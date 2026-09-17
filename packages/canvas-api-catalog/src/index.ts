@@ -263,7 +263,9 @@ function capability(catalog: CanvasApiCatalog, operation: CanvasApiOperation): S
   const readback = canvasReadbackAssessment(catalog.operations, operation, admission);
   const credentialReadReason = operation.toolName === "canvas_get_items_media_upload_url"
     ? "This Canvas read returns a one-time media upload credential. Morrow keeps upload credentials inside its reviewed file transfer."
-    : undefined;
+    : operation.toolName === "canvas_get_public_inline_preview_url"
+      ? "This Canvas read returns a shareable file link that carries its own access token. Morrow does not hand out access tokens. Ask Morrow to read the file's text or to name the file instead."
+      : undefined;
   const incompatibleAuthenticationReason = operation.path.startsWith("/lti/")
     ? "This Canvas LTI service requires separate LTI authorization that the signed-in browser session does not hold."
     : undefined;

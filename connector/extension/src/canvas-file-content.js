@@ -49,9 +49,13 @@ export async function executeCanvasCourseFileTextInPage(input) {
     if (typeof value !== "string" || value.length < 1 || value.length > 8_192) throw new Error("canvas_file_download_url_missing");
     let url;
     try { url = new URL(value); } catch { throw new Error("canvas_file_download_url_invalid"); }
+    // Canvas states a verifier only when the download is meant to work without
+    // the signed-in session. This read always carries that session, so a record
+    // without one is the same file at the same address, not a weaker one.
     if (url.protocol !== "https:" || url.origin !== canvasOrigin || url.username || url.password || url.hash
-      || url.pathname !== `/files/${fileId}/download` || url.searchParams.getAll("verifier").length !== 1
-      || !url.searchParams.get("verifier")) throw new Error("canvas_file_download_url_refused");
+      || url.pathname !== `/files/${fileId}/download` || url.searchParams.getAll("verifier").length > 1) {
+      throw new Error("canvas_file_download_url_refused");
+    }
     return url.href;
   };
   const cancelBody = (body) => {

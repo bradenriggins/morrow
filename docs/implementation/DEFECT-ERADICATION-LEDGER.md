@@ -487,6 +487,16 @@ Every row stays open until its evidence columns are added and its status becomes
 | 470 | P2 | R3 | A change whose item Canvas no longer has told the person to check their Canvas connection, which was working; renaming a Page changes its address, so this was reachable through ordinary use. | closure section 470; approval context and approval page regressions, live BT2 course 89585 | IMPLEMENTED |
 | 471 | P2 | R3 | A request naming a course other than the connected one was reported as a learner-privacy failure, which was not the problem and gave the person nothing to act on. | closure section 471; Canvas connector regressions, live BT2 course 89585 | IMPLEMENTED |
 | 472 | P3 | R3 | An invalid request never said which input was wrong, because the closed refusal projection rebuilt the answer from the code alone. | closure section 472; protocol regressions, live BT2 course 89585 | IMPLEMENTED |
+| 473 | P1 | R7 | Seven Canvas reads could never answer because Morrow refused its own result whenever the page carried an institutional contact address, such as a terms-of-service page. | closure section 473; gateway privacy and Blackboard privacy regressions, live BT2 course 89585 | IMPLEMENTED |
+| 474 | P1 | R7 | A read Morrow refused before sending said only that nothing was sent, so five Canvas reads were dead ends with no reason a person could act on. | closure section 474; Canvas connector and gateway privacy regressions, live BT2 course 89585 | IMPLEMENTED |
+| 475 | P1 | R7 | Canvas answers some of its own listings with a link on another address or with its own defaults added, and Morrow refused the whole read instead of returning the page Canvas had already given. | closure section 475; pagination regressions, live BT2 course 89585 | IMPLEMENTED |
+| 476 | P1 | R7 | Canvas writes some Link headers as a path alone, and the address builder required an absolute one, so a listing on such a route failed with no reason. | closure section 476; pagination regressions, live BT2 course 89585 | IMPLEMENTED |
+| 477 | P1 | R7 | The three `by_path` folder reads sent Canvas the splat segment itself, so they could never answer. | closure section 477; catalog and in-page address regressions, live BT2 course 89585 | IMPLEMENTED |
+| 478 | P0 | R1 | Canvas takes thirteen form parameters as a list of records, and Morrow named only six of them and wrote their fields one field at a time, so a two-entry grading scheme reached Canvas as three broken records. | closure section 478; Canvas record-list regressions, live BT2 course 89585 | IMPLEMENTED |
+| 479 | P0 | R3 | One unresolved change held back every other change in the same course, because a change that creates an object locked the course itself. | closure section 479; effect target identity regressions, live BT2 course 89585 | IMPLEMENTED |
+| 480 | P1 | R3 | A person who connected their course again could never settle an earlier unresolved change, because the evidence had to come through the exact connection that change was made with. | closure section 480; operation journal regressions, live BT2 course 89585 | IMPLEMENTED |
+| 481 | P2 | R7 | The file-text read refused every Canvas file whose record carries no verifier, which is every file the signed-in session can already read. | closure section 481; Canvas file content regressions, live BT2 course 89585 | IMPLEMENTED |
+| 482 | P2 | R3 | A saved change whose course connection is gone was reported without naming the capability it used, so a person could not tell which item to read before settling it. | closure section 482; operations regressions, live BT2 course 89585 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3266,6 +3276,77 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Condition: every refused input answered "Morrow rejected this request because its input is invalid." and named nothing, whether one id had the wrong shape or a required input was missing. The closed refusal projection rebuilt the answer from the code alone, so even a name the validator knew was dropped before the person saw it.
 - Repair: the refusal names the inputs it refused, taken from Morrow's own published schema for that capability: a name is used only when that schema publishes it, and the shape is checked again at egress, so nothing a caller sent and no value ever reaches the person through this sentence. It says, for example, "Check this input: wiki_page_title."
 - Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### 473: a contact address on a Canvas page refused the whole read
+
+- Product decision: Morrow protects the people in a course. An institution's own contact address is not one of them.
+- Condition: the egress boundary treated any address-shaped text as unsafe, so a read whose page carried `legal@instructure.com` or `conduct@canvas.net` refused its entire result. Seven Canvas reads could never answer: terms of service, the person's own activity stream, their sign-ins, global notifications, the account audit, the inline preview link, and their communication channels.
+- Repair: a credential in a result still refuses it. An address is removed from the text and the read answers, with `[address removed]` where the address was. Writing keeps the stricter rule: text on its way to a provider is refused rather than quietly altered, which is how Blackboard's planned patch still stops before any write.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585 (`canvas_get_terms_of_service` now answers).
+
+### 474: a read Morrow refused before sending never said why
+
+- Product decision: when Morrow stops a request itself, the person is told what to correct.
+- Condition: every pre-send refusal of a read collapsed into one code, `canvas_request_not_sent`, and the person was told only "Morrow did not send this request to Canvas." Five Canvas reads were dead ends with no reason: the activity stream, a person's assignments in a course, gradebook history, their access tokens, and the course file text read.
+- Repair: a read Morrow refuses before sending carries Morrow's own name for that refusal across the privacy boundary, as `sourceRefusal`. A change keeps the shared not-sent code, because that code is what frees its target for another attempt, and its own reason travels with the operation record instead. The named reasons are Morrow's tokens, never provider text.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585. It found rows 475, 476 and 481 the same day.
+
+### 475: Canvas's own next link refused the page it had already answered
+
+- Product decision: a page Canvas answered correctly is not thrown away because of an address Morrow will never request.
+- Condition: Canvas paginates some of its own listings onto a different address, such as `/users/self/courses/42/assignments` continuing at `/courses/42/assignments`, and writes its own defaults into others, such as `format=json`. Morrow refused the whole read in both cases, so the reads were unusable even for their first page.
+- Repair: a link that leaves this Canvas site is still refused outright. A link that stays on the site but names another address or another query is simply not followed, and the result says the listing continues beyond what Morrow read. A link that only writes out the person Canvas resolved, or repeats an id the route's own path states, is followed as the same listing.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### 476: a relative Link header ended the read with no reason
+
+- Product decision: Morrow reads what Canvas answers.
+- Condition: Canvas writes some Link headers as a path alone. The address builder required an absolute URL, threw, and the read ended as an unexplained execution failure.
+- Repair: a relative link is resolved against this page's own origin, which is the origin the same-site check requires anyway.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585 (`canvas_list_access_tokens_for_user`).
+
+### 477: the folder `by_path` reads sent Canvas the splat itself
+
+- Product decision: an operation Morrow publishes can be called.
+- Condition: Canvas writes an optional trailing path as a splat segment, and the Canvas documentation lists no parameter for it. All three `folders/by_path` reads sent the address with `*full_path` still in it, so they could never answer.
+- Repair: the catalog publishes that trailing path as its own optional input, the in-page address builder writes it as real path segments with each one encoded, drops it when the caller names none, and refuses any address that still carries a splat.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### 478: a list of records reached Canvas as broken records
+
+- Product decision: what Canvas saves is what the person reviewed.
+- Condition: Canvas takes some form parameters as a list of records, written `polls[][question]`. Morrow named six such parents and not the other seven, so polls, poll choices, poll sessions, poll submissions and the three extension routes were written without the list marker and Canvas ignored them. Worse, every one of the thirteen was written one field at a time: a two-entry grading scheme was sent as `name, name, value, value`, which Canvas reads as three records rather than two.
+- Repair: the set of list parents is the set the Canvas catalog itself states, and `scripts/test/canvas-array-member-name.test.mjs` fails if the catalog gains one the executor does not name. Every field of one record is now written together, record by record, so Canvas reads back exactly the records the person reviewed.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585: a two-entry grading scheme saved as `A = 90` and `F = 0`.
+
+### 479: one unresolved change held back the whole course
+
+- Product decision: a change Morrow cannot confirm holds back what it touched, not everything else.
+- Condition: a change that creates an object names no object yet, so its target fell back to the course itself. Every create in a course therefore shared one lock: one unresolved poll or grading standard left every later page, assignment, quiz and module create waiting on it, with the same conflict message.
+- Repair: a change that names no object locks the collection it creates into. Two new pages are still one at a time; a new page and a new assignment are independent. A change that was saved under the earlier rule now holds back only the target it is still named for, and holds back everything only when Morrow cannot name it at all.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585: a page create verified while two earlier unresolved changes were still open.
+
+### 480: connecting a course again stranded its unresolved changes
+
+- Product decision: the person can always settle a change they checked themselves.
+- Condition: settling an unresolved change required read evidence from the exact course connection it was made through. A course connection made again carries a new generation and a new actor identity, so after any reconnection, including every Bridge update, no reading could match, and the change could never be settled. The answer also failed outright, because rebuilding the old connection's learner scope was impossible.
+- Repair: the evidence is matched to the person, the site and the course rather than to the connection's generation, and the settlement answer carries local operation control state when the old connection's learner scope cannot be rebuilt.
+- Status: `IMPLEMENTED` for the answer and the matching rule; the pre-upgrade records in this install still carry an earlier target name and remain open, which row 479's repair now confines to their own collections.
+
+### 481: the file-text read refused every file it could read
+
+- Product decision: a file the signed-in person can read is a file Morrow can read.
+- Condition: the read required the file record's download address to carry a verifier. Canvas states a verifier only when the download is meant to work without the signed-in session, so every ordinary course file was refused.
+- Repair: the verifier is optional, and at most one is accepted. The address must still be this Canvas site's own download address for that exact file.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585, where the read now reaches its content-type rule instead of the address rule.
+
+
+### 482: a saved change never said what it was
+
+- Product decision: a person can act on what Morrow tells them.
+- Condition: a change made through a course connection that has since been made again is reported from local control state alone. That state named the change's id, its state and Morrow's own attention codes, but not the capability it used, so neither the person nor their assistant could tell which item to read before settling it. The one exit Morrow offers was unusable for want of a name Morrow already holds.
+- Repair: the control state names the capability. It is a name from Morrow's own catalog and carries no course or learner content.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585, where it settled six changes that could not be settled before.
 
 ### Root-cause patterns for rows 331–472
 

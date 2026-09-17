@@ -167,16 +167,20 @@ describe("privacy output boundary", () => {
     expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
   });
 
-  it("refuses sensitive values after free-text fields are selected", () => {
+  it("refuses a credential after free-text fields are selected, and removes an address instead", () => {
     const textResult = normalize({
       content: [{ type: "text", text: "Bearer top-secret" }],
     }, { ...learnerPrivacy(), descriptor: { ...learnerDescriptor, freeText: "allow" } });
+    // An address names nobody once it is removed, so the reading itself is
+    // returned without it. Refusing the whole reading made Canvas routes that
+    // always carry an institutional address impossible to use.
     const fieldResult = normalize({
       structuredContent: { status: "student@example.test" },
     }, { ...learnerPrivacy(), descriptor: { ...learnerDescriptor, allowedFields: ["status"], freeText: "allow" } });
 
     expect(textResult.structuredContent).toMatchObject({ code: "privacy_sensitive_text_refused" });
-    expect(fieldResult.structuredContent).toMatchObject({ code: "privacy_sensitive_text_refused" });
+    expect(fieldResult.structuredContent).toMatchObject({ status: "[address removed]" });
+    expect(JSON.stringify(fieldResult)).not.toContain("student@example.test");
   });
 
   it("PRIV-04 refuses opaque artifacts without trusted generation", () => {
@@ -368,10 +372,15 @@ describe("privacy output boundary", () => {
     // A bare number under a measure key stays a number, while the same text under a note is a person.
     expect(redactLearnerEgress({ score: "17", page: "17", note: "17" }, context)).toEqual({ score: "17", page: "17", note: token });
     for (const key of ["grading_status", "grade", "score", "rows", "page", "attempt", "workflow_status", "course_id", "operation_id"]) {
-      expect(() => redactLearnerEgress({ [key]: "Submitted by unknown.person@school.test" }, context), key).toThrow("privacy_sensitive_text_refused");
+      // An address that named nobody on the roster is removed, so what is left
+      // names nobody and the reading is returned.
+      const removed = redactLearnerEgress({ [key]: "Submitted by unknown.person@school.test" }, context) as Record<string, unknown>;
+      expect(String(removed[key]), key).toBe("Submitted by [address removed]");
+      // A credential is never returned, whatever surrounds it.
       expect(() => redactLearnerEgress({ [key]: ["Bearer secret-token"] }, context), key).toThrow("privacy_sensitive_text_refused");
     }
-    expect(() => redactLearnerEgress({ note: "Submitted by unknown.person@school.test" }, context)).toThrow("privacy_sensitive_text_refused");
+    expect(redactLearnerEgress({ note: "Submitted by unknown.person@school.test" }, context))
+      .toEqual({ note: "Submitted by [address removed]" });
   });
 
   it("redacts roster identities under measure keys in projected output too", () => {
@@ -381,7 +390,11 @@ describe("privacy output boundary", () => {
     expect(JSON.stringify(projected)).not.toContain("Ada Lovelace");
     expect(projected.structuredContent).toMatchObject({ score: "95" });
     expect((projected.structuredContent as { grading_status: string }).grading_status).toMatch(/^Submitted by /);
-    const refused = normalize({ structuredContent: { grading_status: "unknown.person@school.test" } }, { ...context, descriptor });
+    // An address that named nobody on the roster is removed rather than taking
+    // the reading with it, and a credential is still refused outright.
+    const removed = normalize({ structuredContent: { grading_status: "unknown.person@school.test" } }, { ...context, descriptor });
+    expect(removed.structuredContent).toMatchObject({ grading_status: "[address removed]" });
+    const refused = normalize({ structuredContent: { grading_status: "Bearer secret-token" } }, { ...context, descriptor });
     expect(refused.structuredContent).toMatchObject({ code: "privacy_sensitive_text_refused" });
   });
 
@@ -467,14 +480,18 @@ describe("privacy output boundary", () => {
     }
   }, 8_000);
 
-  it("refuses encoded credentials and unrostered email after exact-scope alias redaction", () => {
+  it("refuses an encoded credential, and removes an encoded address, after exact-scope alias redaction", () => {
     const context = learnerPrivacy();
     const descriptor = { ...learnerDescriptor, allowedFields: ["status"], freeText: "allow" as const };
     const credential = normalize({ structuredContent: { status: "Bearer%20secret-value" } }, { ...context, descriptor });
+    // The address is written as an HTML entity, and it is found and removed in
+    // that form: the match is made on the canonical view and applied to the
+    // source bytes.
     const unrostered = normalize({ structuredContent: { status: "outside&#64;example.test" } }, { ...context, descriptor });
 
     expect(credential.structuredContent).toMatchObject({ code: "privacy_sensitive_text_refused" });
-    expect(unrostered.structuredContent).toMatchObject({ code: "privacy_sensitive_text_refused" });
+    expect(unrostered.structuredContent).toMatchObject({ status: "[address removed]" });
+    expect(JSON.stringify(unrostered)).not.toContain("outside");
   });
 
   it("uses a generic marker for a known alias shared by multiple learners", () => {

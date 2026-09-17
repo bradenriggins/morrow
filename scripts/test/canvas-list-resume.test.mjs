@@ -147,17 +147,21 @@ test("a foreign-origin next link is refused instead of read", async () => {
   assert.deepEqual(requests.map((request) => request.pathname), [LIST_PATH]);
 });
 
-test("a next link that changes the request path is refused instead of read", async () => {
+test("a next link that changes the request path is not followed, and the listing says so", async () => {
+  // Canvas paginates some of its own listings onto a different address. That
+  // address is never requested; the page Canvas already returned is kept, and
+  // the result says the listing goes on beyond it.
   const { result, requests } = await sendListRead(
     { course_id: "42", morrow_max_pages: 5, morrow_list_resume: {} },
     pagedCanvas({ path: "/api/v1/courses/42/users" }),
   );
-  assert.equal(result.ok, false);
-  assert.equal(result.error, "canvas_pagination_origin_refused");
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.truncated, true);
+  assert.equal(result.pageCount, 1);
   assert.deepEqual(requests.map((request) => request.pathname), [LIST_PATH]);
 });
 
-test("a next link cannot remove, change, or widen the first page query", async () => {
+test("a next link that removes, changes, or widens the first page query is not followed", async () => {
   const links = [
     `${ORIGIN}${LIST_PATH}?page=2&per_page=10`,
     `${ORIGIN}${LIST_PATH}?search_term=other&page=2&per_page=10`,
@@ -170,8 +174,9 @@ test("a next link cannot remove, change, or widen the first page query", async (
       { course_id: "42", search_term: "needle", morrow_max_pages: 5, morrow_list_resume: {} },
       () => jsonResponse([{ page_id: "11", url: "page-1", title: "Page 1" }], { link: `<${href}>; rel="next"` }),
     );
-    assert.equal(result.ok, false, href);
-    assert.equal(result.error, "canvas_pagination_parameters_refused", href);
+    assert.equal(result.ok, true, href);
+    assert.equal(result.truncated, true, href);
+    assert.equal(result.pageCount, 1, href);
     assert.deepEqual(requests.map((request) => request.pathname), [LIST_PATH], href);
   }
 });
@@ -302,8 +307,10 @@ test("Canvas resolving self to the person's own id keeps the same list, and noth
     pagedCanvas({ path: "/api/v1/users/999/files" }),
     "canvas_list_files_users",
   );
-  assert.equal(other.result.ok, false);
-  assert.equal(other.result.error, "canvas_pagination_origin_refused");
+  assert.equal(other.result.ok, true);
+  assert.equal(other.result.truncated, true);
+  assert.equal(other.result.pageCount, 1);
+  assert.deepEqual(other.requests.map((request) => request.pathname), ["/api/v1/users/28206/files"]);
 
   // A different route that happens to carry an id is still refused.
   const elsewhere = await sendListRead(
@@ -311,6 +318,7 @@ test("Canvas resolving self to the person's own id keeps the same list, and noth
     pagedCanvas({ path: "/api/v1/users/28206/folders" }),
     "canvas_list_files_users",
   );
-  assert.equal(elsewhere.result.ok, false);
-  assert.equal(elsewhere.result.error, "canvas_pagination_origin_refused");
+  assert.equal(elsewhere.result.ok, true);
+  assert.equal(elsewhere.result.truncated, true);
+  assert.equal(elsewhere.result.pageCount, 1);
 });

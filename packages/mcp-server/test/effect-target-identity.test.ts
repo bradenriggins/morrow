@@ -47,6 +47,19 @@ describe("stable effect target identity", () => {
       .not.toBe(target(remove, { course_id: "42", id: "8" }));
   });
 
+  it("locks a new object to the collection it is created in, not to the whole course", () => {
+    const page = canvasTool("canvas_create_page_courses", "POST /v1/courses/{course_id}/pages#create_page");
+    const standard = canvasTool(
+      "canvas_create_new_grading_standard_courses",
+      "POST /v1/courses/{course_id}/grading_standards#create_new_grading_standard",
+    );
+    // Two new pages are one at a time; a new page and a new grading standard are
+    // independent, so one unresolved change cannot hold the other back.
+    expect(target(page, { course_id: "42" })).toBe(target(page, { course_id: "42" }));
+    expect(target(page, { course_id: "42" })).not.toBe(target(standard, { course_id: "42" }));
+    expect(target(page, { course_id: "42" })).not.toBe(target(page, { course_id: "43" }));
+  });
+
   it("uses the known parent object for creates and the course object for favorites", () => {
     const createItem = canvasTool(
       "canvas_create_quiz_item",

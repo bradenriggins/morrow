@@ -35,9 +35,18 @@ export const canvasWriteOutcomeUncertain = (status) => !(
 // gateway settles that record as failed and leaves the course item free. A
 // Moodle failure keeps the shared failed code, because a Moodle status alone
 // never proves the form post changed nothing.
-export function bridgeWriteFailureCode({ unknown, sent, provider, kind, status }) {
+// A read Morrow refused before sending carries its own reason, so the person is
+// told what to correct instead of only that nothing was sent. A write keeps the
+// shared not-sent code: that code is what unlocks its target again.
+const MORROW_REFUSAL_TOKEN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
+
+export function bridgeWriteFailureCode({ unknown, sent, provider, kind, status, error }) {
   if (unknown) return "write_outcome_unknown";
-  if (sent === false) return "canvas_request_not_sent";
+  if (sent === false) {
+    return kind === "invoke_read" && typeof error === "string" && error.length <= 100 && MORROW_REFUSAL_TOKEN.test(error)
+      ? error
+      : "canvas_request_not_sent";
+  }
   return provider === "canvas" && kind === "invoke_write" && !canvasWriteOutcomeUncertain(status)
     ? "canvas_request_not_sent"
     : "canvas_request_failed";

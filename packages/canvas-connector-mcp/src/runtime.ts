@@ -323,8 +323,11 @@ function failedProblem(
   resultState?: "not_sent" | "unknown",
   providerFailure?: JsonObject,
 ): JsonObject {
+  // A read the extension refused before sending names its own reason, so the
+  // state comes from what the provider was told, not from a list of codes.
   const classifiedState = resultState
     || (problem?.code === "write_outcome_unknown" ? "unknown" : undefined)
+    || (providerFailure?.sent === false ? "not_sent" as const : undefined)
     || (["canvas_request_not_sent", "canvas_binding_required", "canvas_content_guard_unavailable", "moodle_binding_required", "moodle_expected_digest_required", "moodle_binding_course_mismatch", "course_binding_required", "course_binding_course_mismatch", "course_binding_mismatch", "course_scope_required",
       "canvas_semantic_target_course_mismatch", "canvas_semantic_target_input_refused", "canvas_semantic_target_resolution_stale",
       "multi_context_object_not_supported", "stale_bridge_command", "operation_catalog_mismatch",
@@ -1213,7 +1216,7 @@ export class CanvasConnectorRuntime {
         provider,
         readDescriptorOf(response.result),
         undefined,
-        kind === "invoke_read" ? providerReadFailureOf(response.result) : undefined,
+        providerReadFailureOf(response.result),
       );
       return {
         schema: "morrow.canvas-connector.result.v1",

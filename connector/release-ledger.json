@@ -88,6 +88,74 @@
     {
       "version": "1.0.27",
       "releaseManifestSha256": "0e65392d002397e1862a476cdc1bafe7e1da09e3890c8365267baa3975d8a7f9"
+    },
+    {
+      "version": "1.0.28",
+      "releaseManifestSha256": "40e2048e0343b02dfd3e893407a148a127725bce054b20c4e399855cbd79bc5a"
+    },
+    {
+      "version": "1.0.29",
+      "releaseManifestSha256": "d65b30164b5647ea493c108c68647a8103242fcb5b7698d056ae45550161eaaf"
+    },
+    {
+      "version": "1.0.30",
+      "releaseManifestSha256": "9fc20a2d95bd3ffbaf86b4ee15e2fe9eccfe81200cf178107e73abee1021a010"
+    },
+    {
+      "version": "1.0.31",
+      "releaseManifestSha256": "1b26a53575c5c612fa3507573305594f13608de2cf3219dcbb20d003462e84d6"
+    },
+    {
+      "version": "1.0.32",
+      "releaseManifestSha256": "f397eb36a895ee61efc6273dd0298052faf2d2f16d0d1ff8f57d151a2a39e967"
+    },
+    {
+      "version": "1.0.33",
+      "releaseManifestSha256": "f46f528fc0ecc654974be1fc0e26ba07344891241c2a9aad2a27eba319b785b9"
+    },
+    {
+      "version": "1.0.34",
+      "releaseManifestSha256": "e66e5d353134d2356440cfdf9f649f39f3a00459ddcbd611a49e09d536186f84"
+    },
+    {
+      "version": "1.0.35",
+      "releaseManifestSha256": "0a50071097b1ead919228165a63a26f8bb745086d62f2dbd5102a24574d00dd1"
+    },
+    {
+      "version": "1.0.36",
+      "releaseManifestSha256": "0584b2a804d3eeaa9a5f18fb3c3aa73d9c05442b7467b771380b528d81c895c6"
+    },
+    {
+      "version": "1.0.37",
+      "releaseManifestSha256": "c11be6861323a783e16650b1387da680deefd61f843f730c5a3bd2b445d530a9"
+    },
+    {
+      "version": "1.0.38",
+      "releaseManifestSha256": "62e9be44f0f2d6d9e3a26cc978e9a964623e4658f4a773dc1d6dc539952d82f6"
+    },
+    {
+      "version": "1.0.39",
+      "releaseManifestSha256": "a95e267b78b0b490a66947e13434ef55f7c59bb76ba5dfa75aa2baa886a1cd19"
+    },
+    {
+      "version": "1.0.40",
+      "releaseManifestSha256": "8432569de1d1f4a01a9f8491e008f4e52e3503e33458ff66bcd4baa154a655bd"
+    },
+    {
+      "version": "1.0.41",
+      "releaseManifestSha256": "0c893776dd3e0d78dc5fd453e2a46f1a21148a71b0c8237ffeed2a8dccee114c"
+    },
+    {
+      "version": "1.0.42",
+      "releaseManifestSha256": "198fcf396c918d1ee1f6498a46ad02227d54a0379307e6c1137a3ba02f03c40a"
+    },
+    {
+      "version": "1.0.43",
+      "releaseManifestSha256": "6546fb169ebf123e6fd0303b17e94645fc696325ea6e423ee112afd6e8664a04"
+    },
+    {
+      "version": "1.0.44",
+      "releaseManifestSha256": "b80c9252b16e2f449a6190e66a5e516e0afabdd87745658d79edd83c447741f7"
     }
   ]
 }

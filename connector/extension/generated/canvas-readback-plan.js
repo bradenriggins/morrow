@@ -58,7 +58,17 @@ const EXACT_READBACKS = Object.freeze({
     create_assignment_group: { read: "get_assignment_group", dynamic: { assignment_group_id: "id" }, targetField: "id", strategy: "created-resource" },
     create_new_discussion_topic_courses: { read: "get_single_topic_courses", dynamic: { topic_id: "id" }, targetField: "id", strategy: "created-resource" },
     create_new_discussion_topic_groups: { read: "get_single_topic_groups", dynamic: { topic_id: "id" }, targetField: "id", strategy: "created-resource" },
-    create_new_grading_standard_courses: { read: "get_single_grading_standard_in_context_courses", dynamic: { grading_standard_id: "id" }, targetField: "id", strategy: "created-resource" },
+    // Canvas stores a scheme entry as the fraction of the percentage it was given,
+    // so the saved scheme is proved against the scheme Canvas said it saved rather
+    // than against the percentages the request named.
+    create_new_grading_standard_courses: {
+        read: "get_single_grading_standard_in_context_courses",
+        dynamic: { grading_standard_id: "id" },
+        targetField: "id",
+        strategy: "created-resource",
+        ignoredAssertions: ["grading_scheme_entry_name", "grading_scheme_entry_value"],
+        responseAssertions: ["title", "grading_scheme"],
+    },
     create_external_tool_courses: { read: "get_single_external_tool_courses", dynamic: { external_tool_id: "id" }, targetField: "id", strategy: "created-resource" },
     // Both the write and the folder list read carry one folder id, and they mean different folders:
     // the write names the folder the new one goes inside, and the list would name the new folder's own

@@ -75,6 +75,7 @@ import {
   GatewayOperationJournal,
   ProviderEffectBroker,
   ProviderEffectTargetConflictError,
+  EFFECT_TARGET_IDENTITY_VERSION,
   ProviderEffectTargetIdentityVersionError,
   ProviderEffectTargetScopeUnknownError,
   classifySourceResult,
@@ -438,6 +439,20 @@ export function capabilityProblemText(code: string): string {
     default:
       return "Morrow could not invoke the selected capability.";
   }
+}
+
+/**
+ * Morrow's own name for a request the source refused before sending. It is one
+ * of Morrow's tokens, never provider output, so it is kept with the operation
+ * and told to the person who has to correct the request.
+ */
+function sourceRefusalOf(result: unknown): string | undefined {
+  const structured = isJsonObject(result) && isJsonObject(result.structuredContent) ? result.structuredContent : undefined;
+  const problem = isJsonObject(structured?.problem) ? structured.problem : undefined;
+  for (const candidate of [structured?.sourceRefusal, problem?.refusal, structured?.sourceCode, problem?.code, structured?.code]) {
+    if (typeof candidate === "string" && /^[a-z][a-z0-9_]{0,99}$/u.test(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 export function isPrivateSourceTool(tool: Pick<CatalogTool, "upstreamName">): boolean {
@@ -1085,6 +1100,24 @@ export interface PreparedEffectAuthority {
   readonly bindingScope?: EffectBindingScope;
 }
 
+/**
+ * The collection a change with no object of its own acts on, read from its own
+ * route: `POST /v1/courses/{course_id}/pages` is the course's pages. Without it
+ * every such change in a course would share one lock, and one unresolved change
+ * would hold every other one back.
+ */
+function routeCollectionEntity(mapping: CatalogTool): readonly { readonly resource: string; readonly id: string }[] {
+  const operationKey = mappingOperationKey(mapping);
+  const operationPath = operationKey && /^[A-Z]+ ([^#\s]+)(?:#|$)/.exec(operationKey)?.[1];
+  if (!operationPath) return [];
+  const tail: string[] = [];
+  for (const segment of operationPath.split("/").filter(Boolean).slice(1).reverse()) {
+    if (/^\{[A-Za-z][A-Za-z0-9_]*\}$/.test(segment) || segment.startsWith("*")) break;
+    tail.unshift(segment);
+  }
+  return tail.map((resource) => ({ resource, id: "" }));
+}
+
 export function stableEffectTargetIdentity(
   mapping: CatalogTool,
   request: JsonObject,
@@ -1103,14 +1136,19 @@ export function stableEffectTargetIdentity(
     // The object, or for a request that names no object the route itself, on this Canvas site. Two
     // changes to the same object lock each other whichever connection plans them.
     return sha256Json({
-      schema: "morrow.effect-target.v3",
+      schema: "morrow.effect-target.v4",
       provider: providerScope.provider,
       origin: providerScope.origin,
       ...(providerScope.siteUrl ? { siteUrl: providerScope.siteUrl } : {}),
       scope: "site",
+      // The collection this route acts on, so a change that creates an object
+      // and the read that lists that collection name the same target. Only a
+      // route that names neither falls back to itself.
       entity: canonicalTarget.path.length > 0
         ? canonicalTarget.path
-        : [{ resource: "operation", id: mappingOperationKey(mapping) || mapping.upstreamName }],
+        : routeCollectionEntity(mapping).length > 0
+          ? routeCollectionEntity(mapping)
+          : [{ resource: "operation", id: mappingOperationKey(mapping) || mapping.upstreamName }],
     });
   }
   if (!courseId) throw new TypeError("Morrow needs an exact course identity before it can plan a provider effect.");
@@ -1129,7 +1167,7 @@ export function stableEffectTargetIdentity(
     throw new TypeError("Morrow needs an exact tenant identity before it can plan a provider effect.");
   }
   return sha256Json({
-    schema: "morrow.effect-target.v3",
+    schema: "morrow.effect-target.v4",
     ...(isCanvasConnector(mapping)
       ? {
           provider: providerScope.provider,
@@ -1149,9 +1187,13 @@ export function stableEffectTargetIdentity(
     courseId,
     // The path omits method and action names. Thus update and delete lock the
     // same provider object while independent sibling objects remain concurrent.
+    // A change that names no object yet, such as creating a page, locks the
+    // collection it creates into rather than the whole course: two new pages are
+    // one at a time, a new page and a new assignment are not each other's
+    // business.
     entity: canonicalTarget.path.length > 0
       ? canonicalTarget.path
-      : [{ resource: "courses", id: courseId }],
+      : [{ resource: "courses", id: courseId }, ...routeCollectionEntity(mapping)],
   });
 }
 
@@ -7024,10 +7066,22 @@ export class GatewayRuntime {
    * A persisted browser operation may outlive its authenticated learner scope.
    * This recovery shape intentionally contains only durable control state.
    */
+  /** True when this capability is one an MCP client can discover and call. */
+  private publicCapabilityName(name: string): boolean {
+    const mapping = this.toolByPublicName.get(name);
+    return Boolean(mapping) && !isPrivateSourceTool(mapping!);
+  }
+
   private historicalOperationControl(record: EffectOperationRecord): JsonObject {
     return {
       schema: "morrow.operation-control.v1",
       operationId: record.operationId,
+      // The capability this change used, when it is one a person can call. It is
+      // a name from Morrow's own catalog and carries no course or learner
+      // content, and without it a person cannot tell which item to read before
+      // settling the change themselves. A capability Morrow keeps for its own
+      // use is not named here, because naming it would publish it.
+      ...(this.publicCapabilityName(record.publicToolName) ? { tool: record.publicToolName } : {}),
       state: record.state,
       dispatchAttempt: record.dispatchAttempt,
       verification: { status: this.operationVerificationStatus(record) },
@@ -7136,6 +7190,34 @@ export class GatewayRuntime {
       return this.localEffectOperationEgress(value, record, "morrow_operation_get");
     } catch {
       return this.historicalOperationPrivacyFailure();
+    }
+  }
+
+  /**
+   * A settlement answer for a change whose course connection is gone. The record
+   * itself is local, so the person is still told its state; nothing from the
+   * course is returned, because none can be read for that connection.
+   */
+  private async redactHistoricalOperationSettlementEgress(
+    value: JsonObject,
+    request: Readonly<Record<string, unknown>>,
+    options: { readonly signal?: AbortSignal; readonly toolName?: string },
+  ): Promise<JsonObject> {
+    const operationId = this.exactString(request.operation_id ?? request.operationId, 160);
+    if (!operationId?.startsWith("op:")) return this.scopedNativeEgress(value, this.egressRequest(request), options);
+    let record: EffectOperationRecord;
+    try {
+      record = this.effects.get(operationId);
+    } catch {
+      return this.historicalOperationPrivacyFailure();
+    }
+    // The full answer whenever Morrow can still project it. Control state is the
+    // fallback for a change whose course connection is gone, so settling it stays
+    // possible instead of failing outright.
+    try {
+      return await this.scopedNativeEgress(value, this.egressRequest(request), options);
+    } catch {
+      return this.historicalOperationControlResult(record, options.toolName || "morrow_operation_get");
     }
   }
 
@@ -7671,6 +7753,13 @@ export class GatewayRuntime {
       if (["morrow_operation_list", "morrow_operations_recent"].includes(options.toolName || "")) {
         return finish(await this.redactOperationCollectionEgress(value, options));
       }
+      // Settling a saved change is a local journal action. A change made through
+      // a course connection that has since been made again has no learner scope
+      // to rebuild, and rebuilding one is not needed to say what happened to it:
+      // these answers carry operation control state and nothing from the course.
+      if (["morrow_operation_close_unresolved", "morrow_operation_verify", "morrow_operation_reconcile"].includes(options.toolName || "")) {
+        return finish(await this.redactHistoricalOperationSettlementEgress(value, request, options));
+      }
       return finish(await this.scopedNativeEgress(value, this.egressRequest(request), options));
     } catch (error) {
       return this.privacyFailure(error);
@@ -8095,7 +8184,10 @@ export class GatewayRuntime {
         isBlackboardApply(pendingMapping)
           ? undefined
           : this.effectAuthority(pendingMapping, request, currentAuthorization, pending.readback || undefined, bindingScope),
-        { enforceHistoricalTargetScopeBarrier: isCanvasConnector(pendingMapping) },
+        {
+          enforceHistoricalTargetScopeBarrier: isCanvasConnector(pendingMapping),
+          historicalTargetIdentities: this.historicalTargetIdentities(),
+        },
       );
     } catch (error) {
       if (options.signal?.aborted) {
@@ -8349,7 +8441,7 @@ export class GatewayRuntime {
         || innerOperation?.sourceResultState === "not_sent";
       const settled = options.signal?.aborted && definitelyNotSent
         ? this.effects.settleCancelledBeforeSend(reserved.operationId)
-        : this.effects.settleFailure(reserved.operationId, result, !definitelyNotSent);
+        : this.effects.settleFailure(reserved.operationId, result, !definitelyNotSent, sourceRefusalOf(result));
       const unresolved = settled.state === "applied_or_unknown" && usesEmbeddedReadback(mapping)
         ? connectorReadDescriptor(mapping, this.resolveResultArtifact(result))
         : null;
@@ -8567,6 +8659,40 @@ export class GatewayRuntime {
    * from another item, course, connection, sign-in, or one Morrow never made is
    * not evidence. The journal performs one exact indexed lookup.
    */
+  /**
+   * The target this saved change names under the target rule in force now. A
+   * change saved by an earlier Morrow carries the name that Morrow gave it, and
+   * no read made today can carry that name, so without this the person could
+   * never close it.
+   */
+  private currentTargetIdentityDigest(operation: EffectOperationRecord): string | null {
+    const mapping = this.toolByPublicName.get(operation.publicToolName);
+    if (!mapping) return null;
+    try {
+      return this.effectAuthority(
+        mapping,
+        operation.forwardedRequest ?? {},
+        REVIEW_AUTHORIZATION,
+        operation.readback ?? undefined,
+      ).targetSetDigest;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * What each saved change still holding a target under an earlier rule targets
+   * under the rule in force now. A change Morrow can still name this way holds
+   * back only that target.
+   */
+  private historicalTargetIdentities(): ReadonlyMap<string, string | null> {
+    const named = new Map<string, string | null>();
+    for (const record of this.effects.historicalTargetHolders()) {
+      named.set(record.operationId, this.currentTargetIdentityDigest(record));
+    }
+    return named;
+  }
+
   private freshReadEvidence(
     operation: EffectOperationRecord,
     observedState: string,
@@ -8575,14 +8701,30 @@ export class GatewayRuntime {
     const actorDigest = authority && typeof authority.actorDigest === "string" && /^[0-9a-f]{64}$/u.test(authority.actorDigest)
       ? authority.actorDigest : null;
     if (!operation.personCloseCausalSequence || !operation.sourceBindingId || !operation.targetIdentityDigest || !actorDigest) return null;
-    return this.journal.findSuccessfulReadEvidence({
-      sourceId: operation.sourceId,
-      sourceBindingId: operation.sourceBindingId,
-      targetIdentityDigest: operation.targetIdentityDigest,
-      actorDigest,
-      upstreamResultDigest: observedState,
-      afterCausalSequence: operation.personCloseCausalSequence,
-    });
+    const names = operation.targetIdentityVersion === EFFECT_TARGET_IDENTITY_VERSION
+      ? [operation.targetIdentityDigest]
+      : [operation.targetIdentityDigest, this.currentTargetIdentityDigest(operation)];
+    // The same person, site and course, connected again: a course connection made
+    // again carries a new generation, and a reading through it is still that
+    // person's reading of that course. The strict match runs first.
+    const pattern = operation.sourceBindingId.replace(/:g[0-9]+:/u, ":g%:");
+    for (const matchActorDigest of [true, false]) {
+      for (const targetIdentityDigest of names) {
+        if (!targetIdentityDigest) continue;
+        const evidence = this.journal.findSuccessfulReadEvidence({
+          sourceId: operation.sourceId,
+          sourceBindingId: operation.sourceBindingId,
+          ...(matchActorDigest ? {} : { sourceBindingPattern: pattern }),
+          targetIdentityDigest,
+          actorDigest,
+          upstreamResultDigest: observedState,
+          afterCausalSequence: operation.personCloseCausalSequence,
+          matchActorDigest,
+        });
+        if (evidence) return evidence;
+      }
+    }
+    return null;
   }
 
   /**

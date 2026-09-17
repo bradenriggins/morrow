@@ -337,7 +337,10 @@ function redactedField(value: unknown, roster: PreparedRoster, label: string): R
   if (value === undefined || value === null) return { state: "absent" };
   let result: unknown;
   try {
-    result = redactLearnerEgress(value, roster);
+    // Blackboard text is checked the strict way: an address that named nobody
+    // on the roster refuses the field rather than being removed from it, because
+    // this same projection is what a planned write is checked against.
+    result = redactLearnerEgress(value, { ...roster, addresses: "refuse" });
   } catch (error) {
     const reason = error instanceof Error && PRIVACY_REASON.test(error.message) ? error.message : "privacy_redaction_failed";
     throw new BlackboardApiError(
@@ -482,13 +485,13 @@ export class BlackboardLearnRuntime {
     const walk = (candidate: unknown, depth = 0, field?: string): unknown => {
       if (depth > 12) throw new Error("privacy_output_depth_exceeded");
       if (typeof candidate === "string" && field && contractFields.has(field)) return candidate;
-      if (typeof candidate === "string") return redactLearnerEgress(candidate, roster);
+      if (typeof candidate === "string") return redactLearnerEgress(candidate, { ...roster, addresses: "refuse" });
       if (Array.isArray(candidate)) return candidate.map((entry) => walk(entry, depth + 1, field));
       if (!isJsonObject(candidate)) return candidate;
       const output: JsonObject = {};
       const closedKeys = depth === 0 || (field !== undefined && contractContainers.has(field));
       for (const [key, child] of Object.entries(candidate)) {
-        const safeKey = closedKeys ? key : String(redactLearnerEgress(key, roster));
+        const safeKey = closedKeys ? key : String(redactLearnerEgress(key, { ...roster, addresses: "refuse" }));
         if (Object.hasOwn(output, safeKey)) throw new Error("privacy_identity_key_collision");
         Object.defineProperty(output, safeKey, { value: walk(child, depth + 1, closedKeys ? key : undefined), enumerable: true });
       }

@@ -482,6 +482,13 @@ export interface LearnerTextRedactionContext {
   readonly learnerScope: LearnerScope;
   /** Canvas course reads may include instructors and editors outside the student roster. */
   readonly allowUnrosteredCanvasIdentities?: boolean;
+  /**
+   * What to do with an address that named nobody on the roster. Reading provider
+   * text removes it, so the reading itself can be returned. Text a person asked
+   * Morrow to send refuses instead, because removing part of what they wrote
+   * would change the thing being written.
+   */
+  readonly addresses?: "remove" | "refuse";
 }
 
 interface LearnerAlias {
@@ -815,6 +822,7 @@ function preparedLearnerTextContext(
     learnerVault: context.learnerVault,
     learnerScope: scope,
     ...(context.allowUnrosteredCanvasIdentities === true ? { allowUnrosteredCanvasIdentities: true } : {}),
+    ...(context.addresses ? { addresses: context.addresses } : {}),
     identities,
     identityById,
     tokensById,
@@ -909,7 +917,8 @@ function redactKnownLearnerTextPrepared(
  * refusal, so `grading_status: "Submitted by jane@school.test"` cannot leave.
  */
 function projectNonIdentityText(value: string, exactContext: PreparedLearnerTextRedactionContext | undefined): string {
-  const output = exactContext ? redactKnownLearnerTextPrepared(value, exactContext, NON_IDENTITY_TEXT_SHAPE) : value;
+  const redacted = exactContext ? redactKnownLearnerTextPrepared(value, exactContext, NON_IDENTITY_TEXT_SHAPE) : value;
+  const output = withoutUnrosteredAddresses(redacted, exactContext?.addresses);
   if (containsSensitiveText(output)) throw new Error("privacy_sensitive_text_refused");
   return output;
 }
@@ -945,7 +954,7 @@ function redactLearnerNumber(value: number, key: string, context: PreparedLearne
 function redactLearnerKey(key: string, context: PreparedLearnerTextRedactionContext): string {
   if (["schema", "provider", "course", "name", "id", "title", "type", "tool", "code", "status", "data", "result", "content", "text", "learnerToken", "student", "user", "author", "participant", "students", "users", "authors", "participants", "grade", "score"].includes(key)) return key;
   const identity = context.identityById.get(key);
-  const output = identity ? snapshotLearnerToken(context, identity) : redactKnownLearnerTextPrepared(key, context);
+  const output = withoutUnrosteredAddresses(identity ? snapshotLearnerToken(context, identity) : redactKnownLearnerTextPrepared(key, context), context.addresses);
   if (containsSensitiveText(output)) throw new Error("privacy_sensitive_text_refused");
   return output;
 }
@@ -1036,33 +1045,45 @@ function sanitizedUpstreamError(value: JsonObject): JsonObject {
   const output = privacyError("upstream_error_sanitized");
   const structured = isJsonObject(value.structuredContent) ? value.structuredContent : undefined;
   if (structured?.schema !== "morrow.canvas-connector.result.v1" || structured.ok !== false) return output;
-  const providerFailure = structured.providerFailure;
-  if (!isJsonObject(providerFailure)
-    || providerFailure.schema !== "morrow.canvas-browser-failure.v1"
-    || !["canvas", "moodle"].includes(String(providerFailure.provider))
-    || typeof providerFailure.sent !== "boolean"
-    || (providerFailure.status !== undefined
-      && (!Number.isInteger(providerFailure.status) || Number(providerFailure.status) < 100 || Number(providerFailure.status) > 599))
-    || Object.keys(providerFailure).some((key) => !["schema", "provider", "sent", "status"].includes(key))) return output;
+  const candidate = structured.providerFailure;
+  // A change carries no provider failure record, only the named reason below.
+  const providerFailure = isJsonObject(candidate)
+    && candidate.schema === "morrow.canvas-browser-failure.v1"
+    && ["canvas", "moodle"].includes(String(candidate.provider))
+    && typeof candidate.sent === "boolean"
+    && (candidate.status === undefined
+      || (Number.isInteger(candidate.status) && Number(candidate.status) >= 100 && Number(candidate.status) <= 599))
+    && !Object.keys(candidate).some((key) => !["schema", "provider", "sent", "status"].includes(key))
+    ? candidate
+    : undefined;
+  if (candidate !== undefined && providerFailure === undefined) return output;
   const resultState = ["not_sent", "unknown"].includes(String(structured.resultState))
     ? structured.resultState
     : undefined;
   const sourceProblem = isJsonObject(structured.problem) ? structured.problem : undefined;
+  const namedReason = (value: unknown): string | undefined => (
+    typeof value === "string" && /^[a-z][a-z0-9_]{0,99}$/u.test(value) ? value : undefined
+  );
   const sourceCode = sourceProblem?.schema === "morrow.bridge.problem.v1"
-    && typeof sourceProblem.code === "string"
-    && /^[a-z][a-z0-9_]{0,99}$/u.test(sourceProblem.code)
-    ? sourceProblem.code
+    ? namedReason(sourceProblem.code)
     : undefined;
+  // Morrow's own name for a request it refused before sending. It is a token
+  // from Morrow's code, never provider output, so it crosses this boundary.
+  const sourceRefusal = sourceProblem?.schema === "morrow.bridge.problem.v1"
+    ? namedReason(sourceProblem.refusal)
+    : undefined;
+  if (providerFailure === undefined && sourceCode === undefined && sourceRefusal === undefined) return output;
   output.structuredContent = {
     ...(output.structuredContent as JsonObject),
-    providerFailure: structuredClone(providerFailure),
+    ...(providerFailure === undefined ? {} : { providerFailure: structuredClone(providerFailure) }),
     ...(resultState === undefined ? {} : { resultState }),
     ...(sourceCode === undefined ? {} : { sourceCode }),
+    ...(sourceRefusal === undefined ? {} : { sourceRefusal }),
   };
   // The provider body was dropped, but its validated status is not unsafe
   // output. A missing item after a delete is the expected readback, so the
   // text names what the provider answered instead of reporting a refusal.
-  output.content = [{ type: "text", text: providerFailureText(providerFailure) }];
+  if (providerFailure !== undefined) output.content = [{ type: "text", text: providerFailureText(providerFailure) }];
   return output;
 }
 
@@ -1187,9 +1208,9 @@ function projectText(
   requiresLearnerRedaction: boolean,
   textContext?: PreparedLearnerTextRedactionContext,
 ): string {
-  const output = requiresLearnerRedaction
+  const output = withoutUnrosteredAddresses(requiresLearnerRedaction
     ? redactKnownLearnerTextPrepared(value, textContext ?? learnerTextContext(context))
-    : value;
+    : value);
   if (containsSensitiveText(output)) throw new Error("privacy_sensitive_text_refused");
   return output;
 }
@@ -1280,12 +1301,47 @@ function projectValue(
   return output;
 }
 
+const UNROSTERED_EMAIL = /(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/giu;
+
+/**
+ * Text Morrow will not return at all. A credential, an embedded payload, or
+ * markup that hides content is never safe to pass on, whatever surrounds it.
+ *
+ * An address is not in this list. An address that named a person on the roster
+ * is already a learner token by the time this runs, and one that named nobody on
+ * it is removed by `withoutUnrosteredAddresses` instead of taking the whole
+ * reading with it. Refusing there made reads that every Canvas site answers,
+ * such as an account's terms of service, impossible to use: institutional
+ * contact addresses are part of that text.
+ */
 function containsSensitiveText(value: string): boolean {
   // Redaction preserves non-learner source bytes, including HTML entities and
   // URL escapes. Inspect the same canonical match view so encoded credentials
-  // and unrostered emails remain refused without rewriting a safe URL.
-  return /(?:data:[^,;]{0,200};base64,|bearer\s+|cookie=|csrf|token=|(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|<[^>]+(?:hidden|display\s*:\s*none))/i
+  // remain refused without rewriting a safe URL.
+  return /(?:data:[^,;]{0,200};base64,|bearer\s+|cookie=|csrf|token=|<[^>]+(?:hidden|display\s*:\s*none))/i
     .test(normalizedIdentityTextView(value).text);
+}
+
+/**
+ * Every address this text still carries, replaced by one fixed marker. What is
+ * left names nobody, so the reading itself can be returned.
+ */
+function withoutUnrosteredAddresses(value: string, mode: "remove" | "refuse" = "remove"): string {
+  if (mode === "refuse") {
+    if (new RegExp(UNROSTERED_EMAIL.source, "iu").test(normalizedIdentityTextView(value).text)) {
+      throw new Error("privacy_sensitive_text_refused");
+    }
+    return value;
+  }
+  const view = normalizedIdentityTextView(value);
+  const replacements: SourceReplacement[] = [];
+  // A global pattern keeps its own position between calls, so the matches are
+  // taken from one fresh walk of this text and nothing else.
+  for (const match of view.text.matchAll(new RegExp(UNROSTERED_EMAIL.source, "giu"))) {
+    const source = sourceRangeForView(view, match.index!, match.index! + match[0].length);
+    if (source) replacements.push({ ...source, replacement: "[address removed]" });
+  }
+  return replacements.length ? applySourceReplacements(value, replacements) : value;
 }
 
 /**
@@ -1313,14 +1369,17 @@ function redactLearnerEgressPrepared(value: unknown, exactContext: PreparedLearn
     if (typeof candidate === "number") return redactLearnerNumber(candidate, scalarKey, exactContext);
     if (typeof candidate === "string") {
       if (STRUCTURAL_REFERENCE_FIELDS.has(scalarKey)) {
-        if (containsSensitiveText(candidate)) throw new Error("privacy_sensitive_text_refused");
-        return candidate;
+        // A structural reference names an object, never a person, so an address
+        // here is removed like anywhere else before the value is passed on.
+        const structural = withoutUnrosteredAddresses(candidate, exactContext.addresses);
+        if (containsSensitiveText(structural)) throw new Error("privacy_sensitive_text_refused");
+        return structural;
       }
       if (nonIdentityScalar(scalarKey)) return projectNonIdentityText(candidate, exactContext);
       if (scalarKey === "schema" && /^morrow\.[a-z0-9.-]+\.v[0-9]+$/u.test(candidate)) return candidate;
       if (scalarKey === "provider" && ["canvas", "moodle", "blackboard"].includes(candidate)) return candidate;
       if (scalarKey === "roles" && ["Student", "Teacher", "TA", "Observer", "Designer", "Non-editing teacher"].includes(candidate)) return candidate;
-      const output = redactKnownLearnerTextPrepared(candidate, exactContext);
+      const output = withoutUnrosteredAddresses(redactKnownLearnerTextPrepared(candidate, exactContext), exactContext.addresses);
       if (containsSensitiveText(output)) throw new Error("privacy_sensitive_text_refused");
       return output;
     }

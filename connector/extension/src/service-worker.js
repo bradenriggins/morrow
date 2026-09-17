@@ -2544,8 +2544,15 @@ function scheduleReconnect() {
   }, delay);
 }
 
-function problem(code, message, recoverable = false) {
-  return { schema: "morrow.bridge.problem.v1", code, message, recoverable };
+const MORROW_REFUSAL_TOKEN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
+
+function problem(code, message, recoverable = false, refusal = undefined) {
+  // A request Morrow refused before sending carries Morrow's own name for that
+  // reason, so the person is told what to correct rather than only that nothing
+  // was sent. The code itself stays the shared one, because that is what frees
+  // the target for another attempt.
+  const named = typeof refusal === "string" && refusal.length <= 100 && MORROW_REFUSAL_TOKEN.test(refusal) ? refusal : null;
+  return { schema: "morrow.bridge.problem.v1", code, message, recoverable, ...(named && named !== code ? { refusal: named } : {}) };
 }
 
 function errorMessage(value) {
@@ -5143,20 +5150,22 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
       provider: operation.provider,
       kind: command.kind,
       status: result?.status,
+      error: result?.error,
     });
-    const readFailure = command.kind === "invoke_read"
-      ? {
-          schema: "morrow.canvas-browser-failure.v1",
-          provider: operation.provider,
-          sent: result?.sent === true,
-          ...(Number.isInteger(result?.status) ? { status: result.status } : {}),
-        }
-      : null;
+    // What the provider was told, for a read and for a change alike: whether the
+    // request left Morrow and the status it answered. Without it a change that
+    // Canvas rejected reads as though Morrow never sent it.
+    const providerFailure = {
+      schema: "morrow.canvas-browser-failure.v1",
+      provider: operation.provider,
+      sent: result?.sent === true,
+      ...(Number.isInteger(result?.status) ? { status: result.status } : {}),
+    };
     sendResult(
       command,
       false,
-      unresolvedDescriptor ? { schema: "morrow.canvas-browser-result.v1", readDescriptor: unresolvedDescriptor } : readFailure,
-      problem(code, message, !unknown),
+      unresolvedDescriptor ? { schema: "morrow.canvas-browser-result.v1", readDescriptor: unresolvedDescriptor } : providerFailure,
+      problem(code, message, !unknown, result?.sent === false ? result?.error : undefined),
     );
     return unknown ? "unknown" : "known";
   }

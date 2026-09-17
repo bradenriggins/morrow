@@ -785,6 +785,7 @@ describe("MorrowRuntime durable batches", () => {
       const expectedControl = {
         schema: "morrow.operation-control.v1",
         operationId,
+        tool: "canvas_update_create_page_courses",
         state: "awaiting_approval",
         dispatchAttempt: 0,
         verification: { status: "unconfirmed" },
@@ -898,6 +899,7 @@ describe("MorrowRuntime durable batches", () => {
       const expectedControl = {
         schema: "morrow.operation-control.v1",
         operationId,
+        tool: "canvas_update_create_page_courses",
         state: "awaiting_approval",
         dispatchAttempt: 0,
         verification: { status: "unconfirmed" },
@@ -1021,6 +1023,7 @@ describe("MorrowRuntime durable batches", () => {
       const control = {
         schema: "morrow.operation-control.v1",
         operationId,
+        tool: "canvas_update_create_page_courses",
         state: "awaiting_approval",
         dispatchAttempt: 0,
         verification: { status: "unconfirmed" },

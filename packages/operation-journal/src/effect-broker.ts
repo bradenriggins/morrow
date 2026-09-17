@@ -24,7 +24,7 @@ export const EFFECT_OPERATION_STATES = Object.freeze([
 
 export type EffectOperationState = typeof EFFECT_OPERATION_STATES[number];
 
-export const EFFECT_TARGET_IDENTITY_VERSION = "morrow.effect-target.v3";
+export const EFFECT_TARGET_IDENTITY_VERSION = "morrow.effect-target.v4";
 
 export interface FrozenReadbackPlan {
   readonly tool: string;
@@ -252,6 +252,13 @@ export class ProviderEffectTargetIdentityVersionError extends Error {
 
 export interface DispatchReservationOptions {
   readonly enforceHistoricalTargetScopeBarrier?: boolean;
+  /**
+   * What a change saved under an earlier target rule targets under the rule in
+   * force now, by operation id. A change whose target can be named this way
+   * holds back only that target; one that cannot still holds back every change,
+   * because its scope is genuinely unknown.
+   */
+  readonly historicalTargetIdentities?: ReadonlyMap<string, string | null>;
 }
 
 export interface EffectBatchOperationBinding {
@@ -1013,6 +1020,21 @@ export class ProviderEffectBroker {
     });
   }
 
+  /**
+   * Saved changes still holding a target that were named under an earlier target
+   * rule. The caller names what each one targets under the rule in force now, so
+   * one of them holds back only its own target.
+   */
+  historicalTargetHolders(): readonly EffectOperationRecord[] {
+    const rows = this.database.prepare(`
+      SELECT operation_id FROM provider_effect_operations
+      WHERE dispatch_attempt>0
+        AND state IN (${TARGET_HOLDING_STATES})
+        AND (target_identity_version IS NULL OR target_identity_version<>?)
+    `).all(EFFECT_TARGET_IDENTITY_VERSION) as { operation_id: string }[];
+    return rows.map((row) => this.get(row.operation_id));
+  }
+
   cancel(operationIdValue: string): EffectOperationRecord {
     const operationId = identifier(operationIdValue, "operation id");
     const now = this.instant();
@@ -1080,15 +1102,18 @@ export class ProviderEffectBroker {
         throw new ProviderEffectTargetIdentityVersionError();
       }
       if (options.enforceHistoricalTargetScopeBarrier && current.targetIdentityVersion === EFFECT_TARGET_IDENTITY_VERSION) {
-        const unknownHistoricalScope = this.database.prepare(`
+        const historical = this.database.prepare(`
           SELECT operation_id FROM provider_effect_operations
           WHERE operation_id<>?
             AND dispatch_attempt>0
             AND state IN (${TARGET_HOLDING_STATES})
             AND (target_identity_version IS NULL OR target_identity_version<>?)
-          LIMIT 1
-        `).get(operationId, EFFECT_TARGET_IDENTITY_VERSION) as { operation_id: string } | undefined;
-        if (unknownHistoricalScope) throw new ProviderEffectTargetScopeUnknownError(unknownHistoricalScope.operation_id);
+        `).all(operationId, EFFECT_TARGET_IDENTITY_VERSION) as { operation_id: string }[];
+        for (const row of historical) {
+          const named = options.historicalTargetIdentities?.get(row.operation_id);
+          if (named === undefined || named === null) throw new ProviderEffectTargetScopeUnknownError(row.operation_id);
+          if (named === frozenAuthority.targetSetDigest) throw new ProviderEffectTargetConflictError(row.operation_id);
+        }
       }
       const conflict = this.database.prepare(`
         SELECT operation_id FROM provider_effect_operations
@@ -1181,18 +1206,30 @@ export class ProviderEffectBroker {
     });
   }
 
-  settleFailure(operationIdValue: string, detail: unknown, mayHaveApplied: boolean): EffectOperationRecord {
+  /**
+   * `reason` is Morrow's own name for the refusal, when the source stated one. It
+   * is a closed Morrow token carrying no course or learner content, so it is kept
+   * beside the other attention codes: without it a person is told a change failed
+   * and never told what to correct.
+   */
+  settleFailure(operationIdValue: string, detail: unknown, mayHaveApplied: boolean, reason?: string): EffectOperationRecord {
     const operationId = identifier(operationIdValue, "operation id");
     const now = this.instant();
+    const named = typeof reason === "string" && /^[a-z][a-z0-9_]{0,99}$/u.test(reason) ? reason : null;
     return this.transaction(() => {
       const current = this.get(operationId);
       if (current.state !== "dispatching") throw new Error(`operation cannot fail from ${current.state}`);
       const state: EffectOperationState = mayHaveApplied ? "applied_or_unknown" : "failed";
       const causalSequence = mayHaveApplied ? this.nextCausalSequence() : null;
+      const attention = [
+        mayHaveApplied ? "provider_effect_may_have_landed" : "dispatch_failed_before_send",
+        ...(named ? [named] : []),
+        sha256Json(detail),
+      ];
       this.database.prepare(`
         UPDATE provider_effect_operations
         SET state=?, person_close_causal_sequence=?, attention_json=?, updated_at=?, terminal_at=? WHERE operation_id=?
-      `).run(state, causalSequence, JSON.stringify([mayHaveApplied ? "provider_effect_may_have_landed" : "dispatch_failed_before_send", sha256Json(detail)]), now, now, operationId);
+      `).run(state, causalSequence, JSON.stringify(attention), now, now, operationId);
       return this.get(operationId);
     });
   }

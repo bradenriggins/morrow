@@ -306,10 +306,16 @@ test("Canvas names the signed-in person self on their own routes, and Morrow adm
     assert.equal(parameter.schema.pattern, "^([1-9][0-9]*|self)$", entry.toolName);
   }
 
-  // A route about someone else in a course keeps the documented id: who it names
-  // is the whole question there.
+  // A course route that names a person reads the same way: `self` can only ever
+  // be the signed-in person, so admitting it does not widen who a route is about.
   const courseUser = operation("canvas_get_single_user");
   const courseParameter = courseUser.parameters.find((value) => value.location === "path" && value.inputName === "id");
   assert.ok(courseParameter);
-  assert.equal(courseParameter.schema.pattern, "^[1-9][0-9]*$");
+  assert.equal(courseParameter.schema.pattern, "^([1-9][0-9]*|self)$");
+
+  // A route that names an object, not a person, keeps the documented id.
+  const assignment = operation("canvas_get_single_assignment");
+  const assignmentParameter = assignment.parameters.find((value) => value.location === "path" && value.inputName === "id");
+  assert.ok(assignmentParameter);
+  assert.equal(assignmentParameter.schema.pattern, "^[1-9][0-9]*$");
 });

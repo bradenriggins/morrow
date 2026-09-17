@@ -2040,6 +2040,16 @@
   function samePersonPath(candidate, pathname) {
     const wanted = pathname.split("/");
     const offered = candidate.split("/");
+    // Canvas answers a route that left the person implicit, such as
+    // `/users/activity_stream`, with links that name that person: the same
+    // route, written out. One added person segment directly after `users` is
+    // that same route; anything else is a different address and is refused.
+    if (offered.length === wanted.length + 1) {
+      const at = offered.findIndex((segment, index) => segment !== wanted[index]);
+      if (at < 1 || offered[at - 1] !== "users") return false;
+      if (!/^(?:self|[1-9][0-9]{0,18})$/.test(offered[at])) return false;
+      return offered.slice(at + 1).join("/") === wanted.slice(at).join("/");
+    }
     if (wanted.length !== offered.length) return false;
     let resolvedSelf = false;
     for (const [index, segment] of wanted.entries()) {
@@ -2050,7 +2060,15 @@
     return resolvedSelf;
   }
 
-  function linkHeaderUrls(value, origin, pathname, requested) {
+  /**
+   * The links Canvas offered for this listing. A link that leaves this Canvas
+   * site is refused outright: it is not this site's answer. A link that stays on
+   * the site but names a different address or a different query is simply not
+   * followed, and `report.incomplete` says the listing goes on beyond what
+   * Morrow read. Canvas does both to its own listings, and refusing the page
+   * already in hand would throw away an answer Canvas gave correctly.
+   */
+  function linkHeaderUrls(value, origin, pathname, requested, report = {}) {
     const links = new Map();
     const raw = String(value || "");
     if (!raw.trim()) return links;
@@ -2058,18 +2076,32 @@
       const match = /^\s*<([^>]+)>;\s*rel="?([a-z]+)"?\s*$/i.exec(part);
       if (!match) throw new Error("canvas_pagination_header_refused");
       const relation = match[2].toLowerCase();
-      const url = new URL(match[1]);
-      if (url.origin !== origin || (url.pathname !== pathname && !samePersonPath(url.pathname, pathname))) {
+      // Canvas writes some Link headers as a path alone. A relative address is
+      // resolved against this page's own origin, which is the origin the check
+      // below requires anyway.
+      let url;
+      try { url = new URL(match[1], origin); } catch { throw new Error("canvas_pagination_header_refused"); }
+      if (url.origin !== origin) {
         if (relation === "next") throw new Error("canvas_pagination_origin_refused");
         continue;
       }
+      if (url.pathname !== pathname && !samePersonPath(url.pathname, pathname)) {
+        if (relation === "next") report.incomplete = true;
+        continue;
+      }
       if (relation === "next" && requested && !sameRequestParameters(url, requested)) {
-        throw new Error("canvas_pagination_parameters_refused");
+        report.incomplete = true;
+        continue;
       }
       if (links.has(relation)) throw new Error("canvas_pagination_header_refused");
       links.set(relation, url);
     }
     return links;
+  }
+
+  // Whether Canvas said the listing continues, read from the header alone.
+  function hasNextRelation(value) {
+    return String(value || "").split(",").some((part) => /;\s*rel="?next"?\s*$/i.test(part.trim()));
   }
 
   function nextLink(value, origin, pathname) {
@@ -2103,7 +2135,20 @@
       const observed = resumed.searchParams.getAll(name);
       if (observed.length !== expected.length || expected.some((value, index) => observed[index] !== value)) return false;
     }
-    for (const name of resumedNames) if (name !== "page" && name !== "per_page" && !requestedNames.has(name)) return false;
+    // Canvas writes some of its own defaults into the later-page address: the
+    // JSON response shape it already returned, and the id the route's own path
+    // states. Neither widens the read, and refusing them would end a listing
+    // Canvas paginated correctly.
+    const echoed = (name) => {
+      if (name === "format") return resumed.searchParams.getAll(name).join() === "json";
+      const values = resumed.searchParams.getAll(name);
+      const owned = /(?:^|_)id$/.test(name) && values.length === 1 && /^[1-9][0-9]*$/.test(values[0]);
+      return owned && resumed.pathname.split("/").includes(values[0]);
+    };
+    for (const name of resumedNames) {
+      if (name === "page" || name === "per_page" || requestedNames.has(name)) continue;
+      if (!echoed(name)) return false;
+    }
     const pages = resumed.searchParams.getAll("page");
     if (pages.length !== 1 || pages[0].length < 1 || pages[0].length > 1_024) return false;
     const expectedPerPage = requested.searchParams.getAll("per_page");
@@ -2154,11 +2199,60 @@
 
   function canvasArrayMemberName(name) {
     const normalized = name === "blackout_dates:" ? "blackout_dates" : name;
-    const recordField = /^(grading_periods|grading_scheme_entry|ratings|events|quiz_groups|order)(\[[^\]]+\])$/.exec(normalized);
+    // Canvas takes these as a list of records: every field under them is written
+    // with the list marker, as `polls[][question]`. The set is the parents whose
+    // form parameters are all arrays in the Canvas catalog, and
+    // scripts/test/canvas-array-member-name.test.mjs fails if the catalog gains
+    // one this expression does not name.
+    const recordField = /^(assignment_extensions|events|grading_periods|grading_scheme_entry|order|poll_choices|poll_sessions|poll_submissions|polls|quiz_extensions|quiz_groups|quiz_submissions|ratings)(\[[^\]]+\])$/.exec(normalized);
     if (recordField) return `${recordField[1]}[]${recordField[2]}`;
     const timetableField = /^timetables\[course_section_id\](\[[^\]]+\])$/.exec(normalized);
     if (timetableField) return `timetables[course_section_id][]${timetableField[1]}`;
     return `${normalized}[]`;
+  }
+
+  // Canvas reads a list of records from a form one record at a time: every field
+  // of the first record, then every field of the second. Morrow takes those
+  // records as one array per field, so the fields of one parent are written
+  // together here, index by index. Sending them field by field instead would
+  // make Canvas read `name, name, value, value` as three records rather than two.
+  function appendRecordList(target, parent, entries) {
+    const length = entries.reduce((most, [, value]) => Math.max(most, Array.isArray(value) ? value.length : 0), 0);
+    for (let index = 0; index < length; index += 1) {
+      for (const [wireName, value] of entries) {
+        if (!Array.isArray(value) || index >= value.length) continue;
+        const field = wireName.slice(parent.length);
+        const entry = value[index];
+        if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+          for (const [key, child] of Object.entries(entry)) appendValue(target, `${parent}[]${field}[${key}]`, child);
+        } else {
+          target.append(`${parent}[]${field}`, entry === null ? "" : String(entry));
+        }
+      }
+    }
+  }
+
+  function recordListParent(name) {
+    const match = canvasArrayMemberName(name).match(/^([A-Za-z0-9_]+)\[\]\[/);
+    return match ? match[1] : null;
+  }
+
+  function appendBody(target, entries) {
+    const groups = new Map();
+    for (const [parameter, value] of entries) {
+      const parent = Array.isArray(value) ? recordListParent(parameter.wireName) : null;
+      if (!parent) continue;
+      if (!groups.has(parent)) groups.set(parent, []);
+      groups.get(parent).push([parameter.wireName, value]);
+    }
+    const written = new Set();
+    for (const [parameter, value] of entries) {
+      const parent = Array.isArray(value) ? recordListParent(parameter.wireName) : null;
+      if (!parent) { appendValue(target, parameter.wireName, value); continue; }
+      if (written.has(parent)) continue;
+      written.add(parent);
+      appendRecordList(target, parent, groups.get(parent));
+    }
   }
 
   function appendValue(target, name, value) {
@@ -3076,7 +3170,16 @@
         continue;
       }
       if (parameter.location === "path") {
-        path = path.replace(`{${parameter.wireName}}`, encodeURIComponent(String(value)));
+        // Canvas writes an optional trailing path as its own splat segment. It is
+        // sent as real path segments, each one encoded, so a folder path reaches
+        // Canvas as a path and never as one escaped value.
+        if (parameter.wireName.startsWith("*")) {
+          const segments = String(value).split("/").filter((segment) => segment !== "");
+          if (segments.some((segment) => segment === "." || segment === "..")) throw new TypeError("canvas_operation_path_refused");
+          path = path.replace(`/${parameter.wireName}`, segments.length ? `/${segments.map(encodeURIComponent).join("/")}` : "");
+        } else {
+          path = path.replace(`{${parameter.wireName}}`, encodeURIComponent(String(value)));
+        }
       } else if (parameter.location === "query") {
         appendValue(query, parameter.wireName, value);
       } else {
@@ -3085,7 +3188,9 @@
         else body.push([parameter, preserveNullableFormValue && !preserveNewQuizValue ? "" : value]);
       }
     }
-    if (/\{[^}]+\}/.test(path) || path.includes("://") || path.split("/").includes("..")) {
+    // A splat the caller named nothing for is not part of the address.
+    path = path.replace(/\/\*[A-Za-z0-9_]+$/, "");
+    if (/\{[^}]+\}/.test(path) || path.includes("*") || path.includes("://") || path.split("/").includes("..")) {
       throw new TypeError("canvas_operation_path_refused");
     }
     const url = new URL(`/api${path}`, location.origin);
@@ -3368,10 +3473,12 @@
         options.body = JSON.stringify(bulkDates);
       } else if (containsFile) {
         const form = new FormData();
+        const fields = [];
         for (const [parameter, value] of body) {
           if (String(parameter.schema?.format || "") === "binary") form.append(parameter.wireName, decodeFile(value));
-          else appendValue(form, parameter.wireName, value);
+          else fields.push([parameter, value]);
         }
+        appendBody(form, fields);
         options.body = form;
       } else if (body.length > 0 && usesJsonBody(operation)) {
         const json = {};
@@ -3383,7 +3490,7 @@
         options.body = JSON.stringify(json);
       } else if (body.length > 0) {
         const encoded = new URLSearchParams();
-        for (const [parameter, value] of body) appendValue(encoded, parameter.wireName, value);
+        appendBody(encoded, body);
         headers.set("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8");
         options.body = encoded.toString();
       }
@@ -3395,6 +3502,7 @@
     if (!isRead && (!Number.isFinite(expiresAt) || Date.now() >= expiresAt)) throw new Error("canvas_request_expired_before_send");
     const pages = [];
     let next = resumed ? resumed.href : url.href;
+    let moreAvailable = false;
     let links = new Map();
     let lastResponse = null;
     for (let page = 0; next && page < maxPages; page += 1) {
@@ -3530,8 +3638,17 @@
         return { ok: false, sent: true, status: response.status, ...(isRead ? {} : { outcomeUnknown }), error: payload, requestUrl: url.pathname };
       }
       pages.push(payload);
-      links = isRead ? linkHeaderUrls(response.headers.get("Link"), location.origin, url.pathname, url) : new Map();
-      next = isRead ? links.get("next")?.href || null : null;
+      // A next link is judged only when Morrow may act on it: another page in
+      // this call, or a resume envelope that carries it forward. A caller that
+      // asked for exactly one page is answered with the page Canvas returned,
+      // and told the listing continues, without Morrow ruling on an address it
+      // will never request.
+      const mayFollow = page + 1 < maxPages || Boolean(listResume);
+      const report = {};
+      links = isRead && mayFollow ? linkHeaderUrls(response.headers.get("Link"), location.origin, url.pathname, url, report) : new Map();
+      next = isRead && mayFollow ? links.get("next")?.href || null : null;
+      if (isRead && !mayFollow) moreAvailable = hasNextRelation(response.headers.get("Link"));
+      if (report.incomplete) moreAvailable = true;
     }
     const pagesRead = pagesBefore + pages.length;
     const data = pages.length === 1 ? pages[0] : pages.flatMap((page) => Array.isArray(page) ? page : [page]);
@@ -3559,7 +3676,7 @@
       ...(newQuizItemLifecycle ? { verification: await verifyNewQuizItemLifecycleChange(newQuizItemLifecycle, data, expiresAt) } : {}),
       ...(newQuizItemPosition ? { verification: await verifyNewQuizItemPositionChange(newQuizItemPosition, expiresAt) } : {}),
       pageCount: pages.length,
-      truncated: Boolean(next),
+      truncated: Boolean(next) || moreAvailable,
       // The resume envelope is returned only to a caller that asked to continue
       // this list. morrow_next_page is opaque and is only ever read back here.
       ...(listResume ? {

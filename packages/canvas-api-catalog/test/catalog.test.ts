@@ -536,7 +536,9 @@ describe("Canvas API catalog", () => {
     ));
     const siteReads = catalog.operations.filter((operation) => operation.readOnly
       && canvasOperationAdmission(operation).authority === "site");
-    const credentialReads = catalog.operations.filter((operation) => operation.toolName === "canvas_get_items_media_upload_url");
+    const credentialReads = catalog.operations.filter((operation) => (
+      ["canvas_get_items_media_upload_url", "canvas_get_public_inline_preview_url"].includes(operation.toolName)
+    ));
     const incompatibleAuthentication = catalog.operations.filter((operation) => (
       operation.path.startsWith("/lti/")
       && canvasOperationAdmission(operation).write.state !== "held"
@@ -573,7 +575,9 @@ describe("Canvas API catalog", () => {
     }
     for (const operation of credentialReads) {
       const tool = tools.find((candidate) => candidate.name === operation.toolName);
-      const reason = "This Canvas read returns a one-time media upload credential. Morrow keeps upload credentials inside its reviewed file transfer.";
+      const reason = operation.toolName === "canvas_get_public_inline_preview_url"
+        ? "This Canvas read returns a shareable file link that carries its own access token. Morrow does not hand out access tokens. Ask Morrow to read the file's text or to name the file instead."
+        : "This Canvas read returns a one-time media upload credential. Morrow keeps upload credentials inside its reviewed file transfer.";
       expect(tool?.capability?.profiles["private-full"]).toEqual({ state: "profile_limited", reason });
       expect(tool?.capability?.profiles["public-canvas"]).toEqual({ state: "profile_limited", reason });
       expect(tool?.capability?.profiles["read-only"]).toEqual({ state: "profile_limited", reason });

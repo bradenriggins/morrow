@@ -292,6 +292,12 @@ export interface BridgeProblem {
   readonly message: string;
   readonly recoverable: boolean;
   readonly detailDigest?: string;
+  /**
+   * Morrow's own name for a request it refused before sending. It is one of
+   * Morrow's tokens, never provider text, so it can be carried across the
+   * privacy boundary and told to the person who has to correct the request.
+   */
+  readonly refusal?: string;
 }
 
 export interface BridgeResult {
@@ -1288,9 +1294,11 @@ export function matchesBridgeEditPermission(
   return changedFields.every((field) => rule.allowedChangedFields.includes(field));
 }
 
+const MORROW_REFUSAL_TOKEN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
+
 function parseProblem(value: unknown): BridgeProblem {
   if (!isJsonObject(value) || value.schema !== "morrow.bridge.problem.v1"
-    || Object.keys(value).some((key) => !["schema", "code", "message", "recoverable", "detailDigest"].includes(key))) {
+    || Object.keys(value).some((key) => !["schema", "code", "message", "recoverable", "detailDigest", "refusal"].includes(key))) {
     throw new TypeError("bridge problem has an invalid schema");
   }
   if (typeof value.recoverable !== "boolean") throw new TypeError("problem.recoverable must be boolean");
@@ -1298,12 +1306,15 @@ function parseProblem(value: unknown): BridgeProblem {
   if (detailDigest && !HEX_SHA256.test(detailDigest)) {
     throw new TypeError("problem.detailDigest must be a SHA-256 digest");
   }
+  const refusal = optionalString(value.refusal, "problem.refusal", 100);
+  if (refusal && !MORROW_REFUSAL_TOKEN.test(refusal)) throw new TypeError("problem.refusal must be a Morrow reason");
   return {
     schema: "morrow.bridge.problem.v1",
     code: requiredString(value.code, "problem.code", 120),
     message: requiredString(value.message, "problem.message", 1000),
     recoverable: value.recoverable,
     ...(detailDigest ? { detailDigest } : {}),
+    ...(refusal ? { refusal } : {}),
   };
 }
 

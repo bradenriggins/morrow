@@ -101,6 +101,21 @@ export interface FindSuccessfulReadEvidenceInput {
   readonly actorDigest: string;
   readonly upstreamResultDigest: string;
   readonly afterCausalSequence: number;
+  /**
+   * A course connection made again by the same person on the same site carries a
+   * new generation in its identity. The evidence has to come from that person,
+   * that site and that course, which this pattern states; the generation itself
+   * is not what makes the reading theirs. `actorDigest` still holds the reading
+   * to the same signed-in person.
+   */
+  readonly sourceBindingPattern?: string;
+  /**
+   * The actor digest is frozen with the connection it was made through, so a
+   * course connected again never matches it. When the evidence is matched by
+   * `sourceBindingPattern` instead, that pattern already carries the person's
+   * own fingerprint and the course, which is what makes the reading theirs.
+   */
+  readonly matchActorDigest?: boolean;
 }
 
 export interface GatewayOperationJournalOptions {
@@ -758,10 +773,19 @@ export class GatewayOperationJournal {
     const sourceBindingId = optionalBindingIdentity(input.sourceBindingId, "source binding id");
     if (!sourceBindingId) throw new TypeError("source binding id is required");
     const afterCausalSequence = exactCausalSequence(input.afterCausalSequence, "read evidence causal lower bound");
+    // Exactly one wildcard, standing for the connection generation, inside an
+    // otherwise valid binding identity.
+    const pattern = input.sourceBindingPattern
+      && optionalBindingIdentity(input.sourceBindingPattern.replace(/%/gu, "0"), "source binding pattern")
+      && input.sourceBindingPattern.split("%").length === 2
+      ? input.sourceBindingPattern
+      : null;
+    const matchActor = input.matchActorDigest !== false;
+    const actorDigest = exactDigest(input.actorDigest, "actor digest");
     const row = this.database.prepare(`
       SELECT * FROM gateway_operations
-      WHERE source_id=? AND source_binding_id=?
-        AND target_identity_digest=? AND actor_digest=?
+      WHERE source_id=? AND (source_binding_id=?${pattern ? " OR source_binding_id LIKE ?" : ""})
+        AND target_identity_digest=?${matchActor ? " AND actor_digest=?" : ""}
         AND upstream_result_digest=? AND prepared_causal_sequence>?
         AND read_only=1 AND state='response_received' AND response_succeeded=1
         AND public_result_delivered=1
@@ -770,8 +794,9 @@ export class GatewayOperationJournal {
     `).get(
       exactName(input.sourceId, "source id"),
       sourceBindingId,
+      ...(pattern ? [pattern] : []),
       exactDigest(input.targetIdentityDigest, "target identity digest"),
-      exactDigest(input.actorDigest, "actor digest"),
+      ...(matchActor ? [actorDigest] : []),
       exactDigest(input.upstreamResultDigest, "upstream result digest"),
       afterCausalSequence,
     ) as SqlRow | undefined;

@@ -819,24 +819,55 @@ function applyClassicQuizAnswerParameters(operations) {
 /**
  * Canvas names the signed-in person `self` on their own routes, and documents
  * every id as a number. Morrow speaks for that person, so `self` is admitted
- * where Canvas accepts it: the routes whose subject is the user themselves. A
- * route about someone else in a course keeps the documented id, because who it
- * names is the whole question there.
+ * wherever a route takes a person id. It can never name anyone else, so who a
+ * route is about stays the documented id for every other person.
  */
+/**
+ * Canvas writes an optional trailing path as a splat segment, such as
+ * `/folders/by_path/*full_path`. The Canvas documentation lists no parameter for
+ * it, so without this the address would be sent with the splat still in it.
+ */
+function applySplatPathInputs(operations) {
+  for (const operation of operations) {
+    const match = /\/\*([A-Za-z0-9_]+)$/.exec(operation.path);
+    if (!match) continue;
+    const inputName = match[1];
+    if ((operation.parameters || []).some((parameter) => parameter.inputName === inputName)) continue;
+    const schema = { type: "string", maxLength: 2000, description: "Optional folder path under this context." };
+    operation.parameters = [...(operation.parameters || []), {
+      deprecated: false,
+      inputName,
+      location: "path",
+      required: false,
+      schema,
+      wireName: `*${inputName}`,
+    }];
+    operation.inputSchema = {
+      ...operation.inputSchema,
+      properties: { ...(operation.inputSchema?.properties || {}), [inputName]: schema },
+    };
+  }
+}
+
 function applySelfPersonRoutes(operations) {
   const pattern = "^([1-9][0-9]*|self)$";
   let widened = 0;
   for (const operation of operations) {
-    if (!/^\/v1\/users\/\{user_id\}(?:\/|$)/.test(operation.path)) continue;
+    if (!/^\/v1\//.test(operation.path)) continue;
+    // A bare `{id}` is a person id when the route names a person just before it.
+    const personInput = operation.parameters.some((parameter) => parameter.location === "path" && parameter.inputName === "user_id")
+      ? "user_id"
+      : /\/users\/\{id\}(?:\/|$)/.test(operation.path) ? "id" : null;
+    if (!personInput) continue;
     for (const parameter of operation.parameters) {
-      if (parameter.location !== "path" || parameter.inputName !== "user_id") continue;
+      if (parameter.location !== "path" || parameter.inputName !== personInput) continue;
       if (parameter.schema?.pattern !== "^[1-9][0-9]*$") continue;
       parameter.schema = { ...parameter.schema, pattern };
       widened += 1;
     }
-    const property = operation.inputSchema?.properties?.user_id;
+    const property = operation.inputSchema?.properties?.[personInput];
     if (property && property.pattern === "^[1-9][0-9]*$") {
-      operation.inputSchema.properties.user_id = { ...property, pattern };
+      operation.inputSchema.properties[personInput] = { ...property, pattern };
     }
   }
   if (widened === 0) throw new Error("Canvas person routes are required.");
@@ -934,6 +965,7 @@ async function buildCatalog() {
   applyClassicQuizAnswerParameters(official);
   applyDocumentedReadInputContracts(official);
   applySelfPersonRoutes(official);
+  applySplatPathInputs(official);
   const itemBank = itemBankOperations();
   const courseFileContent = [courseFileTextOperation()];
   const browser = [...itemBank, ...courseFileContent];
