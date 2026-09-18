@@ -601,7 +601,11 @@ function resourceSpec(
   return null;
 }
 
-const GENERIC_NAME_FIELDS = ["name", "title", "display_name", "short_name", "label", "filename"] as const;
+// Canvas names most objects with a name or a title, and names a few by what
+// they say: a poll by its question, a blackout date by its event title. A review
+// that cannot find one of these shows the object's kind and id instead.
+const GENERIC_NAME_FIELDS = ["name", "title", "display_name", "short_name", "label", "filename",
+  "question", "event_title", "text"] as const;
 
 /**
  * Every object a Canvas write addresses through its route, read back by the GET
@@ -630,7 +634,12 @@ function catalogSpecs(mapping: CatalogTool, args: JsonObject): readonly TargetSp
       // then tells the person Canvas does not have it, which is not true and
       // leaves the change with nothing to approve.
       entityId: (value: JsonObject) => sameId(value.id, id) || value.url === id || sameId(value.page_id, id)
-        || sameId(value[route.field], id),
+        || sameId(value[route.field], id)
+        // Morrow names a person in a course by the learner token it issues, and
+        // the record it reads back carries that token in place of the person's
+        // Canvas id. A change that names the person by that token is a change to
+        // the object Morrow just read, so the token identifies it.
+        || sameId(value.learnerToken, id),
       nameFields: GENERIC_NAME_FIELDS,
       fallbackName: `${route.label} ${id}`,
     } satisfies TargetSpec];
@@ -807,12 +816,62 @@ async function itemBankApprovalContext(
   };
 }
 
+/**
+ * Canvas answers some routes with the record inside an envelope it names, as
+ * `{ "polls": [ ... ] }` from `/v1/polls/{id}`. The record in that envelope is
+ * the object the route was asked for, so a review that only reads the top level
+ * finds no id and reports an object Canvas just returned as missing.
+ */
+/** The records one Canvas answer carries, whether it answered with one or many. */
+function answeredRecords(result: JsonObject | null): readonly JsonObject[] {
+  if (!result || result.isError === true) return [];
+  const content = object(result.structuredContent);
+  if (!content
+    || content.schema !== "morrow.canvas-connector.result.v1"
+    || content.ok !== true
+    || content.commandKind !== "invoke_read") return [];
+  const browser = object(content.result);
+  if (!browser || browser.ok !== true || browser.sent !== true) return [];
+  // Canvas answers some routes with one record and some with a list of them,
+  // and a review that only accepts one reports the record it was given as
+  // missing.
+  if (Array.isArray(browser.data)) {
+    return browser.data.flatMap((entry) => {
+      const record = object(entry);
+      return record ? envelopedRecords(record) : [];
+    });
+  }
+  return envelopedRecords(object(browser.data));
+}
+
+function envelopedRecords(entity: JsonObject | null): readonly JsonObject[] {
+  if (!entity) return [];
+  const held: JsonObject[] = [entity];
+  for (const value of Object.values(entity)) {
+    if (Array.isArray(value)) {
+      for (const row of value) {
+        const record = object(row);
+        if (record) held.push(record);
+      }
+      continue;
+    }
+    const record = object(value);
+    if (record) held.push(record);
+  }
+  return held;
+}
+
 function resolvedTarget(
   target: TargetSpec,
   result: JsonObject | null,
   origin: string | null,
 ): ApprovalReviewContext["targets"][number] {
-  const entity = result ? canvasEntity(result) : null;
+  const answered = result ? canvasEntity(result) : null;
+  const entity = answeredRecords(result).find((record) => {
+    const recordCourseId = record.course_id ?? record.courseId;
+    return (!target.courseId || recordCourseId === undefined || sameId(recordCourseId, target.courseId))
+      && target.entityId(record);
+  }) ?? answered;
   const entityCourseId = entity?.course_id ?? entity?.courseId;
   const courseMatches = !target.courseId || entityCourseId === undefined || sameId(entityCourseId, target.courseId);
   const nameSource = entity && target.entryNameFields ? object(entity.entry) : entity;

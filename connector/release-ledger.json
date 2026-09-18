@@ -208,6 +208,18 @@
     {
       "version": "1.0.57",
       "releaseManifestSha256": "4e0915afaa0d27ba055517bc9e264412a248d08a74ba406a5fde0bb2c67b107a"
+    },
+    {
+      "version": "1.0.58",
+      "releaseManifestSha256": "e58838ad75a4caaf58ba75389db71b291473acc171570574141438f9312abe84"
+    },
+    {
+      "version": "1.0.59",
+      "releaseManifestSha256": "952bcbffd5322b658da5bbf4e708a04dffe9f23d222a47d0d5a9ab4c7c76113f"
+    },
+    {
+      "version": "1.0.60",
+      "releaseManifestSha256": "b22700486d3f6905109a7255078fb1d10468481c299a301f30329a90fc136b3d"
     }
   ]
 }

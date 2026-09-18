@@ -197,6 +197,30 @@ describe("approval review context", () => {
         canvas_get_single_course_courses: { id: 42, name: "Biology" },
         canvas_get_feature_flag_courses: { feature: "outcome_gradebook", context_id: "42", context_type: "Course", state: "on" },
       }, ["canvas_get_feature_flag_courses"]);
+    // Morrow replaces a person's Canvas id with the learner token it issues, so
+    // the submission it reads back carries the token and no id. A change that
+    // names the person by that token names the submission Morrow just read.
+    const submission = await review("canvas_mark_submission_as_read_courses", "submissions",
+      { course_id: "42", assignment_id: "77", user_id: "Student A1" }, {
+        canvas_get_single_course_courses: { id: 42, name: "Biology" },
+        canvas_get_single_assignment: { id: 77, course_id: 42, name: "MORROW assignment" },
+        canvas_get_single_submission_courses: { learnerToken: "Student A1", assignment_id: "77", workflow_state: "unsubmitted" },
+      }, ["canvas_get_single_submission_courses"]);
+    expect(submission.targets.at(-1)).toEqual({ field: "user_id", label: "Submission", name: "Submission Student A1" });
+
+    // Canvas answers a poll inside the envelope it names, so the review has to
+    // open it rather than report the poll Canvas just returned as missing.
+    const poll = await review("canvas_create_single_poll_choice", "polls", { poll_id: "3" }, {
+      canvas_get_single_poll: { polls: [{ id: "3", question: "MORROW poll" }], meta: {} },
+    }, ["canvas_get_single_poll"]);
+    expect(poll.targets).toEqual([{ field: "poll_id", label: "Poll", name: "MORROW poll" }]);
+
+    // A poll Canvas does not hold is still reported as gone.
+    const missingPoll = await review("canvas_create_single_poll_choice", "polls", { poll_id: "3" }, {
+      canvas_get_single_poll: { polls: [{ id: "9", question: "Another poll" }], meta: {} },
+    }, ["canvas_get_single_poll"]);
+    expect(missingPoll.targets).toEqual([{ field: "poll_id", label: "Poll", name: "", state: "absent" }]);
+
     expect(flag.targets).toEqual([
       { field: "course_id", label: "Course", name: "Biology", url: "https://school.instructure.com/courses/42" },
       { field: "feature", label: "Flag", name: "Flag outcome_gradebook" },
