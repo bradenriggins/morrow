@@ -2037,6 +2037,18 @@
   // signed-in person by id, because that is who `self` resolved to. The route is
   // the same one, so a link that differs only in that one segment is followed;
   // any other path is still refused.
+  // The same reads packages/canvas-api-catalog/src/operation-admission.ts names
+  // as canvasRedirectRead. scripts/test/canvas-redirect-read.test.mjs fails if
+  // this rule and that one ever name different operations.
+  function redirectRead(operation) {
+    return operation.readOnly === true && operation.responseType === "void"
+      && /redirect/i.test(`${operation.summary || ""} ${operation.description || ""}`);
+  }
+
+  function sameRequestOrigin(candidate) {
+    try { return new URL(candidate).origin === location.origin; } catch { return false; }
+  }
+
   function samePersonPath(candidate, pathname) {
     const wanted = pathname.split("/");
     const offered = candidate.split("/");
@@ -2255,8 +2267,25 @@
     }
   }
 
+  // Canvas writes a repeated record with its index in the field name and
+  // publishes that index as the letter X, as `appointment_group[new_appointments][X]`
+  // and `calendar_event[child_event_data][X][start_at]`. The letter is a
+  // placeholder, never a field: sending it writes a field Canvas ignores, so the
+  // values silently never reach the change. Each element is written at its own
+  // index instead. scripts/test/canvas-indexed-parameter.test.mjs holds the set.
+  function appendIndexedValue(target, name, value) {
+    const entries = Array.isArray(value) ? value : [value];
+    entries.forEach((entry, index) => {
+      appendValue(target, name.replace("[X]", `[${index}]`), entry);
+    });
+  }
+
   function appendValue(target, name, value) {
     const normalized = name === "blackout_dates:" ? "blackout_dates" : name;
+    if (normalized.includes("[X]")) {
+      appendIndexedValue(target, normalized, value);
+      return;
+    }
     if (Array.isArray(value)) {
       const memberName = canvasArrayMemberName(normalized);
       for (const entry of value) {
@@ -3047,6 +3076,21 @@
     return true;
   }
 
+  // Canvas publishes the blackout-date create with its fields bare and refuses
+  // the request that sends them the way it documents them: it answers 400
+  // "blackout_date is missing" until each field is written inside the record it
+  // belongs to. The wire name here is the one Canvas accepts.
+  // scripts/test/canvas-accepted-wire-name.test.mjs holds the route list.
+  const ACCEPTED_RECORD_WRAPPERS = {
+    canvas_create_blackout_date_courses: { record: "blackout_date", fields: ["event_title", "start_date", "end_date"] },
+    canvas_create_blackout_date_accounts: { record: "blackout_date", fields: ["event_title", "start_date", "end_date"] },
+  };
+
+  function acceptedWireName(operation, wireName) {
+    const wrapper = ACCEPTED_RECORD_WRAPPERS[operation.toolName];
+    return wrapper && wrapper.fields.includes(wireName) ? `${wrapper.record}[${wireName}]` : wireName;
+  }
+
   function bulkAssignmentDatesBody(operation, args) {
     if (operation.toolName !== "canvas_bulk_update_assignment_dates"
       || operation.key !== "PUT /v1/courses/{course_id}/assignments/bulk_update#bulk_update_assignment_dates") return undefined;
@@ -3456,7 +3500,12 @@
     }
     const isRead = operation.method === "GET";
     const headers = new Headers({ Accept: "application/json+canvas-string-ids" });
-    const options = { method: operation.method, credentials: "include", headers, cache: "no-store", redirect: "error" };
+    // Canvas answers a few documented reads with a redirect to the object
+    // itself, inside its own site. Those are followed one hop and the answer is
+    // refused if it left this origin; every other route still refuses a redirect
+    // outright, so no request is ever silently read somewhere else.
+    const followsRedirect = redirectRead(operation);
+    const options = { method: operation.method, credentials: "include", headers, cache: "no-store", redirect: followsRedirect ? "follow" : "error" };
     if (!isRead) {
       const csrfCookie = document.cookie.split(";").map((entry) => entry.trim()).find((entry) => entry.startsWith("_csrf_token="));
       const csrf = csrfCookie ? decodeURIComponent(csrfCookie.slice("_csrf_token=".length)) : "";
@@ -3490,7 +3539,9 @@
         options.body = JSON.stringify(json);
       } else if (body.length > 0) {
         const encoded = new URLSearchParams();
-        appendBody(encoded, body);
+        appendBody(encoded, body.map(([parameter, value]) => (
+          [{ ...parameter, wireName: acceptedWireName(operation, parameter.wireName) }, value]
+        )));
         headers.set("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8");
         options.body = encoded.toString();
       }
@@ -3515,6 +3566,10 @@
           cancelResponseBody(response);
           const seconds = Math.min(30, Math.max(1, Number(response.headers.get("Retry-After") || 1)));
           await waitForRetry(seconds * 1_000, expiresAt);
+        }
+        if (followsRedirect && response.redirected && !sameRequestOrigin(response.url)) {
+          cancelResponseBody(response);
+          throw new Error("canvas_redirect_origin_refused");
         }
         payload = parsePayload(await readBounded(response), response.headers.get("Content-Type"));
       } catch {

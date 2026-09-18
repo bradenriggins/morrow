@@ -1148,19 +1148,21 @@ export function stableEffectTargetIdentity(
     // The object, or for a request that names no object the route itself, on this Canvas site. Two
     // changes to the same object lock each other whichever connection plans them.
     return sha256Json({
-      schema: "morrow.effect-target.v4",
+      schema: "morrow.effect-target.v5",
       provider: providerScope.provider,
       origin: providerScope.origin,
       ...(providerScope.siteUrl ? { siteUrl: providerScope.siteUrl } : {}),
       scope: "site",
-      // The collection this route acts on, so a change that creates an object
-      // and the read that lists that collection name the same target. Only a
-      // route that names neither falls back to itself.
-      entity: canonicalTarget.path.length > 0
-        ? canonicalTarget.path
-        : routeCollectionEntity(mapping).length > 0
-          ? routeCollectionEntity(mapping)
-          : [{ resource: "operation", id: mappingOperationKey(mapping) || mapping.upstreamName }],
+      // The object this route names and the collection under it that the route
+      // acts on, so a change that creates an object and the read that lists that
+      // collection name the same target, while two changes to different
+      // collections of the same object do not. Naming only the object made every
+      // change to an account one target: creating a folder held the account
+      // against creating a role. Only a route that names neither falls back to
+      // itself.
+      entity: canonicalTarget.path.length > 0 || routeCollectionEntity(mapping).length > 0
+        ? [...canonicalTarget.path, ...routeCollectionEntity(mapping)]
+        : [{ resource: "operation", id: mappingOperationKey(mapping) || mapping.upstreamName }],
     });
   }
   if (!courseId) throw new TypeError("Morrow needs an exact course identity before it can plan a provider effect.");
@@ -1179,7 +1181,7 @@ export function stableEffectTargetIdentity(
     throw new TypeError("Morrow needs an exact tenant identity before it can plan a provider effect.");
   }
   return sha256Json({
-    schema: "morrow.effect-target.v4",
+    schema: "morrow.effect-target.v5",
     ...(isCanvasConnector(mapping)
       ? {
           provider: providerScope.provider,
@@ -7093,6 +7095,36 @@ export class GatewayRuntime {
     return Boolean(mapping) && !isPrivateSourceTool(mapping!);
   }
 
+  /**
+   * The reading that settles one unresolved change. Morrow tells a person to
+   * read the item again and close the change with what that reading returns, and
+   * a person cannot do that unless Morrow names the reading and the item. The
+   * change's own retained comparator already names both: the collection the
+   * change went into, or the object it addressed. The arguments are the ids of
+   * the course objects the change named, which every reading of that course
+   * already carries; anything that is not a plain identifier is not published
+   * here, and neither is a capability Morrow keeps for its own use.
+   */
+  private settleReadFor(record: EffectOperationRecord): JsonObject | null {
+    const descriptor = record.connectorReadDescriptor;
+    if (!descriptor) return null;
+    const plainIdentifier = (value: unknown): boolean => (
+      (typeof value === "string" && /^[A-Za-z0-9_.:@%\/+-]{1,200}$/u.test(value))
+      || (typeof value === "number" && Number.isSafeInteger(value))
+    );
+    for (const key of ["collection", "read"] as const) {
+      const read = isJsonObject(descriptor[key]) ? descriptor[key] : null;
+      const tool = read && typeof read.readTool === "string" ? read.readTool : null;
+      const args = read && isJsonObject(read.arguments) ? read.arguments : null;
+      if (!tool || !args || !this.publicCapabilityName(tool)) continue;
+      const values = Object.values(args);
+      if (!values.every((value) => plainIdentifier(value)
+        || (Array.isArray(value) && value.every((entry) => plainIdentifier(entry))))) continue;
+      return { tool, arguments: { ...args } };
+    }
+    return null;
+  }
+
   private historicalOperationControl(record: EffectOperationRecord): JsonObject {
     return {
       schema: "morrow.operation-control.v1",
@@ -7110,6 +7142,12 @@ export class GatewayRuntime {
       // these are its closed codes and they carry no course or learner content.
       // Without them a person is told a change failed and never told why.
       ...(record.attention.length ? { attention: [...record.attention] } : {}),
+      ...(["awaiting_verification", "applied_or_unknown"].includes(record.state)
+        ? (() => {
+          const settleRead = this.settleReadFor(record);
+          return settleRead ? { settleRead } : {};
+        })()
+        : {}),
       contentOmittedReason: "historical_learner_scope_unavailable",
     };
   }
@@ -7841,7 +7879,12 @@ export class GatewayRuntime {
       }
       const scopedCourseId = this.requestCourseId(args)
         ?? courseIdFromCourseTarget(mapping, args as JsonObject);
-      if (isCanvasConnector(mapping) && scopedCourseId) {
+      // A Canvas route that names no course is still read through one course
+      // connection, and a change to the same site-scoped collection names that
+      // connection's course as its target. Without this, no reading of such a
+      // collection could ever settle a change to it, and each unresolved change
+      // held the collection against the next one for good.
+      if (isCanvasConnector(mapping) && (scopedCourseId || canvasCourseFreeScope(mapping))) {
         try {
           const context = mapping.capability?.provider === "moodle"
             ? await this.moodleLearnerContext(mapping, args, options)
@@ -8692,16 +8735,71 @@ export class GatewayRuntime {
    * no read made today can carry that name, so without this the person could
    * never close it.
    */
-  private currentTargetIdentityDigest(operation: EffectOperationRecord): string | null {
+  private currentTargetIdentityDigest(
+    operation: EffectOperationRecord,
+    providerScope?: EffectTargetProviderScope,
+  ): string | null {
     const mapping = this.toolByPublicName.get(operation.publicToolName);
     if (!mapping) return null;
     try {
+      // The target a change holds names the provider and the site. A browser
+      // connection has no configured origin, so only the live connection can say
+      // what site the change was made on. Without it the recomputed target names
+      // a site no reading ever comes from, and a change saved under an earlier
+      // rule could never be settled or release what it holds.
+      if (providerScope) {
+        return stableEffectTargetIdentity(
+          mapping,
+          operation.forwardedRequest ?? {},
+          operation.readback ?? undefined,
+          providerScope,
+        );
+      }
       return this.effectAuthority(
         mapping,
         operation.forwardedRequest ?? {},
         REVIEW_AUTHORIZATION,
         operation.readback ?? undefined,
       ).targetSetDigest;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The site one saved change was made on, read from the connection it was made
+   * through. A course connected again carries a new generation and is the same
+   * connection, so the generation is not part of the match.
+   */
+  private async historicalProviderScope(
+    operation: EffectOperationRecord,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<EffectTargetProviderScope | null> {
+    const mapping = this.toolByPublicName.get(operation.publicToolName);
+    if (!mapping || !operation.sourceBindingId || !isCanvasConnector(mapping)) return null;
+    const bindingTool = this.browserBindingsTool(mapping);
+    if (!bindingTool) return null;
+    const connection = (id: string): string => id.replace(/:g[0-9]+:/u, ":g:");
+    try {
+      const bindings = await this.callSourceOwned(bindingTool.publicName, {}, options);
+      if (bindings.isError === true) return null;
+      const matches = browserBindingContent(bindings).filter((binding) => (
+        binding.runtimeVerified === true
+        && typeof binding.sourceBindingId === "string"
+        && connection(binding.sourceBindingId) === connection(operation.sourceBindingId!)
+        && this.exactString(binding.provider, 30) === mapping.capability?.provider
+        && typeof binding.origin === "string" && /^https:\/\//u.test(binding.origin)
+      ));
+      if (matches.length !== 1) return null;
+      const binding = matches[0]!;
+      const origin = this.exactString(binding.origin, 500);
+      const siteUrl = this.exactString(binding.siteUrl, 500);
+      if (!origin) return null;
+      return {
+        provider: this.exactString(binding.provider, 30) as EffectTargetProviderScope["provider"],
+        origin,
+        ...(siteUrl ? { siteUrl } : {}),
+      };
     } catch {
       return null;
     }
@@ -8723,6 +8821,7 @@ export class GatewayRuntime {
   private freshReadEvidence(
     operation: EffectOperationRecord,
     observedState: string,
+    providerScope?: EffectTargetProviderScope,
   ): GatewayOperationRecord | null {
     const authority = isJsonObject(operation.plan.authority) ? operation.plan.authority : null;
     const actorDigest = authority && typeof authority.actorDigest === "string" && /^[0-9a-f]{64}$/u.test(authority.actorDigest)
@@ -8730,7 +8829,7 @@ export class GatewayRuntime {
     if (!operation.personCloseCausalSequence || !operation.sourceBindingId || !operation.targetIdentityDigest || !actorDigest) return null;
     const names = operation.targetIdentityVersion === EFFECT_TARGET_IDENTITY_VERSION
       ? [operation.targetIdentityDigest]
-      : [operation.targetIdentityDigest, this.currentTargetIdentityDigest(operation)];
+      : [operation.targetIdentityDigest, this.currentTargetIdentityDigest(operation, providerScope)];
     // The same person, site and course, connected again: a course connection made
     // again carries a new generation, and a reading through it is still that
     // person's reading of that course. The strict match runs first.
@@ -8761,11 +8860,12 @@ export class GatewayRuntime {
    * carries an explicit person confirmation and the exact digest of a fresh
    * Morrow read. It is the exit for a change Morrow has no way to check.
    */
-  closeUnresolvedOperation(
+  async closeUnresolvedOperation(
     operationId: string,
     observedState: string,
     confirmedByPerson: boolean,
-  ): JsonObject {
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<JsonObject> {
     const refused = (
       code: string,
       text: string,
@@ -8816,7 +8916,10 @@ export class GatewayRuntime {
         },
       });
     }
-    const evidence = this.freshReadEvidence(operation, observedState);
+    const evidence = this.freshReadEvidence(operation, observedState)
+      ?? (operation.targetIdentityVersion === EFFECT_TARGET_IDENTITY_VERSION
+        ? null
+        : this.freshReadEvidence(operation, observedState, await this.historicalProviderScope(operation, options) ?? undefined));
     if (!evidence) {
       return refused(
         "observed_state_not_from_fresh_read",
@@ -9456,9 +9559,14 @@ export class GatewayRuntime {
       const { bindingScope, courseId } = options.readAuthorityScope;
       const routedBindingId = legacyRouting(args).sourceBindingId;
       const routedCourseId = requestCourseId(args) || courseIdFromCourseTarget(mapping, args as JsonObject);
+      // A course-free route names no course of its own, so the connection's own
+      // course is the exact course of the request.
+      const courseMatches = routedCourseId === null || routedCourseId === undefined
+        ? canvasCourseFreeScope(mapping)
+        : routedCourseId === courseId;
       if (mapping.annotations?.readOnlyHint !== true || !isCanvasConnector(mapping)
         || mapping.capability?.provider !== bindingScope.provider
-        || routedBindingId !== bindingScope.sourceBindingId || routedCourseId !== courseId) {
+        || routedBindingId !== bindingScope.sourceBindingId || !courseMatches) {
         throw new Error("gateway read authority evidence does not match the exact request");
       }
       readAuthorityEvidence = {

@@ -145,6 +145,22 @@ const EXACT_READBACKS: Readonly<Record<string, ExactReadback>> = Object.freeze({
   // Canvas stores a scheme entry as the fraction of the percentage it was given,
   // so the saved scheme is proved against the scheme Canvas said it saved rather
   // than against the percentages the request named.
+  // Canvas answers a new rubric with the rubric and its association together,
+  // and names the rubric's own title `title` rather than the `rubric[title]` the
+  // request used. The saved rubric is read by its own id and compared with the
+  // title Canvas says it saved.
+  create_single_rubric: {
+    read: "get_single_rubric_courses",
+    dynamic: { id: "id" },
+    targetField: "id",
+    strategy: "created-resource",
+    ignoredAssertions: [
+      "rubric_title", "rubric_criteria", "rubric_free_form_criterion_comments", "id",
+      "rubric_association_id", "rubric_association_association_id", "rubric_association_association_type",
+      "rubric_association_purpose", "rubric_association_use_for_grading", "rubric_association_hide_score_total",
+    ],
+    responseAssertions: ["title"],
+  },
   create_new_grading_standard_courses: {
     read: "get_single_grading_standard_in_context_courses",
     dynamic: { grading_standard_id: "id" },
@@ -368,6 +384,26 @@ function collectionTargetArgument(
   return parameters.length === 1 ? parameters[0]!.inputName : undefined;
 }
 
+/**
+ * Canvas takes these collections as a list of records, written one field at a
+ * time as `polls[][question]`. The same parents are named in the Bridge's own
+ * request writer, so a request that carries one record saves one record, and the
+ * saved record holds that record's field value rather than the list it was
+ * written in. A request carrying more than one record creates more than one, and
+ * a single saved record cannot stand for all of them, so the list is kept.
+ */
+const RECORD_LIST_PARENTS = new Set([
+  "assignment_extensions", "events", "grading_periods", "grading_scheme_entry", "order",
+  "poll_choices", "poll_sessions", "poll_submissions", "polls", "quiz_extensions",
+  "quiz_groups", "quiz_submissions", "ratings",
+]);
+
+function singleRecordValue(wireName: string, expected: unknown): unknown {
+  if (!Array.isArray(expected) || expected.length !== 1) return expected;
+  const member = /^([a-z][a-z0-9_]*)\[[A-Za-z0-9_]+\]$/.exec(String(wireName || ""));
+  return member && RECORD_LIST_PARENTS.has(member[1]!) ? expected[0] : expected;
+}
+
 function requestedAssertions(
   write: CanvasReadbackOperation,
   args: Readonly<Record<string, unknown>> | undefined,
@@ -376,8 +412,9 @@ function requestedAssertions(
 ): readonly BrowserReadbackAssertion[] {
   return (write.parameters || []).flatMap((parameter) => {
     if (parameter.location === "path" || ignored.includes(parameter.inputName)) return [];
-    const expected = args?.[parameter.inputName];
-    if (expected === undefined) return [];
+    const requested = args?.[parameter.inputName];
+    if (requested === undefined) return [];
+    const expected = singleRecordValue(parameter.wireName, requested);
     const full = wirePath(parameter.wireName);
     const wrapped = full.length > 1 ? [full, full.slice(1)] : [full];
     const paths = bodies.includes(parameter.inputName) ? [...wrapped, []] : wrapped;
@@ -602,9 +639,63 @@ function recordsAtPath(value: unknown, path: readonly string[]): unknown[] {
   return recordsAtPath(child, path.slice(1));
 }
 
-function targetScope(value: unknown, targetPath: readonly string[] | undefined): unknown[] {
+/**
+ * Canvas returns some collections inside an envelope named after the route's own
+ * collection, such as `{ "polls": [...] }` from `/v1/polls`. Those records are
+ * the collection itself, so a readback that looks for its target among them must
+ * open the envelope. Every other route still answers with the bare array.
+ */
+/**
+ * The names Canvas gives that envelope. A collection route carries the plural it
+ * is named by, and the same route reading one record carries the singular, as
+ * `{ "blackout_date": { ... } }` from `/v1/courses/{course_id}/blackout_dates/{id}`.
+ */
+function envelopeNames(envelope: string): readonly string[] {
+  return envelope.endsWith("s") ? [envelope, envelope.slice(0, -1)] : [envelope];
+}
+
+function envelopeRecords(value: unknown, envelope: string): unknown[] | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const name of envelopeNames(envelope)) {
+      const held = (value as Record<string, unknown>)[name];
+      if (Array.isArray(held)) return held;
+      if (held && typeof held === "object") return [held];
+    }
+    return null;
+  }
+  // A collection read over several pages returns one envelope per page, so the
+  // records are every page's records in the order Canvas returned them.
+  if (Array.isArray(value) && value.length > 0
+    && value.every((page) => page && typeof page === "object" && !Array.isArray(page)
+      && Array.isArray((page as Record<string, unknown>)[envelope]))) {
+    return value.flatMap((page) => (page as Record<string, unknown>)[envelope] as unknown[]);
+  }
+  return null;
+}
+
+function isEnvelopedCollection(value: unknown, envelope: string): boolean {
+  return envelopeRecords(value, envelope) !== null;
+}
+
+function collectionEnvelopeKey(path: string | undefined): string | null {
+  // A single-record route is named by the collection it reads from, so
+  // `/v1/polls/{id}` carries the same `polls` envelope as `/v1/polls`.
+  const segments = String(path || "").split("?")[0]!.split("/").filter(Boolean);
+  while (segments.length && segments.at(-1)!.startsWith("{")) segments.pop();
+  const segment = segments.at(-1);
+  return segment && /^[a-z][a-z0-9_]*$/.test(segment) ? segment : null;
+}
+
+function targetScope(
+  value: unknown,
+  targetPath: readonly string[] | undefined,
+  envelope?: string | null,
+): unknown[] {
   if (targetPath?.length) return recordsAtPath(value, targetPath);
-  return Array.isArray(value) ? value : [value];
+  const held = envelope ? envelopeRecords(value, envelope) : null;
+  if (held) return held;
+  if (Array.isArray(value)) return value;
+  return [value];
 }
 
 function fieldValue(record: unknown, field: string): unknown {
@@ -613,8 +704,14 @@ function fieldValue(record: unknown, field: string): unknown {
   return path.length > 0 ? pathValue(record, path) : undefined;
 }
 
-function targetRecords(value: unknown, target: unknown, targetField: string, targetPath: readonly string[] | undefined): unknown[] {
-  return targetScope(value, targetPath).filter((record) => {
+function targetRecords(
+  value: unknown,
+  target: unknown,
+  targetField: string,
+  targetPath: readonly string[] | undefined,
+  envelope?: string | null,
+): unknown[] {
+  return targetScope(value, targetPath, envelope).filter((record) => {
     const identity = fieldValue(record, targetField);
     return identity !== undefined && identity !== null && String(identity) === String(target);
   });
@@ -688,10 +785,14 @@ export function evaluateBrowserReadback(
   }
   // A change that applies to every record in a listing is proved only by the complete listing, with
   // every record carrying the requested state.
+  const envelope = collectionEnvelopeKey(plan.readOperation?.path);
   if (plan.strategy === "collection-every-record") {
     if (readResult.truncated === true) return verification("unconfirmed", plan, "collection_readback_incomplete");
-    const records = targetScope(readResult.data, plan.targetPath);
-    if (!Array.isArray(readResult.data) && !plan.targetPath?.length) return verification("unconfirmed", plan, "collection_readback_shape_invalid");
+    const records = targetScope(readResult.data, plan.targetPath, envelope);
+    if (!Array.isArray(readResult.data) && !plan.targetPath?.length
+      && !(envelope && isEnvelopedCollection(readResult.data, envelope))) {
+      return verification("unconfirmed", plan, "collection_readback_shape_invalid");
+    }
     for (const record of records) {
       for (const assertion of plan.assertions || []) {
         const values = assertedValues(record, assertion.paths);
@@ -711,15 +812,17 @@ export function evaluateBrowserReadback(
   }
   const targetField = plan.targetField || "id";
   if (plan.strategy === "collection-omits-target") {
-    const scope = targetScope(readResult.data, plan.targetPath);
+    const scope = targetScope(readResult.data, plan.targetPath, envelope);
     if (scope.length > 0 && !scope.some((record) => fieldValue(record, targetField) !== undefined)) {
       return verification("unconfirmed", plan, "readback_records_lack_target_field");
     }
-    return targetRecords(readResult.data, plan.targetId, targetField, plan.targetPath).length === 0
+    return targetRecords(readResult.data, plan.targetId, targetField, plan.targetPath, envelope).length === 0
       ? verification("verified", plan, "fresh_collection_omits_target")
       : verification("mismatch", plan, "target_still_present");
   }
-  const records = plan.targetId ? targetRecords(readResult.data, plan.targetId, targetField, plan.targetPath) : [readResult.data];
+  const records = plan.targetId
+    ? targetRecords(readResult.data, plan.targetId, targetField, plan.targetPath, envelope)
+    : [readResult.data];
   if (plan.targetId && records.length === 0) return verification("mismatch", plan, "target_missing_from_readback");
   if (plan.targetId && records.length > 1) return verification("mismatch", plan, "target_ambiguous_in_readback");
   const record = records[0];

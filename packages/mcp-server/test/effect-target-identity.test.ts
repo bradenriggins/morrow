@@ -32,6 +32,41 @@ function target(
 }
 
 describe("stable effect target identity", () => {
+  it("does not make every change to one account the same target", () => {
+    // An account route names no course, so Canvas scopes it to the site.
+    const accountTool = (name: string, operationKey: string): CatalogTool => {
+      const mapping = canvasTool(name, operationKey) as unknown as Record<string, unknown>;
+      (mapping.capability as Record<string, unknown>).authority = { scopeClass: "site" };
+      return mapping as unknown as CatalogTool;
+    };
+    const folder = accountTool(
+      "canvas_create_folder_accounts",
+      "POST /v1/accounts/{account_id}/folders#create_folder_accounts",
+    );
+    const role = accountTool(
+      "canvas_create_new_role",
+      "POST /v1/accounts/{account_id}/roles#create_new_role",
+    );
+    const course = accountTool(
+      "canvas_create_new_course",
+      "POST /v1/accounts/{account_id}/courses#create_new_course",
+    );
+    const request = { account_id: "924" };
+    const targets = [folder, role, course].map((mapping) => target(mapping, request));
+    expect(new Set(targets).size, "each collection of one account is its own target").toBe(3);
+
+    // The change that creates into a collection and the reading that lists that
+    // collection still name one target, which is what lets a reading settle it.
+    const listing = accountTool(
+      "canvas_list_all_folders_accounts",
+      "GET /v1/accounts/{account_id}/folders#list_all_folders_accounts",
+    );
+    expect(target(listing, request)).toBe(target(folder, request));
+
+    // Another account is another target.
+    expect(target(folder, { account_id: "411" })).not.toBe(target(folder, request));
+  });
+
   it("locks one Canvas object across verbs without serializing sibling objects", () => {
     const update = canvasTool(
       "canvas_edit_assignment",

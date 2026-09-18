@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 import { isJsonObject, sha256Json, type JsonObject, type JsonSchema, type SourceCapabilityMetadata, type UpstreamTool } from "@morrow/contracts";
 import { canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "./operation-admission.js";
 
-export { canvasAccountAuthorityRoute, canvasAdmissionIsBound, canvasAdmissionReason, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment, CANVAS_REVIEWED_UPLOAD_ROUTES, canvasReviewedUploadKind, canvasReviewedUploadPath, canvasReviewedUploadRoute, canvasUploadListingRead, canvasSiteAuthorityNote } from "./operation-admission.js";
+export { canvasAccountAuthorityRoute, canvasAdmissionIsBound, canvasAdmissionReason, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment, canvasRedirectRead, CANVAS_REVIEWED_UPLOAD_ROUTES, canvasReviewedUploadKind, canvasReviewedUploadPath, canvasReviewedUploadRoute, canvasUploadListingRead, canvasSiteAuthorityNote } from "./operation-admission.js";
 export type { CanvasCourseTarget, CanvasOperationAdmission, CanvasOperationAuthority, CanvasReadbackAssessment, CanvasReviewedUploadKind, CanvasSiteAuthorityClass, CanvasWriteAdmission } from "./operation-admission.js";
 export { evaluateBrowserReadback, hasDeclaredCanvasReadback, matchesReadbackAssertions, planBrowserReadback, planCanvasRecoveryDescriptor, readbackFieldValue } from "./readback-plan.js";
 export type { BrowserReadbackAssertion, BrowserReadbackPlan, BrowserReadbackResult, BrowserVerification, CanvasRecoveryDescriptor, CanvasRecoveryRead, CanvasReadbackOperation } from "./readback-plan.js";
@@ -269,10 +269,6 @@ function capability(catalog: CanvasApiCatalog, operation: CanvasApiOperation): S
   const incompatibleAuthenticationReason = operation.path.startsWith("/lti/")
     ? "This Canvas LTI service requires separate LTI authorization that the signed-in browser session does not hold."
     : undefined;
-  const redirectReadReason = operation.readOnly && operation.responseType === "void"
-    && /redirect/iu.test(`${operation.summary} ${operation.description}`)
-    ? "This Canvas route returns a navigation redirect instead of course data, which the Bridge does not follow across origins."
-    : undefined;
   const readAdmissionReason = credentialReadReason;
   const profile = readAdmissionReason
     ? { state: "profile_limited" as const, reason: readAdmissionReason }
@@ -280,8 +276,6 @@ function capability(catalog: CanvasApiCatalog, operation: CanvasApiOperation): S
       ? { state: "profile_limited" as const, reason: canvasAdmissionReason(admission.write) }
       : incompatibleAuthenticationReason
         ? { state: "profile_limited" as const, reason: incompatibleAuthenticationReason }
-      : redirectReadReason
-        ? { state: "profile_limited" as const, reason: redirectReadReason }
       // A change with no exact readback is still sent. It is approved one change at a time, never
       // granted ahead, and its result says Morrow did not check the saved result.
       : { state: "supported" as const };
@@ -340,8 +334,6 @@ function capability(catalog: CanvasApiCatalog, operation: CanvasApiOperation): S
         ? { state: "blocked", reason: canvasAdmissionReason(admission.write) }
         : incompatibleAuthenticationReason
           ? { state: "blocked", reason: incompatibleAuthenticationReason }
-        : redirectReadReason
-          ? { state: "blocked", reason: redirectReadReason }
         : { state: "known" },
       readback: readback.state === "structurally_exact"
         ? { state: "known", reason: "A structural readback plan can compare a target or requested postcondition; live provider readback remains required." }

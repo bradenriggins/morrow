@@ -624,7 +624,13 @@ function catalogSpecs(mapping: CatalogTool, args: JsonObject): readonly TargetSp
       id,
       readTool: route.read,
       readArguments,
-      entityId: (value: JsonObject) => sameId(value.id, id) || value.url === id || sameId(value.page_id, id),
+      // Canvas names most objects with an id, and names some with the field the
+      // route itself addresses them by: a feature flag by `feature`, a report by
+      // `report`. Without that, Morrow reads the exact object Canvas returned and
+      // then tells the person Canvas does not have it, which is not true and
+      // leaves the change with nothing to approve.
+      entityId: (value: JsonObject) => sameId(value.id, id) || value.url === id || sameId(value.page_id, id)
+        || sameId(value[route.field], id),
       nameFields: GENERIC_NAME_FIELDS,
       fallbackName: `${route.label} ${id}`,
     } satisfies TargetSpec];

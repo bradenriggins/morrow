@@ -126,7 +126,7 @@ export function registerOperationTools(server: McpServer, runtime: GatewayRuntim
     },
     async ({ operation_id, observed_state, confirmed_by_person }) => {
       try {
-        return runtime.closeUnresolvedOperation(
+        return await runtime.closeUnresolvedOperation(
           operation_id,
           observed_state,
           confirmed_by_person,

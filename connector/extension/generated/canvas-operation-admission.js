@@ -337,6 +337,16 @@ const NEW_QUIZ_RESPONSE_BOUND_READBACKS = [
     "canvas_set_quiz_level_accommodations",
     "canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post",
 ];
+/**
+ * A Canvas read whose documented answer is a redirect to the object itself, such
+ * as `/v1/courses/{course_id}/root_outcome_group`. Canvas sends these within its
+ * own site and answers the followed request with the object, so the Bridge
+ * follows one hop and refuses anything that leaves the Canvas origin.
+ */
+export function canvasRedirectRead(operation) {
+    return operation.readOnly === true && operation.responseType === "void"
+        && /redirect/iu.test(`${operation.summary || ""} ${operation.description || ""}`);
+}
 export function canvasExecutorOwnedReadback(operation) {
     if (operation.readOnly)
         return false;

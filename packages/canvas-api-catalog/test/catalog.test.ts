@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CANVAS_REVIEWED_UPLOAD_ROUTES, canvasAccountAuthorityRoute, canvasAdmissionIsBound, canvasReviewedUploadKind, canvasReviewedUploadPath, canvasReviewedUploadRoute, canvasAdmissionReason, canvasApiCompatibilityDigest, canvasCatalogTools, canvasSiteAuthorityNote, canvasOperationAdmission, canvasReadbackAssessment, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState, evaluateBrowserReadback, loadCanvasApiCatalog, operationalJsonSchema, parseCanvasApiCatalog, operationArguments, planBrowserReadback } from "../src/index.js";
+import { CANVAS_REVIEWED_UPLOAD_ROUTES, canvasAccountAuthorityRoute, canvasAdmissionIsBound, canvasReviewedUploadKind, canvasReviewedUploadPath, canvasReviewedUploadRoute, canvasAdmissionReason, canvasApiCompatibilityDigest, canvasCatalogTools, canvasSiteAuthorityNote, canvasOperationAdmission, canvasReadbackAssessment, canvasRedirectRead, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState, evaluateBrowserReadback, loadCanvasApiCatalog, operationalJsonSchema, parseCanvasApiCatalog, operationArguments, planBrowserReadback } from "../src/index.js";
 import catalogJson from "../../../artifacts/canvas-api/canvas-api-catalog.json";
 
 const catalog = parseCanvasApiCatalog(catalogJson);
@@ -289,6 +289,31 @@ describe("Canvas API catalog", () => {
     ] }).status).toBe("mismatch");
   });
 
+  it("finds a created poll inside the envelope Canvas names its collection with", () => {
+    const operation = catalog.operations.find((candidate) => candidate.toolName === "canvas_create_single_poll")!;
+    const plan = planBrowserReadback(catalog.operations, operation, {
+      polls_question: ["Morrow sweep question"],
+    }, { polls: [{ id: "913", question: "Morrow sweep question" }] });
+
+    expect(plan?.readOperation.path).toBe("/v1/polls/{id}");
+    expect(plan?.targetId).toBe("913");
+    expect(evaluateBrowserReadback(plan, { ok: true, status: 200, data: {
+      polls: [{ id: "913", question: "Morrow sweep question" }],
+    } }).status).toBe("verified");
+    expect(evaluateBrowserReadback(plan, { ok: true, status: 200, data: {
+      polls: [{ id: "913", question: "A different question" }],
+    } }).status).toBe("mismatch");
+    // The same route reading one record carries the singular name.
+    expect(evaluateBrowserReadback(plan, { ok: true, status: 200, data: {
+      poll: { id: "913", question: "Morrow sweep question" },
+    } }).status).toBe("verified");
+    // A collection read over several pages returns one envelope per page.
+    expect(evaluateBrowserReadback(plan, { ok: true, status: 200, data: [
+      { polls: [{ id: "912", question: "Other question" }] },
+      { polls: [{ id: "913", question: "Morrow sweep question" }] },
+    ] }).status).toBe("verified");
+  });
+
   it("retains New Quiz IP ranges and explicit setting resets through request and readback", () => {
     const ranges = [["10.0.0.1", "10.0.0.20"], ["192.168.1.1", "192.168.1.5"]];
     const input = {
@@ -543,8 +568,10 @@ describe("Canvas API catalog", () => {
       operation.path.startsWith("/lti/")
       && canvasOperationAdmission(operation).write.state !== "held"
     ));
-    const redirectReads = catalog.operations.filter((operation) => operation.readOnly && operation.responseType === "void"
-      && /redirect/iu.test(`${operation.summary} ${operation.description}`));
+    // Canvas sends these reads to the object itself, inside its own site. The
+    // Bridge follows one hop and refuses anything that leaves the Canvas origin,
+    // so they are published like every other bound read.
+    const redirectReads = catalog.operations.filter((operation) => canvasRedirectRead(operation));
     expect(held).toHaveLength(10);
     expect(admittedWithoutExactReadback).toHaveLength(199);
     expect(siteReads).toHaveLength(355);
@@ -555,7 +582,6 @@ describe("Canvas API catalog", () => {
       ...held,
       ...credentialReads,
       ...catalog.operations.filter((operation) => operation.path.startsWith("/lti/")),
-      ...redirectReads,
     ].map((operation) => operation.toolName));
     expect(tools.filter((tool) => tool.capability?.profiles["public-canvas"].state !== "supported"))
       .toHaveLength(expectedLimited.size);
@@ -590,12 +616,12 @@ describe("Canvas API catalog", () => {
       expect(tool?.capability?.profiles["public-canvas"]).toEqual({ state: "profile_limited", reason });
       expect(tool?.capability?.evidence?.admission).toEqual({ state: "blocked", reason });
     }
+    expect(redirectReads.length).toBeGreaterThan(0);
     for (const operation of redirectReads) {
       const tool = tools.find((candidate) => candidate.name === operation.toolName);
-      const reason = "This Canvas route returns a navigation redirect instead of course data, which the Bridge does not follow across origins.";
-      expect(tool?.capability?.profiles["private-full"]).toEqual({ state: "profile_limited", reason });
-      expect(tool?.capability?.profiles["public-canvas"]).toEqual({ state: "profile_limited", reason });
-      expect(tool?.capability?.evidence?.admission).toEqual({ state: "blocked", reason });
+      expect(tool?.capability?.profiles["private-full"], operation.toolName).toEqual({ state: "supported" });
+      expect(tool?.capability?.profiles["public-canvas"], operation.toolName).toEqual({ state: "supported" });
+      expect(tool?.capability?.evidence?.admission, operation.toolName).toEqual({ state: "known" });
     }
     expect(tools.filter((tool) => tool.capability?.family === "new-quizzes-item-banks")).toHaveLength(18);
   });

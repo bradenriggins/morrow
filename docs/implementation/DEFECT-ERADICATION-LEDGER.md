@@ -500,6 +500,17 @@ Every row stays open until its evidence columns are added and its status becomes
 | 483 | P1 | R7 | A credential name inside a longer identifier refused the whole reading, so a Canvas course whose random uuid happened to contain `csrf` made an account audit unreadable. | closure section 483; gateway privacy regressions, live BT2 course 89585 | IMPLEMENTED |
 | 484 | P1 | R3 | A change whose Canvas route states no readable result could never be settled, so the first use of such a route held its collection for good and every later change to it waited on a reading that does not exist. | closure section 484; operation journal and operations regressions, live BT2 course 89585 | IMPLEMENTED |
 | 485 | P2 | R7 | Installing an external tool the way Canvas documents was impossible, because an input Canvas offers as a replacement for the rest of the request was published as a requirement. | closure section 485; catalog regressions, live BT2 course 89585 | IMPLEMENTED |
+| 486 | P1 | R3 | A rubric Morrow created was saved in Canvas and never confirmed, because the create declared no reviewed read, so it held the rubrics collection and refused the next rubric change behind it. | closure section 486; catalog regressions, live BT2 course 89585 | IMPLEMENTED |
+| 487 | P1 | R3 | Canvas answers some routes with the collection inside an envelope named after it, and the comparator looked only past it, so every poll, poll choice, poll session, quiz group, grading period and rating Morrow created reported its own record missing. | closure section 487; catalog regressions, live BT2 course 89585 | IMPLEMENTED |
+| 488 | P1 | R3 | A request that creates one record carries a one-element list while the saved record holds the scalar, and Morrow compared the list against it, so every create through a record-list route mismatched even when Canvas had saved what was asked. | closure section 488; catalog regressions, live BT2 course 89585 | IMPLEMENTED |
+| 489 | P2 | R7 | Canvas reads that answer with a redirect to the object itself were published as unavailable, so a course's own outcome groups could not be reached although the redirect stays inside Canvas. | closure section 489; catalog and Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 490 | P1 | R3 | A reading that names no course recorded no target, connection or reader, so no reading of a course-free collection could settle a change to it and the first such change held that collection for good. | closure section 490; gateway regressions, live BT2 course 89585 | IMPLEMENTED |
+| 491 | P1 | R3 | Recomputing an older change's target under the current rule used the configured Canvas origin, which for a browser connection is a placeholder, so every change saved under an earlier rule stayed unresolved and kept holding what it held. | closure section 491; gateway regressions, live BT2 course 89585 | IMPLEMENTED |
+| 492 | P2 | R3 | Morrow refused to close an unresolved change without a fresh reading of "this exact item" and named neither the reading nor the item, although it retains both, so the change could only be settled by guessing. | closure section 492; gateway regressions, live BT2 course 89585 | IMPLEMENTED |
+| 493 | P1 | R7 | Morrow read the exact object Canvas returned and then said Canvas does not have it, because it identified an object only by an id, so every change to an object Canvas names by its own field, such as a feature flag, was refused with a reason that was not true. | closure section 493; gateway approval regressions, live BT2 course 89585 | IMPLEMENTED |
+| 494 | P1 | R7 | Canvas publishes the blackout-date create with its fields bare and refuses that exact request, so a documented change could never be sent. | closure section 494; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 495 | P1 | R7 | Canvas publishes a repeated record's index as the letter X, and Morrow sent that letter as the field name, so Canvas ignored those fields and every value they carried was silently dropped from the change. | closure section 495; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 496 | P1 | R3 | Every change addressed at one account named the same target, so creating a folder held that account against creating a role, a course, a grading standard or anything else, and one unresolved change locked the whole account for good. | closure section 496; gateway regressions, live BT2 course 89585 and sandbox sub-account 924 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3371,6 +3382,83 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Condition: Canvas describes `client_id` on the external tool routes as "If supplied all other parameters are unnecessary and will be ignored", and its own specification marks it required. Morrow published that requirement, so installing a tool with its own key and secret, which is the documented way and the only way without a developer key, was refused before anything was sent.
 - Repair: an input whose own description says it replaces the rest of the request is published as an alternative, not a requirement. The rule reads Canvas's text, so it covers both external tool routes and any later one Canvas describes the same way.
 - Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### 486: a created rubric was saved and never confirmed
+
+- Product decision: a change Morrow sends is checked against a fresh reading of the object it made.
+- Condition: `canvas_create_single_rubric` had no reviewed readback, so every rubric Morrow created came back as `sent_unchecked`. The rubric was really in Canvas, but Morrow could neither confirm it nor release the rubrics collection, so the next rubric change was refused as a target conflict behind the one before it.
+- Repair: the create declares its own reviewed read of the created rubric, with the association fields Canvas does not return excluded from the comparison and the saved title asserted from Canvas's own response.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585. `canvas_create_single_rubric` now settles `verified` on the first attempt.
+
+### 487: Canvas named its collection and Morrow could not find it
+
+- Product decision: a reading proves a change when Canvas returns the saved record, whatever shape Canvas returns it in.
+- Condition: Canvas answers some routes with the collection inside an envelope named after it, such as `{"polls": [...]}` from `/v1/polls` and from `/v1/polls/{id}`. Morrow's comparator looked for the written record among the top-level records only, so it found one record holding a list rather than the list, and every poll, poll choice, poll session, quiz group, grading period and rating Morrow created reported `target_missing_from_readback`. Each one then held its collection as an unresolved change and blocked the next.
+- Repair: the comparator opens the envelope the route itself names. A single-record route is named by the collection it reads from, so `/v1/polls/{id}` carries the same `polls` envelope as `/v1/polls`, and a route that answers with a bare array is untouched.
+- Status: `IMPLEMENTED`; covered by `packages/canvas-api-catalog/test/catalog.test.ts`.
+
+### 488: a one-record request was compared against a list
+
+- Product decision: what Morrow asserts about a saved record is what that record was asked to hold.
+- Condition: Canvas takes several collections as a list of records written one field at a time, as `polls[][question]`, so a request that creates one poll carries `["Morrow sweep question"]`. The saved record holds the scalar `"Morrow sweep question"`, and Morrow compared the list against it. Every create through a record-list route therefore mismatched even when Canvas had saved exactly what was asked.
+- Repair: a request carrying exactly one record asserts that record's own field value, for the same record-list parents the Bridge's request writer already names. A request carrying more than one record creates more than one, so the list is kept and a single saved record is not accepted as proof of all of them.
+- Status: `IMPLEMENTED`; covered by `packages/canvas-api-catalog/test/catalog.test.ts`.
+
+### 489: a reading Morrow could take was published as one it could not
+
+- Product decision: a read Morrow publishes as unavailable must be one it truly cannot take.
+- Condition: Canvas answers a few documented reads with a redirect to the object itself, such as `/v1/courses/{course_id}/root_outcome_group`. Morrow held every one of them as profile-limited, saying it does not follow a redirect across origins. Canvas sends these inside its own site and answers the followed request with the object, so Morrow was refusing readings it could take, and the course's own outcome groups could not be reached at all.
+- Repair: the catalog names these reads, and the in-page executor follows one hop for exactly them and refuses the answer if it left the Canvas origin. Every other route still refuses a redirect outright, so no request is silently read somewhere else. `scripts/test/canvas-redirect-read.test.mjs` fails if the catalog and the executor ever name different reads.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585. The course, account and global root outcome group reads now return the outcome group. The three `brand_variables` reads still refuse: Canvas redirects those to its content host, which a signed-in browser session cannot follow, and Morrow now says so from the attempt rather than in advance.
+
+### 490: a reading that names no course could settle nothing
+
+- Product decision: every reading Morrow delivers can stand as the person's own check of what it read.
+- Condition: Morrow recorded the target, connection and reader of a reading only when the request named a course. A Canvas route that names no course, such as polls, a group's folders, appointment groups or calendar events, was delivered with none of that recorded, so no reading of those collections could ever settle a change to one. Every unresolved change to a course-free collection then held that collection against the next change for good: the first poll Morrow created blocked every poll after it, with no way out.
+- Repair: a Canvas route that names no course is still read through one course connection, and that connection's course is the exact course of the request. Those readings now carry the same recorded target, connection and reader as every other, and the request-matching rule accepts a route that names no course of its own.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585. An unresolved poll create that had refused every close now settles `closed_by_person`, and the next poll create verifies.
+
+### 491: a change made before a rule changed could never be settled
+
+- Product decision: a rule Morrow changes does not strand the changes people already made.
+- Condition: when the rule for naming a change's target changes, Morrow recomputes the older change's target under the rule in force now. That recomputation used the configured Canvas origin, which for a browser connection is the placeholder `browser-session` rather than the Canvas site. The recomputed target therefore named a site no reading ever comes from, so it never matched, and every change saved under an earlier rule stayed unresolved for good and kept holding what it held.
+- Repair: the target a change holds names the provider and the site, never the connection or its generation, so the site is read from the live connection the change was made through. A course connected again carries a new generation and is the same connection, so the generation is not part of that match.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585. A poll create saved under `morrow.effect-target.v3` settles `closed_by_person`, after which `canvas_create_single_poll` verifies on the first attempt.
+
+### 492: Morrow asked for a reading it would not name
+
+- Product decision: when Morrow asks a person to do something before it can go on, it says exactly what to do.
+- Condition: Morrow refuses to close an unresolved change without the digest of a fresh reading of "this exact item", and named neither the reading nor the item. It retains both, because the change's own comparator holds the collection the change went into and the object it addressed, but it published only the change's own capability name. A person, or an assistant acting for one, could only guess which object to read, and a guess reads a different object, so the change stayed unresolved and kept holding its target.
+- Repair: an unresolved change publishes the reading that settles it, as the capability name and the exact arguments from its retained comparator. Those arguments are the ids of the course objects the change named, which every reading of that course already carries; a value that is not a plain identifier is not published, and neither is a capability Morrow keeps for its own use.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585. Each unresolved change now names its own reading, and settling against the named reading closed 14 changes that every earlier attempt had refused.
+
+### 493: Morrow read the object and said it was not there
+
+- Product decision: a review that has read the object it names can name it.
+- Condition: a review resolves each object a change addresses by reading it, and accepted the answer only when the record carried a matching `id`, `url` or `page_id`. Canvas names some objects by the field the route addresses them by: a feature flag by `feature`, a report by `report`. Morrow read the exact flag Canvas returned, failed to recognise it, and told the person "Canvas does not have the item this change names. It may have been renamed, moved, or removed", which was not true. The approval control was withheld, so every such change could never be approved.
+- Repair: a route names the argument that carries its object's id, and the record Canvas returns carries the same name, so that field identifies the object alongside `id`, `url` and `page_id`.
+- Status: `IMPLEMENTED`; covered by `packages/mcp-server/test/approval-context.test.ts`, which fails when the rule is removed.
+
+### 494: a documented change Canvas would always refuse
+
+- Product decision: a change Morrow publishes can be sent the way Canvas accepts it.
+- Condition: Canvas publishes the blackout-date create with `event_title`, `start_date` and `end_date` as bare form fields. Canvas answers that exact request with 400 `blackout_date is missing`, and accepts the same fields written inside `blackout_date[...]`. Morrow sent what Canvas documents, so the change failed before it reached Canvas's own record every time.
+- Repair: the in-page executor writes those fields under the record Canvas accepts. `scripts/test/canvas-accepted-wire-name.test.mjs` holds the route list and fails if a named route stops publishing those fields or stops being a change.
+- Status: `IMPLEMENTED`; the shape was proven against Canvas itself, which answered 201 for the accepted shape and 400 for the documented one.
+
+### 495: a placeholder was sent as a field name
+
+- Product decision: every value a person approves reaches the change.
+- Condition: Canvas writes a repeated record with its index in the field name and publishes that index as the letter X, as `appointment_group[new_appointments][X]` and `calendar_event[child_event_data][X][start_at]`. Morrow sent the letter as written. Canvas has no such field, so it ignored every value carried under one: appointment time slots and a calendar event's section times never reached the change, and the request either failed or saved without them while the review had shown them.
+- Repair: a field published with Canvas's index placeholder writes each element at its own index. Twelve parameters across eight change routes are published that way, and `scripts/test/canvas-indexed-parameter.test.mjs` holds that set and checks the expansion.
+- Status: `IMPLEMENTED`; covered by `scripts/test/canvas-indexed-parameter.test.mjs`, and proven against Canvas itself in BT2 course 89585. Two appointment time slots sent under the published name were accepted with status 201 and saved as one slot, losing the second; the same two slots written at their own indexes were saved as two. The person was told the change succeeded either way.
+
+### 496: one account was one target
+
+- Product decision: two changes to different things do not wait on each other.
+- Condition: a change that names no course is held against the object it addresses. For an account route that object was resolved to the account alone, because the collection the route acts on carries no id in a create. Creating a folder in an account, creating a role, creating a course, creating a grading standard, creating a group category and creating a sub-account all produced the identical target. They serialized against each other, and because an unresolved change keeps holding its target, the first one Morrow could not confirm locked every later change to that account, of any kind, for good.
+- Repair: the target is the object the route names together with the collection under it that the route acts on. A change that creates into a collection and the reading that lists that collection still name one target, which is what lets a reading settle it, while two changes to different collections of the same object no longer meet. The identity version moves to `morrow.effect-target.v5`, so a change saved under the old rule is recomputed under this one rather than stranded.
+- Status: `IMPLEMENTED`; covered by `packages/mcp-server/test/effect-target-identity.test.ts`, which fails when the collection is dropped. Six unrelated account changes carried the single target `f9f1eaad42e342f0` before the repair.
 
 ### Root-cause patterns for rows 331–472
 

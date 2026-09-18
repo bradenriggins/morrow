@@ -188,6 +188,19 @@ describe("approval review context", () => {
       canvas_get_bookmark: { id: 999, name: "Someone else" },
     }, ["canvas_get_bookmark"]);
     expect(wrong.targets).toEqual([{ field: "id", label: "Bookmark", name: "", state: "absent" }]);
+
+    // Canvas names a feature flag by the field the route addresses it by, not by
+    // an id. The object Canvas returned is the object the change names, so the
+    // review names it rather than reporting it gone.
+    const flag = await review("canvas_set_feature_flag_courses", "feature_flags",
+      { course_id: "42", feature: "outcome_gradebook", state: "on" }, {
+        canvas_get_single_course_courses: { id: 42, name: "Biology" },
+        canvas_get_feature_flag_courses: { feature: "outcome_gradebook", context_id: "42", context_type: "Course", state: "on" },
+      }, ["canvas_get_feature_flag_courses"]);
+    expect(flag.targets).toEqual([
+      { field: "course_id", label: "Course", name: "Biology", url: "https://school.instructure.com/courses/42" },
+      { field: "feature", label: "Flag", name: "Flag outcome_gradebook" },
+    ]);
   });
 
   it("uses the saved binding to resolve exact course and New Quiz names after completion", async () => {

@@ -2024,15 +2024,15 @@ describe("Canvas connector gateway path", () => {
 
       // A close-out needs a person's confirmation and the exact digest of a
       // fresh Morrow read. Neither half alone closes anything.
-      const withoutPerson = runtime.closeUnresolvedOperation(uncertainId, "b".repeat(64), false);
+      const withoutPerson = await runtime.closeUnresolvedOperation(uncertainId, "b".repeat(64), false);
       expect(withoutPerson.isError).toBe(true);
       expect(withoutPerson.structuredContent).toMatchObject({ data: { code: "person_confirmation_required" } });
-      const withoutRead = runtime.closeUnresolvedOperation(uncertainId, "b".repeat(64), true);
+      const withoutRead = await runtime.closeUnresolvedOperation(uncertainId, "b".repeat(64), true);
       expect(withoutRead.isError).toBe(true);
       expect(withoutRead.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
       expect(runtime.effects.get(uncertainId).state).toBe("applied_or_unknown");
 
-      const duringDispatchClose = runtime.closeUnresolvedOperation(uncertainId, duringDispatchState, true);
+      const duringDispatchClose = await runtime.closeUnresolvedOperation(uncertainId, duringDispatchState, true);
       expect(duringDispatchClose.isError).toBe(true);
       expect(duringDispatchClose.structuredContent).toMatchObject({
         data: { code: "observed_state_not_from_fresh_read" },
@@ -2053,7 +2053,7 @@ describe("Canvas connector gateway path", () => {
       });
       expect(wrongCourseRead.isError, JSON.stringify(wrongCourseRead)).not.toBe(true);
       const wrongCourseState = ((wrongCourseRead._meta as JsonObject)["io.morrow/gateway"] as JsonObject).upstreamResultSha256;
-      const wrongCourseClose = runtime.closeUnresolvedOperation(uncertainId, String(wrongCourseState), true);
+      const wrongCourseClose = await runtime.closeUnresolvedOperation(uncertainId, String(wrongCourseState), true);
       expect(wrongCourseClose.isError).toBe(true);
       expect(wrongCourseClose.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
 
@@ -2064,7 +2064,7 @@ describe("Canvas connector gateway path", () => {
       });
       expect(wrongConnectionRead.isError, JSON.stringify(wrongConnectionRead)).not.toBe(true);
       const wrongConnectionState = ((wrongConnectionRead._meta as JsonObject)["io.morrow/gateway"] as JsonObject).upstreamResultSha256;
-      const wrongConnectionClose = runtime.closeUnresolvedOperation(uncertainId, String(wrongConnectionState), true);
+      const wrongConnectionClose = await runtime.closeUnresolvedOperation(uncertainId, String(wrongConnectionState), true);
       expect(wrongConnectionClose.isError).toBe(true);
       expect(wrongConnectionClose.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
       expect(runtime.effects.get(uncertainId).state).toBe("applied_or_unknown");
@@ -2077,7 +2077,7 @@ describe("Canvas connector gateway path", () => {
       });
       expect(failedExactRead.isError).toBe(true);
       const failedExactState = ((failedExactRead._meta as JsonObject)["io.morrow/gateway"] as JsonObject).upstreamResultSha256;
-      const failedExactClose = runtime.closeUnresolvedOperation(uncertainId, String(failedExactState), true);
+      const failedExactClose = await runtime.closeUnresolvedOperation(uncertainId, String(failedExactState), true);
       expect(failedExactClose.isError).toBe(true);
       expect(failedExactClose.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
       expect(runtime.effects.get(uncertainId).state).toBe("applied_or_unknown");
@@ -2091,7 +2091,7 @@ describe("Canvas connector gateway path", () => {
       const observedState = ((freshRead._meta as JsonObject)["io.morrow/gateway"] as JsonObject).upstreamResultSha256;
       expect(observedState).toMatch(/^[0-9a-f]{64}$/);
 
-      const closed = runtime.closeUnresolvedOperation(uncertainId, String(observedState), true);
+      const closed = await runtime.closeUnresolvedOperation(uncertainId, String(observedState), true);
       expect(closed.isError, JSON.stringify(closed)).not.toBe(true);
       expect(closed.structuredContent).toMatchObject({
         effectState: "closed_by_person",

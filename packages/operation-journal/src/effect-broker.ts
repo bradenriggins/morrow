@@ -24,7 +24,7 @@ export const EFFECT_OPERATION_STATES = Object.freeze([
 
 export type EffectOperationState = typeof EFFECT_OPERATION_STATES[number];
 
-export const EFFECT_TARGET_IDENTITY_VERSION = "morrow.effect-target.v4";
+export const EFFECT_TARGET_IDENTITY_VERSION = "morrow.effect-target.v5";
 
 export interface FrozenReadbackPlan {
   readonly tool: string;
