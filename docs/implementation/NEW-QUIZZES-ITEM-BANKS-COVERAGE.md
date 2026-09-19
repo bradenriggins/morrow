@@ -32,7 +32,7 @@ States: **proven** (verified live through Morrow), **gap** (Canvas supports it a
 | List and read questions | `GET /quiz/v1/…/items[/:i]` | `canvas_list_quiz_items`, `canvas_get_quiz_item` | proven |
 | Create each of the 12 question types | `POST /quiz/v1/…/items` | `morrow_plan_new_quiz_item_create` | proven |
 | Edit a question's text | `PATCH /quiz/v1/…/items/:i` | `canvas_update_quiz_item` | proven |
-| Edit points, answer choices, correct answer, feedback, answer feedback, per type | same | same | gap |
+| Edit points, answer choices (add and remove), correct answer, feedback, answer feedback, for every type | same | `canvas_update_quiz_item` | proven |
 | Change a question's type | delete and create | `morrow_plan_new_quiz_item_replacement` | proven |
 | Reorder questions, bank draws, and single bank questions | `PATCH …/items/:i` (`position`) | `morrow_plan_new_quiz_item_order` | proven |
 | Delete a question | `DELETE /quiz/v1/…/items/:i` | `morrow_plan_new_quiz_item_delete` | proven |
@@ -73,5 +73,6 @@ States: **proven** (verified live through Morrow), **gap** (Canvas supports it a
 | List a quiz's draws | `GET …/quiz_entries` | `canvas_item_bank_list_quiz_draws` | proven |
 | Repair missing alt text in a bank question | `PATCH …/banks/:b/items/:i` | `morrow_plan_item_bank_question_image_alt_repair` | proven |
 | Bank reach across courses | reads | `morrow_read_item_bank_fan_out` | proven |
-| Restore an archived bank; list archived | `…/banks/…/archived` | none | gap |
+| List archived banks | `GET /api/banks/archived` | none | Canvas refuses (403 for this account) |
+| Restore an archived bank | `POST /api/banks/:b/restore` | none | gap |
 | Import QTI into a bank | `…/banks/:b/qti_imports` | none | gap |

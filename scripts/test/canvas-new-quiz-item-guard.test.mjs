@@ -225,13 +225,13 @@ const CASES = [
     name: "an added choice",
     current: CHOICE_ITEM,
     interaction: withChoices([...CHOICES, { id: CHOICE_D, position: 4, item_body: "<p>Lysosome</p>" }]),
-    allowed: false,
+    allowed: true,
   },
   {
     name: "a removed choice",
     current: CHOICE_ITEM,
     interaction: withChoices(CHOICES.filter((choice) => choice.id !== CHOICE_C)),
-    allowed: false,
+    allowed: true,
   },
   {
     name: "a whole set of regenerated choice ids",
@@ -315,6 +315,7 @@ test("the interaction ids of an item are the ordered member ids of every list it
   assert.equal(newQuizIdsPreserved(ESSAY_ITEM, { ...ESSAY_ITEM, entry: { ...ESSAY_ITEM.entry, item_body: "<p>Rewritten.</p>" } }), true);
 });
 
+// Live Canvas saves an added answer and a removed answer cleanly; only renamed ids leave blank ghosts.
 test("id preservation is decided by the set of ids, not by their order", () => {
   for (const entry of CASES) {
     assert.equal(newQuizIdsPreserved(entry.current, proposed(entry.current, entry.interaction)), entry.allowed, entry.name);

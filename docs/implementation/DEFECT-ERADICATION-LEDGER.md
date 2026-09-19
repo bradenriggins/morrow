@@ -538,6 +538,7 @@ Every row stays open until its evidence columns are added and its status becomes
 | 521 | P1 | R7 | Every Item Bank question alt-text repair was refused before sending: the repair resends the stored question, which carries Canvas's own read-only fields and names its type only as `interaction_type.slug`, so the question contract saw no question type. | closure section 521; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
 | 522 | P1 | R7 | No question could be reordered in a New Quiz that draws from an Item Bank: the planner and the Bridge accepted only question entries, although Canvas moves a bank draw and a single bank question through the same position update. | closure section 522; gateway and Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
 | 523 | P1 | R7 | A New Quiz time limit, attempt limit, cooling period, IP filter, or one-at-a-time setting could be turned on but never back off, and turning attempts off could never be confirmed: Morrow refused Canvas's own cleared values (0, [], backtracking with no one-at-a-time) and expected null back where Canvas saves 0 or []. | closure section 523; gateway and Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 524 | P1 | R7 | No answer could be added to or removed from a saved New Quiz question: Morrow refused every change to the set of answer ids, although New Quizzes leaves blank answers behind only when ids are renamed. | closure section 524; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3660,6 +3661,12 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Condition: every new quiz starts with `session_time_limit_in_seconds: 0`, `filters.ips: []`, `max_attempts: 0`, and `allow_backtracking: true` with `one_at_a_time_type: "none"`. The settings rules, copied from Canvas's documentation, refused all four, and Canvas saves a cleared `null` as `0` or `[]`, so the reviewed readback never matched. Live evidence: Canvas accepted `0` and `[]` on the settings route and saved them exactly.
 - Repair: `packages/mcp-server/src/new-quiz-settings.ts` accepts a cleared value as `0`, `[]`, or `null`, sends it in the form Canvas saves, and keeps refusing a limit left on with a cleared value; `packages/canvas-connector-mcp/src/server.ts` lets the settings route carry those values; the Bridge compares a readback in Canvas's saved form. `packages/mcp-server/test/new-quiz-settings.test.ts` covers restoring every default.
 - Status: `IMPLEMENTED`; proven live: every settings group turned on and back off, each verified.
+
+### 524: an answer could not be added to or removed from a question
+
+- Condition: `newQuizIdsPreserved` required an identical id set, so adding a choice or removing one was refused with the ghost-answer message. Live evidence: Canvas saved an added choice as exactly three answers and a removed choice as exactly the remaining two, with no blank answer either way.
+- Repair: both copies of the rule (`connector/extension/src/canvas-content.js`, `connector/extension/src/new-quiz-item-guard.js`) allow a change that only adds ids or only removes ids, and still refuse one that renames ids by doing both. `scripts/test/canvas-new-quiz-item-guard.test.mjs` covers each case.
+- Status: `IMPLEMENTED`; proven live: a choice added, then removed, each verified, with the saved answers exactly right.
 
 ### Root-cause patterns for rows 331–472
 

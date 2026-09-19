@@ -2562,7 +2562,12 @@
       const leftSet = new Set(leftIds);
       const rightSet = new Set(rightIds);
       if (leftSet.size !== leftIds.length || rightSet.size !== rightIds.length) return false;
-      if (leftSet.size !== rightSet.size || [...leftSet].some((id) => !rightSet.has(id))) return false;
+      // New Quizzes merges answers by id: an answer added under a new id, or removed while every
+      // other id stays, saves cleanly, but renaming ids (dropping some while adding others) leaves
+      // the old answers behind as blanks. A change may add ids or remove ids, never both.
+      const added = [...rightSet].some((id) => !leftSet.has(id));
+      const removed = [...leftSet].some((id) => !rightSet.has(id));
+      if (added && removed) return false;
     }
     return true;
   }
