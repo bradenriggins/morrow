@@ -8,6 +8,7 @@ const UPDATE_TOOL = "canvas_update_quiz_item";
 const LIST_TOOL = "canvas_list_quiz_items";
 const READ_QUIZ_TOOL = "canvas_get_new_quiz";
 const MAX_ITEMS = 5_000;
+const MOVABLE_ENTRY_TYPES = ["Item", "Bank", "BankEntry"];
 const canvasId = z.string().regex(/^[1-9][0-9]{0,18}$/);
 const inputSchema = z.strictObject({
   source_binding_id: z.string().regex(/^[A-Za-z0-9_.:@-]{1,160}$/),
@@ -37,8 +38,9 @@ function savedOrder(value: unknown): string[] {
   for (const valueRow of value) {
     if (!isJsonObject(valueRow)) refuse("Canvas returned an invalid New Quiz item list.");
     const id = exactId(valueRow.id);
-    if (valueRow.entry_type !== "Item") {
-      refuse(`Canvas returned item ${id || "without an id"} with entry_type ${typeof valueRow.entry_type === "string" ? valueRow.entry_type : "unknown"}. Only Item entries support this position update, so Morrow planned nothing.`);
+    // Canvas moves a question, a bank draw, and a single bank question through the same position update.
+    if (!MOVABLE_ENTRY_TYPES.includes(String(valueRow.entry_type))) {
+      refuse(`Canvas returned entry ${id || "without an id"} with entry_type ${typeof valueRow.entry_type === "string" ? valueRow.entry_type : "unknown"}. Morrow moves questions, bank draws, and single bank questions only, so it planned nothing.`);
     }
     const position = typeof valueRow.position === "number" && Number.isSafeInteger(valueRow.position) && valueRow.position > 0
       ? valueRow.position
@@ -52,6 +54,29 @@ function savedOrder(value: unknown): string[] {
     rows.push({ id, position });
   }
   return rows.sort((left, right) => left.position - right.position).map((row) => row.id);
+}
+
+/** The entries of the longest subsequence of `before` that is already in requested order. */
+function stableEntries(before: readonly string[], requested: readonly string[]): Set<string> {
+  const rank = new Map(requested.map((id, index) => [id, index]));
+  const ranks = before.map((id) => rank.get(id)!);
+  const tails: number[] = [];
+  const tailAt: number[] = [];
+  const previous: number[] = new Array(ranks.length).fill(-1);
+  for (let index = 0; index < ranks.length; index += 1) {
+    let low = 0;
+    let high = tails.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (tails[middle]! < ranks[index]!) low = middle + 1; else high = middle;
+    }
+    if (low > 0) previous[index] = tailAt[low - 1]!;
+    tails[low] = ranks[index]!;
+    tailAt[low] = index;
+  }
+  const stays = new Set<string>();
+  for (let index = tails.length ? tailAt[tails.length - 1]! : -1; index >= 0; index = previous[index]!) stays.add(before[index]!);
+  return stays;
 }
 
 function exactPermutation(before: readonly string[], requested: readonly string[]): boolean {
@@ -105,14 +130,20 @@ export async function planNewQuizItemOrder(runtime: OrderRuntime, value: NewQuiz
     }
     const working = [...before];
     const operations: JsonObject[] = [];
+    // The longest run of entries already in the requested relative order stays where it is, and
+    // every other entry moves once, to just after the entry that precedes it in the requested
+    // order. Moving one entry to the end is one move, not one move for every entry it passes.
+    const stays = stableEntries(before, input.ordered_item_ids);
     for (let index = 0; index < input.ordered_item_ids.length; index += 1) {
       const itemId = input.ordered_item_ids[index]!;
-      if (working[index] === itemId) continue;
-      const from = working.indexOf(itemId, index + 1);
+      if (stays.has(itemId)) continue;
+      const from = working.indexOf(itemId);
       if (from < 0) refuse("The requested item order changed while Morrow was planning it.");
       const beforeDigest = sha256Json(working);
       working.splice(from, 1);
-      working.splice(index, 0, itemId);
+      const to = index === 0 ? 0 : working.indexOf(input.ordered_item_ids[index - 1]!) + 1;
+      working.splice(to, 0, itemId);
+      if (to === from) continue;
       const expected = [...working];
       operations.push({
         step: operations.length + 1,
@@ -120,7 +151,7 @@ export async function planNewQuizItemOrder(runtime: OrderRuntime, value: NewQuiz
         arguments: {
           ...target,
           item_id: itemId,
-          item_position: index + 1,
+          item_position: to + 1,
           morrow_new_quiz_item_position_guard: {
             kind: "new_quiz_item_position",
             before_item_ids_sha256: beforeDigest,
@@ -156,7 +187,7 @@ export async function planNewQuizItemOrder(runtime: OrderRuntime, value: NewQuiz
         "These moves are separate Canvas requests. After each move, the complete saved list must match that step before the next move is reviewed.",
         "An uncertain result must not be sent again. Read the complete item list and reconcile the existing operation.",
       ] : [],
-      limits: ["No New Quiz item move has been sent through Morrow on a live Canvas course."],
+      limits: [],
     };
     return {
       content: [{ type: "text", text: operations.length

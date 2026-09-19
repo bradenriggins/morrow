@@ -44,20 +44,49 @@ describe("New Quiz item order planner", () => {
     expect(report).toMatchObject({ status: "planned", operation_count: 2, atomic: false,
       before_item_ids: ["11", "12", "13"], expected_item_ids: ["13", "12", "11"] });
     const operations = report.operations as JsonObject[];
-    expect(operations.map((operation) => (operation.arguments as JsonObject).item_id)).toEqual(["13", "12"]);
-    expect(operations[0]!.arguments).toMatchObject({ item_position: 1,
+    // Entry 13 stays; 12 then 11 each move once, to just after the entry before them.
+    expect(operations.map((operation) => (operation.arguments as JsonObject).item_id)).toEqual(["12", "11"]);
+    expect(operations[0]!.arguments).toMatchObject({ item_position: 3,
       morrow_new_quiz_item_position_guard: {
         kind: "new_quiz_item_position",
         before_item_ids_sha256: sha256Json(["11", "12", "13"]),
-        expected_item_ids: ["13", "11", "12"],
-        expected_item_ids_sha256: sha256Json(["13", "11", "12"]),
+        expected_item_ids: ["11", "13", "12"],
+        expected_item_ids_sha256: sha256Json(["11", "13", "12"]),
       } });
-    expect(operations[1]!.arguments).toMatchObject({ item_position: 2,
+    expect(operations[1]!.arguments).toMatchObject({ item_position: 3,
       morrow_new_quiz_item_position_guard: {
-        before_item_ids_sha256: sha256Json(["13", "11", "12"]),
+        before_item_ids_sha256: sha256Json(["11", "13", "12"]),
         expected_item_ids: ["13", "12", "11"],
       } });
     expect(calls.some((call) => call.tool === "canvas_update_quiz_item")).toBe(false);
+  });
+
+  it("moves questions around Item Bank draws, and moves the draws themselves", async () => {
+    // Canvas moves a bank draw and a single bank question through the same position update as a question.
+    const { runtime } = fixture([
+      { id: "11", position: 1, entry_type: "Bank" },
+      { id: "12", position: 2, entry_type: "Item" },
+      { id: "13", position: 3, entry_type: "BankEntry" },
+    ]);
+    const result = await planNewQuizItemOrder(runtime, {
+      source_binding_id: sourceBindingId, course_id: "42", quiz_id: "77", ordered_item_ids: ["13", "12", "11"],
+    });
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    const report = result.structuredContent as JsonObject;
+    expect(report).toMatchObject({ status: "planned", before_item_ids: ["11", "12", "13"], expected_item_ids: ["13", "12", "11"] });
+    expect((report.operations as JsonObject[]).map((operation) => (operation.arguments as JsonObject).item_id)).toEqual(["12", "11"]);
+  });
+
+  it("moves one entry to the end in one move, however many entries it passes", async () => {
+    const ids = Array.from({ length: 17 }, (_, index) => String(11 + index));
+    const { runtime } = fixture(ids.map((id, index) => ({ id, position: index + 1, entry_type: index < 5 ? "Bank" : "Item" })));
+    const result = await planNewQuizItemOrder(runtime, {
+      source_binding_id: sourceBindingId, course_id: "42", quiz_id: "77", ordered_item_ids: [...ids.slice(1), ids[0]!],
+    });
+    const operations = (result.structuredContent as JsonObject).operations as JsonObject[];
+    expect(operations).toHaveLength(1);
+    expect(operations[0]!.arguments).toMatchObject({ item_id: "11", item_position: 17,
+      morrow_new_quiz_item_position_guard: { expected_item_ids: [...ids.slice(1), ids[0]!] } });
   });
 
   it("plans nothing for the current order", async () => {
@@ -89,6 +118,6 @@ describe("New Quiz item order planner", () => {
       source_binding_id: sourceBindingId, course_id: "42", quiz_id: "77", ordered_item_ids: ["12", "11"],
     });
     expect(stimulusResult.isError).toBe(true);
-    expect(JSON.stringify(stimulusResult)).toContain("Only Item entries support this position update");
+    expect(JSON.stringify(stimulusResult)).toContain("Morrow moves questions, bank draws, and single bank questions only");
   });
 });

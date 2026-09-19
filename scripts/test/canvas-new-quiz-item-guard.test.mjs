@@ -431,6 +431,21 @@ test("a guarded move reads the complete order before and after one PATCH", async
   ]);
 });
 
+test("a guarded move moves an Item Bank draw among the quiz's questions", async () => {
+  // Canvas moves a bank draw through the same position update as a question, and a quiz's order counts it.
+  const before = [ITEM_ID, "89", "90"];
+  const expected = ["89", ITEM_ID, "90"];
+  const rows = (ids) => ids.map((id, index) => ({ id, position: index + 1, entry_type: id === ITEM_ID ? "Bank" : id === "90" ? "BankEntry" : "Item" }));
+  const draw = { id: ITEM_ID, entry_type: "Bank", status: "mutable", position: 1, points_possible: 1, properties: { sample_num: 1 }, entry: { id: "4029", title: "Cell bank" } };
+  const { result, sent } = await sendQuizItem({
+    item_position: 2,
+    morrow_new_quiz_item_position_guard: positionGuard(before, expected),
+  }, { item: draw, listReads: [{ value: rows(before) }, { value: rows(expected) }] });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.verification.status, "verified");
+  assert.deepEqual(JSON.parse(sent[0].body), { item: { position: 2 } });
+});
+
 test("a position-only update refuses locked and stimulus-linked items before PATCH", async () => {
   const before = [ITEM_ID, "89"];
   const expected = ["89", ITEM_ID];

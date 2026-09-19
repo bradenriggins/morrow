@@ -536,6 +536,7 @@ Every row stays open until its evidence columns are added and its status becomes
 | 519 | P1 | R7 | Every quiz-draw attach and removal ended unconfirmed or refused: a saved quiz draw row names its bank or bank entry only in its embedded `entry`, never in `entry_id`. | closure section 519; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
 | 520 | P1 | R7 | Item Bank approvals were offered only by chance: the review gives each confirming read four seconds, and an Item Bank read opens a launch tab and takes eight to nine seconds live. | closure section 520; gateway regressions, live BT2 course 89585 | IMPLEMENTED |
 | 521 | P1 | R7 | Every Item Bank question alt-text repair was refused before sending: the repair resends the stored question, which carries Canvas's own read-only fields and names its type only as `interaction_type.slug`, so the question contract saw no question type. | closure section 521; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 522 | P1 | R7 | No question could be reordered in a New Quiz that draws from an Item Bank: the planner and the Bridge accepted only question entries, although Canvas moves a bank draw and a single bank question through the same position update. | closure section 522; gateway and Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3645,6 +3646,13 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Condition: a stored bank question carries `interaction_type` (an object), stamps, `metadata`, `user_response_type`, and no `interaction_type_slug`. The repair resends the stored question with one alt added, and the worker's question contract refused it as an unsupported type.
 - Repair: `connector/extension/src/item-bank-executor.js` returns a bank question in its documented fields only, with `interaction_type_slug` from `interaction_type.slug`: the fields Canvas's own Item Banks page sends when it saves a question. Reads, digests, the repair, and the update all use that one shape. A guarded legacy repair, which carries no question, is no longer judged as a missing question by the worker.
 - Status: `IMPLEMENTED`; proven live: the repair verified and a fresh audit found no image without alt text.
+
+### 522: a quiz with a bank draw could not be reordered
+
+- Condition: `packages/mcp-server/src/new-quiz-item-order.ts` refused any list holding an entry other than `Item`, and the Bridge read the order with questions only and required the moved entry to be a standalone question. Live evidence: `PATCH /api/quiz/v1/courses/89585/quizzes/4045165/items/11028169` with `{"item":{"position":3}}` moved a Bank draw and answered 200.
+- Repair: the planner and the Bridge accept `Item`, `Bank`, and `BankEntry` entries; the order read counts every entry; a move that also edits the question still requires a standalone question, and a stimulus-linked or locked entry is still refused. `packages/mcp-server/test/new-quiz-item-order.test.ts` and `scripts/test/canvas-new-quiz-item-guard.test.mjs` cover both.
+- Found with it: the planner moved every entry between a moved entry and its target one step at a time, so sending one entry to the end took one reviewed move per entry passed; it now keeps the longest run already in order and moves each other entry once. The review could not name a single bank question (its title sits in the embedded bank entry), so that move was never approvable; bank draws and bank questions are now named for what they are.
+- Status: `IMPLEMENTED`.
 
 ### Root-cause patterns for rows 331–472
 

@@ -168,6 +168,29 @@ describe("approval review context", () => {
     expect(update.context.targets.every((target) => target.name.trim())).toBe(true);
   });
 
+  it("names an Item Bank draw and a single bank question a quiz move addresses", async () => {
+    // A New Quiz entry can be a bank draw or a single bank question; a review that could not name
+    // them withheld approval for every move of one.
+    const base = operation();
+    const move = async (answer: JsonObject) => resolveApprovalReviewContext({
+      operation: { ...base, publicToolName: "canvas_update_quiz_item", sourceToolName: "canvas_update_quiz_item", plan: { ...base.plan,
+        tool: "canvas_update_quiz_item", sourceTool: "canvas_update_quiz_item",
+        arguments: { course_id: "42", assignment_id: "77", item_id: "900", item_position: 3, _morrow: { source_binding_id: sourceBindingId } } } },
+      tools: [...tools, tool("canvas_update_quiz_item", "canvas_update_quiz_item", false, "new-quizzes"), tool("canvas_get_quiz_item", "canvas_get_quiz_item", true, "new-quizzes")],
+      read: async (name) => {
+        if (name === "morrow_canvas_bindings") return { structuredContent: { schema: "morrow.canvas-bindings.v1", bindings: [{ sourceBindingId, provider: "canvas", runtimeVerified: true, origin: "https://school.instructure.com" }] } };
+        if (name === "canvas_get_single_course_courses") return connector({ id: 42, name: "Biology" });
+        if (name === "canvas_get_new_quiz") return connector({ id: "77", title: "Cells quiz" });
+        return connector(answer);
+      },
+    });
+    const draw = await move({ id: "900", entry_type: "Bank", entry: { id: "4029", title: "Cell bank" } });
+    expect(draw.targets).toContainEqual(expect.objectContaining({ field: "item_id", name: "Item Bank draw from Cell bank" }));
+    const single = await move({ id: "900", entry_type: "BankEntry", entry: { id: "82663", bank_id: "4029", entry: { title: "Which organelle makes ATP?" } } });
+    expect(single.targets).toContainEqual(expect.objectContaining({ field: "item_id", name: "Item Bank question Which organelle makes ATP?" }));
+    expect([...draw.targets, ...single.targets].every((target) => target.name.trim())).toBe(true);
+  });
+
   it("gives an Item Bank review read the time its launch tab needs", async () => {
     // Each Item Bank read opens a fresh Item Banks launch tab and takes eight to nine seconds live.
     const budgets: number[] = [];

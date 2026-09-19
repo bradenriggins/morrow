@@ -75,6 +75,8 @@ interface TargetSpec {
   readonly entityId: (value: JsonObject) => boolean;
   readonly nameFields: readonly string[];
   readonly entryNameFields?: readonly string[];
+  /** Names an entity whose name is not one field, before the field lists are tried. */
+  readonly nameOf?: (entity: JsonObject) => string | null;
   readonly urlPath?: readonly string[];
   readonly courseId?: string;
   /** Shown when Canvas confirms the object but holds no name for it. */
@@ -690,6 +692,21 @@ function questionSpec(
     entityId: (value) => sameId(value.id, itemId),
     nameFields: [],
     entryNameFields: ["title", "name"],
+    // A quiz entry can also be an Item Bank draw, whose entry is the bank, or a single bank
+    // question, whose entry is the bank entry holding the question.
+    nameOf: (value) => {
+      const entry = object(value.entry);
+      if (value.entry_type === "Bank") {
+        const bank = entry ? exactText(entry.title) : null;
+        return bank ? `Item Bank draw from ${bank}` : `Item Bank draw ${itemId}`;
+      }
+      if (value.entry_type === "BankEntry") {
+        const question = entry ? object(entry.entry) : null;
+        const title = question ? exactText(question.title) : null;
+        return title ? `Item Bank question ${title}` : `Item Bank question ${itemId}`;
+      }
+      return null;
+    },
     courseId,
   };
 }
@@ -892,7 +909,8 @@ function resolvedTarget(
   const nameFields = target.entryNameFields || target.nameFields;
   const confirmed = Boolean(entity && nameSource && courseMatches && target.entityId(entity));
   const name = confirmed
-    ? nameFields.map((field) => exactText(nameSource![field])).find((value): value is string => value !== null)
+    ? target.nameOf?.(entity!)
+      || nameFields.map((field) => exactText(nameSource![field])).find((value): value is string => value !== null)
       || target.fallbackName
     : null;
   return {

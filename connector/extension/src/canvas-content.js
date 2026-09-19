@@ -3005,8 +3005,29 @@
     return rows.sort((left, right) => left.position - right.position);
   }
 
+  // A quiz's order counts every entry: questions, bank draws, and single bank questions all hold a position.
   async function newQuizItemOrder(itemUrl, expiresAt) {
-    return (await readNewQuizItemMembership(itemUrl, true, expiresAt)).map((row) => row.id);
+    return (await readNewQuizItemMembership(itemUrl, false, expiresAt)).map((row) => row.id);
+  }
+
+  // Canvas moves a question, a bank draw, or a single bank question through the same position update.
+  const NEW_QUIZ_MOVABLE_ENTRY_TYPES = ["Item", "Bank", "BankEntry"];
+
+  async function readMovableNewQuizEntry(args, url, expiresAt) {
+    let entry;
+    try {
+      entry = await pageJson(url, expiresAt);
+    } catch {
+      throw new Error("new_quiz_item_read_failed: Morrow could not read this quiz entry before moving it. No change was sent.");
+    }
+    const itemId = pageId(args.item_id);
+    if (!itemId || !plainObject(entry) || pageId(entry.id) !== itemId || !NEW_QUIZ_MOVABLE_ENTRY_TYPES.includes(entry.entry_type)) {
+      throw new Error("new_quiz_item_target_changed: This quiz entry is not the question or bank draw Morrow expected. No change was sent.");
+    }
+    if (pageId(entry.stimulus_quiz_entry_id) || entry.entry_editable === false || entry.immutable === true || entry.status !== "mutable") {
+      throw new Error("new_quiz_item_edit_dependency_unverified: This quiz entry cannot be moved on its own. No change was sent.");
+    }
+    return entry;
   }
 
   async function checkNewQuizItemPositionSource(operation, args, url, expiresAt) {
@@ -3032,9 +3053,12 @@
       || expected[requestedPosition - 1] !== itemId) {
       throw new Error("new_quiz_item_position_guard_invalid: The requested item position does not match the expected saved order. No change was sent.");
     }
-    const item = await readEditableStandaloneNewQuizItem(args, url, null, expiresAt);
     const requestedItemFields = newQuizItemPayloadFromArguments(operation, args) || {};
     delete requestedItemFields.position;
+    // A move alone may address any movable entry; a move that also edits needs a standalone question.
+    const item = Object.keys(requestedItemFields).length > 0
+      ? await readEditableStandaloneNewQuizItem(args, url, null, expiresAt)
+      : await readMovableNewQuizEntry(args, url, expiresAt);
     return { expected, url, item, requestedItemFields };
   }
 
