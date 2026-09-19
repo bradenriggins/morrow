@@ -448,9 +448,16 @@ export function capabilityProblemText(code: string): string {
  */
 function sourceRefusalOf(result: unknown): string | undefined {
   const structured = isJsonObject(result) && isJsonObject(result.structuredContent) ? result.structuredContent : undefined;
-  const problem = isJsonObject(structured?.problem) ? structured.problem : undefined;
-  for (const candidate of [structured?.sourceRefusal, problem?.refusal, structured?.sourceCode, problem?.code, structured?.code]) {
-    if (typeof candidate === "string" && /^[a-z][a-z0-9_]{0,99}$/u.test(candidate)) return candidate;
+  // The source answers with its own result, and a public answer carries that
+  // same result under `data`. The reason the source named sits in one of those
+  // two places, and reading only the outer one loses it: a change refused before
+  // it was sent then reports that nothing was sent and never says why.
+  const held = isJsonObject(structured?.data) ? structured.data : undefined;
+  for (const carrier of [structured, held]) {
+    const problem = isJsonObject(carrier?.problem) ? carrier.problem : undefined;
+    for (const candidate of [carrier?.sourceRefusal, problem?.refusal, carrier?.sourceCode, problem?.code, carrier?.code]) {
+      if (typeof candidate === "string" && /^[a-z][a-z0-9_]{0,99}$/u.test(candidate)) return candidate;
+    }
   }
   return undefined;
 }
@@ -8127,6 +8134,13 @@ export class GatewayRuntime {
         structuredContent: {
           schema: "morrow.problem.v1",
           code: callerReadback ? "caller_readback_refused" : "operation_plan_invalid",
+          // Why Morrow could not freeze the plan, in its own words. The digest
+          // identifies one exact refusal; it does not tell the person what to
+          // correct, and without the reason a request that Morrow rejected
+          // cannot be fixed by the person or their assistant.
+          ...(error instanceof Error && typeof error.message === "string" && error.message.trim()
+            ? { reason: error.message.trim().slice(0, 200) }
+            : {}),
           detailDigest: sha256Text(detail),
         },
       },

@@ -239,7 +239,7 @@ function valueAtPath(item: JsonObject, path: readonly string[]): unknown {
  * question the CALLER supplied, a null container is ambiguous between "no feedback" and "clear the
  * feedback", so it stays refused rather than being read as either one.
  */
-function uncarriedPaths(item: JsonObject, prefix: readonly string[] = [], nullContainerIsEmpty = false): readonly string[] {
+export function uncarriedPaths(item: JsonObject, prefix: readonly string[] = [], nullContainerIsEmpty = false): readonly string[] {
   const paths: string[] = [];
   for (const key of Object.keys(item).sort()) {
     const path = [...prefix, key];
@@ -251,9 +251,21 @@ function uncarriedPaths(item: JsonObject, prefix: readonly string[] = [], nullCo
       else if (!(nullContainerIsEmpty && value === null)) paths.push(dotted);
       continue;
     }
-    if (!CARRIED_PATHS.has(dotted)) paths.push(dotted);
+    // A field the create route has no parameter for is only lost if it holds
+    // something. Canvas returns `tag_associations` as an empty list on every
+    // saved question, and treating its presence as content refused every
+    // replacement, so a question's type could never be changed.
+    if (!CARRIED_PATHS.has(dotted) && !carriesNothing(value)) paths.push(dotted);
   }
   return paths;
+}
+
+/** A value that holds nothing, so dropping it drops nothing. */
+function carriesNothing(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (isJsonObject(value)) return Object.keys(value).length === 0;
+  return false;
 }
 
 /**

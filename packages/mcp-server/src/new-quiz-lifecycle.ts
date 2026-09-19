@@ -121,10 +121,22 @@ function createArguments(courseId: string, quiz: JsonObject): JsonObject {
 }
 
 function problem(error: unknown): CallToolResult {
+  // What stopped the plan, in Morrow's own words. Without it a New Quiz change
+  // that could not be planned says only that something could not be read or
+  // validated, and neither the person nor their assistant can act on it.
+  const reason = error instanceof LifecycleError
+    ? error.message
+    : error instanceof Error && typeof error.message === "string" && error.message.trim()
+      ? error.message.trim().slice(0, 200)
+      : undefined;
   return {
     isError: true,
     content: [{ type: "text", text: `No New Quiz lifecycle change was planned. ${error instanceof LifecycleError ? error.message : "Morrow could not read or validate this Canvas target."}` }],
-    structuredContent: { schema: "morrow.problem.v1", code: "new_quiz_lifecycle_not_planned" },
+    structuredContent: {
+      schema: "morrow.problem.v1",
+      code: "new_quiz_lifecycle_not_planned",
+      ...(reason ? { reason } : {}),
+    },
   };
 }
 
@@ -144,7 +156,14 @@ function tools(runtime: LifecycleRuntime, sourceBindingId: string) {
   const routing = { source_binding_id: sourceBindingId };
   const read = async (tool: CatalogSearchTool, args: JsonObject, signal: AbortSignal): Promise<unknown> => {
     signal.throwIfAborted();
-    return canvasReadResult(runtime, await runtime.callSourceOwned(tool.publicName, { ...args, _morrow: routing }, { signal })).data;
+    const answer = await runtime.callSourceOwned(tool.publicName, { ...args, _morrow: routing }, { signal });
+    try {
+      return canvasReadResult(runtime, answer).data;
+    } catch (error) {
+      // Which reading Canvas did not complete. Without the name, a plan that
+      // could not be made says only that something was unreadable.
+      throw new Error(`${tool.publicName}: ${error instanceof Error ? error.message : "Canvas did not return a complete readable result."}`);
+    }
   };
   return { find, read, routing };
 }

@@ -513,6 +513,12 @@ Every row stays open until its evidence columns are added and its status becomes
 | 496 | P1 | R3 | Every change addressed at one account named the same target, so creating a folder held that account against creating a role, a course, a grading standard or anything else, and one unresolved change locked the whole account for good. | closure section 496; gateway regressions, live BT2 course 89585 and sandbox sub-account 924 | IMPLEMENTED |
 | 497 | P1 | R7 | A review read the object Canvas returned inside the envelope Canvas names it with, found no id at the top level, and told the person Canvas does not have the item, so every change to a poll, a poll choice or a poll session could never be approved. | closure section 497; gateway approval regressions, live BT2 course 89585 | IMPLEMENTED |
 | 498 | P1 | R7 | A review could not name a submission, because Morrow's own privacy boundary replaces the person's Canvas id with the learner token it issues and the review never looked at that token, so every change to a submission was refused as an item Canvas does not have. | closure section 498; gateway approval regressions, live BT2 course 89585 | IMPLEMENTED |
+| 499 | P0 | R3 | A New Quiz could not be created or deleted in any course holding more than one New Quiz, because the review sorts the course quiz list and the executor compared that sorted list against the order Canvas lists them in. | closure section 499; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 500 | P1 | R7 | Canvas caps the page size of some routes below what Morrow asks for, and the pagination rule refused any later page whose size differed, so every such listing stopped after its first page. | closure section 500; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 501 | P1 | R7 | A reading that answers with one record was refused for carrying no page bound, which only a listing can have, so every plan that begins by reading one course failed. | closure section 501; gateway regressions, live BT2 course 89585 | IMPLEMENTED |
+| 502 | P1 | R7 | A change the executor refused before sending lost its reason twice: the Bridge sent a whole sentence where one token belongs, and the gateway looked for the reason one level above where the source put it. | closure section 502; Bridge and gateway regressions, live BT2 course 89585 | IMPLEMENTED |
+| 503 | P2 | R7 | A New Quiz plan or an operation plan that Morrow could not make hashed its reason away and named no failing reading, so neither the person nor their assistant could act on it. | closure section 503; gateway regressions, live BT2 course 89585 | IMPLEMENTED |
+| 504 | P1 | R7 | A question's type could never be changed, because Canvas returns an empty tag list on every saved question and Morrow treated the field's presence as content the replacement would lose. | closure section 504; gateway regressions, live BT2 course 89585 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3476,6 +3482,48 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Repair: the learner token identifies the object alongside the id, the url and the route's own field. A change that names a person by the token Morrow issued is a change to the object Morrow read back under that token.
 - Status: `IMPLEMENTED` for the cause named here, and covered by `packages/mcp-server/test/approval-context.test.ts`, which fails when the token is not recognised. The review also now accepts an answer that carries a list of records rather than one.
 - Still open: the live symptom remains. On the installed build, `canvas_mark_submission_as_read_courses` for assignment 3636219 and `Student A1` still shows "Canvas does not have the item this change names", while the same review names the course, the assignment and the section correctly, and `canvas_get_single_submission_courses` for that exact assignment and token answers with the submission. At least one further cause sits between the answer Morrow reads and the record the review compares. Every change addressed at a submission stays unapprovable until it is found.
+
+### 499: a New Quiz could never be created or deleted
+
+- Product decision: a New Quiz change can be made in a course that already holds New Quizzes.
+- Condition: a New Quiz create or delete is reviewed against the set of New Quizzes the course held. The review sorts that set before freezing it; the in-page executor reads the course list in the order Canvas lists it and compared the two position by position. The two orders agree only when a course holds at most one New Quiz, so in every real course the change was refused as stale before it was sent. BT2 holds 160.
+- Repair: the executor compares the membership in the same order the review froze it. `scripts/test/canvas-new-quiz-membership-order.test.mjs` fails if the two sides ever sort differently.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585. `morrow_plan_new_quiz_create` now settles `verified`.
+
+### 500: a listing Canvas capped stopped after one page
+
+- Product decision: a listing Canvas paginates correctly is read to its end.
+- Condition: Canvas caps the page size of some routes below what the request asks for and writes its own cap into the later-page address: Morrow asks for 100 New Quizzes a page and Canvas answers 50 with `per_page=50` in the next link. The pagination rule refused any later page whose page size differed from the one asked for, so the listing stopped after the first page and was reported incomplete. That made the New Quiz membership read short of the list the review had frozen, and it truncates every other listing Canvas caps the same way.
+- Repair: a later page may carry a smaller page size than the one asked for, because a smaller page reads less at a time and never more. A larger one, or a later page that changes a real filter, is still refused. `scripts/test/canvas-page-size-cap.test.mjs` holds each case.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585, where the course's 160 New Quizzes now read in four pages of 50.
+
+### 501: a reading of one record was refused
+
+- Product decision: a reading of one object is complete when Canvas returns that object.
+- Condition: the shared Canvas reading rule required every answer to say it was not truncated. Only a listing carries that flag; a route that answers with one record states nothing about pages. Every plan that begins by reading one object, starting with the New Quiz create plan's reading of the course, was refused as "Canvas did not return a complete readable result."
+- Repair: a listing must still say it is complete; one record is refused only when Canvas says it was cut short. `packages/mcp-server/test/canvas-read.test.ts` covers both.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### 502: a change refused before sending never said why
+
+- Product decision: a change Morrow did not send says what stopped it.
+- Condition: the in-page executor states its reason as a token followed by an explanation, as `new_quiz_lifecycle_stale: The course New Quiz list changed after review.` The Bridge sent that whole sentence as the refusal, which the protocol accepts only as one token, so the reason was dropped. Separately, the gateway looked for the source's reason only at the top of the answer, while a public answer carries the source result one level down. Every such change reported only that nothing was sent.
+- Repair: the Bridge sends the token from the front of the executor's message, and the gateway reads the source's reason from either level.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585, where a stale New Quiz create now reports `new_quiz_lifecycle_stale`.
+
+### 503: a plan Morrow could not make hid its reason
+
+- Product decision: when Morrow cannot plan a change, it says why.
+- Condition: a New Quiz lifecycle plan that failed on anything other than its own named refusals reported only that "Morrow could not read or validate this Canvas target", and an operation plan Morrow could not freeze reported only a digest of its error. Neither named the reason or the reading that failed.
+- Repair: a refused plan carries its reason in Morrow's own words, and a failed reading inside a New Quiz plan names the tool that did not answer completely.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### 504: a question's type could never be changed
+
+- Product decision: a question can be replaced by a question of another type.
+- Condition: replacing a New Quiz question is a delete and a create, and Morrow refuses when the current question holds a field the create route cannot carry, so nothing is silently lost. Canvas returns `tag_associations` as an empty list on every saved question. Morrow treated the field's presence as content, so it refused every replacement and a question's type could never be changed.
+- Repair: a field that holds nothing is not a field the replacement loses. A field that holds something is still refused. `packages/mcp-server/test/new-quiz-replacement-carry.test.ts` covers both.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585, where a true-or-false question was replaced by a written-response question and verified.
 
 ### Root-cause patterns for rows 331–472
 

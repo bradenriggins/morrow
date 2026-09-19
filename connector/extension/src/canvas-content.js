@@ -2163,13 +2163,21 @@
     }
     const pages = resumed.searchParams.getAll("page");
     if (pages.length !== 1 || pages[0].length < 1 || pages[0].length > 1_024) return false;
+    // Canvas caps the page size of some routes below what the request asked for
+    // and writes its own cap into the later-page address. A smaller page reads
+    // less at a time, never more, so it does not widen the read. Requiring the
+    // asked-for size back ended every listing Canvas capped: the read stopped
+    // after one page and reported the rest as unavailable.
     const expectedPerPage = requested.searchParams.getAll("per_page");
     const observedPerPage = resumed.searchParams.getAll("per_page");
+    const pageSize = (value) => (/^[1-9][0-9]{0,3}$/.test(value) ? Number(value) : null);
+    if (observedPerPage.length > 1) return false;
     if (expectedPerPage.length > 0) {
-      if (observedPerPage.length !== expectedPerPage.length
-        || expectedPerPage.some((value, index) => observedPerPage[index] !== value)) return false;
-    } else if (observedPerPage.length > 1
-      || (observedPerPage.length === 1 && !/^(?:[1-9]|[1-9][0-9]|100)$/.test(observedPerPage[0]))) return false;
+      if (expectedPerPage.length > 1 || observedPerPage.length !== 1) return false;
+      const asked = pageSize(expectedPerPage[0]);
+      const given = pageSize(observedPerPage[0]);
+      if (asked === null || given === null || given > asked) return false;
+    } else if (observedPerPage.length === 1 && !/^(?:[1-9]|[1-9][0-9]|100)$/.test(observedPerPage[0])) return false;
     return true;
   }
 
@@ -2718,6 +2726,13 @@
     return present && plainObject(root.quiz) ? root.quiz : {};
   }
 
+  // The one order both sides compare a New Quiz membership in: shortest id
+  // first, then by value. packages/mcp-server/src/new-quiz-lifecycle.ts sorts
+  // the reviewed set the same way.
+  function newQuizIdOrder(ids) {
+    return [...ids].sort((left, right) => left.length - right.length || (left < right ? -1 : left > right ? 1 : 0));
+  }
+
   function validNewQuizGuard(guard, kind) {
     if (!plainObject(guard) || guard.kind !== kind
       || !Array.isArray(guard.before_quiz_ids) || guard.before_quiz_ids.length > NEW_QUIZ_ITEM_LIMIT
@@ -2741,9 +2756,15 @@
       return null;
     }
     if (!validNewQuizGuard(guard, kind)) throw new Error(`new_quiz_lifecycle_guard_required: A New Quiz ${kind} needs a reviewed complete course quiz list. No change was sent.`);
-    const before = await newQuizMembership(url, expiresAt);
+    // The guard names which New Quizzes the course held when the person reviewed
+    // the change, not the order Canvas happened to list them in. The review sorts
+    // that set, so the membership read here is compared in the same order. Comparing
+    // Canvas's own listing order against the sorted set made every create and
+    // delete fail as stale in any course holding more than one New Quiz.
+    const before = newQuizIdOrder(await newQuizMembership(url, expiresAt));
+    const reviewed = newQuizIdOrder(guard.before_quiz_ids.map(String));
     if (await bodyDigest(stable(guard.before_quiz_ids.map(String))) !== guard.before_quiz_ids_sha256
-      || before.length !== guard.before_quiz_ids.length || before.some((id, index) => id !== String(guard.before_quiz_ids[index]))) {
+      || before.length !== reviewed.length || before.some((id, index) => id !== reviewed[index])) {
       throw new Error("new_quiz_lifecycle_stale: The course New Quiz list changed after review. No change was sent.");
     }
     const listUrl = newQuizListUrl(url);

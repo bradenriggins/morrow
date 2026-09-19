@@ -4312,6 +4312,13 @@ function supportedCanvasContentGuardOperation(operation, guard) {
     && candidate.toolName === operation.toolName && candidate.key === operation.key);
 }
 
+/** The named reason at the front of an executor's own error, if it states one. */
+function refusalToken(error) {
+  const text = typeof error === "string" ? error.trim() : "";
+  const token = /^([a-z][a-z0-9]*(?:_[a-z0-9]+)+)/.exec(text)?.[1];
+  return token && token.length <= 100 ? token : undefined;
+}
+
 async function editScopeProblem(command, binding, operation) {
   if (command.kind !== "invoke_write") return null;
   const authorization = command.outerGrant?.authorization;
@@ -5165,7 +5172,13 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
       command,
       false,
       unresolvedDescriptor ? { schema: "morrow.canvas-browser-result.v1", readDescriptor: unresolvedDescriptor } : providerFailure,
-      problem(code, message, !unknown, result?.sent === false ? result?.error : undefined),
+      // An executor states its reason as a token and then explains it, as
+      // `new_quiz_lifecycle_stale: The course New Quiz list changed after
+      // review.` The refusal field carries one token, so the token is taken from
+      // the front of that message. Sending the whole sentence there failed the
+      // field's own rule and the reason was dropped, leaving a change that could
+      // not be sent with nothing to say about why.
+      problem(code, message, !unknown, result?.sent === false ? refusalToken(result?.error) : undefined),
     );
     return unknown ? "unknown" : "known";
   }
