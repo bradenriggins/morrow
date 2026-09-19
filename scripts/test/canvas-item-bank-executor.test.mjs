@@ -68,6 +68,18 @@ function assertPrivate(result, label) {
  * the shape of a stored row is the tenant's property. The default echoes that
  * body verbatim; "snake" and "camel" answer with one casing throughout.
  */
+// What the live bank service answers for an entry: the row with its question embedded.
+// A live entry row has no `entry_id`: it names its question only as `entry.id`.
+function embeddedEntry(state, row) {
+  const question = String(row?.entry_type) === "Item" ? state.items.get(String(row.entry_id)) : null;
+  if (!question) return row;
+  const { entry_id: entryId, ...rest } = row;
+  return { ...rest, entry: { ...question.entry, id: String(entryId) } };
+}
+
+// The question as Morrow reads it back through its entry: its documented fields only.
+const asRead = (item) => item;
+
 function provider({ writeStatus = 0, sabotage = false, banks, items, entries, shareCasing } = {}) {
   const state = {
     banks: banks ?? [{ id: "91", title: "Bank A", language: "en" }],
@@ -75,6 +87,10 @@ function provider({ writeStatus = 0, sabotage = false, banks, items, entries, sh
     entries: entries ?? new Map([["401", { id: "401", bank_id: "91", entry_type: "Item", entry_id: "501" }]]),
     shares: [], nextBank: 92, nextItem: 502, nextEntry: 402,
   };
+  // What the live service does: a course lists only the banks shared with it. A bank made by a
+  // bare POST /api/banks belongs to its creator until it is shared with the course.
+  const associated = new Set(state.banks.map((bank) => bank.id));
+  state.associated = associated;
   const requests = [];
   const json = (data, status = 200) => new Response(status === 204 ? null : JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
   const fetch = async (url, options = {}) => {
@@ -83,9 +99,14 @@ function provider({ writeStatus = 0, sabotage = false, banks, items, entries, sh
     requests.push({ method, path, query: Object.fromEntries(parsed.searchParams), body, options });
     if (method !== "GET" && writeStatus >= 400) return json({ errors: [{ message: "refused" }] }, writeStatus);
     const listPage = (rows) => parsed.searchParams.get("page") && parsed.searchParams.get("page") !== "1" ? [] : rows;
-    if (path === "/api/banks" && method === "GET") return json(listPage(state.banks));
+    if (path === "/api/banks" && method === "GET") {
+      const course = parsed.searchParams.get("course_id");
+      return json(listPage(course === null ? state.banks : state.banks.filter((bank) => associated.has(bank.id))));
+    }
     if (path === "/api/banks" && method === "POST") {
-      const bank = { id: String(state.nextBank++), ...body.bank, ...(sabotage ? { title: "A title nobody reviewed" } : {}) };
+      // The live service keeps the language it was sent out of every bank it answers with.
+      const { language: _language, ...kept } = body.bank;
+      const bank = { id: String(state.nextBank++), ...kept, ...(sabotage ? { title: "A title nobody reviewed" } : {}) };
       state.banks.push(bank);
       return json(bank, 201);
     }
@@ -94,25 +115,35 @@ function provider({ writeStatus = 0, sabotage = false, banks, items, entries, sh
       const index = state.banks.findIndex((bank) => bank.id === bankMatch[1]);
       if (method === "GET") return index < 0 ? json({ error: "missing" }, 404) : json(state.banks[index]);
       if (method === "PATCH") { if (!sabotage) state.banks[index] = { ...state.banks[index], ...body.bank }; return json(state.banks[index]); }
-      if (method === "DELETE") { if (!sabotage) state.banks.splice(index, 1); return json(null, 204); }
+      // The live service archives a deleted bank: the read still answers, and the course no longer lists it.
+      if (method === "DELETE") {
+        if (!sabotage) { state.banks[index] = { ...state.banks[index], archived: true, archived_at: "2026-09-19T15:17:40.598Z" }; associated.delete(state.banks[index].id); }
+        return json(null, 204);
+      }
     }
+    // The live service has no question read under a bank, and takes a question flat.
     const itemMatch = path.match(/^\/api\/banks\/(\d+)\/items\/(\d+)$/);
     if (itemMatch) {
-      if (method === "GET") return state.items.has(itemMatch[2]) ? json(state.items.get(itemMatch[2])) : json({ error: "missing" }, 404);
-      if (method === "PATCH") { if (!sabotage) state.items.set(itemMatch[2], structuredClone(body.item)); return json(state.items.get(itemMatch[2])); }
+      if (method === "GET") return json({ status: 404, error: "not found" }, 404);
+      if (method === "PATCH") {
+        if (!sabotage) state.items.set(itemMatch[2], { id: itemMatch[2], entry_type: "Item", entry: structuredClone(body.item) });
+        return json({ id: itemMatch[2], ...state.items.get(itemMatch[2])?.entry });
+      }
     }
     if (/^\/api\/banks\/\d+\/items$/.test(path) && method === "POST") {
-      const item = { id: String(state.nextItem++), ...structuredClone(body.item), ...(sabotage ? { entry: { title: "Not the reviewed question" } } : {}) };
-      state.items.set(item.id, item);
-      return json(item, 201);
+      const itemId = String(state.nextItem++);
+      const entry = sabotage ? { title: "Not the reviewed question" } : structuredClone(body.item);
+      state.items.set(itemId, { id: itemId, entry_type: "Item", entry });
+      return json({ id: itemId, ...entry }, 201);
     }
     const entryMatch = path.match(/^\/api\/banks\/(\d+)\/bank_entries\/(\d+)$/);
     if (entryMatch) {
-      if (method === "GET") return state.entries.has(entryMatch[2]) ? json(state.entries.get(entryMatch[2])) : json({ error: "missing" }, 404);
+      if (method === "GET") return state.entries.has(entryMatch[2]) ? json(embeddedEntry(state, state.entries.get(entryMatch[2]))) : json({ error: "missing" }, 404);
       if (method === "DELETE") { if (!sabotage) state.entries.delete(entryMatch[2]); return json(null, 204); }
     }
     if (/^\/api\/banks\/\d+\/bank_entries$/.test(path)) {
-      if (method === "GET") return json(listPage([...state.entries.values()]));
+      const listedBank = path.split("/")[3];
+      if (method === "GET") return json(listPage([...state.entries.values()].filter((row) => String(row.bank_id) === listedBank).map((row) => embeddedEntry(state, row))));
       if (method === "POST") {
         const entry = { id: String(state.nextEntry++), ...body.bank_entry, ...(sabotage ? { entry_id: "999" } : {}) };
         state.entries.set(entry.id, entry);
@@ -130,6 +161,9 @@ function provider({ writeStatus = 0, sabotage = false, banks, items, entries, sh
             : { entity_id: created.entity_id ?? created.entityId, entity_type: created.entityType ?? created.entity_type }),
         };
         if (!sabotage) state.shares.push(share);
+        if (!sabotage && (created.entityType ?? created.entity_type) === "course" && String(created.entity_id ?? created.entityId) === CONTEXT_UUID) {
+          associated.add(String(created.bank_id));
+        }
         return json(share, 201);
       }
     }
@@ -169,8 +203,10 @@ const WRITE_SHAPES = [
   {
     nickname: "create_bank",
     args: async (state) => ({ course_id: "42", title: "Bank B", language: "fr", expected_snapshot: { banks_sha256: await digest(state.banks) } }),
-    stale: (state) => state.banks.push({ id: "93", title: "Added behind the reviewer", language: "en" }),
+    stale: (state) => { state.banks.push({ id: "93", title: "Added behind the reviewer", language: "en" }); state.associated.add("93"); },
     mismatch: "created_bank_title_did_not_match",
+    // Canvas's own Item Banks page creates the bank, then shares it with the course.
+    dispatches: 2,
   },
   {
     nickname: "rename_bank",
@@ -179,30 +215,37 @@ const WRITE_SHAPES = [
   },
   {
     nickname: "archive_bank",
-    args: async (state) => ({ course_id: "42", bank_id: "91", expected_snapshot: { bank_sha256: await digest(state.banks[0]), entries_sha256: await digest([...state.entries.values()]), shares_sha256: await digest(state.shares) }, ...await observed() }),
+    args: async (state) => ({ course_id: "42", bank_id: "91", expected_snapshot: { bank_sha256: await digest(state.banks[0]), entries_sha256: await digest([...state.entries.values()].map((row) => embeddedEntry(state, row))), shares_sha256: await digest(state.shares) }, ...await observed() }),
     mismatch: "bank_still_present_after_delete",
   },
   {
     nickname: "create_item",
     args: async (state) => ({ course_id: "42", bank_id: "91", item: { entry_type: "Item", entry: { title: "Question B", item_body: "<p>B</p>" } }, expected_snapshot: { bank_sha256: await digest(state.banks[0]) }, ...await observed() }),
-    mismatch: "created_item_did_not_match_payload",
+    mismatch: "created_item_entry_not_found",
+    // Canvas's own Item Banks page creates the question, then its entry in the bank.
+    dispatches: 2,
   },
   {
     nickname: "update_item",
-    args: async (state) => ({ course_id: "42", bank_id: "91", item_id: "501", item: { id: "501", entry_type: "Item", entry: { title: "Question A2", item_body: "<p>A2</p>" } }, expected_snapshot: { bank_sha256: await digest(state.banks[0]), item_sha256: await digest(state.items.get("501")) }, ...await observed() }),
+    args: async (state) => ({ course_id: "42", bank_id: "91", item_id: "501", item: { id: "501", entry_type: "Item", entry: { title: "Question A2", item_body: "<p>A2</p>" } }, expected_snapshot: { bank_sha256: await digest(state.banks[0]), item_sha256: await digest(asRead(state.items.get("501"))) }, ...await observed() }),
     mismatch: "updated_item_did_not_match_payload",
   },
   {
     nickname: "attach_item",
     args: async (state) => {
+      // The question to attach lives in another bank of this course.
+      state.banks.push({ id: "90", title: "Source bank", language: "en" });
+      state.associated.add("90");
+      const row = state.entries.get("401");
       state.entries.clear();
-      return { course_id: "42", bank_id: "91", item_id: "501", expected_snapshot: { bank_sha256: await digest(state.banks[0]), item_sha256: await digest(state.items.get("501")), entries_sha256: await digest([]) }, ...await observed() };
+      state.entries.set("401", { ...row, bank_id: "90" });
+      return { course_id: "42", bank_id: "91", item_id: "501", expected_snapshot: { bank_sha256: await digest(state.banks[0]), item_sha256: await digest(asRead(state.items.get("501"))), entries_sha256: await digest([]) }, ...await observed() };
     },
     mismatch: "attached_entry_did_not_match_item",
   },
   {
     nickname: "delete_entry",
-    args: async (state) => ({ course_id: "42", bank_id: "91", bank_entry_id: "401", expected_snapshot: { bank_sha256: await digest(state.banks[0]), entry_sha256: await digest(state.entries.get("401")), entries_sha256: await digest([...state.entries.values()]) }, ...await observed() }),
+    args: async (state) => ({ course_id: "42", bank_id: "91", bank_entry_id: "401", expected_snapshot: { bank_sha256: await digest(state.banks[0]), entry_sha256: await digest(embeddedEntry(state, state.entries.get("401"))), entries_sha256: await digest([...state.entries.values()].map((row) => embeddedEntry(state, row))) }, ...await observed() }),
     mismatch: "bank_entry_still_present_after_delete",
   },
   {
@@ -259,14 +302,27 @@ test("the relative native Canvas Item Banks tab resolves to the exact course lau
 test("the native Canvas Item Banks page keeps its token private and completes a bank read", async () => {
   await withPageContext(async () => {
     const p = provider({ banks: [] });
-    globalThis.fetch = p.fetch;
+    // The bank service keys a course by its Canvas uuid, read from Canvas itself; the page's
+    // numeric `canvas_context_id` names no course to the bank service.
+    const COURSE_UUID = "OxO4Y5yErxxwmlKpXV7qWx9wnFyMoQG17sLQndNi";
+    const canvasReads = [];
+    globalThis.fetch = async (url, options = {}) => {
+      const parsed = new URL(url);
+      if (parsed.origin === "https://school.instructure.com") {
+        canvasReads.push(parsed.pathname);
+        return new Response(JSON.stringify({ id: 42, uuid: COURSE_UUID }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return p.fetch(url, options);
+    };
     const request = input("list_banks", { course_id: "42" });
     delete request.credential;
     const result = await executeItemBankInPage(request);
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.sent, true);
+    assert.deepEqual(canvasReads, ["/api/v1/courses/42"]);
     assert.equal(p.requests.length, 1);
-    assert.equal(p.requests[0].query.course_id, CONTEXT_UUID);
+    assert.equal(p.requests[0].query.course_id, COURSE_UUID);
+    assert.equal(JSON.stringify(result).includes(COURSE_UUID), false);
     assert.equal(p.requests[0].options.headers.Authorization, TOKEN);
     assert.equal(JSON.stringify(result).includes(TOKEN), false);
     assert.equal(JSON.stringify(result).includes(CONTEXT_UUID), false);
@@ -285,6 +341,29 @@ test("the native Canvas Item Banks page keeps its token private and completes a 
     }),
     ENV: { current_user_id: "7" },
   });
+});
+
+test("the native Item Banks page sends nothing when Canvas does not name the course uuid", async () => {
+  for (const [label, answer] of [["course read refused", null], ["another course", { id: 43, uuid: "OxO4Y5yErxxwmlKpXV7qWx9wnFyMoQG17sLQndNi" }], ["no uuid", { id: 42 }]]) {
+    await withPageContext(async () => {
+      const p = provider({ banks: [] });
+      globalThis.fetch = async (url, options = {}) => new URL(url).origin === "https://school.instructure.com"
+        ? new Response(answer ? JSON.stringify(answer) : "", { status: answer ? 200 : 403 })
+        : p.fetch(url, options);
+      const request = input("list_banks", { course_id: "42" });
+      delete request.credential;
+      const result = await executeItemBankInPage(request);
+      assert.equal(result.error, "item_bank_course_identity_unavailable", label);
+      assert.equal(result.sent, false, label);
+      assert.equal(p.requests.length, 0, label);
+    }, {
+      location: { hostname: "school.instructure.com", href: "https://school.instructure.com/courses/42/banks" },
+      document: { referrer: "" },
+      sessionStorage: storage({ current_user: JSON.stringify({ id: "7" }), canvas_local_context_id: "42", canvas_context_id: CONTEXT_UUID, "banks.build_token": TOKEN }),
+      localStorage: storage({ canvas_host: "https://school.instructure.com", backend_url: "https://school.quiz-lti.instructure.com" }),
+      ENV: { current_user_id: "7" },
+    });
+  }
 });
 
 test("the native Item Banks page refuses mismatched course, tenant, and context state before fetch", async () => {
@@ -342,8 +421,8 @@ test("every reviewed write sends exactly one request and proves the saved result
     assert.equal(result.sent, true, shape.nickname);
     assert.equal(result.verification.status, "verified", shape.nickname);
     assert.equal(result.outcomeUnknown, false, shape.nickname);
-    assert.equal(api.dispatches(), 1, shape.nickname);
-    assert.equal(api.requests.filter((entry) => entry.method === operations.get(shape.nickname).method).length, 1, shape.nickname);
+    assert.equal(api.dispatches(), shape.dispatches ?? 1, shape.nickname);
+    assert.equal(api.requests.filter((entry) => entry.method === operations.get(shape.nickname).method).length, shape.dispatches ?? 1, shape.nickname);
   }
 });
 
@@ -409,7 +488,7 @@ test("a write the provider accepted but did not apply is never reported as verif
     assert.equal(result.outcomeUnknown, true, shape.nickname);
     assert.equal(result.verification.status, "mismatch", `${shape.nickname}: ${JSON.stringify(result.verification)}`);
     assert.equal(result.verification.reason, shape.mismatch, shape.nickname);
-    assert.equal(api.dispatches(), 1, shape.nickname);
+    assert.equal(api.dispatches(), shape.dispatches ?? 1, shape.nickname);
   }
 });
 
@@ -421,7 +500,7 @@ test("repairing one image is never blocked by another image that still needs wor
     const item = undescribedItem(ONE_REPAIRED);
     const args = {
       course_id: "42", bank_id: "91", item_id: "501", item,
-      expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), item_sha256: await digest(items.get("501")) },
+      expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), item_sha256: await digest(asRead(items.get("501"))) },
       ...await observed(),
     };
     const request = input("update_item", args);
@@ -453,7 +532,7 @@ test("a change that adds a new undescribed image is refused before dispatch", as
       const item = undescribedItem(body);
       const args = {
         course_id: "42", bank_id: "91", item_id: "501", item,
-        expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), item_sha256: await digest(items.get("501")) },
+        expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), item_sha256: await digest(asRead(items.get("501"))) },
         ...await observed(),
       };
       const request = input("update_item", args);
@@ -504,7 +583,7 @@ test("a problem the question already has never excuses a new one", async () => {
       globalThis.fetch = api.fetch;
       const request = input("update_item", {
         course_id: "42", bank_id: "91", item_id: "501", item,
-        expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), item_sha256: await digest(items.get("501")) },
+        expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), item_sha256: await digest(asRead(items.get("501"))) },
         ...await observed(),
       });
       request.payloadContractSha256 = await digest(item);
@@ -538,7 +617,7 @@ test("the in-frame media rule and the shared module rule agree", async () => {
     const item = undescribedItem(ONE_REPAIRED);
     const request = input("update_item", {
       course_id: "42", bank_id: "91", item_id: "501", item,
-      expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), item_sha256: await digest(stored) },
+      expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), item_sha256: await digest(asRead(stored)) },
       ...await observed(),
     });
     request.payloadContractSha256 = await digest(item);
@@ -825,7 +904,7 @@ test("a share a tenant applied but answered for in another casing is still refus
 test("a duplicate effect is refused instead of sent a second time", async () => {
   const cases = [
     ["create_bank", async (api) => ({ course_id: "42", title: "Bank A", language: "en", expected_snapshot: { banks_sha256: await digest(api.state.banks) } }), "item_bank_create_recovery_ambiguous"],
-    ["attach_item", async (api) => ({ course_id: "42", bank_id: "91", item_id: "501", expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), item_sha256: await digest(api.state.items.get("501")), entries_sha256: await digest([...api.state.entries.values()]) }, ...await observed() }), "item_bank_item_already_attached"],
+    ["attach_item", async (api) => ({ course_id: "42", bank_id: "91", item_id: "501", expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), item_sha256: await digest(asRead(api.state.items.get("501"))), entries_sha256: await digest([...api.state.entries.values()].map((row) => embeddedEntry(api.state, row))) }, ...await observed() }), "item_bank_item_already_attached"],
     ["share_bank", async (api) => { api.state.shares.push({ id: "1", entity_id: "77", entity_type: "course", permission: "read" }); return { course_id: "42", bank_id: "91", entity_type: "course", entity_id: "77", permission: "read", expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), shares_sha256: await digest(api.state.shares) }, ...await observed() }; }, "item_bank_share_already_present"],
   ];
   for (const [nickname, argsFor, expected] of cases) {
@@ -920,7 +999,9 @@ test("a bank creation Canvas answered with its own id is still reread and verifi
     assert.equal(result.verification.status, "verified");
     assert.equal(result.verification.targetId, "92");
     assert.equal(result.outcomeUnknown, false);
-    assert.equal(api.dispatches(), 1);
+    assert.equal(api.dispatches(), 2);
+    const share = api.requests.find((entry) => entry.method === "POST" && entry.path === "/api/banks/92/shared_banks");
+    assert.deepEqual(share?.body, { shared_bank: { entity_id: CONTEXT_UUID, entityType: "course", bank_id: "92", permission: "read" } });
     assertPrivate(result, "create_bank verified");
   });
 });

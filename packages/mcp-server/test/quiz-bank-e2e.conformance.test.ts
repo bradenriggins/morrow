@@ -446,7 +446,13 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
         const parsed = new URL(String(url));
         routeRequests.push(`${parsed.pathname}${parsed.search}`);
         if (parsed.pathname === "/api/banks") return new Response(JSON.stringify([{ id: "91", title: "Cell bank" }]), { status: 200 });
-        if (parsed.pathname.endsWith("/bank_entries") || parsed.pathname.endsWith("/shared_banks")) return new Response("[]", { status: 200 });
+        // A bank question is read through its bank entry, which embeds it.
+        if (parsed.pathname.endsWith("/bank_entries")) {
+          return new Response(parsed.searchParams.get("page") === "1"
+            ? JSON.stringify([{ id: "701", bank_id: "91", entry_type: "Item", entry: { id: "501", title: "Question A", item_body: "<p>A</p>" } }])
+            : "[]", { status: 200 });
+        }
+        if (parsed.pathname.endsWith("/shared_banks")) return new Response("[]", { status: 200 });
         const id = parsed.pathname.split("/").at(-1);
         return new Response(JSON.stringify({ id, bank_id: "91", entry_id: "501" }), { status: 200 });
       },
@@ -485,7 +491,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       bankList, "/api/banks/91",
       bankList, "/api/banks/91/bank_entries?page=1&per_page=100",
       bankList, "/api/banks/91/bank_entries/701",
-      bankList, "/api/banks/91/items/501",
+      bankList, "/api/banks/91/bank_entries?page=1&per_page=100",
       bankList, "/api/banks/91/shared_banks",
     ]);
 
@@ -514,11 +520,26 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       location: { hostname: "school.quiz-lti.instructure.com" }, document: { referrer: launchUrl },
       sessionStorage: storage({ current_user: currentUser }), localStorage: storage({}), ENV: {}, fetch: fetchValue,
     });
+    // What the live service answers for an entry: its question embedded, and no `entry_id`.
+    const embedded = (state: { items: Map<string, JsonObject> }, row: JsonObject): JsonObject => {
+      const question = String(row.entry_type) === "Item" ? state.items.get(String(row.entry_id)) : undefined;
+      if (!question) return row;
+      const { entry_id: entryId, ...rest } = row;
+      return { ...rest, entry: { ...(question.entry as JsonObject), id: String(entryId) } };
+    };
     const bankProvider = () => {
       const state = {
-        banks: [{ id: "91", title: "Bank A", language: "en" }] as JsonObject[],
-        items: new Map<string, JsonObject>([["501", { id: "501", entry_type: "Item", entry: { title: "Question A", item_body: "<p>A</p>" } }]]),
-        entries: new Map<string, JsonObject>([["401", { id: "401", bank_id: "91", entry_type: "Item", entry_id: "500" }]]),
+        banks: [{ id: "91", title: "Bank A", language: "en" }, { id: "90", title: "Source bank", language: "en" }] as JsonObject[],
+        items: new Map<string, JsonObject>([
+          ["501", { id: "501", entry_type: "Item", entry: { title: "Question A", item_body: "<p>A</p>" } }],
+          ["502", { id: "502", entry_type: "Item", entry: { title: "Question C", item_body: "<p>C</p>" } }],
+        ]),
+        // Question 501 sits in another bank of the course, ready to attach; 502 is in bank 91.
+        entries: new Map<string, JsonObject>([
+          ["401", { id: "401", bank_id: "91", entry_type: "Item", entry_id: "500" }],
+          ["402", { id: "402", bank_id: "91", entry_type: "Item", entry_id: "502" }],
+          ["403", { id: "403", bank_id: "90", entry_type: "Item", entry_id: "501" }],
+        ]),
         shares: [] as JsonObject[], nextBank: 92, nextItem: 502, nextEntry: 402,
       };
       const requests: { method: string; path: string; body?: JsonObject; options: JsonObject }[] = [];
@@ -551,29 +572,31 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
             return json(null, 204);
           }
         }
+        // The live service has no question read under a bank, and takes a question flat.
         const itemMatch = path.match(/^\/api\/banks\/(\d+)\/items\/(\d+)$/);
         if (itemMatch) {
-          if (method === "GET") return state.items.has(itemMatch[2]!) ? json(state.items.get(itemMatch[2]!)) : json({ error: "missing" }, 404);
+          if (method === "GET") return json({ error: "not found" }, 404);
           if (method === "PATCH") {
-            state.items.set(itemMatch[2]!, structuredClone(body!.item as JsonObject));
-            return json(state.items.get(itemMatch[2]!));
+            state.items.set(itemMatch[2]!, { id: itemMatch[2]!, entry_type: "Item", entry: structuredClone(body!.item as JsonObject) });
+            return json({ id: itemMatch[2]!, ...(body!.item as JsonObject) });
           }
         }
         if (/^\/api\/banks\/\d+\/items$/.test(path) && method === "POST") {
-          const item = { id: String(state.nextItem++), ...structuredClone(body!.item as JsonObject) };
-          state.items.set(String(item.id), item);
-          return json(item, 201);
+          const itemId = String(state.nextItem++);
+          state.items.set(itemId, { id: itemId, entry_type: "Item", entry: structuredClone(body!.item as JsonObject) });
+          return json({ id: itemId, ...(body!.item as JsonObject) }, 201);
         }
         const entryMatch = path.match(/^\/api\/banks\/(\d+)\/bank_entries\/(\d+)$/);
         if (entryMatch) {
-          if (method === "GET") return state.entries.has(entryMatch[2]!) ? json(state.entries.get(entryMatch[2]!)) : json({ error: "missing" }, 404);
+          if (method === "GET") return state.entries.has(entryMatch[2]!) ? json(embedded(state, state.entries.get(entryMatch[2]!)!)) : json({ error: "missing" }, 404);
           if (method === "DELETE") {
             state.entries.delete(entryMatch[2]!);
             return json(null, 204);
           }
         }
         if (/^\/api\/banks\/\d+\/bank_entries$/.test(path)) {
-          if (method === "GET") return json(listPage([...state.entries.values()]));
+          const listedBank = path.split("/")[3];
+          if (method === "GET") return json(listPage([...state.entries.values()].filter((row) => String(row.bank_id) === listedBank).map((row) => embedded(state, row))));
           if (method === "POST") {
             const entry = { id: String(state.nextEntry++), ...(body!.bank_entry as JsonObject) };
             state.entries.set(String(entry.id), entry);
@@ -596,8 +619,9 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       banks_sha256: await browserDigest(state.banks),
       bank_sha256: await browserDigest(state.banks.find((bank) => bank.id === "91")),
       item_sha256: await browserDigest(state.items.get("501")),
-      entries_sha256: await browserDigest([...state.entries.values()]),
-      entry_sha256: await browserDigest(state.entries.get("401")),
+      item502_sha256: await browserDigest(state.items.get("502")),
+      entries_sha256: await browserDigest([...state.entries.values()].filter((row) => row.bank_id === "91").map((row) => embedded(state, row))),
+      entry_sha256: await browserDigest(embedded(state, state.entries.get("401")!)),
       shares_sha256: await browserDigest(state.shares),
     });
     const bankWriteCases = [
@@ -625,16 +649,16 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
         expected_snapshot: { bank_sha256: s.bank_sha256 },
       }) },
       { name: "canvas_item_bank_update_item", args: (s: JsonObject) => ({
-        course_id: COURSE_ID, bank_id: "91", item_id: "501",
+        course_id: COURSE_ID, bank_id: "91", item_id: "502",
         item: {
-          id: "501", entry_type: "Item", points_possible: 1,
+          id: "502", entry_type: "Item", points_possible: 1,
           entry: {
             title: "Question A2", item_body: "<p>A2</p>", interaction_type_slug: "choice",
             interaction_data: { choices: [{ id: "a", item_body: "A" }, { id: "b", item_body: "B" }] },
             scoring_data: { value: "a" }, scoring_algorithm: "Equivalence",
           },
         },
-        expected_snapshot: { bank_sha256: s.bank_sha256, item_sha256: s.item_sha256 },
+        expected_snapshot: { bank_sha256: s.bank_sha256, item_sha256: s.item502_sha256 },
       }) },
       { name: "canvas_item_bank_attach_item", args: (s: JsonObject) => ({ course_id: COURSE_ID, bank_id: "91", item_id: "501", expected_snapshot: { bank_sha256: s.bank_sha256, item_sha256: s.item_sha256, entries_sha256: s.entries_sha256 } }) },
       { name: "canvas_item_bank_delete_entry", args: (s: JsonObject) => ({ course_id: COURSE_ID, bank_id: "91", bank_entry_id: "401", expected_snapshot: { bank_sha256: s.bank_sha256, entry_sha256: s.entry_sha256, entries_sha256: s.entries_sha256 } }) },
@@ -676,7 +700,9 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
         matched: true, ok: true, sent: true, outcomeUnknown: false,
         verification: { schema: "morrow.browser-verification.v1", status: "verified" },
       });
-      expect(provider.requests.filter((request) => request.method !== "GET"), writeCase.name).toHaveLength(1);
+      // Canvas's own Item Banks page shares a new bank with its course and gives a new question its bank entry.
+      const dispatches = ["canvas_item_bank_create_bank", "canvas_item_bank_create_item"].includes(writeCase.name) ? 2 : 1;
+      expect(provider.requests.filter((request) => request.method !== "GET"), writeCase.name).toHaveLength(dispatches);
     }
 
     const builderToken = `Signature ${"builder-credential-".repeat(8)}`;
@@ -958,6 +984,12 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       { id: "91", title: "Cell bank", language: "en" },
       { id: "93", title: "Disposable bank", language: "en" },
     ];
+    // The question as Morrow reads it: through its bank entry, in the documented question fields.
+    const bankItemAsRead = (): JsonObject => {
+      const stored = bankItems.get("501")!.entry as JsonObject;
+      const fields = ["title", "item_body", "calculator_type", "interaction_data", "properties", "scoring_data", "scoring_algorithm", "feedback", "answer_feedback", "interaction_type_slug"];
+      return { id: "501", entry_type: "Item", entry: Object.fromEntries(fields.filter((field) => stored[field] !== undefined).map((field) => [field, stored[field]])) };
+    };
     const bankItems = new Map<string, JsonObject>([
       ["501", bankItem],
       ["503", { ...structuredClone(questionPayloads.essay), id: "503" }],
@@ -967,6 +999,13 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       { id: "704", bank_id: "91", entry_type: "Item", entry_id: "504" },
     ];
     const bankShares: JsonObject[] = [{ id: "share-77", bank_id: "91", entity_type: "course", entity_id: "77", permission: "read" }];
+    // What the live service answers for an entry: its question embedded, and no `entry_id`.
+    const embeddedEntry = (row: JsonObject): JsonObject => {
+      const question = String(row.entry_type) === "Item" ? bankItems.get(String(row.entry_id)) : undefined;
+      if (!question) return row;
+      const { entry_id: entryId, ...rest } = row;
+      return { ...rest, entry: { ...(question.entry as JsonObject), id: String(entryId) } };
+    };
     const quizBankDraws: JsonObject[] = [];
     const courseModules: JsonObject[] = [{ id: "7", name: "Week one" }, { id: "9", name: "Week two" }];
     const courseModuleItems: JsonObject[] = [{ id: "554", module_id: "7", position: 1, type: "Page", page_url: "cells" }];
@@ -1094,28 +1133,29 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
         const itemMatch = url.pathname.match(/^\/api\/banks\/([1-9][0-9]{0,18})\/items\/([1-9][0-9]{0,18})$/);
         if (itemMatch) {
           const itemId = itemMatch[2]!;
-          if (method === "GET") return bankItems.has(itemId) ? json(bankItems.get(itemId)) : json({ error: "missing" }, 404);
+          // The live service has no question read under a bank, and takes a question flat.
+          if (method === "GET") return json({ error: "not found" }, 404);
           if (method === "PATCH") {
             writes += 1;
             if (!bankItems.has(itemId)) return json({ error: "missing" }, 404);
-            const saved = isJsonObject(body.item) ? { ...structuredClone(body.item), id: itemId } : { id: itemId };
-            bankItems.set(itemId, saved);
-            return afterMutation({ item: saved });
+            const flat = isJsonObject(body.item) ? structuredClone(body.item) : {};
+            bankItems.set(itemId, { ...bankItems.get(itemId), id: itemId, entry: flat });
+            return afterMutation({ ...flat, id: itemId });
           }
         }
         const itemListMatch = url.pathname.match(/^\/api\/banks\/([1-9][0-9]{0,18})\/items$/);
         if (itemListMatch && method === "POST") {
           writes += 1;
           const id = String(nextBankItemId++);
-          const saved = { ...(isJsonObject(body.item) ? structuredClone(body.item) : {}), id };
-          bankItems.set(id, saved);
-          return afterMutation({ item: saved }, 201);
+          const flat = isJsonObject(body.item) ? structuredClone(body.item) : {};
+          bankItems.set(id, { id, entry_type: "Item", entry: flat });
+          return afterMutation({ ...flat, id }, 201);
         }
         const entryMatch = url.pathname.match(/^\/api\/banks\/([1-9][0-9]{0,18})\/bank_entries\/([1-9][0-9]{0,18})$/);
         if (entryMatch) {
           const [bankId, entryId] = entryMatch.slice(1);
           const index = bankEntries.findIndex((entry) => exactId(entry.bank_id) === bankId && exactId(entry.id) === entryId);
-          if (method === "GET") return index >= 0 ? json(bankEntries[index]) : json({ error: "missing" }, 404);
+          if (method === "GET") return index >= 0 ? json(embeddedEntry(bankEntries[index]!)) : json({ error: "missing" }, 404);
           if (method === "DELETE") {
             writes += 1;
             if (index < 0) return json({ error: "missing" }, 404);
@@ -1126,7 +1166,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
         const entryListMatch = url.pathname.match(/^\/api\/banks\/([1-9][0-9]{0,18})\/bank_entries$/);
         if (entryListMatch) {
           const rows = bankEntries.filter((entry) => exactId(entry.bank_id) === entryListMatch[1]);
-          if (method === "GET") return json(listPage(rows));
+          if (method === "GET") return json(listPage(rows.map(embeddedEntry)));
           if (method === "POST") {
             writes += 1;
             const saved = { id: String(nextBankEntryId++), ...(isJsonObject(body.bank_entry) ? structuredClone(body.bank_entry) : {}) };
@@ -2182,7 +2222,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
         name: "morrow_plan_item_bank_question_image_alt_repair",
         arguments: {
           source_binding_id: SOURCE_BINDING_ID, course_id: COURSE_ID, bank_id: "91", bank_entry_id: "701", item_id: "501",
-          item_sha256: await guard.itemBankItemDigest(bankItem), image_index: 1,
+          item_sha256: await guard.itemBankItemDigest(bankItemAsRead()), image_index: 1,
           image_src_sha256: await crypto.subtle.digest("SHA-256", new TextEncoder().encode("/courses/42/files/9")).then((bytes) => Buffer.from(bytes).toString("hex")),
           // The acknowledgement is exact: every disclosed external course, and no other.
           alt_text: "Cell membrane diagram", fan_out: structured(fanOut).fan_out,
@@ -2213,7 +2253,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
         name: "morrow_plan_item_bank_question_image_alt_repair",
         arguments: {
           source_binding_id: SOURCE_BINDING_ID, course_id: COURSE_ID, bank_id: "91", bank_entry_id: "701", item_id: "501",
-          item_sha256: await guard.itemBankItemDigest(bankItem), image_index: 1,
+          item_sha256: await guard.itemBankItemDigest(bankItemAsRead()), image_index: 1,
           image_src_sha256: await crypto.subtle.digest("SHA-256", new TextEncoder().encode("/courses/42/files/9")).then((bytes) => Buffer.from(bytes).toString("hex")),
           alt_text: "Cell membrane diagram", fan_out: structured(fanOut).fan_out,
           fan_out_receipt: structured(fanOut).fan_out_receipt, acknowledged_course_ids: [],

@@ -10,22 +10,34 @@ export async function executeQuizBankDrawInPage(input) {
   const ltiHost = /^[^.]+\.quiz-lti(?:-[^.]+)*\.instructure\.com$/i;
   const apiHostPattern = /^[^.]+\.quiz-api(?:-[^.]+)*\.instructure\.com$/i;
   const currentHost = String(location.hostname || "").toLowerCase();
-  if (!ltiHost.test(currentHost)) return { matched: false };
   let canvas;
-  let referrer;
   try {
     canvas = new URL(input.canvasOrigin);
-    referrer = new URL(document.referrer || "");
   } catch {
     return { matched: false };
   }
   const courseId = id(input.courseId);
   const assignmentId = id(input.assignmentId);
-  const referrerMatch = referrer.pathname.match(/^\/courses\/([1-9][0-9]{0,18})\/assignments\/([1-9][0-9]{0,18})\/?$/);
   const tenant = canvas.hostname.match(/^([^.]+)(?:\.(?:beta|test))?\.instructure\.com$/i)?.[1]?.toLowerCase();
-  if (canvas.protocol !== "https:" || canvas.origin !== input.canvasOrigin || referrer.origin !== canvas.origin
-    || !courseId || !assignmentId || referrerMatch?.[1] !== courseId || referrerMatch?.[2] !== assignmentId
-    || !tenant || currentHost.split(".")[0] !== tenant) return { matched: false };
+  if (canvas.protocol !== "https:" || canvas.origin !== input.canvasOrigin || !courseId || !assignmentId || !tenant) return { matched: false };
+  // Canvas can render the New Quiz builder natively, on its own origin at
+  // /courses/:course/assignments/:assignment/build/:quiz, instead of inside a quiz-lti frame.
+  const nativeBuild = location.origin === canvas.origin
+    ? String(location.pathname || "").match(/^\/courses\/([1-9][0-9]{0,18})\/assignments\/([1-9][0-9]{0,18})\/build\/([1-9][0-9]{0,18})$/)
+    : null;
+  if (nativeBuild) {
+    if (nativeBuild[1] !== courseId || nativeBuild[2] !== assignmentId
+      || id(sessionStorage.getItem("canvas_local_context_id")) !== courseId
+      || id(sessionStorage.getItem("canvas_assignment_id")) !== assignmentId
+      || id(sessionStorage.getItem("assignment_id")) !== nativeBuild[3]) return { matched: false };
+  } else {
+    if (!ltiHost.test(currentHost)) return { matched: false };
+    let referrer;
+    try { referrer = new URL(document.referrer || ""); } catch { return { matched: false }; }
+    const referrerMatch = referrer.pathname.match(/^\/courses\/([1-9][0-9]{0,18})\/assignments\/([1-9][0-9]{0,18})\/?$/);
+    if (referrer.origin !== canvas.origin || referrerMatch?.[1] !== courseId || referrerMatch?.[2] !== assignmentId
+      || currentHost.split(".")[0] !== tenant) return { matched: false };
+  }
   const operation = input.operation;
   const contracts = {
     list_quiz_draws: ["GET", "/api/quizzes/{builder_quiz_id}/quiz_entries"],
@@ -45,19 +57,47 @@ export async function executeQuizBankDrawInPage(input) {
   const token = String(localStorage.getItem("quiz.build_token") || sessionStorage.getItem("quiz.build_token") || "");
   let backendUrl;
   try { backendUrl = new URL(backend); } catch { backendUrl = null; }
-  const apiHost = currentHost.replace(".quiz-lti", ".quiz-api");
-  if (!backendUrl || backendUrl.protocol !== "https:" || backendUrl.hostname.toLowerCase() !== currentHost
+  const backendHost = backendUrl ? backendUrl.hostname.toLowerCase() : "";
+  const apiHost = backendHost.replace(".quiz-lti", ".quiz-api");
+  if (!backendUrl || backendUrl.protocol !== "https:" || !ltiHost.test(backendHost) || backendHost.split(".")[0] !== tenant
+    || (!nativeBuild && backendHost !== currentHost)
     || !apiHostPattern.test(apiHost) || token.length < 51 || token.length > 8192) {
     return { matched: true, ok: false, sent: false, error: "quiz_bank_builder_credential_unavailable" };
   }
-  const resources = performance.getEntriesByType("resource").map((entry) => String(entry?.name || ""));
-  const quizIds = [...new Set(resources.flatMap((url) => {
-    const match = url.match(/\/api\/quizzes\/([1-9][0-9]{0,18})(?:[/?#]|$)/);
-    return match ? [match[1]] : [];
-  }))];
-  if (quizIds.length !== 1) return { matched: true, ok: false, sent: false, error: "quiz_bank_builder_context_ambiguous" };
-  const quizId = quizIds[0];
+  let quizId;
+  if (nativeBuild) {
+    // The number in the builder URL is not the builder quiz: the page's signed build token names
+    // it in its `resource_id` claim, and the quiz service refuses every other quiz id.
+    let claims = null;
+    try {
+      const part = token.split(" ").pop().split(".")[1] || "";
+      claims = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/")));
+    } catch {
+      claims = null;
+    }
+    quizId = plain(claims) && claims.scope === "quiz.build" ? id(claims.resource_id) : "";
+    if (!quizId) return { matched: true, ok: false, sent: false, error: "quiz_bank_builder_context_ambiguous" };
+  } else {
+    const resources = performance.getEntriesByType("resource").map((entry) => String(entry?.name || ""));
+    const quizIds = [...new Set(resources.flatMap((url) => {
+      const match = url.match(/\/api\/quizzes\/([1-9][0-9]{0,18})(?:[/?#]|$)/);
+      return match ? [match[1]] : [];
+    }))];
+    if (quizIds.length !== 1) return { matched: true, ok: false, sent: false, error: "quiz_bank_builder_context_ambiguous" };
+    quizId = quizIds[0];
+  }
   const headers = { Accept: "application/json", Authorization: token, AuthType: "Signature" };
+  // New Quizzes and Item Banks keep each course image as an inst-fs URL signed with a
+  // `token` query value. That value is a file credential, and Canvas signs a new one on
+  // every read, so it is removed from every answer here: it never leaves the page, and a
+  // question reads the same twice. Canvas signs the bare URL again when it is saved back.
+  function withoutFileAccessTokens(text) {
+    if (typeof text !== "string" || !text.includes("token=")) return text;
+    return text.replace(/https:\/\/inst-fs-[a-z0-9-]+\.inscloudgate\.net\/(?:[^"'\s<>\\]|\\u0026)*/gi,
+      (url) => url.replace(/(\?|&amp;|&|\\u0026amp;|\\u0026)token=[A-Za-z0-9._~-]*((?:&amp;|&|\\u0026amp;|\\u0026)?)/g,
+        (match, before, after) => (before === "?" ? (after ? "?" : "") : after)));
+  }
+
   const boundedResponse = async (response) => {
     const declared = response?.headers?.get?.("content-length");
     if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_BYTES)) {
@@ -79,7 +119,7 @@ export async function executeQuizBankDrawInPage(input) {
         }
         text += decoder.decode(next.value, { stream: true });
       }
-      return { text: text + decoder.decode() };
+      return { text: withoutFileAccessTokens(text + decoder.decode()) };
     } catch {
       try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return { unreadable: true };
@@ -212,6 +252,9 @@ export async function executeQuizBankDrawInPage(input) {
   const rowId = (row) => id(row?.id ?? row?.quiz_entry?.id);
   const normalized = (row) => plain(row?.quiz_entry) ? row.quiz_entry : row;
   const entryType = (row) => String(normalized(row)?.entry_type || "").replaceAll(/[_ -]/g, "").toLowerCase();
+  // A saved draw row names what it draws only inside its embedded `entry`: the bank for a Bank
+  // row, the bank entry for a BankEntry row. `entry_id` is the create field.
+  const drawTargetId = (value) => id(value?.entry_id) || (plain(value?.entry) ? id(value.entry.id) : "");
   const requiredSnapshotKeys = operation.nickname === "attach_bank_entry_to_quiz"
     ? ["bank_sha256", "entry_sha256", "quiz_entries_sha256"]
     : operation.nickname === "delete_quiz_bank_entry"
@@ -234,10 +277,10 @@ export async function executeQuizBankDrawInPage(input) {
     const value = normalized(target);
     const kind = entryType(target);
     if (["bank", "itembank"].includes(kind)) {
-      if (id(value?.entry_id) !== bankId) return { matched: true, ok: false, sent: false, error: "quiz_bank_entry_bank_mismatch" };
+      if (drawTargetId(value) !== bankId) return { matched: true, ok: false, sent: false, error: "quiz_bank_entry_bank_mismatch" };
     } else if (kind === "bankentry") {
       const bankEntryId = id(input.arguments?.bank_entry_id);
-      if (!bankEntryId || id(value?.entry_id) !== bankEntryId || snapshot.entry_sha256 !== input.verifiedEntrySha256) {
+      if (!bankEntryId || drawTargetId(value) !== bankEntryId || snapshot.entry_sha256 !== input.verifiedEntrySha256) {
         return { matched: true, ok: false, sent: false, error: "quiz_bank_entry_bank_mismatch" };
       }
     } else return { matched: true, ok: false, sent: false, error: "quiz_bank_entry_type_unsupported" };
@@ -276,7 +319,7 @@ export async function executeQuizBankDrawInPage(input) {
       const sample = allItems
         ? Object.hasOwn(properties, "sample_num") && properties.sample_num === null
         : Number(properties.sample_num) === pickCount;
-      return ["bank", "itembank"].includes(entryType(row)) && id(value?.entry_id) === bankId
+      return ["bank", "itembank"].includes(entryType(row)) && drawTargetId(value) === bankId
         && sample && Number(value?.points_possible) === points && Number(value?.position) === position;
     };
     payload = { quiz_entry: { entry_type: "Bank", entry_id: bankId, position, points_possible: points, properties: { sample_num: pickCount } } };
@@ -285,7 +328,7 @@ export async function executeQuizBankDrawInPage(input) {
     if (!bankEntryId) return { matched: true, ok: false, sent: false, error: "quiz_bank_payload_invalid" };
     matches = (row) => {
       const value = normalized(row);
-      return entryType(row) === "bankentry" && id(value?.entry_id) === bankEntryId
+      return entryType(row) === "bankentry" && drawTargetId(value) === bankEntryId
         && Number(value?.points_possible) === points && Number(value?.position) === position;
     };
     payload = { quiz_entry: { entry_type: "BankEntry", entry_id: bankEntryId, position, points_possible: points } };

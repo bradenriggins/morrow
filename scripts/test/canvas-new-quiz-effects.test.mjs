@@ -77,7 +77,8 @@ test("course accommodation sends one exact JSON array and verifies its per-user 
   assert.equal(result.verification.status, "verified");
   assert.equal(writes.length, 1);
   assert.equal(writes[0].options.headers.get("Content-Type"), "application/json;charset=UTF-8");
-  assert.equal(writes[0].options.body, JSON.stringify([payload]));
+  // The quiz service looks a string user_id up as a different user, so the id is a JSON number on the wire.
+  assert.equal(writes[0].options.body, JSON.stringify([{ ...payload, user_id: Number(USER_ID) }]));
 });
 
 test("quiz accommodation sends one exact JSON array and preserves zero values", async () => {
@@ -88,7 +89,8 @@ test("quiz accommodation sends one exact JSON array and preserves zero values", 
   }, { successful: [{ user_id: USER_ID }], failed: [] });
   assert.equal(result.verification.status, "verified");
   assert.equal(writes.length, 1);
-  assert.equal(writes[0].options.body, JSON.stringify([payload]));
+  // The quiz service looks a string user_id up as a different user, so the id is a JSON number on the wire.
+  assert.equal(writes[0].options.body, JSON.stringify([{ ...payload, user_id: Number(USER_ID) }]));
 });
 
 test("accommodation failure row is a mismatch and a lost response is never retried", async () => {
@@ -122,7 +124,15 @@ test("report accepts only an assignment-bound Progress receipt", async () => {
     results: { url: "/api/quiz/v1/reports/501.csv" },
   });
   assert.equal(completed.result.verification.status, "verified");
-  const unknown = await send("canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post", args, null, { throwAfterSend: true });
+  // What Canvas actually answers: the Progress record inside a `progress` envelope, with an absolute URL.
+  const live = await send("canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post", args, { progress: {
+    id: "1620559", context_id: QUIZ_ID, context_type: "Assignment", user_id: "28206", tag: "new_quiz_export", completion: null,
+    workflow_state: "queued", message: null, url: "https://school.instructure.com/api/v1/progress/1620559" } });
+  assert.equal(live.result.verification.status, "verified", JSON.stringify(live.result.verification));
+  const liveWrong = await send("canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post", args, { progress: {
+    id: "1620559", context_id: "78", context_type: "Assignment", workflow_state: "queued", url: "https://school.instructure.com/api/v1/progress/1620559" } });
+  assert.equal(liveWrong.result.verification.status, "mismatch");
+  const unknown =await send("canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post", args, null, { throwAfterSend: true });
   assert.equal(unknown.writes.length, 1);
   assert.equal(unknown.result.verification.reason, "progress_id_response_lost");
 });

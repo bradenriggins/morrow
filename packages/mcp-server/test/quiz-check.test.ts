@@ -152,6 +152,18 @@ describe("New Quiz check with bank-backed content", () => {
     expect(calls.every((call) => !call.name.startsWith("canvas_item_bank_"))).toBe(true);
   });
 
+  it("reads a question saved by Canvas, with its empty stimulus id and feedback map, as complete", async () => {
+    // The shape Canvas answers for every saved question: `stimulus_quiz_entry_id: ""` and
+    // `answer_feedback: {}` even on a question that has neither.
+    const saved = { ...directItem("1", 1, 2, "<p>Explain.</p>"), stimulus_quiz_entry_id: "" };
+    (saved.entry as JsonObject).answer_feedback = {};
+    const { runtime } = fixture(quizReads("102", "Saved quiz", [saved]));
+    const report = structured(await checkNewQuiz(runtime, { ...base, quiz_id: "102", expected_question_count: 1 }));
+    expect(report.status, JSON.stringify(report)).toBe("checks_finished");
+    expect(report.findingCount).toBe(0);
+    expect(quizOf(report)).toMatchObject({ questionCount: 1, totalsComplete: true, contentComplete: true, relationships: { linkedQuestionCount: 0 } });
+  });
+
   it("resolves the private builder row shape as well as the documented one", async () => {
     const { runtime } = fixture(quizReads("101", "Builder quiz", [
       { id: "2", position: 1, points_possible: 3, entry_type: "BankEntry", bank_id: "91", entry_id: "789", entry: question("<p>Builder shape.</p>") },

@@ -11,6 +11,9 @@ import { BLACKBOARD_ACTIONS } from "./blackboard-actions.js";
 const CANVAS_ID = /^[1-9][0-9]{0,18}$/;
 const BLACKBOARD_ID = /^_[1-9][0-9]{0,18}_[1-9][0-9]{0,18}$/;
 const REVIEW_READ_TIMEOUT_MS = 4_000;
+// An Item Bank read opens a fresh Item Banks launch tab and takes eight to nine seconds live,
+// so the general budget left every entry and question unnamed and Approve withheld.
+const ITEM_BANK_REVIEW_READ_TIMEOUT_MS = 20_000;
 const REVIEW_READ_BUDGET = 200;
 const ITEM_BANK_UPDATE_TOOL = "canvas_item_bank_update_item";
 const ITEM_BANK_GUARD_KIND = "item_bank_entry_image_alt";
@@ -470,7 +473,7 @@ async function boundedRead(
   const cached = cache.get(key);
   if (cached) return { result: await cached, limited: false };
   if (cache.size >= REVIEW_READ_BUDGET) return { result: null, limited: true };
-  const signal = AbortSignal.timeout(REVIEW_READ_TIMEOUT_MS);
+  const signal = AbortSignal.timeout(publicName.startsWith("canvas_item_bank_") ? ITEM_BANK_REVIEW_READ_TIMEOUT_MS : REVIEW_READ_TIMEOUT_MS);
   const pending = input.read(publicName, args, signal).catch(() => null);
   cache.set(key, pending);
   return { result: await pending, limited: false };
@@ -622,6 +625,15 @@ function catalogSpecs(mapping: CatalogTool, args: JsonObject): readonly TargetSp
       if (!value) return [];
       readArguments[name] = value;
     }
+    // Every Item Bank read is bound to the selected course by a `course_id` claim that is not in
+    // its path, so the generated route omits it. Without it the read is refused, the object has no
+    // name, and the review withholds approval for every entry delete and question update.
+    const itemBankRead = route.read.startsWith("canvas_item_bank_");
+    if (itemBankRead && readArguments.course_id === undefined) {
+      const courseId = exactId(args.course_id);
+      if (!courseId) return [];
+      readArguments.course_id = courseId;
+    }
     return [{
       field: route.field,
       label: route.label,
@@ -641,6 +653,8 @@ function catalogSpecs(mapping: CatalogTool, args: JsonObject): readonly TargetSp
         // the object Morrow just read, so the token identifies it.
         || sameId(value.learnerToken, id),
       nameFields: GENERIC_NAME_FIELDS,
+      // A bank entry and a bank question carry their title inside the embedded `entry`.
+      ...(itemBankRead && ["canvas_item_bank_get_entry", "canvas_item_bank_get_item"].includes(route.read) ? { entryNameFields: ["title"] } : {}),
       fallbackName: `${route.label} ${id}`,
     } satisfies TargetSpec];
   });

@@ -518,8 +518,20 @@ function richFillPropertiesReason(properties: Plain): string | null {
   return null;
 }
 
+/**
+ * The settings Canvas itself saves in every essay's `properties`. Every essay read back from a
+ * live course carries this exact set, so a saved essay is valid and resending it is safe.
+ */
+const ESSAY_BOOLEAN_PROPERTIES: readonly string[] = ["word_limit", "spell_check", "show_word_count", "rich_content_editor"];
+const ESSAY_COUNT_PROPERTIES: readonly string[] = ["word_limit_max", "word_limit_min"];
+
 function questionPropertiesReason(slug: string, properties: Plain, interaction: Plain, algorithm: unknown): string | null {
-  if (["true-false", "formula", "hot-spot", "numeric", "essay"].includes(slug)) {
+  if (slug === "essay") {
+    return Object.entries(properties).every(([key, value]) => (ESSAY_BOOLEAN_PROPERTIES.includes(key) && typeof value === "boolean")
+      || (ESSAY_COUNT_PROPERTIES.includes(key) && Number.isSafeInteger(value) && Number(value) >= 0))
+      ? null : "create_properties_invalid";
+  }
+  if (["true-false", "formula", "hot-spot", "numeric"].includes(slug)) {
     return Object.keys(properties).length === 0 ? null : "create_properties_invalid";
   }
   if (slug === "categorization") {
@@ -748,7 +760,10 @@ export function completeQuizItemPayloadReason(item: unknown): string | null {
   if (!plainObject(entry.interaction_data) || !plainObject(entry.scoring_data)) return "create_required_data_missing";
   if (!CREATE_ALGORITHMS[slug]?.includes(asText(entry.scoring_algorithm))) return "create_scoring_algorithm_invalid";
   if (entry.properties !== undefined && !plainObject(entry.properties)) return "create_properties_invalid";
-  if (entry.answer_feedback !== undefined) {
+  // Canvas saves every question with `answer_feedback: {}`, so an empty map is no feedback and
+  // a saved non-choice question reads back as valid.
+  if (entry.answer_feedback !== undefined
+    && !(plainObject(entry.answer_feedback) && Object.keys(entry.answer_feedback).length === 0)) {
     if (slug !== "choice" || !plainObject(entry.answer_feedback)) return "create_answer_feedback_invalid";
   }
   const interaction = entry.interaction_data;

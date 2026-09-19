@@ -519,6 +519,23 @@ Every row stays open until its evidence columns are added and its status becomes
 | 502 | P1 | R7 | A change the executor refused before sending lost its reason twice: the Bridge sent a whole sentence where one token belongs, and the gateway looked for the reason one level above where the source put it. | closure section 502; Bridge and gateway regressions, live BT2 course 89585 | IMPLEMENTED |
 | 503 | P2 | R7 | A New Quiz plan or an operation plan that Morrow could not make hashed its reason away and named no failing reading, so neither the person nor their assistant could act on it. | closure section 503; gateway regressions, live BT2 course 89585 | IMPLEMENTED |
 | 504 | P1 | R7 | A question's type could never be changed, because Canvas returns an empty tag list on every saved question and Morrow treated the field's presence as content the replacement would lose. | closure section 504; gateway regressions, live BT2 course 89585 | IMPLEMENTED |
+| 505 | P1 | R7 | Every New Quiz accommodation failed: Morrow sent the learner's `user_id` as a JSON string, which the quiz service looks up as a different user and answers 404 "Users with IDs … were not found". | closure section 505; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 506 | P0 | R7 | Any New Quiz or Item Bank holding a course image could not be read, and no guarded edit of such a question could succeed: Canvas stores each image as an inst-fs URL signed with a `token` that is a file credential and changes on every read. | closure section 506; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 507 | P1 | R7 | A New Quiz holding a formula, categorization, or fill-in-the-blank question could not be read: the privacy walk refused anything nested past twelve levels, while Morrow accepts question payloads thirty-two levels deep. | closure section 507; gateway regressions, live BT2 course 89585 | IMPLEMENTED |
+| 508 | P1 | R7 | The New Quiz check reported every saved question as broken, because Canvas saves `stimulus_quiz_entry_id: ""` and `answer_feedback: {}` on every question and Morrow read both empty values as real references. | closure section 508; gateway and Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 509 | P1 | R7 | Every essay Canvas saves was refused by Morrow's question contract, because Canvas stores six essay settings in `properties` and the contract allowed only an empty object. | closure section 509; gateway and Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 510 | P2 | R7 | Every New Quiz report request ended unconfirmed although Canvas accepted it, because Canvas answers with `{"progress": {...}}` and the verifier looked for the Progress fields one level up. | closure section 510; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 511 | P1 | R7 | Morrow's Item Bank reads and writes addressed a different course than Canvas: the bank service keys a course by its Canvas uuid, and Morrow used the page's numeric global id, so every course listed no banks, a bank Morrow made was invisible in Canvas, and a bank made in Canvas was invisible to Morrow. | closure section 511; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 512 | P1 | R7 | A bank Morrow created never joined the course and could not be confirmed: Canvas's own Item Banks page creates a bank and then shares it read-only with the course, and Morrow made only the first request; the confirmation also compared a `language` field Canvas never returns. | closure section 512; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 513 | P1 | R7 | Sharing a bank with a course sent the numeric Canvas course id, which names no course to the bank service, and then confirmed that useless share as verified. | closure section 513; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 514 | P1 | R7 | Every quiz-draw read and write stalled until its deadline on a Canvas that renders the New Quiz builder natively: the executor waited for a quiz-lti frame that never appears, and then addressed the quiz by the number in the builder URL, which is not the builder quiz. | closure section 514; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 515 | P1 | R7 | No Item Bank question could be created, read, or updated: Morrow sent the question nested under `entry`, which the bank service refuses with 422; read it through `GET /api/banks/:bank/items/:item`, which always answers 404; and never gave a new question its bank entry. | closure section 515; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 516 | P1 | R7 | Attaching a question to a bank and confirming a new question always failed: a live bank entry names its question only as `entry.id` (no `entry_id`), Canvas saves `interaction_type_slug` as `interaction_type.slug`, and the question to attach sits in another bank Morrow never looked in. | closure section 516; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 517 | P2 | R7 | Every bank delete and bank-entry delete ended unconfirmed although it succeeded: the service archives what it deletes and still answers its read, while Morrow required a 404. | closure section 517; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 518 | P1 | R7 | No Item Bank entry delete or question update could ever be approved: the review's confirming read omitted the `course_id` every Item Bank read requires, so the target had no name and the approval page offered only Cancel. | closure section 518; gateway regressions, live BT2 course 89585 | IMPLEMENTED |
+| 519 | P1 | R7 | Every quiz-draw attach and removal ended unconfirmed or refused: a saved quiz draw row names its bank or bank entry only in its embedded `entry`, never in `entry_id`. | closure section 519; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 520 | P1 | R7 | Item Bank approvals were offered only by chance: the review gives each confirming read four seconds, and an Item Bank read opens a launch tab and takes eight to nine seconds live. | closure section 520; gateway regressions, live BT2 course 89585 | IMPLEMENTED |
+| 521 | P1 | R7 | Every Item Bank question alt-text repair was refused before sending: the repair resends the stored question, which carries Canvas's own read-only fields and names its type only as `interaction_type.slug`, so the question contract saw no question type. | closure section 521; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3524,6 +3541,110 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Condition: replacing a New Quiz question is a delete and a create, and Morrow refuses when the current question holds a field the create route cannot carry, so nothing is silently lost. Canvas returns `tag_associations` as an empty list on every saved question. Morrow treated the field's presence as content, so it refused every replacement and a question's type could never be changed.
 - Repair: a field that holds nothing is not a field the replacement loses. A field that holds something is still refused. `packages/mcp-server/test/new-quiz-replacement-carry.test.ts` covers both.
 - Status: `IMPLEMENTED`; proven live in BT2 course 89585, where a true-or-false question was replaced by a written-response question and verified.
+
+### 505: every New Quiz accommodation failed
+
+- Condition: the quiz service looks up a string `user_id` as another user and answers 404 "Users with IDs 48901 were not found"; the same id as a JSON number is accepted. Live evidence: course-level and quiz-level accommodation POSTs for LTI Test Student 2 returned 200 with a per-user success row once the id was a number.
+- Repair: the reviewed payload and its digest keep the string form; `newQuizAccommodationBody` in `connector/extension/src/canvas-content.js` writes the id as JSON digits on the wire, exact for a shard id beyond 2^53. `scripts/test/canvas-new-quiz-accommodation-body.test.mjs` and `scripts/test/canvas-new-quiz-effects.test.mjs` cover it.
+- Canvas precondition: a quiz-level accommodation needs the learner to be a New Quizzes participant of that quiz; the quiz service syncs participants when the quiz is launched. Canvas answers "not participants in this assignment" otherwise.
+- Status: `IMPLEMENTED`; course-level and quiz-level accommodations proven live and verified in BT2 course 89585.
+
+### 506: a New Quiz holding a course image could not be read or edited
+
+- Condition: New Quizzes rewrites a course image as `https://inst-fs-….inscloudgate.net/files/…?token=<JWT>` and signs a new token (13-hour lifetime) on every read. The privacy boundary correctly refused the credential, so the whole quiz item list was unreadable; and because every guarded edit digests the question HTML, the review read and the send read could never match.
+- Repair: both in-page executors remove the `token` query value from inst-fs URLs where they read a Canvas answer (`withoutFileAccessTokens` in `connector/extension/src/canvas-content.js` and `connector/extension/src/item-bank-executor.js`). Live evidence: New Quizzes re-signs a bare inst-fs URL on save, so write-back stays correct. `scripts/test/canvas-file-access-token.test.mjs` runs both copies.
+- Status: `IMPLEMENTED`; proven live: the image question read back without a credential, the audit found its four alt-less images, all four alt repairs verified, and each repaired image still loaded (HTTP 200).
+
+### 507: a New Quiz with a formula question could not be read
+
+- Condition: Canvas nests a formula question eight levels inside one item; with the list and Morrow's envelope the privacy walk passed its limit of twelve and refused the read.
+- Repair: `MAX_PRIVACY_OUTPUT_DEPTH` in `packages/gateway-core/src/privacy.ts` is thirty-two, matching the question payload limit. `packages/gateway-core/test/privacy.test.ts` covers the formula shape and a forty-level refusal.
+- Status: `IMPLEMENTED`; proven live on an eleven-question quiz holding nine question types.
+
+### 508: the New Quiz check flagged every saved question
+
+- Condition: Canvas saves `stimulus_quiz_entry_id: ""` and `answer_feedback: {}` on every question. The check read the empty id as a missing stimulus and the empty map as feedback on a non-choice question.
+- Repair: `packages/mcp-server/src/quiz-check.ts` treats an empty stimulus id as none; the question contract (TypeScript, the generated Bridge copy, and `connector/extension/src/quiz-item-payload.js`) treats an empty `answer_feedback` map as no feedback. Real feedback on a non-choice question is still refused.
+- Status: `IMPLEMENTED`; the check finishes with zero findings on the live proof quiz.
+
+### 509: every saved essay failed the question contract
+
+- Condition: all 146 essays in the course carry `word_limit`, `spell_check`, `word_limit_max`, `word_limit_min`, `show_word_count`, and `rich_content_editor` in `properties`; the contract allowed only an empty object.
+- Repair: the contract accepts exactly those keys with their observed types in every copy. `packages/mcp-server/test/quiz-item-payload.test.ts` covers the saved set and refuses other keys, bad counts, and the set on other types.
+- Status: `IMPLEMENTED`.
+
+### 510: a report Canvas accepted was never confirmed
+
+- Condition: Canvas answers `POST /api/quiz/v1/courses/:course/quizzes/:quiz/reports` with the Progress record inside `{"progress": {...}}`.
+- Repair: `verifyNewQuizReport` reads the envelope. `scripts/test/canvas-new-quiz-effects.test.mjs` pins the live shape.
+- Status: `IMPLEMENTED`; proven live and verified.
+
+### 511: Item Banks addressed a different course than Canvas
+
+- Condition: on Canvas's own Item Banks page the bank service lists and shares a course's banks under the Canvas course `uuid`; the page's `canvas_context_id` holds the numeric global id. Morrow listed by the global id, so every course showed no banks.
+- Repair: in native mode `connector/extension/src/item-bank-executor.js` reads the course's `uuid` from `GET /api/v1/courses/:id` and uses it for every bank list and course share, and shows it back as the selected course's numeric id. A Canvas answer that does not name the course stops before any bank request. `scripts/test/canvas-item-bank-executor.test.mjs` covers both.
+- Live-unverified: an LTI (non-native) Item Banks launch keeps its launch context.
+- Status: `IMPLEMENTED`; proven live: Morrow's list and Canvas's own Item Banks page now read the same banks.
+
+### 512: a bank Morrow created never joined the course
+
+- Condition: Canvas's Item Banks page runs `POST /api/banks`, then `POST /api/banks/:id/shared_banks` with `entityType: "course"` and `permission: "read"`. Morrow sent only the first, so the bank belonged to the person alone; and its confirmation compared a `language` field the bank read never returns.
+- Repair: bank creation makes both requests and confirms the bank in the course list; language is compared only when Canvas returns one. The test double now lists a course's banks by share, as the live service does.
+- Status: `IMPLEMENTED`; proven live and verified. Banks 4014 and 4015 from earlier runs remain as unshared or mis-shared test banks.
+
+### 513: a bank shared with a course reached no course
+
+- Condition: `share_bank` takes a numeric Canvas course id and sent it unchanged as the share's `entity_id`, then confirmed the share by that same value.
+- Repair: in native mode the executor resolves the target course's `uuid` from Canvas, sends it, and confirms the share by it.
+- Status: `IMPLEMENTED`.
+
+### 514: quiz draws stalled on a natively rendered builder
+
+- Condition: this tenant renders the New Quiz builder on Canvas's own origin at `/courses/:course/assignments/:assignment/build/:n`. The service worker waited for a quiz-lti frame until the deadline. The builder quiz is the `resource_id` claim of the page's `quiz.build_token` (scope `quiz.build`); the URL number is another id, and the quiz service answers 401 "resource id invalid" for it. The draw reader also did not remove image tokens, so a quiz holding an image was refused as privacy-sensitive.
+- Repair: `connector/extension/src/quiz-bank-draw-executor.js` binds course, assignment, and builder from the native page's session and the token claim; `connector/extension/src/service-worker.js` probes the native top frame; the draw reader carries `withoutFileAccessTokens`. `scripts/test/canvas-quiz-bank-draw-executor.test.mjs` and `scripts/test/canvas-file-access-token.test.mjs` cover them.
+- Status: `IMPLEMENTED`; the quiz-draw read is proven live.
+
+### 515: Item Bank questions could not be created, read, or updated
+
+- Condition: Canvas's own Item Banks page sends `{"item": {item_body, interaction_data, …}}` flat, creates the question and then its bank entry, reads a question through the bank entry that embeds it, and updates it with `PATCH /api/banks/:bank/items/:item`. `GET /api/banks/:bank/items/:item` answers 404 for every question, and `GET /api/items/:id` needs another credential scope.
+- Repair: `connector/extension/src/item-bank-executor.js` sends the question flat, gives a new question its entry in the bank named by the request, and reads a question through its bank entry in the documented QuestionItem shape for `get_item`, snapshots, confirmations, and the guarded alt repair. The test doubles in `scripts/test/canvas-item-bank-executor.test.mjs` and `scripts/test/canvas-item-bank-guard.test.mjs` now answer as the live service does.
+- Status: `IMPLEMENTED`; question create and question read are proven live and verified.
+
+### 516: attach and create confirmations always failed
+
+- Condition: a live bank entry row carries no `entry_id`; Canvas saves the question type as `interaction_type: { slug }`; the question an attach names lives in a different bank.
+- Repair: entry rows are matched by `entry_id` or `entry.id`; the saved question matches when every sent field matches and the slug agrees; attach reads the question from the course's own banks (at most 50), which also limits an attach to questions this course can reach.
+- Status: `IMPLEMENTED`; attach proven live and verified.
+
+### 517: a bank delete Canvas made was never confirmed
+
+- Condition: `DELETE /api/banks/:bank` and `DELETE /api/banks/:bank/bank_entries/:entry` archive: the read still answers 200 and the list drops the record.
+- Repair: an archived bank or entry absent from its list is confirmed deleted.
+- Status: `IMPLEMENTED`; proven live and verified.
+
+### 518: entry deletes and question updates could never be approved
+
+- Condition: the review names each addressed object by a confirming read generated from the catalog. Item Bank reads carry `course_id` outside their path, so the generated read omitted it and was refused; the target stayed unnamed and the page withheld Approve.
+- Repair: `packages/mcp-server/src/approval-context.ts` adds the change's `course_id` to Item Bank confirming reads and names a bank entry or question by its embedded title. `packages/mcp-server/test/approval-context.test.ts` covers both.
+- Status: `IMPLEMENTED`.
+
+### 519: quiz draws were never confirmed
+
+- Condition: live quiz rows answer `{"entry_type": "Bank", "entry": {bank}}` and `{"entry_type": "BankEntry", "entry": {bank entry}}`; `entry_id` exists only in the create body. Live evidence: both attaches returned 201 while Morrow reported them unconfirmed.
+- Repair: `drawTargetId` in `connector/extension/src/quiz-bank-draw-executor.js` reads `entry_id`, else `entry.id`, at every match. The draw test double now answers rows as Canvas does.
+- Status: `IMPLEMENTED`.
+
+### 520: Item Bank approvals appeared only by chance
+
+- Condition: `REVIEW_READ_TIMEOUT_MS` is four seconds; live Item Bank reads measured 8.3 to 9.2 seconds, so the entry or question stayed unnamed and Approve was withheld, except on a reload that hit a late cached answer.
+- Repair: Item Bank review reads get twenty seconds; every other read keeps four. `packages/mcp-server/test/approval-context.test.ts` pins both budgets.
+- Status: `IMPLEMENTED`.
+
+### 521: every Item Bank question alt repair was refused
+
+- Condition: a stored bank question carries `interaction_type` (an object), stamps, `metadata`, `user_response_type`, and no `interaction_type_slug`. The repair resends the stored question with one alt added, and the worker's question contract refused it as an unsupported type.
+- Repair: `connector/extension/src/item-bank-executor.js` returns a bank question in its documented fields only, with `interaction_type_slug` from `interaction_type.slug`: the fields Canvas's own Item Banks page sends when it saves a question. Reads, digests, the repair, and the update all use that one shape. A guarded legacy repair, which carries no question, is no longer judged as a missing question by the worker.
+- Status: `IMPLEMENTED`; proven live: the repair verified and a fresh audit found no image without alt text.
 
 ### Root-cause patterns for rows 331–472
 

@@ -394,6 +394,20 @@ describe("privacy output boundary", () => {
     expect(() => redactLearnerEgress({ note: "Bearer secret-token" }, context)).toThrow("privacy_sensitive_text_refused");
   });
 
+  it("reads back a New Quizzes formula question inside a list envelope, and still bounds depth", () => {
+    const vault = new LearnerVault(":memory:");
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [{ id: "17", name: "Jane Doe", email: "jane.doe@school.test" }]);
+    const context = { learnerRoster, learnerVault: vault, learnerScope: scope };
+    // Canvas's own formula question, eight levels deep inside one item.
+    const formula = { entry: { scoring_data: { value: { generated_solutions: [{ inputs: [{ name: "y", value: "2" }], output: "4" }] } } } };
+    const read = { structuredContent: { data: { result: { data: [formula] } } } };
+    expect(redactLearnerEgress(read, context)).toEqual(read);
+    let deep: unknown = "leaf";
+    for (let level = 0; level < 40; level += 1) deep = { next: deep };
+    expect(() => redactLearnerEgress(deep, context)).toThrow("privacy_output_depth_exceeded");
+  });
+
   it("redacts roster identities under measure keys in projected output too", () => {
     const context = learnerPrivacy();
     const descriptor = { ...learnerDescriptor, allowedFields: ["grading_status", "score"], freeText: "allow" as const };

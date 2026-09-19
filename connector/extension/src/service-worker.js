@@ -2906,7 +2906,9 @@ async function executeItemBank(binding, operation, args, expiresAt) {
   let context;
   try {
     let payloadContractSha256;
-    if (["create_item", "update_item"].includes(operation.nickname)) {
+    // A guarded image repair carries no question: the Item Banks frame reads the stored question
+    // and changes one alt attribute in it, so there is no sent question for this worker to judge.
+    if (["create_item", "update_item"].includes(operation.nickname) && args?.morrow_item_bank_guard === undefined) {
       const item = args?.item && typeof args.item === "object" && !Array.isArray(args.item) && args.item.item
         ? args.item.item : args?.item;
       // A create is judged on its own, so every media problem in it refuses
@@ -3010,10 +3012,32 @@ async function freshQuizBankBuilderContext(binding, assignmentId, operation, arg
   } catch {
     return { tabId, error: "quiz_bank_launch_failed" };
   }
+  const nativeBuildPath = new RegExp(`^/courses/${binding.courseId}/assignments/${assignmentId}/build/[1-9][0-9]{0,18}$`);
   while (Date.now() < deadline) {
     const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
     const frameIds = itemBankFrameIds(frames);
     if (frameIds.length > 1) return { tabId, error: "quiz_bank_builder_context_ambiguous" };
+    // Canvas can render the builder natively on its own origin, with no quiz-lti frame.
+    let topUrl;
+    try { topUrl = new URL(frames.find((frame) => frame?.frameId === 0)?.url || ""); } catch { topUrl = null; }
+    if (frameIds.length === 0 && topUrl?.origin === binding.origin && nativeBuildPath.test(topUrl.pathname)) {
+      try {
+        const [probe] = await chrome.scripting.executeScript({
+          target: { tabId, frameIds: [0] },
+          world: "MAIN",
+          func: executeQuizBankDrawInPage,
+          args: [{ operation, arguments: args, canvasOrigin: binding.origin, courseId: binding.courseId, assignmentId, contextOnly: true, expiresAt }],
+        });
+        if (probe?.result?.matched === true && probe.result.ok === true) {
+          return { tabId, frameId: 0, launchUrl, verifiedBankSha256 };
+        }
+        if (probe?.result?.matched === true && !["quiz_bank_builder_credential_unavailable", "quiz_bank_builder_context_ambiguous"].includes(probe.result.error)) {
+          return { tabId, error: probe.result.error || "quiz_bank_builder_context_unverified" };
+        }
+      } catch {}
+      await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(1, deadline - Date.now()))));
+      continue;
+    }
     const requiredOrigins = itemBankPermissionOrigins(frames, binding.origin);
     if (frameIds.length === 1 && requiredOrigins.length !== 2) {
       return { tabId, error: "quiz_bank_builder_context_ambiguous" };

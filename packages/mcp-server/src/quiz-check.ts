@@ -301,7 +301,8 @@ export async function checkNewQuiz(runtime: CheckRuntime, value: CheckInput, cal
         } else points += item.points_possible;
         checkQuestion(item, questionId, `Question ${typeof item.position === "number" ? item.position : count}`);
         const stimulusId = item.stimulus_quiz_entry_id;
-        if (stimulusId !== undefined && stimulusId !== null) {
+        // Canvas answers `stimulus_quiz_entry_id: ""` for a question with no stimulus.
+        if (stimulusId !== undefined && stimulusId !== null && stimulusId !== "") {
           linkedQuestionCount += 1;
           const stimulus = itemById.get(String(stimulusId));
           if (!stimulus || stimulus.entry_type !== "Stimulus") {

@@ -1225,7 +1225,7 @@ function projectValue(
   preparedTextContext?: PreparedLearnerTextRedactionContext,
   scalarKey = "",
 ): unknown {
-  if (depth > 12) throw new Error("privacy_output_depth_exceeded");
+  if (depth > MAX_PRIVACY_OUTPUT_DEPTH) throw new Error("privacy_output_depth_exceeded");
   const sourceRedacted = context.learnerBoundary === "source";
   const requiresLearnerRedaction = !sourceRedacted
     && (descriptor.dataClass === "learner"
@@ -1314,6 +1314,15 @@ const UNROSTERED_EMAIL = /(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/giu;
  * such as an account's terms of service, impossible to use: institutional
  * contact addresses are part of that text.
  */
+/**
+ * How deep a provider answer may nest before the privacy walk refuses it. Canvas
+ * nests a New Quizzes formula question eight levels inside one item, and a list
+ * read wraps that in Morrow's own envelope, so twelve refused every quiz holding
+ * one. Morrow accepts a question payload thirty-two levels deep, and the walk
+ * reads back at least what Morrow will write.
+ */
+export const MAX_PRIVACY_OUTPUT_DEPTH = 32;
+
 function containsSensitiveText(value: string): boolean {
   // Redaction preserves non-learner source bytes, including HTML entities and
   // URL escapes. Inspect the same canonical match view so encoded credentials
@@ -1371,7 +1380,7 @@ export function redactLearnerEgressBatch(entries: readonly {
 
 function redactLearnerEgressPrepared(value: unknown, exactContext: PreparedLearnerTextRedactionContext): unknown {
   const walk = (candidate: unknown, depth = 0, kind?: IdentityRecordKind, inheritedLearnerPrivacy = false, scalarKey = ""): unknown => {
-    if (depth > 12) throw new Error("privacy_output_depth_exceeded");
+    if (depth > MAX_PRIVACY_OUTPUT_DEPTH) throw new Error("privacy_output_depth_exceeded");
     if (typeof candidate === "number") return redactLearnerNumber(candidate, scalarKey, exactContext);
     if (typeof candidate === "string") {
       if (STRUCTURAL_REFERENCE_FIELDS.has(scalarKey)) {
@@ -1541,7 +1550,7 @@ export function resolveLearnerTokens(
     return current;
   };
   const resolveValue = (candidate: unknown, key = "", depth = 0): unknown => {
-    if (depth > 12) throw new Error("privacy_output_depth_exceeded");
+    if (depth > MAX_PRIVACY_OUTPUT_DEPTH) throw new Error("privacy_output_depth_exceeded");
     if (typeof candidate === "string") {
       const identifier = /^(?:user|student|learner|recipient|author|participant)(?:s|_?ids?)?$/iu.test(key)
         || learnerIdentifierFields.has(key);

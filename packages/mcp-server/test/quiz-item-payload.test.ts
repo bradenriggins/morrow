@@ -253,6 +253,16 @@ describe("New Quiz question payload rules", () => {
     expect(completeQuizItemPayloadReason(changedEntry(creates.essay as JsonObject, {
       interaction_data: { ...(((creates.essay as JsonObject).entry as JsonObject).interaction_data as JsonObject), file_upload: true },
     }))).toBe("essay_structure_invalid");
+    // Canvas saves every question with an empty answer_feedback map, so a saved essay reads
+    // back as valid; real feedback on a non-choice question is still refused.
+    expect(completeQuizItemPayloadReason(changedEntry(creates.essay as JsonObject, { answer_feedback: {} }))).toBeNull();
+    expect(completeQuizItemPayloadReason(changedEntry(creates.essay as JsonObject, { answer_feedback: { x: "<p>Good</p>" } }))).toBe("create_answer_feedback_invalid");
+    // Every essay Canvas saves carries these six settings of its own.
+    const savedEssayProperties = { word_limit: false, spell_check: false, word_limit_max: 0, word_limit_min: 0, show_word_count: false, rich_content_editor: false };
+    expect(completeQuizItemPayloadReason(changedEntry(creates.essay as JsonObject, { properties: savedEssayProperties }))).toBeNull();
+    expect(completeQuizItemPayloadReason(changedEntry(creates.essay as JsonObject, { properties: { ...savedEssayProperties, word_limit_max: -1 } }))).toBe("create_properties_invalid");
+    expect(completeQuizItemPayloadReason(changedEntry(creates.essay as JsonObject, { properties: { shuffle_rules: {} } }))).toBe("create_properties_invalid");
+    expect(completeQuizItemPayloadReason(changedEntry(creates["true-false"] as JsonObject, { properties: savedEssayProperties }))).toBe("create_properties_invalid");
     expect(completeQuizItemPayloadReason(changedEntry(mixedRichFill, { item_body: "<p>No blank marker</p>" }))).toBe("rich_fill_body_blank_markers_mismatch");
     const mixedEntry = mixedRichFill.entry as JsonObject;
     const mixedScoring = mixedEntry.scoring_data as JsonObject;

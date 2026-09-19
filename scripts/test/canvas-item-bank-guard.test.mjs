@@ -54,23 +54,21 @@ const TWO_UNDESCRIBED = [
 
 const sha256 = (value) => createHash("sha256").update(value, "utf8").digest("hex");
 
+// The question as Morrow reads it: through its bank entry, in the documented QuestionItem shape.
 const item = (body) => Object.freeze({
   id: ITEM_ID,
   entry_type: "Item",
-  position: 3,
-  status: "active",
-  updated_at: "2026-09-01T10:00:00Z",
   entry: {
     title: "Mitosis stages",
     item_body: body,
     interaction_type_slug: "choice",
     interaction_data: { choices: [{ id: "c1", item_body: "Metaphase" }, { id: "c2", item_body: "Anaphase" }] },
     scoring_data: { value: "c1" },
-    points_possible: 1,
-    updated_at: "2026-09-01T10:00:00Z",
   },
 });
 const ITEM = item(BODY);
+// What the frame sends: the question flat, as Canvas's own Item Banks page sends it.
+const asQuestion = (flat) => ({ id: ITEM_ID, entry_type: "Item", entry: flat });
 const ENTRY = Object.freeze({ id: ENTRY_ID, entry_type: "Item", entry_id: ITEM_ID, position: 1 });
 
 const CONSUMERS = Object.freeze([
@@ -170,6 +168,7 @@ function bank({ source = ITEM, entry = ENTRY, readback, readbackThrows = false, 
   const calls = [];
   const requests = [];
   let itemReads = 0;
+  let patched = false;
   const fetchImpl = async (url, options = {}) => {
     const parsed = new URL(String(url));
     const method = options.method || "GET";
@@ -179,14 +178,18 @@ function bank({ source = ITEM, entry = ENTRY, readback, readbackThrows = false, 
       assert.equal(parsed.searchParams.get("course_id"), CONTEXT_UUID);
       return jsonResponse([{ id: BANK, title: "Biology bank" }]);
     }
-    if (method === "GET" && parsed.pathname === ITEM_PATH) {
+    // The live service has no question read under a bank: the entry embeds the question.
+    if (method === "GET" && parsed.pathname === ITEM_PATH) return jsonResponse({ status: 404, error: "not found" }, 404);
+    if (method === "GET" && parsed.pathname === ENTRY_PATH) {
       itemReads += 1;
-      if (itemReads === 1) return jsonResponse(source);
+      if (entryStatus !== 200) return jsonResponse(entry, entryStatus);
+      if (!patched) return jsonResponse({ ...entry, entry: source.entry });
       if (readbackThrows) throw new TypeError("the Item Banks frame is gone");
-      return jsonResponse(readback ?? await savedItem(source));
+      const saved = readback ?? await savedItem(source);
+      return jsonResponse({ ...entry, entry_id: saved.id, entry: saved.entry });
     }
-    if (method === "GET" && parsed.pathname === ENTRY_PATH) return jsonResponse(entry, entryStatus);
     if (method === "PATCH" && parsed.pathname === ITEM_PATH) {
+      patched = true;
       if (patchThrows) throw new TypeError("the Item Banks frame lost the answer");
       return jsonResponse(patchStatus === 200 ? await savedItem(source) : { errors: [{ message: "The Item Banks API did not accept this change." }] }, patchStatus);
     }
@@ -308,14 +311,13 @@ test("a legacy image repair sends one change and proves the saved question", asy
   // Fresh read, exact entry, one change, fresh read again.
   assert.deepEqual(calls, [
     `GET ${ASSOCIATION_PATH}`,
-    `GET ${ITEM_PATH}`,
     `GET ${ENTRY_PATH}`,
     `PATCH ${ITEM_PATH}`,
-    `GET ${ITEM_PATH}`,
+    `GET ${ENTRY_PATH}`,
   ]);
   // The bytes the frame sent are exactly the bytes the shared module computes.
-  assert.equal(sentBody.item.entry.item_body, await repairedBody());
-  assert.deepEqual(itemBankProtectedState(sentBody.item), itemBankProtectedState(ITEM));
+  assert.equal(sentBody.item.item_body, await repairedBody());
+  assert.deepEqual(itemBankProtectedState(asQuestion(sentBody.item)), itemBankProtectedState(ITEM));
 });
 
 test("a repair fixes one reviewed image and leaves the other known issue alone", async () => {
@@ -324,14 +326,14 @@ test("a repair fixes one reviewed image and leaves the other known issue alone",
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.verification.status, "verified");
   assert.equal(patches, 1);
-  const sent = sentBody.item.entry.item_body;
+  const sent = sentBody.item.item_body;
   assert.equal(sent, await repairedBody(source));
   assert.ok(sent.includes(`<img src="${TARGET_SRC}" alt="${escapeItemBankAlt(ALT)}">`), "the reviewed image was not repaired");
   // The second undescribed image is still exactly what Canvas held.
   assert.ok(sent.includes(`<img src="${SECOND_SRC}">`), "the untouched image changed");
   assert.equal(itemBankContentImages(sent).images.length, 2);
-  assert.deepEqual(itemBankMediaFindings(sentBody.item).map((finding) => finding.reason), ["media_image_alt_missing"]);
-  assert.equal(itemBankNewMediaReason(sentBody.item, source), null);
+  assert.deepEqual(itemBankMediaFindings(asQuestion(sentBody.item)).map((finding) => finding.reason), ["media_image_alt_missing"]);
+  assert.equal(itemBankNewMediaReason(asQuestion(sentBody.item), source), null);
 });
 
 test("a question that changed since the review stops before any change is sent", async () => {
@@ -341,7 +343,7 @@ test("a question that changed since the review stops before any change is sent",
   assert.equal(result.error, "item_bank_source_changed");
   assert.equal(result.sent, false);
   assert.equal(patches, 0);
-  assert.deepEqual(calls, [`GET ${ASSOCIATION_PATH}`, `GET ${ITEM_PATH}`]);
+  assert.deepEqual(calls, [`GET ${ASSOCIATION_PATH}`, `GET ${ENTRY_PATH}`]);
 });
 
 test("a definite provider refusal is reported as refused and never repeated", async () => {
@@ -372,7 +374,7 @@ test("a saved question that does not match the reviewed repair is never verified
   const cases = [
     ["the change was not applied", { readback: ITEM }, "saved_item_body_did_not_match"],
     ["another question came back", { readback: { ...clone(ITEM), id: "502" } }, "saved_item_did_not_match_target"],
-    ["a protected field changed", { readback: { ...clone(await savedItem()), points_possible: 5 } }, "saved_protected_state_did_not_match"],
+    ["a protected field changed", { readback: (() => { const saved = clone(ITEM); saved.entry.scoring_data = { value: "c2" }; return saved; })() }, "saved_protected_state_did_not_match"],
   ];
   for (const [label, server, reason] of cases) {
     const { result, patches } = await repair({ server });
@@ -461,7 +463,7 @@ test("a bank entry that does not name this exact question stops the repair", asy
   assert.equal(result.error, "item_bank_entry_unresolved");
   assert.equal(result.sent, false);
   assert.equal(patches, 0);
-  assert.deepEqual(calls, [`GET ${ASSOCIATION_PATH}`, `GET ${ITEM_PATH}`, `GET ${ENTRY_PATH}`]);
+  assert.deepEqual(calls, [`GET ${ASSOCIATION_PATH}`, `GET ${ENTRY_PATH}`]);
 });
 
 test("an image the guard cannot name uniquely stops the repair", async () => {
@@ -479,4 +481,10 @@ test("an image the guard cannot name uniquely stops the repair", async () => {
   const present = await repair({ server: { source: described }, guardItem: described });
   assert.equal(present.result.error, "item_bank_image_alt_already_present");
   assert.equal(present.patches, 0);
+});
+
+test("the service worker leaves a guarded repair's question to the Item Banks frame", () => {
+  // A guarded repair sends no question, so judging a missing question refused every repair.
+  const worker = readFileSync(new URL("../../connector/extension/src/service-worker.js", import.meta.url), "utf8");
+  assert.match(worker, /\["create_item", "update_item"\]\.includes\(operation\.nickname\) && args\?\.morrow_item_bank_guard === undefined\)/);
 });

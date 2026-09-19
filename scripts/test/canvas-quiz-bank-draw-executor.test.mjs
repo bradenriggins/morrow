@@ -57,7 +57,7 @@ function input(nickname, args, extra = {}) {
 }
 
 function provider() {
-  const entries = [{ id: "10", entry_type: "Item", entry_id: "501", position: 1, points_possible: 1, properties: {} }];
+  const entries = [{ id: "10", entry_type: "Item", entry: { id: "501" }, position: 1, points_possible: 1, properties: {} }];
   const requests = [];
   const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
   const fetch = async (url, options = {}) => {
@@ -70,7 +70,9 @@ function provider() {
       return json({ quiz_entries: page === 1 ? entries : [] });
     }
     if (parsed.pathname === "/api/quizzes/77/quiz_entries" && method === "POST") {
-      const row = { id: "11", ...JSON.parse(options.body).quiz_entry };
+      // A saved row names what it draws only in its embedded `entry`, as Canvas answers.
+      const { entry_id: entryId, ...sent } = JSON.parse(options.body).quiz_entry;
+      const row = { id: "11", ...sent, entry: { id: entryId } };
       entries.push(row);
       return json({ quiz_entry: row }, 201);
     }
@@ -106,7 +108,7 @@ test("the builder read binds one assignment and returns the complete entry snaps
 
 test("the builder read combines pages and requires an empty end page", async () => {
   const p = provider();
-  const pageTwo = [{ id: "20", entry_type: "Item", entry_id: "502", position: 2, points_possible: 1, properties: {} }];
+  const pageTwo = [{ id: "20", entry_type: "Item", entry: { id: "502" }, position: 2, points_possible: 1, properties: {} }];
   const fetch = async (url, options = {}) => {
     const parsed = new URL(url);
     if (parsed.pathname === "/api/quizzes/77/quiz_entries" && (options.method || "GET") === "GET") {
@@ -169,7 +171,7 @@ test("both builder create shapes use exact snapshots, one dispatch, and complete
 
 test("the exact builder delete uses one dispatch and verifies absence from a complete list", async () => {
   const p = provider();
-  p.entries.push({ id: "11", entry_type: "Bank", entry_id: "91", position: 2, points_possible: 2, properties: { sample_num: 5 } });
+  p.entries.push({ id: "11", entry_type: "Bank", entry: { id: "91" }, position: 2, points_possible: 2, properties: { sample_num: 5 } });
   await withBuilder(async () => {
     const bankSha256 = "a".repeat(64);
     const result = await executeQuizBankDrawInPage(input("delete_quiz_bank_entry", {
@@ -253,7 +255,7 @@ test("an all-items draw is not verified when Canvas saves a numbered sample inst
     const parsed = new URL(url);
     if (parsed.pathname === "/api/quizzes/77/quiz_entries" && options.method === "POST") {
       p.requests.push({ method: "POST", path: parsed.pathname });
-      const row = { id: "11", entry_type: "Bank", entry_id: "91", position: 2, points_possible: 2, properties: { sample_num: 5 } };
+      const row = { id: "11", entry_type: "Bank", entry: { id: "91" }, position: 2, points_possible: 2, properties: { sample_num: 5 } };
       p.entries.push(row);
       return new Response(JSON.stringify({ quiz_entry: row }), { status: 201, headers: { "content-type": "application/json" } });
     }
@@ -276,7 +278,7 @@ test("an all-items draw is not verified when Canvas saves a numbered sample inst
 
 test("an all-items draw already present is recognised and nothing is sent again", async () => {
   const p = provider();
-  p.entries.push({ id: "11", entry_type: "Bank", entry_id: "91", position: 2, points_possible: 2, properties: { sample_num: null } });
+  p.entries.push({ id: "11", entry_type: "Bank", entry: { id: "91" }, position: 2, points_possible: 2, properties: { sample_num: null } });
   await withBuilder(async () => {
     const bankSha256 = "a".repeat(64);
     const result = await executeQuizBankDrawInPage(input("attach_bank_to_quiz", {
@@ -318,4 +320,59 @@ test("an expired quiz-bank command starts no provider request", async () => {
     assert.deepEqual(result, { matched: true, ok: false, sent: false, error: "quiz_bank_operation_timeout" });
     assert.equal(p.requests.length, 0);
   }, p.fetch);
+});
+
+// The native page's build token names the builder quiz in its `resource_id` claim.
+const base64url = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+const NATIVE_TOKEN = `${base64url({ alg: "HS512" })}.${base64url({ scope: "quiz.build", resource_id: 77, exp: 9_999_999_999 })}.${"s".repeat(40)}`;
+
+async function withNativeBuilder(callback, fetch, session = {}) {
+  const keys = ["location", "document", "localStorage", "sessionStorage", "performance", "fetch"];
+  const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const values = {
+    location: { hostname: "school.instructure.com", origin: "https://school.instructure.com", pathname: "/courses/42/assignments/188/build/9001" },
+    document: { referrer: "" },
+    localStorage: storage({ backend_url: "https://school.quiz-lti.instructure.com" }),
+    sessionStorage: storage({ canvas_local_context_id: "42", canvas_assignment_id: "188", assignment_id: "9001", "quiz.build_token": NATIVE_TOKEN, ...session }),
+    performance: { getEntriesByType: () => [] },
+    fetch,
+  };
+  try {
+    for (const [key, value] of Object.entries(values)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    return await callback();
+  } finally {
+    for (const key of keys) {
+      const descriptor = descriptors.get(key);
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];
+    }
+  }
+}
+
+test("Canvas's native builder page reads the quiz's draws from its own session", async () => {
+  // Canvas can render the New Quiz builder on its own origin with no quiz-lti frame.
+  const p = provider();
+  await withNativeBuilder(async () => {
+    const result = await executeQuizBankDrawInPage(input("list_quiz_draws", { course_id: "42", assignment_id: "188" }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.quizId, "77");
+    assert.equal(result.data.length, 1);
+    assert.ok(p.requests.every((request) => request.options.headers.Authorization === NATIVE_TOKEN));
+    assert.equal(JSON.stringify(result).includes(NATIVE_TOKEN), false);
+  }, p.fetch);
+});
+
+test("the native builder page sends nothing when its session names another course, assignment, or quiz", async () => {
+  for (const [label, session] of [
+    ["another course", { canvas_local_context_id: "43" }],
+    ["another assignment", { canvas_assignment_id: "189" }],
+    ["a page that names another builder", { assignment_id: "78" }],
+    ["a build token for another scope", { "quiz.build_token": `${base64url({ alg: "HS512" })}.${base64url({ scope: "banks.build", resource_id: 77 })}.${"s".repeat(40)}` }],
+  ]) {
+    const p = provider();
+    await withNativeBuilder(async () => {
+      const result = await executeQuizBankDrawInPage(input("list_quiz_draws", { course_id: "42", assignment_id: "188" }));
+      assert.notEqual(result.ok, true, label);
+      assert.equal(p.requests.length, 0, label);
+    }, p.fetch, session);
+  }
 });

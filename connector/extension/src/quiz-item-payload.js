@@ -592,8 +592,19 @@ function richFillPropertiesReason(properties) {
     }
     return null;
 }
+/**
+ * The settings Canvas itself saves in every essay's `properties`. Every essay read back from a
+ * live course carries this exact set, so a saved essay is valid and resending it is safe.
+ */
+const ESSAY_BOOLEAN_PROPERTIES = ["word_limit", "spell_check", "show_word_count", "rich_content_editor"];
+const ESSAY_COUNT_PROPERTIES = ["word_limit_max", "word_limit_min"];
 function questionPropertiesReason(slug, properties, interaction, algorithm) {
-    if (["true-false", "formula", "hot-spot", "numeric", "essay"].includes(slug)) {
+    if (slug === "essay") {
+        return Object.entries(properties).every(([key, value]) => (ESSAY_BOOLEAN_PROPERTIES.includes(key) && typeof value === "boolean")
+            || (ESSAY_COUNT_PROPERTIES.includes(key) && Number.isSafeInteger(value) && Number(value) >= 0))
+            ? null : "create_properties_invalid";
+    }
+    if (["true-false", "formula", "hot-spot", "numeric"].includes(slug)) {
         return Object.keys(properties).length === 0 ? null : "create_properties_invalid";
     }
     if (slug === "categorization") {
@@ -875,7 +886,10 @@ export function completeQuizItemPayloadReason(item) {
         return "create_scoring_algorithm_invalid";
     if (entry.properties !== undefined && !plainObject(entry.properties))
         return "create_properties_invalid";
-    if (entry.answer_feedback !== undefined) {
+    // Canvas saves every question with `answer_feedback: {}`, so an empty map is no feedback and
+    // a saved non-choice question reads back as valid.
+    if (entry.answer_feedback !== undefined
+        && !(plainObject(entry.answer_feedback) && Object.keys(entry.answer_feedback).length === 0)) {
         if (slug !== "choice" || !plainObject(entry.answer_feedback))
             return "create_answer_feedback_invalid";
     }

@@ -35,7 +35,7 @@
   const MORROW_OWN_ERROR_TOKEN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+/;
 
   /* BEGIN GENERATED NEW QUIZ ITEM PAYLOAD CONTRACT */
-  // Generated from packages/mcp-server/src/quiz-item-payload.ts sha256:20807f46b8e445f6e2486011f575a4638e37227600efa5036afbbf5e6391a10c
+  // Generated from packages/mcp-server/src/quiz-item-payload.ts sha256:f80b681d1f3adc5c62cdae8d3485d2e574e187752f4d5dd27eb34455abac001d
   const NEW_QUIZ_ITEM_PAYLOAD_CONTRACT = (() => {
     const MEDIA_ELEMENTS = ["img", "audio", "video"];
     const MEDIA_SRC_PREFIXES = ["https://", "/courses/", "/api/v1/files/"];
@@ -545,8 +545,15 @@
         }
         return null;
     }
+    const ESSAY_BOOLEAN_PROPERTIES = ["word_limit", "spell_check", "show_word_count", "rich_content_editor"];
+    const ESSAY_COUNT_PROPERTIES = ["word_limit_max", "word_limit_min"];
     function questionPropertiesReason(slug, properties, interaction, algorithm) {
-        if (["true-false", "formula", "hot-spot", "numeric", "essay"].includes(slug)) {
+        if (slug === "essay") {
+            return Object.entries(properties).every(([key, value]) => (ESSAY_BOOLEAN_PROPERTIES.includes(key) && typeof value === "boolean")
+                || (ESSAY_COUNT_PROPERTIES.includes(key) && Number.isSafeInteger(value) && Number(value) >= 0))
+                ? null : "create_properties_invalid";
+        }
+        if (["true-false", "formula", "hot-spot", "numeric"].includes(slug)) {
             return Object.keys(properties).length === 0 ? null : "create_properties_invalid";
         }
         if (slug === "categorization") {
@@ -816,7 +823,8 @@
             return "create_scoring_algorithm_invalid";
         if (entry.properties !== undefined && !plainObject(entry.properties))
             return "create_properties_invalid";
-        if (entry.answer_feedback !== undefined) {
+        if (entry.answer_feedback !== undefined
+            && !(plainObject(entry.answer_feedback) && Object.keys(entry.answer_feedback).length === 0)) {
             if (slug !== "choice" || !plainObject(entry.answer_feedback))
                 return "create_answer_feedback_invalid";
         }
@@ -1996,6 +2004,17 @@
     }
   }
 
+  // New Quizzes and Item Banks keep each course image as an inst-fs URL signed with a
+  // `token` query value. That value is a file credential, and Canvas signs a new one on
+  // every read, so it is removed from every answer here: it never leaves the page, and a
+  // question reads the same twice. Canvas signs the bare URL again when it is saved back.
+  function withoutFileAccessTokens(text) {
+    if (typeof text !== "string" || !text.includes("token=")) return text;
+    return text.replace(/https:\/\/inst-fs-[a-z0-9-]+\.inscloudgate\.net\/(?:[^"'\s<>\\]|\\u0026)*/gi,
+      (url) => url.replace(/(\?|&amp;|&|\\u0026amp;|\\u0026)token=[A-Za-z0-9._~-]*((?:&amp;|&|\\u0026amp;|\\u0026)?)/g,
+        (match, before, after) => (before === "?" ? (after ? "?" : "") : after)));
+  }
+
   async function readBounded(response) {
     if (!response.body) return "";
     const reader = response.body.getReader();
@@ -2017,7 +2036,7 @@
       bytes.set(chunk, offset);
       offset += chunk.byteLength;
     }
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return withoutFileAccessTokens(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   }
 
   function parsePayload(text, contentType) {
@@ -2850,6 +2869,15 @@
     return value;
   }
 
+  // The quiz service looks a string user_id up as a different user and answers 404, so the id
+  // goes on the wire as a JSON number. It is spliced in as digits so a shard id beyond 2^53 stays exact.
+  function newQuizAccommodationBody(request) {
+    const { user_id: userId, ...rest } = request;
+    if (!/^[1-9][0-9]{0,18}$/.test(String(userId))) throw new Error("new_quiz_accommodation_user_invalid");
+    const fields = JSON.stringify(rest).slice(1, -1);
+    return `[{"user_id":${userId}${fields ? `,${fields}` : ""}}]`;
+  }
+
   function verifyNewQuizAccommodation(data, request) {
     const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-accommodation-response" };
     if (!plainObject(data) || !Array.isArray(data.successful) || !Array.isArray(data.failed)) {
@@ -2863,8 +2891,10 @@
     return { ...base, status: "mismatch", reason: failed.length > 0 ? "new_quiz_accommodation_provider_failed" : "new_quiz_accommodation_user_result_missing" };
   }
 
-  function verifyNewQuizReport(data, args) {
+  function verifyNewQuizReport(answer, args) {
     const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-report-progress" };
+    // Canvas answers a New Quiz report request as `{"progress": {...}}`.
+    const data = plainObject(answer) && plainObject(answer.progress) ? answer.progress : answer;
     const id = plainObject(data) ? pageId(data.id) : null;
     const contextId = plainObject(data) ? pageId(data.context_id) : null;
     let progressUrl;
@@ -3537,7 +3567,7 @@
       const containsFile = body.some(([parameter]) => String(parameter.schema?.format || "") === "binary");
       if (newQuizAccommodation) {
         headers.set("Content-Type", "application/json;charset=UTF-8");
-        options.body = JSON.stringify([newQuizAccommodation]);
+        options.body = newQuizAccommodationBody(newQuizAccommodation);
       } else if (bulkDates !== undefined) {
         headers.set("Content-Type", "application/json;charset=UTF-8");
         options.body = JSON.stringify(bulkDates);

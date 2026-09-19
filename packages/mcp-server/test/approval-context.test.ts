@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { CatalogTool, JsonObject } from "@morrow/contracts";
 import {
   resolveApprovalReviewContext,
@@ -133,6 +133,61 @@ describe("approval review context", () => {
       },
     });
     expect(context.targets).toEqual([{ field: "id", label: "File", name: "Week 4 study guide.pdf" }]);
+  });
+
+  it("reads an Item Bank entry and question for review within the selected course", async () => {
+    // Every Item Bank read is bound to the course by a `course_id` claim outside its path. Without
+    // it the read is refused, the object has no name, and no entry delete or question update can
+    // ever be approved.
+    const base = operation();
+    const review = async (publicName: string, args: JsonObject, readTool: string, answer: JsonObject) => {
+      const seen: JsonObject[] = [];
+      const context = await resolveApprovalReviewContext({
+        operation: { ...base, publicToolName: publicName, sourceToolName: publicName, plan: { ...base.plan,
+          tool: publicName, sourceTool: publicName, arguments: { ...args, _morrow: { source_binding_id: sourceBindingId } } } },
+        tools: [...tools, ...[publicName, "canvas_item_bank_get_bank", readTool].map((name) => tool(name, name, name !== publicName, "new-quizzes-item-banks"))],
+        read: async (name, readArgs) => {
+          if (name === "morrow_canvas_bindings") return { structuredContent: { schema: "morrow.canvas-bindings.v1", bindings: [{ sourceBindingId, provider: "canvas", runtimeVerified: true, origin: "https://school.instructure.com" }] } };
+          if (name === "canvas_get_single_course_courses") return connector({ id: 89585, name: "Biology" });
+          if (name === "canvas_item_bank_get_bank") return connector({ id: "4021", title: "Cell bank" });
+          expect(name).toBe(readTool);
+          seen.push(readArgs as JsonObject);
+          return connector(answer);
+        },
+      });
+      return { context, seen };
+    };
+    const question = { title: "Which organelle makes ATP?", item_body: "<p>Which organelle makes ATP?</p>", id: "11242016" };
+    const deletion = await review("canvas_item_bank_delete_entry", { course_id: "89585", bank_id: "4021", bank_entry_id: "82661" },
+      "canvas_item_bank_get_entry", { id: "82661", entry_type: "Item", bank_id: "4021", entry: question });
+    expect(deletion.seen).toEqual([{ bank_id: "4021", bank_entry_id: "82661", course_id: "89585", _morrow: { source_binding_id: sourceBindingId } }]);
+    expect(deletion.context.targets).toContainEqual({ field: "bank_entry_id", label: "Bank entry", name: "Which organelle makes ATP?" });
+    const update = await review("canvas_item_bank_update_item", { course_id: "89585", bank_id: "4021", item_id: "11242016" },
+      "canvas_item_bank_get_item", { id: "11242016", entry_type: "Item", entry: question });
+    expect(update.context.targets).toContainEqual({ field: "item_id", label: "Item", name: "Which organelle makes ATP?" });
+    expect(update.context.targets.every((target) => target.name.trim())).toBe(true);
+  });
+
+  it("gives an Item Bank review read the time its launch tab needs", async () => {
+    // Each Item Bank read opens a fresh Item Banks launch tab and takes eight to nine seconds live.
+    const budgets: number[] = [];
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => { budgets.push(ms); return new AbortController().signal; });
+    try {
+      const base = operation();
+      await resolveApprovalReviewContext({
+        operation: { ...base, publicToolName: "canvas_item_bank_delete_entry", sourceToolName: "canvas_item_bank_delete_entry", plan: { ...base.plan,
+          tool: "canvas_item_bank_delete_entry", sourceTool: "canvas_item_bank_delete_entry",
+          arguments: { course_id: "89585", bank_id: "4021", bank_entry_id: "82661", _morrow: { source_binding_id: sourceBindingId } } } },
+        tools: [...tools, ...["canvas_item_bank_delete_entry", "canvas_item_bank_get_bank", "canvas_item_bank_get_entry"].map((name, index) => tool(name, name, index > 0, "new-quizzes-item-banks"))],
+        read: async (name) => name === "morrow_canvas_bindings"
+          ? { structuredContent: { schema: "morrow.canvas-bindings.v1", bindings: [{ sourceBindingId, provider: "canvas", runtimeVerified: true, origin: "https://school.instructure.com" }] } }
+          : connector({ id: "1" }),
+      });
+    } finally {
+      timeout.mockRestore();
+    }
+    expect(budgets.filter((ms) => ms === 20_000)).toHaveLength(2);
+    expect(budgets.filter((ms) => ms === 4_000).length).toBeGreaterThan(0);
   });
 
   it("names every object a Canvas write addresses, from the catalog's own read routes", async () => {
