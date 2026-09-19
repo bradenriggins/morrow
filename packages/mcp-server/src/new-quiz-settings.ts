@@ -79,10 +79,42 @@ function requireBoolean(value: unknown, path: string): void {
   if (typeof value !== "boolean") refuse(`${path} must be true or false.`);
 }
 
-function requirePositiveIntegerOrNull(value: unknown, path: string): void {
-  if (value !== null && (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0)) {
-    refuse(`${path} must be a positive whole number or null.`);
+// Canvas saves a cleared count as 0 and a cleared IP list as [], and a quiz starts that way, so
+// both are accepted as cleared values alongside null.
+function cleared(value: unknown): boolean {
+  return value === undefined || value === null || value === 0 || (Array.isArray(value) && value.length === 0);
+}
+
+function requirePositiveIntegerOrCleared(value: unknown, path: string): void {
+  if (value !== null && value !== 0 && (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0)) {
+    refuse(`${path} must be a positive whole number, or 0 or null to clear it.`);
   }
+}
+
+/** Every cleared count or IP list as null, the cleared value Canvas's write route accepts. */
+function clearedAsNull(settings: JsonObject): JsonObject {
+  const sent = structuredClone(settings);
+  if (Object.hasOwn(sent, "session_time_limit_in_seconds") && cleared(sent.session_time_limit_in_seconds)) sent.session_time_limit_in_seconds = null;
+  if (isJsonObject(sent.multiple_attempts)) {
+    for (const key of ["max_attempts", "cooling_period_seconds"]) {
+      if (Object.hasOwn(sent.multiple_attempts, key) && cleared(sent.multiple_attempts[key])) sent.multiple_attempts[key] = null;
+    }
+  }
+  if (isJsonObject(sent.filters) && Object.hasOwn(sent.filters, "ips") && cleared(sent.filters.ips)) sent.filters.ips = null;
+  return sent;
+}
+
+/** A cleared value in the form Canvas saves it, so the saved settings read back exactly as planned. */
+export function canvasSavedSettings(settings: JsonObject): JsonObject {
+  const saved = structuredClone(settings);
+  if (Object.hasOwn(saved, "session_time_limit_in_seconds") && saved.session_time_limit_in_seconds === null) saved.session_time_limit_in_seconds = 0;
+  if (isJsonObject(saved.multiple_attempts)) {
+    for (const key of ["max_attempts", "cooling_period_seconds"]) {
+      if (Object.hasOwn(saved.multiple_attempts, key) && saved.multiple_attempts[key] === null) saved.multiple_attempts[key] = 0;
+    }
+  }
+  if (isJsonObject(saved.filters) && Object.hasOwn(saved.filters, "ips") && saved.filters.ips === null) saved.filters.ips = [];
+  return saved;
 }
 
 function requireDateTimeOrNull(value: unknown, path: string): void {
@@ -123,15 +155,15 @@ export function validateRequestedNewQuizSettings(requested: JsonObject): void {
     refuse("student_access_code must be text or null.");
   }
   if (Object.hasOwn(requested, "session_time_limit_in_seconds")) {
-    requirePositiveIntegerOrNull(requested.session_time_limit_in_seconds, "session_time_limit_in_seconds");
+    requirePositiveIntegerOrCleared(requested.session_time_limit_in_seconds, "session_time_limit_in_seconds");
   }
 
   if (isJsonObject(requested.filters) && Object.hasOwn(requested.filters, "ips")) {
     const ips = requested.filters.ips;
-    if (ips !== null && (!Array.isArray(ips) || ips.length === 0
+    if (ips !== null && (!Array.isArray(ips)
       || ips.some((range) => !Array.isArray(range) || range.length !== 2
         || range.some((address) => typeof address !== "string" || isIP(address) === 0)))) {
-      refuse("filters.ips must be null or a non-empty list of start and end address pairs.");
+      refuse("filters.ips must be a list of start and end address pairs, or [] or null to clear it.");
     }
   }
 
@@ -140,7 +172,7 @@ export function validateRequestedNewQuizSettings(requested: JsonObject): void {
     if (Object.hasOwn(attempts, key)) requireBoolean(attempts[key], `multiple_attempts.${key}`);
   }
   for (const key of ["cooling_period_seconds", "max_attempts"]) {
-    if (Object.hasOwn(attempts, key)) requirePositiveIntegerOrNull(attempts[key], `multiple_attempts.${key}`);
+    if (Object.hasOwn(attempts, key)) requirePositiveIntegerOrCleared(attempts[key], `multiple_attempts.${key}`);
   }
   if (Object.hasOwn(attempts, "score_to_keep")
     && !["average", "first", "highest", "latest"].includes(String(attempts.score_to_keep))) {
@@ -180,21 +212,25 @@ function requireTimeOrder(view: JsonObject, showKey: string, hideKey: string, la
 }
 
 export function validateNewQuizSettingDependencies(requested: JsonObject, merged: JsonObject): void {
-  if (requested.allow_backtracking === true && merged.one_at_a_time_type !== "question") {
-    refuse("allow_backtracking can be true only when one_at_a_time_type is question.");
-  }
   const ips = mergedGroup(merged, "filters").ips;
-  if ((requested.filter_ip_address === true || (requestedLeaf(requested, "filters", "ips") && requested.filters !== null && ips !== null))
+  if ((requested.filter_ip_address === true || requestedLeaf(requested, "filters", "ips")) && merged.filter_ip_address === true && cleared(ips)) {
+    refuse("IP filtering needs filter_ip_address true and at least one filters.ips range.");
+  }
+  if ((requested.filter_ip_address === true || (requestedLeaf(requested, "filters", "ips") && !cleared(ips)))
     && (merged.filter_ip_address !== true || !Array.isArray(ips) || ips.length === 0)) {
     refuse("IP filtering needs filter_ip_address true and at least one filters.ips range.");
   }
-  if ((requested.has_time_limit === true || (Object.hasOwn(requested, "session_time_limit_in_seconds") && requested.session_time_limit_in_seconds !== null))
+  if ((requested.has_time_limit === true || Object.hasOwn(requested, "session_time_limit_in_seconds"))
+    && merged.has_time_limit === true && cleared(merged.session_time_limit_in_seconds)) {
+    refuse("A time limit needs has_time_limit true and a positive session_time_limit_in_seconds.");
+  }
+  if ((requested.has_time_limit === true || (Object.hasOwn(requested, "session_time_limit_in_seconds") && !cleared(requested.session_time_limit_in_seconds)))
     && (merged.has_time_limit !== true || typeof merged.session_time_limit_in_seconds !== "number"
       || !Number.isSafeInteger(merged.session_time_limit_in_seconds) || merged.session_time_limit_in_seconds <= 0)) {
     refuse("A time limit needs has_time_limit true and a positive session_time_limit_in_seconds.");
   }
-  if (requested.has_time_limit === false && merged.session_time_limit_in_seconds !== undefined && merged.session_time_limit_in_seconds !== null) {
-    refuse("Set session_time_limit_in_seconds to null before disabling the time limit.");
+  if (requested.has_time_limit === false && !cleared(merged.session_time_limit_in_seconds)) {
+    refuse("Set session_time_limit_in_seconds to 0 or null before disabling the time limit.");
   }
   if ((requested.require_student_access_code === true || (Object.hasOwn(requested, "student_access_code") && requested.student_access_code !== null))
     && (merged.require_student_access_code !== true || typeof merged.student_access_code !== "string" || !merged.student_access_code)) {
@@ -203,36 +239,44 @@ export function validateNewQuizSettingDependencies(requested: JsonObject, merged
   if (requested.require_student_access_code === false && merged.student_access_code !== undefined && merged.student_access_code !== null) {
     refuse("Set student_access_code to null before disabling the access code.");
   }
-  if (requested.filter_ip_address === false && ips !== undefined && ips !== null) {
-    refuse("Set filters.ips to null before disabling IP filtering.");
+  if (requested.filter_ip_address === false && !cleared(ips)) {
+    refuse("Set filters.ips to [] or null before disabling IP filtering.");
   }
 
   const requestedAttempts = isJsonObject(requested.multiple_attempts) ? requested.multiple_attempts : {};
   const attempts = mergedGroup(merged, "multiple_attempts");
   const dependentAttemptLeaf = ["attempt_limit", "cooling_period", "cooling_period_seconds", "max_attempts", "score_to_keep"]
-    .some((key) => Object.hasOwn(requestedAttempts, key) && requestedAttempts[key] !== false && requestedAttempts[key] !== null);
+    .some((key) => Object.hasOwn(requestedAttempts, key) && requestedAttempts[key] !== false && !cleared(requestedAttempts[key]));
   if (dependentAttemptLeaf && attempts.multiple_attempts_enabled !== true) {
     refuse("Attempt limit, score, and cooling settings need multiple_attempts.multiple_attempts_enabled true.");
   }
   if (requestedAttempts.multiple_attempts_enabled === false
     && (attempts.attempt_limit === true || attempts.cooling_period === true
-      || activeValue(attempts.cooling_period_seconds) || activeValue(attempts.max_attempts))) {
+      || !cleared(attempts.cooling_period_seconds) || !cleared(attempts.max_attempts))) {
     refuse("Clear active attempt limit and cooling settings before disabling multiple attempts.");
   }
-  if ((requestedAttempts.attempt_limit === true || (Object.hasOwn(requestedAttempts, "max_attempts") && requestedAttempts.max_attempts !== null))
+  if ((requestedAttempts.attempt_limit === true || Object.hasOwn(requestedAttempts, "max_attempts"))
+    && attempts.attempt_limit === true && cleared(attempts.max_attempts)) {
+    refuse("An attempt limit needs attempt_limit true and a positive max_attempts.");
+  }
+  if ((requestedAttempts.cooling_period === true || Object.hasOwn(requestedAttempts, "cooling_period_seconds"))
+    && attempts.cooling_period === true && cleared(attempts.cooling_period_seconds)) {
+    refuse("A cooling period needs cooling_period true and positive cooling_period_seconds.");
+  }
+  if ((requestedAttempts.attempt_limit === true || (Object.hasOwn(requestedAttempts, "max_attempts") && !cleared(requestedAttempts.max_attempts)))
     && (attempts.attempt_limit !== true || typeof attempts.max_attempts !== "number" || attempts.max_attempts <= 0)) {
     refuse("An attempt limit needs attempt_limit true and a positive max_attempts.");
   }
-  if (requestedAttempts.attempt_limit === false && attempts.max_attempts !== undefined && attempts.max_attempts !== null) {
-    refuse("Set multiple_attempts.max_attempts to null before disabling the attempt limit.");
+  if (requestedAttempts.attempt_limit === false && !cleared(attempts.max_attempts)) {
+    refuse("Set multiple_attempts.max_attempts to 0 or null before disabling the attempt limit.");
   }
   if ((requestedAttempts.cooling_period === true
-    || (Object.hasOwn(requestedAttempts, "cooling_period_seconds") && requestedAttempts.cooling_period_seconds !== null))
+    || (Object.hasOwn(requestedAttempts, "cooling_period_seconds") && !cleared(requestedAttempts.cooling_period_seconds)))
     && (attempts.cooling_period !== true || typeof attempts.cooling_period_seconds !== "number" || attempts.cooling_period_seconds <= 0)) {
     refuse("A cooling period needs cooling_period true and positive cooling_period_seconds.");
   }
-  if (requestedAttempts.cooling_period === false && attempts.cooling_period_seconds !== undefined && attempts.cooling_period_seconds !== null) {
-    refuse("Set multiple_attempts.cooling_period_seconds to null before disabling the cooling period.");
+  if (requestedAttempts.cooling_period === false && !cleared(attempts.cooling_period_seconds)) {
+    refuse("Set multiple_attempts.cooling_period_seconds to 0 or null before disabling the cooling period.");
   }
 
   const requestedView = isJsonObject(requested.result_view_settings) ? requested.result_view_settings : {};
@@ -299,9 +343,11 @@ function exactId(value: unknown): string {
 export async function planNewQuizSettings(runtime: SettingsRuntime, value: NewQuizSettingsInput, callerSignal?: AbortSignal): Promise<CallToolResult> {
   try {
     const input = inputSchema.parse(value);
-    const requested = structuredClone(input.settings);
-    stable(requested);
-    validateRequestedNewQuizSettings(requested);
+    stable(input.settings);
+    validateRequestedNewQuizSettings(input.settings);
+    // A cleared value is sent in the form Canvas saves it (0 or []), so the saved settings, the
+    // connector's comparator, and the reviewed plan all hold the same values.
+    const requested = canvasSavedSettings(clearedAsNull(input.settings));
     const changedArguments = newQuizSettingArguments(requested);
     const timeout = AbortSignal.timeout(60_000);
     const signal = callerSignal ? AbortSignal.any([callerSignal, timeout]) : timeout;
@@ -345,7 +391,8 @@ export async function planNewQuizSettings(runtime: SettingsRuntime, value: NewQu
     if (validated.issues) refuse("The current Canvas settings route does not accept these settings or their guard. Check the setting names and values and the connector version.");
     const { merged, preserved } = mergeSettings(before, requested);
     validateNewQuizSettingDependencies(requested, merged);
-    const expectedDigest = newQuizSettingsDigest(merged);
+    // Canvas saves a cleared count as 0 and a cleared IP list as [], so the readback is expected in that form.
+    const expectedDigest = newQuizSettingsDigest(canvasSavedSettings(merged));
     const unchanged = currentDigest === expectedDigest;
     const title = typeof quiz.title === "string" && quiz.title.trim() ? quiz.title.trim().slice(0, 300) : "New Quiz";
     signal.throwIfAborted();

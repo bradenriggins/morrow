@@ -537,6 +537,7 @@ Every row stays open until its evidence columns are added and its status becomes
 | 520 | P1 | R7 | Item Bank approvals were offered only by chance: the review gives each confirming read four seconds, and an Item Bank read opens a launch tab and takes eight to nine seconds live. | closure section 520; gateway regressions, live BT2 course 89585 | IMPLEMENTED |
 | 521 | P1 | R7 | Every Item Bank question alt-text repair was refused before sending: the repair resends the stored question, which carries Canvas's own read-only fields and names its type only as `interaction_type.slug`, so the question contract saw no question type. | closure section 521; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
 | 522 | P1 | R7 | No question could be reordered in a New Quiz that draws from an Item Bank: the planner and the Bridge accepted only question entries, although Canvas moves a bank draw and a single bank question through the same position update. | closure section 522; gateway and Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 523 | P1 | R7 | A New Quiz time limit, attempt limit, cooling period, IP filter, or one-at-a-time setting could be turned on but never back off, and turning attempts off could never be confirmed: Morrow refused Canvas's own cleared values (0, [], backtracking with no one-at-a-time) and expected null back where Canvas saves 0 or []. | closure section 523; gateway and Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3653,6 +3654,12 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Repair: the planner and the Bridge accept `Item`, `Bank`, and `BankEntry` entries; the order read counts every entry; a move that also edits the question still requires a standalone question, and a stimulus-linked or locked entry is still refused. `packages/mcp-server/test/new-quiz-item-order.test.ts` and `scripts/test/canvas-new-quiz-item-guard.test.mjs` cover both.
 - Found with it: the planner moved every entry between a moved entry and its target one step at a time, so sending one entry to the end took one reviewed move per entry passed; it now keeps the longest run already in order and moves each other entry once. The review could not name a single bank question (its title sits in the embedded bank entry), so that move was never approvable; bank draws and bank questions are now named for what they are.
 - Status: `IMPLEMENTED`.
+
+### 523: quiz settings could be turned on but not back off
+
+- Condition: every new quiz starts with `session_time_limit_in_seconds: 0`, `filters.ips: []`, `max_attempts: 0`, and `allow_backtracking: true` with `one_at_a_time_type: "none"`. The settings rules, copied from Canvas's documentation, refused all four, and Canvas saves a cleared `null` as `0` or `[]`, so the reviewed readback never matched. Live evidence: Canvas accepted `0` and `[]` on the settings route and saved them exactly.
+- Repair: `packages/mcp-server/src/new-quiz-settings.ts` accepts a cleared value as `0`, `[]`, or `null`, sends it in the form Canvas saves, and keeps refusing a limit left on with a cleared value; `packages/canvas-connector-mcp/src/server.ts` lets the settings route carry those values; the Bridge compares a readback in Canvas's saved form. `packages/mcp-server/test/new-quiz-settings.test.ts` covers restoring every default.
+- Status: `IMPLEMENTED`; proven live: every settings group turned on and back off, each verified.
 
 ### Root-cause patterns for rows 331–472
 

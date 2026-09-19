@@ -116,7 +116,7 @@ describe("New Quiz settings planner", () => {
       const dispatched = await execute(plans[0]!.args);
       expect(dispatched.result).toMatchObject({ ok: true, verification: { status: "verified" } });
       expect(dispatched.writes).toEqual([{ quiz: { quiz_settings: { ...current.quiz_settings, shuffle_answers: true,
-        require_student_access_code: false, student_access_code: null, filter_ip_address: false, filters: { ips: null },
+        require_student_access_code: false, student_access_code: null, filter_ip_address: false, filters: { ips: [] },
         result_view_settings: { display_items: true, display_item_response: true,
           display_item_response_correctness: true, display_item_correct_answer: true } } } }]);
     } finally { await client.close(); await server.close(); }
@@ -145,26 +145,47 @@ describe("New Quiz settings planner", () => {
     }
   });
 
+  it("turns settings back off to the values Canvas saves, and expects those values back", async () => {
+    // Canvas starts a quiz with session_time_limit_in_seconds 0, filters.ips [], max_attempts 0 and
+    // backtracking on without one-at-a-time; its write route takes null and saves 0 or [].
+    const { runtime, plans } = fixture();
+    const result = await planNewQuizSettings(runtime, { ...input, settings: {
+      has_time_limit: false, session_time_limit_in_seconds: 0,
+      filter_ip_address: false, filters: { ips: [] },
+      multiple_attempts: { attempt_limit: false, max_attempts: 0 },
+      one_at_a_time_type: "none", allow_backtracking: true,
+    } });
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    // Sent in the form Canvas saves, so every readback compares like with like.
+    expect(plans[0]!.args).toMatchObject({ quiz_quiz_settings_session_time_limit_in_seconds: 0,
+      quiz_quiz_settings_filters_ips: [], quiz_quiz_settings_multiple_attempts_max_attempts: 0 });
+    const plan = (result.structuredContent as JsonObject).settings_plan as JsonObject;
+    const saved = { ...current.quiz_settings, has_time_limit: false, session_time_limit_in_seconds: 0,
+      filter_ip_address: false, filters: { ips: [] }, one_at_a_time_type: "none", allow_backtracking: true,
+      multiple_attempts: { ...current.quiz_settings.multiple_attempts, attempt_limit: false, max_attempts: 0 } };
+    expect(plan.expected_quiz_settings_sha256).toBe(newQuizSettingsDigest(saved as unknown as JsonObject));
+  });
+
   it("rejects invalid enums, ranges, dates, and dependent settings before review", async () => {
     const cases: readonly [JsonObject, string][] = [
       [{ calculator_type: "graphing" }, "calculator_type"],
       [{ one_at_a_time_type: "page" }, "one_at_a_time_type"],
-      [{ session_time_limit_in_seconds: 0 }, "positive whole number"],
-      [{ filters: { ips: [] } }, "filters.ips"],
+      [{ session_time_limit_in_seconds: -5 }, "positive whole number"],
+      [{ session_time_limit_in_seconds: 0 }, "A time limit needs"],
+      [{ filters: { ips: [] } }, "IP filtering needs"],
       [{ filters: { ips: [["x", "y"]] } }, "filters.ips"],
       [{ multiple_attempts: { score_to_keep: "best" } }, "score_to_keep"],
       [{ result_view_settings: { display_item_response_qualifier: "sometimes" } }, "unsupported value"],
       [{ result_view_settings: { show_item_responses_at: "tomorrow" } }, "Canvas date and time"],
       [{ result_view_settings: { show_item_responses_at: "2026-09-08" } }, "Canvas date and time"],
-      [{ allow_backtracking: true, one_at_a_time_type: "none" }, "one_at_a_time_type is question"],
       [{ filter_ip_address: true, filters: { ips: null } }, "IP filtering needs"],
       [{ has_time_limit: true, session_time_limit_in_seconds: null }, "A time limit needs"],
       [{ require_student_access_code: true, student_access_code: null }, "An access code needs"],
-      [{ has_time_limit: false }, "Set session_time_limit_in_seconds to null"],
+      [{ has_time_limit: false }, "Set session_time_limit_in_seconds to 0 or null"],
       [{ require_student_access_code: false }, "Set student_access_code to null"],
-      [{ filter_ip_address: false }, "Set filters.ips to null"],
+      [{ filter_ip_address: false }, "Set filters.ips to [] or null"],
       [{ multiple_attempts: { multiple_attempts_enabled: false } }, "Clear active attempt limit and cooling settings"],
-      [{ multiple_attempts: { attempt_limit: false } }, "Set multiple_attempts.max_attempts to null"],
+      [{ multiple_attempts: { attempt_limit: false } }, "Set multiple_attempts.max_attempts to 0 or null"],
       [{ multiple_attempts: { multiple_attempts_enabled: false, attempt_limit: true, max_attempts: 2 } }, "multiple_attempts_enabled true"],
       [{ multiple_attempts: { cooling_period: true, cooling_period_seconds: null } }, "A cooling period needs"],
       [{ result_view_settings: { display_items: false } }, "Disable item feedback, response, and correctness settings"],

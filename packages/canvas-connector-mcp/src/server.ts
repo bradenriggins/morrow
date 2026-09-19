@@ -55,12 +55,37 @@ export function canvasConnectorSummary(value: JsonObject): string {
   return "Morrow could not confirm this change. Ask your assistant to check the existing request. Do not repeat this change.";
 }
 
+// Canvas documents these counts as positive and the IP list as non-empty, but it saves a cleared
+// value as 0 or [] (every new quiz starts that way) and accepts those values back, so the settings
+// route takes them: a person can turn a setting off in the same form Canvas keeps it.
+const NEW_QUIZ_CLEARED_COUNT_SETTINGS = [
+  "quiz_quiz_settings_session_time_limit_in_seconds",
+  "quiz_quiz_settings_multiple_attempts_max_attempts",
+  "quiz_quiz_settings_multiple_attempts_cooling_period_seconds",
+];
+
+function withCanvasClearedSettings(properties: JsonObject): JsonObject {
+  const next = { ...properties };
+  for (const name of NEW_QUIZ_CLEARED_COUNT_SETTINGS) {
+    const property = next[name];
+    if (!isJsonObject(property)) continue;
+    const { exclusiveMinimum: _exclusiveMinimum, ...rest } = property;
+    next[name] = { ...rest, minimum: 0 };
+  }
+  const ips = next.quiz_quiz_settings_filters_ips;
+  if (isJsonObject(ips)) {
+    const { minItems: _minItems, ...rest } = ips;
+    next.quiz_quiz_settings_filters_ips = rest;
+  }
+  return next;
+}
+
 export function newQuizSettingsWriteSchema(inputSchema: JsonSchema): JsonObject {
   const schema = augmentBridgeInputSchema(inputSchema);
   return {
     ...schema,
     properties: {
-      ...(isJsonObject(schema.properties) ? schema.properties : {}),
+      ...withCanvasClearedSettings(isJsonObject(schema.properties) ? schema.properties : {}),
       morrow_new_quiz_settings_guard: {
         type: "object",
         description: "Fresh complete quiz_settings digest from morrow_plan_new_quiz_settings. Required when this request changes a New Quiz setting.",

@@ -2457,6 +2457,20 @@
     };
   }
 
+  // Canvas saves a cleared count as 0 and a cleared IP list as [], whatever cleared value it was sent.
+  function canvasSavedQuizSettings(settings) {
+    if (!plainObject(settings)) return settings;
+    const saved = JSON.parse(JSON.stringify(settings));
+    if (Object.hasOwn(saved, "session_time_limit_in_seconds") && saved.session_time_limit_in_seconds === null) saved.session_time_limit_in_seconds = 0;
+    if (plainObject(saved.multiple_attempts)) {
+      for (const key of ["max_attempts", "cooling_period_seconds"]) {
+        if (Object.hasOwn(saved.multiple_attempts, key) && saved.multiple_attempts[key] === null) saved.multiple_attempts[key] = 0;
+      }
+    }
+    if (plainObject(saved.filters) && Object.hasOwn(saved.filters, "ips") && saved.filters.ips === null) saved.filters.ips = [];
+    return saved;
+  }
+
   async function verifyNewQuizSettingsChange(args, url, expectedSettings, previousSettings = null, requestedQuizFields = {}, expiresAt) {
     const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-settings" };
     let saved;
@@ -2473,7 +2487,7 @@
       return { ...base, status: "unconfirmed", reason: "new_quiz_settings_readback_missing" };
     }
     const savedSettings = stable(saved.quiz_settings);
-    if (savedSettings !== stable(expectedSettings)) {
+    if (savedSettings !== stable(expectedSettings) && savedSettings !== stable(canvasSavedQuizSettings(expectedSettings))) {
       if (plainObject(previousSettings) && savedSettings === stable(previousSettings)) {
         return { ...base, status: "mismatch", reason: "new_quiz_settings_readback_no_effect" };
       }
