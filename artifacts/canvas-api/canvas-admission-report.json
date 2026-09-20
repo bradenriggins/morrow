@@ -1,25 +1,25 @@
 {
   "schema": "morrow.canvas-admission-report.v1",
-  "catalogDigest": "f5690ac0537093c00277321258a25c1668715aa84ba2fab73996031b0c1eee67",
+  "catalogDigest": "1b8f252872dc37c4169cdabd85697b6e6e2ba976da03f2185528bd3024691590",
   "totals": {
-    "operations": 1130,
+    "operations": 1132,
     "reads": 573,
-    "writes": 557
+    "writes": 559
   },
   "admission": {
-    "admitted": 547,
+    "admitted": 549,
     "admittedByCourseTargetKind": {
       "none": 293,
-      "course_path": 232,
+      "course_path": 234,
       "semantic_course_object": 16,
       "self_path": 6
     },
     "admittedByAuthority": {
-      "course": 236,
+      "course": 238,
       "site": 311
     },
     "admittedCourseByCourseTargetKind": {
-      "course_path": 221,
+      "course_path": 223,
       "semantic_course_object": 15
     },
     "admittedSiteByClass": {
@@ -45,7 +45,7 @@
   },
   "readback": {
     "stateCounts": {
-      "structurally_exact": 348,
+      "structurally_exact": 350,
       "unavailable": 164,
       "blocked": 24,
       "unconfirmed": 11
@@ -67,7 +67,7 @@
       "created_child": 75,
       "parent_collection": 25,
       "declared": 20,
-      "executor": 21,
+      "executor": 23,
       "mismatched": 2,
       "none": 188
     },

@@ -343,7 +343,7 @@ test("Canvas Edit categories are exactly the bound admitted writes with exact re
   const supported = supportedEditableCanvasWrites()
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  assert.equal(supported.length, 341);
+  assert.equal(supported.length, 343);
   assert.deepEqual(editable, supported);
   // A bound write with no exact readback is offered for review too, one change at a time.
   const uncheckable = canvasOperations.filter((operation) => operation.readOnly === false
@@ -660,11 +660,11 @@ test("only a destructive Item Bank change is approved change by change; every ot
   const options = categoriesForBinding({ provider: "canvas" }, canvasOperations);
   assert.equal(options.some((entry) => entry.id === LEGACY_ITEM_BANK_CATEGORY), false);
   const writes = itemBankWrites();
-  assert.equal(writes.length, 18);
+  assert.equal(writes.length, 20);
   const destructive = writes.filter((operation) => ITEM_BANK_DESTRUCTIVE_WRITES.has(operation.toolName));
   const standing = writes.filter((operation) => !ITEM_BANK_DESTRUCTIVE_WRITES.has(operation.toolName));
   assert.equal(destructive.length, 6);
-  assert.equal(standing.length, 12);
+  assert.equal(standing.length, 14);
   for (const operation of destructive) {
     const option = canvasOption(options, operation.toolName);
     assert.equal(canvasOperationAdmission(operation).write.state, "admitted", operation.toolName);
@@ -699,7 +699,7 @@ test("Item Bank write rules never carry the legacy guard, and a destructive one 
     enabledCategories: options.filter((option) => option.availability === "edit").map((option) => option.id), operations,
   });
   const rules = permission.rules.filter((rule) => rule.toolName.startsWith("canvas_item_bank_"));
-  assert.equal(rules.length, 12);
+  assert.equal(rules.length, 14);
   assert.equal(rules.some((rule) => ITEM_BANK_DESTRUCTIVE_WRITES.has(rule.toolName)), false);
   assert.equal(rules.some((rule) => rule.requiresItemBankGuard === true), false);
 });

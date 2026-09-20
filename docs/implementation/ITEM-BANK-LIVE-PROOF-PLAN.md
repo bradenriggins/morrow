@@ -32,7 +32,7 @@ Every bank-specific read first proves that the selected course's fresh bank list
 
 Build one reviewable operation with the exact current snapshot and intended payload. Do not approve or dispatch it in this assignment. Record the operation name, target ids, payload digest, required snapshot keys, and approval state in `03-plan.json`.
 
-The eighteen course-bound changes use these contracts:
+The twenty course-bound changes use these contracts:
 
 | Operation | Required snapshot | Intended effect |
 | --- | --- | --- |
@@ -54,6 +54,8 @@ The eighteen course-bound changes use these contracts:
 | `canvas_item_bank_remove_entry_tag` | `bank_sha256`, `entry_sha256` | Remove one exact tag from one exact question, named by its value. Canvas has no read that reports a question's tags, so Morrow resolves the tag, proves the question carries it, and asks Canvas for the association. |
 | `canvas_item_bank_update_quiz_draw` | `bank_sha256`, `quiz_entries_sha256` | Change one exact bank draw's question count or points on one exact New Quiz. A row another bank supplies, or a question row, is refused. |
 | `canvas_item_bank_add_quiz_question_to_bank` | `bank_sha256`, `quiz_entries_sha256` | Put one question the named quiz row holds into this bank. The quiz keeps the question, and both then name the same one. |
+| `canvas_item_bank_create_stimulus` | `bank_sha256` | Create one stimulus or text block and the bank entry that holds it. |
+| `canvas_item_bank_update_stimulus` | `bank_sha256`, `entries_sha256` | Change one exact stimulus. Every question asked about it shows the change. |
 
 `morrow_plan_item_bank_question_image_alt_repair` uses the same reviewed Item Bank item update. It changes the underlying shared question, so it can affect every consuming quiz. That is why it carries the same `bank_sha256` and `item_sha256` snapshots and the same observed-reach acknowledgement as any other change to an existing bank. It repairs one reviewed image and leaves every other part of the question, including any other image that still needs alternative text, exactly as Canvas holds it.
 

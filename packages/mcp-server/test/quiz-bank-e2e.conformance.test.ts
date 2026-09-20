@@ -1830,13 +1830,13 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       const published = admitted.filter((operation) => operation.toolName !== "canvas_get_items_media_upload_url");
       const hidden = relevantOperations.filter((operation) => held.includes(operation)
         || operation.toolName === "canvas_get_items_media_upload_url");
-      expect(relevantOperations).toHaveLength(41);
+      expect(relevantOperations).toHaveLength(43);
       // Learner accommodations are course work reached through their course, so nothing here is held.
-      expect(admitted).toHaveLength(41);
+      expect(admitted).toHaveLength(43);
       expect(held).toHaveLength(0);
       expect(relevantOperations.filter((operation) => operation.service === "item_bank" && !operation.readOnly
         && canvasOperationAdmission(operation).write.state === "admitted").map((operation) => operation.toolName))
-        .toHaveLength(18);
+        .toHaveLength(20);
       for (const operation of published) {
         const capability = await client!.callTool({ name: "morrow_capability_get", arguments: { name: operation.toolName } });
         expect(capability.isError, operation.toolName).not.toBe(true);
@@ -2360,6 +2360,8 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
         canvas_item_bank_move_entry: "scripts/test/canvas-item-bank-executor.test.mjs",
         canvas_item_bank_add_entry_tag: "scripts/test/canvas-item-bank-executor.test.mjs",
         canvas_item_bank_remove_entry_tag: "scripts/test/canvas-item-bank-executor.test.mjs",
+        canvas_item_bank_create_stimulus: "scripts/test/canvas-item-bank-executor.test.mjs",
+        canvas_item_bank_update_stimulus: "scripts/test/canvas-item-bank-executor.test.mjs",
         // The five assignment-bound quiz-builder writes, driven end to end against the real
         // executor, including the documented all-items draw, the exact-absence delete, the draw
         // edit, and the refusal to bank a question the named quiz row does not hold.

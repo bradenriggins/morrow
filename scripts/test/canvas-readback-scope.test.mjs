@@ -222,6 +222,8 @@ const ITEM_BANK_UNROUTED_CREATES = [
   { nickname: "add_entry_tag", args: { course_id: "42", bank_id: "901", bank_entry_id: "701", tag_value: "Chapter: 01" }, data: { id: "7600" } },
   { nickname: "remove_entry_tag", args: { course_id: "42", bank_id: "901", bank_entry_id: "701", tag_value: "Chapter: 01" }, data: {} },
   { nickname: "add_quiz_question_to_bank", args: { course_id: "42", assignment_id: "77", bank_id: "901", quiz_entry_id: "801", item_id: "502" }, data: { id: "703" } },
+  { nickname: "create_stimulus", args: { course_id: "42", bank_id: "901", title: "The passage", body: "<p>Read this.</p>" }, data: { id: "301" } },
+  { nickname: "update_stimulus", args: { course_id: "42", bank_id: "901", stimulus_id: "301", title: "The passage, revised" }, data: { id: "301" } },
 ];
 
 const itemBankWrite = (nickname) => {
@@ -232,7 +234,7 @@ const itemBankWrite = (nickname) => {
 
 test("every Item Bank change is reread by its own executor, whatever the planner would route", () => {
   const writes = catalog.operations.filter((entry) => entry.service === "item_bank" && !entry.readOnly);
-  assert.equal(writes.length, 18);
+  assert.equal(writes.length, 20);
   assert.deepEqual(
     [...ITEM_BANK_PLANNED_ROUTES, ...ITEM_BANK_UNROUTED_CREATES].map((entry) => entry.nickname).sort(),
     writes.map((entry) => entry.nickname).sort(),

@@ -76,7 +76,7 @@ describe("Canvas API catalog", () => {
 
   it("covers the official surface plus the browser-session Item Banks contract", () => {
     expect(catalog.counts.officialOperations).toBeGreaterThanOrEqual(1_100);
-    expect(catalog.counts.itemBankOperations).toBe(27);
+    expect(catalog.counts.itemBankOperations).toBe(29);
     expect(catalog.counts.newQuizzesOperations).toBeGreaterThan(12);
     expect(new Set(catalog.operations.map((operation) => operation.toolName)).size).toBe(catalog.operations.length);
   });
@@ -540,7 +540,7 @@ describe("Canvas API catalog", () => {
 
   it("admits every Item Bank write with exact readback metadata", () => {
     const writes = catalog.operations.filter((operation) => operation.service === "item_bank" && !operation.readOnly);
-    expect(writes).toHaveLength(18);
+    expect(writes).toHaveLength(20);
     for (const operation of writes) {
       expect(operation.inputSchema.required).toEqual(expect.arrayContaining(["course_id", "expected_snapshot"]));
       const admission = canvasOperationAdmission(operation);
@@ -623,7 +623,7 @@ describe("Canvas API catalog", () => {
       expect(tool?.capability?.profiles["public-canvas"], operation.toolName).toEqual({ state: "supported" });
       expect(tool?.capability?.evidence?.admission, operation.toolName).toEqual({ state: "known" });
     }
-    expect(tools.filter((tool) => tool.capability?.family === "new-quizzes-item-banks")).toHaveLength(27);
+    expect(tools.filter((tool) => tool.capability?.family === "new-quizzes-item-banks")).toHaveLength(29);
   });
 
   it("admits every course-path learner record under ordinary course Edit and exact readback", () => {
@@ -870,7 +870,7 @@ describe("Canvas API catalog", () => {
 
     const admitted = catalog.operations.filter((operation) => !operation.readOnly
       && canvasOperationAdmission(operation).write.state === "admitted");
-    expect(admitted).toHaveLength(547);
+    expect(admitted).toHaveLength(549);
     expect(admitted.filter((operation) => accountRoute(operation.path))).toHaveLength(115);
   });
 
@@ -1000,7 +1000,7 @@ describe("Canvas API catalog", () => {
 
     // The admitted set is pinned here as well. Any change needs a reviewed admission reason.
     expect(catalog.operations.filter((operation) => !operation.readOnly
-      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(547);
+      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(549);
   });
 
   // Generic Canvas upload pre-flights cannot carry the remaining transfer steps. The Rubric CSV
@@ -1505,8 +1505,8 @@ describe("Canvas API catalog", () => {
     expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(164);
     expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(24);
     expect(assessments.filter((assessment) => assessment.state === "unconfirmed")).toHaveLength(11);
-    expect(admittedWrites).toHaveLength(547);
-    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(348);
+    expect(admittedWrites).toHaveLength(549);
+    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(350);
     const tools = canvasCatalogTools(catalog);
     expect(tools.find((tool) => tool.name === "canvas_update_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
     // Deleting a gradebook column is course work admitted through its course, and its absence reads back exactly.

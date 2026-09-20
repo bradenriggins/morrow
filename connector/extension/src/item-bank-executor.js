@@ -154,6 +154,8 @@ export async function executeItemBankInPage(input) {
     copy_entry: ["POST", "/api/banks/{bank_id}/bank_entries/copy"],
     move_entry: ["POST", "/api/banks/{bank_id}/bank_entries/move"],
     update_share: ["PATCH", "/api/banks/{bank_id}/shared_banks/{share_id}"],
+    create_stimulus: ["POST", "/api/banks/{bank_id}/stimuli"],
+    update_stimulus: ["PATCH", "/api/banks/{bank_id}/stimuli/{stimulus_id}"],
     add_entry_tag: ["POST", "/api/bank_entries/{bank_entry_id}/tag_associations"],
     remove_entry_tag: ["DELETE", "/api/bank_entries/{bank_entry_id}/tag_associations/{tag_association_id}"],
   };
@@ -355,8 +357,18 @@ export async function executeItemBankInPage(input) {
     body = { source_bank_id: String(formValues.source_bank_id), source_bank_entry_id: String(formValues.source_bank_entry_id) };
   }
   else if (operation.nickname === "update_share") {
-    if (!["read", "edit"].includes(String(formValues.permission))) return { matched: true, ok: false, sent: false, error: "item_bank_share_permission_unsupported" };
+    // Canvas removes a share by setting its permission to removed_access: there is no delete route.
+    if (!["read", "edit", "removed_access"].includes(String(formValues.permission))) return { matched: true, ok: false, sent: false, error: "item_bank_share_permission_unsupported" };
     body = { shared_bank: { permission: String(formValues.permission) } };
+  }
+  else if (operation.nickname === "create_stimulus" || operation.nickname === "update_stimulus") {
+    const stimulus = {};
+    for (const key of ["title", "body", "instructions", "orientation", "source_url"]) {
+      if (formValues[key] !== undefined) stimulus[key] = String(formValues[key]);
+    }
+    if (operation.nickname === "create_stimulus") stimulus.passage = formValues.passage === true;
+    if (Object.keys(stimulus).length === 0) return { matched: true, ok: false, sent: false, error: "item_bank_stimulus_payload_empty" };
+    body = { stimulus };
   }
   else if (operation.nickname === "add_entry_tag") body = { tag_value: String(formValues.tag_value) };
   else if (operation.nickname === "share_bank") {
@@ -921,6 +933,8 @@ export async function executeItemBankInPage(input) {
       update_share: ["bank_sha256", "shares_sha256"],
       copy_entry: ["bank_sha256", "entries_sha256", "source_entry_sha256"],
       move_entry: ["bank_sha256", "entries_sha256", "source_entry_sha256"],
+      create_stimulus: ["bank_sha256"],
+      update_stimulus: ["bank_sha256", "entries_sha256"],
       add_entry_tag: ["bank_sha256", "entry_sha256"],
       remove_entry_tag: ["bank_sha256", "entry_sha256"],
     }[operation.nickname] || [];
@@ -1166,10 +1180,49 @@ export async function executeItemBankInPage(input) {
         const shareId = id(input.arguments?.share_id);
         const list = await readObservedList(`/api/banks/${bankId}/shared_banks`);
         const share = list.error ? null : list.rows.find((row) => id(row?.id) === shareId);
+        // A removed share may be answered either as a row saying removed_access or as no row at all.
+        const removed = String(formValues.permission) === "removed_access";
+        const saved = removed
+          ? !share || String(share.permission) === "removed_access"
+          : Boolean(share) && String(share.permission) === String(formValues.permission);
         verification = list.error ? unconfirmed()
-          : share && String(share.permission) === String(formValues.permission)
-            ? { ...base, status: "verified", evidence: "exact_share_permission_reread" }
-            : mismatch("share_permission_did_not_match");
+          : saved
+            ? { ...base, status: "verified", evidence: removed ? "exact_share_removed_reread" : "exact_share_permission_reread" }
+            : mismatch(removed ? "share_still_present" : "share_permission_did_not_match");
+      } else if (operation.nickname === "create_stimulus") {
+        // Canvas's own Item Banks page creates the stimulus and then the bank entry that holds it.
+        const created = plain(written.data?.stimulus) ? written.data.stimulus : written.data;
+        const createdId = id(created?.id);
+        const placed = createdId ? await request("POST", `/api/banks/${bankId}/bank_entries`, {
+          bank_entry: { bank_id: bankId, entry_type: "Stimulus", entry_id: createdId },
+        }) : null;
+        const after = createdId && placed?.ok ? await readList(`/api/banks/${encodeURIComponent(bankId)}/bank_entries`) : null;
+        const saved = after && !after.error
+          ? after.rows.find((row) => String(row?.entry_type) === "Stimulus" && id(row?.entry?.id ?? row?.entry_id) === createdId)
+          : null;
+        const wanted = plain(body?.stimulus) ? body.stimulus : {};
+        const matches = plain(saved?.entry)
+          && Object.entries(wanted).every(([key, value]) => String(saved.entry[key] ?? "") === String(value));
+        verification = !createdId ? unconfirmed()
+          : !placed?.ok ? { ...unconfirmed("created_stimulus_bank_entry_failed"), targetId: createdId }
+          : after?.error ? { ...unconfirmed(), targetId: createdId }
+          : !saved ? { ...mismatch("created_stimulus_entry_not_found"), targetId: createdId }
+          : matches
+            ? { ...base, status: "verified", evidence: "created_stimulus_reread_from_complete_entry_list", targetId: createdId }
+            : { ...mismatch("created_stimulus_did_not_match_request"), targetId: createdId };
+      } else if (operation.nickname === "update_stimulus") {
+        const stimulusId = id(input.arguments?.stimulus_id);
+        const after = await readList(`/api/banks/${encodeURIComponent(bankId)}/bank_entries`);
+        const saved = after.error ? null
+          : after.rows.find((row) => String(row?.entry_type) === "Stimulus" && id(row?.entry?.id ?? row?.entry_id) === stimulusId);
+        const wanted = plain(body?.stimulus) ? body.stimulus : {};
+        const matches = plain(saved?.entry)
+          && Object.entries(wanted).every(([key, value]) => String(saved.entry[key] ?? "") === String(value));
+        verification = after.error ? unconfirmed()
+          : !saved ? mismatch("stimulus_not_found")
+          : matches
+            ? { ...base, status: "verified", evidence: "exact_stimulus_reread_from_complete_entry_list", targetId: stimulusId }
+            : mismatch("stimulus_did_not_match_request");
       } else if (operation.nickname === "add_entry_tag" || operation.nickname === "remove_entry_tag") {
         // No route reads one question's tags, so the bank is searched for that exact tag. That
         // search reads an index the service fills after the write returns: measured live, the

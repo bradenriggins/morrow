@@ -151,7 +151,7 @@ test("refuses reactivation when the write response cannot bind the same enrollme
 // named Canvas readback either.
 test("no Item Bank change takes a Canvas readback route outside its own frame", () => {
   const writes = catalog.operations.filter((operation) => operation.service === "item_bank" && !operation.readOnly);
-  assert.equal(writes.length, 18);
+  assert.equal(writes.length, 20);
   for (const write of writes) {
     assert.equal(isCanvasOperationReadback(write), false, write.toolName);
     assert.equal(planCanvasOperationReadback(catalog.operations, write, { course_id: "42", bank_id: "901" }, { id: "801" }), null, write.toolName);

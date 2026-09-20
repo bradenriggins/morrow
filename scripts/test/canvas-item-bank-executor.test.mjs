@@ -71,6 +71,12 @@ function assertPrivate(result, label) {
 // What the live bank service answers for an entry: the row with its question embedded.
 // A live entry row has no `entry_id`: it names its question only as `entry.id`.
 function embeddedEntry(state, row) {
+  if (String(row?.entry_type) === "Stimulus") {
+    const stimulus = state.stimuli.get(String(row.entry_id));
+    if (!stimulus) return row;
+    const { entry_id: stimulusId, ...rest } = row;
+    return { ...rest, entry: { ...stimulus, id: String(stimulusId) } };
+  }
   const question = String(row?.entry_type) === "Item" ? state.items.get(String(row.entry_id)) : null;
   if (!question) return row;
   const { entry_id: entryId, ...rest } = row;
@@ -89,7 +95,8 @@ function provider({ writeStatus = 0, sabotage = false, banks, items, entries, sh
     items: items ?? new Map([["501", { id: "501", entry_type: "Item", entry: { title: "Question A", item_body: "<p>A</p>" } }]]),
     entries: entries ?? new Map([["401", { id: "401", bank_id: "91", entry_type: "Item", entry_id: "501" }]]),
     shares: [],
-    tags: [{ id: "23", value: "Chapter: 01" }], tagged: new Map(), associations: new Map(), nextBank: 92, nextItem: 502, nextEntry: 402, nextTagAssociation: 7600,
+    tags: [{ id: "23", value: "Chapter: 01" }], tagged: new Map(), associations: new Map(), stimuli: new Map(),
+    nextBank: 92, nextItem: 502, nextEntry: 402, nextTagAssociation: 7600, nextStimulus: 301,
   };
   // What the live service does: a course lists only the banks shared with it. A bank made by a
   // bare POST /api/banks belongs to its creator until it is shared with the course.
@@ -153,6 +160,20 @@ function provider({ writeStatus = 0, sabotage = false, banks, items, entries, sh
         state.entries.set(entry.id, entry);
         return json(entry, 201);
       }
+    }
+    // A stimulus is created in the bank and then held by a bank entry, like a question.
+    const stimulusListMatch = path.match(/^\/api\/banks\/(\d+)\/stimuli$/);
+    if (stimulusListMatch && method === "POST") {
+      const stimulus = { id: String(state.nextStimulus++), ...body.stimulus };
+      state.stimuli.set(stimulus.id, stimulus);
+      return json({ stimulus }, 201);
+    }
+    const stimulusMatch = path.match(/^\/api\/banks\/(\d+)\/stimuli\/(\d+)$/);
+    if (stimulusMatch && method === "PATCH") {
+      const current = state.stimuli.get(stimulusMatch[2]);
+      if (!current) return json({ error: "missing" }, 404);
+      if (!sabotage) state.stimuli.set(stimulusMatch[2], { ...current, ...body.stimulus });
+      return json({ stimulus: state.stimuli.get(stimulusMatch[2]) });
     }
     // The question search, the account's tags, and copy, move and tag writes, as the live service answers them.
     const searchMatch = path.match(/^\/api\/banks\/(\d+)\/bank_entries\/search$/);
@@ -361,6 +382,25 @@ const WRITE_SHAPES = [
     mismatch: "question_still_carries_the_tag",
   },
   {
+    nickname: "create_stimulus",
+    args: async (state) => ({ course_id: "42", bank_id: "91", title: "The passage", body: "<p>Read this.</p>",
+      expected_snapshot: { bank_sha256: await digest(state.banks[0]) }, ...await observed() }),
+    mismatch: "created_stimulus_entry_not_found",
+    // The stimulus, then the bank entry that holds it: the shape Canvas's own page sends.
+    dispatches: 2,
+  },
+  {
+    nickname: "update_stimulus",
+    args: async (state) => {
+      state.stimuli.set("300", { id: "300", title: "The passage", body: "<p>Read this.</p>", passage: false });
+      state.entries.set("410", { id: "410", bank_id: "91", entry_type: "Stimulus", entry_id: "300" });
+      return { course_id: "42", bank_id: "91", stimulus_id: "300", title: "The passage, revised",
+        expected_snapshot: { bank_sha256: await digest(state.banks[0]), entries_sha256: await digest([...state.entries.values()].filter((row) => String(row.bank_id) === "91").map((row) => embeddedEntry(state, row))) },
+        ...await observed() };
+    },
+    mismatch: "stimulus_did_not_match_request",
+  },
+  {
     nickname: "share_bank",
     args: async (state) => ({ course_id: "42", bank_id: "91", entity_type: "course", entity_id: "77", permission: "read", expected_snapshot: { bank_sha256: await digest(state.banks[0]), shares_sha256: await digest(sharesAsRead(state)) }, ...await observed() }),
     mismatch: "course_read_share_not_found",
@@ -382,16 +422,17 @@ async function runShape(shape, options = {}) {
   });
 }
 
-test("Item Bank catalog exposes nine reads and eighteen course-bound writes", () => {
-  assert.equal(operations.size, 27);
+test("Item Bank catalog exposes nine reads and twenty course-bound writes", () => {
+  assert.equal(operations.size, 29);
   assert.equal([...operations.values()].filter((operation) => operation.readOnly).length, 9);
   for (const operation of [...operations.values()].filter((candidate) => !candidate.readOnly)) {
     assert.ok(operation.inputSchema.required.includes("course_id"), operation.nickname);
     assert.ok(operation.inputSchema.required.includes("expected_snapshot"), operation.nickname);
   }
   assert.deepEqual(WRITE_SHAPES.map((shape) => shape.nickname).sort(), [
-    "add_entry_tag", "archive_bank", "attach_item", "copy_entry", "create_bank", "create_item", "delete_entry",
-    "move_entry", "remove_entry_tag", "rename_bank", "share_bank", "update_item", "update_share",
+    "add_entry_tag", "archive_bank", "attach_item", "copy_entry", "create_bank", "create_item", "create_stimulus",
+    "delete_entry", "move_entry", "remove_entry_tag", "rename_bank", "share_bank", "update_item", "update_share",
+    "update_stimulus",
   ]);
 });
 
@@ -1252,5 +1293,61 @@ test("a tag is removed by its value, and a tag the question does not carry is re
       "POST /api/bank_entries/401/tag_associations",
       "DELETE /api/bank_entries/401/tag_associations/7600",
     ]);
+  });
+});
+
+// Canvas has no route that deletes a share: its own Item Banks page unshares a bank by setting
+// that share's permission to removed_access, so that is how Morrow removes one.
+test("a share is removed by the permission Canvas uses for it, answered as either shape", async () => {
+  for (const answer of ["row", "absent"]) {
+    await withPageContext(async () => {
+      const api = provider();
+      globalThis.fetch = async (url, options = {}) => {
+        const path = new URL(url).pathname;
+        const method = options.method || "GET";
+        if (path === "/api/banks/91/shared_banks/1" && method === "PATCH") {
+          const sent = JSON.parse(options.body).shared_bank;
+          api.requests.push({ method, path, body: JSON.parse(options.body) });
+          if (answer === "absent") api.state.shares = api.state.shares.filter((row) => String(row.id) !== "1");
+          else api.state.shares = api.state.shares.map((row) => String(row.id) === "1" ? { ...row, ...sent } : row);
+          return new Response(JSON.stringify({ id: "1", ...sent }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return await api.fetch(url, options);
+      };
+      api.state.shares.push({ id: "1", bank_id: "91", entity_type: "course", entity_id: "77", permission: "read" });
+      const result = await executeItemBankInPage(input("update_share", {
+        course_id: "42", bank_id: "91", share_id: "1", permission: "removed_access",
+        expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), shares_sha256: await digest(sharesAsRead(api.state)) },
+        ...await observed(),
+      }));
+      assert.equal(result.ok, true, `${answer}: ${JSON.stringify(result.verification ?? result)}`);
+      assert.equal(result.verification.evidence, "exact_share_removed_reread");
+      assert.deepEqual(api.requests.filter((request) => request.method === "PATCH").map((request) => request.body),
+        [{ shared_bank: { permission: "removed_access" } }]);
+    });
+  }
+});
+
+test("a share Canvas still reports as readable is not taken for a removed one", async () => {
+  await withPageContext(async () => {
+    const api = provider();
+    globalThis.fetch = async (url, options = {}) => {
+      const path = new URL(url).pathname;
+      if (path === "/api/banks/91/shared_banks/1" && (options.method || "GET") === "PATCH") {
+        api.requests.push({ method: "PATCH", path });
+        return new Response(JSON.stringify({ id: "1", permission: "read" }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return await api.fetch(url, options);
+    };
+    api.state.shares.push({ id: "1", bank_id: "91", entity_type: "course", entity_id: "77", permission: "read" });
+    const result = await executeItemBankInPage(input("update_share", {
+      course_id: "42", bank_id: "91", share_id: "1", permission: "removed_access",
+      expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), shares_sha256: await digest(sharesAsRead(api.state)) },
+      ...await observed(),
+    }));
+    assert.equal(result.ok, false);
+    assert.equal(result.sent, true);
+    assert.equal(result.verification.status, "mismatch");
+    assert.equal(result.verification.reason, "share_still_present");
   });
 });

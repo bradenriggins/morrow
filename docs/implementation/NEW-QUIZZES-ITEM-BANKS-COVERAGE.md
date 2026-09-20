@@ -36,7 +36,7 @@ States: **proven** (verified live through Morrow), **gap** (Canvas supports it a
 | Change a question's type | delete and create | `morrow_plan_new_quiz_item_replacement` | proven |
 | Reorder questions, bank draws, and single bank questions | `PATCH …/items/:i` (`position`) | `morrow_plan_new_quiz_item_order` | proven |
 | Delete a question | `DELETE /quiz/v1/…/items/:i` | `morrow_plan_new_quiz_item_delete` | proven |
-| Duplicate a question | create with the saved question | `morrow_plan_new_quiz_item_create` | gap |
+| Duplicate a question | create with the saved question | `morrow_plan_new_quiz_item_create`, `canvas_item_bank_create_item` | proven |
 | Add a question with an uploaded image (Hot Spot) | media upload URL, then create | `morrow_plan_new_quiz_item_create` with `material_path` | proven |
 | Repair missing image alt text (body, choice, answer feedback, feedback) | `PATCH …/items/:i` | the four `…_image_alt_repair` planners | proven |
 | Accessibility audit of a question or quiz | reads | `morrow_audit_course` | proven |
@@ -62,9 +62,10 @@ States: **proven** (verified live through Morrow), **gap** (Canvas supports it a
 | List, read, create, rename, delete a bank | quiz-service `/api/banks` | `canvas_item_bank_*` | proven |
 | Share a bank with a course (read) | `…/banks/:b/shared_banks` | `canvas_item_bank_share_bank` | proven |
 | Change a share's permission (read to edit) | `PATCH …/banks/:b/shared_banks/:s` | `canvas_item_bank_update_share` | proven |
-| Share with a user or an account; remove a share | same | none | gap |
+| Remove a share | `PATCH …/shared_banks/:s` with `removed_access` | `canvas_item_bank_update_share` | proven |
+| Share with a user or an account | same | none | gap |
 | Create a question in a bank (choice) | `…/banks/:b/items`, then `…/bank_entries` | `canvas_item_bank_create_item` | proven |
-| Create each of the 12 types in a bank | same | same | gap |
+| Create each of the 12 types in a bank | same | same | proven |
 | Read and update a bank question | bank entry read; `PATCH …/banks/:b/items/:i` | `canvas_item_bank_get_item`, `…_update_item` | proven |
 | Attach a question to another bank; remove an entry | `…/bank_entries` | `…_attach_item`, `…_delete_entry` | proven |
 | Copy a question into another bank | `POST …/banks/:b/bank_entries/copy` | `canvas_item_bank_copy_entry` | proven |
@@ -81,3 +82,16 @@ States: **proven** (verified live through Morrow), **gap** (Canvas supports it a
 | List archived banks | `GET /api/banks/archived` | none | Canvas refuses (403 for this account) |
 | Restore an archived bank | `POST /api/banks/:b/restore` | none | gap |
 | Import QTI into a bank | `…/banks/:b/qti_imports` | none | gap |
+
+## What still has no route in Morrow
+
+| Task | Canvas route | Why it is still open |
+|---|---|---|
+| Upload a new image for a bank question | `GET /api/banks/:b/items/media_upload_url`, then the signed PUT | The route is confirmed live and answers a signed upload URL. A Hot Spot question in a bank is proven with an image Canvas already holds; staging new bytes into a bank needs the same reviewed transfer the New Quiz Hot Spot uses. |
+| Stimulus (passage) with linked questions | quiz-service `Stimulus` and `Passage` quiz entries, `stimulus_quiz_entry_id` on a question | Canvas's own page creates a stimulus entry and links each question to it. Morrow reads such a row today and refuses to move it; it cannot yet create one. |
+| Import QTI into a quiz or a bank | `…/qti_imports` | A multi-step upload that belongs to the reviewed file transfer. |
+| Copy a quiz into another course | `POST /v1/courses/:c/content_migrations` | The catalog carries the migration routes; the selective course copy is not yet proven live. |
+| Submissions, grading, moderation, statistics, regrade | assignment submission routes; quiz-service `quiz_sessions`, `stats/*`, `quiz_entry_regrades` | Each needs a learner attempt. The sandbox course has none, so none of these can be proven here without one. |
+| Align a question to an outcome | quiz-service `/api/alignment_sets` | Not yet exposed. |
+| List archived banks | `GET /api/banks/archived` | Canvas refuses it for this account (403). |
+| Restore an archived bank | `POST /api/banks/:b/restore` | Cannot be reached while the archived list is refused. |
