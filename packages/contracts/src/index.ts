@@ -281,7 +281,7 @@ export interface McpRuntimeHealth {
 }
 
 export interface GatewayRuntimeLimitation {
-  readonly code: "blackboard_runtime_unavailable";
+  readonly code: "blackboard_runtime_unavailable" | "blackboard_attestation_required";
   readonly setupFilePath: string;
   readonly detail: string;
 }

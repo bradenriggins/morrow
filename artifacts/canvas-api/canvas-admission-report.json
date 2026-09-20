@@ -45,8 +45,8 @@
   },
   "readback": {
     "stateCounts": {
-      "structurally_exact": 350,
-      "unavailable": 164,
+      "structurally_exact": 345,
+      "unavailable": 169,
       "blocked": 24,
       "unconfirmed": 11
     },
@@ -63,13 +63,13 @@
       "summary_state_has_no_narrow_reader": 1
     },
     "routeTierCounts": {
-      "exact": 216,
-      "created_child": 75,
+      "exact": 213,
+      "created_child": 73,
       "parent_collection": 25,
       "declared": 20,
       "executor": 23,
       "mismatched": 2,
-      "none": 188
+      "none": 193
     },
     "namedReadbackTools": [
       "canvas_bulk_update_assignment_dates",
@@ -99,8 +99,10 @@
       "canvas_apply_lti_registration_update_requst_apps",
       "canvas_apply_lti_registration_update_requst_lti_registrations",
       "canvas_assign_unassigned_members",
+      "canvas_batch_create_overrides_in_course",
       "canvas_batch_update_grading_periods_courses",
       "canvas_batch_update_grading_periods_grading_period_sets",
+      "canvas_batch_update_overrides_in_course",
       "canvas_beta_initiate_batch_page_views_query",
       "canvas_beta_initiate_page_views_query",
       "canvas_bind_lti_registration_to_root_account_apps",
@@ -116,6 +118,7 @@
       "canvas_complete_quiz_submission_turn_it_in",
       "canvas_copy_file",
       "canvas_copy_folder",
+      "canvas_create_course_pace",
       "canvas_create_developer_key_account_binding",
       "canvas_create_error_report",
       "canvas_create_external_tool_accounts",
@@ -131,6 +134,7 @@
       "canvas_create_link_outcome_global_outcome_id",
       "canvas_create_membership",
       "canvas_create_new_grading_standard_accounts",
+      "canvas_create_new_role",
       "canvas_create_observer_pairing_code",
       "canvas_create_or_update_events_directly_for_course_timetable",
       "canvas_create_portfolio_notification",
@@ -272,6 +276,7 @@
       "canvas_update_preference_communication_channel_id",
       "canvas_update_preference_type",
       "canvas_update_preferences_by_category",
+      "canvas_update_role",
       "canvas_update_rubricassociation",
       "canvas_update_several_calendars",
       "canvas_update_shared_theme",

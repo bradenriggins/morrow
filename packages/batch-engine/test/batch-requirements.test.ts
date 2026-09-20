@@ -215,6 +215,51 @@ describe("BAT durable batch requirements", () => {
     store.close();
   });
 
+  it("settles a dependent for inspection when its dependency does not succeed", async () => {
+    const store = new DurableBatchStore({ path: ":memory:", encryptionKey: randomBytes(32) });
+    const created = store.create({
+      name: "Failed dependency",
+      mode: "read_only",
+      catalogDigest,
+      concurrency: 1,
+      operationFamily: "course_read",
+      profileDigest,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+      children: [
+        readChild(1),
+        { ...readChild(2), dependencyChildIds: ["course:1"] },
+        { ...readChild(3), dependencyChildIds: ["course:2"] },
+      ],
+    });
+    const options = {
+      expectedCatalogDigest: catalogDigest,
+      expectedCourseSetDigest: created.manifest.courseSet.digest,
+      expectedProfileDigest: profileDigest,
+      maxChildren: 10,
+    };
+    const first = await runBatchWindow(store, created.batch.batchId, async ({ child }) => ({
+      state: "failed",
+      resultDigest: sha256Json({ childId: child.childId }),
+    }), options);
+    expect(first).toMatchObject({ processed: 1 });
+    expect(first.batch).toMatchObject({
+      state: "inspection_required",
+      pendingChildren: 0,
+      failedChildren: 1,
+      unknownChildren: 2,
+    });
+    expect(store.get(created.batch.batchId).children.slice(1).map((child) => ({
+      childId: child.childId,
+      state: child.state,
+      gatewayOperationState: child.gatewayOperationState,
+    }))).toEqual([
+      { childId: "course:2", state: "unknown", gatewayOperationState: "dependency_unverified" },
+      { childId: "course:3", state: "unknown", gatewayOperationState: "dependency_unverified" },
+    ]);
+    expect(store.hasActiveBatches()).toBe(false);
+    store.close();
+  });
+
   it("BAT-07 and BAT-08 block incomplete discovery and target-set drift", () => {
     expect(() => resolveBatchCourseSet({
       source: "account_search",

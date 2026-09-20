@@ -1229,6 +1229,37 @@ test("an expired Item Bank command starts no provider request", async () => {
   });
 });
 
+// The deadline can also pass after the last pinned snapshot read returns, while that snapshot is
+// sanitized, stringified and digested. The write is refused before it is dispatched, so nothing
+// reached Canvas: a write reported as sent with an unknown outcome would hold the bank until a
+// person states what Canvas shows.
+test("a deadline that passes after the snapshot reads leaves the write unsent", async () => {
+  for (const shape of WRITE_SHAPES) {
+    const { api: measured } = await runShape(shape);
+    const readsBeforeWrite = measured.requests.findIndex((entry) => entry.method !== "GET");
+    assert.ok(readsBeforeWrite > 0, shape.nickname);
+    const { result, api } = await withPageContext(async () => {
+      const api = provider();
+      const args = await shape.args(api.state);
+      const request = input(shape.nickname, args);
+      request.expiresAt = Date.now() + 60_000;
+      if (["create_item", "update_item"].includes(shape.nickname)) request.payloadContractSha256 = await digest(args.item);
+      globalThis.fetch = async (url, options = {}) => {
+        const response = await api.fetch(url, options);
+        if (api.requests.length >= readsBeforeWrite) request.expiresAt = Date.now() - 1;
+        return response;
+      };
+      const result = await executeItemBankInPage(request);
+      assertPrivate(result, shape.nickname);
+      return { result, api };
+    });
+    assert.equal(api.dispatches(), 0, `${shape.nickname}: ${JSON.stringify(result)}`);
+    assert.equal(result.sent, false, `${shape.nickname}: ${JSON.stringify(result)}`);
+    assert.notEqual(result.outcomeUnknown, true, shape.nickname);
+    assert.equal(result.ok, false, shape.nickname);
+  }
+});
+
 // The bank search reads an index the service fills after the tag write returns. Measured live
 // on 2026-09-19: the question a tag was just added to is missing from that search for about a
 // second and a half, so one immediate read would report a saved tag as missing.

@@ -7088,12 +7088,17 @@ export class GatewayRuntime {
    * This recovery shape intentionally contains only durable control state.
    */
   /**
-   * True when Morrow can check this capability's saved result at all. A Canvas
-   * route that states no readable result has nothing for a person to read, so
-   * their own check is the only evidence a close can carry.
+   * True when Morrow has a reading it can require of a person closing this
+   * capability's change. A route that states no readable result has none. So
+   * does a route whose readings Morrow cannot journal as read authority: only a
+   * Canvas connector read carries that evidence, so no reading of any other
+   * route could ever settle a close. Either way the person's own check is the
+   * only evidence a close can carry.
    */
-  private capabilityReadsBack(name: string): boolean {
-    return this.toolByPublicName.get(name)?.capability?.behavior?.supportsReadback !== false;
+  private capabilityCloseReadsBack(name: string): boolean {
+    const mapping = this.toolByPublicName.get(name);
+    return mapping !== undefined && isCanvasConnector(mapping)
+      && mapping.capability?.behavior?.supportsReadback !== false;
   }
 
   /** True when this capability is one an MCP client can discover and call. */
@@ -8250,6 +8255,7 @@ export class GatewayRuntime {
       } else if (authorization.kind === "edit_scope") {
         currentAuthorization = await this.resolveCurrentEditAuthorization(pendingMapping, request, options);
       }
+      const historicalTargetIdentities = await this.historicalTargetIdentities(options);
       options.signal?.throwIfAborted();
       checkingFileStage = false;
       reserved = this.effects.reserveDispatch(
@@ -8264,7 +8270,7 @@ export class GatewayRuntime {
           : this.effectAuthority(pendingMapping, request, currentAuthorization, pending.readback || undefined, bindingScope),
         {
           enforceHistoricalTargetScopeBarrier: isCanvasConnector(pendingMapping),
-          historicalTargetIdentities: this.historicalTargetIdentities(),
+          historicalTargetIdentities,
         },
       );
     } catch (error) {
@@ -8824,9 +8830,20 @@ export class GatewayRuntime {
    * under the rule in force now. A change Morrow can still name this way holds
    * back only that target.
    */
-  private historicalTargetIdentities(): ReadonlyMap<string, string | null> {
+  private async historicalTargetIdentities(
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<ReadonlyMap<string, string | null>> {
     const named = new Map<string, string | null>();
     for (const record of this.effects.historicalTargetHolders()) {
+      const mapping = this.toolByPublicName.get(record.publicToolName);
+      if (mapping && isCanvasConnector(mapping)) {
+        // A connector change has no configured site, so only the live
+        // connection can say what site it was made on. A change Morrow cannot
+        // ask about keeps its hold.
+        const scope = await this.historicalProviderScope(record, options);
+        named.set(record.operationId, scope ? this.currentTargetIdentityDigest(record, scope) : null);
+        continue;
+      }
       named.set(record.operationId, this.currentTargetIdentityDigest(record));
     }
     return named;
@@ -8911,16 +8928,15 @@ export class GatewayRuntime {
         { effectState: operation.state },
       );
     }
-    // A change whose route states no readable result has no reading to offer the
-    // person: Morrow froze no comparator for it and never could. Their own check
-    // is the only evidence that exists, so it is what closes the change. Every
-    // change Morrow can read back still needs that reading.
-    if (!this.capabilityReadsBack(operation.publicToolName)) {
+    // A change whose route offers the person no reading Morrow could accept has
+    // only their own check as evidence, so it is what closes the change. Every
+    // change Morrow can read back this way still needs that reading.
+    if (!this.capabilityCloseReadsBack(operation.publicToolName)) {
       const closedWithoutRead = this.effects.closeWithoutReadableResult(operation.operationId, observedState);
       return this.effectResult(closedWithoutRead, "closed_by_person", {
         content: [{
           type: "text",
-          text: "Morrow closed this request because you checked the saved state yourself. This change has no result Morrow can read, so Morrow confirmed nothing, and it will not send it again.",
+          text: "Morrow closed this request because you checked the saved state yourself. Morrow has no reading of its own that could settle this change, so Morrow confirmed nothing, and it will not send it again.",
         }],
         structuredContent: {
           schema: "morrow.operation-person-close.v1",

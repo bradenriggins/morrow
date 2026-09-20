@@ -1647,12 +1647,42 @@ export class DurableBatchStore {
         WHERE batch_id=? AND child_id=? AND state='pending'
       `);
       const claimed: BatchChildRecord[] = [];
+      // A dependency that reached a terminal state without succeeding can never
+      // release its dependent, so the dependent settles for inspection instead
+      // of waiting for a claim that will never come. settleResultBindings
+      // already does this for a result-bound child; a plain depends_on child is
+      // released or stranded only here. The sweep repeats until it is stable so
+      // a dependent of a child stranded in this pass is stranded too.
+      const strandUnreachable = this.database.prepare(`
+        UPDATE gateway_batch_children
+        SET state='unknown', gateway_operation_state='dependency_unverified', error_digest=?,
+            updated_at=?, terminal_at=?, revision=revision+1
+        WHERE batch_id=? AND child_id=? AND state='pending'
+      `);
+      const unreachableDigest = sha256Text("dependency_did_not_succeed");
+      for (let stranded = true; stranded;) {
+        stranded = false;
+        for (const row of rows) {
+          if (dependencyStates.get(row.child_id) !== "pending") continue;
+          const dependencies = dependenciesByChild.get(row.child_id) || [];
+          const blocked = dependencies.some((dependency) => {
+            const state = dependencyStates.get(dependency);
+            return state !== undefined && state !== "succeeded" && TERMINAL_CHILD_STATES.has(state);
+          });
+          if (!blocked) continue;
+          const marked = strandUnreachable.run(unreachableDigest, now, now, batchId, row.child_id);
+          if (Number(marked.changes) !== 1) continue;
+          dependencyStates.set(row.child_id, "unknown");
+          stranded = true;
+        }
+      }
       // Dependency order is a graph property, not an ordinal-prefix property.
       // Creation caps the complete manifest at MAX_BATCH_CHILDREN, so scanning
       // every pending row here is bounded and guarantees that a ready child
       // after any blocked prefix is considered on this run.
       for (const row of rows) {
         if (claimed.length >= limit) break;
+        if (dependencyStates.get(row.child_id) !== "pending") continue;
         const dependencies = dependenciesByChild.get(row.child_id) || [];
         if (dependencies.some((dependency) => dependencyStates.get(dependency) !== "succeeded")) continue;
         const manifestChild = manifestChildren.get(row.child_id);

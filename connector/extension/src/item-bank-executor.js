@@ -1052,6 +1052,10 @@ export async function executeItemBankInPage(input) {
 
     const questionWrite = ["create_item", "update_item"].includes(operation.nickname) && isRecord(body?.item);
     const written = await request(operation.method, path, questionWrite ? { item: wireQuestion(body.item) } : body);
+    // The deadline can pass while the pinned snapshots above are digested and compared, and
+    // request() then refuses to dispatch. Nothing reached Canvas, so this answers the same
+    // not-sent timeout as the checks before it, never a sent write of unknown outcome.
+    if (written.timeout) return { matched: true, ok: false, sent: false, error: "item_bank_operation_timeout" };
     const clearRefusal = Number.isInteger(written.status) && written.status >= 400 && written.status < 500 && written.status !== 408 && written.status !== 429;
     if (clearRefusal) return { matched: true, ok: false, sent: true, status: written.status, data: sanitize(written.data), apiHost, outcomeUnknown: false };
 
@@ -1599,6 +1603,8 @@ export async function executeItemBankInPage(input) {
     // One dispatch. No loop, no in-frame retry: a repeat could apply the change
     // twice to a bank other courses draw from.
     const written = await request("PATCH", path, { item: wireQuestion(proposed) });
+    // request() refused to dispatch because the deadline had passed, so nothing reached Canvas.
+    if (written.timeout) return { matched: true, ok: false, sent: false, error: "item_bank_operation_timeout" };
     if (written.oversize) return { matched: true, ok: false, sent: true, status: written.status, outcomeUnknown: itemBankOutcomeUnknown(operation.method, written.status), error: "item_bank_response_too_large" };
     if (written.transport) return { matched: true, ok: false, sent: true, outcomeUnknown: true, error: "item_bank_request_failed" };
     if (!written.ok) return { matched: true, ok: false, sent: true, status: written.status, data: sanitize(written.data), apiHost, outcomeUnknown: itemBankOutcomeUnknown(operation.method, written.status) };

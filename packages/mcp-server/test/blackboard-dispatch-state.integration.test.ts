@@ -218,6 +218,16 @@ describe("Blackboard Gateway effect execution state", () => {
       expect(unconfirmedRecord.state).toBe("applied_or_unknown");
       expect(unconfirmedRecord.attention[0]).toBe("provider_effect_may_have_landed");
       expect(fixture.counts().patch).toBe(1);
+
+      // No Morrow reading of a Blackboard item can carry read authority, so the
+      // person's own check is the only evidence this close could ever have. The
+      // close takes it, and the closed record stops holding the item.
+      const closed = await runtime.gateway.closeUnresolvedOperation(unconfirmedOperationId, "c".repeat(64), true);
+      expect(closed.isError, JSON.stringify(closed)).not.toBe(true);
+      const closedRecord = runtime.gateway.operationGet(unconfirmedOperationId);
+      expect(closedRecord.state).toBe("closed_by_person");
+      expect(closedRecord.attention).toContain("no_readable_provider_result");
+      expect(fixture.counts().patch).toBe(1);
     } finally {
       await runtime?.close();
       await fixture.close();

@@ -251,6 +251,17 @@ function readArguments(read, writeArguments, dynamic = {}, fixedArguments = {}, 
             return null;
         output[inputName] = value;
     }
+    // `operationArguments` refuses to send a request that leaves out an input the catalog marks
+    // required, so a plan missing one names a read that can never be issued. The write's own value for
+    // that input is the only source the planner can take it from.
+    for (const parameter of read.parameters || []) {
+        if (parameter.location === "path" || !parameter.required || Object.hasOwn(output, parameter.inputName))
+            continue;
+        const value = writeArguments?.[parameter.inputName];
+        if (value === undefined || value === null || value === "" || typeof value === "object")
+            return null;
+        output[parameter.inputName] = String(value);
+    }
     return output;
 }
 function exactRead(operations, write) {
@@ -700,11 +711,15 @@ export function evaluateBrowserReadback(plan, readResult) {
     }
     const records = plan.targetId
         ? targetRecords(readResult.data, plan.targetId, targetField, plan.targetPath, envelope)
-        : [readResult.data];
+        : targetScope(readResult.data, plan.targetPath, envelope);
     if (plan.targetId && records.length === 0)
         return verification("mismatch", plan, "target_missing_from_readback");
     if (plan.targetId && records.length > 1)
         return verification("mismatch", plan, "target_ambiguous_in_readback");
+    // Without a target id the read answers about one record only. Several records prove
+    // nothing about the one that was written.
+    if (!plan.targetId && records.length !== 1)
+        return verification("unconfirmed", plan, "readback_target_unresolved");
     const record = records[0];
     for (const assertion of plan.assertions || []) {
         const values = assertedValues(record, assertion.paths);

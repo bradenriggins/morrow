@@ -198,14 +198,14 @@ function bank({ source = ITEM, entry = ENTRY, readback, readbackThrows = false, 
   return { calls, requests, fetchImpl };
 }
 
-async function repair({ guard: guardOverrides = {}, server = {}, args, guardItem } = {}) {
+async function repair({ guard: guardOverrides = {}, server = {}, args, guardItem, expireAfterSourceRead = false } = {}) {
   const source = guardItem ?? server.source ?? ITEM;
   const guard = await guardFor(source, guardOverrides);
   const api = bank(server);
   const result = await withPageContext(async (token) => {
     globalThis.fetch = api.fetchImpl;
     const capturedAt = Date.now();
-    const value = await executeItemBankInPage({
+    const request = {
       principalId: "7",
       canvasOrigin: "https://school.instructure.com",
       courseId: COURSE,
@@ -223,7 +223,18 @@ async function repair({ guard: guardOverrides = {}, server = {}, args, guardItem
         launchedAt: capturedAt - 1_000,
         capturedAt,
       },
-    });
+    };
+    // The question read is the last request before the repair is dispatched, so ending the
+    // command there is the deadline passing while that read is digested and compared.
+    if (expireAfterSourceRead) {
+      request.expiresAt = capturedAt + 60_000;
+      globalThis.fetch = async (url, options = {}) => {
+        const response = await api.fetchImpl(url, options);
+        if ((options.method || "GET") === "GET" && new URL(String(url)).pathname === ENTRY_PATH) request.expiresAt = Date.now() - 1;
+        return response;
+      };
+    }
+    const value = await executeItemBankInPage(request);
     const encoded = JSON.stringify(value ?? null);
     assert.equal(encoded.includes(token), false, "the result carried the credential");
     assert.equal(encoded.includes(CONTEXT_UUID), false, "the result carried the private context");
@@ -342,6 +353,18 @@ test("a question that changed since the review stops before any change is sent",
   const { result, calls, patches } = await repair({ server: { source: item(TWO_UNDESCRIBED) }, guardItem: ITEM });
   assert.equal(result.error, "item_bank_source_changed");
   assert.equal(result.sent, false);
+  assert.equal(patches, 0);
+  assert.deepEqual(calls, [`GET ${ASSOCIATION_PATH}`, `GET ${ENTRY_PATH}`]);
+});
+
+// The deadline can pass after the question is read, while it is digested and compared against
+// the guard. The repair is then refused before dispatch, so nothing reached Canvas and the
+// answer is the same not-sent timeout the checks before the read give.
+test("a deadline that passes after the question is read leaves the repair unsent", async () => {
+  const { result, calls, patches } = await repair({ expireAfterSourceRead: true });
+  assert.equal(result.sent, false, JSON.stringify(result));
+  assert.notEqual(result.outcomeUnknown, true);
+  assert.equal(result.error, "item_bank_operation_timeout");
   assert.equal(patches, 0);
   assert.deepEqual(calls, [`GET ${ASSOCIATION_PATH}`, `GET ${ENTRY_PATH}`]);
 });

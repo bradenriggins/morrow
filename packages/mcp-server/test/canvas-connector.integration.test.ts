@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
@@ -1346,6 +1347,61 @@ describe("Canvas connector gateway path", () => {
         ]),
       });
       expect(writeCommands).toBe(6);
+    }, CASE_TIMEOUT_MS);
+
+    it("holds a course against an unresolved change an older Morrow left on the same target", async () => {
+      // The journal carries a change an older Morrow sent and never confirmed.
+      // Its target name predates the rule in force now, so Morrow has to name it
+      // again from the connection it was made on. A course connection carries no
+      // configured site, so a name taken from the profile would match nothing
+      // and the change would lose its hold.
+      const settings = { course_id: "42", hide_final_grades: true };
+      const older = await runtime.call("canvas_update_course_settings", {
+        ...settings,
+        _morrow: { operation_id: "operation:older-morrow-settings", source_binding_id: sourceBindingId },
+      });
+      const olderId = operationId(older);
+      runtime.approveOperation(olderId);
+      runtime.effects.reserveDispatch(olderId);
+      const journal = new DatabaseSync(join(directory, "gateway.sqlite3"));
+      try {
+        journal.prepare(`
+          UPDATE provider_effect_operations
+          SET target_identity_version='morrow.effect-target.v4', target_identity_digest=?
+          WHERE operation_id=?
+        `).run("4".repeat(64), olderId);
+      } finally {
+        journal.close();
+      }
+      expect(runtime.effects.get(olderId)).toMatchObject({
+        state: "dispatching",
+        dispatchAttempt: 1,
+        targetIdentityVersion: "morrow.effect-target.v4",
+      });
+
+      try {
+        const blocked = await runtime.call("canvas_update_course_settings", {
+          ...settings,
+          _morrow: { operation_id: "operation:blocked-by-older-morrow", source_binding_id: sourceBindingId },
+        });
+        const blockedId = operationId(blocked);
+        runtime.approveOperation(blockedId);
+        const refused = await runtime.dispatchOperation(blockedId);
+        expect(refused).toMatchObject({
+          isError: true,
+          structuredContent: {
+            data: {
+              code: "operation_dispatch_refused",
+              reason: "provider_effect_target_conflict",
+              blockingOperationId: olderId,
+            },
+          },
+        });
+        expect(runtime.effects.get(blockedId)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
+        expect(writeCommands).toBe(6);
+      } finally {
+        runtime.effects.settleFailure(olderId, "released_after_target_barrier_case", false);
+      }
     }, CASE_TIMEOUT_MS);
 
     it("refuses a plan with no course connection, and one whose course connection changed", async () => {

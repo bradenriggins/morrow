@@ -206,6 +206,28 @@ test("lossy, broad, private, and stateful Canvas readers do not run as readback"
   }
 });
 
+test("a planned readback carries every input its own read requires", () => {
+  const custom = planBrowserReadback(catalog.operations, operation("canvas_store_custom_data"), {
+    user_id: "self", ns: "com.example.morrow", data: { fruit: "mango" },
+  }, {});
+  assert.ok(custom, "canvas_store_custom_data must have a readback plan");
+  assert.equal(custom.readOperation.toolName, "canvas_load_custom_data");
+  assert.deepEqual(custom.arguments, { user_id: "self", ns: "com.example.morrow" });
+
+  const missing = [];
+  for (const write of catalog.operations) {
+    if (write.readOnly) continue;
+    const args = Object.fromEntries((write.parameters || []).map((parameter) => [parameter.inputName, "1"]));
+    const plan = planBrowserReadback(catalog.operations, write, args, { id: "1", page_id: "1", rubric_id: "1", url: "morrow-structural-target" });
+    for (const parameter of plan?.readOperation.parameters || []) {
+      if (parameter.required && !Object.hasOwn(plan.arguments, parameter.inputName)) {
+        missing.push(`${write.toolName} -> ${plan.readOperation.toolName} omits ${parameter.inputName}`);
+      }
+    }
+  }
+  assert.deepEqual(missing, []);
+});
+
 test("personal Canvas bookmark and course-nickname writes are site requests that read back exactly", () => {
   const selfScoped = [
     "canvas_create_bookmark",

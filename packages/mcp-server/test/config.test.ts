@@ -162,6 +162,54 @@ describe("gateway configuration", () => {
     }
   });
 
+  it("refuses the private Blackboard API source when the attestation policy is active", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-attested-"));
+    const setup = join(directory, "blackboard-learn.json");
+    const upstreams = join(directory, "morrow.upstreams.json");
+    const revision = "a".repeat(40);
+    try {
+      await writeFile(setup, "{}\n", { mode: 0o600 });
+      await writeFile(upstreams, JSON.stringify({
+        schema: "morrow.upstreams.v1",
+        profile: "private-full",
+        sourcePolicy: { requireAttestation: true },
+        upstreams: [{
+          id: "fixture",
+          label: "Fixture",
+          kind: "mcp-stdio",
+          command: "node",
+          args: ["server.js"],
+          cwd: directory,
+          revision,
+          attestation: {
+            kind: "local-git",
+            root: directory,
+            expectedRevision: revision,
+            requireTrackedClean: true,
+            launch: {
+              entrypoint: "server.js",
+              expectedEntrypointSha256: "c".repeat(64),
+              runtime: { kind: "sha256", expectedExecutableSha256: "d".repeat(64) },
+            },
+          },
+        }],
+        operationJournal: { path: ":memory:" },
+      }));
+      const config = await loadGatewayConfig(
+        { MORROW_UPSTREAMS_FILE: upstreams, MORROW_BLACKBOARD_CONFIG: setup },
+        fileURLToPath(new URL("../../..", import.meta.url)),
+      );
+      expect(config.sourcePolicy.requireAttestation).toBe(true);
+      expect(config.upstreams.some((source) => source.id === "blackboard-rest")).toBe(false);
+      expect(config.runtimeLimitations).toEqual([expect.objectContaining({
+        code: "blackboard_attestation_required",
+        setupFilePath: setup,
+      })]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("keeps Morrow starting from a workspace directory when Blackboard is configured", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-workspace-"));
     const workspace = await mkdtemp(join(tmpdir(), "morrow-blackboard-cwd-"));

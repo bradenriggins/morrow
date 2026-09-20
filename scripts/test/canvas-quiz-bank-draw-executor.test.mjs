@@ -322,6 +322,50 @@ test("an expired quiz-bank command starts no provider request", async () => {
   }, p.fetch);
 });
 
+// The deadline can also pass after the last entry page is read, while that snapshot is digested
+// and compared. The write is refused before it is dispatched, so nothing reached Canvas and
+// nothing may be reported as sent.
+test("a deadline that passes after the entry snapshot is read leaves the write unsent", async () => {
+  const bankSha256 = "a".repeat(64);
+  const shapes = [
+    ["attach_bank_to_quiz", async (p) => ({
+      course_id: "42", assignment_id: "188", bank_id: "91", pick_count: 5, points_per_item: 2, position: 2,
+      expected_snapshot: { bank_sha256: bankSha256, quiz_entries_sha256: await digest(p.entries) }, ...await observed(),
+    })],
+    ["delete_quiz_bank_entry", async (p) => ({
+      course_id: "42", assignment_id: "188", bank_id: "91", quiz_entry_id: "11",
+      expected_snapshot: {
+        bank_sha256: bankSha256,
+        quiz_entries_sha256: await digest(p.entries),
+        quiz_entry_sha256: await digest(p.entries[1]),
+      },
+      ...await observed(),
+    })],
+  ];
+  for (const [nickname, argsFor] of shapes) {
+    const p = provider();
+    if (nickname === "delete_quiz_bank_entry") {
+      p.entries.push({ id: "11", entry_type: "Bank", entry: { id: "91" }, position: 2, points_possible: 2, properties: { sample_num: 5 } });
+    }
+    const request = input(nickname, await argsFor(p), { verifiedBankSha256: bankSha256, expiresAt: Date.now() + 60_000 });
+    // The entry list ends with an empty page, so this is the last read before the write.
+    const fetch = async (url, options = {}) => {
+      const response = await p.fetch(url, options);
+      const parsed = new URL(url);
+      if ((options.method || "GET") === "GET" && parsed.pathname === "/api/quizzes/77/quiz_entries"
+        && parsed.searchParams.get("page") !== "1") request.expiresAt = Date.now() - 1;
+      return response;
+    };
+    await withBuilder(async () => {
+      const result = await executeQuizBankDrawInPage(request);
+      assert.equal(result.sent, false, `${nickname}: ${JSON.stringify(result)}`);
+      assert.notEqual(result.outcomeUnknown, true, nickname);
+      assert.equal(result.ok, false, nickname);
+      assert.equal(p.requests.filter((entry) => entry.method !== "GET").length, 0, nickname);
+    }, fetch);
+  }
+});
+
 // The native page's build token names the builder quiz in its `resource_id` claim.
 const base64url = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
 const NATIVE_TOKEN = `${base64url({ alg: "HS512" })}.${base64url({ scope: "quiz.build", resource_id: 77, exp: 9_999_999_999 })}.${"s".repeat(40)}`;

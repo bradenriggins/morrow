@@ -157,6 +157,10 @@ export async function executeQuizBankDrawInPage(input) {
     try { data = read.text ? JSON.parse(read.text) : null; } catch { data = read.text; parsed = false; }
     return { ok: response.ok, status: response.status, data, parsed };
   };
+  // The deadline can pass while the snapshots read before a write are digested and compared,
+  // and request() then refuses to dispatch. A write that sees that sentinel never reached
+  // Canvas, so it is answered as not sent, never as a dispatched write of unknown outcome.
+  const expiredBeforeSend = { matched: true, ok: false, sent: false, error: "quiz_bank_operation_timeout" };
   const stable = (value) => Array.isArray(value)
     ? `[${value.map(stable).join(",")}]`
     : plain(value)
@@ -315,6 +319,7 @@ export async function executeQuizBankDrawInPage(input) {
         verification: { ...base, status: "verified", evidence: "exact_quiz_bank_entry_already_saved", targetId: quizEntryId } };
     }
     const written = await request("PATCH", `/api/quizzes/${encodeURIComponent(quizId)}/quiz_entries/${encodeURIComponent(quizEntryId)}`, { quiz_entry: entry });
+    if (written.timeout) return expiredBeforeSend;
     const clearRefusal = Number.isInteger(written.status) && written.status >= 400 && written.status < 500 && written.status !== 408 && written.status !== 429;
     if (clearRefusal) return { matched: true, ok: false, sent: true, status: written.status, outcomeUnknown: false };
     const after = await readEntries();
@@ -351,6 +356,7 @@ export async function executeQuizBankDrawInPage(input) {
     const written = await request("POST",
       `/api/banks/${encodeURIComponent(bankId)}/bank_entries/move_from_quiz_entry?source_quiz_id=${encodeURIComponent(quizId)}`,
       { source_entry_id: itemId, source_entry_type: "Item" });
+    if (written.timeout) return expiredBeforeSend;
     const clearRefusal = Number.isInteger(written.status) && written.status >= 400 && written.status < 500 && written.status !== 408 && written.status !== 429;
     if (clearRefusal) return { matched: true, ok: false, sent: true, status: written.status, outcomeUnknown: false };
     const after = await bankEntries();
@@ -379,6 +385,7 @@ export async function executeQuizBankDrawInPage(input) {
     } else return { matched: true, ok: false, sent: false, error: "quiz_bank_entry_type_unsupported" };
     if (snapshot.quiz_entry_sha256 !== await digest(sanitize(target))) return { matched: true, ok: false, sent: false, error: "quiz_bank_snapshot_invalid" };
     const written = await request("DELETE", `/api/quizzes/${encodeURIComponent(quizId)}/quiz_entries/${encodeURIComponent(quizEntryId)}`);
+    if (written.timeout) return expiredBeforeSend;
     const clearRefusal = Number.isInteger(written.status) && written.status >= 400 && written.status < 500 && written.status !== 408 && written.status !== 429;
     if (clearRefusal) return { matched: true, ok: false, sent: true, status: written.status, outcomeUnknown: false };
     const after = await readEntries();
@@ -435,6 +442,7 @@ export async function executeQuizBankDrawInPage(input) {
   }
   if (existing.length > 1) return { matched: true, ok: false, sent: false, error: "quiz_bank_existing_entry_ambiguous" };
   const written = await request("POST", `/api/quizzes/${encodeURIComponent(quizId)}/quiz_entries`, payload);
+  if (written.timeout) return expiredBeforeSend;
   const clearRefusal = Number.isInteger(written.status) && written.status >= 400 && written.status < 500 && written.status !== 408 && written.status !== 429;
   if (clearRefusal) return { matched: true, ok: false, sent: true, status: written.status, outcomeUnknown: false };
   const after = await readEntries();

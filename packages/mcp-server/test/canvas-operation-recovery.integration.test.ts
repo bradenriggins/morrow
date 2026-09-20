@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import type { BridgeCommand } from "@morrow/bridge-protocol";
 import { loadCanvasApiCatalog, planCanvasRecoveryDescriptor } from "@morrow/canvas-api-catalog";
@@ -554,6 +555,153 @@ describe("Canvas unresolved-operation recovery", () => {
       unread = [{ id: "5", subject: "unread" }];
       await runtime.reconcileOperation(openId);
       expect(runtime.effects.get(openId).state).toBe("applied_or_unknown");
+    } finally {
+      await bridge?.close();
+      await morrow.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("closes an unresolved change whose write tool the catalog no longer carries", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-canvas-retired-tool-recovery-"));
+    const port = await availablePort();
+    const browserCatalogDigest = bridgeCatalogDigestForTests(ROOT);
+    const morrow = await MorrowRuntime.connect(connectorConfig(directory, port), {
+      statePath: join(directory, "gateway.sqlite3"),
+    });
+    const runtime = morrow.gateway;
+    let bridge: BridgeTestClient | undefined;
+    let writeCommands = 0;
+
+    try {
+      bridge = await connectBridgeTestClient({
+        port,
+        token: TOKEN,
+        extensionId: EXTENSION_ID,
+        catalogDigest: browserCatalogDigest,
+        bindings: [{
+          sourceBindingId: SOURCE_BINDING_ID,
+          provider: "canvas" as const,
+          origin: "https://school.instructure.com",
+          courseId: "42",
+          principalFingerprint: "c".repeat(64),
+          sessionGeneration: 1,
+          catalogDigest: browserCatalogDigest,
+          runtimeVerified: true,
+        }],
+      });
+
+      bridge.onCommand((command) => {
+        if (command.kind === "invoke_write") {
+          writeCommands += 1;
+          bridge?.respond(command, {
+            schema: "morrow.canvas-browser-result.v1",
+            ok: true, sent: true, status: 200, truncated: false,
+            data: { ...command.arguments, id: "88" } as JsonObject,
+            verification: {
+              schema: "morrow.browser-verification.v1",
+              status: "verified",
+              strategy: "updated-resource",
+              readTool: "canvas_get_single_assignment",
+              evidence: "fresh_readback_matches_requested_postcondition",
+            },
+          });
+          return;
+        }
+        const data = command.toolName === "canvas_get_single_assignment"
+          ? { id: "88", course_id: "42", name: "Cell transport reflection", published: true }
+          : { id: "42", name: "Biology" };
+        bridge?.respond(command, {
+          schema: "morrow.canvas-browser-result.v1",
+          ok: true, sent: true, status: 200, truncated: false, data: data as JsonObject,
+        });
+      });
+
+      // A change an older Morrow sent through a write route this build no
+      // longer publishes: the route was renamed, filtered out, or its upstream
+      // was dropped. Morrow cannot name the target it holds under the rule in
+      // force now, so it holds every connector change back.
+      const retiredRequest = {
+        course_id: "42",
+        id: "77",
+        _morrow: { source_binding_id: SOURCE_BINDING_ID },
+      };
+      const retired = runtime.effects.create({
+        publicToolName: "canvas_delete_single_retired",
+        sourceId: "canvas-session",
+        sourceToolName: "canvas_delete_single_retired",
+        catalogDigest: runtime.catalog.digest,
+        request: retiredRequest,
+        forwardedRequest: retiredRequest,
+        sourceOperationId: "operation:canvas-retired-write-tool",
+        sourceBindingId: SOURCE_BINDING_ID,
+        authority: {
+          profileDigest: "1".repeat(64),
+          actorDigest: "2".repeat(64),
+          providerPrincipalDigest: "3".repeat(64),
+          connectionGeneration: 1,
+          catalogDigest: runtime.catalog.digest,
+          approvalClass: "standard",
+          targetSetDigest: "4".repeat(64),
+        },
+      });
+      runtime.effects.approve(retired.operationId);
+      runtime.effects.reserveDispatch(retired.operationId);
+      runtime.effects.settleFailure(retired.operationId, "canvas-retired-write-tool-case", true);
+      const journal = new DatabaseSync(join(directory, "gateway.sqlite3"));
+      try {
+        journal.prepare(`
+          UPDATE provider_effect_operations
+          SET target_identity_version='morrow.effect-target.v4'
+          WHERE operation_id=?
+        `).run(retired.operationId);
+      } finally {
+        journal.close();
+      }
+      expect(runtime.effects.get(retired.operationId)).toMatchObject({
+        state: "applied_or_unknown",
+        dispatchAttempt: 1,
+        targetIdentityVersion: "morrow.effect-target.v4",
+      });
+
+      // Every connector change is held back, whatever it targets.
+      const planned = await runtime.call("canvas_edit_assignment", {
+        course_id: "42",
+        id: "88",
+        assignment_name: "Cell transport reflection v2",
+        _morrow: {
+          operation_id: "operation:canvas-retired-write-tool-blocked",
+          source_binding_id: SOURCE_BINDING_ID,
+        },
+      });
+      const blockedId = operationId(planned as JsonObject);
+      runtime.approveOperation(blockedId);
+      const refused = await runtime.dispatchOperation(blockedId);
+      expect(refused.isError).toBe(true);
+      expect(structured(refused)).toMatchObject({
+        data: {
+          reason: "provider_effect_target_scope_unknown",
+          blockingOperationId: retired.operationId,
+        },
+      });
+      expect(runtime.effects.get(blockedId)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
+      expect(writeCommands).toBe(0);
+
+      // The person checked the item themselves. Morrow has no reading of its
+      // own for a route it no longer carries, so their check closes it.
+      const closed = await runtime.closeUnresolvedOperation(retired.operationId, "a".repeat(64), true);
+      expect(closed.isError).not.toBe(true);
+      expect(structured(closed)).toMatchObject({
+        phase: "closed_by_person",
+        effectState: "closed_by_person",
+      });
+      expect(runtime.effects.get(retired.operationId).state).toBe("closed_by_person");
+
+      // The hold is released, and the held change is sent.
+      const sent = await runtime.dispatchOperation(blockedId);
+      expect(sent.isError).not.toBe(true);
+      expect(structured(sent)).toMatchObject({ effectState: "verified" });
+      expect(writeCommands).toBe(1);
     } finally {
       await bridge?.close();
       await morrow.close();

@@ -277,6 +277,18 @@ function appendConfiguredBlackboardSource(
   if (config.profile !== "private-full" || config.upstreams.some((source) => source.id === "blackboard-rest")) return config;
   const blackboardConfigPath = resolve(environment.MORROW_BLACKBOARD_CONFIG || `${homedir()}/.morrow/blackboard-learn.json`);
   if (!existsSync(blackboardConfigPath)) return config;
+  // parseGatewayConfig enforces the attestation rule before this source is appended, and this
+  // source carries no attestation, so the policy is applied here instead of bypassed.
+  if (config.sourcePolicy.requireAttestation) {
+    return {
+      ...config,
+      runtimeLimitations: [...(config.runtimeLimitations ?? []), {
+        code: "blackboard_attestation_required",
+        setupFilePath: blackboardConfigPath,
+        detail: "Blackboard Learn is set up in this file, but this configuration requires a source attestation for every source and the Blackboard runtime does not carry one, so Blackboard tools are not available. Canvas and Moodle are not affected.",
+      }],
+    };
+  }
   const entry = resolveBlackboardRuntimeEntry(workingDirectory);
   if (!entry) {
     return {

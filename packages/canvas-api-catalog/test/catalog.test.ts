@@ -314,6 +314,36 @@ describe("Canvas API catalog", () => {
     ] }).status).toBe("verified");
   });
 
+  it("opens the envelope for a single-record readback that has no target id", () => {
+    const operation = catalog.operations.find((candidate) => candidate.toolName === "canvas_update_blackout_date_courses")!;
+    const plan = planBrowserReadback(catalog.operations, operation, {
+      course_id: "7", id: "42", event_title: "Spring break", start_date: "2026-03-09", end_date: "2026-03-13",
+    }, {});
+
+    expect(plan?.strategy).toBe("updated-resource");
+    expect(plan?.readOperation.path).toBe("/v1/courses/{course_id}/blackout_dates/{id}");
+    expect(plan?.targetId).toBeUndefined();
+    const saved = { id: 42, event_title: "Spring break", start_date: "2026-03-09", end_date: "2026-03-13" };
+    expect(evaluateBrowserReadback(plan, { ok: true, status: 200, data: saved }).status).toBe("verified");
+    expect(evaluateBrowserReadback(plan, { ok: true, status: 200, data: { blackout_date: saved } }).status).toBe("verified");
+    expect(evaluateBrowserReadback(plan, { ok: true, status: 200, data: {
+      blackout_date: { ...saved, event_title: "Reading week" },
+    } }).status).toBe("mismatch");
+
+    const poll = catalog.operations.find((candidate) => candidate.toolName === "canvas_update_single_poll")!;
+    const pollPlan = planBrowserReadback(catalog.operations, poll, {
+      id: "913", polls_question: ["Morrow sweep question"],
+    }, {});
+    expect(pollPlan?.targetId).toBeUndefined();
+    expect(evaluateBrowserReadback(pollPlan, { ok: true, status: 200, data: {
+      polls: [{ id: "913", question: "Morrow sweep question" }],
+    } }).status).toBe("verified");
+    // Canvas answered about more than one record, so none of them proves this write.
+    expect(evaluateBrowserReadback(pollPlan, { ok: true, status: 200, data: {
+      polls: [{ id: "913", question: "Morrow sweep question" }, { id: "914", question: "Another question" }],
+    } })).toMatchObject({ status: "unconfirmed", evidence: "readback_target_unresolved" });
+  });
+
   it("retains New Quiz IP ranges and explicit setting resets through request and readback", () => {
     const ranges = [["10.0.0.1", "10.0.0.20"], ["192.168.1.1", "192.168.1.5"]];
     const input = {
@@ -573,7 +603,7 @@ describe("Canvas API catalog", () => {
     // so they are published like every other bound read.
     const redirectReads = catalog.operations.filter((operation) => canvasRedirectRead(operation));
     expect(held).toHaveLength(10);
-    expect(admittedWithoutExactReadback).toHaveLength(199);
+    expect(admittedWithoutExactReadback).toHaveLength(204);
     expect(siteReads).toHaveLength(355);
     // Every read is bound: to the selected course, or to the connected Canvas site as the signed-in person.
     expect(catalog.operations.filter((operation) => operation.readOnly
@@ -1502,11 +1532,11 @@ describe("Canvas API catalog", () => {
   it("derives structural readback metadata from the shared planner", () => {
     const admittedWrites = catalog.operations.filter((operation) => !operation.readOnly && canvasOperationAdmission(operation).write.state === "admitted");
     const assessments = admittedWrites.map((operation) => canvasReadbackAssessment(catalog.operations, operation));
-    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(164);
+    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(169);
     expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(24);
     expect(assessments.filter((assessment) => assessment.state === "unconfirmed")).toHaveLength(11);
     expect(admittedWrites).toHaveLength(549);
-    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(350);
+    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(345);
     const tools = canvasCatalogTools(catalog);
     expect(tools.find((tool) => tool.name === "canvas_update_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
     // Deleting a gradebook column is course work admitted through its course, and its absence reads back exactly.
