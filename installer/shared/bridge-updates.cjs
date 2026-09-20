@@ -785,6 +785,24 @@ async function removeBridgeRollbackTransaction(stateDirectory) {
   if (await exists(file)) fail("bridge_rollback_transaction_invalid");
 }
 
+/**
+ * Discards the durable swap transactions that name the installation record.
+ * Both recovery routines converge a transaction against that record, so a
+ * transaction that outlives it fails every later lock and nothing can install
+ * or repair the Bridge again. A caller that removes the record removes these
+ * with it.
+ */
+async function discardBridgeTransactions(options = {}) {
+  const stateDirectory = await readOnlyStateDirectory(options.stateDirectory);
+  if (!stateDirectory) return Object.freeze({ discarded: Object.freeze([]) });
+  const files = [updateTransactionPath(stateDirectory), rollbackTransactionPath(stateDirectory)];
+  const discarded = [];
+  for (const file of files) if (await exists(file)) discarded.push(file);
+  await removeBridgeUpdateTransaction(stateDirectory);
+  await removeBridgeRollbackTransaction(stateDirectory);
+  return Object.freeze({ discarded: Object.freeze(discarded) });
+}
+
 function releaseFromRecord(record) {
   return Object.freeze({
     extensionId: record.extensionId,
@@ -1106,7 +1124,9 @@ async function bridgeInstallationStatus(options = {}) {
   };
   // Ordinary status remains read-only. A durable interrupted swap is the one
   // startup state that status repairs before it reports the installed bytes.
-  if (await exists(updateTransactionPath(stateDirectory))) return lock(stateDirectory, readStatus);
+  // Either transaction file is such a swap, and the lock converges both.
+  if (await exists(updateTransactionPath(stateDirectory))
+    || await exists(rollbackTransactionPath(stateDirectory))) return lock(stateDirectory, readStatus);
   return readStatus();
 }
 
@@ -1316,6 +1336,7 @@ module.exports = {
   bridgeInstallationStatus,
   compareChromeVersions,
   confirmBridgeUpdate,
+  discardBridgeTransactions,
   inspectPendingBridgeUpdate,
   initializeBridgeDirectory,
   issueBridgeActiveFolderChallenge,

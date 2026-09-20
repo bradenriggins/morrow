@@ -96,6 +96,10 @@ function transactionPath(stateDirectory) {
   return path.join(stateDirectory, "bridge-update-transaction.json");
 }
 
+function rollbackTransactionPath(stateDirectory) {
+  return path.join(stateDirectory, "bridge-rollback-transaction.json");
+}
+
 function lockPath(stateDirectory) {
   return path.join(stateDirectory, "bridge-update.lock");
 }
@@ -341,6 +345,51 @@ test("a pending Bridge update rolls back to its exact retained record and bytes"
   assert.deepEqual(await record(stateDirectory), originalRecord);
   assert.equal(await fs.readFile(path.join(bridgeDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.2";\n');
   assert.equal(await present(updated.backupDirectory), false);
+});
+
+test("startup converges every durable Bridge rollback cut point", async (t) => {
+  for (const phase of ["current_moved", "previous_restored"]) {
+    await t.test(phase, async (t) => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), `morrow-bridge-rollback-recovery-${phase}-`));
+      t.after(() => fs.rm(root, { recursive: true, force: true }));
+      const stateDirectory = path.join(root, "State");
+      const bridgeDirectory = path.join(root, "Bridge");
+      const original = await fixture(root, "1.0.2");
+      const initial = await initializeBridgeDirectory({
+        ...original,
+        stateDirectory,
+        bridgeDirectory,
+        initialChallenge: challenge(`${phase}-old`)
+      });
+      const previousRecord = await record(stateDirectory);
+      const updated = await stageUpdate(root, stateDirectory, bridgeDirectory, initial.activeFolderChallenge, "1.0.2", "1.0.3");
+      const currentRecord = await record(stateDirectory);
+      const transactionId = crypto.randomUUID();
+      const currentBackupDirectory = path.join(path.dirname(updated.backupDirectory), `1.0.3-failed-${transactionId}`);
+
+      await fs.rename(bridgeDirectory, currentBackupDirectory);
+      if (phase === "previous_restored") await fs.rename(updated.backupDirectory, bridgeDirectory);
+      await fs.writeFile(rollbackTransactionPath(stateDirectory), `${JSON.stringify({
+        schema: "morrow.bridge-rollback-transaction.v1",
+        transactionId,
+        createdAt: new Date().toISOString(),
+        currentBackupDirectory,
+        previousBackupDirectory: updated.backupDirectory,
+        currentRecord,
+        previousRecord
+      })}\n`, { mode: 0o600 });
+
+      const status = await bridgeInstallationStatus({ stateDirectory, bridgeDirectory, expectedExtensionId: extensionId });
+      assert.equal(status.installed, true);
+      assert.equal(status.version, "1.0.2");
+      assert.equal(status.manualChromeReloadRequired, false);
+      assert.equal(await present(rollbackTransactionPath(stateDirectory)), false);
+      assert.equal(await present(updated.backupDirectory), false);
+      assert.deepEqual(await record(stateDirectory), previousRecord);
+      assert.equal(await fs.readFile(path.join(bridgeDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.2";\n');
+      assert.equal(await fs.readFile(path.join(currentBackupDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.3";\n');
+    });
+  }
 });
 
 test("changed sealed Bridge bytes at the same Chrome version are refused before quiescence", async (t) => {

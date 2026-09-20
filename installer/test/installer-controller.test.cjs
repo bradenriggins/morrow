@@ -1470,6 +1470,66 @@ test("repair rebuilds a Bridge folder that was removed and re-issues its active-
   assert.equal((await fs.readdir(path.join(stateDirectory, "Backups"))).length, 1, "a Bridge folder that verifies is kept");
 });
 
+/**
+ * A durable swap that can no longer converge: the transaction still names a
+ * stage and a backup that are both gone. Repair discards that installation,
+ * so it must discard the transaction with it. A transaction left behind fails
+ * every later lock, which leaves the Bridge unrepairable from then on.
+ */
+test("repair discards a durable swap transaction with the record it removes", async () => {
+  const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const { installer } = await repairableController(root);
+  const stateDirectory = path.join(root, "UserData", "State");
+  const bridgeDirectory = path.join(root, "UserData", "Bridge");
+  await fs.mkdir(stateDirectory, { recursive: true });
+  await fs.writeFile(path.join(stateDirectory, "morrow.upstreams.json"), "{}\n");
+  await installer.initializeBridgeAtStartup();
+  const previous = JSON.parse(await fs.readFile(path.join(stateDirectory, "bridge-installation.json"), "utf8"));
+
+  // The record names the resolved paths, and the transaction is read against
+  // those, so the fixture derives both from the record rather than from root.
+  const resolvedUserData = path.dirname(previous.bridgeDirectory);
+  const transactionId = crypto.randomUUID();
+  const backupDirectory = path.join(resolvedUserData, "State", "bridge-backups", `${previous.extensionVersion}-${transactionId}`);
+  const nextRecord = {
+    ...previous,
+    extensionVersion: "9.9.9",
+    releaseManifestSha256: sha256("a release this fixture never installs"),
+    activeFolderChallenge: { ...previous.activeFolderChallenge, manifestVersion: "9.9.9" },
+    pendingUpdate: {
+      backupDirectory,
+      fromVersion: previous.extensionVersion,
+      quiesceEpoch: "quiesce-epoch-0123456789",
+      previousRecord: previous
+    }
+  };
+  const transactionFile = path.join(stateDirectory, "bridge-update-transaction.json");
+  await fs.writeFile(transactionFile, `${JSON.stringify({
+    schema: "morrow.bridge-update-transaction.v1",
+    transactionId,
+    createdAt: new Date().toISOString(),
+    stageDirectory: path.join(resolvedUserData, `.morrow-bridge-stage-${transactionId}`),
+    backupDirectory,
+    previousRecord: previous,
+    nextRecord
+  })}\n`, { mode: 0o600 });
+
+  installer.bridgeInitialization = null;
+  installer.bridgeInstallation = null;
+  await assert.rejects(() => installer.readBridgeInstallation(), (error) => error.code === "bridge_update_transaction_invalid");
+
+  const state = await installer.repair();
+  assert.equal(state.bridge.folderReady, true);
+  assert.equal(await fs.stat(transactionFile).then(() => true, () => false), false,
+    "repair removes the transaction it can no longer converge");
+  assert.equal((await fs.stat(path.join(bridgeDirectory, "manifest.json"))).isFile(), true);
+  const rebuilt = JSON.parse(await fs.readFile(path.join(stateDirectory, "bridge-installation.json"), "utf8"));
+  assert.equal(rebuilt.extensionVersion, previous.extensionVersion);
+  assert.equal((await installer.readBridgeInstallation()).installed, true,
+    "every later read stays usable once the orphaned transaction is gone");
+});
+
 test("restoring a staged Bridge does not enter assistant configuration repair", async () => {
   const root = await temporaryRoot();
   const installer = controller(root);
@@ -1488,6 +1548,30 @@ test("restoring a staged Bridge does not enter assistant configuration repair", 
 
   assert.equal(await installer.restorePreviousBridge(), finalState);
   assert.deepEqual(calls, ["read-bridge", "rollback-bridge", "refresh-runtime"]);
+});
+
+test("restoring a staged Bridge is admitted while that update still holds its own lease", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const monitor = {};
+  const finalState = { schema: "morrow.installer-state.v1", lifecycle: "assistant_ready" };
+  let rollbacks = 0;
+  installer.restartLeases.set("bridge-lease", monitor);
+  installer.bridgeLeaseId = "bridge-lease";
+  installer.readBridgeInstallation = async () => bridgeInstallation({ manualChromeReloadRequired: true });
+  installer.rollbackPendingBridgeInstallation = async () => { rollbacks += 1; };
+  installer.effectiveWorkspace = async () => path.join(root, "UserData", "Materials");
+  installer.runtimeSnapshot = async () => {};
+  installer.state = async () => finalState;
+
+  assert.equal(await installer.restorePreviousBridge(), finalState);
+  assert.equal(await installer.repair(), finalState);
+  assert.equal(rollbacks, 2, "repair reaches the same rollback for this state");
+
+  // A second lease is other work, and the rollback still refuses to run beside it.
+  installer.restartLeases.set("other-lease", {});
+  await assert.rejects(() => installer.restorePreviousBridge(), (error) => error.code === "active_or_uncertain_operations");
+  await assert.rejects(() => installer.repair(), (error) => error.code === "active_or_uncertain_operations");
 });
 
 test("repair replaces an older app-owned Bridge from the sealed release", async () => {

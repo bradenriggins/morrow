@@ -28,6 +28,7 @@ const {
   bridgeInstallationStatus,
   compareChromeVersions,
   confirmBridgeUpdate,
+  discardBridgeTransactions,
   initializeBridgeDirectory,
   inspectPendingBridgeUpdate,
   issueBridgeActiveFolderChallenge,
@@ -2134,7 +2135,9 @@ class InstallerController {
 
   async restorePreviousBridge() {
     try {
-      const refused = this.maintenanceAdmission();
+      // Rolling the staged update back is the other end of the step the staging lease is held for,
+      // and rollbackPendingBridgeInstallation reuses that same lease, so it is not other work here.
+      const refused = this.maintenanceAdmission({ pendingBridgeUpdate: true });
       if (refused) throw errorDetails(refused);
       const installed = await this.readBridgeInstallation();
       if (installed?.manualChromeReloadRequired !== true) throw errorDetails("bridge_check_failed");
@@ -2255,6 +2258,9 @@ class InstallerController {
       await captureConfiguration(record, path.join(this.paths.state, "Backups"));
       await fs.rm(record, { force: true });
     }
+    // A durable swap transaction converges against the record above. Leaving
+    // one behind fails every later lock, so the discard takes both together.
+    await discardBridgeTransactions({ stateDirectory: this.paths.state });
     const info = await fs.lstat(this.paths.bridgeDirectory).catch(() => null);
     if (info?.isDirectory() === true) await fs.rm(this.paths.bridgeDirectory, { recursive: true, force: true });
   }
