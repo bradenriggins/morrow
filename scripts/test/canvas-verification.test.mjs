@@ -243,11 +243,12 @@ test("the single course-nickname read stays bound to one course", () => {
 // connector/extension/src/quiz-bank-draw-executor.js. The generic Canvas
 // planner cannot reach the private bank surface, so it owns neither the
 // readback nor the recovery descriptor for these changes.
-const QUIZ_DRAW_NICKNAMES = ["attach_bank_to_quiz", "attach_bank_entry_to_quiz", "delete_quiz_bank_entry"];
+const QUIZ_DRAW_NICKNAMES = ["attach_bank_to_quiz", "attach_bank_entry_to_quiz", "delete_quiz_bank_entry",
+  "update_quiz_draw", "add_quiz_question_to_bank"];
 
 test("every Item Bank change is admitted with an executor-owned exact readback", () => {
   const writes = catalog.operations.filter((candidate) => candidate.service === "item_bank" && !candidate.readOnly);
-  assert.equal(writes.length, 11);
+  assert.equal(writes.length, 18);
   for (const write of writes) {
     assert.equal(canvasOperationAdmission(write).write.state, "admitted", write.toolName);
     assert.deepEqual(canvasOperationAdmission(write).courseTarget, { kind: "course_path", argument: "course_id" }, write.toolName);

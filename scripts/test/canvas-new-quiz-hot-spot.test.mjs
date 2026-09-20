@@ -478,7 +478,10 @@ async function runHotSpotWorker({ expiresAt, duringFetch }) {
     chrome: {
       scripting: {
         executeScript: async (injection) => {
-          const input = injection.args[0];
+          // The worker hands an injected request over as text, because Chrome drops a null
+          // property of an object argument. See scripts/test/canvas-executor-input-transport.test.mjs.
+          assert.equal(typeof injection.args[0], "string");
+          const input = JSON.parse(injection.args[0]);
           scriptModes.push(input.mode);
           const result = input.mode === "initialize"
             ? { ok: true, sent: false, data: { course_id: COURSE_ID, assignment_id: QUIZ_ID, item_count: SAVED.length, upload_url: SIGNED_UPLOAD_URL } }

@@ -1174,6 +1174,14 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
             return afterMutation({ bank_entry: saved }, 201);
           }
         }
+        const searchMatch = url.pathname.match(/^\/api\/banks\/([1-9][0-9]{0,18})\/bank_entries\/search$/);
+        if (searchMatch && method === "GET") {
+          const text = String(url.searchParams.get("text") ?? "").toLowerCase();
+          const rows = bankEntries.filter((entry) => exactId(entry.bank_id) === searchMatch[1]).map(embeddedEntry)
+            .filter((entry) => !text || JSON.stringify(entry).toLowerCase().includes(text));
+          return json({ total: rows.length, entries: rows });
+        }
+        if (url.pathname === "/api/tags" && method === "GET") return json([{ id: "23", value: "cells" }]);
         const sharesMatch = url.pathname.match(/^\/api\/banks\/([1-9][0-9]{0,18})\/shared_banks$/);
         if (sharesMatch) {
           const rows = bankShares.filter((share) => exactId(share.bank_id) === sharesMatch[1]);
@@ -1189,7 +1197,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       };
 
       let result: JsonObject;
-      if (["list_quiz_draws", "attach_bank_to_quiz", "attach_bank_entry_to_quiz", "delete_quiz_bank_entry"].includes(operation.nickname)) {
+      if (["list_quiz_draws", "attach_bank_to_quiz", "attach_bank_entry_to_quiz", "delete_quiz_bank_entry", "update_quiz_draw", "add_quiz_question_to_bank"].includes(operation.nickname)) {
         const drawFetch = async (input: string | URL | Request, options: RequestInit = {}) => {
           const url = new URL(String((input as { href?: string }).href ?? input));
           const method = String(options.method ?? "GET");
@@ -1206,6 +1214,28 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
             return afterMutation({ quiz_entry: saved }, 201);
           }
           const drawMatch = url.pathname.match(/^\/api\/quizzes\/77\/quiz_entries\/([1-9][0-9]{0,18})$/);
+          if (drawMatch && method === "PATCH") {
+            writes += 1;
+            const index = quizBankDraws.findIndex((row) => exactId(row.id) === drawMatch[1]);
+            if (index < 0) return json({ error: "missing" }, 404);
+            const sent = isJsonObject(body.quiz_entry) ? body.quiz_entry : {};
+            const properties = isJsonObject(quizBankDraws[index]!.properties) ? { ...quizBankDraws[index]!.properties } : {};
+            if (isJsonObject(sent.properties) && sent.properties.sample_num !== undefined) properties.sample_num = sent.properties.sample_num;
+            quizBankDraws[index] = { ...quizBankDraws[index], ...(sent.points_possible !== undefined ? { points_possible: sent.points_possible } : {}), properties };
+            return afterMutation({ quiz_entry: quizBankDraws[index] });
+          }
+          const bankEntryListMatch = url.pathname.match(/^\/api\/banks\/([1-9][0-9]{0,18})\/bank_entries$/);
+          if (bankEntryListMatch && method === "GET") {
+            return json(bankEntries.filter((entry) => exactId(entry.bank_id) === bankEntryListMatch[1]).map(embeddedEntry));
+          }
+          const moveFromQuiz = url.pathname.match(/^\/api\/banks\/([1-9][0-9]{0,18})\/bank_entries\/move_from_quiz_entry$/);
+          if (moveFromQuiz && method === "POST") {
+            writes += 1;
+            const saved = { id: String(nextBankEntryId++), bank_id: moveFromQuiz[1]!, entry_type: String(body.source_entry_type),
+              entry_id: String(body.source_entry_id) };
+            bankEntries.push(saved);
+            return afterMutation(embeddedEntry(saved));
+          }
           if (drawMatch && method === "DELETE") {
             writes += 1;
             const index = quizBankDraws.findIndex((row) => exactId(row.id) === drawMatch[1]);
@@ -1800,13 +1830,13 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       const published = admitted.filter((operation) => operation.toolName !== "canvas_get_items_media_upload_url");
       const hidden = relevantOperations.filter((operation) => held.includes(operation)
         || operation.toolName === "canvas_get_items_media_upload_url");
-      expect(relevantOperations).toHaveLength(32);
+      expect(relevantOperations).toHaveLength(41);
       // Learner accommodations are course work reached through their course, so nothing here is held.
-      expect(admitted).toHaveLength(32);
+      expect(admitted).toHaveLength(41);
       expect(held).toHaveLength(0);
       expect(relevantOperations.filter((operation) => operation.service === "item_bank" && !operation.readOnly
         && canvasOperationAdmission(operation).write.state === "admitted").map((operation) => operation.toolName))
-        .toHaveLength(11);
+        .toHaveLength(18);
       for (const operation of published) {
         const capability = await client!.callTool({ name: "morrow_capability_get", arguments: { name: operation.toolName } });
         expect(capability.isError, operation.toolName).not.toBe(true);
@@ -1825,6 +1855,8 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
         canvas_item_bank_list_entries: { course_id: COURSE_ID, bank_id: "91" },
         canvas_item_bank_list_shares: { course_id: COURSE_ID, bank_id: "91" },
         canvas_item_bank_list_quiz_draws: { course_id: COURSE_ID, assignment_id: "77" },
+        canvas_item_bank_list_tags: { course_id: COURSE_ID },
+        canvas_item_bank_search_entries: { course_id: COURSE_ID, bank_id: "91", text: "cell" },
         canvas_list_new_quizzes: { course_id: COURSE_ID },
         canvas_list_quiz_items: { course_id: COURSE_ID, assignment_id: "77" },
       };
@@ -2323,11 +2355,19 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
         canvas_item_bank_attach_item: "scripts/test/canvas-item-bank-executor.test.mjs",
         canvas_item_bank_delete_entry: "scripts/test/canvas-item-bank-executor.test.mjs",
         canvas_item_bank_share_bank: "scripts/test/canvas-item-bank-executor.test.mjs",
-        // The three assignment-bound quiz-builder writes, driven end to end against the real
-        // executor, including the documented all-items draw and the exact-absence delete.
+        canvas_item_bank_update_share: "scripts/test/canvas-item-bank-executor.test.mjs",
+        canvas_item_bank_copy_entry: "scripts/test/canvas-item-bank-executor.test.mjs",
+        canvas_item_bank_move_entry: "scripts/test/canvas-item-bank-executor.test.mjs",
+        canvas_item_bank_add_entry_tag: "scripts/test/canvas-item-bank-executor.test.mjs",
+        canvas_item_bank_remove_entry_tag: "scripts/test/canvas-item-bank-executor.test.mjs",
+        // The five assignment-bound quiz-builder writes, driven end to end against the real
+        // executor, including the documented all-items draw, the exact-absence delete, the draw
+        // edit, and the refusal to bank a question the named quiz row does not hold.
         canvas_item_bank_attach_bank_to_quiz: "scripts/test/canvas-quiz-bank-draw-executor.test.mjs",
         canvas_item_bank_attach_bank_entry_to_quiz: "scripts/test/canvas-quiz-bank-draw-executor.test.mjs",
         canvas_item_bank_delete_quiz_bank_entry: "scripts/test/canvas-quiz-bank-draw-executor.test.mjs",
+        canvas_item_bank_update_quiz_draw: "scripts/test/canvas-quiz-bank-draw-executor.test.mjs",
+        canvas_item_bank_add_quiz_question_to_bank: "scripts/test/canvas-quiz-bank-draw-executor.test.mjs",
       };
       for (const name of Object.keys(PROVED_ELSEWHERE)) {
         expect(provedCatalog.has(name), `${name} is now proved here; remove it from PROVED_ELSEWHERE`).toBe(false);

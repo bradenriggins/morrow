@@ -77,6 +77,9 @@ function embeddedEntry(state, row) {
   return { ...rest, entry: { ...question.entry, id: String(entryId) } };
 }
 
+// Shares as Morrow reads them: the private launch context never travels back in a result.
+const sharesAsRead = (state) => state.shares.map((row) => JSON.parse(JSON.stringify(row).split(CONTEXT_UUID).join("[redacted]")));
+
 // The question as Morrow reads it back through its entry: its documented fields only.
 const asRead = (item) => item;
 
@@ -85,7 +88,8 @@ function provider({ writeStatus = 0, sabotage = false, banks, items, entries, sh
     banks: banks ?? [{ id: "91", title: "Bank A", language: "en" }],
     items: items ?? new Map([["501", { id: "501", entry_type: "Item", entry: { title: "Question A", item_body: "<p>A</p>" } }]]),
     entries: entries ?? new Map([["401", { id: "401", bank_id: "91", entry_type: "Item", entry_id: "501" }]]),
-    shares: [], nextBank: 92, nextItem: 502, nextEntry: 402,
+    shares: [],
+    tags: [{ id: "23", value: "Chapter: 01" }], tagged: new Map(), associations: new Map(), nextBank: 92, nextItem: 502, nextEntry: 402, nextTagAssociation: 7600,
   };
   // What the live service does: a course lists only the banks shared with it. A bank made by a
   // bare POST /api/banks belongs to its creator until it is shared with the course.
@@ -149,6 +153,68 @@ function provider({ writeStatus = 0, sabotage = false, banks, items, entries, sh
         state.entries.set(entry.id, entry);
         return json(entry, 201);
       }
+    }
+    // The question search, the account's tags, and copy, move and tag writes, as the live service answers them.
+    const searchMatch = path.match(/^\/api\/banks\/(\d+)\/bank_entries\/search$/);
+    if (searchMatch && method === "GET") {
+      const tagFilter = parsed.searchParams.getAll("tag_ids[]");
+      const text = String(parsed.searchParams.get("text") || "").toLowerCase();
+      const rows = [...state.entries.values()].filter((row) => String(row.bank_id) === searchMatch[1])
+        .filter((row) => tagFilter.length === 0 || tagFilter.some((tag) => (state.tagged.get(String(row.id)) || []).includes(tag)))
+        .map((row) => embeddedEntry(state, row))
+        .filter((row) => !text || JSON.stringify(row).toLowerCase().includes(text));
+      return json({ total: rows.length, entries: rows });
+    }
+    if (path === "/api/tags" && method === "GET") {
+      const filter = parsed.searchParams.get("filter");
+      return json(filter ? state.tags.filter((row) => String(row.value).includes(filter)) : state.tags);
+    }
+    const transferMatch = path.match(/^\/api\/banks\/(\d+)\/bank_entries\/(copy|move)$/);
+    if (transferMatch && method === "POST") {
+      const [, targetBank, kind] = transferMatch;
+      const source = state.entries.get(String(body.source_bank_entry_id));
+      if (!source || String(source.bank_id) !== String(body.source_bank_id)) return json({ error: "missing" }, 404);
+      if (sabotage) return json({ id: source.id, bank_id: targetBank }, 200);
+      if (kind === "move") {
+        state.entries.set(String(source.id), { ...source, bank_id: targetBank });
+        return json(embeddedEntry(state, state.entries.get(String(source.id))));
+      }
+      const itemId = String(state.nextItem++);
+      state.items.set(itemId, structuredClone(state.items.get(String(source.entry_id))));
+      const copied = { id: String(state.nextEntry++), bank_id: targetBank, entry_type: "Item", entry_id: itemId };
+      state.entries.set(copied.id, copied);
+      return json(embeddedEntry(state, copied), 201);
+    }
+    const tagListMatch = path.match(/^\/api\/bank_entries\/(\d+)\/tag_associations$/);
+    if (tagListMatch && method === "POST") {
+      const tag = state.tags.find((row) => row.value === body.tag_value) ?? { id: String(state.tags.length + 24), value: String(body.tag_value) };
+      if (!state.tags.includes(tag)) state.tags.push(tag);
+      // Live: posting a tag a question already carries answers with that same association and
+      // adds nothing, which is the only way Canvas names an association that already exists.
+      const existing = state.associations.get(`${tagListMatch[1]}:${tag.id}`);
+      if (existing) return json(existing, 201);
+      const association = { id: String(state.nextTagAssociation++), tag_id: tag.id, tag_value: tag.value };
+      if (!sabotage) state.tagged.set(tagListMatch[1], [...(state.tagged.get(tagListMatch[1]) || []), tag.id]);
+      if (!sabotage) state.associations.set(`${tagListMatch[1]}:${tag.id}`, association);
+      state.tagged.set(`association:${association.id}`, [tagListMatch[1], tag.id]);
+      return json(association, 201);
+    }
+    const tagMatch = path.match(/^\/api\/bank_entries\/(\d+)\/tag_associations\/(\d+)$/);
+    if (tagMatch && method === "DELETE") {
+      const named = state.tagged.get(`association:${tagMatch[2]}`);
+      const removed = named ? named[1] : "23";
+      if (!sabotage) {
+        state.tagged.set(tagMatch[1], (state.tagged.get(tagMatch[1]) || []).filter((tag) => tag !== removed));
+        state.associations.delete(`${tagMatch[1]}:${removed}`);
+      }
+      return json(null, 204);
+    }
+    const shareMatch = path.match(/^\/api\/banks\/(\d+)\/shared_banks\/(\d+)$/);
+    if (shareMatch && method === "PATCH") {
+      const index = state.shares.findIndex((row) => String(row.id) === shareMatch[2]);
+      if (index < 0) return json({ error: "missing" }, 404);
+      if (!sabotage) state.shares[index] = { ...state.shares[index], ...body.shared_bank };
+      return json(state.shares[index]);
     }
     if (/^\/api\/banks\/\d+\/shared_banks$/.test(path)) {
       if (method === "GET") return json(state.shares);
@@ -215,7 +281,7 @@ const WRITE_SHAPES = [
   },
   {
     nickname: "archive_bank",
-    args: async (state) => ({ course_id: "42", bank_id: "91", expected_snapshot: { bank_sha256: await digest(state.banks[0]), entries_sha256: await digest([...state.entries.values()].map((row) => embeddedEntry(state, row))), shares_sha256: await digest(state.shares) }, ...await observed() }),
+    args: async (state) => ({ course_id: "42", bank_id: "91", expected_snapshot: { bank_sha256: await digest(state.banks[0]), entries_sha256: await digest([...state.entries.values()].map((row) => embeddedEntry(state, row))), shares_sha256: await digest(sharesAsRead(state)) }, ...await observed() }),
     mismatch: "bank_still_present_after_delete",
   },
   {
@@ -249,8 +315,54 @@ const WRITE_SHAPES = [
     mismatch: "bank_entry_still_present_after_delete",
   },
   {
+    nickname: "copy_entry",
+    args: async (state) => {
+      state.banks.push({ id: "90", title: "Source bank", language: "en" });
+      state.associated.add("90");
+      state.entries.set("403", { id: "403", bank_id: "90", entry_type: "Item", entry_id: "501" });
+      return { course_id: "42", bank_id: "91", source_bank_id: "90", source_bank_entry_id: "403",
+        expected_snapshot: { bank_sha256: await digest(state.banks[0]), entries_sha256: await digest([...state.entries.values()].filter((row) => row.bank_id === "91").map((row) => embeddedEntry(state, row))), source_entry_sha256: await digest(embeddedEntry(state, state.entries.get("403"))) }, ...await observed() };
+    },
+    mismatch: "copied_entry_not_found_in_bank",
+  },
+  {
+    nickname: "move_entry",
+    args: async (state) => {
+      state.banks.push({ id: "90", title: "Source bank", language: "en" });
+      state.associated.add("90");
+      state.entries.set("403", { id: "403", bank_id: "90", entry_type: "Item", entry_id: "501" });
+      return { course_id: "42", bank_id: "91", source_bank_id: "90", source_bank_entry_id: "403",
+        expected_snapshot: { bank_sha256: await digest(state.banks[0]), entries_sha256: await digest([...state.entries.values()].filter((row) => row.bank_id === "91").map((row) => embeddedEntry(state, row))), source_entry_sha256: await digest(embeddedEntry(state, state.entries.get("403"))) }, ...await observed() };
+    },
+    mismatch: "moved_entry_not_found_in_bank",
+  },
+  {
+    nickname: "update_share",
+    args: async (state) => {
+      state.shares.push({ id: "1", bank_id: "91", entity_type: "course", entity_id: "77", permission: "read" });
+      return { course_id: "42", bank_id: "91", share_id: "1", permission: "edit",
+        expected_snapshot: { bank_sha256: await digest(state.banks[0]), shares_sha256: await digest(sharesAsRead(state)) }, ...await observed() };
+    },
+    mismatch: "share_permission_did_not_match",
+  },
+  {
+    nickname: "add_entry_tag",
+    args: async (state) => ({ course_id: "42", bank_id: "91", bank_entry_id: "401", tag_value: "Chapter: 01",
+      expected_snapshot: { bank_sha256: await digest(state.banks[0]), entry_sha256: await digest(embeddedEntry(state, state.entries.get("401"))) }, ...await observed() }),
+    mismatch: "tagged_question_not_found",
+  },
+  {
+    nickname: "remove_entry_tag",
+    args: async (state) => {
+      state.tagged.set("401", ["23"]);
+      return { course_id: "42", bank_id: "91", bank_entry_id: "401", tag_association_id: "7600", tag_id: "23",
+        expected_snapshot: { bank_sha256: await digest(state.banks[0]), entry_sha256: await digest(embeddedEntry(state, state.entries.get("401"))) }, ...await observed() };
+    },
+    mismatch: "question_still_carries_the_tag",
+  },
+  {
     nickname: "share_bank",
-    args: async (state) => ({ course_id: "42", bank_id: "91", entity_type: "course", entity_id: "77", permission: "read", expected_snapshot: { bank_sha256: await digest(state.banks[0]), shares_sha256: await digest(state.shares) }, ...await observed() }),
+    args: async (state) => ({ course_id: "42", bank_id: "91", entity_type: "course", entity_id: "77", permission: "read", expected_snapshot: { bank_sha256: await digest(state.banks[0]), shares_sha256: await digest(sharesAsRead(state)) }, ...await observed() }),
     mismatch: "course_read_share_not_found",
   },
 ];
@@ -270,15 +382,16 @@ async function runShape(shape, options = {}) {
   });
 }
 
-test("Item Bank catalog exposes seven reads and eleven course-bound writes", () => {
-  assert.equal(operations.size, 18);
-  assert.equal([...operations.values()].filter((operation) => operation.readOnly).length, 7);
+test("Item Bank catalog exposes nine reads and eighteen course-bound writes", () => {
+  assert.equal(operations.size, 27);
+  assert.equal([...operations.values()].filter((operation) => operation.readOnly).length, 9);
   for (const operation of [...operations.values()].filter((candidate) => !candidate.readOnly)) {
     assert.ok(operation.inputSchema.required.includes("course_id"), operation.nickname);
     assert.ok(operation.inputSchema.required.includes("expected_snapshot"), operation.nickname);
   }
   assert.deepEqual(WRITE_SHAPES.map((shape) => shape.nickname).sort(), [
-    "archive_bank", "attach_item", "create_bank", "create_item", "delete_entry", "rename_bank", "share_bank", "update_item",
+    "add_entry_tag", "archive_bank", "attach_item", "copy_entry", "create_bank", "create_item", "delete_entry",
+    "move_entry", "remove_entry_tag", "rename_bank", "share_bank", "update_item", "update_share",
   ]);
 });
 
@@ -1072,5 +1185,72 @@ test("an expired Item Bank command starts no provider request", async () => {
     });
     assert.deepEqual(result, { matched: true, ok: false, sent: false, error: "item_bank_operation_timeout" });
     assert.equal(calls, 0);
+  });
+});
+
+// The bank search reads an index the service fills after the tag write returns. Measured live
+// on 2026-09-19: the question a tag was just added to is missing from that search for about a
+// second and a half, so one immediate read would report a saved tag as missing.
+test("a tag is verified once the search the service fills catches up, and a tag that never appears is a mismatch", async () => {
+  for (const [lateReads, expected] of [[2, "verified"], [99, "mismatch"]]) {
+    await withPageContext(async () => {
+      const api = provider();
+      let searches = 0;
+      globalThis.fetch = async (url, options = {}) => {
+        const path = new URL(url).pathname;
+        if (path === "/api/banks/91/bank_entries/search" && (options.method || "GET") === "GET") {
+          searches += 1;
+          if (searches <= lateReads) {
+            return new Response(JSON.stringify({ total: 0, entries: [] }), { status: 200, headers: { "content-type": "application/json" } });
+          }
+        }
+        return await api.fetch(url, options);
+      };
+      const shape = WRITE_SHAPES.find((candidate) => candidate.nickname === "add_entry_tag");
+      const result = await executeItemBankInPage(input(shape.nickname, await shape.args(api.state)));
+      assert.equal(result.sent, true);
+      assert.equal(result.verification.status, expected, JSON.stringify(result.verification));
+      assert.equal(result.ok, expected === "verified");
+      // The tag is written once however many times the search is read.
+      assert.equal(api.requests.filter((request) => request.method === "POST" && request.path.endsWith("/tag_associations")).length, 1);
+      assert.ok(searches > 1, "the search was read again after it disagreed");
+    });
+  }
+});
+
+// Canvas has no read that reports one question's tags, so a removal names the tag by its value:
+// Morrow resolves the exact tag, proves this question carries it, and asks Canvas for the
+// association by posting that same tag again, which adds nothing.
+test("a tag is removed by its value, and a tag the question does not carry is refused before any write", async () => {
+  await withPageContext(async () => {
+    const api = provider();
+    globalThis.fetch = api.fetch;
+    // The question already carries "Chapter: 01".
+    api.state.tagged.set("401", ["23"]);
+    api.state.associations.set("401:23", { id: "7600", tag_id: "23", tag_value: "Chapter: 01" });
+    const args = async (overrides) => ({
+      course_id: "42", bank_id: "91", bank_entry_id: "401",
+      expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), entry_sha256: await digest(embeddedEntry(api.state, api.state.entries.get("401"))) },
+      ...await observed(), ...overrides,
+    });
+
+    const absent = await executeItemBankInPage(input("remove_entry_tag", await args({ tag_value: "Chapter: 02" })));
+    assert.deepEqual(absent, { matched: true, ok: false, sent: false, error: "item_bank_tag_value_unresolved" });
+    assert.equal(api.dispatches(), 0);
+
+    api.state.tags.push({ id: "24", value: "Chapter: 02" });
+    const untagged = await executeItemBankInPage(input("remove_entry_tag", await args({ tag_value: "Chapter: 02" })));
+    assert.deepEqual(untagged, { matched: true, ok: false, sent: false, error: "item_bank_question_does_not_carry_that_tag" });
+    assert.equal(api.dispatches(), 0);
+
+    const result = await executeItemBankInPage(input("remove_entry_tag", await args({ tag_value: "Chapter: 01" })));
+    assert.equal(result.ok, true, JSON.stringify(result.verification ?? result));
+    assert.equal(result.verification.status, "verified");
+    assert.deepEqual(api.state.tagged.get("401"), []);
+    // One resolving post that added nothing, then exactly one delete.
+    assert.deepEqual(api.requests.filter((request) => request.method !== "GET").map((request) => `${request.method} ${request.path}`), [
+      "POST /api/bank_entries/401/tag_associations",
+      "DELETE /api/bank_entries/401/tag_associations/7600",
+    ]);
   });
 });

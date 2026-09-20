@@ -14,6 +14,15 @@ export function absoluteItemBankTabUrls(tabs, canvasOrigin) {
 }
 
 export async function executeItemBankInPage(input) {
+  // Chrome's scripting.executeScript drops every null-valued property of an object argument
+  // (measured live on 2026-09-19: {"a":null,"b":1} arrives as {"b":1}; a null inside an array
+  // survives). A question carries nulls of its own, such as an essay's word limits, so the
+  // reviewed request is carried across this boundary as text and read back here whole.
+  if (typeof input === "string") {
+    try { input = JSON.parse(input); } catch { return { matched: true, ok: false, sent: false, error: "item_bank_input_unreadable" }; }
+  }
+  const TAG_SEARCH_ATTEMPTS = 8;
+  const TAG_SEARCH_SETTLE_MS = 750;
   const requestExpired = () => Number.isSafeInteger(input?.expiresAt) && input.expiresAt <= Date.now();
   const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
     Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
@@ -140,6 +149,13 @@ export async function executeItemBankInPage(input) {
     update_item: ["PATCH", "/api/banks/{bank_id}/items/{item_id}"],
     delete_entry: ["DELETE", "/api/banks/{bank_id}/bank_entries/{bank_entry_id}"],
     share_bank: ["POST", "/api/banks/{bank_id}/shared_banks"],
+    search_entries: ["GET", "/api/banks/{bank_id}/bank_entries/search"],
+    list_tags: ["GET", "/api/tags"],
+    copy_entry: ["POST", "/api/banks/{bank_id}/bank_entries/copy"],
+    move_entry: ["POST", "/api/banks/{bank_id}/bank_entries/move"],
+    update_share: ["PATCH", "/api/banks/{bank_id}/shared_banks/{share_id}"],
+    add_entry_tag: ["POST", "/api/bank_entries/{bank_entry_id}/tag_associations"],
+    remove_entry_tag: ["DELETE", "/api/bank_entries/{bank_entry_id}/tag_associations/{tag_association_id}"],
   };
   const contract = operationContracts[operation.nickname];
   if (!contract || operation.method !== contract[0] || operation.path !== contract[1]) {
@@ -210,7 +226,13 @@ export async function executeItemBankInPage(input) {
     }
     else formValues[parameter.wireName] = value;
   }
-  if (!/^\/api\/banks(?:[/?#]|$)/.test(path) || path.includes("://") || path.split(/[?#]/)[0].split("/").includes("..") || /\{[^}]+\}/.test(path)) {
+  // A tag removal may name the tag by its value: Canvas has no read that reports one question's
+  // tags, so the association id in the path is resolved from Canvas below, and only that one
+  // placeholder may still be open here.
+  const resolvesTagAssociation = operation.nickname === "remove_entry_tag" && !id(input.arguments?.tag_association_id)
+    && typeof input.arguments?.tag_value === "string" && input.arguments.tag_value !== "";
+  const openPlaceholders = resolvesTagAssociation ? path.replace("{tag_association_id}", "") : path;
+  if (!/^\/api\/(?:banks|bank_entries|tags)(?:[/?#]|$)/.test(path) || path.includes("://") || path.split(/[?#]/)[0].split("/").includes("..") || /\{[^}]+\}/.test(openPlaceholders)) {
     return { matched: true, ok: false, sent: false, error: "item_bank_path_refused" };
   }
   // The media rule, over every string the payload carries. It reports every
@@ -329,6 +351,14 @@ export async function executeItemBankInPage(input) {
   if (operation.nickname === "create_bank") body = { bank: { title: String(formValues.title), language: String(formValues.language || "en") } };
   else if (operation.nickname === "rename_bank") body = { bank: { title: String(formValues.title) } };
   else if (operation.nickname === "attach_item") body = { bank_entry: { bank_id: String(input.arguments.bank_id), entry_type: "Item", entry_id: String(formValues.item_id) } };
+  else if (operation.nickname === "copy_entry" || operation.nickname === "move_entry") {
+    body = { source_bank_id: String(formValues.source_bank_id), source_bank_entry_id: String(formValues.source_bank_entry_id) };
+  }
+  else if (operation.nickname === "update_share") {
+    if (!["read", "edit"].includes(String(formValues.permission))) return { matched: true, ok: false, sent: false, error: "item_bank_share_permission_unsupported" };
+    body = { shared_bank: { permission: String(formValues.permission) } };
+  }
+  else if (operation.nickname === "add_entry_tag") body = { tag_value: String(formValues.tag_value) };
   else if (operation.nickname === "share_bank") {
     // Only a course share with read permission is established. Every other
     // scope is unverified, so Morrow refuses it instead of sending it.
@@ -799,7 +829,8 @@ export async function executeItemBankInPage(input) {
       ? { matched: true, ok: false, sent: false, error: "item_bank_course_association_unverified" }
       : { matched: true, ok: false, sent: false, outcomeUnknown: false, error: "item_bank_course_association_unreadable" };
   };
-  const bankSpecific = !["list_banks", "create_bank"].includes(operation.nickname);
+  // The account's tag list names no bank, so it carries no bank to bind to the course.
+  const bankSpecific = !["list_banks", "create_bank", "list_tags"].includes(operation.nickname);
   if (bankSpecific && !guardedUpdate) {
     const associationRefusal = await verifyCourseAssociation();
     if (associationRefusal) return associationRefusal;
@@ -877,7 +908,7 @@ export async function executeItemBankInPage(input) {
     };
     const plain = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
     const snapshot = input.arguments?.expected_snapshot;
-    const snapshotKeys = ["banks_sha256", "bank_sha256", "item_sha256", "entries_sha256", "entry_sha256", "shares_sha256"];
+    const snapshotKeys = ["banks_sha256", "bank_sha256", "item_sha256", "entries_sha256", "entry_sha256", "shares_sha256", "source_entry_sha256"];
     const requiredSnapshots = {
       create_bank: ["banks_sha256"],
       rename_bank: ["bank_sha256"],
@@ -887,6 +918,11 @@ export async function executeItemBankInPage(input) {
       update_item: ["bank_sha256", "item_sha256"],
       delete_entry: ["bank_sha256", "entry_sha256", "entries_sha256"],
       share_bank: ["bank_sha256", "shares_sha256"],
+      update_share: ["bank_sha256", "shares_sha256"],
+      copy_entry: ["bank_sha256", "entries_sha256", "source_entry_sha256"],
+      move_entry: ["bank_sha256", "entries_sha256", "source_entry_sha256"],
+      add_entry_tag: ["bank_sha256", "entry_sha256"],
+      remove_entry_tag: ["bank_sha256", "entry_sha256"],
     }[operation.nickname] || [];
     const validDigest = (value) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
     if (!plain(snapshot) || Object.keys(snapshot).some((key) => !snapshotKeys.includes(key))
@@ -928,6 +964,16 @@ export async function executeItemBankInPage(input) {
       before.entry = sanitize(result.data);
       preflight.entry_sha256 = await digest(before.entry);
     }
+    if (snapshot.source_entry_sha256) {
+      // The question this copy or move takes, read in the bank it comes from.
+      const sourceBank = id(formValues.source_bank_id);
+      const sourceEntry = id(formValues.source_bank_entry_id);
+      if (!sourceBank || !sourceEntry) return { matched: true, ok: false, sent: false, error: "item_bank_source_entry_required" };
+      const result = await readObject(`/api/banks/${encodeURIComponent(sourceBank)}/bank_entries/${encodeURIComponent(sourceEntry)}`);
+      if (!readableObject(result)) return { matched: true, ok: false, sent: false, error: "item_bank_snapshot_unreadable" };
+      before.sourceEntry = sanitize(result.data);
+      preflight.source_entry_sha256 = await digest(before.sourceEntry);
+    }
     if (snapshot.shares_sha256) {
       // The pinned digest covers the share rows one unpaged read observed,
       // not a complete share list: the same caveat the read tool reports.
@@ -962,6 +1008,32 @@ export async function executeItemBankInPage(input) {
     if (operation.nickname === "share_bank" && (before.shares || []).some((row) => sharedEntities.includes(shareEntityId(row))
       && shareEntityType(row) === "course" && String(row?.permission) === "read")) {
       return { matched: true, ok: false, sent: false, error: "item_bank_share_already_present" };
+    }
+
+    // The tag a removal names by value, resolved from Canvas: the account's tag list gives the
+    // exact tag, the bank search proves this question carries it, and posting that same tag value
+    // again answers with the association already there (Canvas returns the same association id and
+    // adds nothing), which is the only way Canvas names it.
+    let resolvedTagId = id(formValues.tag_id);
+    if (resolvesTagAssociation) {
+      const wanted = String(input.arguments.tag_value);
+      const tags = await readObject(`/api/tags?${new URLSearchParams({ filter: wanted })}`);
+      const listed = readableObject(tags) || (tags?.ok && Array.isArray(tags.data)) ? tags.data : null;
+      const match = Array.isArray(listed) ? listed.filter((row) => plain(row) && String(row.value) === wanted) : null;
+      if (match === null) return { matched: true, ok: false, sent: false, error: "item_bank_tag_list_unreadable" };
+      if (match.length !== 1 || !id(match[0].id)) return { matched: true, ok: false, sent: false, error: "item_bank_tag_value_unresolved" };
+      resolvedTagId = id(match[0].id);
+      const entryId = id(input.arguments?.bank_entry_id);
+      const found = await readObject(`/api/banks/${bankId}/bank_entries/search?${new URLSearchParams({ page: "1", "tag_ids[]": resolvedTagId })}`);
+      const rows = readableObject(found) && Array.isArray(found.data.entries) ? found.data.entries : null;
+      if (rows === null) return { matched: true, ok: false, sent: false, error: "item_bank_tag_search_unreadable" };
+      if (!rows.some((row) => id(row?.id) === entryId)) {
+        return { matched: true, ok: false, sent: false, error: "item_bank_question_does_not_carry_that_tag" };
+      }
+      const association = await request("POST", `/api/bank_entries/${encodeURIComponent(entryId)}/tag_associations`, { tag_value: wanted });
+      const associationId = readableObject(association) ? id(association.data.id) : "";
+      if (!associationId) return { matched: true, ok: false, sent: false, error: "item_bank_tag_association_unresolved" };
+      path = path.replace("{tag_association_id}", encodeURIComponent(associationId));
     }
 
     const questionWrite = ["create_item", "update_item"].includes(operation.nickname) && isRecord(body?.item);
@@ -1071,6 +1143,56 @@ export async function executeItemBankInPage(input) {
         verification = removed && !list.error && !list.rows.some((row) => id(row?.id) === entryId)
           ? { ...base, status: "verified", evidence: "entry_absent_from_exact_read_and_bank_entry_list" }
           : saved?.transport || list.error ? unconfirmed() : mismatch("bank_entry_still_present_after_delete");
+      } else if (operation.nickname === "copy_entry" || operation.nickname === "move_entry") {
+        // The question the service answered with, found in this bank by its own entry row, and for
+        // a move, gone from the bank it came from.
+        const created = plain(written.data?.bank_entry) ? written.data.bank_entry : written.data;
+        const createdId = id(created?.id);
+        const listed = await readList(`/api/banks/${bankId}/bank_entries`);
+        const sourceBank = id(formValues.source_bank_id);
+        const sourceEntry = id(formValues.source_bank_entry_id);
+        const source = operation.nickname === "move_entry" ? await readList(`/api/banks/${sourceBank}/bank_entries`) : { rows: [] };
+        const here = !listed.error && listed.rows.some((row) => id(row?.id) === createdId);
+        const goneFromSource = operation.nickname === "copy_entry"
+          || (!source.error && !source.rows.some((row) => id(row?.id) === sourceEntry));
+        verification = !createdId ? unconfirmed("created_bank_entry_id_not_returned")
+          : listed.error || source.error ? unconfirmed()
+          : here && goneFromSource
+            ? { ...base, status: "verified", evidence: operation.nickname === "copy_entry"
+              ? "copied_entry_present_in_bank" : "moved_entry_present_in_bank_and_absent_from_its_source", targetId: createdId }
+            : mismatch(here ? "moved_entry_still_present_in_its_source"
+              : operation.nickname === "move_entry" ? "moved_entry_not_found_in_bank" : "copied_entry_not_found_in_bank");
+      } else if (operation.nickname === "update_share") {
+        const shareId = id(input.arguments?.share_id);
+        const list = await readObservedList(`/api/banks/${bankId}/shared_banks`);
+        const share = list.error ? null : list.rows.find((row) => id(row?.id) === shareId);
+        verification = list.error ? unconfirmed()
+          : share && String(share.permission) === String(formValues.permission)
+            ? { ...base, status: "verified", evidence: "exact_share_permission_reread" }
+            : mismatch("share_permission_did_not_match");
+      } else if (operation.nickname === "add_entry_tag" || operation.nickname === "remove_entry_tag") {
+        // No route reads one question's tags, so the bank is searched for that exact tag. That
+        // search reads an index the service fills after the write returns: measured live, the
+        // question a tag was just added to is missing from it for about a second and a half. So
+        // the search is read until it agrees with the change or the budget here runs out; a single
+        // immediate read would call a saved tag missing.
+        const created = plain(written.data) ? written.data : {};
+        const tagId = id(operation.nickname === "add_entry_tag" ? created.tag_id : resolvedTagId);
+        const entryId = id(input.arguments?.bank_entry_id);
+        const wanted = operation.nickname === "add_entry_tag";
+        let tagged = null;
+        for (let attempt = 0; tagId && attempt < TAG_SEARCH_ATTEMPTS; attempt += 1) {
+          if (attempt > 0) await new Promise((resolve) => { setTimeout(resolve, TAG_SEARCH_SETTLE_MS); });
+          const found = await readObject(`/api/banks/${bankId}/bank_entries/search?${new URLSearchParams({ page: "1", "tag_ids[]": tagId })}`);
+          const rows = readableObject(found) && Array.isArray(found.data.entries) ? found.data.entries : null;
+          tagged = rows === null ? null : rows.some((row) => id(row?.id) === entryId);
+          if (tagged === wanted) break;
+        }
+        verification = !tagId ? unconfirmed("tag_id_not_returned")
+          : tagged === null ? unconfirmed()
+          : tagged === wanted
+            ? { ...base, status: "verified", evidence: "bank_search_for_that_exact_tag_reread" }
+            : mismatch(wanted ? "tagged_question_not_found" : "question_still_carries_the_tag");
       } else if (operation.nickname === "share_bank") {
         const list = await readObservedList(`/api/banks/${bankId}/shared_banks`);
         verification = list.error ? unconfirmed()

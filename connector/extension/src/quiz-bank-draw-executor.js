@@ -1,4 +1,11 @@
 export async function executeQuizBankDrawInPage(input) {
+  // Chrome's scripting.executeScript drops every null-valued property of an object argument
+  // (measured live on 2026-09-19: {"a":null,"b":1} arrives as {"b":1}; a null inside an array
+  // survives). A question carries nulls of its own, such as an essay's word limits, so the
+  // reviewed request is carried across this boundary as text and read back here whole.
+  if (typeof input === "string") {
+    try { input = JSON.parse(input); } catch { return { matched: true, ok: false, sent: false, error: "quiz_bank_input_unreadable" }; }
+  }
   const requestExpired = () => Number.isSafeInteger(input?.expiresAt) && input.expiresAt <= Date.now();
   const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
     Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
@@ -44,6 +51,8 @@ export async function executeQuizBankDrawInPage(input) {
     attach_bank_to_quiz: ["POST", "/api/quizzes/{builder_quiz_id}/quiz_entries"],
     attach_bank_entry_to_quiz: ["POST", "/api/quizzes/{builder_quiz_id}/quiz_entries"],
     delete_quiz_bank_entry: ["DELETE", "/api/quizzes/{builder_quiz_id}/quiz_entries/{quiz_entry_id}"],
+    update_quiz_draw: ["PATCH", "/api/quizzes/{builder_quiz_id}/quiz_entries/{quiz_entry_id}"],
+    add_quiz_question_to_bank: ["POST", "/api/banks/{bank_id}/bank_entries/move_from_quiz_entry"],
   };
   const contract = contracts[operation?.nickname];
   if (!contract || operation.service !== "item_bank" || operation.method !== contract[0] || operation.path !== contract[1]) {
@@ -255,7 +264,9 @@ export async function executeQuizBankDrawInPage(input) {
   // A saved draw row names what it draws only inside its embedded `entry`: the bank for a Bank
   // row, the bank entry for a BankEntry row. `entry_id` is the create field.
   const drawTargetId = (value) => id(value?.entry_id) || (plain(value?.entry) ? id(value.entry.id) : "");
-  const requiredSnapshotKeys = operation.nickname === "attach_bank_entry_to_quiz"
+  const requiredSnapshotKeys = ["update_quiz_draw", "add_quiz_question_to_bank"].includes(operation.nickname)
+    ? ["bank_sha256", "quiz_entries_sha256"]
+    : operation.nickname === "attach_bank_entry_to_quiz"
     ? ["bank_sha256", "entry_sha256", "quiz_entries_sha256"]
     : operation.nickname === "delete_quiz_bank_entry"
       ? ["bank_sha256", "quiz_entries_sha256", "quiz_entry_sha256", ...(id(input.arguments?.bank_entry_id) ? ["entry_sha256"] : [])]
@@ -270,6 +281,88 @@ export async function executeQuizBankDrawInPage(input) {
   }
 
   const base = { schema: "morrow.browser-verification.v1", strategy: `quiz-bank-${operation.nickname}-readback` };
+  if (operation.nickname === "update_quiz_draw") {
+    const quizEntryId = id(input.arguments?.quiz_entry_id);
+    const target = before.rows.find((row) => rowId(row) === quizEntryId);
+    if (!quizEntryId || !target) return { matched: true, ok: false, sent: false, error: "quiz_bank_entry_unresolved" };
+    const value = normalized(target);
+    const kind = entryType(target);
+    // Only a row this bank supplies may be changed under this bank's reviewed reach.
+    if (!["bank", "itembank", "bankentry"].includes(kind)) return { matched: true, ok: false, sent: false, error: "quiz_bank_entry_type_unsupported" };
+    const bankRow = ["bank", "itembank"].includes(kind);
+    if (bankRow ? drawTargetId(value) !== bankId : id(value?.entry?.bank_id) !== bankId) {
+      return { matched: true, ok: false, sent: false, error: "quiz_bank_entry_bank_mismatch" };
+    }
+    const wantsPick = input.arguments?.pick_count !== undefined && input.arguments?.pick_count !== null;
+    const wantsPoints = input.arguments?.points_per_item !== undefined && input.arguments?.points_per_item !== null;
+    const pickCount = wantsPick ? Number(input.arguments.pick_count) : null;
+    const pointsPerItem = wantsPoints ? Number(input.arguments.points_per_item) : null;
+    if ((!wantsPick && !wantsPoints)
+      || (wantsPick && (!bankRow || !Number.isInteger(pickCount) || pickCount < 1))
+      || (wantsPoints && (!Number.isFinite(pointsPerItem) || pointsPerItem <= 0))) {
+      return { matched: true, ok: false, sent: false, error: "quiz_bank_payload_invalid" };
+    }
+    const entry = { ...(wantsPoints ? { points_possible: pointsPerItem } : {}), ...(wantsPick ? { properties: { sample_num: pickCount } } : {}) };
+    const saved = (row) => {
+      const current = normalized(row);
+      const properties = plain(current?.properties) ? current.properties : {};
+      return rowId(row) === quizEntryId
+        && (!wantsPick || Number(properties.sample_num) === pickCount)
+        && (!wantsPoints || Number(current?.points_possible) === pointsPerItem);
+    };
+    if (before.rows.some(saved)) {
+      return { matched: true, ok: true, sent: false, status: 200, outcomeUnknown: false,
+        verification: { ...base, status: "verified", evidence: "exact_quiz_bank_entry_already_saved", targetId: quizEntryId } };
+    }
+    const written = await request("PATCH", `/api/quizzes/${encodeURIComponent(quizId)}/quiz_entries/${encodeURIComponent(quizEntryId)}`, { quiz_entry: entry });
+    const clearRefusal = Number.isInteger(written.status) && written.status >= 400 && written.status < 500 && written.status !== 408 && written.status !== 429;
+    if (clearRefusal) return { matched: true, ok: false, sent: true, status: written.status, outcomeUnknown: false };
+    const after = await readEntries();
+    const verification = after.error
+      ? { ...base, status: "unconfirmed", reason: "quiz_bank_readback_unavailable" }
+      : after.rows.some(saved)
+        ? { ...base, status: "verified", evidence: "exact_quiz_bank_entry_reread_from_complete_entry_list", targetId: quizEntryId }
+        : { ...base, status: "mismatch", reason: "quiz_bank_entry_did_not_match_request" };
+    return { matched: true, ok: verification.status === "verified", sent: true,
+      ...(Number.isInteger(written.status) ? { status: written.status } : {}),
+      outcomeUnknown: verification.status !== "verified", verification };
+  }
+  if (operation.nickname === "add_quiz_question_to_bank") {
+    // The question must be one this quiz holds: the bank route takes an item id, and an id from
+    // somewhere else would put another course's question into this bank.
+    const quizEntryId = id(input.arguments?.quiz_entry_id);
+    const itemId = id(input.arguments?.item_id);
+    const target = before.rows.find((row) => rowId(row) === quizEntryId);
+    const value = target ? normalized(target) : null;
+    if (!quizEntryId || !itemId || !target || entryType(target) !== "item" || id(value?.entry?.id) !== itemId) {
+      return { matched: true, ok: false, sent: false, error: "quiz_bank_question_not_in_this_quiz" };
+    }
+    const bankEntries = async () => {
+      const result = await request("GET", `/api/banks/${encodeURIComponent(bankId)}/bank_entries?page=1&per_page=100`);
+      return result.ok && result.parsed === true && Array.isArray(result.data) ? { rows: result.data } : { error: result };
+    };
+    const holds = (rows) => rows.some((row) => plain(row) && String(row.entry_type) === "Item" && id(row.entry?.id ?? row.entry_id) === itemId);
+    const already = await bankEntries();
+    if (already.error) return { matched: true, ok: false, sent: false, error: "quiz_bank_bank_unreadable" };
+    if (holds(already.rows)) {
+      return { matched: true, ok: true, sent: false, status: 200, outcomeUnknown: false,
+        verification: { ...base, status: "verified", evidence: "question_already_in_this_bank", targetId: itemId } };
+    }
+    const written = await request("POST",
+      `/api/banks/${encodeURIComponent(bankId)}/bank_entries/move_from_quiz_entry?source_quiz_id=${encodeURIComponent(quizId)}`,
+      { source_entry_id: itemId, source_entry_type: "Item" });
+    const clearRefusal = Number.isInteger(written.status) && written.status >= 400 && written.status < 500 && written.status !== 408 && written.status !== 429;
+    if (clearRefusal) return { matched: true, ok: false, sent: true, status: written.status, outcomeUnknown: false };
+    const after = await bankEntries();
+    const verification = after.error
+      ? { ...base, status: "unconfirmed", reason: "quiz_bank_readback_unavailable" }
+      : holds(after.rows)
+        ? { ...base, status: "verified", evidence: "question_present_in_bank_entry_list", targetId: itemId }
+        : { ...base, status: "mismatch", reason: "question_not_found_in_bank" };
+    return { matched: true, ok: verification.status === "verified", sent: true,
+      ...(Number.isInteger(written.status) ? { status: written.status } : {}),
+      outcomeUnknown: verification.status !== "verified", verification };
+  }
   if (operation.nickname === "delete_quiz_bank_entry") {
     const quizEntryId = id(input.arguments?.quiz_entry_id);
     const target = before.rows.find((row) => rowId(row) === quizEntryId);

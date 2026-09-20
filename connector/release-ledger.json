@@ -332,6 +332,30 @@
     {
       "version": "1.0.88",
       "releaseManifestSha256": "600e74bcf02ec9aba78aa37e42b47d321543d36bb0f2a4dddfd7f3d8a600ec0a"
+    },
+    {
+      "version": "1.0.89",
+      "releaseManifestSha256": "c877bde544e4db9c77b8d80d277c85c73e756659b87ba051b8bb8c6d7ce9f801"
+    },
+    {
+      "version": "1.0.90",
+      "releaseManifestSha256": "e728aef625795cd8f8a28d5090d9c9201176d3388796788b0ddca9d2608aef21"
+    },
+    {
+      "version": "1.0.91",
+      "releaseManifestSha256": "bd13dfbb6ab1d539b38bd131c33c29a76fc26c329cd74b414c7e63baa5f9a72e"
+    },
+    {
+      "version": "1.0.92",
+      "releaseManifestSha256": "974a0f24ddff746960ebba8ed957efc1ae490685518705792a19b54d853ad1fe"
+    },
+    {
+      "version": "1.0.93",
+      "releaseManifestSha256": "d4712c404bd23f2745dcd64a6a9340006e8d0087d7c0d19073d67a2fbe1bda66"
+    },
+    {
+      "version": "1.0.94",
+      "releaseManifestSha256": "814bba4f4e32ea00a8676a464bc28bed80fd8144d8e204035b0bddf0b9f5a50d"
     }
   ]
 }

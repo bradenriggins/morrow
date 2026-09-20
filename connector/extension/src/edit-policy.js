@@ -167,7 +167,11 @@ const NEW_QUIZ_DELETE_TOOL = "canvas_delete_new_quiz";
 // attaching, sharing, renaming, and updating an item remove nothing and stay
 // standing Edit grants.
 const ITEM_BANK_DESTRUCTIVE_REASON = "This Item Bank change cannot be undone, and it can reach every quiz, in every course, that draws from the bank - Canvas provides no complete list of everything that uses one. Morrow shows you the courses it did find and asks you to confirm them for each change, so this one is approved change by change rather than switched on in advance.";
-const ITEM_BANK_DESTRUCTIVE_TOOLS = new Set(["canvas_item_bank_archive_bank", "canvas_item_bank_delete_entry", "canvas_item_bank_delete_quiz_bank_entry"]);
+// Which Item Bank changes are judged one change at a time is the catalog's own risk
+// annotation, never a second list here: a list kept beside the catalog goes stale the moment an
+// operation is added, and the change would silently become a standing grant.
+const itemBankDestructive = (operation) => String(operation?.toolName || "").startsWith("canvas_item_bank_")
+  && destructiveOperation(operation);
 const CHECKED = Object.freeze({ verification: "checked" });
 
 const CURATED_CATEGORY_SPECS = Object.freeze([
@@ -377,7 +381,7 @@ function operationAvailability(operation, canvasReads) {
       return { availability: "review", reviewReason: CANVAS_UNCHECKED_REVIEW_REASON };
     }
     if (NEW_QUIZ_DELETE_TOOL === operation.toolName) return { availability: "review", reviewReason: NEW_QUIZ_DELETE_REVIEW_REASON };
-    if (ITEM_BANK_DESTRUCTIVE_TOOLS.has(operation.toolName || "")) return { availability: "review", reviewReason: ITEM_BANK_DESTRUCTIVE_REASON };
+    if (itemBankDestructive(operation)) return { availability: "review", reviewReason: ITEM_BANK_DESTRUCTIVE_REASON };
     return { availability: "edit" };
   }
   if (MOODLE_ACTIVITY_DELETE_TOOLS.has(operation.toolName || "")) {

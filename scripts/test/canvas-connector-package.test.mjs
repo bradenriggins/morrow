@@ -113,9 +113,9 @@ test("Canvas connector package has a stable least-privilege identity and exact g
   assert.match(extensionSemanticTarget, /export function canvasSemanticCourseTarget/);
   assert.doesNotMatch(extensionSemanticTarget, /\bnode:|\brequire\s*\(/);
   const parsed = JSON.parse(catalog);
-  assert.equal(parsed.counts.totalOperations, 1121);
-  assert.equal(parsed.counts.newQuizzesOperations, 32);
-  assert.equal(parsed.counts.itemBankOperations, 18);
+  assert.equal(parsed.counts.totalOperations, 1130);
+  assert.equal(parsed.counts.newQuizzesOperations, 41);
+  assert.equal(parsed.counts.itemBankOperations, 27);
   assert.equal(parsed.counts.courseFileContentOperations, 1);
   assert.deepEqual(parsed.operations.find((operation) => operation.toolName === "canvas_read_course_file_text"), {
     key: "CANVAS_COURSE_FILE_TEXT GET /v1/courses/{course_id}/files/{file_id}/text",

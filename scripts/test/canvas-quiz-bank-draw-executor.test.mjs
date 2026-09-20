@@ -376,3 +376,110 @@ test("the native builder page sends nothing when its session names another cours
     }, p.fetch, session);
   }
 });
+
+// A draw's size and worth are edited in place on the row the quiz already holds.
+test("a draw edit changes only the named row and verifies the exact saved values", async () => {
+  const p = provider();
+  p.entries.push({ id: "11", entry_type: "Bank", entry: { id: "91" }, position: 2, points_possible: 2, properties: { sample_num: 5 } });
+  const fetch = async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/api/quizzes/77/quiz_entries/11" && options.method === "PATCH") {
+      const sent = JSON.parse(options.body).quiz_entry;
+      p.requests.push({ method: "PATCH", path: parsed.pathname, body: JSON.parse(options.body) });
+      const row = p.entries.find((entry) => entry.id === "11");
+      if (sent.points_possible !== undefined) row.points_possible = sent.points_possible;
+      if (sent.properties?.sample_num !== undefined) row.properties = { ...row.properties, sample_num: sent.properties.sample_num };
+      return new Response(JSON.stringify({ quiz_entry: row }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return p.fetch(url, options);
+  };
+  await withBuilder(async () => {
+    const bankSha256 = "a".repeat(64);
+    const result = await executeQuizBankDrawInPage(input("update_quiz_draw", {
+      course_id: "42", assignment_id: "188", bank_id: "91", quiz_entry_id: "11", pick_count: 3, points_per_item: 4,
+      expected_snapshot: { bank_sha256: bankSha256, quiz_entries_sha256: await digest(p.entries) }, ...await observed(),
+    }, { verifiedBankSha256: bankSha256 }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.sent, true);
+    assert.equal(result.outcomeUnknown, false);
+    assert.equal(result.verification.status, "verified");
+    assert.equal(result.verification.targetId, "11");
+    const patches = p.requests.filter((request) => request.method === "PATCH");
+    assert.equal(patches.length, 1);
+    assert.deepEqual(patches[0].body, { quiz_entry: { points_possible: 4, properties: { sample_num: 3 } } });
+    assert.deepEqual(p.entries[1].properties, { sample_num: 3 });
+    assert.equal(p.entries[1].points_possible, 4);
+    assert.equal(p.entries[0].points_possible, 1);
+  }, fetch);
+});
+
+test("a draw edit refuses a row this bank does not supply, and a pick count on a single question", async () => {
+  const p = provider();
+  p.entries.push({ id: "11", entry_type: "Bank", entry: { id: "92" }, position: 2, points_possible: 2, properties: { sample_num: 5 } });
+  await withBuilder(async () => {
+    const bankSha256 = "a".repeat(64);
+    const args = async (overrides) => ({
+      course_id: "42", assignment_id: "188", bank_id: "91", quiz_entry_id: "11", pick_count: 3,
+      expected_snapshot: { bank_sha256: bankSha256, quiz_entries_sha256: await digest(p.entries) }, ...await observed(), ...overrides,
+    });
+    const other = await executeQuizBankDrawInPage(input("update_quiz_draw", await args({}), { verifiedBankSha256: bankSha256 }));
+    assert.deepEqual(other, { matched: true, ok: false, sent: false, error: "quiz_bank_entry_bank_mismatch" });
+    const missing = await executeQuizBankDrawInPage(input("update_quiz_draw", await args({ quiz_entry_id: "999" }), { verifiedBankSha256: bankSha256 }));
+    assert.deepEqual(missing, { matched: true, ok: false, sent: false, error: "quiz_bank_entry_unresolved" });
+    // Row 10 is a question the quiz owns, not a bank draw: it has no sample to take.
+    const question = await executeQuizBankDrawInPage(input("update_quiz_draw", await args({ quiz_entry_id: "10" }), { verifiedBankSha256: bankSha256 }));
+    assert.deepEqual(question, { matched: true, ok: false, sent: false, error: "quiz_bank_entry_type_unsupported" });
+    assert.equal(p.requests.some((request) => request.method === "PATCH"), false);
+  }, p.fetch);
+});
+
+// The bank route takes a bare item id, so an id from another course would be moved into this bank
+// on the strength of the request alone. Morrow reads the quiz first and refuses what it does not hold.
+test("a question is put into a bank only when the named quiz row holds that exact question", async () => {
+  const p = provider();
+  const bankEntries = [];
+  const fetch = async (url, options = {}) => {
+    const parsed = new URL(url);
+    const method = options.method || "GET";
+    if (parsed.pathname === "/api/banks/91/bank_entries" && method === "GET") {
+      p.requests.push({ method, path: parsed.pathname });
+      return new Response(JSON.stringify(bankEntries), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (parsed.pathname === "/api/banks/91/bank_entries/move_from_quiz_entry" && method === "POST") {
+      p.requests.push({ method, path: parsed.pathname, body: JSON.parse(options.body), query: parsed.search });
+      const sent = JSON.parse(options.body);
+      bankEntries.push({ id: "700", entry_type: sent.source_entry_type, entry: { id: sent.source_entry_id } });
+      return new Response(JSON.stringify(bankEntries[0]), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return p.fetch(url, options);
+  };
+  await withBuilder(async () => {
+    const bankSha256 = "a".repeat(64);
+    const args = async (overrides) => ({
+      course_id: "42", assignment_id: "188", bank_id: "91", quiz_entry_id: "10", item_id: "501",
+      expected_snapshot: { bank_sha256: bankSha256, quiz_entries_sha256: await digest(p.entries) }, ...await observed(), ...overrides,
+    });
+    const elsewhere = await executeQuizBankDrawInPage(input("add_quiz_question_to_bank", await args({ item_id: "999" }), { verifiedBankSha256: bankSha256 }));
+    assert.deepEqual(elsewhere, { matched: true, ok: false, sent: false, error: "quiz_bank_question_not_in_this_quiz" });
+    assert.equal(p.requests.some((request) => request.method === "POST"), false);
+
+    const result = await executeQuizBankDrawInPage(input("add_quiz_question_to_bank", await args({}), { verifiedBankSha256: bankSha256 }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.sent, true);
+    assert.equal(result.verification.status, "verified");
+    assert.equal(result.verification.targetId, "501");
+    const posts = p.requests.filter((request) => request.method === "POST");
+    assert.equal(posts.length, 1);
+    assert.deepEqual(posts[0].body, { source_entry_id: "501", source_entry_type: "Item" });
+    assert.equal(posts[0].query, "?source_quiz_id=77");
+    // The quiz keeps its question.
+    assert.equal(p.entries.some((row) => row.id === "10"), true);
+
+    // Sent once: a second request reads the bank, finds the question, and dispatches nothing.
+    const again = await executeQuizBankDrawInPage(input("add_quiz_question_to_bank", await args({}), { verifiedBankSha256: bankSha256 }));
+    assert.equal(again.ok, true);
+    assert.equal(again.sent, false);
+    assert.equal(again.verification.evidence, "question_already_in_this_bank");
+    assert.equal(p.requests.filter((request) => request.method === "POST").length, 1);
+  }, fetch);
+});

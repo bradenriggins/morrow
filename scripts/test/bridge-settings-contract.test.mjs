@@ -324,6 +324,9 @@ const REVIEW_ONLY_ADMITTED_CANVAS_WRITES = new Map([
   ["canvas_item_bank_archive_bank", /approved change by change rather than switched on in advance/],
   ["canvas_item_bank_delete_entry", /approved change by change rather than switched on in advance/],
   ["canvas_item_bank_delete_quiz_bank_entry", /approved change by change rather than switched on in advance/],
+  ["canvas_item_bank_move_entry", /approved change by change rather than switched on in advance/],
+  ["canvas_item_bank_remove_entry_tag", /approved change by change rather than switched on in advance/],
+  ["canvas_item_bank_update_share", /approved change by change rather than switched on in advance/],
 ]);
 
 function supportedEditableCanvasWrites() {
@@ -340,7 +343,7 @@ test("Canvas Edit categories are exactly the bound admitted writes with exact re
   const supported = supportedEditableCanvasWrites()
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  assert.equal(supported.length, 337);
+  assert.equal(supported.length, 341);
   assert.deepEqual(editable, supported);
   // A bound write with no exact readback is offered for review too, one change at a time.
   const uncheckable = canvasOperations.filter((operation) => operation.readOnly === false
@@ -646,17 +649,22 @@ function itemBankWrites() {
 // at one moment, since the courses Morrow observed can differ between two
 // changes. Every other Item Bank write removes nothing and is an ordinary
 // standing Edit grant.
-const ITEM_BANK_DESTRUCTIVE_WRITES = new Set(["canvas_item_bank_archive_bank", "canvas_item_bank_delete_entry", "canvas_item_bank_delete_quiz_bank_entry"]);
+// A move empties the bank the question came from, a removed tag is gone from that question, and a
+// share raised to edit lets another course change every question this bank holds. Each is judged
+// one change at a time, like the three deletions.
+const ITEM_BANK_DESTRUCTIVE_WRITES = new Set(["canvas_item_bank_archive_bank", "canvas_item_bank_delete_entry",
+  "canvas_item_bank_delete_quiz_bank_entry", "canvas_item_bank_move_entry", "canvas_item_bank_remove_entry_tag",
+  "canvas_item_bank_update_share"]);
 
 test("only a destructive Item Bank change is approved change by change; every other one is a standing grant", async () => {
   const options = categoriesForBinding({ provider: "canvas" }, canvasOperations);
   assert.equal(options.some((entry) => entry.id === LEGACY_ITEM_BANK_CATEGORY), false);
   const writes = itemBankWrites();
-  assert.equal(writes.length, 11);
+  assert.equal(writes.length, 18);
   const destructive = writes.filter((operation) => ITEM_BANK_DESTRUCTIVE_WRITES.has(operation.toolName));
   const standing = writes.filter((operation) => !ITEM_BANK_DESTRUCTIVE_WRITES.has(operation.toolName));
-  assert.equal(destructive.length, 3);
-  assert.equal(standing.length, 8);
+  assert.equal(destructive.length, 6);
+  assert.equal(standing.length, 12);
   for (const operation of destructive) {
     const option = canvasOption(options, operation.toolName);
     assert.equal(canvasOperationAdmission(operation).write.state, "admitted", operation.toolName);
@@ -691,7 +699,7 @@ test("Item Bank write rules never carry the legacy guard, and a destructive one 
     enabledCategories: options.filter((option) => option.availability === "edit").map((option) => option.id), operations,
   });
   const rules = permission.rules.filter((rule) => rule.toolName.startsWith("canvas_item_bank_"));
-  assert.equal(rules.length, 8);
+  assert.equal(rules.length, 12);
   assert.equal(rules.some((rule) => ITEM_BANK_DESTRUCTIVE_WRITES.has(rule.toolName)), false);
   assert.equal(rules.some((rule) => rule.requiresItemBankGuard === true), false);
 });

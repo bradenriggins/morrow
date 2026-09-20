@@ -61,15 +61,20 @@ States: **proven** (verified live through Morrow), **gap** (Canvas supports it a
 |---|---|---|---|
 | List, read, create, rename, delete a bank | quiz-service `/api/banks` | `canvas_item_bank_*` | proven |
 | Share a bank with a course (read) | `…/banks/:b/shared_banks` | `canvas_item_bank_share_bank` | proven |
-| Share with edit permission, with a user or account; change or remove a share | same | none | gap |
+| Change a share's permission (read to edit) | `PATCH …/banks/:b/shared_banks/:s` | `canvas_item_bank_update_share` | proven |
+| Share with a user or an account; remove a share | same | none | gap |
 | Create a question in a bank (choice) | `…/banks/:b/items`, then `…/bank_entries` | `canvas_item_bank_create_item` | proven |
 | Create each of the 12 types in a bank | same | same | gap |
 | Read and update a bank question | bank entry read; `PATCH …/banks/:b/items/:i` | `canvas_item_bank_get_item`, `…_update_item` | proven |
 | Attach a question to another bank; remove an entry | `…/bank_entries` | `…_attach_item`, `…_delete_entry` | proven |
-| Move or copy a question between banks | `…/bank_entries/:e` with `source_bank_entry_id` | none | gap |
-| Search and filter a bank; tags | `…/bank_entries/search`, `/api/tags`, `…/tag_associations` | none | gap |
+| Copy a question into another bank | `POST …/banks/:b/bank_entries/copy` | `canvas_item_bank_copy_entry` | proven |
+| Move a question into another bank | `POST …/banks/:b/bank_entries/move` | `canvas_item_bank_move_entry` | proven |
+| Search a bank by text or tag | `GET …/banks/:b/bank_entries/search` | `canvas_item_bank_search_entries` | proven |
+| List the tags a bank question can carry | `GET /api/tags` | `canvas_item_bank_list_tags` | proven |
+| Tag a question, remove a tag by its value | `…/bank_entries/:e/tag_associations` | `canvas_item_bank_add_entry_tag`, `…_remove_entry_tag` | proven |
 | Draw from a bank into a quiz; add one bank question; remove a draw | `…/quizzes/:q/quiz_entries` | `…_attach_bank_to_quiz`, `…_attach_bank_entry_to_quiz`, `…_delete_quiz_bank_entry` | proven |
-| Change a draw's question count or points | `PATCH …/quiz_entries/:e` | none | gap |
+| Change a draw's question count or points | `PATCH …/quiz_entries/:e` | `canvas_item_bank_update_quiz_draw` | proven |
+| Put a question written in a quiz into a bank | `POST …/banks/:b/bank_entries/move_from_quiz_entry` | `canvas_item_bank_add_quiz_question_to_bank` | proven |
 | List a quiz's draws | `GET …/quiz_entries` | `canvas_item_bank_list_quiz_draws` | proven |
 | Repair missing alt text in a bank question | `PATCH …/banks/:b/items/:i` | `morrow_plan_item_bank_question_image_alt_repair` | proven |
 | Bank reach across courses | reads | `morrow_read_item_bank_fan_out` | proven |

@@ -20,10 +20,10 @@ test("the plan keeps the five attended-proof stages in order", () => {
 });
 
 test("the plan covers all current Item Bank tools", () => {
-  assert.equal(itemBanks.length, 18);
+  assert.equal(itemBanks.length, 27);
   for (const operation of itemBanks) assert.ok(plan.includes(`\`${operation.toolName}\``), operation.toolName);
-  assert.equal(itemBanks.filter((operation) => operation.readOnly).length, 7);
-  assert.equal(itemBanks.filter((operation) => !operation.readOnly).length, 11);
+  assert.equal(itemBanks.filter((operation) => operation.readOnly).length, 9);
+  assert.equal(itemBanks.filter((operation) => !operation.readOnly).length, 18);
 });
 
 test("the plan records each operation-specific snapshot contract", () => {
@@ -39,6 +39,13 @@ test("the plan records each operation-specific snapshot contract", () => {
     canvas_item_bank_attach_bank_to_quiz: ["bank_sha256", "quiz_entries_sha256"],
     canvas_item_bank_attach_bank_entry_to_quiz: ["bank_sha256", "entry_sha256", "quiz_entries_sha256"],
     canvas_item_bank_delete_quiz_bank_entry: ["bank_sha256", "quiz_entries_sha256", "quiz_entry_sha256"],
+    canvas_item_bank_update_share: ["bank_sha256", "shares_sha256"],
+    canvas_item_bank_copy_entry: ["bank_sha256", "entries_sha256", "source_entry_sha256"],
+    canvas_item_bank_move_entry: ["bank_sha256", "entries_sha256", "source_entry_sha256"],
+    canvas_item_bank_add_entry_tag: ["bank_sha256", "entry_sha256"],
+    canvas_item_bank_remove_entry_tag: ["bank_sha256", "entry_sha256"],
+    canvas_item_bank_update_quiz_draw: ["bank_sha256", "quiz_entries_sha256"],
+    canvas_item_bank_add_quiz_question_to_bank: ["bank_sha256", "quiz_entries_sha256"],
   };
   for (const [tool, digests] of Object.entries(required)) {
     const row = plan.split("\n").find((line) => line.includes(`\`${tool}\``));

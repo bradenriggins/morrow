@@ -683,7 +683,7 @@ async function readCanvasCourseFileBytes(binding, fileId, expiresAt, contentType
     };
     if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_file_content_timeout");
     const [preparedExecution] = await chrome.scripting.executeScript({
-      target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeCanvasCourseFileTextInPage, args: [pageInput],
+      target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeCanvasCourseFileTextInPage, args: [JSON.stringify(pageInput)],
     });
     const prepared = preparedExecution?.result;
     if (!prepared?.ok || !prepared.version || !prepared.file || typeof prepared.downloadUrl !== "string") {
@@ -715,7 +715,7 @@ async function readCanvasCourseFileBytes(binding, fileId, expiresAt, contentType
     if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_file_content_timeout");
     const [verificationExecution] = await chrome.scripting.executeScript({
       target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeCanvasCourseFileTextInPage,
-      args: [{ ...pageInput, includeDownloadUrl: false }],
+      args: [JSON.stringify({ ...pageInput, includeDownloadUrl: false })],
     });
     const verified = verificationExecution?.result;
     if (!verified?.ok || !sameCourseFileVersion(prepared.version, verified.version)) {
@@ -2729,7 +2729,7 @@ async function executeCanvasConversation(binding, operation, privateConversation
       target: { tabId: binding.tabId, frameIds: [0] },
       world: "MAIN",
       func: executeCanvasConversationInPage,
-      args: [{
+      args: [JSON.stringify({
         binding: {
           origin: binding.origin,
           courseId: binding.courseId,
@@ -2738,7 +2738,7 @@ async function executeCanvasConversation(binding, operation, privateConversation
         },
         payload,
         expiresAt,
-      }],
+      })],
     });
     result = execution?.result || { ok: false, sent: true, outcomeUnknown: true, error: "canvas_conversation_result_missing" };
   } catch {
@@ -2823,7 +2823,7 @@ async function freshItemBankContext(binding, operation, expiresAt) {
             target: { tabId: launchTabId, frameIds: [0] },
             world: "MAIN",
             func: executeItemBankInPage,
-            args: [{ operation, principalId: binding.principalId, canvasOrigin: binding.origin, courseId: binding.courseId, contextOnly: true, expiresAt }],
+            args: [JSON.stringify({ operation, principalId: binding.principalId, canvasOrigin: binding.origin, courseId: binding.courseId, contextOnly: true, expiresAt })],
           });
           if (probe?.result?.matched === true && probe.result.ok === true) {
             return { tabId: launchTabId, frameId: 0, native: true };
@@ -2943,7 +2943,7 @@ async function executeItemBank(binding, operation, args, expiresAt) {
       target: { tabId: context.tabId, frameIds: [context.frameId] },
       world: "MAIN",
       func: executeItemBankInPage,
-      args: [{ operation, principalId: binding.principalId, canvasOrigin: binding.origin, courseId: binding.courseId, contextOnly: true, expiresAt }],
+      args: [JSON.stringify({ operation, principalId: binding.principalId, canvasOrigin: binding.origin, courseId: binding.courseId, contextOnly: true, expiresAt })],
     });
     if (probe?.result?.matched !== true) return { ok: false, sent: false, error: "item_bank_context_not_established" };
     if (!commandDeadlineCurrent(expiresAt)) return { ok: false, sent: false, error: "item_bank_operation_timeout" };
@@ -2975,7 +2975,7 @@ async function executeItemBank(binding, operation, args, expiresAt) {
         target: { tabId: context.tabId, frameIds: [context.frameId] },
         world: "MAIN",
         func: executeItemBankInPage,
-        args: [executionInput],
+        args: [JSON.stringify(executionInput)],
       });
       return execution?.result || { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "item_bank_result_missing" };
     } catch {
@@ -3026,7 +3026,7 @@ async function freshQuizBankBuilderContext(binding, assignmentId, operation, arg
           target: { tabId, frameIds: [0] },
           world: "MAIN",
           func: executeQuizBankDrawInPage,
-          args: [{ operation, arguments: args, canvasOrigin: binding.origin, courseId: binding.courseId, assignmentId, contextOnly: true, expiresAt }],
+          args: [JSON.stringify({ operation, arguments: args, canvasOrigin: binding.origin, courseId: binding.courseId, assignmentId, contextOnly: true, expiresAt })],
         });
         if (probe?.result?.matched === true && probe.result.ok === true) {
           return { tabId, frameId: 0, launchUrl, verifiedBankSha256 };
@@ -3051,7 +3051,7 @@ async function freshQuizBankBuilderContext(binding, assignmentId, operation, arg
           target: { tabId, frameIds },
           world: "MAIN",
           func: executeQuizBankDrawInPage,
-          args: [{
+          args: [JSON.stringify({
             operation,
             arguments: args,
             canvasOrigin: binding.origin,
@@ -3059,7 +3059,7 @@ async function freshQuizBankBuilderContext(binding, assignmentId, operation, arg
             assignmentId,
             contextOnly: true,
             expiresAt,
-          }],
+          })],
         });
         if (probe?.result?.matched === true && probe.result.ok === true) {
           return { tabId, frameId: frameIds[0], launchUrl, verifiedBankSha256 };
@@ -3116,7 +3116,7 @@ async function executeQuizBankDraw(binding, operation, args, expiresAt) {
       target: { tabId: context.tabId, frameIds: [context.frameId] },
       world: "MAIN",
       func: executeQuizBankDrawInPage,
-      args: [{
+      args: [JSON.stringify({
         operation,
         arguments: args,
         canvasOrigin: binding.origin,
@@ -3125,7 +3125,7 @@ async function executeQuizBankDraw(binding, operation, args, expiresAt) {
         verifiedBankSha256,
         verifiedEntrySha256,
         expiresAt,
-      }],
+      })],
     });
     return execution?.result || { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "quiz_bank_result_missing" };
   } catch {
@@ -3901,7 +3901,7 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
     return await executeCanvasConversation(binding, operation, privateConversation, expiresAt);
   }
   return operation.service === "item_bank"
-    ? ["list_quiz_draws", "attach_bank_to_quiz", "attach_bank_entry_to_quiz", "delete_quiz_bank_entry"].includes(operation.nickname)
+    ? ["list_quiz_draws", "attach_bank_to_quiz", "attach_bank_entry_to_quiz", "delete_quiz_bank_entry", "update_quiz_draw", "add_quiz_question_to_bank"].includes(operation.nickname)
       ? await executeQuizBankDraw(binding, operation, args, expiresAt)
       : await executeItemBank(binding, operation, args, expiresAt)
     : await executeCanvas(binding, operation, args, expiresAt);
@@ -4051,7 +4051,7 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
       if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_hot_spot_transfer_timeout");
       const [execution] = await chrome.scripting.executeScript({
         target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeCanvasNewQuizHotSpotInPage,
-        args: [input],
+        args: [JSON.stringify(input)],
       });
       return execution?.result || null;
     };
@@ -4217,7 +4217,7 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
       if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_file_transfer_timeout");
       const [execution] = await chrome.scripting.executeScript({
         target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeCanvasCourseFileTransferInPage,
-        args: [input],
+        args: [JSON.stringify(input)],
       });
       return execution?.result || null;
     };
@@ -5011,12 +5011,21 @@ async function itemBankRecoveryDescriptor(operation, args, result) {
   let collection;
   let assertions = [];
   let strategy = "collection-contains-target";
+  if (operation.nickname === "update_quiz_draw" && courseId && assignmentId && exactId(args.quiz_entry_id)) {
+    collection = read("canvas_item_bank_list_quiz_draws", { course_id: courseId, assignment_id: assignmentId });
+    assertions = [assertion("id", [["id"]], String(args.quiz_entry_id)),
+      ...(args.pick_count === undefined ? [] : [assertion("sample_num", [["properties", "sample_num"]], Number(args.pick_count))]),
+      ...(args.points_per_item === undefined ? [] : [assertion("points_possible", [["points_possible"]], Number(args.points_per_item))])];
+  } else if (operation.nickname === "add_quiz_question_to_bank" && courseId && bankId && exactId(args.item_id)) {
+    collection = read("canvas_item_bank_list_entries", { course_id: courseId, bank_id: bankId });
+    assertions = [assertion("entry_type", [["entry_type"]], "Item"), assertion("entry_id", [["entry_id"], ["entry", "id"]], String(args.item_id))];
+  } else
   if (operation.nickname === "create_bank" && courseId) {
     collection = read("canvas_item_bank_list_banks", { course_id: courseId });
     assertions = [assertion("title", [["title"]], String(args.title)), assertion("language", [["language"]], String(args.language || "en"))];
   } else if (operation.nickname === "attach_item" && courseId && bankId) {
     collection = read("canvas_item_bank_list_entries", { course_id: courseId, bank_id: bankId });
-    assertions = [assertion("entry_type", [["entry_type"]], "Item"), assertion("entry_id", [["entry_id"]], String(args.item_id))];
+    assertions = [assertion("entry_type", [["entry_type"]], "Item"), assertion("entry_id", [["entry_id"], ["entry", "id"]], String(args.item_id))];
   } else if (operation.nickname === "share_bank" && courseId && bankId) {
     collection = read("canvas_item_bank_list_shares", { course_id: courseId, bank_id: bankId });
     assertions = [assertion("entity_id", [["entity_id"], ["entityId"]], String(args.entity_id)), assertion("entity_type", [["entity_type"], ["entityType"]], "course"), assertion("permission", [["permission"]], "read")];
@@ -5024,8 +5033,8 @@ async function itemBankRecoveryDescriptor(operation, args, result) {
   } else if (["attach_bank_to_quiz", "attach_bank_entry_to_quiz"].includes(operation.nickname) && courseId && assignmentId) {
     collection = read("canvas_item_bank_list_quiz_draws", { course_id: courseId, assignment_id: assignmentId });
     assertions = operation.nickname === "attach_bank_to_quiz"
-      ? [assertion("entry_type", [["entry_type"], ["quiz_entry", "entry_type"]], "Bank"), assertion("entry_id", [["entry_id"], ["quiz_entry", "entry_id"]], bankId), assertion("position", [["position"], ["quiz_entry", "position"]], Number(args.position)), assertion("points_possible", [["points_possible"], ["quiz_entry", "points_possible"]], Number(args.points_per_item)), assertion("sample_num", [["properties", "sample_num"], ["quiz_entry", "properties", "sample_num"]], Number(args.pick_count))]
-      : [assertion("entry_type", [["entry_type"], ["quiz_entry", "entry_type"]], "BankEntry"), assertion("entry_id", [["entry_id"], ["quiz_entry", "entry_id"]], String(args.bank_entry_id)), assertion("position", [["position"], ["quiz_entry", "position"]], Number(args.position)), assertion("points_possible", [["points_possible"], ["quiz_entry", "points_possible"]], Number(args.points_per_item))];
+      ? [assertion("entry_type", [["entry_type"], ["quiz_entry", "entry_type"]], "Bank"), assertion("entry_id", [["entry_id"], ["entry", "id"], ["quiz_entry", "entry_id"]], bankId), assertion("position", [["position"], ["quiz_entry", "position"]], Number(args.position)), assertion("points_possible", [["points_possible"], ["quiz_entry", "points_possible"]], Number(args.points_per_item)), assertion("sample_num", [["properties", "sample_num"], ["quiz_entry", "properties", "sample_num"]], Number(args.pick_count))]
+      : [assertion("entry_type", [["entry_type"], ["quiz_entry", "entry_type"]], "BankEntry"), assertion("entry_id", [["entry_id"], ["entry", "id"], ["quiz_entry", "entry_id"]], String(args.bank_entry_id)), assertion("position", [["position"], ["quiz_entry", "position"]], Number(args.position)), assertion("points_possible", [["points_possible"], ["quiz_entry", "points_possible"]], Number(args.points_per_item))];
   }
   if (!collection || assertions.length === 0) return null;
   return descriptor(strategy, operation.method, assertions, {

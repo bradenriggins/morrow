@@ -14,6 +14,11 @@ export function canvasFileTextContentTypeSupported(value) {
  * needs must remain inside this lexical scope.
  */
 export async function executeCanvasCourseFileTextInPage(input) {
+  // Chrome's scripting.executeScript drops every null-valued property of an object argument, so
+  // the reviewed request crosses this boundary as text and is read back here whole.
+  if (typeof input === "string") {
+    try { input = JSON.parse(input); } catch { return { ok: false, error: "canvas_file_input_unreadable" }; }
+  }
   const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
     Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;

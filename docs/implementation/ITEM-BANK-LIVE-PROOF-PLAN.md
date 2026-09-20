@@ -23,6 +23,8 @@ Run all seven reads. Save each sanitized result, `snapshotSha256`, paging state,
 | `canvas_item_bank_get_item` | selected `course_id`, exact `bank_id`, exact `item_id` | `item_sha256` for attach and item update |
 | `canvas_item_bank_list_shares` | selected `course_id`, exact `bank_id` | One unpaged observation only. It must report `paginationUnestablished`. `shares_sha256` covers exactly what that one response returned. |
 | `canvas_item_bank_list_quiz_draws` | selected `course_id`, exact New Quiz `assignment_id` | Numbered pages through an empty end page. A page or row bound stops the read. The complete result supplies `quiz_entries_sha256` for a bank draw. |
+| `canvas_item_bank_search_entries` | selected `course_id`, exact `bank_id` | One page of the questions matching the reviewed text, interaction types, or tags. It reads an index the service fills after a write, so it is never the sole evidence that a change has not landed. |
+| `canvas_item_bank_list_tags` | selected `course_id` | The account's tag list, optionally filtered. It names tags, never which question carries one. |
 
 Every bank-specific read first proves that the selected course's fresh bank list contains the exact bank. A bounded or truncated list is not an empty list. Run `morrow_read_item_bank_fan_out` as well: an existing-bank change needs its observed-reach record, and the reviewer acknowledges the exact observed external courses it names. That record never replaces an operation snapshot and never claims a complete account-wide answer.
 
@@ -30,7 +32,7 @@ Every bank-specific read first proves that the selected course's fresh bank list
 
 Build one reviewable operation with the exact current snapshot and intended payload. Do not approve or dispatch it in this assignment. Record the operation name, target ids, payload digest, required snapshot keys, and approval state in `03-plan.json`.
 
-The eleven course-bound changes use these contracts:
+The eighteen course-bound changes use these contracts:
 
 | Operation | Required snapshot | Intended effect |
 | --- | --- | --- |
@@ -45,6 +47,13 @@ The eleven course-bound changes use these contracts:
 | `canvas_item_bank_attach_bank_to_quiz` | `bank_sha256`, `quiz_entries_sha256` | Add one fixed random-draw group to one exact New Quiz assignment. |
 | `canvas_item_bank_attach_bank_entry_to_quiz` | `bank_sha256`, `entry_sha256`, `quiz_entries_sha256` | Add one exact bank entry to one exact New Quiz assignment. |
 | `canvas_item_bank_delete_quiz_bank_entry` | `bank_sha256`, `quiz_entries_sha256`, `quiz_entry_sha256` | Remove one exact quiz entry. Proved by its absence from a complete reread of the quiz-entry list. |
+| `canvas_item_bank_update_share` | `bank_sha256`, `shares_sha256` | Change one exact share's permission. Proved by rereading that exact share row. |
+| `canvas_item_bank_copy_entry` | `bank_sha256`, `entries_sha256`, `source_entry_sha256` | Copy one exact question into this bank. The source bank keeps its own entry. |
+| `canvas_item_bank_move_entry` | `bank_sha256`, `entries_sha256`, `source_entry_sha256` | Move one exact question into this bank. Proved present here and absent from its source. |
+| `canvas_item_bank_add_entry_tag` | `bank_sha256`, `entry_sha256` | Tag one exact question. Proved by searching the bank for that exact tag, read again until the service's index agrees. |
+| `canvas_item_bank_remove_entry_tag` | `bank_sha256`, `entry_sha256` | Remove one exact tag from one exact question, named by its value. Canvas has no read that reports a question's tags, so Morrow resolves the tag, proves the question carries it, and asks Canvas for the association. |
+| `canvas_item_bank_update_quiz_draw` | `bank_sha256`, `quiz_entries_sha256` | Change one exact bank draw's question count or points on one exact New Quiz. A row another bank supplies, or a question row, is refused. |
+| `canvas_item_bank_add_quiz_question_to_bank` | `bank_sha256`, `quiz_entries_sha256` | Put one question the named quiz row holds into this bank. The quiz keeps the question, and both then name the same one. |
 
 `morrow_plan_item_bank_question_image_alt_repair` uses the same reviewed Item Bank item update. It changes the underlying shared question, so it can affect every consuming quiz. That is why it carries the same `bank_sha256` and `item_sha256` snapshots and the same observed-reach acknowledgement as any other change to an existing bank. It repairs one reviewed image and leaves every other part of the question, including any other image that still needs alternative text, exactly as Canvas holds it.
 

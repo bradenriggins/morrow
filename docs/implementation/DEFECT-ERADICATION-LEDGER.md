@@ -539,6 +539,12 @@ Every row stays open until its evidence columns are added and its status becomes
 | 522 | P1 | R7 | No question could be reordered in a New Quiz that draws from an Item Bank: the planner and the Bridge accepted only question entries, although Canvas moves a bank draw and a single bank question through the same position update. | closure section 522; gateway and Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
 | 523 | P1 | R7 | A New Quiz time limit, attempt limit, cooling period, IP filter, or one-at-a-time setting could be turned on but never back off, and turning attempts off could never be confirmed: Morrow refused Canvas's own cleared values (0, [], backtracking with no one-at-a-time) and expected null back where Canvas saves 0 or []. | closure section 523; gateway and Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
 | 524 | P1 | R7 | No answer could be added to or removed from a saved New Quiz question: Morrow refused every change to the set of answer ids, although New Quizzes leaves blank answers behind only when ids are renamed. | closure section 524; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 525 | P1 | R7 | A New Quiz that draws from an Item Bank could not have that draw changed: the saved draw's question count and points were fixed at the moment it was added, so the only way to change either was to remove the draw and add it again. | closure section 525; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 526 | P1 | R7 | A question written in a New Quiz could not be put into an Item Bank, so nothing authored in a quiz could be reused; and the private route takes a bare question id, which would have moved a question from any other course into the named bank. | closure section 526; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 527 | P1 | R7 | Item Bank questions could not be searched, tagged, or moved or copied between banks, and a bank share's permission could never be changed from read to edit, although Canvas's own Item Banks page does all five. | closure section 527; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 528 | P1 | R7 | Tagging a question was reported as an unchecked change every time: the only route that reads a question's tags is a search over an index the service fills after the write returns, and Morrow judged the saved tag on one read taken before that index had it. | closure section 528; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 529 | P1 | R7 | A tag could be added to a question and then never removed: removal needs the tag association's own id, and no Canvas read on this tenant reports one question's tag associations, so only the session that added the tag could ever remove it. | closure section 529; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
+| 530 | P0 | R7 | Every reviewed request Morrow ran inside a page lost each of its null values on the way there: Chrome's `scripting.executeScript` drops every null-valued property of an object argument, so an essay's word limits, an ordering question's shuffle rules and every other null field never reached Canvas. | closure section 530; Bridge regressions, live BT2 course 89585 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3667,6 +3673,42 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Condition: `newQuizIdsPreserved` required an identical id set, so adding a choice or removing one was refused with the ghost-answer message. Live evidence: Canvas saved an added choice as exactly three answers and a removed choice as exactly the remaining two, with no blank answer either way.
 - Repair: both copies of the rule (`connector/extension/src/canvas-content.js`, `connector/extension/src/new-quiz-item-guard.js`) allow a change that only adds ids or only removes ids, and still refuse one that renames ids by doing both. `scripts/test/canvas-new-quiz-item-guard.test.mjs` covers each case.
 - Status: `IMPLEMENTED`; proven live: a choice added, then removed, each verified, with the saved answers exactly right.
+
+### 525: a bank draw could not be changed after it was added
+
+- Condition: `list_quiz_draws`, `attach_bank_to_quiz`, `attach_bank_entry_to_quiz`, and `delete_quiz_bank_entry` were the whole builder surface, so a draw's question count and points were fixed when it was created. Live evidence: Canvas saves `PATCH /api/quizzes/{quiz}/quiz_entries/{entry}` with `{quiz_entry:{points_possible, properties:{sample_num}}}` exactly as sent.
+- Repair: `canvas_item_bank_update_quiz_draw` in `scripts/generate-canvas-api-catalog.mjs` and `connector/extension/src/quiz-bank-draw-executor.js` changes only a row the named bank supplies, refuses a question row and a row from another bank, requires a positive whole question count, and rereads the complete entry list to prove the saved values. `connector/extension/src/service-worker.js` routes it and names its guarded repair read.
+- Status: `IMPLEMENTED`; proven live.
+
+### 526: a question written in a quiz could not be put into a bank
+
+- Condition: authoring in a New Quiz was a dead end, because nothing carried a question back into an Item Bank. The private route, `POST /api/banks/{bank}/bank_entries/move_from_quiz_entry?source_quiz_id={quiz}`, takes only a question id and a quiz id, and Canvas accepts a question id from another course: a probe of that route with an unrelated id attached a real course's question to a sandbox bank, which had to be removed by hand.
+- Repair: `canvas_item_bank_add_quiz_question_to_bank` names both the quiz row and the question, reads the quiz's complete entry list first, and sends nothing unless that exact row is a question row whose own question id is the one named. It reads the bank first, so a question already there is never sent again, and proves the result from the bank's entry list.
+- Status: `IMPLEMENTED`; proven live.
+
+### 527: Item Bank questions could not be searched, tagged, moved, or copied
+
+- Condition: the Item Banks surface offered only list, read, create, update, attach, and remove, so a person could not find a question by its text or tag, could not tag one, could not move or copy one between banks without recreating it, and could not raise a course share from read to edit.
+- Repair: seven operations join the Item Bank executor with the same snapshot, single-send, and reread contract as the rest: `search_entries`, `list_tags`, `copy_entry`, `move_entry`, `update_share`, `add_entry_tag`, and `remove_entry_tag`. Each change pins the source entry's own digest as well as the target bank's, and each verification rereads the exact object it changed.
+- Status: `IMPLEMENTED`; proven live.
+
+### 528: a saved tag was reported as unchecked
+
+- Condition: Canvas has no route that reads one question's tags (`GET /api/bank_entries/:e/tag_associations` answers 404), so the tag is verified by searching the bank for that exact tag id. That search reads an index the service fills after the write returns. Measured live on 2026-09-19: the question a tag had just been added to was missing from the search immediately, present 1.5 seconds later. Morrow read once and reported every tag as a change it could not check.
+- Repair: `connector/extension/src/item-bank-executor.js` reads that search again until it agrees with the change or its bounded budget runs out, and only then calls the result verified or a mismatch. The tag itself is still written exactly once. `scripts/test/canvas-item-bank-executor.test.mjs` covers a search that catches up and one that never does.
+- Status: `IMPLEMENTED`; proven live.
+
+### 529: a tag could be added but never removed
+
+- Condition: `DELETE /api/bank_entries/:e/tag_associations/:a` needs the association id, and every read that might report it answers 404 (`/api/bank_entries/:e/tag_associations`, `/api/tag_associations?bank_entry_id=`) or omits it (the bank entry read, the entry list, the bank search, each also with `include_tags`, `include[]=tag_associations`, `tags=true`, `with_tags=true`). The tag facet the search returns names tags, never the association. So the id existed only in the answer to the write that made it.
+- Repair: `canvas_item_bank_remove_entry_tag` now names the tag by its value. Morrow resolves the exact tag from the account tag list, proves from the bank search that this question carries it, and asks Canvas for the association by posting that same tag value again, which is idempotent live: Canvas answers with the association already there and adds nothing. A caller that still holds the association id may name it instead. A tag the question does not carry is refused before anything is sent.
+- Status: `IMPLEMENTED`; proven live: the tag removed by its value and confirmed absent from Canvas's own search, and the refusal proven for a tag the question does not carry.
+
+### 530: a reviewed request lost its null values on the way into the page
+
+- Condition: measured live in the signed-in browser on 2026-09-19, `chrome.scripting.executeScript` given the object argument `{"a":null,"b":1,"c":{"d":null,"e":"x"},"f":[1,null,2]}` delivered `{"b":1,"c":{"e":"x"},"f":[1,null,2]}` to the page: every null-valued property was dropped, while a null inside an array survived. Every in-page executor took its input that way, so any reviewed request carrying a null reached Canvas without those fields. Three of the twelve question types carry one (an essay's `word_limit_min` and `word_limit_max`, an ordering question's `shuffle_rules`, a rich fill-in-the-blank's nested `children`), and none of them could be created in an Item Bank. The payload certificate turned that silent rewrite into a refusal for the two question writes that carry one (`item_bank_payload_contract_unverified`), which is how it was found; every other operation would have sent the shortened request.
+- Repair: every `scripting.executeScript` argument is now the request as text, and each in-page executor reads it back whole: the Item Bank, quiz-bank draw, conversation, course-file read, course-file transfer, and Hot Spot executors. `scripts/test/canvas-executor-input-transport.test.mjs` fails if any injection site passes an object again, if an executor stops reading text, or if text and object input stop agreeing.
+- Status: `IMPLEMENTED`; proven live.
 
 ### Root-cause patterns for rows 331–472
 

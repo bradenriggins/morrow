@@ -39,7 +39,7 @@ function region() {
     "async function boundedResponseBytes(response) { return new Uint8Array(await response.arrayBuffer()); }",
     "async function sha256Bytes() { return " + JSON.stringify(SHA256) + "; }",
     "function privateCanvasConfirmationUrl(value, canvasOrigin) { try { const url = new URL(value, canvasOrigin); return url.origin === canvasOrigin ? url : null; } catch { return null; } }",
-    "globalThis.chrome = { scripting: { executeScript: async ({ args }) => [{ result: args[0].mode === 'initialize'",
+    "globalThis.chrome = { scripting: { executeScript: async ({ args }) => [{ result: JSON.parse(args[0]).mode === 'initialize'",
     "  ? { ok: true, sent: false, data: { course_id: " + JSON.stringify(COURSE_ID) + ", upload_path: '/api/v1/folders/" + FOLDER_ID + "/files' } }",
     "  : completion }] } };",
     body,

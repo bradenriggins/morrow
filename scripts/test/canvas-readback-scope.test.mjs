@@ -206,13 +206,22 @@ const ITEM_BANK_PLANNED_ROUTES = [
   { nickname: "attach_bank_to_quiz", args: { course_id: "42", assignment_id: "77", bank_id: "901", pick_count: 2, points_per_item: 1, position: 1 }, data: { id: "801" }, read: "canvas_item_bank_list_quiz_draws", strategy: "collection-contains-target" },
   { nickname: "attach_bank_entry_to_quiz", args: { course_id: "42", assignment_id: "77", bank_id: "901", bank_entry_id: "701", points_per_item: 1, position: 1 }, data: { id: "801" }, read: "canvas_item_bank_list_quiz_draws", strategy: "collection-contains-target" },
   { nickname: "delete_quiz_bank_entry", args: { course_id: "42", assignment_id: "77", bank_id: "901", quiz_entry_id: "801" }, data: {}, read: "canvas_item_bank_list_quiz_draws", strategy: "collection-omits-target" },
+  { nickname: "update_share", args: { course_id: "42", bank_id: "901", share_id: "801", permission: "edit" }, data: { id: "801" }, read: "canvas_item_bank_list_shares", strategy: "collection-contains-target" },
+  { nickname: "update_quiz_draw", args: { course_id: "42", assignment_id: "77", bank_id: "901", quiz_entry_id: "801", pick_count: 2 }, data: { id: "801" }, read: "canvas_item_bank_list_quiz_draws", strategy: "collection-contains-target" },
 ];
-// A create has no id to be read by until Canvas answers, so the planner routes
-// none of these. The executor reads each one back by the id Canvas returned.
+// A create has no id to be read by until Canvas answers, so the planner routes none of these,
+// and neither a transfer between banks nor a tag names a route the planner can build: a copied or
+// moved question is found by the question it names, and a tag is found only by searching the bank
+// for that tag. The executor reads each one back itself.
 const ITEM_BANK_UNROUTED_CREATES = [
   { nickname: "create_bank", args: { course_id: "42", title: "Anatomy", expected_snapshot: {} }, data: { id: "901" } },
   { nickname: "create_item", args: { course_id: "42", bank_id: "901", item: {} }, data: { id: "502" } },
   { nickname: "attach_item", args: { course_id: "42", bank_id: "901", item_id: "502" }, data: { id: "701" } },
+  { nickname: "copy_entry", args: { course_id: "42", bank_id: "901", source_bank_id: "902", source_bank_entry_id: "701" }, data: { id: "702" } },
+  { nickname: "move_entry", args: { course_id: "42", bank_id: "901", source_bank_id: "902", source_bank_entry_id: "701" }, data: { id: "701" } },
+  { nickname: "add_entry_tag", args: { course_id: "42", bank_id: "901", bank_entry_id: "701", tag_value: "Chapter: 01" }, data: { id: "7600" } },
+  { nickname: "remove_entry_tag", args: { course_id: "42", bank_id: "901", bank_entry_id: "701", tag_value: "Chapter: 01" }, data: {} },
+  { nickname: "add_quiz_question_to_bank", args: { course_id: "42", assignment_id: "77", bank_id: "901", quiz_entry_id: "801", item_id: "502" }, data: { id: "703" } },
 ];
 
 const itemBankWrite = (nickname) => {
@@ -223,13 +232,13 @@ const itemBankWrite = (nickname) => {
 
 test("every Item Bank change is reread by its own executor, whatever the planner would route", () => {
   const writes = catalog.operations.filter((entry) => entry.service === "item_bank" && !entry.readOnly);
-  assert.equal(writes.length, 11);
+  assert.equal(writes.length, 18);
   assert.deepEqual(
     [...ITEM_BANK_PLANNED_ROUTES, ...ITEM_BANK_UNROUTED_CREATES].map((entry) => entry.nickname).sort(),
     writes.map((entry) => entry.nickname).sort(),
   );
   // Whatever the planner does or does not route, the readback the product uses
-  // is the executor's, for all eleven.
+  // is the executor's, for all eighteen.
   for (const write of writes) {
     assert.equal(canvasExecutorOwnedReadback(write), true, write.toolName);
     assert.deepEqual(canvasReadbackAssessment(catalog.operations, write), { state: "structurally_exact" }, write.toolName);
@@ -248,12 +257,16 @@ test("every Item Bank change is reread by its own executor, whatever the planner
   }
 
   const executor = readFileSync(new URL("../../connector/extension/src/item-bank-executor.js", import.meta.url), "utf8");
+  // A change made in the New Quiz builder frame is reread by the builder's own executor.
+  const builder = readFileSync(new URL("../../connector/extension/src/quiz-bank-draw-executor.js", import.meta.url), "utf8");
+  const BUILDER_WRITES = new Set(["attach_bank_to_quiz", "attach_bank_entry_to_quiz", "delete_quiz_bank_entry",
+    "update_quiz_draw", "add_quiz_question_to_bank"]);
   for (const entry of ITEM_BANK_UNROUTED_CREATES) {
     const write = itemBankWrite(entry.nickname);
     assert.equal(planBrowserReadback(catalog.operations, write, entry.args, entry.data), null, `${entry.nickname} gained a generic route`);
-    // The shape the planner cannot route is the shape the executor rereads by
-    // the id Canvas returned.
-    assert.ok(executor.includes(`operation.nickname === "${entry.nickname}"`), `${entry.nickname} has no readback branch in the Item Banks executor`);
+    // The shape the planner cannot route is the shape the owning executor rereads itself.
+    const source = BUILDER_WRITES.has(entry.nickname) ? builder : executor;
+    assert.ok(source.includes(`operation.nickname === "${entry.nickname}"`), `${entry.nickname} has no readback branch in its own executor`);
   }
   assert.match(executor, /created_bank_fields_and_selected_course_association_reread/);
   assert.match(executor, /created_item_reread_by_returned_id/);

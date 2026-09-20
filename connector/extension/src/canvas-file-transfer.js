@@ -12,6 +12,11 @@ export function canvasUploadFolderId(uploadPath) {
  * supplied function body for a MAIN-world injection.
  */
 export async function executeCanvasCourseFileTransferInPage(input) {
+  // Chrome's scripting.executeScript drops every null-valued property of an object argument, so
+  // the reviewed request crosses this boundary as text and is read back here whole.
+  if (typeof input === "string") {
+    try { input = JSON.parse(input); } catch { return { ok: false, error: "canvas_file_input_unreadable" }; }
+  }
   const requestSignal = (expiresAt) => {
     const remaining = Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 0;
     if (remaining <= 0) throw new Error("canvas_file_transfer_timeout");
