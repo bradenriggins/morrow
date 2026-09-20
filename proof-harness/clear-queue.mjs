@@ -34,8 +34,12 @@ try {
   }
   const after = await openOperations();
   const needsPerson = after.filter((row) => !(String(row.state) === "awaiting_approval" && Number(row.dispatchAttempt ?? 0) === 0));
+  // Everything that could be cancelled was. What is left needs a person to say what Canvas shows,
+  // which is the platform behaving correctly, so it is not counted as a failure here.
+  const cancellableLeft = after.filter((row) => String(row.state) === "awaiting_approval" && Number(row.dispatchAttempt ?? 0) === 0);
   recordRow(ledger, "queue:closed-after-write-phase", {
-    phase: 1, kind: "maintenance", verdict: after.length < before.length || before.length === 0 ? "PASS" : "FAIL",
+    phase: 1, kind: "maintenance", verdict: cancellableLeft.length === 0 ? "PASS" : "FAIL",
+    ...(cancellableLeft.length ? { reason: `${cancellableLeft.length} request(s) that were never sent could not be cancelled.` } : {}),
     readback: { source: "morrow-journal", openBefore: before.length, cancelled: closed, openAfter: after.length,
       leftForAPerson: needsPerson.length },
     ...(needsPerson.length ? { note: "Morrow requires a person to state what they saw in Canvas before an operation that may have landed is closed. This harness does not claim that on their behalf." } : {}),

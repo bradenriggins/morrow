@@ -17141,7 +17141,7 @@
     },
     "cleanup:verified-against-canvas": {
       "id": "cleanup:verified-against-canvas",
-      "at": "2026-09-20T05:09:34.656Z",
+      "at": "2026-09-20T05:46:27.052Z",
       "phase": 1,
       "kind": "cleanup",
       "verdict": "FAIL",
@@ -17155,25 +17155,13 @@
       ],
       "readback": {
         "source": "canvas",
-        "markedBefore": 5,
+        "markedBefore": 3,
         "removed": [
           {
             "place": "pages",
             "id": "morrowproof1789874351-wiki-page-title-2",
             "name": "MORROWPROOF1789874351 wiki_page_title",
             "outcome": "failed"
-          },
-          {
-            "place": "pages",
-            "id": "morrowsweep1789670138-wiki-page-title",
-            "name": "MORROWSWEEP1789670138 wiki_page_title",
-            "outcome": "verified"
-          },
-          {
-            "place": "pages",
-            "id": "morrowsweep1789670138-page-copy",
-            "name": "MORROWSWEEP1789670138 page Copy",
-            "outcome": "verified"
           },
           {
             "place": "rubrics",
@@ -17192,15 +17180,16 @@
     },
     "queue:closed-after-write-phase": {
       "id": "queue:closed-after-write-phase",
-      "at": "2026-09-20T04:54:45.834Z",
+      "at": "2026-09-20T05:39:38.787Z",
       "phase": 1,
       "kind": "maintenance",
-      "verdict": "FAIL",
+      "verdict": "PASS",
       "readback": {
         "source": "morrow-journal",
-        "openBefore": 3,
-        "closed": 0,
-        "openAfter": 3
+        "openBefore": 16,
+        "cancelled": 16,
+        "openAfter": 0,
+        "leftForAPerson": 0
       },
       "sandbox": {
         "courseId": "89585"
@@ -17343,7 +17332,768 @@
         "courseId": "89585",
         "mark": "MORROWPROOFS1789881919"
       }
+    },
+    "robustness:refuses-a-course-it-is-not-bound-to": {
+      "id": "robustness:refuses-a-course-it-is-not-bound-to",
+      "at": "2026-09-20T05:38:24.092Z",
+      "phase": 3,
+      "kind": "robustness",
+      "title": "A read addressed to another course is refused before any request",
+      "verdict": "PASS",
+      "readback": {
+        "code": "canvas_course_not_connected",
+        "isError": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFR1789882701"
+      }
+    },
+    "robustness:unknown-capability-is-named-not-guessed": {
+      "id": "robustness:unknown-capability-is-named-not-guessed",
+      "at": "2026-09-20T05:38:24.103Z",
+      "phase": 3,
+      "kind": "robustness",
+      "title": "An unknown tool name is refused with a reason",
+      "verdict": "PASS",
+      "readback": {
+        "code": "capability_not_found"
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFR1789882701"
+      }
+    },
+    "robustness:stale-snapshot-is-refused": {
+      "id": "robustness:stale-snapshot-is-refused",
+      "at": "2026-09-20T05:38:24.113Z",
+      "phase": 3,
+      "kind": "robustness",
+      "title": "A change pinned to a snapshot that no longer matches is refused before dispatch",
+      "verdict": "PASS",
+      "readback": {
+        "status": null,
+        "code": "capability_input_invalid"
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFR1789882701"
+      }
+    },
+    "robustness:oversized-result-is-paged-not-truncated": {
+      "id": "robustness:oversized-result-is-paged-not-truncated",
+      "at": "2026-09-20T05:38:32.009Z",
+      "phase": 3,
+      "kind": "robustness",
+      "title": "A large read answers through a result handle rather than a cut-off body",
+      "verdict": "PASS",
+      "readback": {
+        "answered": true,
+        "records": 50
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFR1789882701"
+      }
+    },
+    "robustness:parallel-reads-keep-the-journal-whole": {
+      "id": "robustness:parallel-reads-keep-the-journal-whole",
+      "at": "2026-09-20T05:39:07.834Z",
+      "phase": 3,
+      "kind": "robustness",
+      "title": "Reads running together do not disturb the operation journal",
+      "verdict": "PASS",
+      "readback": {
+        "operationsBefore": 50,
+        "operationsAfter": 50
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFR1789882701"
+      }
+    },
+    "robustness:effect-receipt-is-single-use": {
+      "id": "robustness:effect-receipt-is-single-use",
+      "at": "2026-09-20T05:38:55.496Z",
+      "phase": 3,
+      "kind": "robustness",
+      "title": "A dispatched change cannot be applied twice from one approval",
+      "verdict": "PASS",
+      "readback": {
+        "source": "canvas",
+        "pagesWithThatTitle": 1,
+        "secondDispatch": "answered"
+      },
+      "cleanup": {
+        "removed": "verified"
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFR1789882701"
+      }
+    },
+    "morrow_activity": {
+      "id": "morrow_activity",
+      "at": "2026-09-20T05:48:20.945Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_audit_course": {
+      "id": "morrow_audit_course",
+      "at": "2026-09-20T05:48:20.961Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "FAIL",
+      "reason": "The control answered with an error or nothing: null",
+      "readback": {
+        "source": "morrow",
+        "answered": false
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_batch_cancel": {
+      "id": "morrow_batch_cancel",
+      "at": "2026-09-20T05:48:20.964Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_batch_create": {
+      "id": "morrow_batch_create",
+      "at": "2026-09-20T05:48:20.967Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_batch_get": {
+      "id": "morrow_batch_get",
+      "at": "2026-09-20T05:48:20.969Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_batch_health": {
+      "id": "morrow_batch_health",
+      "at": "2026-09-20T05:48:20.978Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_batch_pause": {
+      "id": "morrow_batch_pause",
+      "at": "2026-09-20T05:48:20.979Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_batch_reconcile": {
+      "id": "morrow_batch_reconcile",
+      "at": "2026-09-20T05:48:20.980Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_batch_recover": {
+      "id": "morrow_batch_recover",
+      "at": "2026-09-20T05:48:20.981Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_batch_results_page": {
+      "id": "morrow_batch_results_page",
+      "at": "2026-09-20T05:48:20.982Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_batch_resume": {
+      "id": "morrow_batch_resume",
+      "at": "2026-09-20T05:48:20.984Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_batch_run": {
+      "id": "morrow_batch_run",
+      "at": "2026-09-20T05:48:20.985Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_batches_recent": {
+      "id": "morrow_batches_recent",
+      "at": "2026-09-20T05:48:20.993Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_capability_get": {
+      "id": "morrow_capability_get",
+      "at": "2026-09-20T05:48:34.878Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_capability_read": {
+      "id": "morrow_capability_read",
+      "at": "2026-09-20T05:48:44.116Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_catalog": {
+      "id": "morrow_catalog",
+      "at": "2026-09-20T05:48:44.134Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_catalog_search": {
+      "id": "morrow_catalog_search",
+      "at": "2026-09-20T05:48:44.150Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_check_new_quiz": {
+      "id": "morrow_check_new_quiz",
+      "at": "2026-09-20T05:49:01.918Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_health": {
+      "id": "morrow_health",
+      "at": "2026-09-20T05:49:01.935Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_inventory_courses": {
+      "id": "morrow_inventory_courses",
+      "at": "2026-09-20T05:49:14.760Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_operation_cancel": {
+      "id": "morrow_operation_cancel",
+      "at": "2026-09-20T05:49:16.961Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_operation_close_unresolved": {
+      "id": "morrow_operation_close_unresolved",
+      "at": "2026-09-20T05:49:16.965Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "Closing an unresolved change requires a person to state what Canvas shows. This harness never claims that on a person's behalf."
+    },
+    "morrow_operation_list": {
+      "id": "morrow_operation_list",
+      "at": "2026-09-20T05:49:19.462Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_operations_recent": {
+      "id": "morrow_operations_recent",
+      "at": "2026-09-20T05:49:29.022Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883292"
+      }
+    },
+    "morrow_plan_assignment_image_alt_repair": {
+      "id": "morrow_plan_assignment_image_alt_repair",
+      "at": "2026-09-20T05:49:29.027Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_canvas_conversation": {
+      "id": "morrow_plan_canvas_conversation",
+      "at": "2026-09-20T05:49:29.030Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_canvas_file_upload": {
+      "id": "morrow_plan_canvas_file_upload",
+      "at": "2026-09-20T05:49:29.033Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_classic_quiz_description_image_alt_repair": {
+      "id": "morrow_plan_classic_quiz_description_image_alt_repair",
+      "at": "2026-09-20T05:49:29.036Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_classic_quiz_question_image_alt_repair": {
+      "id": "morrow_plan_classic_quiz_question_image_alt_repair",
+      "at": "2026-09-20T05:49:29.038Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_discussion_image_alt_repair": {
+      "id": "morrow_plan_discussion_image_alt_repair",
+      "at": "2026-09-20T05:49:29.040Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_item_bank_question_image_alt_repair": {
+      "id": "morrow_plan_item_bank_question_image_alt_repair",
+      "at": "2026-09-20T05:49:29.042Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_accommodation": {
+      "id": "morrow_plan_new_quiz_accommodation",
+      "at": "2026-09-20T05:49:29.044Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_answer_feedback_image_alt_repair": {
+      "id": "morrow_plan_new_quiz_answer_feedback_image_alt_repair",
+      "at": "2026-09-20T05:49:29.046Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_assignment_group_order": {
+      "id": "morrow_plan_new_quiz_assignment_group_order",
+      "at": "2026-09-20T05:49:29.048Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_choice_image_alt_repair": {
+      "id": "morrow_plan_new_quiz_choice_image_alt_repair",
+      "at": "2026-09-20T05:49:29.049Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_create": {
+      "id": "morrow_plan_new_quiz_create",
+      "at": "2026-09-20T05:49:29.051Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_delete": {
+      "id": "morrow_plan_new_quiz_delete",
+      "at": "2026-09-20T05:49:29.052Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_feedback_image_alt_repair": {
+      "id": "morrow_plan_new_quiz_feedback_image_alt_repair",
+      "at": "2026-09-20T05:49:29.053Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_item_create": {
+      "id": "morrow_plan_new_quiz_item_create",
+      "at": "2026-09-20T05:49:29.055Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_item_delete": {
+      "id": "morrow_plan_new_quiz_item_delete",
+      "at": "2026-09-20T05:49:29.056Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_item_image_alt_repair": {
+      "id": "morrow_plan_new_quiz_item_image_alt_repair",
+      "at": "2026-09-20T05:49:29.058Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_item_order": {
+      "id": "morrow_plan_new_quiz_item_order",
+      "at": "2026-09-20T05:49:29.059Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_item_replacement": {
+      "id": "morrow_plan_new_quiz_item_replacement",
+      "at": "2026-09-20T05:49:29.060Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_module_move": {
+      "id": "morrow_plan_new_quiz_module_move",
+      "at": "2026-09-20T05:49:29.061Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_module_placement": {
+      "id": "morrow_plan_new_quiz_module_placement",
+      "at": "2026-09-20T05:49:29.063Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_report": {
+      "id": "morrow_plan_new_quiz_report",
+      "at": "2026-09-20T05:49:29.064Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_new_quiz_settings": {
+      "id": "morrow_plan_new_quiz_settings",
+      "at": "2026-09-20T05:49:29.065Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_page_correction": {
+      "id": "morrow_plan_page_correction",
+      "at": "2026-09-20T05:49:29.066Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_plan_page_image_alt_repair": {
+      "id": "morrow_plan_page_image_alt_repair",
+      "at": "2026-09-20T05:49:29.067Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_private_chat": {
+      "id": "morrow_private_chat",
+      "at": "2026-09-20T05:49:29.069Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_profile_status": {
+      "id": "morrow_profile_status",
+      "at": "2026-09-20T05:49:29.071Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_program_inventory_create": {
+      "id": "morrow_program_inventory_create",
+      "at": "2026-09-20T05:49:29.072Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_program_inventory_create_audit_batch": {
+      "id": "morrow_program_inventory_create_audit_batch",
+      "at": "2026-09-20T05:49:29.073Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_program_ledger": {
+      "id": "morrow_program_ledger",
+      "at": "2026-09-20T05:49:29.074Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_read_item_bank_fan_out": {
+      "id": "morrow_read_item_bank_fan_out",
+      "at": "2026-09-20T05:49:29.075Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_request_edit_access": {
+      "id": "morrow_request_edit_access",
+      "at": "2026-09-20T05:49:29.076Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_result_page": {
+      "id": "morrow_result_page",
+      "at": "2026-09-20T05:49:29.077Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_review_lesson": {
+      "id": "morrow_review_lesson",
+      "at": "2026-09-20T05:49:29.078Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "BLOCKED",
+      "reason": "This control has no exercise in the harness yet, so it is recorded as unproven rather than assumed."
+    },
+    "morrow_capability_change": {
+      "id": "morrow_capability_change",
+      "at": "2026-09-20T05:50:34.917Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true,
+        "outcome": "verified",
+        "operationId": "op:0a96c4eb-20a2-4cd4-b2b2-922c952e85d9",
+        "savedInCanvas": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883413"
+      }
+    },
+    "morrow_operation_dispatch": {
+      "id": "morrow_operation_dispatch",
+      "at": "2026-09-20T05:50:37.326Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true,
+        "spentReceiptRejected": true,
+        "status": "failed",
+        "phase": "rejected"
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883413"
+      }
+    },
+    "morrow_operation_get": {
+      "id": "morrow_operation_get",
+      "at": "2026-09-20T05:50:37.339Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883413"
+      }
+    },
+    "morrow_operation_reconcile": {
+      "id": "morrow_operation_reconcile",
+      "at": "2026-09-20T05:50:39.502Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883413"
+      }
+    },
+    "morrow_operation_undo": {
+      "id": "morrow_operation_undo",
+      "at": "2026-09-20T05:50:46.860Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "FAIL",
+      "reason": "The control answered with an error or nothing: {\"schema\":\"morrow.result.v1\",\"operationId\":\"op:0a96c4eb-20a2-4cd4-b2b2-922c952e85d9\",\"phase\":\"rejected\",\"verification\":{\"status\":\"not_requested\"},\"data\":{\"schema\":\"morrow.problem.v1\",\"code\":\"operation",
+      "readback": {
+        "source": "morrow",
+        "answered": false,
+        "pagesStillNamedThat": 1,
+        "statesTheCorrection": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883413"
+      }
+    },
+    "morrow_operation_verify": {
+      "id": "morrow_operation_verify",
+      "at": "2026-09-20T05:50:49.065Z",
+      "phase": 1,
+      "kind": "tool",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow",
+        "answered": true
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFT1789883413"
+      }
     }
   },
-  "updatedAt": "2026-09-20T05:32:27.681Z"
+  "updatedAt": "2026-09-20T05:50:49.065Z"
 }

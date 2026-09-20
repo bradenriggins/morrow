@@ -33,12 +33,21 @@ export function makeTools(client, logPath) {
   // approval. Sending every cookie ever issued grows one header without bound and
   // the review is refused for a reason that has nothing to do with the change.
   async function approve(approvalUrl, attempt = 0) {
-    const page = await fetch(approvalUrl);
-    const body = await page.text();
-    const issued = page.headers.getSetCookie?.() ?? [page.headers.get("set-cookie")].filter(Boolean);
-    const cookie = issued.map((value) => String(value).split(";", 1)[0].trim()).filter(Boolean).join("; ");
-    const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1];
-    if (!nonce || !cookie) throw new Error(`approval page had no form (${page.status})`);
+    // Morrow offers the Approve control only once it has named everything the change addresses,
+    // and naming it is a fresh Canvas read that can take a few seconds. A person would open the
+    // page again; giving up on the first load reports a change as withheld that was only not
+    // ready yet.
+    let page; let body; let cookie; let nonce;
+    for (let load = 0; load < 5; load += 1) {
+      page = await fetch(approvalUrl);
+      body = await page.text();
+      const issued = page.headers.getSetCookie?.() ?? [page.headers.get("set-cookie")].filter(Boolean);
+      cookie = issued.map((value) => String(value).split(";", 1)[0].trim()).filter(Boolean).join("; ");
+      nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1];
+      if (nonce && cookie) break;
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+    }
+    if (!nonce || !cookie) throw new Error(`approval page had no form (${page?.status})`);
     const response = await fetch(`${approvalUrl}/approve`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", cookie, origin: new URL(approvalUrl).origin, referer: approvalUrl },

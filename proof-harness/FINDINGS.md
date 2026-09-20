@@ -70,7 +70,38 @@ cannot be passed back to the route that reads it.
 Evidence: ledger rows `canvas_get_module_item_sequence`, `canvas_get_single_rubric_courses`,
 `canvas_get_single_rubric_accounts`.
 
-## 6. What the sandbox cannot prove
+## 6. Two objects this run made are still in the sandbox, and why
+
+The goal is that a run leaves nothing behind. This one leaves two things, each for a different
+reason, and neither is hidden.
+
+A page this harness created was made the course front page by a write proof. Canvas refuses to
+delete a front page, and the delete is answered `failed`. Removing it properly means deciding what
+the course's front page should be instead, which is a person's decision about their course, not a
+cleanup script's.
+
+A rubric's removal plans normally and its approval page renders "Remove rubric?", but posting the
+nonce from that page is answered `409 approval_action_refused`, "approval nonce is missing,
+expired, or invalid", with a nonce and cookie fetched seconds earlier. The same code path approved
+376 writes in this run, so this is not approval failing in general; it is this operation's approval
+being refused, and it is open.
+
+Evidence: ledger row `cleanup:verified-against-canvas`; the 409 body above.
+
+## 7. Undo is refused for a change Morrow itself verified
+
+`morrow_operation_undo` does not invent the inverse of a change: the caller states the correcting
+tool and arguments, which is a sound design. But a page create that Morrow had just settled as
+verified, given `canvas_delete_page_courses` and that page's own identifier as the correction, is
+answered `operation_unavailable`: "Morrow could not create a correction for this request. Check the
+saved request before trying again." Canvas still holds the page afterwards.
+
+Reproduced twice, on a freshly created operation as well as on one made earlier in the run. A
+person told to undo a change they just made would be told to check the saved request instead.
+
+Evidence: ledger row `morrow_operation_undo`, field `problem`.
+
+## 8. What the sandbox cannot prove
 
 Eighty operations need a learner attempt that no one has made in the sandbox course: submissions,
 quiz sessions, statistics, and regrades. They are classified `NEEDS-LEARNER-ATTEMPT` rather than

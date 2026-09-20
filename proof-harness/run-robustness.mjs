@@ -62,7 +62,9 @@ check("effect-receipt-is-single-use", "A dispatched change cannot be applied twi
   // The same operation, dispatched again. Its receipt is spent, so Morrow must not send a second
   // create. Canvas is then read to prove exactly one page carries this title.
   const again = await callTool("morrow_operation_dispatch", { operation_id: made.operationId }).catch((error) => ({ threw: String(error).slice(0, 160) }));
-  const pages = await read("canvas_list_pages_courses", { course_id: COURSE });
+  // The list is asked for this exact title: a page beyond the first page of an unsearched list
+  // would read as absent, and absence would look like the very thing this check is proving.
+  const pages = await read("canvas_list_pages_courses", { course_id: COURSE, search_term: title });
   const matching = (Array.isArray(pages.data) ? pages.data : []).filter((row) => String(row.title) === title);
   const cleanup = matching[0]
     ? await change("robustness.page.delete", "canvas_delete_page_courses", { course_id: COURSE, url_or_id: String(matching[0].url) })

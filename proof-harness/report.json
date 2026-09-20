@@ -1,0 +1,66 @@
+{
+  "schema": "morrow.proof-report.v1",
+  "builtAt": "2026-09-20T05:51:46.767Z",
+  "sandbox": {
+    "provider": "canvas",
+    "courseId": "89585"
+  },
+  "provable": {
+    "total": 766,
+    "evidenced": 378,
+    "failed": 2,
+    "blocked": 386,
+    "notYetRun": 0,
+    "percentEvidenced": 49.3
+  },
+  "scenarios": {
+    "total": 7,
+    "passed": 7,
+    "failed": 0
+  },
+  "classification": {
+    "NO-TENANT": {
+      "total": 571,
+      "reasons": {
+        "A site write acts on the whole Canvas site; the sandbox course gives no authority to prove it.": 296,
+        "No Moodle test tenant is connected to this machine.": 260,
+        "No Blackboard test tenant exists.": 15
+      }
+    },
+    "DESTRUCTIVE": {
+      "total": 44,
+      "reasons": {
+        "Proved only on an object this harness created in its own sandbox, then removed.": 44
+      }
+    },
+    "EXTERNAL-DEPENDENT": {
+      "total": 44,
+      "reasons": {
+        "Canvas has no read that shows the saved result, so no readback can prove the effect.": 44
+      }
+    },
+    "PROVABLE": {
+      "total": 693,
+      "reasons": {}
+    },
+    "NEEDS-LEARNER-ATTEMPT": {
+      "total": 80,
+      "reasons": {
+        "The object exists only after a learner attempt, and the sandbox course has none.": 80
+      }
+    },
+    "HELD": {
+      "total": 10,
+      "reasons": {
+        "multi_step_upload_requires_reviewed_transfer": 10
+      }
+    },
+    "BROWSER-ONLY": {
+      "total": 29,
+      "reasons": {
+        "The route answers only inside the signed-in browser session that Morrow drives.": 29
+      }
+    }
+  },
+  "ledgerRows": 1168
+}
