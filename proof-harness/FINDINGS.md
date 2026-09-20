@@ -4,7 +4,32 @@ What the run showed about Morrow, as distinct from what it showed about the harn
 names the evidence that produced it. A finding that the evidence later contradicted is corrected
 here rather than left standing.
 
-## 1. An unattended run collides with its own pending approvals
+## 1. An operation whose outcome is unknown holds its target for good, and they accumulate
+
+This is the finding that explains most of the others.
+
+When Morrow cannot confirm what a change did, the operation stays unresolved and keeps a hold on
+what it addressed. A later change to the same collection is then answered
+`provider_effect_target_conflict` and never reaches verified. The hold is not released by time,
+by a new session, or by a fresh gateway process: the journal is on disk and the hold is in it.
+
+Measured at the end of this run: the journal holds 215,772 operations, of which 547 have an
+unknown outcome. A page create that verified reliably early in the run is answered with a target
+conflict by the end of it, on the same course and the same collection.
+
+Clearing one needs `morrow_operation_close_unresolved`, which requires a person to state what
+Canvas shows. That requirement is right, and finding 2 explains why. Together they mean an
+unattended run degrades itself: the more it does that Morrow cannot confirm, the less of the
+course it can still change, and nothing but a person can undo that.
+
+What this run could clear, it cleared: only requests that were never sent, which are safe to
+cancel. The 547 unknown ones stay.
+
+Evidence: `morrow_health` journal counts; operation `op:172d9dfe` answered
+`provider_effect_target_conflict`; ledger rows `cleanup:MORROWPROOF1789874351`,
+`queue:closed-after-write-phase`.
+
+## 2. An unattended run collides with its own pending approvals
 
 A cleanup pass that asks to remove many objects in a row is answered, for some of them, with
 "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing
@@ -22,7 +47,7 @@ corrected mechanism is the one above.
 Evidence: ledger rows `cleanup:MORROWPROOF1789874351`, `cleanup:verified-against-canvas`,
 `queue:closed-after-write-phase` (three open operations, not five hundred).
 
-## 2. Morrow refuses to let an automated process certify what a person must see
+## 3. Morrow refuses to let an automated process certify what a person must see
 
 `morrow_operation_close_unresolved` requires `observed_state` and `confirmed_by_person`. A change
 Morrow could not confirm cannot be closed by the process that made it; a person has to say what
@@ -34,7 +59,7 @@ automated proof run cannot quietly mark its own uncertain writes as settled.
 
 Evidence: the refusal text from `morrow_operation_close_unresolved`; `proof-harness/clear-queue.mjs`.
 
-## 3. A write proof renames real course content, and a title is not proof of ownership
+## 4. A write proof renames real course content, and a title is not proof of ownership
 
 The write phase proves an update against a record the course already holds, which is what the
 sandbox exists for, and the record keeps the written title afterwards. The course's real
@@ -51,7 +76,7 @@ it can be put back, and a title is never evidence of who made something.
 Evidence: page `0-dot-1-course-overview-2-2-2`; ledger row `cleanup:verified-against-canvas`,
 field `carriesAMarkedTitleButWasNotMadeHere`.
 
-## 4. Canvas's rubric delete is published under a name that says nothing
+## 5. Canvas's rubric delete is published under a name that says nothing
 
 `DELETE /v1/courses/{course_id}/rubrics/{id}` is registered as `canvas_delete_single`. The name
 carries no noun, so an assistant choosing a tool by name cannot tell what it deletes. The harness's
@@ -60,7 +85,7 @@ whole pass. Every other delete in the same family is named for what it removes.
 
 Evidence: catalog entry `canvas_delete_single`; the first `cleanup:verified-against-canvas` pass.
 
-## 5. Two catalog schemas do not match what Canvas requires
+## 6. Two catalog schemas do not match what Canvas requires
 
 `canvas_get_module_item_sequence` is refused as invalid input when given only `course_id`, because
 Canvas needs asset arguments the catalog does not mark required. `canvas_get_single_rubric_courses`
@@ -70,7 +95,7 @@ cannot be passed back to the route that reads it.
 Evidence: ledger rows `canvas_get_module_item_sequence`, `canvas_get_single_rubric_courses`,
 `canvas_get_single_rubric_accounts`.
 
-## 6. Two objects this run made are still in the sandbox, and why
+## 7. Two objects this run made are still in the sandbox, and why
 
 The goal is that a run leaves nothing behind. This one leaves two things, each for a different
 reason, and neither is hidden.
@@ -88,7 +113,7 @@ being refused, and it is open.
 
 Evidence: ledger row `cleanup:verified-against-canvas`; the 409 body above.
 
-## 7. Undo is refused for a change Morrow itself verified
+## 8. Undo is refused for a change Morrow itself verified
 
 `morrow_operation_undo` does not invent the inverse of a change: the caller states the correcting
 tool and arguments, which is a sound design. But a page create that Morrow had just settled as
@@ -101,7 +126,7 @@ person told to undo a change they just made would be told to check the saved req
 
 Evidence: ledger row `morrow_operation_undo`, field `problem`.
 
-## 8. What the sandbox cannot prove
+## 9. What the sandbox cannot prove
 
 Eighty operations need a learner attempt that no one has made in the sandbox course: submissions,
 quiz sessions, statistics, and regrades. They are classified `NEEDS-LEARNER-ATTEMPT` rather than

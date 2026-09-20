@@ -110,7 +110,27 @@ export function makeTools(client, logPath) {
    * asked for by name. What they hand back is approved and followed exactly like any other change.
    */
   async function plan(label, name, args) {
-    return await change(label, name, args, { direct: true });
+    // A planner answers in one of two ways: as one change already awaiting approval, or as the
+    // list of operations it would run. Both are how the change is made, so both are followed.
+    const asked = await callTool(name, { source_binding_id: SB, ...args });
+    const report = asked?.structuredContent ?? {};
+    if (report.status === "awaiting_approval" && report.receipts?.approvalUrl) {
+      return await change(label, name, args, { direct: true });
+    }
+    if (report.status === "planned" && Array.isArray(report.operations) && report.operations.length > 0) {
+      const steps = [];
+      for (const operation of report.operations) {
+        const step = await change(`${label}.step${operation.step ?? steps.length + 1}`, operation.tool, operation.arguments || {});
+        steps.push(step);
+        if (!["verified", "sent_unchecked"].includes(String(step.outcome))) break;
+      }
+      const last = steps.at(-1) ?? {};
+      return { label, tool: name, outcome: last.outcome ?? "not_planned", steps: steps.length,
+        ...(last.operationId ? { operationId: last.operationId } : {}) };
+    }
+    if (report.status === "verified") return { label, tool: name, outcome: "verified" };
+    await log(`${label}: not_planned ${report.status ?? "no status"} ${(asked?.content?.[0]?.text || "").slice(0, 120)}`);
+    return { label, tool: name, outcome: "not_planned", plan: { status: report.status ?? null } };
   }
 
   async function change(label, name, args, { operationId, direct = false } = {}) {

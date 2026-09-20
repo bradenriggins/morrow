@@ -321,13 +321,18 @@ const record = (toolName, entry) => {
   const state = String(entry.state ?? entry.outcome ?? "unknown");
   const confirmed = state !== "verified" || entry.verification === undefined || entry.verification === "verified";
   const queued = blockedReason(entry);
-  const verdict = !confirmed ? "FAIL" : queued ? "BLOCKED" : (VERDICTS[state] ?? "FAIL");
+  // A change Canvas confirmed is proven, whatever an earlier planning attempt said: the queue
+  // reason only explains a change that did not complete.
+  const verdict = !confirmed ? "FAIL"
+    : state === "verified" ? "PASS"
+    : queued ? "BLOCKED"
+    : (VERDICTS[state] ?? "FAIL");
   recordRow(ledger, toolName, {
     phase: 1,
     kind: "write",
     verdict,
     ...(confirmed ? {} : { reason: `Morrow settled this change as ${state} while its own readback said ${entry.verification}.` }),
-    ...(confirmed && queued ? { reason: queued } : {}),
+    ...(confirmed && queued && state !== "verified" ? { reason: queued } : {}),
     state,
     ...(entry.reason ? { reason: entry.reason } : {}),
     ...(entry.path ? { path: entry.path } : {}),

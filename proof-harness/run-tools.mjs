@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 import { connect, SANDBOX, SOURCE_BINDING } from "./connect.mjs";
 import { makeTools } from "./lib/tools.mjs";
 import { loadLedger, recordRow, summarize } from "./ledger.mjs";
+import { extraRunners } from "./lib/tool-runners-extra.mjs";
+import { fixtureRunners } from "./lib/tool-runners-fixtures.mjs";
 
 const COURSE = SANDBOX.courseId;
 const mark = `${SANDBOX.mark}T${String(Math.floor(Date.now() / 1000))}`;
@@ -13,7 +15,10 @@ const ledger = loadLedger();
 const { client, close } = await connect("morrow-proof-tools");
 const { log, read, change, plan, callTool } = makeTools(client, new URL("run-tools.log", import.meta.url));
 
-const todo = manifest.operations.filter((row) => row.kind === "mcp_tool" && row.classification === "PROVABLE" && !ledger.rows[row.id]);
+// A control the manifest once called provable, and one an earlier pass had no exercise for: both
+// are still to be proven, so both are run.
+// Any control without evidence is still to be proven, whatever the manifest calls it.
+const todo = manifest.operations.filter((row) => row.kind === "mcp_tool" && !ledger.rows[row.id]);
 const only = (process.env.PROOF_ONLY || "").split(",").map((name) => name.trim()).filter(Boolean);
 
 /** A tool answered when it returned structure and did not report an error. */
@@ -44,7 +49,9 @@ const RUNNERS = {
       max_pages_per_list: 1, max_list_calls_per_course: 10,
     }, 900_000),
   }),
-  morrow_audit_course: async () => ({ answer: await callTool("morrow_audit_course", { source_binding_id: SOURCE_BINDING, course_id: COURSE }, 900_000) }),
+  morrow_audit_course: async () => ({ answer: await callTool("morrow_audit_course", {
+    provider: "canvas", source_binding_id: SOURCE_BINDING, course_id: COURSE,
+  }, 900_000) }),
   morrow_check_new_quiz: async () => {
     const quizzes = await read("canvas_list_new_quizzes", { course_id: COURSE });
     const first = (Array.isArray(quizzes.data) ? quizzes.data : [])[0];
@@ -121,6 +128,9 @@ const RUNNERS = {
   }),
 };
 
+Object.assign(RUNNERS, extraRunners({ COURSE, SOURCE_BINDING, mark, state, callTool, read, change, plan }));
+Object.assign(RUNNERS, fixtureRunners({ COURSE, SOURCE_BINDING, mark, state, callTool, read, change, plan }));
+
 try {
   const course = await read("canvas_get_single_course_courses", { id: COURSE });
   state.courseName = String(course.data?.name ?? course.data?.course?.name ?? "");
@@ -143,11 +153,16 @@ try {
       recordRow(ledger, row.id, { phase: 1, kind: "tool", verdict: "BLOCKED", reason: outcome.blocked });
     } else if (outcome.threw) {
       recordRow(ledger, row.id, { phase: 1, kind: "tool", verdict: "FAIL", reason: `The control threw: ${outcome.threw}` });
+    } else if (outcome.detail?.outcome && ["approved", "applied_or_unknown", "sent_unchecked"].includes(String(outcome.detail.outcome))) {
+      // Morrow sent the change and could not confirm it. That is not a defect, and it is not proof.
+      recordRow(ledger, row.id, { phase: 1, kind: "tool", verdict: "BLOCKED",
+        reason: `Morrow settled this control's change as ${outcome.detail.outcome}, so Canvas confirmed nothing.`,
+        readback: { source: "morrow", ...(outcome.detail ?? {}) } });
     } else {
       const ok = outcome.ok ?? answered(outcome.answer);
       recordRow(ledger, row.id, {
         phase: 1, kind: "tool", verdict: ok ? "PASS" : "FAIL",
-        ...(ok ? {} : { reason: `The control answered with an error or nothing: ${JSON.stringify(outcome.answer?.structuredContent ?? null).slice(0, 200)}` }),
+        ...(ok ? {} : { reason: `The control answered with an error or nothing: ${(outcome.answer?.content?.[0]?.text || JSON.stringify(outcome.answer?.structuredContent ?? null)).slice(0, 220)}` }),
         readback: { source: "morrow", answered: ok, ...(outcome.detail ?? {}) },
         sandbox: { courseId: COURSE, mark },
       });
@@ -155,6 +170,10 @@ try {
     await log(`${row.id}: ${ledger.rows[row.id].verdict}`);
   }
   // Whatever the lifecycle left behind goes now.
+  if (state.altPageUrl) {
+    const removed = await change("fixture.page.delete", "canvas_delete_page_courses", { course_id: COURSE, url_or_id: state.altPageUrl });
+    await log(`fixture page removed: ${removed.outcome}`);
+  }
   if (state.pageUrl) {
     const removed = await change("tools.page.delete", "canvas_delete_page_courses", { course_id: COURSE, url_or_id: state.pageUrl });
     await log(`lifecycle page removed: ${removed.outcome}`);

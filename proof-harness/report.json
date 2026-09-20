@@ -1,66 +1,82 @@
 {
   "schema": "morrow.proof-report.v1",
-  "builtAt": "2026-09-20T05:51:46.767Z",
+  "builtAt": "2026-09-20T06:46:51.198Z",
   "sandbox": {
     "provider": "canvas",
     "courseId": "89585"
   },
-  "provable": {
-    "total": 766,
-    "evidenced": 378,
-    "failed": 2,
-    "blocked": 386,
-    "notYetRun": 0,
-    "percentEvidenced": 49.3
+  "operations": {
+    "inManifest": 1471,
+    "attempted": 1177,
+    "proven": 418,
+    "defects": 4,
+    "neverAttempted": 294,
+    "percentOfAttemptedProven": 35.5
   },
   "scenarios": {
     "total": 7,
-    "passed": 7,
-    "failed": 0
+    "passed": 7
+  },
+  "robustness": {
+    "total": 6,
+    "passed": 6
   },
   "classification": {
-    "NO-TENANT": {
-      "total": 571,
-      "reasons": {
-        "A site write acts on the whole Canvas site; the sandbox course gives no authority to prove it.": 296,
-        "No Moodle test tenant is connected to this machine.": 260,
-        "No Blackboard test tenant exists.": 15
-      }
+    "OUT-OF-SANDBOX": {
+      "count": 216,
+      "reason": "The change addresses something outside the connected course, which this harness never touches."
     },
-    "DESTRUCTIVE": {
-      "total": 44,
-      "reasons": {
-        "Proved only on an object this harness created in its own sandbox, then removed.": 44
-      }
+    "NO-FIXTURE": {
+      "count": 215,
+      "reason": "The sandbox course holds no object of this kind to address the route with."
     },
-    "EXTERNAL-DEPENDENT": {
-      "total": 44,
-      "reasons": {
-        "Canvas has no read that shows the saved result, so no readback can prove the effect.": 44
-      }
+    "QUEUE-COLLISION": {
+      "count": 91,
+      "reason": "Another request for the same target was still waiting, so this one was not settled."
     },
-    "PROVABLE": {
-      "total": 693,
-      "reasons": {}
+    "PROVEN": {
+      "count": 418,
+      "reason": ""
+    },
+    "PERSON-SETTINGS": {
+      "count": 17,
+      "reason": "The change alters the signed-in person's own account settings rather than course content."
+    },
+    "OUTBOUND": {
+      "count": 24,
+      "reason": "The change leaves Canvas for someone: a ticket, a message, or another course."
+    },
+    "PROVIDER-REFUSED": {
+      "count": 101,
+      "reason": "Canvas refused the request for this connection, so no expected state can be read back."
+    },
+    "NO-READBACK": {
+      "count": 37,
+      "reason": "Canvas has no read that shows the saved result of this change."
     },
     "NEEDS-LEARNER-ATTEMPT": {
-      "total": 80,
-      "reasons": {
-        "The object exists only after a learner attempt, and the sandbox course has none.": 80
-      }
+      "count": 45,
+      "reason": "The object exists only after a learner attempt, and the sandbox course has none."
     },
-    "HELD": {
-      "total": 10,
-      "reasons": {
-        "multi_step_upload_requires_reviewed_transfer": 10
-      }
+    "IRREVERSIBLE": {
+      "count": 5,
+      "reason": "The change cannot be undone on a person or a whole course, so it is never attempted here."
     },
-    "BROWSER-ONLY": {
-      "total": 29,
-      "reasons": {
-        "The route answers only inside the signed-in browser session that Morrow drives.": 29
-      }
+    "NO-TENANT": {
+      "count": 275,
+      "reason": "No Moodle test tenant is connected to this machine."
+    },
+    "PROVABLE": {
+      "count": 7,
+      "reason": ""
+    },
+    "NEEDS-FIXTURE": {
+      "count": 16,
+      "reason": "Needs an assignment whose description carries an image with no description."
+    },
+    "BLOCKED-OTHER": {
+      "count": 4,
+      "reason": "This run has no quiz to order."
     }
-  },
-  "ledgerRows": 1168
+  }
 }
