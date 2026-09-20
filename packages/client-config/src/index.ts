@@ -422,7 +422,7 @@ function readme(input: {
     "- claude.mcp.json: merge the mcpServers entry into Claude Code configuration.",
     "- claude-desktop.config.json: merge the mcpServers entry into claude_desktop_config.json. That file is in Library/Application Support/Claude on macOS and in %APPDATA%\\Claude on Windows. Claude Desktop opens it from Settings, Developer, Edit Config.",
     "- gemini.settings.json: merge the mcpServers entry into Gemini CLI settings.",
-    "- cursor.mcp.json: merge the mcpServers entry into .cursor/mcp.json or ~/.cursor/mcp.json. Cursor documents no cwd field, so Morrow uses the directory Cursor starts it in.",
+    "- cursor.mcp.json: merge the mcpServers entry into .cursor/mcp.json or ~/.cursor/mcp.json. Cursor documents no cwd field, so Morrow uses the directory Cursor starts it in. Open Cursor on a project folder. Morrow refuses to run with a disk root or your home directory as the workspace.",
     "- vscode.mcp.json: merge the servers entry into .vscode/mcp.json. For a user profile, run MCP: Open User Configuration in VS Code and merge it there.",
     "- install.posix.sh and install.powershell.ps1: project-scope registration commands for Claude Code and Gemini CLI. Use morrow mcp install for all supported clients.",
     "- verify.txt: client-neutral verification sequence.",
@@ -1195,7 +1195,7 @@ export function morrowClientConfigNotes(input: {
     return ["Codex reads a project .codex/config.toml only in a project you have marked trusted. The ChatGPT desktop app reads the user file, so for ChatGPT run this command again with --scope user."];
   }
   if (input.client === "claude-desktop" && platform === "win32") {
-    return ["Morrow confirmed a write to this documented Windows location on a real Windows computer on 8 September 2026. In Claude Desktop, open Settings, Developer, Edit Config, and check that Morrow is listed."];
+    return ["This is the documented Windows location, and no Windows computer has confirmed a Morrow write here. In Claude Desktop, open Settings, Developer, Edit Config, and check that Morrow is listed."];
   }
   return [];
 }
@@ -1939,9 +1939,10 @@ export function buildClientParityReport(options: ClientConfigBundleOptions): Cli
   const clients = SUPPORTED_MORROW_CLIENTS.map((client) => {
     const entry = serverEntry(bundle, client, options.upstreamConfigPath);
     const pinned = entry.cwd !== undefined;
+    // Equivalence covers the working directory, so a client whose file pins none is not equivalent.
     const equivalent = entry.command === bundle.command
       && JSON.stringify(entry.args) === JSON.stringify(bundle.args)
-      && (!pinned || entry.cwd === bundle.cwd)
+      && pinned && entry.cwd === bundle.cwd
       && JSON.stringify(entry.env) === JSON.stringify({ MORROW_UPSTREAMS_FILE: options.upstreamConfigPath });
     return {
       client,

@@ -47,7 +47,11 @@ async function fixture(root, version, options = {}) {
   await fs.writeFile(path.join(sourceDirectory, "manifest.json"), `${JSON.stringify(manifest)}\n`);
   await fs.writeFile(path.join(sourceDirectory, "src", "service-worker.js"), options.workerSource || `export const version = ${JSON.stringify(version)};\n`);
   await fs.writeFile(path.join(sourceDirectory, "settings.html"), "<main>Morrow Bridge</main>\n");
-  const paths = ["manifest.json", "settings.html", "src/service-worker.js"];
+  const extraFiles = options.extraFiles || {};
+  for (const [relative, content] of Object.entries(extraFiles)) {
+    await fs.writeFile(path.join(sourceDirectory, relative), content);
+  }
+  const paths = ["manifest.json", "settings.html", "src/service-worker.js", ...Object.keys(extraFiles)].sort();
   const files = [];
   for (const relative of paths) {
     const content = await fs.readFile(path.join(sourceDirectory, relative));
@@ -228,6 +232,19 @@ test("the app initializes only an exact signed-payload receipt and records an ap
   await assertBridgeError(() => initializeBridgeDirectory({ ...release, trustedReleaseManifestSha256: "0".repeat(64), stateDirectory, bridgeDirectory }), "bridge_release_manifest_untrusted");
   await fs.writeFile(path.join(release.sourceDirectory, "src/service-worker.js"), "changed");
   await assertBridgeError(() => readReleaseManifest(release), "bridge_release_files_invalid");
+});
+
+test("a sealed file beside a directory of the same stem is verified in the packager's flat path order", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-bridge-order-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "UserData", "State");
+  const bridgeDirectory = path.join(root, "UserData", "Bridge");
+  const release = await fixture(root, "1.0.4", { extraFiles: { "src.html": "<main>Morrow Bridge options</main>\n" } });
+  const read = await readReleaseManifest(release);
+  assert.deepEqual(read.files.map((file) => file.path), ["manifest.json", "settings.html", "src.html", "src/service-worker.js"]);
+  const installed = await initializeBridgeDirectory({ ...release, stateDirectory, bridgeDirectory, initialChallenge: challenge("initial") });
+  assert.equal(installed.initialized, true);
+  assert.equal(await fs.readFile(path.join(bridgeDirectory, "src.html"), "utf8"), "<main>Morrow Bridge options</main>\n");
 });
 
 test("a challenge is exact stable-directory evidence for a later authenticated Bridge reply", async (t) => {

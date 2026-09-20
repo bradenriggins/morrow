@@ -540,9 +540,10 @@ async function createWindow() {
 }
 
 /** Owns bootstrap, activation, and quit as one closing lifecycle. */
-function createDesktopLifecycle({ target, initialize, currentWindow, openWindow, closeResources }) {
+function createDesktopLifecycle({ target, initialize, currentWindow, openWindow, closeResources, reportFailure = () => {} }) {
   if (!target || typeof target.quit !== "function" || typeof initialize !== "function"
-    || typeof currentWindow !== "function" || typeof openWindow !== "function" || typeof closeResources !== "function") {
+    || typeof currentWindow !== "function" || typeof openWindow !== "function" || typeof closeResources !== "function"
+    || typeof reportFailure !== "function") {
     throw new TypeError("Desktop lifecycle needs an app and resource functions");
   }
   let bootstrap = null;
@@ -578,6 +579,13 @@ function createDesktopLifecycle({ target, initialize, currentWindow, openWindow,
         if (closing || showWindow !== true) return null;
         const current = currentWindow();
         return current && !current.isDestroyed() ? current : openWindow();
+      }).catch(() => {
+        // A failed bootstrap keeps its rejection, so every later activation
+        // would fail the same way with no window to carry the reason. The
+        // failure is reported once and the app quits instead of waiting.
+        if (!closing) reportFailure();
+        void close();
+        return null;
       }).finally(() => { opening = null; });
       return opening;
     },
@@ -897,7 +905,8 @@ const desktopLifecycle = createDesktopLifecycle({
   initialize: startMorrow,
   currentWindow: () => mainWindow,
   openWindow: openDesktopWindow,
-  closeResources: closeDesktopResources
+  closeResources: closeDesktopResources,
+  reportFailure: showWindowLoadFailure
 });
 
 if (claimSingleInstance(app, () => mainWindow)) {

@@ -895,8 +895,13 @@ function redactKnownLearnerTextPrepared(
   }
   value = value.replace(/\b(?:Student A[1-9][0-9]*|learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/gu, (reference) => {
     const label = exactContext.referenceLabels.get(reference);
-    if (!label) throw new Error("learner_roster_identity_unavailable");
-    return label;
+    if (label) return label;
+    // Morrow's own label vocabulary comes back in course prose, because people paste an
+    // answer into an announcement or a comment. A label that names nobody on this roster
+    // follows the unrostered-address rule: a reading replaces it with the marker, and the
+    // strict projection a planned write is checked against refuses instead.
+    if (exactContext.addresses === "refuse") throw new Error("learner_roster_identity_unavailable");
+    return "[learner]";
   });
   // A string that is exactly a numeric platform id names a person: a recipient list entry or a
   // cache value carries people that way, with nothing around the number to say so.

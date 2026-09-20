@@ -232,6 +232,31 @@ test("activation during bootstrap joins one initialization and creates one trust
   assert.equal(created, 2, "concurrent activation created more than one replacement window");
 });
 
+test("a failed bootstrap reports the failure once, opens no window, and quits", async () => {
+  const { main } = loadMain(fakeApp(true));
+  const target = fakeApp(true);
+  let reported = 0;
+  let windows = 0;
+  const lifecycle = main.createDesktopLifecycle({
+    target,
+    initialize: async () => { throw new Error("bootstrap failed"); },
+    currentWindow: () => null,
+    openWindow: () => { windows += 1; return fakeWindow(); },
+    closeResources: async () => {},
+    reportFailure: () => { reported += 1; }
+  });
+
+  assert.equal(await lifecycle.open(), null, "a failed bootstrap opened a window");
+  await lifecycle.pending();
+  assert.equal(reported, 1);
+  assert.equal(windows, 0);
+  assert.equal(target.quits, 1);
+
+  assert.equal(await lifecycle.open(), null, "activation after a failed bootstrap reopened the app");
+  assert.equal(reported, 1, "activation repeated the failure message");
+  assert.equal(target.quits, 1);
+});
+
 test("a renderer load failure destroys the hidden window and activation opens a fresh one", async () => {
   const root = await temporaryRoot();
   let startup = null;

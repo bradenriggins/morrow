@@ -61,6 +61,19 @@ Two limits stay open:
 - The indexed field encoding is **live-unverified**. No live Canvas tenant has confirmed it, and no live tenant has confirmed that a rebuilt answer round-trips without losing hidden question state.
 - The published `Answer` model documents `answer_comments`, but in `instructure/canvas-lms` only the essay parser reads that name. The multiple-choice, true-false, multiple-answers and short-answer parsers read `answer_comment` or `comments`. Morrow sends the documented name, so an answer comment is not proven to survive a rebuild. A repair that must preserve answer comments has to check them in its own post-write readback.
 
+## Sanitation rule: record list write inputs
+
+Canvas types a list of records as `[Model]`, which the generic mapper flattens to an array of strings. Canvas reads each element as a record of its own fields, so no payload can be rebuilt from that shape. `applyRecordListWriteParameters()` in `scripts/generate-canvas-api-catalog.mjs` replaces the declared item type on four write inputs:
+
+- `assignment_overrides` on `POST /v1/courses/{course_id}/assignments/overrides#batch_create_overrides_in_course`, required key `assignment_id`;
+- `assignment_overrides` on `PUT /v1/courses/{course_id}/assignments/overrides#batch_update_overrides_in_course`, required keys `assignment_id` and `id`;
+- `overrides` on `PUT /v1/courses/{course_id}/modules/{context_module_id}/assignment_overrides#update_module_s_overrides`, no required key, so an empty list still deletes every module override;
+- `column_data` on `PUT /v1/courses/{course_id}/custom_gradebook_column_data#bulk_update_column_data`, required keys `column_id`, `user_id` and `content`.
+
+Source of the fields: the override records take the documented create attributes, read from `create_assignment_override` in the same catalog, which is the operation the two batch descriptions point at. The module route carries only the keys its own description names: `id`, `title`, `student_ids`, `course_section_id` and `group_id`. One column datum record carries what the single-datum route `update_column_data` carries in its address and its body: the column, the person, and the content. No other field is accepted.
+
+`connector/extension/src/canvas-content.js` sends each record as `name[][field]` form fields, which is the encoding Canvas reads one record at a time. `scripts/test/canvas-record-list-body.test.mjs` holds both the declared fields and the sent request. The encoding stays **live-unverified**: no live Canvas tenant has confirmed these four routes.
+
 ## Discovery
 
 The gateway can register the complete catalog because the default limit is 2,000 tools. Clients should still use `morrow_catalog_search` and bounded catalog pages instead of loading or guessing the full surface in a prompt.

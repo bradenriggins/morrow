@@ -72,7 +72,11 @@ function schemaType(parameter) {
   const format = String(parameter.format || "").toLowerCase();
   const name = String(parameter.name || "");
   if (parameter.name === "url_or_id") return { type: "string", minLength: 1, maxLength: 1000 };
-  if (["array", "string[]"].includes(type) || type.startsWith("multiple ") || /^\[.+\]$/.test(type)) {
+  // A path segment carries one value. Canvas types a few path ids from the list shape of the
+  // request body, and taking that type would build the address from a joined list.
+  const listed = String(parameter.paramType || "").toLowerCase() !== "path"
+    && (["array", "string[]"].includes(type) || type.startsWith("multiple ") || /^\[.+\]$/.test(type));
+  if (listed) {
     const itemType = String(parameter.items?.type || "string").toLowerCase();
     const ids = /(?:^|_)ids?$/.test(name) || /\[(?:\w+_)?ids?\]$/.test(name)
       || ["members", "order"].includes(name)
@@ -827,6 +831,112 @@ function applyClassicQuizAnswerParameters(operations) {
   }
 }
 
+const CANVAS_ID_SCHEMA = { type: "string", pattern: "^[1-9][0-9]*$" };
+
+// The Canvas specification types a list of records as [Model], which the generic
+// mapper flattens to an array of strings. Canvas reads each element as a record
+// of its own fields, so no payload can be rebuilt from that shape. The fields of
+// one assignment override are the documented create attributes, which the batch
+// routes point at by name.
+function assignmentOverrideRecordFields(operations) {
+  const create = operations.find((candidate) => (
+    candidate.method === "POST"
+    && candidate.path === "/v1/courses/{course_id}/assignments/{assignment_id}/overrides"
+    && candidate.nickname === "create_assignment_override"
+  ));
+  if (!create) throw new Error("Canvas assignment override create operation is required.");
+  const prefix = "assignment_override[";
+  const fields = Object.fromEntries(create.parameters
+    .filter((parameter) => parameter.location === "form" && parameter.wireName.startsWith(prefix))
+    .map((parameter) => [parameter.wireName.slice(prefix.length, -1), parameter.schema]));
+  const documented = ["course_section_id", "due_at", "group_id", "lock_at", "student_ids", "title", "unlock_at"];
+  if (documented.some((field) => !fields[field])) {
+    throw new Error("Canvas assignment override attributes no longer match the documented batch contract.");
+  }
+  return fields;
+}
+
+// One custom Gradebook column datum carries in each record what the single-datum
+// route carries in its address and its body: the column, the person, the content.
+function customColumnDatumRecordFields(operations) {
+  const update = operations.find((candidate) => (
+    candidate.method === "PUT"
+    && candidate.path === "/v1/courses/{course_id}/custom_gradebook_columns/{id}/data/{user_id}"
+    && candidate.nickname === "update_column_data"
+  ));
+  const content = update?.parameters.find((parameter) => (
+    parameter.location === "form" && parameter.wireName === "column_data[content]"
+  ));
+  if (!content) throw new Error("Canvas custom Gradebook column datum update operation is required.");
+  return { column_id: CANVAS_ID_SCHEMA, content: content.schema, user_id: CANVAS_ID_SCHEMA };
+}
+
+export function applyRecordListWriteParameters(operations) {
+  const override = assignmentOverrideRecordFields(operations);
+  // The module route documents the keys it reads: id, title, student_ids,
+  // course_section_id and group_id. It takes no dates of its own.
+  const moduleFields = ["course_section_id", "group_id", "student_ids", "title"];
+  const rows = [
+    {
+      method: "POST",
+      path: "/v1/courses/{course_id}/assignments/overrides",
+      nickname: "batch_create_overrides_in_course",
+      wireName: "assignment_overrides",
+      required: ["assignment_id"],
+      properties: { ...override, assignment_id: CANVAS_ID_SCHEMA },
+    },
+    {
+      method: "PUT",
+      path: "/v1/courses/{course_id}/assignments/overrides",
+      nickname: "batch_update_overrides_in_course",
+      wireName: "assignment_overrides",
+      required: ["assignment_id", "id"],
+      properties: { ...override, assignment_id: CANVAS_ID_SCHEMA, id: CANVAS_ID_SCHEMA },
+    },
+    {
+      method: "PUT",
+      path: "/v1/courses/{course_id}/modules/{context_module_id}/assignment_overrides",
+      nickname: "update_module_s_overrides",
+      wireName: "overrides",
+      required: [],
+      properties: {
+        ...Object.fromEntries(moduleFields.map((field) => [field, override[field]])),
+        id: CANVAS_ID_SCHEMA,
+      },
+    },
+    {
+      method: "PUT",
+      path: "/v1/courses/{course_id}/custom_gradebook_column_data",
+      nickname: "bulk_update_column_data",
+      wireName: "column_data",
+      required: ["column_id", "content", "user_id"],
+      properties: customColumnDatumRecordFields(operations),
+    },
+  ];
+  for (const row of rows) {
+    const operation = operations.find((candidate) => (
+      candidate.method === row.method && candidate.path === row.path && candidate.nickname === row.nickname
+    ));
+    if (!operation) throw new Error(`Canvas record list operation ${row.nickname} is required.`);
+    const target = operation.parameters.filter((parameter) => (
+      parameter.location === "form" && parameter.wireName === row.wireName
+    ));
+    if (target.length !== 1 || target[0].schema.type !== "array") {
+      throw new Error(`Canvas operation ${row.nickname} no longer documents one ${row.wireName} array.`);
+    }
+    target[0].schema = {
+      ...target[0].schema,
+      items: {
+        type: "object",
+        properties: row.properties,
+        ...(row.required.length > 0 ? { required: [...row.required].sort(ascii) } : {}),
+        additionalProperties: false,
+      },
+    };
+    operation.inputSchema = inputSchema(operation.parameters);
+  }
+}
+
 /**
  * Canvas names the signed-in person `self` on their own routes, and documents
  * every id as a number. Morrow speaks for that person, so `self` is admitted
@@ -1002,6 +1112,7 @@ async function buildCatalog() {
   applySelfPersonRoutes(official);
   applySplatPathInputs(official);
   applyAlternativeInputs(official);
+  applyRecordListWriteParameters(official);
   const itemBank = itemBankOperations();
   const courseFileContent = [courseFileTextOperation()];
   const browser = [...itemBank, ...courseFileContent];

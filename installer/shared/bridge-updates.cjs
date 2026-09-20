@@ -193,7 +193,8 @@ async function walkFiles(root, relative = "") {
     else if (info.isFile()) files.push({ path: next, bytes: info.size, full });
     else fail("bridge_release_file_type_refused", { path: next });
   }
-  return files;
+  // Sealed file lists are flat lexicographic, so a walk must flatten before a receipt compares it position by position.
+  return relative ? files : files.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
 }
 
 async function verifyDirectoryReceipt(root, files, code, allowMarker = false) {

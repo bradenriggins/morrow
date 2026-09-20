@@ -1032,6 +1032,16 @@ describe("bidirectional roster dictionary", () => {
     roster.register(scope, []);
     expect(() => resolveLearnerTokens({ body: `Hello ${token}.` }, ctx.learnerVault, scope, roster)).toThrow("learner_roster_identity_unavailable");
   });
+  it("neutralizes a pasted label outside the roster and refuses it only in the strict projection", () => {
+    const roster = new LearnerRoster(); roster.register(scope, [{ id: "17", name: "Ada Lovelace" }]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const stale = "learner_1f0e3dad-9999-4444-8888-99990000abcd";
+    expect(redactKnownLearnerText("Great work Student A9! I agree.", ctx)).toBe("Great work [learner]! I agree.");
+    expect(redactKnownLearnerText(`See ${stale} for the rest.`, ctx)).toBe("See [learner] for the rest.");
+    expect(redactLearnerEgress({ body: "Student A9 replied." }, ctx)).toEqual({ body: "[learner] replied." });
+    expect(() => redactLearnerEgress({ body: "Student A9 replied." }, { ...ctx, addresses: "refuse" }))
+      .toThrow("learner_roster_identity_unavailable");
+  });
   it("replaces numeric identity values without changing typed course IDs or grades", () => {
     const roster = new LearnerRoster(); roster.register(scope, [{ id: "17", name: "Ada Lovelace" }]);
     const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };

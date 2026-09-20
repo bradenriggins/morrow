@@ -86,3 +86,88 @@ test("a two-entry grading scheme reaches Canvas as two whole records", async () 
     ["grading_scheme_entry[][value]", "0"],
   ]);
 });
+
+// Canvas types a list of records as [Model], which the generic catalog mapper
+// flattens to an array of strings. A record cannot be rebuilt from that shape,
+// so applyRecordListWriteParameters() declares the fields each route reads.
+test("the record list writes declare the record fields their route reads", () => {
+  const declared = new Map([
+    ["canvas_batch_create_overrides_in_course", { wireName: "assignment_overrides", required: ["assignment_id"] }],
+    ["canvas_batch_update_overrides_in_course", { wireName: "assignment_overrides", required: ["assignment_id", "id"] }],
+    ["canvas_update_module_s_overrides", { wireName: "overrides", required: undefined }],
+    ["canvas_bulk_update_column_data", { wireName: "column_data", required: ["column_id", "content", "user_id"] }],
+  ]);
+  for (const [toolName, expected] of declared) {
+    const operation = catalogOperation(toolName);
+    const parameter = operation.parameters.find((entry) => entry.wireName === expected.wireName);
+    assert.ok(parameter, `${toolName} no longer documents ${expected.wireName}`);
+    assert.equal(parameter.schema.type, "array", toolName);
+    assert.equal(parameter.schema.items.type, "object", toolName);
+    assert.equal(parameter.schema.items.additionalProperties, false, toolName);
+    assert.deepEqual(parameter.schema.items.required, expected.required, toolName);
+    assert.equal(operation.inputSchema.properties[parameter.inputName].items.type, "object", toolName);
+  }
+  const overrideFields = catalogOperation("canvas_batch_update_overrides_in_course")
+    .parameters.find((entry) => entry.wireName === "assignment_overrides").schema.items.properties;
+  assert.deepEqual(Object.keys(overrideFields).sort(), [
+    "assignment_id", "course_section_id", "due_at", "group_id", "id", "lock_at", "student_ids", "title", "unlock_at",
+  ]);
+  const moduleFields = catalogOperation("canvas_update_module_s_overrides")
+    .parameters.find((entry) => entry.wireName === "overrides").schema.items.properties;
+  assert.deepEqual(Object.keys(moduleFields).sort(), ["course_section_id", "group_id", "id", "student_ids", "title"]);
+});
+
+// The shipped catalog is generator output, so the rule and the catalog must agree.
+test("the shipped catalog carries exactly what the generator rule declares", async () => {
+  const { applyRecordListWriteParameters } = await import("../generate-canvas-api-catalog.mjs");
+  const operations = JSON.parse(JSON.stringify(CATALOG.operations));
+  applyRecordListWriteParameters(operations);
+  assert.deepEqual(operations, CATALOG.operations);
+});
+
+test("a batch override create reaches Canvas as whole override records", async () => {
+  const sent = await sendWrite(
+    "canvas_batch_create_overrides_in_course",
+    {
+      course_id: "42",
+      assignment_overrides: [
+        { assignment_id: "77", course_section_id: "5", due_at: "2026-10-21T18:48:00Z" },
+        { assignment_id: "78", student_ids: ["9", "11"], title: "Extension" },
+      ],
+    },
+    [{ id: 512, assignment_id: 77 }],
+  );
+  assert.equal(sent.length, 1);
+  assert.deepEqual([...new URLSearchParams(sent[0])], [
+    ["assignment_overrides[][assignment_id]", "77"],
+    ["assignment_overrides[][course_section_id]", "5"],
+    ["assignment_overrides[][due_at]", "2026-10-21T18:48:00Z"],
+    ["assignment_overrides[][assignment_id]", "78"],
+    ["assignment_overrides[][student_ids][]", "9"],
+    ["assignment_overrides[][student_ids][]", "11"],
+    ["assignment_overrides[][title]", "Extension"],
+  ]);
+});
+
+test("a bulk custom column update reaches Canvas as whole datum records", async () => {
+  const sent = await sendWrite(
+    "canvas_bulk_update_column_data",
+    {
+      course_id: "42",
+      column_data: [
+        { column_id: "3", user_id: "9", content: "Nut allergy" },
+        { column_id: "3", user_id: "11", content: "" },
+      ],
+    },
+    { id: 1, workflow_state: "queued" },
+  );
+  assert.equal(sent.length, 1);
+  assert.deepEqual([...new URLSearchParams(sent[0])], [
+    ["column_data[][column_id]", "3"],
+    ["column_data[][user_id]", "9"],
+    ["column_data[][content]", "Nut allergy"],
+    ["column_data[][column_id]", "3"],
+    ["column_data[][user_id]", "11"],
+    ["column_data[][content]", ""],
+  ]);
+});

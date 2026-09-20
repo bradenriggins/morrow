@@ -135,8 +135,10 @@ fields, while the executor independently requires the exact snapshot object.
 Two files hold this same list and must agree:
 [`connector/extension/src/edit-policy.js`](../../connector/extension/src/edit-policy.js)
 and [`packages/bridge-protocol/src/index.ts`](../../packages/bridge-protocol/src/index.ts).
+`scripts/test/edit-policy.test.mjs` compares them name for name.
 [`packages/mcp-server/src/runtime.ts`](../../packages/mcp-server/src/runtime.ts)
-applies the same rule when it derives changed fields for Edit authority.
+imports the `bridge-protocol` set when it derives changed fields for Edit
+authority, so it cannot hold a third copy that drifts from either.
 
 ## Capped grants
 

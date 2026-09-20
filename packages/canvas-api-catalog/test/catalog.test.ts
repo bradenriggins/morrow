@@ -90,6 +90,17 @@ describe("Canvas API catalog", () => {
       .toBe("/quiz/v1/courses/9007199254740993/quizzes/9223372036854775807");
   });
 
+  it("gives every path input one value, so no address is built from a joined list", () => {
+    const listed = catalog.operations.flatMap((operation) => operation.parameters
+      .filter((parameter) => parameter.location === "path" && parameter.schema.type !== "string")
+      .map((parameter) => `${operation.toolName}:${parameter.inputName}`));
+    expect(listed).toEqual([]);
+    const bulk = catalog.operations.find((candidate) => candidate.toolName === "canvas_bulk_create_lti_context_controls");
+    expect(bulk).toBeTruthy();
+    expect(operationArguments(bulk!, { account_id: "7", registration_id: "3" }).path)
+      .toBe("/v1/accounts/7/lti_registrations/3/controls/bulk");
+  });
+
   it("keeps anonymous submission references as path-safe opaque strings", () => {
     for (const name of [
       "canvas_get_single_submission_by_anonymous_id_courses",

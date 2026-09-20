@@ -377,9 +377,9 @@ describe("project installation and hermetic parity", () => {
         realClientExecution: "not_run",
       });
       expect(report.clients).toHaveLength(6);
-      expect(report.clients.every((client) => client.equivalent)).toBe(true);
+      expect(report.clients.filter((client) => !client.equivalent).map((client) => client.client)).toEqual(["cursor"]);
       expect(report.clients.find((client) => client.client === "cursor"))
-        .toMatchObject({ workingDirectory: "client_default" });
+        .toMatchObject({ workingDirectory: "client_default", equivalent: false });
       expect(report.clients.find((client) => client.client === "cursor")).not.toHaveProperty("cwd");
       expect(report.clients.find((client) => client.client === "vscode"))
         .toMatchObject({ workingDirectory: "pinned", cwd: repositoryRoot });
@@ -1172,8 +1172,9 @@ describe("project installation and hermetic parity", () => {
 
     const windowsDesktop = morrowClientConfigNotes({ client: "claude-desktop", scope: "user", platform: "win32" });
     expect(windowsDesktop).toHaveLength(1);
-    expect(windowsDesktop[0]).toContain("confirmed a write to this documented Windows location");
+    expect(windowsDesktop[0]).toContain("no Windows computer has confirmed a Morrow write here");
     expect(windowsDesktop[0]).toContain("Edit Config");
+    expect(windowsDesktop[0]).not.toMatch(/Morrow confirmed|on a real Windows computer/);
     expect(morrowClientConfigNotes({ client: "claude-desktop", scope: "user", platform: "darwin" })).toEqual([]);
     expect(morrowClientConfigNotes({ client: "claude-code", scope: "project", platform: "win32" })).toEqual([]);
   });

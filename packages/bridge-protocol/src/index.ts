@@ -550,7 +550,18 @@ const PRINTABLE_TEXT = /^[\x20-\x7e]+$/;
 const PRIVATE_ATTACHMENT_HANDLE = /^file:[A-Za-z0-9_.:-]{1,160}$/;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const CANVAS_CONVERSATION_RECIPIENT = /^(?:[1-9][0-9]{0,18}|(?:course|section|group)_[1-9][0-9]{0,18}(?:_(?:students|teachers|tas|observers|designers))?)$/;
-const STRUCTURAL_EDIT_FIELDS = new Set(["course_id", "url_or_id", "id", "topic_id", "module_id", "section_id", "target_section_id", "assignment_id", "item_id", "quiz_id", "expected_digest", "expected_snapshot", "chapter_id", "after_chapter_id", "category_id", "grade_item_id", "slot_id", "section_number", "section_name", "bank_id", "bank_entry_id", "_morrow", "morrow_canvas_content_guard", "morrow_item_bank_guard", "morrow_page_guard"]);
+// The arguments that name the write's target rather than change it. This list and the one in
+// connector/extension/src/edit-policy.js must hold the same names: the extension refuses to grant
+// any of them as a changed field, so a name missing from either side becomes a changed field the
+// grant can never name, and the write falls back to a separate approval. The gateway imports this
+// set rather than keeping a third copy.
+export const STRUCTURAL_EDIT_FIELDS: ReadonlySet<string> = new Set([
+  "course_id", "url_or_id", "id", "topic_id", "module_id", "section_id", "target_section_id", "assignment_id", "item_id", "quiz_id", "expected_digest",
+  "chapter_id", "after_chapter_id", "category_id", "grade_item_id", "slot_id", "after_slot_id", "section_number", "section_name", "override_id",
+  "page_id", "after_page_id", "expected_jump_changes", "expected_invalid_jumps",
+  "bank_id", "bank_entry_id", "quiz_entry_id", "expected_snapshot", "fan_out", "fan_out_receipt", "acknowledged_course_ids", "user_id", "event_id",
+  "_morrow", "morrow_page_guard", "morrow_canvas_content_guard", "morrow_item_bank_guard", "morrow_new_quiz_item_position_guard",
+]);
 
 function requiredString(value: unknown, label: string, maxLength: number): string {
   if (typeof value !== "string") throw new TypeError(`${label} must be a string`);
