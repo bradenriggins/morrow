@@ -1,0 +1,92 @@
+// The scenario suite. One entry per capability pattern, each a realistic educator intent rather
+// than a tool call: the patterns are what a person strings together, and an operation that passes
+// alone can still be unusable in the chain it belongs to.
+export const SCENARIOS = [
+  {
+    id: "read-chain-course-inventory",
+    intent: "Show me what is in this course, then open the quiz you find and tell me what it holds.",
+    pattern: "read chain across tools",
+    chain: ["morrow_inventory_course", "canvas_list_new_quizzes", "canvas_list_quiz_items"],
+    privacy: false,
+  },
+  {
+    id: "write-cycle-page-approved",
+    intent: "Add a page called Lab Safety with the three rules, and let me approve it first.",
+    pattern: "plan, review, approve, verify",
+    chain: ["canvas_create_page_courses", "canvas_show_page_courses"],
+    privacy: false,
+  },
+  {
+    id: "write-cycle-page-rejected",
+    intent: "Actually, do not publish that page.",
+    pattern: "rejection path",
+    chain: ["canvas_create_page_courses"],
+    expectRejected: true,
+    privacy: false,
+  },
+  {
+    id: "file-generate-and-insert",
+    intent: "Make a one-page study guide, upload it to the course, and put a link to it on a page.",
+    pattern: "file generation, upload, insertion, render check",
+    chain: ["morrow_plan_canvas_file_upload", "canvas_create_page_courses", "canvas_show_page_courses"],
+    privacy: false,
+  },
+  {
+    id: "accessibility-audit-repair-verify",
+    intent: "Check this course for accessibility problems, fix the image that has no description, and show me it is fixed.",
+    pattern: "audit, remediate, verify",
+    chain: ["morrow_audit_course", "morrow_plan_page_image_alt_repair", "canvas_show_page_courses"],
+    privacy: false,
+  },
+  {
+    id: "new-quiz-authoring-chain",
+    intent: "Build me a five-question quiz on cell structure, put it in week one, and set a time limit.",
+    pattern: "multi-step authoring with settings and placement",
+    chain: ["morrow_plan_new_quiz_create", "morrow_plan_new_quiz_item_create", "morrow_plan_new_quiz_settings", "morrow_plan_new_quiz_module_placement", "morrow_check_new_quiz"],
+    privacy: false,
+  },
+  {
+    id: "item-bank-reuse-chain",
+    intent: "Put those questions in a bank so I can reuse them, then draw three of them into next week's quiz.",
+    pattern: "bank authoring and reuse",
+    chain: ["canvas_item_bank_create_bank", "canvas_item_bank_create_item", "canvas_item_bank_attach_bank_to_quiz", "canvas_item_bank_list_quiz_draws"],
+    privacy: false,
+  },
+  {
+    id: "per-student-study-guides",
+    intent: "Create a custom study guide for each student below 75% on last week's quiz, based on what they missed. Show me the drafts and the reasoning.",
+    pattern: "per-student personalization over learner records",
+    chain: ["canvas_list_assignment_submissions", "morrow_plan_canvas_file_upload"],
+    privacy: true,
+    privacyNote: "Every read path in this chain must answer with learner tokens. An untokenized identity anywhere is a FAIL.",
+  },
+  {
+    id: "batch-lifecycle",
+    intent: "Do all of that across my three sections, and let me pause it partway.",
+    pattern: "batch create, run, pause, resume, reconcile",
+    chain: ["morrow_batch_create", "morrow_batch_run", "morrow_batch_pause", "morrow_batch_resume", "morrow_batch_reconcile"],
+    privacy: false,
+  },
+  {
+    id: "undo-after-partial-failure",
+    intent: "That last change went wrong halfway. Put it back.",
+    pattern: "undo and reconcile after partial failure",
+    chain: ["morrow_operation_list", "morrow_operation_undo", "morrow_operation_get"],
+    privacy: false,
+  },
+  {
+    id: "cross-course-compare",
+    intent: "Compare this course with my other section and tell me what is missing.",
+    pattern: "cross-course read and update",
+    chain: ["morrow_inventory_courses", "morrow_inventory_course"],
+    privacy: false,
+  },
+  {
+    id: "delivery-by-message",
+    intent: "Send the study guides to the students who need them.",
+    pattern: "delivery through conversations",
+    chain: ["morrow_plan_canvas_conversation"],
+    privacy: true,
+    privacyNote: "Recipients are named by learner token until the moment Morrow sends, and the draft is reviewed first.",
+  },
+];

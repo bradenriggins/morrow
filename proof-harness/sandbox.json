@@ -1,0 +1,16 @@
+{
+  "schema": "morrow.proof-sandbox.v1",
+  "checkedAt": "2026-09-20T02:22:35.668Z",
+  "sourceBindingId": "canvas:5381de17df52cb77eb87:g98:c89585",
+  "bindingCourseId": "89585",
+  "bindingRuntimeVerified": true,
+  "course": {
+    "id": "89585",
+    "name": "BIOL 101: General Biology",
+    "accountId": "1",
+    "workflowState": "available"
+  },
+  "ownMark": "MORROWPROOF",
+  "marksSeenInAssignments": {},
+  "ok": true
+}
