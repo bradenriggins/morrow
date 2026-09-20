@@ -8466,7 +8466,7 @@
       "at": "2026-09-20T03:24:00.568Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/enrollments/{id}/accept",
       "attention": [
@@ -8478,7 +8478,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_activate_role": {
       "id": "canvas_activate_role",
@@ -8667,7 +8669,7 @@
       "at": "2026-09-20T03:24:14.856Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/assignments/{assignment_id}/allocate",
       "attention": [
@@ -8677,7 +8679,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_answering_questions": {
       "id": "canvas_answering_questions",
@@ -8745,14 +8749,16 @@
       "at": "2026-09-20T03:24:32.156Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/assignments/overrides",
       "detail": "Morrow rejected this request because its input is invalid. Check this input: assignment_overrides.",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "This harness could not build the argument shape the route requires: assignment_overrides.",
+      "reclassified": true
     },
     "canvas_batch_update_conversations": {
       "id": "canvas_batch_update_conversations",
@@ -8803,14 +8809,16 @@
       "at": "2026-09-20T03:24:32.174Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/assignments/overrides",
       "detail": "Morrow rejected this request because its input is invalid. Check this input: assignment_overrides.",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "This harness could not build the argument shape the route requires: assignment_overrides.",
+      "reclassified": true
     },
     "canvas_begin_migration_to_push_to_associated_courses": {
       "id": "canvas_begin_migration_to_push_to_associated_courses",
@@ -8937,7 +8945,7 @@
       "at": "2026-09-20T03:24:56.102Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/assignments/{assignment_id}/provisional_grades/bulk_select",
       "attention": [
@@ -8947,35 +8955,41 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_bulk_update_assignment_dates": {
       "id": "canvas_bulk_update_assignment_dates",
       "at": "2026-09-20T03:24:56.119Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/assignments/bulk_update",
       "detail": "Morrow rejected this request because its input is invalid. Check this input: assignment_dates.",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "This harness could not build the argument shape the route requires: assignment_dates.",
+      "reclassified": true
     },
     "canvas_bulk_update_column_data": {
       "id": "canvas_bulk_update_column_data",
       "at": "2026-09-20T03:24:56.132Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/custom_gradebook_column_data",
       "detail": "Morrow rejected this request because its input is invalid. Check this input: column_data.",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "This harness could not build the argument shape the route requires: column_data.",
+      "reclassified": true
     },
     "canvas_cancel_progress": {
       "id": "canvas_cancel_progress",
@@ -8998,7 +9012,7 @@
       "at": "2026-09-20T03:25:04.477Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/submissions/{user_id}/clear_unread",
       "attention": [
@@ -9010,14 +9024,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_clear_unread_status_for_all_submissions_sections": {
       "id": "canvas_clear_unread_status_for_all_submissions_sections",
       "at": "2026-09-20T03:25:13.076Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/sections/{section_id}/submissions/{user_id}/clear_unread",
       "attention": [
@@ -9029,7 +9045,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_complete_quiz_submission_turn_it_in": {
       "id": "canvas_complete_quiz_submission_turn_it_in",
@@ -9052,7 +9070,7 @@
       "at": "2026-09-20T03:25:19.487Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/course_copy",
       "attention": [
@@ -9062,7 +9080,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_copy_file": {
       "id": "canvas_copy_file",
@@ -9131,7 +9151,7 @@
       "at": "2026-09-20T03:25:25.879Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/ai_experiences",
       "attention": [
@@ -9143,7 +9163,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_appointment_group": {
       "id": "canvas_create_appointment_group",
@@ -9192,7 +9214,7 @@
       "at": "2026-09-20T03:26:03.587Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/assignments/{assignment_id}/overrides",
       "attention": [
@@ -9202,7 +9224,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_blackout_date_accounts": {
       "id": "canvas_create_blackout_date_accounts",
@@ -9307,7 +9331,7 @@
       "at": "2026-09-20T03:26:35.674Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/groups/{group_id}/content_migrations",
       "attention": [
@@ -9319,7 +9343,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_content_migration_users": {
       "id": "canvas_create_content_migration_users",
@@ -9368,7 +9394,7 @@
       "at": "2026-09-20T03:26:42.053Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/course_pacing",
       "attention": [
@@ -9380,7 +9406,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_course_section": {
       "id": "canvas_create_course_section",
@@ -9457,7 +9485,7 @@
       "at": "2026-09-20T03:27:14.296Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/epub_exports",
       "attention": [
@@ -9467,7 +9495,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_error_report": {
       "id": "canvas_create_error_report",
@@ -9488,7 +9518,7 @@
       "at": "2026-09-20T03:27:20.628Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/external_feeds",
       "attention": [
@@ -9500,7 +9530,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_external_feed_groups": {
       "id": "canvas_create_external_feed_groups",
@@ -9535,7 +9567,7 @@
       "at": "2026-09-20T03:27:39.325Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/external_tools",
       "attention": [
@@ -9545,7 +9577,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_feedback_on_conversation_message": {
       "id": "canvas_create_feedback_on_conversation_message",
@@ -9608,7 +9642,7 @@
       "at": "2026-09-20T03:28:12.166Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/groups/{group_id}/folders",
       "attention": [
@@ -9618,7 +9652,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_folder_users": {
       "id": "canvas_create_folder_users",
@@ -9737,7 +9773,7 @@
       "at": "2026-09-20T03:28:51.832Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{id}/late_policy",
       "attention": [
@@ -9749,7 +9785,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_link_outcome_accounts": {
       "id": "canvas_create_link_outcome_accounts",
@@ -9784,7 +9822,7 @@
       "at": "2026-09-20T03:28:59.012Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/outcome_groups/{id}/outcomes",
       "attention": [
@@ -9796,7 +9834,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_link_outcome_courses_outcome_id": {
       "id": "canvas_create_link_outcome_courses_outcome_id",
@@ -9905,7 +9945,7 @@
       "at": "2026-09-20T03:29:06.512Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/lti_resource_links",
       "attention": [
@@ -9917,14 +9957,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_membership": {
       "id": "canvas_create_membership",
       "at": "2026-09-20T03:29:13.017Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/groups/{group_id}/memberships",
       "attention": [
@@ -9936,7 +9978,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_module": {
       "id": "canvas_create_module",
@@ -9957,14 +10001,16 @@
       "at": "2026-09-20T03:29:27.202Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/modules/{module_id}/items",
       "detail": "Morrow rejected this request because its input is invalid. Check this input: module_item_content_id.",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "This harness could not build the argument shape the route requires: module_item_content_id.",
+      "reclassified": true
     },
     "canvas_create_new_course": {
       "id": "canvas_create_new_course",
@@ -10041,7 +10087,7 @@
       "at": "2026-09-20T03:30:22.609Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/quiz/v1/courses/{course_id}/quizzes",
       "attention": [
@@ -10052,7 +10098,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_new_role": {
       "id": "canvas_create_new_role",
@@ -10101,7 +10149,7 @@
       "at": "2026-09-20T03:30:29.187Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/live_assessments",
       "attention": [
@@ -10113,7 +10161,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_or_update_events_directly_for_course_timetable": {
       "id": "canvas_create_or_update_events_directly_for_course_timetable",
@@ -10284,7 +10334,7 @@
       "at": "2026-09-20T03:31:54.420Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/quiz/v1/courses/{course_id}/quizzes/{assignment_id}/reports",
       "attention": [
@@ -10295,7 +10345,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_quiz_report_course_id_quizzes_quiz_id_reports_post": {
       "id": "canvas_create_quiz_report_course_id_quizzes_quiz_id_reports_post",
@@ -10316,7 +10368,7 @@
       "at": "2026-09-20T03:32:12.683Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/quizzes/{quiz_id}/submissions",
       "attention": [
@@ -10328,14 +10380,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_rubricassociation": {
       "id": "canvas_create_rubricassociation",
       "at": "2026-09-20T03:32:19.413Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/rubric_associations",
       "attention": [
@@ -10345,7 +10399,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_single_poll": {
       "id": "canvas_create_single_poll",
@@ -10471,7 +10527,7 @@
       "at": "2026-09-20T03:33:05.834Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/outcome_groups/{id}/subgroups",
       "attention": [
@@ -10483,7 +10539,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_subgroup_global": {
       "id": "canvas_create_subgroup_global",
@@ -10532,7 +10590,7 @@
       "at": "2026-09-20T03:33:12.111Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/outcome_proficiency",
       "attention": [
@@ -10544,7 +10602,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_create_user": {
       "id": "canvas_create_user",
@@ -10593,14 +10653,16 @@
       "at": "2026-09-20T03:33:12.133Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/rubrics/upload",
       "detail": "This capability exists but is not available in this Morrow profile. Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "The change did not complete and Canvas confirmed nothing: not_planned.",
+      "reclassified": true
     },
     "canvas_cross_list_section": {
       "id": "canvas_cross_list_section",
@@ -10663,7 +10725,7 @@
       "at": "2026-09-20T03:33:18.741Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/discussion_topics/{topic_id}/summaries/disable",
       "attention": [
@@ -10675,14 +10737,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_disable_summary_groups": {
       "id": "canvas_disable_summary_groups",
       "at": "2026-09-20T03:33:25.352Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/groups/{group_id}/discussion_topics/{topic_id}/summaries/disable",
       "attention": [
@@ -10694,14 +10758,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_duplicate_assignment": {
       "id": "canvas_duplicate_assignment",
       "at": "2026-09-20T03:33:31.860Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/assignments/{assignment_id}/duplicate",
       "attention": [
@@ -10711,7 +10777,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_duplicate_discussion_topic_courses": {
       "id": "canvas_duplicate_discussion_topic_courses",
@@ -10760,7 +10828,7 @@
       "at": "2026-09-20T03:34:00.716Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/assignments/{id}",
       "attention": [
@@ -10770,7 +10838,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_edit_assignment_group": {
       "id": "canvas_edit_assignment_group",
@@ -10936,7 +11006,7 @@
       "at": "2026-09-20T03:34:55.695Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/csp_settings",
       "attention": [
@@ -10948,14 +11018,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_enqueue_delayed_outcome_rollup_calculation_job": {
       "id": "canvas_enqueue_delayed_outcome_rollup_calculation_job",
       "at": "2026-09-20T03:35:02.355Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/enqueue_outcome_rollup_calculation",
       "attention": [
@@ -10967,7 +11039,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_enroll_multiple_users_to_one_or_more_courses": {
       "id": "canvas_enroll_multiple_users_to_one_or_more_courses",
@@ -11068,7 +11142,7 @@
       "at": "2026-09-20T03:36:02.999Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/discussion_topics/{topic_id}/summaries",
       "attention": [
@@ -11080,14 +11154,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_find_or_create_summary_groups": {
       "id": "canvas_find_or_create_summary_groups",
       "at": "2026-09-20T03:36:10.340Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/groups/{group_id}/discussion_topics/{topic_id}/summaries",
       "attention": [
@@ -11099,7 +11175,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_flagging_question": {
       "id": "canvas_flagging_question",
@@ -11162,7 +11240,7 @@
       "at": "2026-09-20T03:36:16.988Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/assignments/{assignment_id}/submissions/update_grades",
       "attention": [
@@ -11172,14 +11250,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_grade_or_comment_on_multiple_submissions_courses_submissions": {
       "id": "canvas_grade_or_comment_on_multiple_submissions_courses_submissions",
       "at": "2026-09-20T03:36:23.959Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/submissions/update_grades",
       "attention": [
@@ -11191,14 +11271,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_grade_or_comment_on_multiple_submissions_sections_assignments": {
       "id": "canvas_grade_or_comment_on_multiple_submissions_sections_assignments",
       "at": "2026-09-20T03:36:30.198Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/sections/{section_id}/assignments/{assignment_id}/submissions/update_grades",
       "attention": [
@@ -11210,14 +11292,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_grade_or_comment_on_multiple_submissions_sections_submissions": {
       "id": "canvas_grade_or_comment_on_multiple_submissions_sections_submissions",
       "at": "2026-09-20T03:36:36.712Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/sections/{section_id}/submissions/update_grades",
       "attention": [
@@ -11229,7 +11313,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_grade_or_comment_on_submission_by_anonymous_id_courses": {
       "id": "canvas_grade_or_comment_on_submission_by_anonymous_id_courses",
@@ -11294,7 +11380,7 @@
       "at": "2026-09-20T03:37:08.684Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/group_categories/{group_category_id}/import",
       "attention": [
@@ -11306,14 +11392,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_import_differentiation_tags": {
       "id": "canvas_import_differentiation_tags",
       "at": "2026-09-20T03:37:15.698Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/group_categories/import_tags",
       "attention": [
@@ -11325,7 +11413,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_import_outcome_group_accounts": {
       "id": "canvas_import_outcome_group_accounts",
@@ -11390,7 +11480,7 @@
       "at": "2026-09-20T03:37:22.216Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/outcome_imports",
       "attention": [
@@ -11402,7 +11492,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_import_sis_data": {
       "id": "canvas_import_sis_data",
@@ -11745,7 +11837,7 @@
       "at": "2026-09-20T03:38:00.898Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/discussion_topics/read_all",
       "attention": [
@@ -11755,7 +11847,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_mark_all_topic_as_read_groups": {
       "id": "canvas_mark_all_topic_as_read_groups",
@@ -12098,7 +12192,7 @@
       "at": "2026-09-20T03:41:48.017Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/eportfolios/{eportfolio_id}/moderate",
       "attention": [
@@ -12110,7 +12204,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_modify_context_control": {
       "id": "canvas_modify_context_control",
@@ -12249,7 +12345,7 @@
       "at": "2026-09-20T03:43:16.458Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/assignments/{assignment_id}/provisional_grades/publish",
       "attention": [
@@ -12259,14 +12355,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_publish_provisional_grades_for_assignment_asynchronous": {
       "id": "canvas_publish_provisional_grades_for_assignment_asynchronous",
       "at": "2026-09-20T03:43:23.429Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/assignments/{assignment_id}/provisional_grades/publish_async",
       "attention": [
@@ -12276,14 +12374,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_rate_entry_courses": {
       "id": "canvas_rate_entry_courses",
       "at": "2026-09-20T03:43:30.568Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/discussion_topics/{topic_id}/entries/{entry_id}/rating",
       "attention": [
@@ -12295,7 +12395,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_rate_entry_groups": {
       "id": "canvas_rate_entry_groups",
@@ -12316,7 +12418,7 @@
       "at": "2026-09-20T03:43:37.481Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/enrollments/{id}/reactivate",
       "attention": [
@@ -12328,7 +12430,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_re_lock_module_progressions": {
       "id": "canvas_re_lock_module_progressions",
@@ -12380,7 +12484,7 @@
       "at": "2026-09-20T03:44:00.381Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/enrollments/{id}/reject",
       "attention": [
@@ -12392,7 +12496,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_reorder_custom_columns": {
       "id": "canvas_reorder_custom_columns",
@@ -12415,14 +12521,16 @@
       "at": "2026-09-20T03:44:00.395Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/discussion_topics/reorder",
       "detail": "Morrow rejected this request because its input is invalid. Check this input: order.",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "This harness could not build the argument shape the route requires: order.",
+      "reclassified": true
     },
     "canvas_reorder_pinned_topics_groups": {
       "id": "canvas_reorder_pinned_topics_groups",
@@ -12445,35 +12553,39 @@
       "at": "2026-09-20T03:44:00.406Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/quizzes/{quiz_id}/groups/{id}/reorder",
       "detail": "Morrow rejected this request because its input is invalid. Check this input: order_type.",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "This harness could not build the argument shape the route requires: order_type.",
+      "reclassified": true
     },
     "canvas_reorder_quiz_items": {
       "id": "canvas_reorder_quiz_items",
       "at": "2026-09-20T03:44:00.414Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/quizzes/{id}/reorder",
       "detail": "Morrow rejected this request because its input is invalid. Check this input: order_type.",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "This harness could not build the argument shape the route requires: order_type.",
+      "reclassified": true
     },
     "canvas_request_study_assist_response": {
       "id": "canvas_request_study_assist_response",
       "at": "2026-09-20T03:44:06.853Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/study_assist",
       "attention": [
@@ -12485,14 +12597,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_reserve_time_slot": {
       "id": "canvas_reserve_time_slot",
       "at": "2026-09-20T03:44:12.831Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/calendar_events/{id}/reservations",
       "attention": [
@@ -12504,7 +12618,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_reserve_time_slot_participant_id": {
       "id": "canvas_reserve_time_slot_participant_id",
@@ -12599,7 +12715,7 @@
       "at": "2026-09-20T03:44:18.927Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/modules/{module_id}/items/{id}/select_mastery_path",
       "attention": [
@@ -12611,7 +12727,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_select_provisional_grade": {
       "id": "canvas_select_provisional_grade",
@@ -12634,7 +12752,7 @@
       "at": "2026-09-20T03:44:25.274Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/assignments/{assignment_id}/moderated_students",
       "attention": [
@@ -12644,7 +12762,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_send_annotation_notification": {
       "id": "canvas_send_annotation_notification",
@@ -12679,14 +12799,16 @@
       "at": "2026-09-20T03:44:25.288Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/quiz/v1/courses/{course_id}/accommodations",
       "detail": "Morrow rejected this request because its input is invalid. Check this input: user_id.",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "This harness could not build the argument shape the route requires: user_id.",
+      "reclassified": true
     },
     "canvas_set_course_nickname": {
       "id": "canvas_set_course_nickname",
@@ -12707,14 +12829,16 @@
       "at": "2026-09-20T03:44:25.298Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/calendar_events/timetable",
       "detail": "Morrow rejected this request because its input is invalid. Check this input: timetables_course_section_id.",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "This harness could not build the argument shape the route requires: timetables_course_section_id.",
+      "reclassified": true
     },
     "canvas_set_extensions_for_student_assignment_submissions": {
       "id": "canvas_set_extensions_for_student_assignment_submissions",
@@ -12753,14 +12877,16 @@
       "at": "2026-09-20T03:44:25.314Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/quiz_extensions",
       "detail": "Morrow rejected this request because its input is invalid. Check this input: user_id.",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "This harness could not build the argument shape the route requires: user_id.",
+      "reclassified": true
     },
     "canvas_set_feature_flag_accounts": {
       "id": "canvas_set_feature_flag_accounts",
@@ -12828,14 +12954,16 @@
       "at": "2026-09-20T03:44:49.184Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/quiz/v1/courses/{course_id}/quizzes/{assignment_id}/accommodations",
       "detail": "Morrow rejected this request because its input is invalid. Check this input: user_id.",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "This harness could not build the argument shape the route requires: user_id.",
+      "reclassified": true
     },
     "canvas_set_usage_rights_courses": {
       "id": "canvas_set_usage_rights_courses",
@@ -12975,7 +13103,7 @@
       "at": "2026-09-20T03:45:18.949Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/assignments/{assignment_id}/submissions",
       "attention": [
@@ -12985,14 +13113,16 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_submit_assignment_sections": {
       "id": "canvas_submit_assignment_sections",
       "at": "2026-09-20T03:45:25.460Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/sections/{section_id}/assignments/{assignment_id}/submissions",
       "attention": [
@@ -13004,7 +13134,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_submit_captured_events": {
       "id": "canvas_submit_captured_events",
@@ -13272,7 +13404,7 @@
       "at": "2026-09-20T03:46:08.863Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/blackout_dates/{id}",
       "attention": [
@@ -13284,7 +13416,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_update_bookmark": {
       "id": "canvas_update_bookmark",
@@ -13671,7 +13805,7 @@
       "at": "2026-09-20T03:48:03.142Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/files/{id}",
       "attention": [
@@ -13682,7 +13816,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_update_files_ui_version_preference": {
       "id": "canvas_update_files_ui_version_preference",
@@ -13790,7 +13926,7 @@
       "at": "2026-09-20T03:48:56.202Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "approved",
       "path": "/v1/courses/{course_id}/assignments/{assignment_id}/date_details",
       "attention": [
@@ -13800,7 +13936,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_update_learning_object_s_date_information_discussion_topics": {
       "id": "canvas_update_learning_object_s_date_information_discussion_topics",
@@ -13823,7 +13961,7 @@
       "at": "2026-09-20T03:49:03.496Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/files/{attachment_id}/date_details",
       "attention": [
@@ -13835,7 +13973,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_update_learning_object_s_date_information_pages": {
       "id": "canvas_update_learning_object_s_date_information_pages",
@@ -14198,7 +14338,7 @@
       "at": "2026-09-20T03:50:30.198Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "failed",
       "path": "/v1/courses/{course_id}/outcome_groups/{id}",
       "attention": [
@@ -14210,7 +14350,9 @@
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
     },
     "canvas_update_outcome_group_global": {
       "id": "canvas_update_outcome_group_global",
@@ -14603,112 +14745,128 @@
       "at": "2026-09-20T03:51:40.555Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/files",
       "detail": "This capability exists but is not available in this Morrow profile. Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "The change did not complete and Canvas confirmed nothing: not_planned.",
+      "reclassified": true
     },
     "canvas_upload_file_quiz_id_submissions_self_files_post": {
       "id": "canvas_upload_file_quiz_id_submissions_self_files_post",
       "at": "2026-09-20T03:51:40.572Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/quizzes/{quiz_id}/submissions/self/files",
       "detail": "This capability exists but is not available in this Morrow profile. Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "The change did not complete and Canvas confirmed nothing: not_planned.",
+      "reclassified": true
     },
     "canvas_upload_file_sections": {
       "id": "canvas_upload_file_sections",
       "at": "2026-09-20T03:51:40.585Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/sections/{section_id}/assignments/{assignment_id}/submissions/{user_id}/files",
       "detail": "This capability exists but is not available in this Morrow profile. Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "The change did not complete and Canvas confirmed nothing: not_planned.",
+      "reclassified": true
     },
     "canvas_upload_file_submissions_user_id_comments_files_post": {
       "id": "canvas_upload_file_submissions_user_id_comments_files_post",
       "at": "2026-09-20T03:51:40.601Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/comments/files",
       "detail": "This capability exists but is not available in this Morrow profile. Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "The change did not complete and Canvas confirmed nothing: not_planned.",
+      "reclassified": true
     },
     "canvas_upload_file_v1_courses_course_id_files_post": {
       "id": "canvas_upload_file_v1_courses_course_id_files_post",
       "at": "2026-09-20T03:51:40.616Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/courses/{course_id}/files",
       "detail": "This capability exists but is not available in this Morrow profile. Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "The change did not complete and Canvas confirmed nothing: not_planned.",
+      "reclassified": true
     },
     "canvas_upload_file_v1_folders_folder_id_files_post": {
       "id": "canvas_upload_file_v1_folders_folder_id_files_post",
       "at": "2026-09-20T03:51:40.631Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/folders/{folder_id}/files",
       "detail": "This capability exists but is not available in this Morrow profile. Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "The change did not complete and Canvas confirmed nothing: not_planned.",
+      "reclassified": true
     },
     "canvas_upload_file_v1_groups_group_id_files_post": {
       "id": "canvas_upload_file_v1_groups_group_id_files_post",
       "at": "2026-09-20T03:51:40.648Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/groups/{group_id}/files",
       "detail": "This capability exists but is not available in this Morrow profile. Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "The change did not complete and Canvas confirmed nothing: not_planned.",
+      "reclassified": true
     },
     "canvas_upload_file_v1_users_user_id_files_post": {
       "id": "canvas_upload_file_v1_users_user_id_files_post",
       "at": "2026-09-20T03:51:40.659Z",
       "phase": 1,
       "kind": "write",
-      "verdict": "FAIL",
+      "verdict": "BLOCKED",
       "state": "not_planned",
       "path": "/v1/users/{user_id}/files",
       "detail": "This capability exists but is not available in this Morrow profile. Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends",
       "sandbox": {
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
-      }
+      },
+      "reason": "The change did not complete and Canvas confirmed nothing: not_planned.",
+      "reclassified": true
     },
     "canvas_validate_quiz_access_code": {
       "id": "canvas_validate_quiz_access_code",
@@ -14742,7 +14900,2312 @@
         "courseId": "89585",
         "mark": "MORROWPROOF1789874351"
       }
+    },
+    "canvas_bulk_delete_memberships_bulk_deletes_memberships_by_providing_array_of_user_ids_or_for_different": {
+      "id": "canvas_bulk_delete_memberships_bulk_deletes_memberships_by_providing_array_of_user_ids_or_for_different",
+      "at": "2026-09-20T03:52:16.606Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "sent_unchecked",
+      "path": "/v1/groups/{group_id}/users",
+      "attention": [
+        "readback_did_not_match_frozen_comparator"
+      ],
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_clear_course_nicknames": {
+      "id": "canvas_clear_course_nicknames",
+      "at": "2026-09-20T03:52:16.622Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/self/course_nicknames",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_close_notification_for_user_destroy_notification_for_admin": {
+      "id": "canvas_close_notification_for_user_destroy_notification_for_admin",
+      "at": "2026-09-20T03:52:16.631Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/account_notifications/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_conclude_deactivate_or_delete_enrollment": {
+      "id": "canvas_conclude_deactivate_or_delete_enrollment",
+      "at": "2026-09-20T03:52:16.632Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/courses/{course_id}/enrollments/{id}",
+      "missing": [
+        "enrollment_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_de_cross_list_section": {
+      "id": "canvas_de_cross_list_section",
+      "at": "2026-09-20T03:52:23.040Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "failed",
+      "path": "/v1/sections/{id}/crosslist",
+      "attention": [
+        "dispatch_failed_before_send",
+        "canvas_request_not_sent",
+        "provider_status_400"
+      ],
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
+    },
+    "canvas_deactivate_role": {
+      "id": "canvas_deactivate_role",
+      "at": "2026-09-20T03:52:23.041Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/roles/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_access_token": {
+      "id": "canvas_delete_access_token",
+      "at": "2026-09-20T03:52:23.042Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/{user_id}/tokens/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_ai_conversation": {
+      "id": "canvas_delete_ai_conversation",
+      "at": "2026-09-20T03:52:23.043Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outbound_ticket_message_or_cross_course",
+      "path": "/v1/courses/{course_id}/ai_experiences/{ai_experience_id}/conversations/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_ai_experience": {
+      "id": "canvas_delete_ai_experience",
+      "at": "2026-09-20T03:52:23.043Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/courses/{course_id}/ai_experiences/{id}",
+      "missing": [
+        "ai_experience_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_appointment_group": {
+      "id": "canvas_delete_appointment_group",
+      "at": "2026-09-20T03:52:23.044Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outbound_ticket_message_or_cross_course",
+      "path": "/v1/appointment_groups/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_assignment": {
+      "id": "canvas_delete_assignment",
+      "at": "2026-09-20T03:52:29.870Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approved",
+      "path": "/v1/courses/{course_id}/assignments/{id}",
+      "attention": [
+        "provider_effect_target_conflict"
+      ],
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
+    },
+    "canvas_delete_assignment_override": {
+      "id": "canvas_delete_assignment_override",
+      "at": "2026-09-20T03:52:36.383Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/courses/{course_id}/assignments/{assignment_id}/overrides/{id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_authentication_provider": {
+      "id": "canvas_delete_authentication_provider",
+      "at": "2026-09-20T03:52:36.384Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/authentication_providers/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_blackout_date_accounts": {
+      "id": "canvas_delete_blackout_date_accounts",
+      "at": "2026-09-20T03:52:36.385Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/blackout_dates/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_blackout_date_courses": {
+      "id": "canvas_delete_blackout_date_courses",
+      "at": "2026-09-20T03:52:44.190Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/courses/{course_id}/blackout_dates/{id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_bookmark": {
+      "id": "canvas_delete_bookmark",
+      "at": "2026-09-20T03:52:44.193Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/self/bookmarks/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_calendar_event": {
+      "id": "canvas_delete_calendar_event",
+      "at": "2026-09-20T03:52:53.174Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/calendar_events/{id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_communication_channel_id": {
+      "id": "canvas_delete_communication_channel_id",
+      "at": "2026-09-20T03:52:53.176Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/{user_id}/communication_channels/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_communication_channel_type": {
+      "id": "canvas_delete_communication_channel_type",
+      "at": "2026-09-20T03:52:53.177Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/{user_id}/communication_channels/{type}/{address}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_conclude_course": {
+      "id": "canvas_delete_conclude_course",
+      "at": "2026-09-20T03:52:53.178Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_irreversible_person_or_course_change",
+      "path": "/v1/courses/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_context_control": {
+      "id": "canvas_delete_context_control",
+      "at": "2026-09-20T03:52:53.179Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/lti_registrations/{registration_id}/controls/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_conversation": {
+      "id": "canvas_delete_conversation",
+      "at": "2026-09-20T03:52:53.180Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outbound_ticket_message_or_cross_course",
+      "path": "/v1/conversations/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_course_pace": {
+      "id": "canvas_delete_course_pace",
+      "at": "2026-09-20T03:52:53.181Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/courses/{course_id}/course_pacing/{id}",
+      "missing": [
+        "course_pace_id",
+        "course_pacing_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_custom_data": {
+      "id": "canvas_delete_custom_data",
+      "at": "2026-09-20T03:53:01.439Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/users/{user_id}/custom_data",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_custom_gradebook_column": {
+      "id": "canvas_delete_custom_gradebook_column",
+      "at": "2026-09-20T03:53:09.188Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/courses/{course_id}/custom_gradebook_columns/{id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_developer_key": {
+      "id": "canvas_delete_developer_key",
+      "at": "2026-09-20T03:53:09.190Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/developer_keys/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_enrollment_term": {
+      "id": "canvas_delete_enrollment_term",
+      "at": "2026-09-20T03:53:09.192Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/terms/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_entry_courses": {
+      "id": "canvas_delete_entry_courses",
+      "at": "2026-09-20T03:53:15.861Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/courses/{course_id}/discussion_topics/{topic_id}/entries/{id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_entry_groups": {
+      "id": "canvas_delete_entry_groups",
+      "at": "2026-09-20T03:53:15.867Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/groups/{group_id}/discussion_topics/{topic_id}/entries/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_eportfolio": {
+      "id": "canvas_delete_eportfolio",
+      "at": "2026-09-20T03:53:15.871Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/eportfolios/{id}",
+      "missing": [
+        "eportfolio_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_external_feed_courses": {
+      "id": "canvas_delete_external_feed_courses",
+      "at": "2026-09-20T03:53:15.872Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/courses/{course_id}/external_feeds/{external_feed_id}",
+      "missing": [
+        "external_feed_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_external_feed_groups": {
+      "id": "canvas_delete_external_feed_groups",
+      "at": "2026-09-20T03:53:15.873Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/groups/{group_id}/external_feeds/{external_feed_id}",
+      "missing": [
+        "external_feed_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_external_tool_accounts": {
+      "id": "canvas_delete_external_tool_accounts",
+      "at": "2026-09-20T03:53:15.874Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/external_tools/{external_tool_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_external_tool_courses": {
+      "id": "canvas_delete_external_tool_courses",
+      "at": "2026-09-20T03:53:15.875Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/courses/{course_id}/external_tools/{external_tool_id}",
+      "missing": [
+        "external_tool_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_feedback_on_conversation_message": {
+      "id": "canvas_delete_feedback_on_conversation_message",
+      "at": "2026-09-20T03:53:15.877Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outbound_ticket_message_or_cross_course",
+      "path": "/v1/courses/{course_id}/ai_experiences/{ai_experience_id}/conversations/{id}/messages/{message_id}/feedback/{feedback_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_file": {
+      "id": "canvas_delete_file",
+      "at": "2026-09-20T03:53:15.879Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/files/{id}",
+      "missing": [
+        "file_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_folder": {
+      "id": "canvas_delete_folder",
+      "at": "2026-09-20T03:53:25.383Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/folders/{id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_grading_period_accounts": {
+      "id": "canvas_delete_grading_period_accounts",
+      "at": "2026-09-20T03:53:25.398Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/grading_periods/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_grading_period_courses": {
+      "id": "canvas_delete_grading_period_courses",
+      "at": "2026-09-20T03:53:25.403Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/courses/{course_id}/grading_periods/{id}",
+      "missing": [
+        "grading_period_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_grading_period_set": {
+      "id": "canvas_delete_grading_period_set",
+      "at": "2026-09-20T03:53:25.407Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/grading_period_sets/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_grading_standard_accounts": {
+      "id": "canvas_delete_grading_standard_accounts",
+      "at": "2026-09-20T03:53:25.408Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/grading_standards/{grading_standard_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_grading_standard_courses": {
+      "id": "canvas_delete_grading_standard_courses",
+      "at": "2026-09-20T03:53:33.510Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/courses/{course_id}/grading_standards/{grading_standard_id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_group": {
+      "id": "canvas_delete_group",
+      "at": "2026-09-20T03:53:43.622Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/groups/{group_id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_group_category": {
+      "id": "canvas_delete_group_category",
+      "at": "2026-09-20T03:53:51.488Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/group_categories/{group_category_id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_lti_registration_apps": {
+      "id": "canvas_delete_lti_registration_apps",
+      "at": "2026-09-20T03:53:51.493Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/apps/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_lti_registration_lti_registrations": {
+      "id": "canvas_delete_lti_registration_lti_registrations",
+      "at": "2026-09-20T03:53:51.502Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/lti_registrations/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_lti_resource_link": {
+      "id": "canvas_delete_lti_resource_link",
+      "at": "2026-09-20T03:53:51.511Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/courses/{course_id}/lti_resource_links/{id}",
+      "missing": [
+        "lti_resource_link_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_message": {
+      "id": "canvas_delete_message",
+      "at": "2026-09-20T03:53:51.514Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outbound_ticket_message_or_cross_course",
+      "path": "/v1/conversations/{id}/remove_messages",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_module": {
+      "id": "canvas_delete_module",
+      "at": "2026-09-20T03:53:57.962Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/courses/{course_id}/modules/{id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_module_item": {
+      "id": "canvas_delete_module_item",
+      "at": "2026-09-20T03:54:07.095Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/courses/{course_id}/modules/{module_id}/items/{id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_multiple_users_from_root_account": {
+      "id": "canvas_delete_multiple_users_from_root_account",
+      "at": "2026-09-20T03:54:07.098Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/users",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_new_quiz": {
+      "id": "canvas_delete_new_quiz",
+      "at": "2026-09-20T03:54:13.458Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "failed",
+      "path": "/quiz/v1/courses/{course_id}/quizzes/{assignment_id}",
+      "attention": [
+        "dispatch_failed_before_send",
+        "new_quiz_lifecycle_guard_required"
+      ],
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
+    },
+    "canvas_delete_outcome_group_accounts": {
+      "id": "canvas_delete_outcome_group_accounts",
+      "at": "2026-09-20T03:54:13.463Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/outcome_groups/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_outcome_group_courses": {
+      "id": "canvas_delete_outcome_group_courses",
+      "at": "2026-09-20T03:54:20.677Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "failed",
+      "path": "/v1/courses/{course_id}/outcome_groups/{id}",
+      "attention": [
+        "dispatch_failed_before_send",
+        "canvas_request_not_sent",
+        "provider_status_403"
+      ],
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
+    },
+    "canvas_delete_outcome_group_global": {
+      "id": "canvas_delete_outcome_group_global",
+      "at": "2026-09-20T03:54:20.681Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/global/outcome_groups/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_page_courses": {
+      "id": "canvas_delete_page_courses",
+      "at": "2026-09-20T03:54:29.247Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/courses/{course_id}/pages/{url_or_id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_page_groups": {
+      "id": "canvas_delete_page_groups",
+      "at": "2026-09-20T03:54:29.250Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/groups/{group_id}/pages/{url_or_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_peer_review_courses": {
+      "id": "canvas_delete_peer_review_courses",
+      "at": "2026-09-20T03:54:29.252Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{submission_id}/peer_reviews",
+      "missing": [
+        "submission_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_peer_review_sections": {
+      "id": "canvas_delete_peer_review_sections",
+      "at": "2026-09-20T03:54:29.254Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/sections/{section_id}/assignments/{assignment_id}/submissions/{submission_id}/peer_reviews",
+      "missing": [
+        "submission_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_planner_note": {
+      "id": "canvas_delete_planner_note",
+      "at": "2026-09-20T03:54:29.255Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/planner_notes/{id}",
+      "missing": [
+        "planner_note_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_planner_override": {
+      "id": "canvas_delete_planner_override",
+      "at": "2026-09-20T03:54:29.256Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/planner/overrides/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_poll": {
+      "id": "canvas_delete_poll",
+      "at": "2026-09-20T03:54:29.258Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/polls/{id}",
+      "missing": [
+        "poll_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_poll_choice": {
+      "id": "canvas_delete_poll_choice",
+      "at": "2026-09-20T03:54:29.260Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/polls/{poll_id}/poll_choices/{id}",
+      "missing": [
+        "poll_choice_id",
+        "poll_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_poll_session": {
+      "id": "canvas_delete_poll_session",
+      "at": "2026-09-20T03:54:29.263Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/polls/{poll_id}/poll_sessions/{id}",
+      "missing": [
+        "poll_session_id",
+        "poll_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_push_notification_endpoint": {
+      "id": "canvas_delete_push_notification_endpoint",
+      "at": "2026-09-20T03:54:29.265Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/self/communication_channels/push",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_question_group": {
+      "id": "canvas_delete_question_group",
+      "at": "2026-09-20T03:54:37.385Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/courses/{course_id}/quizzes/{quiz_id}/groups/{id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_quiz": {
+      "id": "canvas_delete_quiz",
+      "at": "2026-09-20T03:54:52.811Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/courses/{course_id}/quizzes/{id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_quiz_item": {
+      "id": "canvas_delete_quiz_item",
+      "at": "2026-09-20T03:55:00.212Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_quiz_question": {
+      "id": "canvas_delete_quiz_question",
+      "at": "2026-09-20T03:55:06.856Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/courses/{course_id}/quizzes/{quiz_id}/questions/{id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_report": {
+      "id": "canvas_delete_report",
+      "at": "2026-09-20T03:55:06.857Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/reports/{report}/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_rubricassociation": {
+      "id": "canvas_delete_rubricassociation",
+      "at": "2026-09-20T03:55:06.858Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/courses/{course_id}/rubric_associations/{id}",
+      "missing": [
+        "rubric_association_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_section": {
+      "id": "canvas_delete_section",
+      "at": "2026-09-20T03:55:15.024Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/sections/{id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_single": {
+      "id": "canvas_delete_single",
+      "at": "2026-09-20T03:55:22.318Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/courses/{course_id}/rubrics/{id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_single_rubric_assessment": {
+      "id": "canvas_delete_single_rubric_assessment",
+      "at": "2026-09-20T03:55:22.321Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/courses/{course_id}/rubric_associations/{rubric_association_id}/rubric_assessments/{id}",
+      "missing": [
+        "rubric_assessment_id",
+        "rubric_association_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_sub_account": {
+      "id": "canvas_delete_sub_account",
+      "at": "2026-09-20T03:55:22.325Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/sub_accounts/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_submission_comment": {
+      "id": "canvas_delete_submission_comment",
+      "at": "2026-09-20T03:55:22.328Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/comments/{id}",
+      "missing": [
+        "comment_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_temporary_enrollment_pairing": {
+      "id": "canvas_delete_temporary_enrollment_pairing",
+      "at": "2026-09-20T03:55:22.331Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/temporary_enrollment_pairings/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_topic_courses": {
+      "id": "canvas_delete_topic_courses",
+      "at": "2026-09-20T03:55:29.046Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/courses/{course_id}/discussion_topics/{topic_id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_topic_groups": {
+      "id": "canvas_delete_topic_groups",
+      "at": "2026-09-20T03:55:36.409Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/groups/{group_id}/discussion_topics/{topic_id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_user_from_root_account": {
+      "id": "canvas_delete_user_from_root_account",
+      "at": "2026-09-20T03:55:36.413Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/users/{user_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_delete_user_login": {
+      "id": "canvas_delete_user_login",
+      "at": "2026-09-20T03:55:36.416Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/{user_id}/logins/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_destroy_assignment_group": {
+      "id": "canvas_destroy_assignment_group",
+      "at": "2026-09-20T03:55:44.948Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "PASS",
+      "state": "verified",
+      "path": "/v1/courses/{course_id}/assignment_groups/{assignment_group_id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_force_password_reset": {
+      "id": "canvas_force_password_reset",
+      "at": "2026-09-20T03:55:44.952Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/authentication_providers/force_password_reset",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_hide_all_stream_items": {
+      "id": "canvas_hide_all_stream_items",
+      "at": "2026-09-20T03:55:44.953Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/self/activity_stream",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_hide_stream_item": {
+      "id": "canvas_hide_stream_item",
+      "at": "2026-09-20T03:55:44.954Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/self/activity_stream/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_item_bank_archive_bank": {
+      "id": "canvas_item_bank_archive_bank",
+      "at": "2026-09-20T03:55:44.954Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/api/banks/{bank_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_item_bank_delete_entry": {
+      "id": "canvas_item_bank_delete_entry",
+      "at": "2026-09-20T03:55:44.955Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/api/banks/{bank_id}/bank_entries/{bank_entry_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_item_bank_delete_quiz_bank_entry": {
+      "id": "canvas_item_bank_delete_quiz_bank_entry",
+      "at": "2026-09-20T03:55:44.956Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/api/quizzes/{builder_quiz_id}/quiz_entries/{quiz_entry_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_item_bank_move_entry": {
+      "id": "canvas_item_bank_move_entry",
+      "at": "2026-09-20T03:55:44.957Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/api/banks/{bank_id}/bank_entries/move",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_item_bank_remove_entry_tag": {
+      "id": "canvas_item_bank_remove_entry_tag",
+      "at": "2026-09-20T03:55:44.957Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/api/bank_entries/{bank_entry_id}/tag_associations/{tag_association_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_item_bank_update_share": {
+      "id": "canvas_item_bank_update_share",
+      "at": "2026-09-20T03:55:44.958Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/api/banks/{bank_id}/shared_banks/{share_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_kickoff_password_recovery_flow": {
+      "id": "canvas_kickoff_password_recovery_flow",
+      "at": "2026-09-20T03:55:44.959Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/reset_password",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_leave_group_memberships": {
+      "id": "canvas_leave_group_memberships",
+      "at": "2026-09-20T03:55:44.960Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/groups/{group_id}/memberships/{membership_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_leave_group_users": {
+      "id": "canvas_leave_group_users",
+      "at": "2026-09-20T03:55:53.635Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/groups/{group_id}/users/{user_id}",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_log_users_out_of_all_mobile_apps_id": {
+      "id": "canvas_log_users_out_of_all_mobile_apps_id",
+      "at": "2026-09-20T03:55:53.636Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_irreversible_person_or_course_change",
+      "path": "/v1/users/{id}/mobile_sessions",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_log_users_out_of_all_mobile_apps_mobile_sessions": {
+      "id": "canvas_log_users_out_of_all_mobile_apps_mobile_sessions",
+      "at": "2026-09-20T03:55:53.637Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/mobile_sessions",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_mark_all_entries_as_unread_courses": {
+      "id": "canvas_mark_all_entries_as_unread_courses",
+      "at": "2026-09-20T03:56:01.078Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/courses/{course_id}/discussion_topics/{topic_id}/read_all",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_mark_all_entries_as_unread_groups": {
+      "id": "canvas_mark_all_entries_as_unread_groups",
+      "at": "2026-09-20T03:56:08.318Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/groups/{group_id}/discussion_topics/{topic_id}/read_all",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_mark_entry_as_unread_courses": {
+      "id": "canvas_mark_entry_as_unread_courses",
+      "at": "2026-09-20T03:56:15.587Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/courses/{course_id}/discussion_topics/{topic_id}/entries/{entry_id}/read",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_mark_entry_as_unread_groups": {
+      "id": "canvas_mark_entry_as_unread_groups",
+      "at": "2026-09-20T03:56:15.588Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/groups/{group_id}/discussion_topics/{topic_id}/entries/{entry_id}/read",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_mark_submission_as_unread_courses": {
+      "id": "canvas_mark_submission_as_unread_courses",
+      "at": "2026-09-20T03:56:23.447Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/read",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_mark_submission_as_unread_sections": {
+      "id": "canvas_mark_submission_as_unread_sections",
+      "at": "2026-09-20T03:56:30.714Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/sections/{section_id}/assignments/{assignment_id}/submissions/{user_id}/read",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_mark_topic_as_unread_courses": {
+      "id": "canvas_mark_topic_as_unread_courses",
+      "at": "2026-09-20T03:56:38.098Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/courses/{course_id}/discussion_topics/{topic_id}/read",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_mark_topic_as_unread_groups": {
+      "id": "canvas_mark_topic_as_unread_groups",
+      "at": "2026-09-20T03:56:45.174Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/groups/{group_id}/discussion_topics/{topic_id}/read",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_account_admin": {
+      "id": "canvas_remove_account_admin",
+      "at": "2026-09-20T03:56:45.178Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/admins/{user_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_content_share": {
+      "id": "canvas_remove_content_share",
+      "at": "2026-09-20T03:56:45.181Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/{user_id}/content_shares/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_course_from_favorites": {
+      "id": "canvas_remove_course_from_favorites",
+      "at": "2026-09-20T03:56:45.184Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_signed_in_person_settings",
+      "path": "/v1/users/self/favorites/courses/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_course_nickname": {
+      "id": "canvas_remove_course_nickname",
+      "at": "2026-09-20T03:56:45.186Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/self/course_nicknames/{course_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_domain_from_account": {
+      "id": "canvas_remove_domain_from_account",
+      "at": "2026-09-20T03:56:45.189Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/csp_settings/domains",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_feature_flag_accounts": {
+      "id": "canvas_remove_feature_flag_accounts",
+      "at": "2026-09-20T03:56:45.191Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/features/flags/{feature}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_feature_flag_courses": {
+      "id": "canvas_remove_feature_flag_courses",
+      "at": "2026-09-20T03:57:01.877Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "sent_unchecked",
+      "path": "/v1/courses/{course_id}/features/flags/{feature}",
+      "attention": [
+        "readback_did_not_match_frozen_comparator"
+      ],
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_feature_flag_users": {
+      "id": "canvas_remove_feature_flag_users",
+      "at": "2026-09-20T03:57:01.880Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/{user_id}/features/flags/{feature}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_group_from_favorites": {
+      "id": "canvas_remove_group_from_favorites",
+      "at": "2026-09-20T03:57:01.882Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_signed_in_person_settings",
+      "path": "/v1/users/self/favorites/groups/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_inherited_lti_registration_apps": {
+      "id": "canvas_remove_inherited_lti_registration_apps",
+      "at": "2026-09-20T03:57:01.885Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/apps/{id}/bind",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_inherited_lti_registration_lti_registrations": {
+      "id": "canvas_remove_inherited_lti_registration_lti_registrations",
+      "at": "2026-09-20T03:57:01.888Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/lti_registrations/{id}/bind",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_observee": {
+      "id": "canvas_remove_observee",
+      "at": "2026-09-20T03:57:01.890Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/{user_id}/observees/{observee_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_quiz_migration_alert": {
+      "id": "canvas_remove_quiz_migration_alert",
+      "at": "2026-09-20T03:57:01.892Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outbound_ticket_message_or_cross_course",
+      "path": "/v1/courses/{id}/dismiss_migration_limitation_message",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_tool_from_top_navigation_favorites": {
+      "id": "canvas_remove_tool_from_top_navigation_favorites",
+      "at": "2026-09-20T03:57:01.894Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/external_tools/top_nav_favorites/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_usage_rights_courses": {
+      "id": "canvas_remove_usage_rights_courses",
+      "at": "2026-09-20T03:57:01.906Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "not_planned",
+      "path": "/v1/courses/{course_id}/usage_rights",
+      "detail": "Morrow rejected this request because its input is invalid. Check this input: file_ids.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      },
+      "reason": "This harness could not build the argument shape the route requires: file_ids.",
+      "reclassified": true
+    },
+    "canvas_remove_usage_rights_groups": {
+      "id": "canvas_remove_usage_rights_groups",
+      "at": "2026-09-20T03:57:01.908Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/groups/{group_id}/usage_rights",
+      "missing": [
+        "file_ids"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_remove_usage_rights_users": {
+      "id": "canvas_remove_usage_rights_users",
+      "at": "2026-09-20T03:57:01.910Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_signed_in_person_settings",
+      "path": "/v1/users/{user_id}/usage_rights",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_reset_course": {
+      "id": "canvas_reset_course",
+      "at": "2026-09-20T03:57:01.911Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_irreversible_person_or_course_change",
+      "path": "/v1/courses/{course_id}/reset_content",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_reset_course_favorites": {
+      "id": "canvas_reset_course_favorites",
+      "at": "2026-09-20T03:57:01.913Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/self/favorites/courses",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_reset_group_favorites": {
+      "id": "canvas_reset_group_favorites",
+      "at": "2026-09-20T03:57:01.914Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/users/self/favorites/groups",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_reset_link_verifier": {
+      "id": "canvas_reset_link_verifier",
+      "at": "2026-09-20T03:57:01.916Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/files/{id}/reset_verifier",
+      "missing": [
+        "file_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_reset_lti_registration_to_defaults_apps": {
+      "id": "canvas_reset_lti_registration_to_defaults_apps",
+      "at": "2026-09-20T03:57:01.917Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/apps/{id}/reset",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_reset_lti_registration_to_defaults_lti_registrations": {
+      "id": "canvas_reset_lti_registration_to_defaults_lti_registrations",
+      "at": "2026-09-20T03:57:01.919Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/lti_registrations/{id}/reset",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_reset_what_if_scores_for_current_user_for_entire_course_and_recalculate_grades": {
+      "id": "canvas_reset_what_if_scores_for_current_user_for_entire_course_and_recalculate_grades",
+      "at": "2026-09-20T03:57:08.433Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "failed",
+      "path": "/v1/courses/{course_id}/what_if_grades/reset",
+      "attention": [
+        "dispatch_failed_before_send",
+        "canvas_request_not_sent",
+        "provider_status_403"
+      ],
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      },
+      "reason": "Morrow held this change behind one already waiting on the same target; this run did not settle it.",
+      "reclassified": true
+    },
+    "canvas_restore_deleted_authentication_provider": {
+      "id": "canvas_restore_deleted_authentication_provider",
+      "at": "2026-09-20T03:57:08.437Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/authentication_providers/{id}/restore",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_restore_deleted_eportfolio": {
+      "id": "canvas_restore_deleted_eportfolio",
+      "at": "2026-09-20T03:57:08.440Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/eportfolios/{eportfolio_id}/restore",
+      "missing": [
+        "eportfolio_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_restore_deleted_user_from_root_account": {
+      "id": "canvas_restore_deleted_user_from_root_account",
+      "at": "2026-09-20T03:57:08.442Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/users/{user_id}/restore",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_set_or_remove_restrictions_on_blueprint_course_object": {
+      "id": "canvas_set_or_remove_restrictions_on_blueprint_course_object",
+      "at": "2026-09-20T03:57:08.446Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outbound_ticket_message_or_cross_course",
+      "path": "/v1/courses/{course_id}/blueprint_templates/{template_id}/restrict_item",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_terminate_all_user_sessions": {
+      "id": "canvas_terminate_all_user_sessions",
+      "at": "2026-09-20T03:57:08.449Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_irreversible_person_or_course_change",
+      "path": "/v1/users/{id}/sessions",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_un_share_brandconfig_theme": {
+      "id": "canvas_un_share_brandconfig_theme",
+      "at": "2026-09-20T03:57:08.451Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/shared_brand_configs/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_unlink_outcome_accounts": {
+      "id": "canvas_unlink_outcome_accounts",
+      "at": "2026-09-20T03:57:08.453Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/outcome_groups/{id}/outcomes/{outcome_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_unlink_outcome_courses": {
+      "id": "canvas_unlink_outcome_courses",
+      "at": "2026-09-20T03:57:08.455Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "unreachable",
+      "path": "/v1/courses/{course_id}/outcome_groups/{id}/outcomes/{outcome_id}",
+      "missing": [
+        "outcome_id"
+      ],
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_unlink_outcome_global": {
+      "id": "canvas_unlink_outcome_global",
+      "at": "2026-09-20T03:57:08.457Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/global/outcome_groups/{id}/outcomes/{outcome_id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_unmark_tool_as_rce_favorite": {
+      "id": "canvas_unmark_tool_as_rce_favorite",
+      "at": "2026-09-20T03:57:08.459Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "excluded",
+      "reason": "owner_excluded_outside_the_connected_course",
+      "path": "/v1/accounts/{account_id}/external_tools/rce_favorites/{id}",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_unsubscribe_from_topic_courses": {
+      "id": "canvas_unsubscribe_from_topic_courses",
+      "at": "2026-09-20T03:57:15.979Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/courses/{course_id}/discussion_topics/{topic_id}/subscribed",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "canvas_unsubscribe_from_topic_groups": {
+      "id": "canvas_unsubscribe_from_topic_groups",
+      "at": "2026-09-20T03:57:23.267Z",
+      "phase": 1,
+      "kind": "write",
+      "verdict": "BLOCKED",
+      "state": "approval_withheld",
+      "path": "/v1/groups/{group_id}/discussion_topics/{topic_id}/subscribed",
+      "detail": "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      }
+    },
+    "cleanup:MORROWPROOF1789874351": {
+      "id": "cleanup:MORROWPROOF1789874351",
+      "at": "2026-09-20T03:59:39.040Z",
+      "phase": 1,
+      "kind": "cleanup",
+      "verdict": "FAIL",
+      "reason": "16 object(s) this run made were not removed: override_id, question_id, entry_id, item_id, topic_id, page_id, group_id, event_id, group_category_id, column_id, section_id, assignment_group_id, module_id, topic_id, assignment_id, page_id.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF1789874351"
+      },
+      "cleanup": {
+        "removed": [
+          {
+            "key": "override_id",
+            "id": "82693",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "question_id",
+            "id": "6797770",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "entry_id",
+            "id": "7721069",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "item_id",
+            "id": "10057806",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "folder_id",
+            "id": "1826078",
+            "outcome": "verified"
+          },
+          {
+            "key": "topic_id",
+            "id": "1241829",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "page_id",
+            "id": "morrowproof1789874351-group-page",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "group_id",
+            "id": "1908",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "event_id",
+            "id": "163944",
+            "outcome": "failed"
+          },
+          {
+            "key": "group_category_id",
+            "id": "2018",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "column_id",
+            "id": "2154",
+            "outcome": "failed"
+          },
+          {
+            "key": "section_id",
+            "id": "95411",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "assignment_group_id",
+            "id": "436876",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "module_id",
+            "id": "958418",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "quiz_id",
+            "id": "338301",
+            "outcome": "verified"
+          },
+          {
+            "key": "topic_id",
+            "id": "1241828",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "assignment_id",
+            "id": "4045186",
+            "outcome": "approved"
+          },
+          {
+            "key": "page_id",
+            "id": "morrowproof1789874351-page",
+            "outcome": "approval_withheld"
+          }
+        ],
+        "leftBehind": [
+          {
+            "key": "override_id",
+            "id": "82693",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "question_id",
+            "id": "6797770",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "entry_id",
+            "id": "7721069",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "item_id",
+            "id": "10057806",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "topic_id",
+            "id": "1241829",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "page_id",
+            "id": "morrowproof1789874351-group-page",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "group_id",
+            "id": "1908",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "event_id",
+            "id": "163944",
+            "outcome": "failed"
+          },
+          {
+            "key": "group_category_id",
+            "id": "2018",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "column_id",
+            "id": "2154",
+            "outcome": "failed"
+          },
+          {
+            "key": "section_id",
+            "id": "95411",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "assignment_group_id",
+            "id": "436876",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "module_id",
+            "id": "958418",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "topic_id",
+            "id": "1241828",
+            "outcome": "approval_withheld"
+          },
+          {
+            "key": "assignment_id",
+            "id": "4045186",
+            "outcome": "approved"
+          },
+          {
+            "key": "page_id",
+            "id": "morrowproof1789874351-page",
+            "outcome": "approval_withheld"
+          }
+        ]
+      }
+    },
+    "cleanup:verified-against-canvas": {
+      "id": "cleanup:verified-against-canvas",
+      "at": "2026-09-20T05:09:34.656Z",
+      "phase": 1,
+      "kind": "cleanup",
+      "verdict": "FAIL",
+      "reason": "2 object(s) this harness made remain: pages:MORROWPROOF1789874351 wiki_page_title, rubrics:MORROWSWEEP1789677962 rubric two.",
+      "carriesAMarkedTitleButWasNotMadeHere": [
+        {
+          "place": "pages",
+          "id": "0-dot-1-course-overview-2-2-2",
+          "title": "MORROWSWEEP1789693946 wiki_page_title"
+        }
+      ],
+      "readback": {
+        "source": "canvas",
+        "markedBefore": 5,
+        "removed": [
+          {
+            "place": "pages",
+            "id": "morrowproof1789874351-wiki-page-title-2",
+            "name": "MORROWPROOF1789874351 wiki_page_title",
+            "outcome": "failed"
+          },
+          {
+            "place": "pages",
+            "id": "morrowsweep1789670138-wiki-page-title",
+            "name": "MORROWSWEEP1789670138 wiki_page_title",
+            "outcome": "verified"
+          },
+          {
+            "place": "pages",
+            "id": "morrowsweep1789670138-page-copy",
+            "name": "MORROWSWEEP1789670138 page Copy",
+            "outcome": "verified"
+          },
+          {
+            "place": "rubrics",
+            "id": "560499",
+            "name": "MORROWSWEEP1789677962 rubric two",
+            "outcome": "approval_withheld"
+          }
+        ],
+        "markedAfter": 3,
+        "removableAfter": 2
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOF"
+      }
+    },
+    "queue:closed-after-write-phase": {
+      "id": "queue:closed-after-write-phase",
+      "at": "2026-09-20T04:54:45.834Z",
+      "phase": 1,
+      "kind": "maintenance",
+      "verdict": "FAIL",
+      "readback": {
+        "source": "morrow-journal",
+        "openBefore": 3,
+        "closed": 0,
+        "openAfter": 3
+      },
+      "sandbox": {
+        "courseId": "89585"
+      }
     }
   },
-  "updatedAt": "2026-09-20T03:51:58.064Z"
+  "updatedAt": "2026-09-20T05:09:34.656Z"
 }

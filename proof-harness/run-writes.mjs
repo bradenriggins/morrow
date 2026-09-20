@@ -283,23 +283,51 @@ const { log, read, change, callTool } = makeTools(client, logPath);
  */
 const VERDICTS = {
   verified: "PASS",
+  // Not proven, and not a defect either: the harness could not build the argument, Morrow held
+  // the change behind one already waiting on the same target, or Canvas has no read for it.
   excluded: "BLOCKED",
   unreachable: "BLOCKED",
+  not_planned: "BLOCKED",
   sent_unchecked: "BLOCKED",
   applied_or_unknown: "BLOCKED",
   approval_withheld: "BLOCKED",
+  approved: "BLOCKED",
+  unsettled: "BLOCKED",
+  closed_by_person: "BLOCKED",
+  cancelled: "BLOCKED",
   refused: "BLOCKED",
+  // A defect: Morrow threw, or its own readback disagreed with what it settled.
   threw: "FAIL",
   mismatch: "FAIL",
+  failed: "FAIL",
 };
+
+/**
+ * Why a change that did not complete was not proven. A queue conflict and an argument the harness
+ * cannot build are limits of this run; they are recorded as such rather than as defects, because a
+ * FAIL that is not a defect hides the ones that are.
+ */
+function blockedReason(entry) {
+  const detail = String(entry.text ?? entry.detail ?? "");
+  if (/waiting for approval|existing request/i.test(detail)) {
+    return "Morrow held this change behind one already waiting on the same target; this run did not settle it.";
+  }
+  if (/input is invalid|Check this input/i.test(detail)) {
+    return `This harness could not build the argument shape the route requires: ${/Check this input: ([^.]+)\./.exec(detail)?.[1] ?? "see detail"}.`;
+  }
+  return "";
+}
 const record = (toolName, entry) => {
   const state = String(entry.state ?? entry.outcome ?? "unknown");
   const confirmed = state !== "verified" || entry.verification === undefined || entry.verification === "verified";
+  const queued = blockedReason(entry);
+  const verdict = !confirmed ? "FAIL" : queued ? "BLOCKED" : (VERDICTS[state] ?? "FAIL");
   recordRow(ledger, toolName, {
     phase: 1,
     kind: "write",
-    verdict: confirmed ? (VERDICTS[state] ?? "FAIL") : "FAIL",
+    verdict,
     ...(confirmed ? {} : { reason: `Morrow settled this change as ${state} while its own readback said ${entry.verification}.` }),
+    ...(confirmed && queued ? { reason: queued } : {}),
     state,
     ...(entry.reason ? { reason: entry.reason } : {}),
     ...(entry.path ? { path: entry.path } : {}),
