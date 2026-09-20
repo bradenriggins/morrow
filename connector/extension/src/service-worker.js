@@ -4618,19 +4618,32 @@ async function executeNamedCanvasReadback(binding, plan, expiresAt) {
 
 /**
  * A Canvas file record carries links that are their own way in to the bytes: each one holds a signed
- * verifier. Morrow keeps a verifier out of every result it hands back, so a change to a course file
- * answers with the saved record and without those links.
+ * verifier. Morrow keeps a verifier out of every result it hands back, so a course file answers with
+ * the record and without those links, whether the call read the file or changed it.
  */
 const CANVAS_SIGNED_LINK_FIELDS = Object.freeze(["url", "preview_url", "thumbnail_url"]);
+
+/**
+ * Canvas names the bytes it stored with the saved type and the saved name, on a file row and on an
+ * attachment alike. Every other Canvas record keeps its own `url`, which names a route rather than
+ * the bytes.
+ */
+function canvasFileRecord(value) {
+  return typeof value["content-type"] === "string"
+    && (typeof value.filename === "string" || typeof value.display_name === "string");
+}
 
 function withoutSignedLinkFields(value) {
   if (Array.isArray(value)) return value.map((entry) => withoutSignedLinkFields(entry));
   if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.entries(value).filter(([key]) => !CANVAS_SIGNED_LINK_FIELDS.includes(key)));
+  const signed = canvasFileRecord(value);
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !(signed && CANVAS_SIGNED_LINK_FIELDS.includes(key)))
+    .map(([key, entry]) => [key, withoutSignedLinkFields(entry)]));
 }
 
-function withoutCanvasSignedLinks(result, semantic) {
-  return semantic?.target.object === "file" && result?.data !== undefined
+function withoutCanvasSignedLinks(result, provider) {
+  return provider === "canvas" && result?.data !== undefined
     ? { ...result, data: withoutSignedLinkFields(result.data) }
     : result;
 }
@@ -5302,7 +5315,7 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
   }
   const publicResult = withoutCanvasSignedLinks(
     privateAttachment || privateAttachments || privateConversation ? withoutPrivateAttachment(result) : result,
-    semantic,
+    operation.provider,
   );
   const renderCheck = await savedHtmlRenderCheck(command, operation, publicResult);
   sendResult(command, true, { schema: "morrow.canvas-browser-result.v1", ...publicResult, provider: operation.provider, ...(verification ? { verification } : {}), ...(readDescriptor ? { readDescriptor } : {}), ...(semanticResolution ? { semanticResolution } : {}), ...(renderCheck ? { renderCheck } : {}) }, null);

@@ -15,6 +15,7 @@ import {
 
 const ORIGIN = "https://school.instructure.com";
 const CONTENT_SOURCE = readFileSync(new URL("../../connector/extension/src/canvas-content.js", import.meta.url), "utf8");
+const WORKER_SOURCE = readFileSync(new URL("../../connector/extension/src/service-worker.js", import.meta.url), "utf8");
 const CATALOG = JSON.parse(readFileSync(new URL("../../connector/extension/generated/canvas-api-catalog.json", import.meta.url), "utf8"));
 
 // 601 is the selected course's own file, 701 belongs to another course, and 702 hangs from the
@@ -415,4 +416,45 @@ test("the page still refuses every held file and folder route, proof or not", as
     assert.deepEqual(held.result, { ok: false, sent: false, error: "canvas_course_scope_required" }, toolName);
     assert.deepEqual(held.requests, [], toolName);
   }
+});
+
+/** The guard the worker ships, read out of its own source and run here. */
+function signedLinkGuard() {
+  const start = WORKER_SOURCE.indexOf("const CANVAS_SIGNED_LINK_FIELDS");
+  const end = WORKER_SOURCE.indexOf("function canvasOperationList(");
+  assert.ok(start >= 0 && end > start, "the service worker declares the signed-link guard");
+  return new Function(`${WORKER_SOURCE.slice(start, end)}\nreturn withoutCanvasSignedLinks;`)();
+}
+
+test("a Canvas file link stays in the browser on a read as much as on a change", () => {
+  const withoutSignedLinks = signedLinkGuard();
+  const signed = {
+    ...COURSE_FILE,
+    url: `${ORIGIN}/files/601/download?download_frd=1&verifier=signed-file-verifier`,
+    preview_url: `${ORIGIN}/courses/42/files/601/file_preview?verifier=signed-file-verifier`,
+    thumbnail_url: `${ORIGIN}/images/thumbnails/601/signed-file-verifier`,
+  };
+
+  // canvas_list_files_courses and canvas_get_file_files read a file. No change is being made, so no
+  // write reading narrows them, and Canvas answers each row with the signed link.
+  const listed = withoutSignedLinks({ ok: true, status: 200, data: [signed] }, "canvas");
+  assert.deepEqual(listed.data, [COURSE_FILE]);
+  assert.equal(JSON.stringify(listed).includes("signed-file-verifier"), false);
+  assert.deepEqual(withoutSignedLinks({ ok: true, status: 200, data: signed }, "canvas").data, COURSE_FILE);
+
+  // Canvas hands the same record back inside another one, where it carries the same link.
+  const submission = withoutSignedLinks({ ok: true, status: 200, data: { id: "9", attachments: [signed] } }, "canvas");
+  assert.deepEqual(submission.data, { id: "9", attachments: [COURSE_FILE] });
+
+  // Every other Canvas record keeps its own url, which names a route rather than the bytes: a page
+  // is read and written by that name.
+  const page = { page_id: "91", url: "week-one", title: "Week one" };
+  assert.deepEqual(withoutSignedLinks({ ok: true, status: 200, data: page }, "canvas").data, page);
+
+  // Another provider's result is handed back as it came.
+  const moodle = { ok: true, status: 200, data: { filename: "notes.pdf", fileurl: `${ORIGIN}/pluginfile.php/1/notes.pdf?token=t` } };
+  assert.deepEqual(withoutSignedLinks(moodle, "moodle"), moodle);
+
+  // And the worker runs the guard over every Canvas result, not only over a change it recognised.
+  assert.match(WORKER_SOURCE, /withoutCanvasSignedLinks\([\s\S]{0,240}?operation\.provider,/);
 });

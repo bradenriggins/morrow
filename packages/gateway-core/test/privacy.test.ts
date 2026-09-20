@@ -694,6 +694,25 @@ describe("privacy output boundary", () => {
     });
   });
 
+  it("refuses an unresolved person record nested under a resolved learner", () => {
+    const context = learnerPrivacy();
+    const value = {
+      user: {
+        id: "17",
+        name: "Ada Lovelace",
+        members: [{ name: "Unknown Person", sortable_name: "Person, Unknown" }],
+      },
+    };
+    const descriptor = { ...learnerDescriptor, allowedFields: [], fieldPolicy: "scrub-sensitive" as const };
+
+    const normalized = normalize({ structuredContent: value }, { ...context, descriptor });
+    expect(normalized.structuredContent).toMatchObject({ code: "privacy_identity_record_unresolved" });
+    expect(JSON.stringify(normalized)).not.toContain("Unknown Person");
+    expect(() => redactLearnerEgress(value, {
+      learnerRoster: context.learnerRoster!, learnerVault: context.learnerVault!, learnerScope: context.learnerScope!,
+    })).toThrow("privacy_identity_record_unresolved");
+  });
+
   it("normalizes identity field spellings before tokenizing a generic learner record", () => {
     const result = normalize({
       structuredContent: {
@@ -873,6 +892,45 @@ describe("privacy output boundary", () => {
     });
     expect(JSON.stringify(result)).not.toContain("never-return-this");
     expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
+  });
+
+  it("scrubs every credential spelling a Canvas external tool record carries", () => {
+    const context = learnerPrivacy();
+    const descriptor = { ...learnerDescriptor, allowedFields: [], fieldPolicy: "scrub-sensitive" as const, freeText: "allow" as const };
+    const value = {
+      external_tool: {
+        id: "5",
+        name: "Proctoring",
+        consumer_key: "prod-consumer-91af",
+        consumerKey: "prod-consumer-91af",
+        session_token: "st_live_44c1",
+        sessionToken: "st_live_44c1",
+        token: "tk_live_77b0",
+        custom_fields: {
+          api_key: "ak_live_9d2f81",
+          apiKey: "ak_live_9d2f81",
+          password: "Sup3rSecret!",
+          private_key: "pk_live_31aa",
+          privateKey: "pk_live_31aa",
+          signature: "abc123signature",
+        },
+      },
+    };
+    const leaked = [
+      "prod-consumer-91af", "st_live_44c1", "tk_live_77b0", "ak_live_9d2f81",
+      "Sup3rSecret!", "pk_live_31aa", "abc123signature",
+    ];
+
+    const projected = normalize({ structuredContent: value }, { ...context, descriptor });
+    expect(projected.structuredContent).toEqual({ external_tool: { id: "5", name: "Proctoring", custom_fields: {} } });
+    const egress = redactLearnerEgress(value, {
+      learnerRoster: context.learnerRoster!, learnerVault: context.learnerVault!, learnerScope: context.learnerScope!,
+    });
+    expect(egress).toEqual({ external_tool: { id: "5", name: "Proctoring", custom_fields: {} } });
+    for (const credential of leaked) {
+      expect(JSON.stringify(projected), credential).not.toContain(credential);
+      expect(JSON.stringify(egress), credential).not.toContain(credential);
+    }
   });
 
   it("redacts roster aliases and removes unknown learner-shaped fields in course data", () => {

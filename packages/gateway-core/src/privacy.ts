@@ -1027,9 +1027,17 @@ const IDENTITY_CONTAINER_KEYS = new Map<string, IdentityRecordKind>([
   ["recipient", "recipient"], ["recipients", "recipient"], ["member", "member"], ["members", "member"],
   ["membership", "member"], ["memberships", "member"],
 ]);
-const SECRET_FIELD = /(?:^|_)(?:authorization|bearer|access_token|refresh_token|csrf|cookie|secret|credential|jwt)(?:$|_)/i;
+// A field named for a credential never crosses this boundary, whatever its
+// value looks like. `token`, `key` and `signature` stand for the whole family:
+// access_token, refresh_token, api_key, consumer_key and private_key are all
+// credentials a provider record can carry, and narrowing any of them to one
+// spelling lets the next spelling through. The normalized set repeats the same
+// names without separators, because the regex boundaries cannot see the word
+// break in `apiKey` or `consumerKey`.
+const SECRET_FIELD = /(?:^|_)(?:authorization|bearer|token|csrf|cookie|secret|credential|jwt|password|api_key|consumer_key|private_key|signature)(?:$|_)/i;
 const SECRET_FIELD_NORMALIZED = new Set([
-  "authorization", "bearer", "accesstoken", "refreshtoken", "csrf", "cookie", "secret", "credential", "jwt",
+  "authorization", "bearer", "accesstoken", "refreshtoken", "sessiontoken", "token", "csrf", "cookie",
+  "secret", "credential", "jwt", "password", "apikey", "consumerkey", "privatekey", "signature",
   "privateattachment", "bytesbase64",
 ]);
 
@@ -1251,9 +1259,14 @@ function projectValue(
   // failure there, not a record to tokenize here; a record that carries only a
   // token is already resolved and is not an unresolved identity.
   if (sourceRedacted && detectedIdentity) throw new Error("privacy_source_learner_identity_refused");
+  // A resolved parent says "redact learner text below here". It does not say the
+  // records below it are that same person. An attribute bag such as an
+  // enrollment's grades carries no identity signal and belongs to the parent, so
+  // it passes; a nested record that names somebody Morrow could not resolve is a
+  // second person and is refused exactly as it would be at the top level.
   if (!sourceRedacted && kind && !detectedIdentity && Object.keys(value).length !== 0
-    && !inheritedLearnerPrivacy && !mayScrubUnrosteredCanvasIdentity
-    && !((kind === "author" || kind === "member") && !hasIdentityRecordSignal(value))) {
+    && !mayScrubUnrosteredCanvasIdentity
+    && !((inheritedLearnerPrivacy || kind === "author" || kind === "member") && !hasIdentityRecordSignal(value))) {
     throw new Error("privacy_identity_record_unresolved");
   }
   let learner = detectedIdentity;
@@ -1407,8 +1420,9 @@ function redactLearnerEgressPrepared(value: unknown, exactContext: PreparedLearn
     const detectedIdentity = learner !== null;
     const mayScrubUnrosteredCanvasIdentity = exactContext.allowUnrosteredCanvasIdentities === true
       && (kind !== undefined || detectedIdentity);
-    if (kind && !learner && Object.keys(candidate).length !== 0 && !inheritedLearnerPrivacy
-      && !((kind === "author" || kind === "member" || mayScrubUnrosteredCanvasIdentity) && !hasIdentityRecordSignal(candidate))) {
+    if (kind && !learner && Object.keys(candidate).length !== 0
+      && !((inheritedLearnerPrivacy || kind === "author" || kind === "member" || mayScrubUnrosteredCanvasIdentity)
+        && !hasIdentityRecordSignal(candidate))) {
       throw new Error("privacy_identity_record_unresolved");
     }
     const needsLearnerPrivacy = inheritedLearnerPrivacy || kind !== undefined || learner !== null;
