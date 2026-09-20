@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID, timingSafeEqual, createHash } from "node:crypto";
 import { lstatSync, realpathSync, statSync, unlinkSync } from "node:fs";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
   canonicalPrivateStateFilePath,
   createExactPrivateStateFile,
@@ -257,8 +258,24 @@ function exactWorkspace(value: unknown): value is string {
   return typeof value === "string" && isAbsolute(value) && !/[\0\r\n]/.test(value) && resolve(value) === value;
 }
 
+// The workspace root is the only bound on the local files Morrow will read and stage for upload, so
+// a root that holds the whole account or the whole disk is not a project folder. A client that
+// starts Morrow without a working directory lands on one of these, and must be refused there.
+export function workspaceRootTooBroad(root: string): boolean {
+  if (dirname(root) === root) return true;
+  let home = homedir();
+  try {
+    home = realpathSync(home);
+  } catch {
+    // An unreadable home directory still bounds the comparison by its configured path.
+  }
+  if (!isAbsolute(home)) return false;
+  const homeFromRoot = relative(root, home);
+  return homeFromRoot === "" || (!isAbsolute(homeFromRoot) && !homeFromRoot.startsWith(".."));
+}
+
 function canonicalWorkspace(value: unknown): string | null {
-  if (!exactWorkspace(value)) return null;
+  if (!exactWorkspace(value) || workspaceRootTooBroad(value)) return null;
   try {
     const canonical = realpathSync(value);
     return canonical === value && statSync(canonical).isDirectory() ? canonical : null;

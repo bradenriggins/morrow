@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { DomUtils, parseDocument } from "htmlparser2";
 import sanitizeHtml from "sanitize-html";
 import {
+  STRUCTURAL_EDIT_FIELDS,
   normalizeBridgeBindings,
   normalizeBridgeEditOptionsResult,
   normalizeBridgePrivateConversation,
@@ -75,6 +76,7 @@ import {
   GatewayOperationJournal,
   ProviderEffectBroker,
   ProviderEffectTargetConflictError,
+  CORRECTABLE_EFFECT_OPERATION_STATES,
   EFFECT_TARGET_IDENTITY_VERSION,
   ProviderEffectTargetIdentityVersionError,
   ProviderEffectTargetScopeUnknownError,
@@ -686,11 +688,15 @@ export interface BrowserEditAccessSelection {
   readonly sessionGeneration: number;
   readonly catalogDigest: string;
   readonly expectedPolicyRevision: number;
-  readonly enabledCategories: readonly {
-    readonly id: string;
-    readonly label: string;
-    readonly description: string;
-  }[];
+  readonly enabledCategories: readonly BrowserEditAccessCategory[];
+}
+
+export interface BrowserEditAccessCategory {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+  readonly destructive: boolean;
+  readonly unchecked: boolean;
 }
 
 export interface BrowserEditAccessPrepared {
@@ -917,32 +923,12 @@ function isBlackboardContentPatchVerify(mapping: CatalogTool): boolean {
 }
 
 const REVIEW_AUTHORIZATION: EffectAuthorization = { kind: "review" };
-const EDIT_POLICY_STRUCTURAL_FIELDS = new Set([
-  "course_id",
-  "url_or_id",
-  "module_id",
-  "section_id",
-  "target_section_id",
-  "expected_digest",
-  "expected_snapshot",
-  "fan_out",
-  "fan_out_receipt",
-  "acknowledged_course_ids",
-  "chapter_id",
-  "after_chapter_id",
-  "category_id",
-  "grade_item_id",
-  "slot_id",
-  "section_number",
-  "section_name",
-]);
 
 function browserEditFields(mapping: CatalogTool, request: JsonObject): readonly string[] {
   const pathFields = new Set([...(mappingOperationKey(mapping) || "").matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)]
     .map((match) => match[1]!));
   return Object.keys(request)
-    .filter((field) => field !== "_morrow" && !EDIT_POLICY_STRUCTURAL_FIELDS.has(field)
-      && !pathFields.has(field))
+    .filter((field) => !STRUCTURAL_EDIT_FIELDS.has(field) && !pathFields.has(field))
     .sort();
 }
 
@@ -3257,16 +3243,28 @@ export class GatewayRuntime {
       throw new Error("The selected browser course connection changed. Read current course connections and try again.");
     }
     const categories = Array.isArray(binding.editCategories) ? binding.editCategories : [];
-    const available = new Map<string, { readonly id: string; readonly label: string; readonly description: string }>();
+    const available = new Map<string, BrowserEditAccessCategory>();
     for (const category of categories) {
       if (!isJsonObject(category) || typeof category.id !== "string" || typeof category.label !== "string"
         || typeof category.description !== "string" || !category.id || !category.label || !category.description
         || category.id.length > 160 || category.label.length > 300 || category.description.length > 1_000
         || (category.availability !== undefined && category.availability !== "edit" && category.availability !== "review")
+        || (category.destructive !== undefined && typeof category.destructive !== "boolean")
+        || (category.verification !== undefined && typeof category.verification !== "string")
         || available.has(category.id)) {
         throw new Error("The selected browser course categories changed. Read current course connections and try again.");
       }
-      if (category.availability !== "review") available.set(category.id, { id: category.id, label: category.label, description: category.description });
+      // The confirmation a person accepts has to name what the settings page names, so the two
+      // flags its confirmation stage reads travel with the label instead of being dropped here.
+      if (category.availability !== "review") {
+        available.set(category.id, {
+          id: category.id,
+          label: category.label,
+          description: category.description,
+          destructive: category.destructive === true || category.tier === "destructive",
+          unchecked: category.verification === "unchecked",
+        });
+      }
     }
     if (mode === "edit") {
       for (const id of input.enabledCategories ?? []) {
@@ -3295,7 +3293,7 @@ export class GatewayRuntime {
       sessionGeneration,
       catalogDigest,
       expectedPolicyRevision,
-      enabledCategories: enabledCategories.filter((category): category is { readonly id: string; readonly label: string; readonly description: string } => Boolean(category)),
+      enabledCategories: enabledCategories.filter((category): category is BrowserEditAccessCategory => Boolean(category)),
     };
   }
 
@@ -9496,9 +9494,8 @@ export class GatewayRuntime {
     correctionArguments: Readonly<Record<string, unknown>>,
   ): JsonObject {
     const original = this.effects.get(operationId);
-    const undo = isJsonObject(original.plan.undo) ? original.plan.undo : {};
-    if (undo.supported !== true) {
-      throw new Error("The frozen operation plan has no exact undo facts");
+    if (!CORRECTABLE_EFFECT_OPERATION_STATES.has(original.state)) {
+      throw new Error("Only an operation Morrow may have sent can take a correction");
     }
     const mapping = this.toolByPublicName.get(correctionTool);
     if (!mapping || mapping.annotations?.readOnlyHint === true) {

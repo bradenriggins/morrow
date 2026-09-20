@@ -12,12 +12,15 @@ export const SETTINGS_EDIT_DURATIONS = Object.freeze([
   Object.freeze({ value: MAX_EDIT_DURATION_MS, label: "24 hours" }),
 ]);
 
-const STRUCTURAL_EDIT_FIELDS = new Set([
+// This list and the one in packages/bridge-protocol/src/index.ts must hold the same names. The
+// gateway imports the bridge-protocol set, so a name present here and missing there becomes a
+// changed field no grant can ever name, and the write falls back to a separate approval.
+export const STRUCTURAL_EDIT_FIELDS = new Set([
   "course_id", "url_or_id", "id", "topic_id", "module_id", "section_id", "target_section_id", "assignment_id", "item_id", "quiz_id", "expected_digest",
   "chapter_id", "after_chapter_id", "category_id", "grade_item_id", "slot_id", "after_slot_id", "section_number", "section_name", "override_id",
   "page_id", "after_page_id", "expected_jump_changes", "expected_invalid_jumps",
   "bank_id", "bank_entry_id", "quiz_entry_id", "expected_snapshot", "fan_out", "fan_out_receipt", "acknowledged_course_ids", "user_id", "event_id",
-  "morrow_page_guard", "morrow_canvas_content_guard", "morrow_item_bank_guard", "morrow_new_quiz_item_position_guard"
+  "_morrow", "morrow_page_guard", "morrow_canvas_content_guard", "morrow_item_bank_guard", "morrow_new_quiz_item_position_guard"
 ]);
 const EDIT_FIELD = /^[A-Za-z][A-Za-z0-9_]{0,159}$/;
 const EDIT_FIELD_GRANT_LIMIT = 8;

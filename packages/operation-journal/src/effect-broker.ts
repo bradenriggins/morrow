@@ -186,6 +186,20 @@ const TARGET_HOLDING_STATES = "'dispatching','awaiting_inner_approval','awaiting
  */
 const UNRESOLVED_STATES: readonly EffectOperationState[] = ["awaiting_verification", "applied_or_unknown"];
 
+/**
+ * The states a record never left review from, plus the failure the broker only
+ * records when the write did not apply. A record in one of these has nothing at
+ * the provider to correct.
+ */
+const NOTHING_SENT_STATES: readonly EffectOperationState[] = ["awaiting_approval", "approved", "cancelled", "failed"];
+
+/**
+ * The states a correction can be planned from: Morrow may have sent the write.
+ */
+export const CORRECTABLE_EFFECT_OPERATION_STATES: ReadonlySet<EffectOperationState> = new Set(
+  EFFECT_OPERATION_STATES.filter((state) => !NOTHING_SENT_STATES.includes(state)),
+);
+
 function encodeOperationListCursor(row: Pick<EffectRow, "created_at" | "operation_id">): string {
   return Buffer.from(JSON.stringify({ createdAt: row.created_at, operationId: row.operation_id }), "utf8").toString("base64url");
 }
@@ -752,7 +766,9 @@ export class ProviderEffectBroker {
       requestCost: { providerRequests: readback ? 2 : 1 },
       ...(input.sourceBindingId ? { sourceBindingId: identifier(input.sourceBindingId, "source binding id") } : {}),
       ...(readback ? { readback } : {}),
-      undo: { supported: false, reason: "no_frozen_pre_state_or_correction_payload" },
+      // Morrow reverses nothing on its own. The one correction route is a new
+      // operation with its own plan and its own approval.
+      undo: { automatic: false, correction: "separately_approved_operation" },
       ...(input.correctionOf ? { correctionOf: identifier(input.correctionOf, "correction operation id") } : {}),
       ...(requestedBy ? { requestedBy } : {}),
     };

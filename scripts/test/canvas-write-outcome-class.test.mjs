@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { runInThisContext } from "node:vm";
+import vm, { runInThisContext } from "node:vm";
 import { bridgeWriteFailureCode, canvasWriteOutcomeUncertain } from "../../connector/extension/src/canvas-write-outcome.js";
 import { canvasOperationAdmission } from "../../connector/extension/generated/canvas-operation-admission.js";
 import { executeItemBankInPage } from "../../connector/extension/src/item-bank-executor.js";
@@ -250,4 +250,49 @@ test("the Item Banks executor classifies one bank creation and keeps failed read
     assert.equal(read.sent, true, `HTTP ${status}`);
     assert.equal(read.outcomeUnknown, false, `HTTP ${status}`);
   }
+});
+
+/**
+ * Runs the real handleTrackedWrite against a failing step, with the same effect
+ * flag the service worker sets immediately before it dispatches a change.
+ */
+async function trackedWriteAfter(failure, { effectPossible = false } = {}) {
+  const worker = readFileSync(new URL("../../connector/extension/src/service-worker.js", import.meta.url), "utf8");
+  const flags = worker.slice(worker.indexOf("function markBridgeEffectPossible(command) {"), worker.indexOf("\nasync function bindingFor("));
+  const tracked = worker.slice(worker.indexOf("function maintenanceCode(error) {"), worker.indexOf("\nasync function handleCommand(command)"));
+  assert.ok(flags.length > 0 && tracked.length > 0);
+  const command = { requestId: "bridge:request-1234", operationId: "operation:tracked-write-1234", kind: "invoke_write", generation: 1 };
+  const active = { command, cancelled: false, effectPossible, resultSent: false };
+  const context = {
+    state: { bridgeCommands: new Map([[command.requestId, active]]) },
+    BridgeMaintenanceError: class extends Error {},
+    finished: [],
+    results: [],
+    bridgeMaintenance: {
+      beginWrite: async () => undefined,
+      finishWrite: async (operationId, outcome) => { context.finished.push({ operationId, outcome }); },
+    },
+    bridgeCommandCancelled: async () => false,
+    commandContext: async () => { if (failure === "context") throw new Error("storage rejected"); return { binding: { sourceBindingId: "canvas:course-42" } }; },
+    queueBindingWrite: async (_id, run) => await run(),
+    handleQueuedWrite: async () => { throw new Error("dispatch failed"); },
+    problem(code, message, recoverable) { return { code, message, recoverable }; },
+    sendResult(value, ok, result, problemValue) { context.results.push({ ok, failure: problemValue }); },
+  };
+  vm.runInNewContext(`${flags}\n${tracked}\nglobalThis.trackedWrite = handleTrackedWrite;`, context);
+  await context.trackedWrite(command);
+  return { finished: context.finished, failure: context.results.at(-1).failure };
+}
+
+test("a course change that fails before dispatch settles as a known outcome", async () => {
+  // Nothing reached the course, so the operation must not be held for a person
+  // to close by hand.
+  const beforeDispatch = await trackedWriteAfter("context");
+  assert.deepEqual(beforeDispatch.finished, [{ operationId: "operation:tracked-write-1234", outcome: "known" }]);
+  assert.equal(beforeDispatch.failure.code, "bridge_request_failed");
+  assert.equal(beforeDispatch.failure.recoverable, true);
+
+  const afterDispatch = await trackedWriteAfter("dispatch", { effectPossible: true });
+  assert.deepEqual(afterDispatch.finished, [{ operationId: "operation:tracked-write-1234", outcome: "unknown" }]);
+  assert.equal(afterDispatch.failure.code, "write_outcome_unknown");
 });

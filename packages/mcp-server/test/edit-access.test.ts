@@ -18,12 +18,12 @@ const prepared: BrowserEditAccessPrepared = {
     {
       sourceBindingId: "canvas-bio", provider: "canvas", courseId: "42", courseName: "Biology", site: "https://canvas.example.edu",
       principalFingerprint: "a".repeat(64), sessionGeneration: 4, catalogDigest: "b".repeat(64), expectedPolicyRevision: 2,
-      enabledCategories: [{ id: "assignment_due_at", label: "Assignment due dates", description: "Change one assignment due date." }],
+      enabledCategories: [{ id: "assignment_due_at", label: "Assignment due dates", description: "Change one assignment due date.", destructive: false, unchecked: false }],
     },
     {
       sourceBindingId: "moodle-chem", provider: "moodle", courseId: "51", courseName: "Chemistry", site: "https://moodle.example.edu",
       principalFingerprint: "c".repeat(64), sessionGeneration: 9, catalogDigest: "d".repeat(64), expectedPolicyRevision: 7,
-      enabledCategories: [{ id: "moodle_page_content", label: "Page content", description: "Change a Moodle Page." }],
+      enabledCategories: [{ id: "moodle_page_content", label: "Page content", description: "Change a Moodle Page.", destructive: false, unchecked: false }],
     },
   ],
 };
@@ -126,6 +126,36 @@ describe("conversational Edit access", () => {
       expect(revoked).not.toHaveProperty("inputRequests");
       expect(apply).toHaveBeenLastCalledWith(planPrepared);
       expect(revoked.structuredContent).toMatchObject({ schema: "morrow.edit-access.v1", ok: true, mode: "plan", outcome: "received" });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("states that a selected action removes course content before the person confirms", async () => {
+    const { runtime, prepare } = fixture();
+    prepare.mockResolvedValueOnce({
+      mode: "edit",
+      selections: [{
+        ...prepared.selections[1]!,
+        enabledCategories: [{
+          id: "action:moodle:moodle_delete_book_chapter",
+          label: "Delete a Book chapter",
+          description: "It removes or replaces saved course content for everyone in the course, and Morrow cannot undo it.",
+          destructive: true,
+          unchecked: true,
+        }],
+      }],
+    } satisfies BrowserEditAccessPrepared);
+    const { client, server } = await connected(runtime);
+    try {
+      const round = await client.callTool({
+        name: "morrow_request_edit_access",
+        arguments: { mode: "edit", selections: [{ source_binding_id: "moodle-chem", enabled_categories: ["action:moodle:moodle_delete_book_chapter"] }] },
+      }, { allowInputRequired: true }) as unknown as { inputRequests: { edit_access: { params: { message: string } } } };
+      const message = round.inputRequests.edit_access.params.message;
+      expect(message).toContain("1 selected action removes course content: Delete a Book chapter.");
+      expect(message).toContain("Morrow cannot check the saved result for 1 selected action: Delete a Book chapter.");
     } finally {
       await client.close();
       await server.close();

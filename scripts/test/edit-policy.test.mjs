@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { categoriesForBinding, changedFields, createEditPermission } from "../../connector/extension/src/edit-policy.js";
-import { matchesBridgeEditPermission } from "../../packages/bridge-protocol/dist/index.js";
+import { STRUCTURAL_EDIT_FIELDS, categoriesForBinding, changedFields, createEditPermission } from "../../connector/extension/src/edit-policy.js";
+import { STRUCTURAL_EDIT_FIELDS as bridgeStructuralEditFields, matchesBridgeEditPermission } from "../../packages/bridge-protocol/dist/index.js";
 
 const root = new URL("../../", import.meta.url);
 const moodleOperations = JSON.parse(readFileSync(new URL("connector/extension/generated/moodle-browser-catalog.json", root), "utf8")).operations;
@@ -139,4 +139,29 @@ test("a granted Moodle Book chapter deletion carries no field grant and still au
     toolName: "moodle_delete_book_chapter",
     arguments: { ...args, title: "Renamed" },
   }), false);
+});
+
+test("the extension and the bridge hold the same structural field list", () => {
+  assert.deepEqual([...bridgeStructuralEditFields].sort(), [...STRUCTURAL_EDIT_FIELDS].sort());
+});
+
+test("a granted Moodle enrolment authorizes its own write, whose only argument names the person", async () => {
+  const permission = await createEditPermission({
+    binding, catalogDigest: CATALOG_DIGEST, revision: 1, operations: moodleOperations,
+    enabledCategories: ["action:moodle:moodle_enrol_participant"],
+  });
+  assert.deepEqual(permission.rules, [{
+    operationKey: "moodle.form.enrol.participant.enrol.write.v1",
+    toolName: "moodle_enrol_participant",
+    allowedChangedFields: [],
+  }]);
+  const args = { course_id: 2, user_id: 14, expected_digest: "d".repeat(64) };
+  assert.deepEqual(changedFields(args), []);
+  assert.equal(matchesBridgeEditPermission(bridgeBinding(permission), {
+    provider: "moodle",
+    catalogDigest: CATALOG_DIGEST,
+    operationKey: "moodle.form.enrol.participant.enrol.write.v1",
+    toolName: "moodle_enrol_participant",
+    arguments: args,
+  }), true);
 });

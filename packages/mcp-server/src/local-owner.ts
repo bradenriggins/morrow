@@ -55,6 +55,7 @@ import {
   recoverExactLocalOwnerMaintenanceLease,
   removeExactLocalOwnerMaintenanceLease,
   writeLocalOwnerMaintenanceLease,
+  workspaceRootTooBroad,
 } from "./local-owner-maintenance.js";
 import { RuntimeStateLease, hardenMorrowStateFiles } from "./state-lease.js";
 import { StrictStdioServerTransport } from "./strict-stdio.js";
@@ -388,7 +389,7 @@ function encodeWorkspaceRoot(root: string): string | null {
 }
 
 function admittedWorkspace(root: string, encoded?: string): WorkspaceAdmission | null {
-  if (!root || !isAbsolute(root) || /[\0\r\n]/.test(root)) return null;
+  if (!root || !isAbsolute(root) || /[\0\r\n]/.test(root) || workspaceRootTooBroad(root)) return null;
   let canonical: string;
   try {
     canonical = realpathSync(root);
@@ -407,6 +408,11 @@ function currentWorkspaceAdmission(): WorkspaceAdmission {
     root = realpathSync(process.cwd());
   } catch {
     throw new Error("Morrow could not admit the current assistant workspace.");
+  }
+  if (workspaceRootTooBroad(root)) {
+    throw new Error(
+      `Morrow will not use ${root} as the assistant workspace. Start this assistant in a project folder, not a disk root or your home directory.`,
+    );
   }
   const admitted = admittedWorkspace(root);
   if (!admitted) throw new Error("Morrow could not admit the current assistant workspace.");

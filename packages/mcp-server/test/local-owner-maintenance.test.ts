@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, link, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, parse } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   LocalOwnerMaintenanceClientError,
@@ -18,6 +18,7 @@ import {
   removeExactLocalOwnerMaintenanceLease,
   requestLocalOwnerMaintenance,
   writeLocalOwnerMaintenanceLease,
+  workspaceRootTooBroad,
   type LocalOwnerIdentity,
 } from "../src/local-owner-maintenance.js";
 import { localOwnerSidecarAccessAccepted } from "../src/local-owner-sidecar-access.js";
@@ -325,6 +326,26 @@ describe("local owner maintenance lease", () => {
       });
       expect(readLocalOwnerMaintenanceLease(fixture.journalPath)?.leaseId).toBe(stopped?.leaseId);
       expect(removeExactLocalOwnerMaintenanceLease(fixture.journalPath, stopped!.leaseId, stopped!.leaseToken)).toBe(true);
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a workspace root that holds the whole disk or the whole account", async () => {
+    const fixture = await directory();
+    try {
+      const diskRoot = parse(fixture.workspaceRoot).root;
+      const home = await realpath(homedir());
+      expect(workspaceRootTooBroad(diskRoot)).toBe(true);
+      expect(workspaceRootTooBroad(home)).toBe(true);
+      expect(workspaceRootTooBroad(dirname(home))).toBe(true);
+      expect(workspaceRootTooBroad(fixture.workspaceRoot)).toBe(false);
+
+      expect(acquireStoppedLocalOwnerMaintenanceLease(fixture.journalPath, {
+        holderPid: process.pid,
+        workspaceRoot: diskRoot,
+      })).toBeNull();
+      expect(readLocalOwnerMaintenanceLease(fixture.journalPath)).toBeNull();
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }

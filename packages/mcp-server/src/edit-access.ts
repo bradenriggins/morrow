@@ -74,12 +74,36 @@ function supportsForm(context: ServerContext, server: McpServer): boolean {
   return isJsonObject(capabilities) && isJsonObject(capabilities.elicitation);
 }
 
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function labelList(categories: readonly { readonly label: string }[]): string {
+  const labels = [...new Set(categories.map((category) => category.label))];
+  return labels.length > 6 ? `${labels.slice(0, 6).join(", ")}, and ${plural(labels.length - 6, "more action")}` : labels.join(", ");
+}
+
+// The settings page states these two facts before it saves the same grant. The native form is the
+// whole consent here, so it states them in the same words.
+function flaggedText(prepared: BrowserEditAccessPrepared): string {
+  const categories = [...new Map(prepared.selections
+    .flatMap((selection) => [...selection.enabledCategories])
+    .map((category) => [category.id, category])).values()];
+  const destructive = categories.filter((category) => category.destructive);
+  const unchecked = categories.filter((category) => category.unchecked);
+  return [
+    destructive.length ? `${plural(destructive.length, "selected action")} ${destructive.length === 1 ? "removes" : "remove"} course content: ${labelList(destructive)}.` : "",
+    unchecked.length ? `Morrow cannot check the saved result for ${plural(unchecked.length, "selected action")}: ${labelList(unchecked)}. Morrow reports those results as unconfirmed.` : "",
+  ].filter(Boolean).join(" ");
+}
+
 function confirmationMessage(prepared: BrowserEditAccessPrepared): string {
   const courses = prepared.selections.map((selection) => {
     const categories = selection.enabledCategories.map((category) => category.label).join(", ");
     return `${selection.courseName} (course ${selection.courseId}, ${selection.site}; ${categories})`;
   }).join("\n");
-  const message = `Enable Morrow Edit access for these exact current course connections:\n${courses}\n\nThis temporary Edit scope expires in 30 minutes. Confirm this Edit scope.`;
+  const flagged = flaggedText(prepared);
+  const message = `Enable Morrow Edit access for these exact current course connections:\n${courses}\n\n${flagged ? `${flagged}\n\n` : ""}This temporary Edit scope expires in 30 minutes. Confirm this Edit scope.`;
   if (message.length > 24_000) throw new Error("The selected courses exceed one confirmation form. Select fewer exact course connections.");
   return message;
 }

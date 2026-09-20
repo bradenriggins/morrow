@@ -2608,9 +2608,13 @@ function markBridgeEffectPossible(command) {
   return true;
 }
 
-function bridgeCommandEndedAfterEffect(command) {
+function bridgeCommandEffectPossible(command) {
   const active = state.bridgeCommands.get(command.requestId);
-  return active?.command === command && active.cancelled === true && active.effectPossible === true;
+  return active?.command === command && active.effectPossible === true;
+}
+
+function bridgeCommandEndedAfterEffect(command) {
+  return state.bridgeCommands.get(command.requestId)?.cancelled === true && bridgeCommandEffectPossible(command);
 }
 
 async function bindingFor(id, { fresh = false } = {}) {
@@ -5383,6 +5387,11 @@ async function handleTrackedWrite(command) {
     }
     outcome = await queueBindingWrite(context.binding.sourceBindingId, () => handleQueuedWrite(command));
   } catch {
+    // The same flag that raises uncertainty after dispatch settles it before dispatch.
+    if (!bridgeCommandEffectPossible(command)) {
+      outcome = "known";
+      return sendResult(command, false, null, problem("bridge_request_failed", "Morrow could not prepare this course change, and sent nothing to the course.", true));
+    }
     return sendResult(command, false, null, problem("write_outcome_unknown", "Morrow could not determine the result of this course change. Check the existing course before another change.", false));
   } finally {
     if (bridgeCommandEndedAfterEffect(command)) outcome = "unknown";
