@@ -214,8 +214,22 @@ describe("outer provider effects", () => {
       const replay = await runtime.dispatchOperation(id);
       expect(replay.isError).toBe(true);
 
-      expect(() => runtime.undoOperation(id, "morrow_legacy_only", { value: "corrected" }))
-        .toThrow("no exact undo facts");
+      const correction = runtime.undoOperation(id, "morrow_legacy_only", { value: "corrected", course_id: "101" });
+      expect(correction.structuredContent).toMatchObject({
+        schema: "morrow.result.v1",
+        phase: "correction_planned",
+        effectState: "awaiting_approval",
+      });
+      const correctionId = operationId(correction);
+      expect(correctionId).not.toBe(id);
+      expect(runtime.operationGet(correctionId)).toMatchObject({
+        plan: { correctionOf: id, arguments: { value: "corrected", course_id: "101" } },
+      });
+
+      // A record still in review has nothing at the provider to correct.
+      const pending = await runtime.call("morrow_legacy_only", { value: "pending", course_id: "102" });
+      expect(() => runtime.undoOperation(operationId(pending), "morrow_legacy_only", { value: "x", course_id: "102" }))
+        .toThrow("may have sent");
     } finally {
       await runtime.close();
     }
@@ -351,6 +365,8 @@ describe("outer provider effects", () => {
       const settledBody = await settled.text();
       expect(settledBody).toContain("Changes confirmed");
       expect(settledBody).not.toContain('<button class="approve"');
+      expect(settledBody).not.toContain('name="nonce"');
+      expect(settled.headers.get("set-cookie")).toBeNull();
       const stale = await fetch(`${url}/approve`, {
         method: "POST",
         headers: { accept: "text/html", "content-type": "application/x-www-form-urlencoded" },

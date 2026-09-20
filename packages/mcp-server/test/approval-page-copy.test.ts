@@ -46,8 +46,8 @@ function approvalServer(
 }
 
 /** Reads the review page and returns the nonce and cookie an approval post needs. */
-async function reviewPage(baseUrl: string): Promise<{ body: string; nonce: string; cookie: string }> {
-  const response = await fetch(`${baseUrl}/operations/${encodedId}`);
+async function reviewPage(baseUrl: string, id = operationId): Promise<{ body: string; nonce: string; cookie: string }> {
+  const response = await fetch(`${baseUrl}/operations/${encodeURIComponent(id)}`);
   const body = await response.text();
   return {
     body,
@@ -56,18 +56,39 @@ async function reviewPage(baseUrl: string): Promise<{ body: string; nonce: strin
   };
 }
 
-async function submitApproval(baseUrl: string, nonce: string, cookie: string): Promise<Response> {
-  return fetch(`${baseUrl}/operations/${encodedId}/approve`, {
+async function submitApproval(baseUrl: string, nonce: string, cookie: string, id = operationId): Promise<Response> {
+  const encoded = encodeURIComponent(id);
+  return fetch(`${baseUrl}/operations/${encoded}/approve`, {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
       accept: "text/html",
       cookie,
       origin: baseUrl,
-      referer: `${baseUrl}/operations/${encodedId}`,
+      referer: `${baseUrl}/operations/${encoded}`,
     },
     body: new URLSearchParams({ nonce }),
     redirect: "manual",
+  });
+}
+
+/** One server whose reviews are addressed by operation id, so many stay open at once. */
+function manyReviewServer(approved: string[]): LoopbackApprovalServer {
+  const snapshot = (id: string, state: string): JsonObject => ({ ...moodleSnapshot(state), operationId: id });
+  return new LoopbackApprovalServer({
+    operationGet: (id) => snapshot(id, "awaiting_approval"),
+    operationList: () => ({ schema: "morrow.operations.list.v1", returned: 0, operations: [] }),
+    operationReviewContext: async () => ({ targets: [
+      { field: "course_id", label: "Course", name: "Biology 101" },
+      { field: "module_id", label: "Page", name: "Week 2 overview" },
+    ] }),
+    approveOperation: (id) => {
+      approved.push(id);
+      return snapshot(id, "approved");
+    },
+    runApprovedOperation: async () => undefined,
+    cancelOperation: (id) => snapshot(id, "cancelled"),
+    setApprovalBaseUrl: () => undefined,
   });
 }
 
@@ -160,6 +181,23 @@ describe("approval page copy", () => {
       expect(approvals.count).toBe(0);
       await expect(submitApproval(baseUrl, second.nonce, second.cookie)).resolves.toMatchObject({ status: 303 });
       expect(approvals.count).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps a review page valid after many other reviews are opened", async () => {
+    const approved: string[] = [];
+    const server = manyReviewServer(approved);
+    try {
+      const baseUrl = await server.start();
+      const first = await reviewPage(baseUrl, operationId);
+      const others = [];
+      for (let index = 0; index < 128; index += 1) others.push(await reviewPage(baseUrl, `${operationId}-other-${index}`));
+      await expect(submitApproval(baseUrl, first.nonce, first.cookie, operationId)).resolves.toMatchObject({ status: 303 });
+      expect(approved).toEqual([operationId]);
+      expect(others.at(-2)?.nonce).not.toBe("");
+      expect(others.at(-1)?.nonce).toBe("");
     } finally {
       await server.close();
     }

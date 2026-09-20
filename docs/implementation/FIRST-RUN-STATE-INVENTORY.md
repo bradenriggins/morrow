@@ -547,15 +547,15 @@ stale name here.
 | `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:143`, `connector/extension/settings/settings.js:476` |
 | `Keep reviewing` | Plan and Edit settings | `connector/extension/settings/settings.html:152` |
 | `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:153` |
-| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:965` |
-| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:965` |
-| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:965` |
-| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:965` |
-| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:965` |
-| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:976` |
-| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:955` |
-| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:952` |
-| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:954` |
+| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:969` |
+| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:969` |
+| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:969` |
+| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:969` |
+| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:969` |
+| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:980` |
+| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:959` |
+| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
+| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:958` |
 
 Names a person reads as landmarks rather than presses:
 

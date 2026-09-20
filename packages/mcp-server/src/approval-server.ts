@@ -836,7 +836,11 @@ function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boo
   return stateContent(state, platform, attention) + (total ? `<section class="section"><p>${confirmed} of ${total} changes confirmed in ${platform}.</p></section>` : "");
 }
 
-function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, contexts: ReadonlyMap<string, ApprovalReviewContext>, active: boolean): string {
+// The nonce is issued on demand so a page that renders no form never takes a
+// grant slot or sets a cookie the reader cannot use.
+function html(target: ApprovalTarget, snapshot: JsonObject, grant: () => string, contexts: ReadonlyMap<string, ApprovalReviewContext>, active: boolean): string {
+  let issued: string | null = null;
+  const nonce = (): string => (issued ??= grant());
   const summary = escapeHtml(JSON.stringify(technicalDetails(target, snapshot), null, 2));
   const escapedId = escapeHtml(encodeURIComponent(target.id));
   const batch = target.kind === "batches";
@@ -951,7 +955,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
   }).join("");
   const reviewContent = batch ? `<section class="batch-review"><div class="change-list-controls" hidden><label for="change-search">Find a change</label><input id="change-search" type="search" placeholder="Search titles or courses" autocomplete="off"></div><div class="change-list">${changed}</div><nav class="change-pagination" aria-label="Review pages" hidden><p id="changes-count" role="status" aria-live="polite"></p><div><button id="changes-previous" type="button" class="secondary">Previous</button><button id="changes-next" type="button" class="secondary">Next</button></div></nav></section>` : changed;
   if (state !== "awaiting_approval") {
-    const stop = batch && active ? `<div class="actions" id="stop-work"><form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Stop remaining changes</button></form></div>` : "";
+    const stop = batch && active ? `<div class="actions" id="stop-work"><form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="cancel" type="submit">Stop remaining changes</button></form></div>` : "";
     return pageShell("Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active)}</div>${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
   }
   const addingQuestion = !batch && plan.tool === "canvas_create_quiz_item";
@@ -972,8 +976,8 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
       ? '<p class="warning">Canvas does not have the item this change names. It may have been renamed, moved, or removed since this change was prepared.</p><p>Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review. This page has not changed anything.</p>'
       : '<p class="warning">Morrow could not identify the course or a selected item in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
     : `<p>${batch ? `Morrow will apply all ${plans.length} changes and check each result in Canvas. Searching does not change what you approve.` : addingQuestion ? "Morrow will add this question and check it in Canvas." : "Morrow applies these changes and checks them in Canvas."}</p><p class="keep-open">${keepOpenInstruction(platform)}</p>`).replaceAll("Canvas", platform);
-  const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="approve" type="submit">${approveLabel}</button></form>`;
-  return pageShell(title, `<header class="hero"><h1>${escapeHtml(title)}</h1>${requestedByLine(snapshot, plans)}${batchSummary}${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${reviewContent}<footer class="decision"><div class="next-step">${next}</div><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Cancel</button></form></div><details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></footer>`);
+  const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="approve" type="submit">${approveLabel}</button></form>`;
+  return pageShell(title, `<header class="hero"><h1>${escapeHtml(title)}</h1>${requestedByLine(snapshot, plans)}${batchSummary}${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${reviewContent}<footer class="decision"><div class="next-step">${next}</div><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="cancel" type="submit">Cancel</button></form></div><details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></footer>`);
 }
 
 function cookieValue(request: IncomingMessage, name: string): string | null {
@@ -1056,15 +1060,26 @@ export class LoopbackApprovalServer {
       const oldest = targetNonces.shift();
       if (oldest) this.nonces.delete(oldest[0]);
     }
-    while (this.nonces.size >= MAX_APPROVAL_NONCES) {
-      const oldest = this.nonces.keys().next().value as string | undefined;
-      if (!oldest) break;
-      this.nonces.delete(oldest);
-    }
+    this.reclaimNonceSlot();
     let nonce: string;
     do nonce = randomBytes(32).toString("base64url"); while (this.nonces.has(nonce));
     this.nonces.set(nonce, { targetKey, expiresAt: now + 15 * 60_000, canApprove });
     return nonce;
+  }
+
+  /**
+   * The global cap reclaims only a spare grant, the way a full file stage refuses
+   * instead of dropping a pending one. A review that holds a single live grant
+   * keeps it, so an unrelated page load can never answer its approval 409.
+   */
+  private reclaimNonceSlot(): void {
+    while (this.nonces.size >= MAX_APPROVAL_NONCES) {
+      const held = new Map<string, number>();
+      for (const grant of this.nonces.values()) held.set(grant.targetKey, (held.get(grant.targetKey) ?? 0) + 1);
+      const spare = [...this.nonces].find(([, grant]) => (held.get(grant.targetKey) ?? 0) > 1);
+      if (!spare) throw new Error("too many reviews are open to start another one");
+      this.nonces.delete(spare[0]);
+    }
   }
 
   private revokeTargetNonces(targetKey: string): void {
@@ -1145,13 +1160,15 @@ export class LoopbackApprovalServer {
           }
         }
         const nonceKey = `${target.kind}:${target.id}`;
-        const nonce = this.issueNonce(nonceKey, !namedTargetsMissing(operations, contexts));
+        const canApprove = !namedTargetsMissing(operations, contexts);
         const cookiePath = `/${target.kind}/${encodeURIComponent(target.id)}`;
+        let nonce: string | null = null;
+        const body = html(target, snapshot, () => (nonce = this.issueNonce(nonceKey, canApprove)), contexts, active);
         sendHtml(
           response,
           200,
-          html(target, snapshot, nonce, contexts, active),
-          `${approvalCookieName(nonce)}=${nonce}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=900`,
+          body,
+          nonce ? `${approvalCookieName(nonce)}=${nonce}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=900` : undefined,
         );
         return;
       }
