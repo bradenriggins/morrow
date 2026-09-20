@@ -96,10 +96,20 @@ export function makeTools(client, logPath) {
   }
 
   /** Plans one change, approves it on Morrow's page, and waits for the saved result. */
-  async function change(label, name, args, { operationId } = {}) {
+  /**
+   * Morrow's own planners are top-level controls rather than catalog capabilities, so they are
+   * asked for by name. What they hand back is approved and followed exactly like any other change.
+   */
+  async function plan(label, name, args) {
+    return await change(label, name, args, { direct: true });
+  }
+
+  async function change(label, name, args, { operationId, direct = false } = {}) {
     const entry = { label, tool: name, at: new Date().toISOString() };
     try {
-      const planned = await callTool("morrow_capability_change", { name, arguments: { ...args, _morrow: { source_binding_id: SB, operation_id: operationId || `${label}-${Date.now()}` } } });
+      const planned = direct
+        ? await callTool(name, { source_binding_id: SB, ...args })
+        : await callTool("morrow_capability_change", { name, arguments: { ...args, _morrow: { source_binding_id: SB, operation_id: operationId || `${label}-${Date.now()}` } } });
       const plan = planned?.structuredContent ?? {};
       entry.plan = { status: plan.status, code: plan.data?.code, text: (planned?.content?.[0]?.text || "").slice(0, 160) };
       if (plan.status === "verified") { entry.outcome = "verified"; await log(`${label}: verified (no approval needed)`); return entry; }
@@ -144,5 +154,5 @@ export function makeTools(client, logPath) {
     return entry;
   }
 
-  return { log, read, change, callTool };
+  return { log, read, change, plan, callTool };
 }

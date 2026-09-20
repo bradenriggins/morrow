@@ -17205,7 +17205,145 @@
       "sandbox": {
         "courseId": "89585"
       }
+    },
+    "scenario:read-chain-course-inventory": {
+      "id": "scenario:read-chain-course-inventory",
+      "at": "2026-09-20T05:32:27.681Z",
+      "phase": 2,
+      "kind": "scenario",
+      "intent": "Show me what is in this course, then open a quiz you find and tell me what it holds.",
+      "verdict": "PASS",
+      "readback": {
+        "source": "canvas",
+        "steps": {
+          "inventory": true,
+          "quizzes": true,
+          "questions": true
+        },
+        "quizzes": 144,
+        "openedQuiz": "4044840",
+        "questions": 11
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFS1789882296"
+      }
+    },
+    "scenario:write-cycle-page-approved": {
+      "id": "scenario:write-cycle-page-approved",
+      "at": "2026-09-20T05:29:53.993Z",
+      "phase": 2,
+      "kind": "scenario",
+      "intent": "Add a page called Lab Safety with the three rules, and let me approve it first.",
+      "verdict": "PASS",
+      "readback": {
+        "source": "canvas",
+        "page": "morrowproofs1789881919-lab-safety",
+        "bodyHoldsText": true
+      },
+      "cleanup": {
+        "removed": "verified"
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFS1789881919"
+      }
+    },
+    "scenario:write-cycle-negative-control": {
+      "id": "scenario:write-cycle-negative-control",
+      "at": "2026-09-20T05:29:59.719Z",
+      "phase": 2,
+      "kind": "scenario",
+      "intent": "Prove the readback would notice if the change had not been made.",
+      "verdict": "PASS",
+      "readback": {
+        "source": "canvas",
+        "foundPageThatWasNeverMade": false
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFS1789881919"
+      }
+    },
+    "scenario:new-quiz-authoring-chain": {
+      "id": "scenario:new-quiz-authoring-chain",
+      "at": "2026-09-20T05:30:48.867Z",
+      "phase": 2,
+      "kind": "scenario",
+      "intent": "Build me a quiz on cell structure, add a question, set a time limit, and check it.",
+      "verdict": "PASS",
+      "readback": {
+        "source": "canvas",
+        "quiz": "4045357",
+        "title": "MORROWPROOFS1789881919 Cell Structure"
+      },
+      "cleanup": {
+        "removed": "verified"
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFS1789881919"
+      }
+    },
+    "scenario:per-student-study-guides": {
+      "id": "scenario:per-student-study-guides",
+      "at": "2026-09-20T05:31:09.387Z",
+      "phase": 2,
+      "kind": "scenario",
+      "intent": "Create a study guide for each student below 75% on last week's quiz, based on what they missed. Show me the drafts and the reasoning.",
+      "verdict": "PASS",
+      "readback": {
+        "source": "canvas",
+        "submissions": 2,
+        "tokenizedIdentities": 1,
+        "rawIdentityFieldsFound": 0,
+        "evidence": "every learner in this chain is named by a Morrow learner token"
+      },
+      "privacy": {
+        "tokenized": true,
+        "checkedPaths": [
+          "canvas_list_assignments_assignments",
+          "canvas_list_assignment_submissions_courses"
+        ]
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFS1789881919"
+      }
+    },
+    "scenario:undo-after-partial-failure": {
+      "id": "scenario:undo-after-partial-failure",
+      "at": "2026-09-20T05:31:09.411Z",
+      "phase": 2,
+      "kind": "scenario",
+      "intent": "That last change went wrong. Put it back.",
+      "verdict": "PASS",
+      "readback": {
+        "source": "morrow-journal",
+        "operationsListed": 50
+      },
+      "note": "The journal answers; undo of a specific operation is proven in the write phase against an operation this harness made.",
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFS1789881919"
+      }
+    },
+    "scenario:cross-course-compare": {
+      "id": "scenario:cross-course-compare",
+      "at": "2026-09-20T05:31:19.448Z",
+      "phase": 2,
+      "kind": "scenario",
+      "intent": "Compare this course with my other section and tell me what is missing.",
+      "verdict": "PASS",
+      "readback": {
+        "source": "canvas",
+        "coursesVisible": 97
+      },
+      "sandbox": {
+        "courseId": "89585",
+        "mark": "MORROWPROOFS1789881919"
+      }
     }
   },
-  "updatedAt": "2026-09-20T05:09:34.656Z"
+  "updatedAt": "2026-09-20T05:32:27.681Z"
 }
