@@ -838,10 +838,17 @@ export class MorrowRuntime {
     for (const batch of batches) {
       try {
         if (["paused", "inspection_required"].includes(batch.state)) {
-          this.batches.recover({
-            batchId: batch.batchId,
-            mode: "apply_safe",
-          });
+          let recoveryAfterOrdinal = 0;
+          for (;;) {
+            const recovered = this.batches.recover({
+              batchId: batch.batchId,
+              mode: "apply_safe",
+              afterOrdinal: recoveryAfterOrdinal,
+              maxChildren: 500,
+            });
+            if (recovered.nextAfterOrdinal === null) break;
+            recoveryAfterOrdinal = recovered.nextAfterOrdinal;
+          }
         }
         if (batch.mode !== "stage_writes") continue;
         this.ensureSourceSettlementRows(batch.batchId);
@@ -857,7 +864,12 @@ export class MorrowRuntime {
           reconciliationOffset = nextOffset;
         }
       } catch {
-        this.cancelEffectBatch(batch.batchId, "batch_recovery_failed");
+        // A recovery failure says the batch state is unknown, not that the approved work is refused.
+        // Quarantine keeps the pending children; cancellation is terminal and nothing reverses it.
+        this.batches.quarantine(batch.batchId);
+        if (batch.mode === "stage_writes") {
+          this.gateway.revokeEffectBatch(batch.batchId, "batch_recovery_failed");
+        }
       }
     }
   }
@@ -1572,6 +1584,9 @@ export class MorrowRuntime {
       input.offset ?? 0,
       input.limit ?? 100,
     );
+    // Running or resuming a frozen batch requires these two digests, so they stay readable
+    // after the create response is gone. They are opaque hashes; the manifest itself stays sealed.
+    const manifest = this.batches.getManifest(input.batchId);
     return {
       schema: "morrow.batch-detail.v1",
       batch: page.batch,
@@ -1579,6 +1594,8 @@ export class MorrowRuntime {
         schema: "morrow.batch-manifest-ref.v1",
         digest: page.batch.manifestDigest,
         encrypted: true,
+        courseSetDigest: manifest.courseSet.digest,
+        profileDigest: manifest.profileDigest,
       },
       sourceSettlement: this.sourceSettlements.summary(input.batchId),
       offset: page.offset,

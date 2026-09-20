@@ -409,7 +409,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
     "morrow_batch_get",
     {
       title: "Review a group of requests",
-      description: "Inspect one batch, an encrypted manifest reference, its source-settlement summary, and a bounded page of child records. The batch names the assistant that asked for it, as that assistant reported itself, and names its project without giving its path. The full manifest and decrypted child arguments are never returned.",
+      description: "Inspect one batch, an encrypted manifest reference that carries the course-set and profile digests needed to run or resume the batch, its source-settlement summary, and a bounded page of child records. The batch names the assistant that asked for it, as that assistant reported itself, and names its project without giving its path. The full manifest and decrypted child arguments are never returned.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
         offset: z.number().int().min(0).default(0),

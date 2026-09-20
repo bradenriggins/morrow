@@ -6,6 +6,7 @@ import { GatewayOperationJournal } from "@morrow/operation-journal";
 import { sha256Json, sha256Text } from "@morrow/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  BatchSourceSettlementStore,
   DurableBatchStore,
   recoverBatchState,
 } from "../src/public.js";
@@ -173,7 +174,7 @@ describe("recoverBatchState", () => {
         mode: "apply_safe",
       });
       expect(recovered).toMatchObject({
-        stateAfter: "completed",
+        stateAfter: "paused",
         sourceTasksRecovered: 1,
         inspectionRequired: 0,
         providerDispatches: 0,
@@ -190,7 +191,68 @@ describe("recoverBatchState", () => {
         sourceTaskId: "task:recover-9",
         sourceResultState: "awaiting_confirmation",
       });
+      expect(finalStore.getBatch(created.batch.batchId)).toMatchObject({
+        state: "paused",
+        terminalAt: null,
+      });
       finalStore.close();
+    } finally {
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("completes a recovered staged task once its source settlement is terminal", async () => {
+    const fixture = await workspace("recover-task-settled");
+    try {
+      const sourceOperationId = "operation:recover-settled-0001";
+      const store = new DurableBatchStore({ path: fixture.path, encryptionKey: fixture.key });
+      const created = createWriteBatch(store, sourceOperationId);
+      store.beginRun(created.batch.batchId, catalogDigest);
+      expect(store.claimPending(created.batch.batchId, 1)).toHaveLength(1);
+
+      const journal = new GatewayOperationJournal({ path: fixture.path });
+      const prepared = prepareGatewayOperation(journal, sourceOperationId);
+      journal.markDispatched(prepared.operationId);
+      journal.recordResponse(prepared.operationId, {
+        upstreamResultDigest: sha256Text("staged-response"),
+        normalizedResultDigest: sha256Text("normalized-staged-response"),
+        sourceResultState: "completed",
+        sourceTaskId: "task:recover-settled",
+      });
+      journal.close();
+      store.close();
+
+      const settlements = new BatchSourceSettlementStore({ path: fixture.path });
+      settlements.initialize(created.batch.batchId, [{
+        childId: "course:9",
+        sourceId: "morrow-legacy",
+        sourceBindingId: "canvas:9",
+      }]);
+      settlements.markStaged(created.batch.batchId, "course:9", {
+        sourceTaskId: "task:recover-settled",
+      });
+      expect(settlements.applyTaskProjection(created.batch.batchId, "course:9", {
+        taskId: "task:recover-settled",
+        status: "completed",
+        outcome: "succeeded",
+        terminal: true,
+        verificationStatus: "verified",
+        resultCounts: { done: 1 },
+      }).state).toBe("succeeded");
+      settlements.close();
+
+      const recoveredStore = recoverRunningChild(fixture.path, fixture.key);
+      recoveredStore.close();
+      const recovered = recoverBatchState({
+        path: fixture.path,
+        batchId: created.batch.batchId,
+        mode: "apply_safe",
+      });
+      expect(recovered).toMatchObject({
+        stateAfter: "completed",
+        sourceTasksRecovered: 1,
+        providerDispatches: 0,
+      });
     } finally {
       await rm(fixture.directory, { recursive: true, force: true });
     }

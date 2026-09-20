@@ -134,7 +134,7 @@ interface SettlementRow {
 
 const IDENTIFIER = /^[A-Za-z0-9_.:@-]{1,160}$/;
 const TASK_STATUS_MAX = 120;
-const TERMINAL_STATES = new Set<BatchSourceSettlementState>([
+export const BATCH_SOURCE_SETTLEMENT_TERMINAL_STATES: ReadonlySet<BatchSourceSettlementState> = new Set<BatchSourceSettlementState>([
   "succeeded",
   "failed_no_effect",
   "failed_effect_possible",

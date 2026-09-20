@@ -126,6 +126,35 @@ describe("DurableBatchStore", () => {
     store.close();
   });
 
+  it("reports the unrun children of a quarantined batch as remaining", async () => {
+    const root = mkdtempSync(join(tmpdir(), "morrow-batch-quarantined-"));
+    roots.push(root);
+    const path = join(root, "morrow.sqlite3");
+    const key = new Uint8Array(32).fill(11);
+    const first = new DurableBatchStore({ path, encryptionKey: key });
+    const created = first.create({
+      name: "Interrupted three",
+      mode: "read_only",
+      catalogDigest: "a".repeat(64),
+      concurrency: 1,
+      children: [child(1), child(2), child(3)],
+    });
+    first.beginRun(created.batch.batchId, "a".repeat(64));
+    first.claimPending(created.batch.batchId, 1);
+    first.close();
+
+    const recovered = new DurableBatchStore({ path, encryptionKey: key });
+    const result = await runBatchWindow(recovered, created.batch.batchId, async () => ({
+      state: "succeeded",
+      resultDigest: "b".repeat(64),
+    }), { expectedCatalogDigest: "a".repeat(64) });
+    expect(result.batch.state).toBe("inspection_required");
+    expect(result.processed).toBe(0);
+    expect(result.batch.pendingChildren).toBe(2);
+    expect(result.remaining).toBe(2);
+    recovered.close();
+  });
+
   it("turns interrupted running children into inspection-required truth", () => {
     const root = mkdtempSync(join(tmpdir(), "morrow-batch-restart-"));
     roots.push(root);

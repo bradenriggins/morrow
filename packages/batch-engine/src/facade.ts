@@ -335,7 +335,7 @@ export async function runBatchWindow(
       schema: "morrow.batch-window.v1",
       batch: started,
       processed: 0,
-      remaining: 0,
+      remaining: started.pendingChildren,
       children: [],
       effectiveConcurrency: rate.concurrency,
       backoffMs: 0,

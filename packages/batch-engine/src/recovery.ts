@@ -18,6 +18,7 @@ import {
   decryptCanvasResultBindingArtifact,
   type CanvasBindingChild,
 } from "./canvas-result-binding.js";
+import { BATCH_SOURCE_SETTLEMENT_TERMINAL_STATES } from "./settlement.js";
 import type { BatchMode, BatchState, FrozenBatchManifest } from "./index.js";
 
 export const BATCH_RECOVERY_MODES = Object.freeze(["inspect", "apply_safe"] as const);
@@ -341,14 +342,48 @@ function derivedBatchState(current: BatchState, counts: CountRow): BatchState {
   return current;
 }
 
+function unsettledStagedWrites(database: DatabaseSync, batchId: string): number {
+  const table = database.prepare(`
+    SELECT 1 AS present FROM sqlite_master
+    WHERE type='table' AND name='gateway_batch_source_settlements'
+  `).get() as unknown as { present: number } | undefined;
+  if (!table) {
+    const staged = database.prepare(`
+      SELECT COUNT(*) AS count FROM gateway_batch_children
+      WHERE batch_id=? AND source_task_id IS NOT NULL
+    `).get(batchId) as unknown as { count: number } | undefined;
+    return Number(staged?.count || 0);
+  }
+  const terminalStates = [...BATCH_SOURCE_SETTLEMENT_TERMINAL_STATES];
+  const placeholders = terminalStates.map(() => "?").join(",");
+  const row = database.prepare(`
+    SELECT COUNT(*) AS count FROM gateway_batch_children AS child
+    WHERE child.batch_id=? AND child.source_task_id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM gateway_batch_source_settlements AS settlement
+        WHERE settlement.batch_id=child.batch_id AND settlement.child_id=child.child_id
+          AND settlement.state IN (${placeholders})
+      )
+  `).get(batchId, ...terminalStates) as unknown as { count: number } | undefined;
+  return Number(row?.count || 0);
+}
+
 function updateBatchCounts(
   database: DatabaseSync,
   batchId: string,
   current: BatchState,
   now: string,
+  mode: BatchMode,
 ): { state: BatchState; counts: CountRow } {
   const counts = countRow(database, batchId);
-  const state = derivedBatchState(current, counts);
+  const derived = derivedBatchState(current, counts);
+  // Recovery makes no provider call, so it cannot prove that a staged write settled.
+  const state = mode === "stage_writes"
+    && derived !== "inspection_required"
+    && TERMINAL_BATCH_STATES.has(derived)
+    && unsettledStagedWrites(database, batchId) > 0
+    ? "paused"
+    : derived;
   const terminalAt = TERMINAL_BATCH_STATES.has(state) && state !== "inspection_required"
     ? now
     : null;
@@ -829,7 +864,7 @@ export function recoverBatchState(input: RecoverBatchStateInput): BatchRecoveryR
     }
 
     const updated = mode === "apply_safe"
-      ? updateBatchCounts(database, batchId, batch.state, now)
+      ? updateBatchCounts(database, batchId, batch.state, now, batch.mode)
       : { state: batch.state, counts: before };
     const remainingAfterCursor = database.prepare(`
       SELECT COUNT(*) AS count FROM gateway_batch_children

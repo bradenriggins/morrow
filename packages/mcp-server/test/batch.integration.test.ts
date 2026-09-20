@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { MAX_BATCH_RESULT_BYTES } from "@morrow/batch-engine";
+import { DurableBatchStore, MAX_BATCH_RESULT_BYTES, loadOrCreateBatchEncryptionKey } from "@morrow/batch-engine";
 import { WebSocket } from "ws";
 import { describe, expect, it, vi } from "vitest";
 import type { BridgeCommand } from "@morrow/bridge-protocol";
@@ -1095,7 +1095,20 @@ describe("MorrowRuntime durable batches", () => {
       expect(batch.state).toBe("planned");
       expect(created.sourceSettlement).toMatchObject({ outcome: "not_applicable", total: 0 });
 
-      const first = await runtime.batchRun({ batchId: batch.batchId, maxChildren: 2 });
+      const frozen = runtime.batchGet({ batchId: batch.batchId, limit: 1 }).manifest as {
+        courseSetDigest: string;
+        profileDigest: string;
+      };
+      const createdManifest = created.manifest as { courseSet: { digest: string }; profileDigest: string };
+      expect(frozen.courseSetDigest).toBe(createdManifest.courseSet.digest);
+      expect(frozen.profileDigest).toBe(createdManifest.profileDigest);
+
+      const first = await runtime.batchRun({
+        batchId: batch.batchId,
+        maxChildren: 2,
+        courseSetDigest: frozen.courseSetDigest,
+        profileDigest: frozen.profileDigest,
+      });
       expect((first.batch as { state: string }).state).toBe("running");
       expect(first.processed).toBe(2);
       expect(first.remaining).toBe(1);
@@ -1356,6 +1369,100 @@ describe("MorrowRuntime durable batches", () => {
       expect(JSON.stringify(detail)).not.toContain("Never returned");
     } finally {
       await second.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("quarantines a batch whose startup recovery throws without cancelling approved children", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-batch-recovery-quarantine-"));
+    const statePath = join(directory, "morrow.sqlite3");
+    const keyPath = join(directory, "batch.key");
+    let batchId = "";
+    let second: MorrowRuntime | undefined;
+
+    const first = await MorrowRuntime.connect(config(), { statePath, batchKeyPath: keyPath });
+    try {
+      const created = await first.batchCreate({
+        name: "Recovery quarantine",
+        mode: "stage_writes",
+        concurrency: 1,
+        operations: [
+          { childId: "course:701", tool: "edit_page", sourceBindingId: "canvas:701", arguments: { course_id: "701", title: "First" } },
+          { childId: "course:702", tool: "edit_page", sourceBindingId: "canvas:702", arguments: { course_id: "702", title: "Second" } },
+        ],
+      });
+      batchId = (created.batch as { batchId: string }).batchId;
+      first.approveBatch(batchId);
+      await first.batchRun({ batchId, maxChildren: 1 });
+    } finally {
+      await first.close();
+    }
+
+    const reconcile = vi
+      .spyOn(MorrowRuntime.prototype as unknown as { batchReconcile: () => Promise<unknown> }, "batchReconcile")
+      .mockImplementationOnce(() => {
+        throw new Error("simulated startup reconcile failure");
+      });
+    try {
+      second = await MorrowRuntime.connect(config(), { statePath, batchKeyPath: keyPath });
+      reconcile.mockRestore();
+      const detail = second.batchGet({ batchId, limit: 10 });
+      expect(detail.batch).toMatchObject({ state: "inspection_required", cancelledChildren: 0 });
+      expect(second.batchResultsPage({ batchId, offset: 0, limit: 10 }).children).toMatchObject([
+        { childId: "course:701" },
+        { childId: "course:702", state: "pending" },
+      ]);
+    } finally {
+      reconcile.mockRestore();
+      await second?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("recovers every unknown child of a large interrupted read group at startup", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-batch-recovery-pages-"));
+    const statePath = join(directory, "morrow.sqlite3");
+    const keyPath = join(directory, "batch.key");
+    const courses = Array.from({ length: 101 }, (_, index) => String(index + 1));
+    let batchId = "";
+    let second: MorrowRuntime | undefined;
+
+    const first = await MorrowRuntime.connect(config(), { statePath, batchKeyPath: keyPath });
+    try {
+      const created = await first.batchCreate({
+        name: "Interrupted large read",
+        mode: "read_only",
+        concurrency: 4,
+        operations: courses.map((course) => ({
+          childId: `course:${course}`,
+          tool: "canvas_page_get",
+          arguments: { course_id: course },
+        })),
+      });
+      batchId = (created.batch as { batchId: string }).batchId;
+    } finally {
+      await first.close();
+    }
+
+    // Every child is in flight when Morrow stops, so the restart finds more
+    // unknown children than one recovery page holds.
+    const store = new DurableBatchStore({ path: statePath, encryptionKey: loadOrCreateBatchEncryptionKey(keyPath) });
+    try {
+      store.beginRun(batchId, store.getBatch(batchId).catalogDigest);
+      expect(store.claimPending(batchId, courses.length)).toHaveLength(courses.length);
+    } finally {
+      store.close();
+    }
+
+    try {
+      second = await MorrowRuntime.connect(config(), { statePath, batchKeyPath: keyPath });
+      expect(second.batchGet({ batchId, limit: 1 }).batch).toMatchObject({
+        state: "paused",
+        unknownChildren: 0,
+        pendingChildren: courses.length,
+      });
+    } finally {
+      await second?.close();
       await rm(directory, { recursive: true, force: true });
     }
   }, 30_000);
