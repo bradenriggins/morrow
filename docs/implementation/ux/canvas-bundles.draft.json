@@ -1,0 +1,690 @@
+{
+ "generatedFrom": "canvas-api-catalog.json",
+ "catalogDigestNote": "field names validated against inputSchema.properties",
+ "bundles": [
+  {
+   "id": "canvas_pages_text",
+   "area": "pages",
+   "routine": true,
+   "rememberable": true,
+   "label": "Edit page text and titles",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses",
+     "toolName": "canvas_update_create_page_courses",
+     "allowedChangedFields": [
+      "wiki_page_body",
+      "wiki_page_title"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/front_page#update_create_front_page_courses",
+     "toolName": "canvas_update_create_front_page_courses",
+     "allowedChangedFields": [
+      "wiki_page_body",
+      "wiki_page_title"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_modules_structure",
+   "area": "pages",
+   "routine": true,
+   "rememberable": true,
+   "label": "Rename and reorder modules and items",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/modules/{id}#update_module",
+     "toolName": "canvas_update_module",
+     "allowedChangedFields": [
+      "module_name",
+      "module_position"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/modules/{module_id}/items/{id}#update_module_item",
+     "toolName": "canvas_update_module_item",
+     "allowedChangedFields": [
+      "module_item_external_url",
+      "module_item_indent",
+      "module_item_module_id",
+      "module_item_new_tab",
+      "module_item_position",
+      "module_item_title"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_assignment_text",
+   "area": "assignments",
+   "routine": true,
+   "rememberable": true,
+   "label": "Edit assignment titles and instructions",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment",
+     "toolName": "canvas_edit_assignment",
+     "allowedChangedFields": [
+      "assignment_description",
+      "assignment_name"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_discussion_text",
+   "area": "discussions",
+   "routine": true,
+   "rememberable": true,
+   "label": "Edit discussion titles and prompts",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/discussion_topics/{topic_id}#update_topic_courses",
+     "toolName": "canvas_update_topic_courses",
+     "allowedChangedFields": [
+      "message",
+      "title"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_classic_quiz_text",
+   "area": "quizzes",
+   "routine": true,
+   "rememberable": true,
+   "label": "Edit Classic Quiz titles and instructions",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz",
+     "toolName": "canvas_edit_quiz",
+     "allowedChangedFields": [
+      "quiz_description",
+      "quiz_title"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_files_organize",
+   "area": "files",
+   "routine": true,
+   "rememberable": true,
+   "label": "Rename and move files, create folders",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/files/{id}#update_file",
+     "toolName": "canvas_update_file",
+     "allowedChangedFields": [
+      "name",
+      "parent_folder_id"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "POST /v1/courses/{course_id}/folders#create_folder_courses",
+     "toolName": "canvas_create_folder_courses",
+     "allowedChangedFields": [
+      "name",
+      "parent_folder_id",
+      "parent_folder_path"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_dates",
+   "area": "assignments",
+   "routine": false,
+   "rememberable": true,
+   "learnerVisible": true,
+   "label": "Change due dates and availability dates",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment",
+     "toolName": "canvas_edit_assignment",
+     "allowedChangedFields": [
+      "assignment_due_at",
+      "assignment_lock_at",
+      "assignment_unlock_at"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/assignments/bulk_update#bulk_update_assignment_dates",
+     "toolName": "canvas_bulk_update_assignment_dates",
+     "allowedChangedFields": [
+      "assignment_dates"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/assignments/{assignment_id}/date_details#update_learning_object_s_date_information_assignments",
+     "toolName": "canvas_update_learning_object_s_date_information_assignments",
+     "allowedChangedFields": [
+      "due_at",
+      "lock_at",
+      "unlock_at"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/discussion_topics/{discussion_topic_id}/date_details#update_learning_object_s_date_information_discussion_topics",
+     "toolName": "canvas_update_learning_object_s_date_information_discussion_topics",
+     "allowedChangedFields": [
+      "due_at",
+      "lock_at",
+      "unlock_at"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/files/{attachment_id}/date_details#update_learning_object_s_date_information_files",
+     "toolName": "canvas_update_learning_object_s_date_information_files",
+     "allowedChangedFields": [
+      "due_at",
+      "lock_at",
+      "unlock_at"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/pages/{url_or_id}/date_details#update_learning_object_s_date_information_pages",
+     "toolName": "canvas_update_learning_object_s_date_information_pages",
+     "allowedChangedFields": [
+      "due_at",
+      "lock_at",
+      "unlock_at"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/quizzes/{quiz_id}/date_details#update_learning_object_s_date_information_quizzes",
+     "toolName": "canvas_update_learning_object_s_date_information_quizzes",
+     "allowedChangedFields": [
+      "due_at",
+      "lock_at",
+      "unlock_at"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz",
+     "toolName": "canvas_edit_quiz",
+     "allowedChangedFields": [
+      "quiz_due_at",
+      "quiz_lock_at",
+      "quiz_unlock_at"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/assignments/{assignment_id}/overrides/{id}#update_assignment_override",
+     "toolName": "canvas_update_assignment_override",
+     "allowedChangedFields": [
+      "assignment_override_due_at",
+      "assignment_override_lock_at",
+      "assignment_override_unlock_at"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_pages_create",
+   "area": "pages",
+   "routine": false,
+   "rememberable": false,
+   "label": "Create and copy pages",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "POST /v1/courses/{course_id}/pages#create_page_courses",
+     "toolName": "canvas_create_page_courses",
+     "allowedChangedFields": [
+      "wiki_page_body",
+      "wiki_page_title"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "POST /v1/courses/{course_id}/pages/{url_or_id}/duplicate#duplicate_page",
+     "toolName": "canvas_duplicate_page",
+     "allowedChangedFields": [],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_modules_create",
+   "area": "pages",
+   "routine": false,
+   "rememberable": false,
+   "label": "Create modules and add items",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "POST /v1/courses/{course_id}/modules#create_module",
+     "toolName": "canvas_create_module",
+     "allowedChangedFields": [
+      "module_name",
+      "module_position"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "POST /v1/courses/{course_id}/modules/{module_id}/items#create_module_item",
+     "toolName": "canvas_create_module_item",
+     "allowedChangedFields": [
+      "module_item_content_id",
+      "module_item_external_url",
+      "module_item_indent",
+      "module_item_new_tab",
+      "module_item_page_url",
+      "module_item_position",
+      "module_item_title",
+      "module_item_type"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_assignment_setup",
+   "area": "assignments",
+   "routine": false,
+   "rememberable": false,
+   "label": "Change assignment points and submission settings",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment",
+     "toolName": "canvas_edit_assignment",
+     "allowedChangedFields": [
+      "assignment_allowed_attempts",
+      "assignment_allowed_extensions",
+      "assignment_assignment_group_id",
+      "assignment_grading_type",
+      "assignment_omit_from_final_grade",
+      "assignment_peer_reviews",
+      "assignment_points_possible",
+      "assignment_position",
+      "assignment_submission_types"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_assignment_create",
+   "area": "assignments",
+   "routine": false,
+   "rememberable": false,
+   "label": "Create assignments",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "POST /v1/courses/{course_id}/assignments#create_assignment",
+     "toolName": "canvas_create_assignment",
+     "allowedChangedFields": [
+      "assignment_assignment_group_id",
+      "assignment_description",
+      "assignment_due_at",
+      "assignment_grading_type",
+      "assignment_lock_at",
+      "assignment_name",
+      "assignment_points_possible",
+      "assignment_submission_types",
+      "assignment_unlock_at"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_publish_state",
+   "area": "pages",
+   "routine": false,
+   "rememberable": false,
+   "learnerVisible": true,
+   "label": "Publish and unpublish course content",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses",
+     "toolName": "canvas_update_create_page_courses",
+     "allowedChangedFields": [
+      "wiki_page_published"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/modules/{id}#update_module",
+     "toolName": "canvas_update_module",
+     "allowedChangedFields": [
+      "module_published"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/modules/{module_id}/items/{id}#update_module_item",
+     "toolName": "canvas_update_module_item",
+     "allowedChangedFields": [
+      "module_item_published"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment",
+     "toolName": "canvas_edit_assignment",
+     "allowedChangedFields": [
+      "assignment_published"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz",
+     "toolName": "canvas_edit_quiz",
+     "allowedChangedFields": [
+      "quiz_published"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/discussion_topics/{topic_id}#update_topic_courses",
+     "toolName": "canvas_update_topic_courses",
+     "allowedChangedFields": [
+      "published"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_rubrics",
+   "area": "assignments",
+   "routine": false,
+   "rememberable": false,
+   "label": "Create and edit rubrics",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "POST /v1/courses/{course_id}/rubrics#create_single_rubric",
+     "toolName": "canvas_create_single_rubric",
+     "allowedChangedFields": [
+      "rubric_criteria",
+      "rubric_free_form_criterion_comments",
+      "rubric_title"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/rubrics/{id}#update_single_rubric",
+     "toolName": "canvas_update_single_rubric",
+     "allowedChangedFields": [
+      "rubric_criteria",
+      "rubric_free_form_criterion_comments",
+      "rubric_title"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_classic_quiz_settings",
+   "area": "quizzes",
+   "routine": false,
+   "rememberable": false,
+   "label": "Change Classic Quiz settings",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz",
+     "toolName": "canvas_edit_quiz",
+     "allowedChangedFields": [
+      "quiz_allowed_attempts",
+      "quiz_assignment_group_id",
+      "quiz_cant_go_back",
+      "quiz_hide_correct_answers_at",
+      "quiz_hide_results",
+      "quiz_one_question_at_a_time",
+      "quiz_scoring_policy",
+      "quiz_show_correct_answers",
+      "quiz_show_correct_answers_at",
+      "quiz_shuffle_answers",
+      "quiz_time_limit"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_classic_quiz_questions",
+   "area": "quizzes",
+   "routine": false,
+   "rememberable": false,
+   "label": "Create and edit Classic Quiz questions",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "POST /v1/courses/{course_id}/quizzes/{quiz_id}/questions#create_single_quiz_question",
+     "toolName": "canvas_create_single_quiz_question",
+     "allowedChangedFields": [
+      "question_answers",
+      "question_correct_comments",
+      "question_incorrect_comments",
+      "question_neutral_comments",
+      "question_points_possible",
+      "question_position",
+      "question_question_name",
+      "question_question_text",
+      "question_question_type",
+      "question_quiz_group_id",
+      "question_text_after_answers"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/quizzes/{quiz_id}/questions/{id}#update_existing_quiz_question",
+     "toolName": "canvas_update_existing_quiz_question",
+     "allowedChangedFields": [
+      "question_answers",
+      "question_correct_comments",
+      "question_incorrect_comments",
+      "question_neutral_comments",
+      "question_points_possible",
+      "question_position",
+      "question_question_name",
+      "question_question_text",
+      "question_question_type",
+      "question_quiz_group_id",
+      "question_text_after_answers"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_new_quiz_items",
+   "area": "quizzes",
+   "routine": false,
+   "rememberable": false,
+   "label": "Create and edit New Quiz questions",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "POST /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items#create_quiz_item",
+     "toolName": "canvas_create_quiz_item",
+     "allowedChangedFields": [
+      "item_entry_answer_feedback",
+      "item_entry_calculator_type",
+      "item_entry_feedback_correct",
+      "item_entry_feedback_incorrect",
+      "item_entry_feedback_neutral",
+      "item_entry_interaction_data",
+      "item_entry_interaction_type_slug",
+      "item_entry_item_body",
+      "item_entry_properties",
+      "item_entry_scoring_algorithm",
+      "item_entry_scoring_data",
+      "item_entry_title",
+      "item_entry_type"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item",
+     "toolName": "canvas_update_quiz_item",
+     "allowedChangedFields": [
+      "item_entry_answer_feedback",
+      "item_entry_calculator_type",
+      "item_entry_feedback_correct",
+      "item_entry_feedback_incorrect",
+      "item_entry_feedback_neutral",
+      "item_entry_interaction_data",
+      "item_entry_interaction_type_slug",
+      "item_entry_item_body",
+      "item_entry_properties",
+      "item_entry_scoring_algorithm",
+      "item_entry_scoring_data",
+      "item_entry_title",
+      "item_entry_type"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_calendar",
+   "area": "calendar",
+   "routine": false,
+   "rememberable": false,
+   "learnerVisible": true,
+   "label": "Create and edit calendar events",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "POST /v1/calendar_events#create_calendar_event",
+     "toolName": "canvas_create_calendar_event",
+     "allowedChangedFields": [
+      "calendar_event_all_day",
+      "calendar_event_context_code",
+      "calendar_event_description",
+      "calendar_event_end_at",
+      "calendar_event_location_address",
+      "calendar_event_location_name",
+      "calendar_event_start_at",
+      "calendar_event_title"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/calendar_events/{id}#update_calendar_event",
+     "toolName": "canvas_update_calendar_event",
+     "allowedChangedFields": [
+      "calendar_event_all_day",
+      "calendar_event_description",
+      "calendar_event_end_at",
+      "calendar_event_location_address",
+      "calendar_event_location_name",
+      "calendar_event_start_at",
+      "calendar_event_title"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_gradebook_setup",
+   "area": "assignments",
+   "routine": false,
+   "rememberable": false,
+   "label": "Change assignment groups and weights",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "POST /v1/courses/{course_id}/assignment_groups#create_assignment_group",
+     "toolName": "canvas_create_assignment_group",
+     "allowedChangedFields": [
+      "group_weight",
+      "name",
+      "position"
+     ],
+     "risk": "write"
+    },
+    {
+     "provider": "canvas",
+     "operationKey": "PUT /v1/courses/{course_id}/assignment_groups/{assignment_group_id}#edit_assignment_group",
+     "toolName": "canvas_edit_assignment_group",
+     "allowedChangedFields": [
+      "group_weight",
+      "name",
+      "position",
+      "rules"
+     ],
+     "risk": "write"
+    }
+   ]
+  },
+  {
+   "id": "canvas_discussion_create",
+   "area": "discussions",
+   "routine": false,
+   "rememberable": false,
+   "learnerVisible": true,
+   "label": "Create discussions",
+   "rules": [
+    {
+     "provider": "canvas",
+     "operationKey": "POST /v1/courses/{course_id}/discussion_topics#create_new_discussion_topic_courses",
+     "toolName": "canvas_create_new_discussion_topic_courses",
+     "allowedChangedFields": [
+      "discussion_type",
+      "message",
+      "title"
+     ],
+     "risk": "write"
+    }
+   ]
+  }
+ ]
+}
