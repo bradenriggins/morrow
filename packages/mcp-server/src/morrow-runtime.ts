@@ -976,21 +976,19 @@ export class MorrowRuntime {
 
   /**
    * This is deliberately stricter than hasActiveWork. Maintenance refuses a
-   * bounded history, saved approval, inspection state, or approval request
-   * whose final provider outcome is not known to be terminal.
+   * saved approval, inspection state, or approval request whose final provider
+   * outcome is not known to be terminal. The effect and batch queries cover the
+   * complete durable stores, not only the recent activity pages.
    */
   maintenanceQuiescent(): boolean {
     const effects = this.gateway.effectHealth();
-    const effectCoverageComplete = effects.recentCoverageComplete === true;
     const effectCounts = [
       effects.unresolvedOperationCount,
       effects.dispatchingCount,
       effects.appliedOrUnknownCount,
     ];
-    if (!effectCoverageComplete || effectCounts.some((count) => !Number.isSafeInteger(count) || count !== 0)) return false;
-    const batches = this.batches.list(200);
-    if (batches.length >= 200) return false;
-    if (batches.some((batch) => !["completed", "partial", "failed", "cancelled"].includes(batch.state))) return false;
+    if (effectCounts.some((count) => !Number.isSafeInteger(count) || count !== 0)) return false;
+    if (this.batches.listNonterminal(0, 1).batches.length !== 0) return false;
     return this.approval.maintenanceQuiescent();
   }
 

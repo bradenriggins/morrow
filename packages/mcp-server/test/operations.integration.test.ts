@@ -177,6 +177,70 @@ describe("outer provider effects", () => {
     }
   }, 20_000);
 
+  it("allows maintenance beyond recent windows only after effects and batches are terminal", async () => {
+    const runtime = await MorrowRuntime.connect(config(), { statePath: ":memory:" });
+    try {
+      const blockingEffect = runtime.gateway.planOperation("morrow_legacy_only", {
+        value: "unresolved-before-terminal-history",
+        course_id: "101",
+        _morrow: { operation_id: "operation:maintenance-unresolved-before-history" },
+      });
+      for (let index = 0; index < 205; index += 1) {
+        const planned = runtime.gateway.planOperation("morrow_legacy_only", {
+          value: `terminal-${String(index).padStart(3, "0")}`,
+          course_id: "101",
+          _morrow: { operation_id: `operation:maintenance-terminal-${String(index).padStart(3, "0")}` },
+        });
+        runtime.gateway.cancelOperation(operationId(planned));
+      }
+      expect(runtime.gateway.effectHealth()).toMatchObject({
+        totalOperationCount: 206,
+        recentCoverageComplete: false,
+        unresolvedOperationCount: 1,
+      });
+      const approval = runtime as unknown as {
+        approval: { setMaintenanceAdmission(open: boolean): void };
+      };
+      approval.approval.setMaintenanceAdmission(false);
+      expect(runtime.maintenanceQuiescent()).toBe(false);
+
+      runtime.gateway.cancelOperation(operationId(blockingEffect));
+      expect(runtime.maintenanceQuiescent()).toBe(true);
+
+      const createStoredBatch = (suffix: string) => runtime.batches.create({
+        batchId: `bat:maintenance-${suffix}`,
+        name: `Maintenance ${suffix}`,
+        mode: "read_only",
+        catalogDigest: runtime.gateway.catalog.digest,
+        concurrency: 1,
+        children: [{
+          childId: "read",
+          courseId: "101",
+          publicToolName: "morrow_legacy_only",
+          sourceId: "morrow-legacy",
+          sourceToolName: "morrow_legacy_only",
+          readOnly: true,
+          arguments: { value: suffix, course_id: "101" },
+        }],
+      });
+      const blockingBatch = createStoredBatch("unresolved-before-history");
+      for (let index = 0; index < 205; index += 1) {
+        const terminal = createStoredBatch(`terminal-${String(index).padStart(3, "0")}`);
+        runtime.batches.cancel(terminal.batch.batchId);
+      }
+      expect(runtime.batches.list(200)).toHaveLength(200);
+      expect(runtime.batches.listNonterminal(0, 1).batches).toMatchObject([
+        { batchId: blockingBatch.batch.batchId, state: "planned" },
+      ]);
+      expect(runtime.maintenanceQuiescent()).toBe(false);
+
+      runtime.batches.cancel(blockingBatch.batch.batchId);
+      expect(runtime.maintenanceQuiescent()).toBe(true);
+    } finally {
+      await runtime.close();
+    }
+  }, 30_000);
+
   it("plans, separately approves, dispatches once, verifies fresh evidence, and corrects with a new operation", async () => {
     const runtime = await GatewayRuntime.connect(config(), { journalPath: ":memory:" });
     try {
