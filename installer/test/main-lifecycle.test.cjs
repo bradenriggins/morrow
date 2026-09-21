@@ -143,6 +143,15 @@ test("a duplicate start quits with exit code 0, builds no controller, and writes
   }
 });
 
+test("the packaged assistant smoke creates the default workspace through the setup transaction", () => {
+  const source = require("node:fs").readFileSync(mainPath, "utf8");
+  const start = source.indexOf("async function runDesktopSmokeIfRequested()");
+  const end = source.indexOf("\nasync function", start + 1);
+  const smoke = source.slice(start, end);
+  assert.match(smoke, /const materials = await installer\.workspaceForAssistantSetup\(await installer\.record\(\)\);/);
+  assert.doesNotMatch(smoke, /const materials = await installer\.effectiveWorkspace\(\);/);
+});
+
 test("the start that holds the lock reaches app.whenReady() and answers a later start", async () => {
   const root = await temporaryRoot();
   const restoreArguments = startedWith({ testRoot: root });

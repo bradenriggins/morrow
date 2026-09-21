@@ -387,7 +387,7 @@ async function runDesktopSmokeIfRequested() {
       "setup", "--repository", installer.paths.appRoot, "--upstreams", installer.paths.upstreams,
       "--node", installer.paths.node, "--state-directory", installer.paths.state, "--json"
     ]);
-    const materials = await installer.effectiveWorkspace();
+    const materials = await installer.workspaceForAssistantSetup(await installer.record());
     if (!materials) throw new Error("materials unavailable");
     if (installCodex) {
       await installer.executeCli([
