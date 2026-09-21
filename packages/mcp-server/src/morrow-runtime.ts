@@ -975,19 +975,14 @@ export class MorrowRuntime {
   }
 
   /**
-   * This is deliberately stricter than hasActiveWork. Maintenance refuses a
-   * saved approval, inspection state, or approval request whose final provider
-   * outcome is not known to be terminal. The effect and batch queries cover the
-   * complete durable stores, not only the recent activity pages.
+   * Maintenance may retire the owner only when no provider call, approval, or
+   * batch can still advance in this process. Awaiting-verification and unknown
+   * results are durable, are never replayed on restart, and must not deadlock a
+   * Bridge update that is needed to read and reconcile them.
    */
   maintenanceQuiescent(): boolean {
     const effects = this.gateway.effectHealth();
-    const effectCounts = [
-      effects.unresolvedOperationCount,
-      effects.dispatchingCount,
-      effects.appliedOrUnknownCount,
-    ];
-    if (effectCounts.some((count) => !Number.isSafeInteger(count) || count !== 0)) return false;
+    if (!Number.isSafeInteger(effects.dispatchingCount) || effects.dispatchingCount !== 0) return false;
     if (this.batches.listNonterminal(0, 1).batches.length !== 0) return false;
     return this.approval.maintenanceQuiescent();
   }

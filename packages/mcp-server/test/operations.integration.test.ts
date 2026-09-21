@@ -177,14 +177,18 @@ describe("outer provider effects", () => {
     }
   }, 20_000);
 
-  it("allows maintenance beyond recent windows only after effects and batches are terminal", async () => {
+  it("allows maintenance with durable unresolved results but blocks active effects and batches beyond recent windows", async () => {
     const runtime = await MorrowRuntime.connect(config(), { statePath: ":memory:" });
     try {
-      const blockingEffect = runtime.gateway.planOperation("morrow_legacy_only", {
+      const durableEffect = runtime.gateway.planOperation("morrow_legacy_only", {
         value: "unresolved-before-terminal-history",
         course_id: "101",
         _morrow: { operation_id: "operation:maintenance-unresolved-before-history" },
       });
+      const durableEffectId = operationId(durableEffect);
+      runtime.gateway.effects.approve(durableEffectId);
+      runtime.gateway.effects.reserveDispatch(durableEffectId);
+      runtime.gateway.effects.settleFailure(durableEffectId, "provider response was lost", true);
       for (let index = 0; index < 205; index += 1) {
         const planned = runtime.gateway.planOperation("morrow_legacy_only", {
           value: `terminal-${String(index).padStart(3, "0")}`,
@@ -197,14 +201,25 @@ describe("outer provider effects", () => {
         totalOperationCount: 206,
         recentCoverageComplete: false,
         unresolvedOperationCount: 1,
+        appliedOrUnknownCount: 1,
+        dispatchingCount: 0,
       });
       const approval = runtime as unknown as {
         approval: { setMaintenanceAdmission(open: boolean): void };
       };
       approval.approval.setMaintenanceAdmission(false);
-      expect(runtime.maintenanceQuiescent()).toBe(false);
+      expect(runtime.maintenanceQuiescent()).toBe(true);
 
-      runtime.gateway.cancelOperation(operationId(blockingEffect));
+      const activeEffect = runtime.gateway.planOperation("morrow_legacy_only", {
+        value: "dispatching",
+        course_id: "102",
+        _morrow: { operation_id: "operation:maintenance-dispatching" },
+      });
+      const activeEffectId = operationId(activeEffect);
+      runtime.gateway.effects.approve(activeEffectId);
+      runtime.gateway.effects.reserveDispatch(activeEffectId);
+      expect(runtime.maintenanceQuiescent()).toBe(false);
+      runtime.gateway.effects.settleFailure(activeEffectId, "provider refused before send", false);
       expect(runtime.maintenanceQuiescent()).toBe(true);
 
       const createStoredBatch = (suffix: string) => runtime.batches.create({
