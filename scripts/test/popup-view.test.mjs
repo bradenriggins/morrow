@@ -139,10 +139,10 @@ test("known connection states keep their own value, label, and detail", () => {
   assert.equal(courseValue(statuses[7]), "Ready");
   assert.equal(primaryLabel(statuses[7]), "Choose courses");
   assert.equal(controlState(statuses[7]).primaryDisabled, false);
-  assert.equal(courseValue(statuses[8]), "Canvas tab needed");
+  assert.equal(courseValue(statuses[8]), "Canvas is closed");
   assert.equal(courseValue(statuses[9]), "Connected");
   assert.match(detailText(statuses[9]), /Keep one signed-in Canvas course tab open/);
-  assert.equal(courseValue(statuses[10]), "Canvas tab needed");
+  assert.equal(courseValue(statuses[10]), "Canvas is closed");
   assert.match(detailText(statuses[10]), /its Canvas tab is no longer open/);
   assert.match(detailText(statuses[10], "moodle"), /selected Canvas course is not open.*detected Moodle.*Connect Moodle/);
 });
@@ -198,6 +198,7 @@ test("the popup answers a failed first status read with a retry, then clears it 
     "#consent-detail": stubElement("Select Agree and continue to accept this data use."),
     "#connection-content": stubElement("", true),
     "#canvas-action": stubElement("Check or switch course", true),
+    "#open-platform-action": stubElement("Open Canvas", true),
     "#disconnect": stubElement("Disconnect Morrow", true),
     "#status-label": stubElement("Morrow"),
     "#status-value": stubElement("Checking…"),
@@ -215,6 +216,9 @@ test("the popup answers a failed first status read with a retry, then clears it 
     ".edit-access": stubElement(),
     "#editing-settings": stubElement("Open Plan and Edit settings"),
     "#setup-guide": stubElement("Open setup guide"),
+    "#edit-access-banner": stubElement("", true),
+    "#edit-access-banner-text": stubElement(),
+    "#ask-first-all-courses": stubElement("Ask first in all courses"),
   };
   nodes["#primary"].disabled = true;
   let respond = async () => { throw new Error("Could not establish connection. Receiving end does not exist."); };

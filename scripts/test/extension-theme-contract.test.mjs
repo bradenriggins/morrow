@@ -48,7 +48,7 @@ const SHIPPED_WITHOUT_A_REFERENCE = new Map([["Manrope-OFL.txt", "Manrope-variab
 function tokens(source) {
   const block = source.match(/:root\s*\{([^}]*)\}/);
   assert.ok(block, "expected a :root block");
-  return Object.fromEntries([...block[1].matchAll(/(--[a-z-]+):\s*([^;]+);/g)].map(([, name, value]) => [name, value.trim()]));
+  return Object.fromEntries([...block[1].matchAll(/(--[a-z0-9-]+):\s*([^;]+);/g)].map(([, name, value]) => [name, value.trim()]));
 }
 
 const [lightSource, darkSource] = theme.split("@media (prefers-color-scheme: dark)");
@@ -125,6 +125,44 @@ test("the brand document records the contrast the tokens actually produce", () =
   assert.deepEqual(drift, [], `${BRAND_DOC_PATH} and ${THEME_PATH} disagree`);
 });
 
+/** The `--control-border` boundary WI-F.3 defines, checked against each surface it can sit on. */
+const CONTROL_BORDER_COMPARISONS = SURFACES.map((token) => ({
+  label: `\`--control-border\` on \`${token}\``,
+  against: (palette) => channels(palette[token]),
+}));
+
+test("--control-border reaches the WCAG 1.4.11 control-boundary minimum against every surface, in both themes", () => {
+  const failures = [];
+  for (const [name, palette] of Object.entries(palettes)) {
+    for (const comparison of CONTROL_BORDER_COMPARISONS) {
+      const ratio = contrast(channels(palette["--control-border"]), comparison.against(palette));
+      if (ratio < 3) failures.push(`${name}: ${comparison.label} is ${round(ratio)}:1`);
+    }
+  }
+  assert.deepEqual(failures, [], "an input, select, checkbox, or radio button boundary below 3:1 fails WCAG 1.4.11");
+});
+
+test("the brand document records the --control-border contrast the tokens actually produce", () => {
+  const rows = new Map(
+    [...brandDocument.matchAll(/^\| (`--control-border` on `--[a-z]+`) \| ([\d.]+):1 \| ([\d.]+):1 \|$/gm)]
+      .map(([, label, lightRatio, darkRatio]) => [label, { light: Number(lightRatio), dark: Number(darkRatio) }]),
+  );
+  assert.deepEqual(
+    [...rows.keys()],
+    CONTROL_BORDER_COMPARISONS.map((comparison) => comparison.label),
+    `${BRAND_DOC_PATH} must record one row per --control-border comparison, in order`,
+  );
+  const drift = [];
+  for (const comparison of CONTROL_BORDER_COMPARISONS) {
+    for (const [name, palette] of Object.entries(palettes)) {
+      const measured = round(contrast(channels(palette["--control-border"]), comparison.against(palette)));
+      const recorded = rows.get(comparison.label)[name];
+      if (measured !== recorded) drift.push(`${name} ${comparison.label}: document says ${recorded}:1, tokens give ${measured}:1`);
+    }
+  }
+  assert.deepEqual(drift, [], `${BRAND_DOC_PATH} and ${THEME_PATH} disagree on --control-border`);
+});
+
 test("--ink stays a text colour, so the focus ring never sits on it", () => {
   // The recorded --ink ratios are below 3:1. They are safe only while no surface is painted in ink.
   const painted = [];
@@ -135,6 +173,113 @@ test("--ink stays a text colour, so the focus ring never sits on it", () => {
     }
   }
   assert.deepEqual(painted, [], "a surface painted in --ink would carry a focus ring below 3:1");
+});
+
+// --- Type, space, and radius scale ---------------------------------------------------------------
+
+/** The seven type roles WI-F.1 defines. Each is a `font` shorthand, so every value carries `var(--font-sans)`. */
+const TYPE_TOKENS = {
+  "--text-display": "700 2rem/1.1 var(--font-sans)",
+  "--text-title": "700 1.375rem/1.2 var(--font-sans)",
+  "--text-heading": "700 1.0625rem/1.3 var(--font-sans)",
+  "--text-body": "400 1rem/1.55 var(--font-sans)",
+  "--text-ui": "400 0.875rem/1.45 var(--font-sans)",
+  "--text-ui-strong": "600 0.875rem/1.45 var(--font-sans)",
+  "--text-caption": "400 0.8125rem/1.4 var(--font-sans)",
+};
+const SPACE_TOKENS = {
+  "--space-1": "4px",
+  "--space-2": "8px",
+  "--space-3": "12px",
+  "--space-4": "16px",
+  "--space-5": "24px",
+  "--space-6": "32px",
+  "--space-7": "48px",
+};
+const RADIUS_TOKENS = {
+  "--radius-control": "10px",
+  "--radius-card": "14px",
+  "--radius-panel": "18px",
+  "--radius-pill": "999px",
+};
+const SCALE_TOKENS = { ...TYPE_TOKENS, ...SPACE_TOKENS, ...RADIUS_TOKENS, "--measure": "68ch" };
+
+test("theme.css defines the type, space, and radius scale with its exact values", () => {
+  const wrong = Object.entries(SCALE_TOKENS)
+    .filter(([name, value]) => light[name] !== value)
+    .map(([name, value]) => `${name}: expected \`${value}\`, got \`${light[name] ?? "(missing)"}\``);
+  assert.deepEqual(wrong, [], `${THEME_PATH} must define each scale token with its exact value`);
+});
+
+test("installer/renderer/styles.css copies the scale token names and values without change", () => {
+  const installerSource = read("installer/renderer/styles.css");
+  const installerTokens = tokens(installerSource.split("@media (prefers-color-scheme: dark)")[0]);
+  const wrong = Object.entries(SCALE_TOKENS)
+    .filter(([name, value]) => installerTokens[name] !== value)
+    .map(([name, value]) => `${name}: expected \`${value}\`, got \`${installerTokens[name] ?? "(missing)"}\``);
+  assert.deepEqual(wrong, [], "installer/renderer/styles.css must copy the scale tokens, as .better-web-ui.md requires");
+});
+
+// --- Motion: five named places, and nowhere else --------------------------------------------------
+
+/** WI-F.7: motion lives in exactly five places. Each duration and the one easing curve are tokens. */
+const MOTION_TOKENS = {
+  "--motion-fast": "120ms",
+  "--motion-standard": "160ms",
+  "--motion-panel": "180ms",
+  "--motion-complete": "300ms",
+  "--ease-panel": "cubic-bezier(0.2, 0, 0, 1)",
+};
+
+test("theme.css defines the motion contract with its exact values", () => {
+  const wrong = Object.entries(MOTION_TOKENS)
+    .filter(([name, value]) => light[name] !== value)
+    .map(([name, value]) => `${name}: expected \`${value}\`, got \`${light[name] ?? "(missing)"}\``);
+  assert.deepEqual(wrong, [], `${THEME_PATH} must define each motion token with its exact value`);
+});
+
+test("installer/renderer/styles.css copies the motion tokens without change", () => {
+  const installerSource = read("installer/renderer/styles.css");
+  const installerTokens = tokens(installerSource.split("@media (prefers-color-scheme: dark)")[0]);
+  const wrong = Object.entries(MOTION_TOKENS)
+    .filter(([name, value]) => installerTokens[name] !== value)
+    .map(([name, value]) => `${name}: expected \`${value}\`, got \`${installerTokens[name] ?? "(missing)"}\``);
+  assert.deepEqual(wrong, [], "installer/renderer/styles.css must copy the motion tokens, as .better-web-ui.md requires");
+});
+
+test("button press feedback is scale(0.98), the value WI-F.7 pins", () => {
+  for (const path of [THEME_PATH, "installer/renderer/styles.css"]) {
+    const active = rules(read(path)).filter((rule) => /button/i.test(rule.selector) && /:active/.test(rule.selector));
+    assert.ok(active.length > 0, `${path} must define a button :active rule`);
+    for (const rule of active) {
+      assert.match(rule.declarations, /transform:\s*scale\(0\.98\)/, `${path}: ${rule.selector} must set transform: scale(0.98)`);
+    }
+  }
+});
+
+test("every brand stylesheet disables transitions and animations under prefers-reduced-motion", () => {
+  const missing = [THEME_PATH, "installer/renderer/styles.css"].filter((path) => {
+    const source = read(path);
+    const block = source.match(/@media \(prefers-reduced-motion: reduce\)\s*\{([^}]*)\}/);
+    return !block || !/transition:\s*none\s*!important/.test(block[1]);
+  });
+  assert.deepEqual(missing, [], "a surface without a reduced-motion rule cannot remove the five motion places");
+});
+
+test("no type token in theme.css is smaller than the 13 px floor", () => {
+  const ROOT_PX = 16;
+  const small = Object.keys(TYPE_TOKENS)
+    .filter((name) => {
+      const rem = Number(light[name]?.match(/([\d.]+)rem/)?.[1]);
+      return Number.isFinite(rem) && rem * ROOT_PX < 13;
+    });
+  assert.deepEqual(small, [], "a type token below the 13px floor is not legible");
+});
+
+test("every type token in theme.css uses weight 400, 600, or 700", () => {
+  const bad = Object.keys(TYPE_TOKENS)
+    .filter((name) => ![400, 600, 700].includes(Number(light[name]?.trim().split(/\s+/)[0])));
+  assert.deepEqual(bad, [], "a type token must use weight 400, 600, or 700");
 });
 
 // --- Control size and reduced transparency ---------------------------------------------------------

@@ -183,6 +183,9 @@ function renderWelcome(current) {
     && current?.lifecycle !== "repair_required"
     && current?.runtime?.status !== "repair_required";
   setupIntro.hidden = !needsWelcome;
+  // The intro's own h1 is hidden with it, so the step heading becomes the
+  // page's level-one heading until the welcome screen returns.
+  actionTitle.setAttribute("aria-level", needsWelcome ? "2" : "1");
 }
 
 function setProblem(value) {

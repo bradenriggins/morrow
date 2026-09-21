@@ -31,6 +31,9 @@ const showConnectedButton = document.querySelector("#show-connected");
 const modePanel = document.querySelector("#mode-panel");
 const refreshButton = document.querySelector("#refresh");
 const returnPlanButton = document.querySelector("#return-plan");
+const editAccessBanner = document.querySelector("#edit-access-banner");
+const editAccessBannerText = document.querySelector("#edit-access-banner-text");
+const askFirstAllCoursesButton = document.querySelector("#ask-first-all-courses");
 const saveEditButton = document.querySelector("#save-edit");
 const saveConfirmation = document.querySelector("#save-confirmation");
 const saveConfirmationDetail = document.querySelector("#save-confirmation-detail");
@@ -82,11 +85,14 @@ const state = {
   fileStorageBusy: false,
   filter: "",
   mode: "plan",
+  openPlatformBusy: false,
+  openPlatformProgressVisible: false,
   page: 0,
   optionsByBinding: new Map(),
   optionsLoading: false,
   optionsRequestToken: 0,
   pendingSaveConfirmation: false,
+  saveProgressText: null,
   privateChatOpen: false,
   privateChatBusy: false,
   readGeneration: 0,
@@ -265,6 +271,53 @@ function anchors() {
   return Array.isArray(value) ? value.filter((anchor) => anchor && typeof anchor.siteAnchorId === "string" && anchor.siteAnchorId && anchor.runtimeVerified === true) : [];
 }
 
+/** The saved site the empty course list can offer to open, open or closed. */
+function savedAnchor() {
+  const value = state.status?.siteAnchors;
+  const list = Array.isArray(value) ? value : [];
+  return list.find((anchor) => anchor && typeof anchor.siteAnchorId === "string" && anchor.siteAnchorId && typeof anchor.provider === "string") || null;
+}
+
+function platformDisplayName(provider) {
+  return provider === "moodle" ? "Moodle" : provider === "canvas" ? "Canvas" : "the learning platform";
+}
+
+/** "Open Canvas" or "Open Moodle" (WI-1.1); "Opening" once the wait has been visible long enough. */
+function openPlatformLabel(entity, busy = false) {
+  return `${busy ? "Opening" : "Open"} ${platformDisplayName(entity?.provider)}`;
+}
+
+/**
+ * Opens a saved site's tab (WI-1.1's handler): from the empty course list, with no binding, or from
+ * a closed course card, with a binding, so the tab opens to that exact course. The button disables
+ * at once, so a second click cannot start a second tab, but its text only changes to "Opening…" once
+ * the wait has run long enough to need it (WI-F.10): no flash of progress for a fast open. A sign-in
+ * is necessary when the open finishes unverified: the site loaded, but no saved session matched it.
+ */
+async function openSavedPlatform(siteAnchorId, sourceBindingId, provider) {
+  if (!siteAnchorId || state.openPlatformBusy) return;
+  state.openPlatformBusy = true;
+  state.openPlatformProgressVisible = false;
+  clearError();
+  renderCourses();
+  const revealTimer = setTimeout(() => {
+    state.openPlatformProgressVisible = true;
+    renderCourses();
+  }, 400);
+  try {
+    const result = await request("morrow_open_platform", sourceBindingId ? { siteAnchorId, sourceBindingId } : { siteAnchorId });
+    if (result?.verified === false) showNotice(`Sign in to ${platformDisplayName(provider)} in the tab that opened. Morrow continues after that.`);
+    else clearNotice();
+  } catch (cause) {
+    showError(cause);
+  } finally {
+    clearTimeout(revealTimer);
+    state.openPlatformBusy = false;
+    state.openPlatformProgressVisible = false;
+    await refresh();
+  }
+}
+
 function selectedAnchor() {
   return anchors().find((anchor) => anchor.siteAnchorId === state.discovery?.siteAnchorId || anchor.siteAnchorId === siteAnchor.value) || null;
 }
@@ -353,6 +406,16 @@ function expiryLabel(expiresAt) {
 function isStale(binding) {
   const permission = storedEditPermission(binding);
   return permissionHasExpired(binding) || binding?.policyStale === true || Boolean(permission && state.status?.catalogDigest && permission.catalogDigest !== state.status.catalogDigest);
+}
+
+/** WI-1.4: a connection with a live Edit permission. Morrow can act in it now, with no review. */
+function hasActiveEdit(binding) {
+  return isEligible(binding) && !permissionHasExpired(binding) && !isStale(binding)
+    && Array.isArray(binding?.editPermission?.enabledCategories) && binding.editPermission.enabledCategories.length > 0;
+}
+
+function activeEditBindings() {
+  return (Array.isArray(state.status?.bindings) ? state.status.bindings : []).filter(hasActiveEdit);
 }
 
 function matchingItems() {
@@ -608,11 +671,16 @@ function renderCategories() {
     </details>` : "");
 }
 
+/** WI-1.1: the course is otherwise usable, but its saved Canvas or Moodle tab is not open. */
+function siteClosed(binding) {
+  return isEligible(binding) && !permissionHasExpired(binding) && !isStale(binding) && binding.runtimeVerified !== true;
+}
+
 function permissionState(binding) {
   if (!isEligible(binding)) return { label: "Reconnect needed", className: "" };
   if (permissionHasExpired(binding)) return { label: "Edit expired", className: "stale" };
   if (isStale(binding)) return { label: "Save again", className: "stale" };
-  if (binding.runtimeVerified !== true) return { label: "Course tab needed", className: "" };
+  if (siteClosed(binding)) return { label: `${providerName(binding)} is closed`, className: "" };
   const enabled = categoriesFor(binding);
   if (!enabled.length) return binding?.editPermission ? { label: "Edit active", className: "edit" } : { label: "Plan only", className: "" };
   return { label: `Edit: ${plural(enabled.length, "type")}`, className: "edit" };
@@ -633,11 +701,11 @@ function renderDiagnosticDetails(binding) {
   return `<details class="course-diagnostics"><summary>Course details</summary><dl>${details.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl></details>`;
 }
 
-function bindingNote(binding) {
+function bindingNote(binding, selected) {
   if (!isEligible(binding)) return "Morrow cannot identify this course. Reconnect it from the Morrow popup before you choose Edit.";
   if (permissionHasExpired(binding)) return "This temporary Edit access has ended. The course is back in Plan. Ask Morrow for Edit access again if you still need it.";
   if (isStale(binding)) return "Available actions changed. Edit is paused until you review and save the selected actions again.";
-  if (binding.runtimeVerified !== true) return "This course remains selected, but its site is closed. Open the learning platform before you save Edit.";
+  if (siteClosed(binding)) return selected ? "This course remains selected, but its site is closed. Morrow Bridge can open it for you." : "Morrow Bridge can open it for you.";
   const enabled = categoriesFor(binding);
   if (!enabled.length) return binding?.editPermission
     ? "Edit access is active. Select this course to read its exact allowed actions."
@@ -683,7 +751,8 @@ function renderBinding(binding) {
   const eligible = isEligible(binding);
   const selected = state.selected.has(binding.sourceBindingId);
   const permission = permissionState(binding);
-  const note = bindingNote(binding);
+  const note = bindingNote(binding, selected);
+  const closed = siteClosed(binding);
   return `
     <article class="course-card ${selected ? "is-selected" : ""} ${eligible ? "" : "is-unavailable"}" data-binding-id="${escapeHtml(binding.sourceBindingId || "")}">
       <input class="course-select" type="checkbox" aria-label="${escapeHtml(courseSelectionAccessibleName(binding))}" ${selected ? "checked" : ""} ${eligible ? "" : "disabled"}>
@@ -695,6 +764,7 @@ function renderBinding(binding) {
         ${renderCourseContext(binding)}
         ${renderDiagnosticDetails(binding)}
         ${note ? `<p class="card-note">${escapeHtml(note)}</p>` : ""}
+        ${closed ? `<button class="secondary card-action" type="button" data-open-platform="${escapeHtml(binding.sourceBindingId || "")}" ${state.openPlatformBusy ? 'disabled aria-busy="true"' : ""}>${escapeHtml(openPlatformLabel(binding, state.openPlatformProgressVisible))}</button>` : ""}
       </div>
     </article>
   `;
@@ -752,11 +822,19 @@ function renderCourses(focus = focusedCourseControl()) {
   if (state.statusReadFailed) {
     courseList.innerHTML = '<p class="state-message">Connected courses were not checked. Select Refresh connected courses.</p>';
   } else if (!state.status) {
-    courseList.innerHTML = '<p class="state-message">Loading connected courses…</p>';
+    // WI-F.10: three skeleton rows while the first read is outstanding, not a sentence.
+    courseList.innerHTML = Array.from({ length: 3 }, () => '<div class="course-card-skeleton" aria-hidden="true"></div>').join("");
   } else if (availableView && discoveryExpired()) {
     courseList.innerHTML = '<p class="state-message">This available-course list has expired. Find available courses again before you connect courses.</p>';
   } else if (!availableView && !connected.length) {
-    courseList.innerHTML = '<p class="state-message">No connected courses are available. Choose a signed-in site above to find courses you can connect.</p>';
+    // WI-F.10: one composed empty message, plus the WI-1.1 open-platform action once a site is saved.
+    const anchor = savedAnchor();
+    courseList.innerHTML = anchor
+      ? `<div class="course-list-empty state-message">
+          <p>Open a course in Canvas or Moodle. Morrow Bridge finds it.</p>
+          <button id="open-platform-empty" type="button" ${state.openPlatformBusy ? 'disabled aria-busy="true"' : ""}>${escapeHtml(openPlatformLabel(anchor, state.openPlatformProgressVisible))}</button>
+        </div>`
+      : '<p class="state-message">Open a course in Canvas or Moodle. Morrow Bridge finds it.</p>';
   } else if (!matching.length) {
     courseList.innerHTML = state.filter.trim()
       ? `<p class="state-message">No ${availableView ? "available" : "connected"} course matches this search. Clear the search to view every course in this list.</p>`
@@ -905,7 +983,7 @@ function renderSelection() {
   cancelSaveButton.disabled = state.busy;
   saveEditButton.disabled = state.busy || confirming || !showEditStage || !categoriesSelected || !availableCategories.size || !selectedEditDuration();
   returnPlanButton.textContent = `Return ${plural(selected.length, "selected course")} to Plan`;
-  saveEditButton.textContent = showEditStage ? `Save Edit access for ${plural(selected.length, "course")}` : "Save Edit access";
+  saveEditButton.textContent = state.saveProgressText || (showEditStage ? `Save Edit access for ${plural(selected.length, "course")}` : "Save Edit access");
   actionHelp.textContent = needsSite
     ? "Open each selected course in Canvas or Moodle, then refresh this page before you choose Edit."
     : state.mode === "plan"
@@ -1002,11 +1080,20 @@ async function revokeCourseFileStorageAccess() {
   }
 }
 
+/** WI-1.4: the "Ask first in all courses" banner, shown while any connection can act with no review. */
+function renderEditBanner() {
+  const bindings = activeEditBindings();
+  editAccessBanner.hidden = bindings.length === 0;
+  if (bindings.length) editAccessBannerText.textContent = `Morrow can make some changes with no review in ${plural(bindings.length, "course")}.`;
+  askFirstAllCoursesButton.disabled = state.busy || bindings.length === 0;
+}
+
 function render(courseFocus = focusedCourseControl()) {
   renderAnchors();
   renderCategories();
   renderCourses(courseFocus);
   renderSelection();
+  renderEditBanner();
   renderFileStorageAccess();
   renderPrivateChat();
 }
@@ -1046,6 +1133,10 @@ async function refresh() {
   const generation = ++state.readGeneration;
   courseList.setAttribute("aria-busy", "true");
   refreshButton.disabled = true;
+  // WI-F.10: renders the loading skeleton for the very first read. A later refresh re-renders the
+  // course list it already has, which is a no-op until the new read replaces it. Only the course
+  // list is rendered here: the rest of the page has nothing new to say until the read settles.
+  renderCourses();
   try {
     const result = normalizeStatus(await request("morrow_edit_policy_status"));
     if (generation !== state.readGeneration) return;
@@ -1139,7 +1230,7 @@ function setBusy(value) {
   render();
 }
 
-async function returnToPlan(bindings) {
+async function returnToPlan(bindings, { doneMessage } = {}) {
   if (!bindings.length || state.busy) return;
   setBusy(true);
   clearError();
@@ -1155,7 +1246,7 @@ async function returnToPlan(bindings) {
     state.selectedCategories.clear();
     modePlan.checked = true;
     modeEdit.checked = false;
-    showNotice(`${plural(completed, "course")} returned to Plan. Edit access was removed immediately.`);
+    showNotice(doneMessage || `${plural(completed, "course")} returned to Plan. Edit access was removed immediately.`);
   } catch (cause) {
     showError(cause, { prefix: completed ? `${plural(completed, "course")} returned to Plan. ` : "" });
   } finally {
@@ -1185,6 +1276,14 @@ async function saveEditAccess() {
   clearNotice();
   let completed = 0;
   let expiresAt = null;
+  const total = bindings.length;
+  // WI-F.10: "Saving 2 of 5 courses" only once the save has run long enough to need it (400 ms),
+  // shown within 100 ms of that wait, so a fast save never flashes a progress line.
+  const saveProgressLabel = () => `Saving ${Math.min(completed + 1, total)} of ${plural(total, "course")}`;
+  const revealTimer = setTimeout(() => {
+    state.saveProgressText = saveProgressLabel();
+    renderSelection();
+  }, 400);
   try {
     for (const binding of bindings) {
       const result = await request("morrow_edit_policy_save", { sourceBindingId: binding.sourceBindingId, enabledCategories, expiresInMs });
@@ -1193,11 +1292,17 @@ async function saveEditAccess() {
       }
       if (Number.isSafeInteger(result.editPermission.expiresAt)) expiresAt = result.editPermission.expiresAt;
       completed += 1;
+      if (state.saveProgressText) {
+        state.saveProgressText = saveProgressLabel();
+        renderSelection();
+      }
     }
-    showNotice(`Edit access saved for ${plural(completed, "course")}. Allowed actions: ${categoryLabels(enabledCategories)}. It ends ${expiresAt ? expiryLabel(expiresAt) : "after the selected duration"}.`);
+    showNotice(`Edit access saved for ${plural(completed, "course")}. Allowed actions: ${labelList(enabledCategories.map((id) => categoryById(id) || { label: id }))}. It ends ${expiresAt ? expiryLabel(expiresAt) : "after the selected duration"}.`);
   } catch (cause) {
     showError(cause, { prefix: completed ? `Edit access saved for ${plural(completed, "course")}. ` : "" });
   } finally {
+    clearTimeout(revealTimer);
+    state.saveProgressText = null;
     state.pendingSaveConfirmation = false;
     state.saveConfirmedFor = null;
     setBusy(false);
@@ -1400,7 +1505,20 @@ selectVisible.addEventListener("click", () => {
 });
 
 courseList.addEventListener("click", (event) => {
-  if (!(event.target instanceof Element) || event.target.closest("input, button, a, summary, details")) return;
+  if (!(event.target instanceof Element)) return;
+  if (event.target.closest("#open-platform-empty")) {
+    const anchor = savedAnchor();
+    void openSavedPlatform(anchor?.siteAnchorId, undefined, anchor?.provider);
+    return;
+  }
+  const openPlatformButton = event.target.closest("[data-open-platform]");
+  if (openPlatformButton) {
+    const sourceBindingId = openPlatformButton.dataset.openPlatform;
+    const binding = (state.status?.bindings || []).find((entry) => entry.sourceBindingId === sourceBindingId);
+    if (binding?.siteAnchorId) void openSavedPlatform(binding.siteAnchorId, binding.sourceBindingId, binding.provider);
+    return;
+  }
+  if (event.target.closest("input, button, a, summary, details")) return;
   const card = event.target.closest(".course-card");
   if (!card || card.classList.contains("is-unavailable")) return;
   const input = card.querySelector(".available-course-select, .course-select");
@@ -1462,6 +1580,7 @@ nextPage.addEventListener("click", () => {
   renderCourses();
 });
 returnPlanButton.addEventListener("click", () => void returnToPlan(selectedBindings()));
+askFirstAllCoursesButton.addEventListener("click", () => void returnToPlan(activeEditBindings(), { doneMessage: "Done. Morrow asks first in all courses." }));
 saveEditButton.addEventListener("click", () => void saveEditAccess());
 confirmSaveButton.addEventListener("click", () => {
   state.saveConfirmedFor = selectionSignature();

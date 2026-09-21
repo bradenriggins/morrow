@@ -25,6 +25,9 @@ const connection = (fields = {}) => ({
 });
 const anchor = (fields = {}) => ({ siteAnchorId: "canvas:site", provider: "canvas", origin: COURSE_ORIGIN, principalId: "teacher@example.edu", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
 const binding = (fields = {}) => ({ sourceBindingId: "canvas:course-1", provider: "canvas", courseName: "Anatomy", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
+const editPermission = (sourceBindingId, expiresAt, enabledCategories = ["canvas_page_content"]) => ({
+  schema: "morrow.bridge.edit-permission.v1", sourceBindingId, revision: 1, scopeDigest: "d".repeat(64), catalogDigest: "c".repeat(64), expiresAt, enabledCategories,
+});
 
 async function openPopup({ status, handlers = {}, ...rest } = {}) {
   return await loadExtensionPage("popup/popup.html", { handlers: { morrow_status: () => status(), morrow_detect_course_platform: () => ({ provider: "canvas" }), ...handlers }, ...rest });
@@ -40,6 +43,7 @@ function view(page) {
     primaryDisabled: page.query("#primary").disabled,
     primaryBusy: page.query("#primary").getAttribute("aria-busy"),
     secondary: page.hidden("#canvas-action") ? null : page.text("#canvas-action"),
+    openPlatform: page.hidden("#open-platform-action") ? null : page.text("#open-platform-action"),
     disconnect: page.hidden("#disconnect") ? null : page.text("#disconnect"),
     planAndEdit: !page.query(".edit-access").hidden,
     online: page.query("#pulse").classList.contains("online"),
@@ -79,25 +83,25 @@ test("before a course site is connected the popup names the state it is in", asy
     ["a status read that failed", () => ({ ok: false, code: "bridge_extension_unreachable", error: "bridge_extension_unreachable" }), {
       connection: "Not checked", courseLabel: "Course", course: "Not checked",
       primary: "Try again", primaryDisabled: false, primaryBusy: "false",
-      secondary: null, disconnect: null, planAndEdit: false, online: false, account: null,
+      secondary: null, openPlatform: null, disconnect: null, planAndEdit: false, online: false, account: null,
       detail: "Morrow could not read this connection state. Select Try again. If the state does not change, close this popup and open it again.",
     }],
     ["Morrow is not added to an assistant yet", () => connection(), {
       connection: "Not connected", courseLabel: "Course", course: "Not connected",
       primary: "Connect Morrow", primaryDisabled: false, primaryBusy: "false",
-      secondary: null, disconnect: null, planAndEdit: false, online: false, account: null,
+      secondary: null, openPlatform: null, disconnect: null, planAndEdit: false, online: false, account: null,
       detail: "Add Morrow to your assistant, then open it. Select Connect Morrow to continue.",
     }],
     ["the person has not approved this connection yet", () => connection({ pairing: true }), {
       connection: "Waiting for approval", courseLabel: "Course", course: "Not connected",
       primary: "Waiting for approval", primaryDisabled: true, primaryBusy: "true",
-      secondary: null, disconnect: null, planAndEdit: false, online: false, account: null,
+      secondary: null, openPlatform: null, disconnect: null, planAndEdit: false, online: false, account: null,
       detail: "Confirm this connection on the Morrow page that opens. Then return to this popup.",
     }],
     ["Morrow Bridge is connecting", () => connection({ paired: true, connecting: true }), {
       connection: "Connecting…", courseLabel: "Course", course: "Not connected",
       primary: "Waiting for your assistant", primaryDisabled: true, primaryBusy: "true",
-      secondary: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: false, account: null,
+      secondary: null, openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: false, account: null,
       detail: "Connecting to Morrow. Keep this popup open or return in a moment.",
     }],
   ];
@@ -112,35 +116,35 @@ test("once Morrow is connected the popup names the course state and the one step
     ["a signed-in Canvas course is detected", () => connection({ paired: true, connected: true }), {
       connection: "Connected", courseLabel: "Course", course: "Not connected",
       primary: "Connect Canvas", primaryDisabled: false, primaryBusy: "false",
-      secondary: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: true, account: null,
+      secondary: null, openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: true, account: null,
       detail: "Morrow Bridge detected Canvas. Select Connect Canvas to allow access to this signed-in course.",
     }],
     ["the saved Canvas connection is closed", () => connection({ paired: true, connected: true, siteAnchors: [anchor({ runtimeVerified: false })] }), {
-      connection: "Connected", courseLabel: "Learning platform", course: "Canvas tab needed",
+      connection: "Connected", courseLabel: "Learning platform", course: "Canvas is closed",
       primary: "Connect Canvas", primaryDisabled: false, primaryBusy: "false",
-      secondary: null, disconnect: "Disconnect Morrow", planAndEdit: true, online: true,
+      secondary: null, openPlatform: "Open Canvas", disconnect: "Disconnect Morrow", planAndEdit: true, online: true,
       account: "Saved platform: Canvas",
       detail: "The saved Canvas connection is no longer open. Open a Canvas course in Chrome, sign in, then select Connect Canvas.",
     }],
     ["a signed-in site is connected and no course is chosen", () => connection({ paired: true, connected: true, siteAnchors: [anchor()] }), {
       connection: "Connected", courseLabel: "Course selection", course: "Ready",
       primary: "Choose courses", primaryDisabled: false, primaryBusy: "false",
-      secondary: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: true,
+      secondary: null, openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: true,
       account: "Connected platform: Canvas",
       detail: "Choose courses in Plan and Edit settings. Plan keeps changes ready for your review.",
     }],
     ["a selected course has no open tab", () => connection({ paired: true, connected: true, bindings: [binding({ runtimeVerified: false })], bindingCount: 1, siteAnchors: [anchor()] }), {
-      connection: "Connected", courseLabel: "Selected course", course: "Canvas tab needed",
+      connection: "Connected", courseLabel: "Connection", course: "Canvas is closed",
       primary: "Connect Canvas", primaryDisabled: false, primaryBusy: "false",
-      secondary: null, disconnect: "Disconnect Morrow", planAndEdit: true, online: true,
-      account: "Selected course: Anatomy",
+      secondary: null, openPlatform: "Open Canvas", disconnect: "Disconnect Morrow", planAndEdit: true, online: true,
+      account: "Course: Anatomy",
       detail: "This selected course is connected, but its Canvas tab is no longer open. Open the course in Chrome, sign in, then select Connect Canvas.",
     }],
     ["two courses are selected and one site is open", () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 2, siteAnchors: [anchor()] }), {
-      connection: "Connected", courseLabel: "Selected course", course: "Connected",
+      connection: "Connected", courseLabel: "Connection", course: "Connected",
       primary: null, primaryDisabled: false, primaryBusy: "false",
-      secondary: "Check or switch course", disconnect: "Disconnect Morrow", planAndEdit: true, online: true,
-      account: "Selected course: Anatomy · 2 courses selected",
+      secondary: "Check or switch course", openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: true, online: true,
+      account: "Course: Anatomy · 2 courses selected",
       detail: "This selected course is connected. Keep one signed-in Canvas course tab open while you work in Morrow.",
     }],
   ];
@@ -148,6 +152,33 @@ test("once Morrow is connected the popup names the course state and the one step
     const page = await openPopup({ status });
     assert.deepEqual(view(page), expected, name);
   }
+});
+
+test("Open Canvas opens the saved site itself, with no permission prompt, and asks for sign-in only when it is unverified after", async () => {
+  const opened = [];
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding({ runtimeVerified: false })], bindingCount: 1, siteAnchors: [anchor()] }),
+    handlers: {
+      morrow_open_platform: (fields) => { opened.push(fields); return { opened: true, verified: false }; },
+    },
+  });
+  assert.equal(page.text("#open-platform-action"), "Open Canvas");
+  await page.click("#open-platform-action");
+  assert.deepEqual(opened, [{ type: "morrow_open_platform", siteAnchorId: "canvas:site", sourceBindingId: "canvas:course-1" }]);
+  assert.deepEqual(page.permissionCalls, []);
+  assert.equal(page.hidden("#error"), true);
+  assert.equal(page.hidden("#notice"), false);
+  assert.equal(page.text("#notice"), "Sign in to Canvas in the tab that opened. Morrow continues after that.");
+});
+
+test("Open Canvas clears its sign-in notice once the reopened site verifies", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, siteAnchors: [anchor({ runtimeVerified: false })] }),
+    handlers: { morrow_open_platform: () => ({ opened: true, verified: true }) },
+  });
+  assert.equal(page.text("#open-platform-action"), "Open Canvas");
+  await page.click("#open-platform-action");
+  assert.equal(page.hidden("#notice"), true);
 });
 
 test("the popup uses the platform detected in the active course tab", async () => {
@@ -168,10 +199,10 @@ test("a version-mismatched Bridge exposes only setup recovery", async () => {
     handlers: { morrow_open_setup: () => ({ opened: true }) },
   });
   assert.deepEqual(view(page), {
-    connection: "Reload needed", courseLabel: "Selected course", course: "Not available",
+    connection: "Reload needed", courseLabel: "Connection", course: "Not available",
     primary: "Open setup guide", primaryDisabled: false, primaryBusy: "false",
-    secondary: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: false,
-    account: "Selected course: Anatomy",
+    secondary: null, openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: false,
+    account: "Course: Anatomy",
     detail: "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome.",
   });
   assert.equal(page.hidden("#setup-guide"), true);
@@ -347,4 +378,46 @@ test("the setup guide opens from the popup, and says so when it cannot", async (
   });
   await refused.click("#setup-guide");
   assert.equal(refused.text("#error"), problemText("bridge_not_connected"));
+});
+
+// WI-1.4: morrow_status carries no editPermission per binding, so the popup reads
+// morrow_edit_policy_status once it is connected, the same command the settings page uses.
+test("the popup's banner offers to ask first in all courses, and the result is announced", async () => {
+  const expiresAt = Date.now() + 60 * 60 * 1_000;
+  let permission = editPermission("canvas:course-1", expiresAt);
+  const revoked = [];
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
+    handlers: {
+      morrow_edit_policy_status: () => ({ bindings: [{ sourceBindingId: "canvas:course-1", ...(permission ? { editPermission: permission } : {}) }] }),
+      morrow_edit_policy_revoke: ({ sourceBindingId }) => {
+        revoked.push(sourceBindingId);
+        permission = null;
+        return { revoked: true };
+      },
+    },
+  });
+  assert.equal(page.hidden("#edit-access-banner"), false);
+  assert.equal(page.text("#edit-access-banner-text"), "Morrow can make some changes with no review in 1 course.");
+  assert.equal(page.query("#ask-first-all-courses").disabled, false);
+
+  await page.click("#ask-first-all-courses");
+  await page.waitFor(() => page.text("#notice") !== "", "the popup never reported the result");
+  assert.deepEqual(revoked, ["canvas:course-1"]);
+  assert.equal(page.text("#notice"), "Done. Morrow asks first in all courses.");
+  assert.equal(page.hidden("#edit-access-banner"), true);
+});
+
+test("the popup's banner stays hidden with no active Edit access, and asks nothing while choosing courses", async () => {
+  const noEdit = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
+    handlers: { morrow_edit_policy_status: () => ({ bindings: [{ sourceBindingId: "canvas:course-1" }] }) },
+  });
+  assert.equal(noEdit.hidden("#edit-access-banner"), true);
+
+  const choosing = await openPopup({
+    status: () => connection({ paired: true, connected: true, siteAnchors: [anchor()] }),
+  });
+  assert.equal(choosing.hidden("#edit-access-banner"), true);
+  assert.deepEqual(choosing.messages("morrow_edit_policy_status"), []);
 });

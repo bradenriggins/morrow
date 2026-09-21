@@ -103,7 +103,11 @@ after(clearExtensionGlobals);
 test("with no connected course the page states that, and offers no course to act on", async () => {
   const page = await openSettings({ status: () => statusFixture([]) });
   assert.equal(page.text("#connection-status"), "No course is connected yet.");
-  assert.equal(page.text("#course-list"), "No connected courses are available. Choose a signed-in site above to find courses you can connect.");
+  // WI-F.10: pin changed from "No connected courses are available. Choose a signed-in site above to
+  // find courses you can connect." to the composed empty message. No site is saved here, so it
+  // carries no action.
+  assert.equal(page.text("#course-list"), "Open a course in Canvas or Moodle. Morrow Bridge finds it.");
+  assert.equal(page.queryAll("#course-list button").length, 0);
   assert.equal(page.query("#course-list").getAttribute("aria-busy"), "false");
   assert.equal(page.text("#site-anchor-details"), "No signed-in Canvas or Moodle course is available. Open one course in Chrome, then refresh this page.");
   assert.equal(page.query("#site-anchor").disabled, true);
@@ -115,6 +119,71 @@ test("with no connected course the page states that, and offers no course to act
   assert.equal(page.hidden("#course-pages"), true);
   assert.equal(page.hidden("#error"), true);
   assert.equal(page.text("#announcement"), "No course is connected yet.");
+});
+
+test("the course list shows three skeleton rows while the first read is outstanding, not a sentence", async () => {
+  let resolveStatus;
+  const pending = new Promise((resolve) => { resolveStatus = resolve; });
+  const loading = loadExtensionPage("settings/settings.html", {
+    handlers: {
+      morrow_edit_policy_status: () => pending,
+      morrow_edit_policy_save: () => ({}),
+      morrow_edit_policy_revoke: () => ({}),
+    },
+  });
+  // The status read stays outstanding, so the module's own top-level `await refresh()` cannot
+  // finish. Its synchronous work, including the skeleton render, still runs: wait for it the same
+  // way loadExtensionPage's own waitFor does, rather than assuming one tick is enough.
+  for (let attempt = 0; attempt < 2_000 && globalThis.document?.querySelectorAll("#course-list .course-card-skeleton").length !== 3; attempt += 1) {
+    await new Promise((resolve) => { setTimeout(resolve, 1); });
+  }
+  assert.equal(globalThis.document.querySelectorAll("#course-list .course-card-skeleton").length, 3);
+  assert.equal(globalThis.document.querySelector("#course-list").getAttribute("aria-busy"), "true");
+  assert.equal(globalThis.document.querySelector("#course-list").querySelectorAll("p").length, 0);
+
+  resolveStatus(statusFixture([]));
+  const page = await loading;
+  assert.equal(page.queryAll("#course-list .course-card-skeleton").length, 0);
+});
+
+test("the empty course list offers one composed message, and the WI-1.1 open action once a site is saved", async () => {
+  const opened = [];
+  const closedSite = { siteAnchorId: "canvas-site-1", provider: "canvas", origin: "https://canvas.example.edu", principalId: "teacher@example.edu", runtimeVerified: false };
+  const page = await openSettings({
+    status: () => statusFixture([], { siteAnchors: [closedSite] }),
+    handlers: {
+      morrow_open_platform: ({ siteAnchorId }) => { opened.push(siteAnchorId); return { opened: true, verified: true }; },
+    },
+  });
+  assert.equal(page.query("#course-list p").textContent, "Open a course in Canvas or Moodle. Morrow Bridge finds it.");
+  assert.equal(page.text("#open-platform-empty"), "Open Canvas");
+
+  await page.click("#open-platform-empty");
+  assert.deepEqual(opened, ["canvas-site-1"]);
+  assert.equal(page.hidden("#error"), true);
+  // A fast open never shows progress text: the 400 ms reveal timer is cleared before it can fire.
+  assert.notEqual(page.text("#open-platform-empty"), "Opening Canvas");
+});
+
+test("opening a saved but closed site shows progress only once the wait runs long enough to need it", async () => {
+  let resolveOpen;
+  const opening = new Promise((resolve) => { resolveOpen = resolve; });
+  const closedSite = { siteAnchorId: "moodle-site-1", provider: "moodle", origin: "https://moodle.example.edu", principalId: "teacher@example.edu", runtimeVerified: false };
+  const page = await openSettings({
+    status: () => statusFixture([], { siteAnchors: [closedSite] }),
+    handlers: { morrow_open_platform: () => opening },
+  });
+  assert.equal(page.text("#open-platform-empty"), "Open Moodle");
+
+  await page.click("#open-platform-empty");
+  assert.equal(page.query("#open-platform-empty").disabled, true, "a second click must not start a second tab");
+  assert.equal(page.text("#open-platform-empty"), "Open Moodle", "no progress yet: the wait has not run long enough to need it");
+
+  await page.waitFor(() => page.text("#open-platform-empty") === "Opening Moodle", "no progress appeared once the wait ran long enough to need it");
+
+  resolveOpen({ opened: true, verified: true });
+  await page.waitFor(() => page.query("#open-platform-empty").disabled === false, "opening the site never finished");
+  assert.equal(page.text("#open-platform-empty"), "Open Moodle");
 });
 
 test("the connected-course summary counts only runtime-verified eligible courses as ready", async () => {
@@ -135,7 +204,8 @@ test("the connected-course summary counts only runtime-verified eligible courses
   await reread([unidentified],
     "0 connected courses are ready to use. 1 saved course needs an open course tab or a reconnected site.");
   await reread([], "No course is connected yet.");
-  assert.equal(page.text("#course-list"), "No connected courses are available. Choose a signed-in site above to find courses you can connect.");
+  // WI-F.10 pin: see "with no connected course the page states that, and offers no course to act on".
+  assert.equal(page.text("#course-list"), "Open a course in Canvas or Moodle. Morrow Bridge finds it.");
 });
 
 test("a Bridge course-tab status event refreshes the rendered course state", async () => {
@@ -310,7 +380,45 @@ test("an options response that is not runtime verified moves the course to site 
   assert.deepEqual(listedActions(page), []);
   assert.equal(page.hidden("#error"), true);
   assert.equal(page.text("#category-list"), "Open each selected course in Canvas or Moodle, then refresh this page before you choose Edit.");
-  assert.equal(page.text(".permission-state"), "Course tab needed");
+  // WI-1.1 pin: "Course tab needed" became "Canvas is closed".
+  assert.equal(page.text(".permission-state"), "Canvas is closed");
+});
+
+test("a closed course card offers its own Open Canvas action, targeted at that exact course", async () => {
+  const opened = [];
+  const closed = { ...ANATOMY, runtimeVerified: false, siteAnchorId: "canvas:site-1" };
+  const page = await openSettings({
+    status: () => statusFixture([closed]),
+    handlers: {
+      morrow_open_platform: (fields) => { opened.push(fields); return { opened: true, verified: true }; },
+    },
+  });
+  assert.equal(page.text(".permission-state"), "Canvas is closed");
+  assert.equal(page.query(".card-note").textContent, "Morrow Bridge can open it for you.");
+  assert.equal(page.text(`[data-open-platform="${closed.sourceBindingId}"]`), "Open Canvas");
+
+  await page.click(`[data-open-platform="${closed.sourceBindingId}"]`);
+  assert.deepEqual(opened, [{ type: "morrow_open_platform", siteAnchorId: "canvas:site-1", sourceBindingId: closed.sourceBindingId }]);
+  assert.equal(page.hidden("#error"), true);
+});
+
+test("WI-1.5: a selected closed course keeps the remains-selected sentence, an unselected one does not", async () => {
+  const closed = { ...ANATOMY, runtimeVerified: false, siteAnchorId: "canvas:site-1" };
+  const page = await openSettings({ status: () => statusFixture([closed]) });
+  assert.equal(page.query(".card-note").textContent, "Morrow Bridge can open it for you.");
+  await page.click(`[data-binding-id="${closed.sourceBindingId}"] .course-select`);
+  assert.equal(page.query(".card-note").textContent, "This course remains selected, but its site is closed. Morrow Bridge can open it for you.");
+});
+
+test("a closed course's Open Canvas shows a sign-in notice when the reopened site is still unverified", async () => {
+  const closed = { ...ANATOMY, runtimeVerified: false, siteAnchorId: "canvas:site-1" };
+  const page = await openSettings({
+    status: () => statusFixture([closed]),
+    handlers: { morrow_open_platform: () => ({ opened: true, verified: false }) },
+  });
+  await page.click(`[data-open-platform="${closed.sourceBindingId}"]`);
+  assert.equal(page.hidden("#notice"), false);
+  assert.equal(page.text("#notice"), "Sign in to Canvas in the tab that opened. Morrow continues after that.");
 });
 
 test("an action published for review only carries its reason and no Edit control", async () => {
@@ -361,6 +469,53 @@ test("Edit access defaults to one hour and saves one exact request for each sele
     { type: "morrow_edit_policy_save", sourceBindingId: PHYSIOLOGY.sourceBindingId, enabledCategories: [CHECKED_ACTION.id], expiresInMs: 4 * ONE_HOUR_MS },
   ]);
   assert.match(page.text("#notice"), /^Edit access saved for 2 courses\. Allowed actions: Page content\. It ends /);
+});
+
+test("the save notice caps the list of allowed actions at six, then counts the rest", async () => {
+  const manyActions = Array.from({ length: 8 }, (_, index) => ({
+    id: `canvas_action_${index + 1}`, group: "Focused Canvas repairs", label: `Action ${index + 1}`,
+    description: `Action ${index + 1} description.`, availability: "edit", destructive: false, verification: "checked",
+  }));
+  const page = await openEditStage(manyActions, [ANATOMY]);
+  for (const action of manyActions) {
+    await page.click(`#category-list input[value="${action.id}"]`);
+  }
+  await page.click("#save-edit");
+  await page.waitFor(() => page.messages("morrow_edit_policy_save").length === 1, "the page never saved Edit access");
+  assert.match(page.text("#notice"),
+    /^Edit access saved for 1 course\. Allowed actions: Action 1, Action 2, Action 3, Action 4, Action 5, Action 6, and 2 more actions\. It ends /);
+});
+
+test("saving Edit access for several courses shows progress only once the wait runs long enough to need it", async () => {
+  const releases = [];
+  const page = await openSettings({
+    status: () => statusFixture([ANATOMY, PHYSIOLOGY]),
+    options: (sourceBindingId) => optionsFixture(sourceBindingId, [CHECKED_ACTION]),
+    handlers: {
+      morrow_edit_policy_save: ({ sourceBindingId, enabledCategories, expiresInMs }) => new Promise((resolve) => {
+        releases.push(() => resolve({ editPermission: { ...editPermissionSummary(sourceBindingId, Date.now() + expiresInMs), enabledCategories } }));
+      }),
+    },
+  });
+  await page.click("#select-visible");
+  await page.click("#mode-edit");
+  await page.click(`#category-list input[value="${CHECKED_ACTION.id}"]`);
+  assert.equal(page.text("#save-edit"), "Save Edit access for 2 courses");
+
+  await page.click("#save-edit");
+  await page.waitFor(() => releases.length === 1, "the first course save never started");
+  assert.equal(page.text("#save-edit"), "Save Edit access for 2 courses", "no progress yet: the wait has not run long enough to need it");
+  await page.waitFor(() => page.text("#save-edit") === "Saving 1 of 2 courses", "no progress appeared once the save ran long enough to need it");
+
+  releases[0]();
+  await page.waitFor(() => releases.length === 2, "the second course save never started");
+  await page.waitFor(() => page.text("#save-edit") === "Saving 2 of 2 courses", "progress never advanced to the second course");
+
+  releases[1]();
+  await page.waitFor(() => !page.hidden("#notice"), "the save never finished");
+  assert.match(page.text("#notice"), /^Edit access saved for 2 courses\./);
+  // The progress text is gone: the button reads its ordinary label again, not the last progress line.
+  assert.equal(page.text("#save-edit"), "Save Edit access for 2 courses");
 });
 
 test("an action Morrow cannot check, or one that removes content, is confirmed by name before it is saved", async () => {
@@ -469,6 +624,51 @@ test("returning courses to Plan removes each access, and says how far it got whe
   release();
   holdRefresh = null;
   await page.flush();
+});
+
+// WI-1.4: the banner offers the one-click "stop all access" budget row, without first selecting
+// any course. It reuses returnToPlan (the same handler "Return selected courses to Plan" uses), so
+// only its own result text and count differ from that flow.
+test("a banner offers to ask first in all courses while any connection can act with no review, and clears once none can", async () => {
+  const expiresAt = Date.now() + ONE_HOUR_MS;
+  let editingPermission = { ...editPermissionSummary("canvas:course-1", expiresAt), enabledCategories: [CHECKED_ACTION.id] };
+  const planOnly = canvasCourse(2, "Physiology");
+  const revoked = [];
+  const page = await openSettings({
+    status: () => statusFixture([
+      canvasCourse(1, "Anatomy", editingPermission ? { editPermission: editingPermission } : {}),
+      planOnly,
+    ]),
+    handlers: {
+      morrow_edit_policy_revoke: ({ sourceBindingId }) => {
+        revoked.push(sourceBindingId);
+        editingPermission = null;
+        return { revoked: true };
+      },
+    },
+  });
+  assert.equal(page.hidden("#edit-access-banner"), false);
+  assert.equal(page.text("#edit-access-banner-text"), "Morrow can make some changes with no review in 1 course.");
+  assert.equal(page.query("#ask-first-all-courses").disabled, false);
+
+  await page.click("#ask-first-all-courses");
+  await page.waitFor(() => page.text("#notice") !== "", "the page never reported the result");
+  assert.deepEqual(revoked, ["canvas:course-1"]);
+  assert.equal(page.text("#notice"), "Done. Morrow asks first in all courses.");
+  assert.equal(page.text("#announcement"), "Done. Morrow asks first in all courses.");
+  assert.equal(page.hidden("#edit-access-banner"), true);
+});
+
+test("the banner counts every connection that can act with no review, and ignores an ended one", async () => {
+  const expiresAt = Date.now() + ONE_HOUR_MS;
+  const first = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1", expiresAt), enabledCategories: [CHECKED_ACTION.id] } });
+  const second = canvasCourse(2, "Physiology", { editPermission: { ...editPermissionSummary("canvas:course-2", expiresAt), enabledCategories: [CHECKED_ACTION.id] } });
+  const ended = canvasCourse(3, "Genetics", { editPermission: { ...editPermissionSummary("canvas:course-3", Date.now() - 1_000), enabledCategories: [CHECKED_ACTION.id] } });
+  const page = await openSettings({ status: () => statusFixture([first, second, ended]) });
+  assert.equal(page.text("#edit-access-banner-text"), "Morrow can make some changes with no review in 2 courses.");
+
+  const none = await openSettings({ status: () => statusFixture([canvasCourse(4, "History")]) });
+  assert.equal(none.hidden("#edit-access-banner"), true);
 });
 
 test("a state the page cannot read is named as itself, with the next action", async () => {

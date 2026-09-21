@@ -327,6 +327,23 @@ test("a setup problem is placed above the step body, where it is visible without
   assert.match(setProblem, /scrollIntoView/, "a newly shown problem is brought into view");
 });
 
+test("the step heading becomes the page's level-one heading once the welcome screen is hidden", async () => {
+  let answer = () => ok(state({ lifecycle: "ready_for_assistant", assistants: [], selectedAssistantId: null }));
+  const dom = await load("heading-level", async () => answer());
+  assert.equal(dom.element(".intro").hidden, false, "the welcome screen carries the page's own h1 here");
+  assert.equal(dom.element("#action-title").getAttribute("aria-level"), "2", "the step heading stays a level-two heading under the welcome h1");
+
+  answer = () => ok(state());
+  await checkStatus(dom);
+  assert.equal(dom.element(".intro").hidden, true, "an assistant is configured, so the welcome h1 is gone");
+  assert.equal(dom.element("#action-title").getAttribute("aria-level"), "1", "the step heading is now the page's only level-one heading");
+
+  answer = () => ok(state({ lifecycle: "ready_for_assistant", assistants: [], selectedAssistantId: null }));
+  await checkStatus(dom);
+  assert.equal(dom.element(".intro").hidden, false);
+  assert.equal(dom.element("#action-title").getAttribute("aria-level"), "2");
+});
+
 test("a first load that returns no state stops claiming progress and offers a retry", async () => {
   let answer = () => ({ nothing: true });
   const dom = await load("unreadable", async (method) => answer(method));

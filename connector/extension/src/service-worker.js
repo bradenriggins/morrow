@@ -530,6 +530,13 @@ const COURSE_CONNECTION_INTENT_TTL_MS = 60_000;
 // burst of reads against one course site shares one page round trip. Writes never read it.
 const ANCHOR_VERIFICATION_TTL_MS = 2_000;
 const SETUP_GUIDE_PATH = "onboarding/onboarding.html";
+// How long openPlatform waits for the tab it opened to finish loading before it gives up and hands
+// the tab to the person to sign in. D1a: a closed course site opens with no consent step.
+const OPEN_PLATFORM_LOAD_TIMEOUT_MS = 20_000;
+// WI-1.3: fires refreshBadge() when the soonest valid Edit permission ends, so the badge clears
+// itself with no other event to prompt it. `--action` from docs/brand/MORROW-BRAND.md.
+const BADGE_ALARM_NAME = "morrow-badge";
+const BADGE_ACTION_COLOR = "#253FEA";
 const CANVAS_CONTENT_GUARD_OPERATIONS = Object.freeze([
   Object.freeze({ kind: "page_text", toolName: "canvas_update_create_page_courses", key: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses" }),
   Object.freeze({ kind: "page_image_alt", toolName: "canvas_update_create_page_courses", key: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses" }),
@@ -809,7 +816,7 @@ function httpUrl(path = "") {
 }
 
 async function storage() {
-  return await chrome.storage.local.get(["token", "bindings", "pairing", PAIRING_AUTHORITY_KEY, "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead"]);
+  return await chrome.storage.local.get(["token", "bindings", "pairing", PAIRING_AUTHORITY_KEY, "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead", "openPlatformWhenNeeded"]);
 }
 
 async function courseDataConsentAccepted() {
@@ -1592,6 +1599,54 @@ function forgetTabSiteAnchorVerifications(tabId) {
   }
 }
 
+function badgeClockTime(expiresAt) {
+  return new Date(expiresAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+/**
+ * WI-1.3. A count of reviews wins over Edit, because a wait for the person's decision is the more
+ * urgent state. `state.reviewsWaiting` does not exist before R2 (WI-2.4 sets it); it reads as 0
+ * until then, so this always falls through to the Edit check.
+ */
+async function refreshBadge() {
+  // chrome.action is optional here, not because a real Bridge ever lacks it (the manifest declares
+  // it), but because a harness that loads this module for an unrelated behavior, as
+  // extension-lifecycle-authority.test.mjs does, does not stub every Chrome namespace this file
+  // touches. Same reasoning as the existing chrome.permissions.onRemoved?. and
+  // chrome.webNavigation?. above.
+  const reviewsWaiting = Number.isSafeInteger(state.reviewsWaiting) ? state.reviewsWaiting : 0;
+  if (reviewsWaiting > 0) {
+    await chrome.alarms.clear(BADGE_ALARM_NAME);
+    await chrome.action?.setBadgeText({ text: String(Math.min(reviewsWaiting, 99)) });
+    await chrome.action?.setBadgeBackgroundColor({ color: BADGE_ACTION_COLOR });
+    await chrome.action?.setTitle({ title: `Morrow Bridge. ${reviewsWaiting} review${reviewsWaiting === 1 ? "" : "s"} ${reviewsWaiting === 1 ? "waits" : "wait"}.` });
+    return;
+  }
+  const stored = await storage();
+  const api = await catalog();
+  const policies = storedPolicies(stored.editPolicies);
+  const operations = [...state.operations.values()];
+  let editCount = 0;
+  let earliestExpiresAt = null;
+  for (const binding of stored.bindings || []) {
+    const permission = await validEditPermission({ permission: policies[binding.sourceBindingId], binding, catalogDigest: api.catalogDigest, operations });
+    if (!permission) continue;
+    editCount += 1;
+    if (Number.isSafeInteger(permission.expiresAt) && (earliestExpiresAt === null || permission.expiresAt < earliestExpiresAt)) {
+      earliestExpiresAt = permission.expiresAt;
+    }
+  }
+  await chrome.action?.setBadgeText({ text: editCount > 0 ? "ON" : "" });
+  if (editCount > 0) await chrome.action?.setBadgeBackgroundColor({ color: BADGE_ACTION_COLOR });
+  await chrome.action?.setTitle({
+    title: editCount === 0 || earliestExpiresAt === null
+      ? "Morrow Bridge"
+      : `Morrow Bridge. Morrow can change ${editCount} course${editCount === 1 ? "" : "s"} with no review until ${badgeClockTime(earliestExpiresAt)}.`,
+  });
+  if (earliestExpiresAt === null) await chrome.alarms.clear(BADGE_ALARM_NAME);
+  else await chrome.alarms.create(BADGE_ALARM_NAME, { when: earliestExpiresAt });
+}
+
 async function publishBindings() {
   const authorityGeneration = state.courseDataAuthorityGeneration;
   if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
@@ -1603,6 +1658,7 @@ async function publishBindings() {
     socket.send(JSON.stringify({ schema: "morrow.bridge.bindings.v1", protocolVersion: PROTOCOL_VERSION, generation: bridgeGeneration, bindings, sentAt: Date.now() }));
   }
   void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
+  await refreshBadge();
 }
 
 // Chrome reports this when the tab closes and when it moves to another address. Either ends what a
@@ -4506,8 +4562,9 @@ async function commandContext(command) {
     return { failure: problem("operation_catalog_mismatch", "The command does not match the connector catalog.", false) };
   }
   // A change always probes the course site again here, so the reading immediately before a write is
-  // never one kept for an earlier request.
-  const binding = await bindingFor(command.sourceBindingId, { fresh: command.kind === "invoke_write" });
+  // never one kept for an earlier request. WI-1.2: when that probe finds no signed-in site tab,
+  // bindingForCommand opens the site once (D1a) and reads the binding again before this fails.
+  const binding = await bindingForCommand(command, operation);
   if (!binding?.runtimeVerified || binding.provider !== operation.provider) return { failure: lostCourseSiteProblem(binding, operation) };
   const privateConversationPresent = Object.hasOwn(command, "privateConversation");
   const privateConversation = privateConversationPresent
@@ -5878,6 +5935,76 @@ async function openSetupGuide() {
   return { opened: true };
 }
 
+/** Resolves once `tabId` reports a completed load, or after `timeoutMs` either way. */
+function awaitTabLoad(tabId, timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (loaded) => {
+      if (settled) return;
+      settled = true;
+      chrome.tabs.onUpdated.removeListener(listener);
+      clearTimeout(timer);
+      resolve(loaded);
+    };
+    const listener = (updatedTabId, change) => {
+      if (updatedTabId === tabId && change.status === "complete") finish(true);
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+  });
+}
+
+/**
+ * Opens the saved Canvas or Moodle site for a course tab that is not open, D1a: no consent step,
+ * because the person already connected the course and allowed the site. The address always comes
+ * from the stored anchor and binding, never from the page message, so a page cannot send the Bridge
+ * to an address of its choosing.
+ */
+async function openPlatform(siteAnchorId, sourceBindingId) {
+  const stored = await storage();
+  const anchor = storedAnchors(stored.siteAnchors).find((entry) => entry.siteAnchorId === siteAnchorId);
+  if (!anchor) throw new Error("platform_open_anchor_missing");
+  const rawBinding = sourceBindingId ? (stored.bindings || []).find((entry) => entry.sourceBindingId === sourceBindingId) : null;
+  const binding = rawBinding && rawBinding.siteAnchorId === siteAnchorId ? rawBinding : null;
+  const url = anchor.provider === "moodle"
+    ? (binding ? `${anchor.siteUrl}course/view.php?id=${binding.courseId}` : anchor.siteUrl)
+    : (binding ? `${anchor.origin}/courses/${binding.courseId}` : `${anchor.origin}/`);
+  const tab = await chrome.tabs.create({ url, active: false });
+  await awaitTabLoad(tab.id, OPEN_PLATFORM_LOAD_TIMEOUT_MS);
+  // canvasTabChanged (F4) does not publish for this tab: it does not yet belong to a connection.
+  // publishBindings runs siteAnchorMatches for every anchor, which calls reattachSiteAnchor (F3) and
+  // finds the tab just opened.
+  await publishBindings();
+  const verified = await siteAnchorMatches(anchor, { fresh: true });
+  if (!verified) await chrome.tabs.update(tab.id, { active: true }).catch(() => undefined);
+  return { opened: true, verified };
+}
+
+/**
+ * WI-1.2 (D1a): when a command's course has no open, signed-in site tab, and
+ * `openPlatformWhenNeeded` allows it (default on; a missing key means on), the Bridge opens that
+ * site itself, with no consent step, and reads the binding once more. It tries this once. A binding
+ * that is already verified, that names no saved site (nothing to open), or whose provider does not
+ * match the operation is returned as read: this retry only answers "no signed-in tab is open", not
+ * a different failure. It opens a tab only when no tab for that site already matches (D1a "Never").
+ */
+async function bindingForCommand(command, operation) {
+  const binding = await bindingFor(command.sourceBindingId, { fresh: command.kind === "invoke_write" });
+  if (binding?.runtimeVerified || !binding?.siteAnchorId || binding.provider !== operation.provider) return binding;
+  const stored = await storage();
+  if (stored.openPlatformWhenNeeded === false) return binding;
+  try {
+    await openPlatform(binding.siteAnchorId, binding.sourceBindingId);
+  } catch {
+    return binding;
+  }
+  // Say what happened (P2): recorded for the Bridge popup to show, one line, until it is closed.
+  await chrome.storage.local.set({
+    openPlatformNotice: { schema: "morrow.open-platform-notice.v1", provider: binding.provider, siteAnchorId: binding.siteAnchorId, at: Date.now() },
+  }).catch(() => undefined);
+  return (await bindingFor(command.sourceBindingId, { fresh: true })) ?? binding;
+}
+
 async function disconnectConnector() {
   void chrome.alarms.clear(BRIDGE_RECONNECT_ALARM).catch(() => undefined);
   abortPairingFetches();
@@ -5994,6 +6121,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const run = message?.type === "morrow_course_data_consent_accept" ? acceptCourseDataConsent
     : message?.type === "morrow_pair" ? requestPairing
     : message?.type === "morrow_open_setup" ? openSetupGuide
+      : message?.type === "morrow_open_platform" ? () => openPlatform(message.siteAnchorId, message.sourceBindingId)
       : message?.type === "morrow_detect_course_platform" ? () => detectActiveCoursePlatform(message.tabId)
       : message?.type === "morrow_connect_course_prepare" ? () => prepareCourseConnection(message.tabId)
       : message?.type === "morrow_connect_course_complete" ? () => completePreparedCourseConnection({ intentId: message.intentId, popupConfirmed: true })
@@ -6018,6 +6146,7 @@ chrome.permissions.onRemoved?.addListener(() => { void handleCoursePermissionRem
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "morrow-pairing") void pollPairing();
   if (alarm.name === BRIDGE_RECONNECT_ALARM) void connectBridge();
+  if (alarm.name === BADGE_ALARM_NAME) void refreshBadge();
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearItemBankCredentialsForTab(tabId);

@@ -162,6 +162,36 @@ describe("conversational Edit access", () => {
     }
   });
 
+  it("caps the confirmation label list at six per course", async () => {
+    const { runtime, prepare } = fixture();
+    const manyCategories = Array.from({ length: 8 }, (_, index) => ({
+      id: `assignment_field_${index}`,
+      label: `Assignment field ${index}`,
+      description: "Change one assignment field.",
+      destructive: false,
+      unchecked: false,
+    }));
+    prepare.mockResolvedValueOnce({
+      mode: "edit",
+      selections: [{ ...prepared.selections[0]!, enabledCategories: manyCategories }],
+    } satisfies BrowserEditAccessPrepared);
+    const { client, server } = await connected(runtime);
+    try {
+      const round = await client.callTool({
+        name: "morrow_request_edit_access",
+        arguments: { mode: "edit", selections: [{ source_binding_id: "canvas-bio", enabled_categories: manyCategories.map((category) => category.id) }] },
+      }, { allowInputRequired: true }) as unknown as { inputRequests: { edit_access: { params: { message: string } } } };
+      const message = round.inputRequests.edit_access.params.message;
+      expect(message).toContain(
+        "Biology (course 42, https://canvas.example.edu; Assignment field 0, Assignment field 1, Assignment field 2, "
+        + "Assignment field 3, Assignment field 4, Assignment field 5, and 2 more actions)",
+      );
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("does not apply after cancellation and refuses stale confirmation", async () => {
     const { runtime, apply } = fixture();
     const { client, server } = await connected(runtime);

@@ -15,6 +15,14 @@ const HTTP_REQUEST_TIMEOUT_MS = 30_000;
 const HTTP_KEEP_ALIVE_TIMEOUT_MS = 1_000;
 const HTTP_SHUTDOWN_GRACE_MS = 250;
 
+/**
+ * Fields that identify which item a change reaches, not what changes about it.
+ * They read as machine identifiers on the review page (an ID, a URL slug), so
+ * they always move into Technical details, whether or not the review context
+ * resolved a human name for the item they point to.
+ */
+const STRUCTURAL_EDIT_FIELDS = ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "target_section_id", "url_or_id"];
+
 interface AcceptedHttpRequest {
   readonly signal: AbortSignal;
   readonly release: () => void;
@@ -708,6 +716,21 @@ function changeTitle(request: JsonObject, context: ApprovalReviewContext | undef
   return typeof title === "string" ? title : context?.targets.filter((target) => target.field !== "connection_id").at(-1)?.name || fallback;
 }
 
+/**
+ * The item a confirmed single change reached, and its address in the platform
+ * when the review context read one. A batch confirms several items at once, so
+ * it names none of them here; the change list below the summary already does.
+ */
+function resultItem(target: ApprovalTarget, snapshot: JsonObject, contexts?: ReadonlyMap<string, ApprovalReviewContext>): { name: string; url?: string } | undefined {
+  if (target.kind !== "operations") return undefined;
+  const context = contexts?.get(target.id);
+  const request = object(object(snapshot.plan).arguments);
+  const name = changeTitle(request, context, "");
+  if (!name) return undefined;
+  const url = context?.targets.filter((item) => item.url?.startsWith("https://")).at(-1)?.url;
+  return url ? { name, url } : { name };
+}
+
 function reviewState(target: ApprovalTarget, snapshot: JsonObject): string {
   if (target.kind === "operations") return String(snapshot.state || "unavailable");
   const batch = object(snapshot.batch);
@@ -756,10 +779,23 @@ function keepOpenInstruction(platform: string): string {
     : "Keep your assistant and Chrome open while Morrow works.";
 }
 
-function stateContent(state: string, platform = "Canvas", attention: readonly unknown[] = []): string {
+/**
+ * The end of a task must feel complete, so a confirmed result gets its own shape:
+ * a success mark, the item Canvas saved, a way to open it, and where to go next.
+ * Every other state stays the plain, calm outcome section below. It never earns
+ * the success mark, confirmed or not.
+ */
+function verifiedResultContent(platform: string, item?: { name: string; url?: string }): string {
+  const itemName = item?.name ? `<p class="result-item">${escapeHtml(item.name)}</p>` : "";
+  const openLink = item?.url ? `<p><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">Open in ${escapeHtml(platform)}</a></p>` : "";
+  const title = "Canvas saved the change. Morrow checked the result.".replaceAll("Canvas", platform);
+  return `<section class="outcome outcome-success"><svg class="success-mark" viewBox="0 0 40 40" aria-hidden="true" focusable="false"><circle cx="20" cy="20" r="17"></circle><path d="M12 21l6 6L29 13"></path></svg><h1>${title}</h1>${itemName}${openLink}<p>Return to your assistant. It continues on its own.</p><p><a href="/recent">See recent changes</a></p></section>`;
+}
+
+function stateContent(state: string, platform = "Canvas", attention: readonly unknown[] = [], item?: { name: string; url?: string }): string {
+  if (state === "verified") return verifiedResultContent(platform, item);
   const content: Record<string, [string, string]> = {
     approved: ["Changes not started", "Your approval was saved, but this request is not running. Return to your assistant and ask Morrow to check this saved request before starting anything else."],
-    verified: ["Changes confirmed", "Morrow checked Canvas and confirmed the requested result."],
     cancelled: ["Request cancelled", "Morrow will not start more changes for this request. Changes already sent may still finish. Return to the assistant where you started this request to check the result."],
     expired: ["Review expired", "Return to the assistant where you started this request and ask Morrow for a new review. Check the new request before approving it."],
     dispatching: ["Applying your changes", `Morrow will check the saved result in Canvas. This page updates automatically. ${keepOpenInstruction(platform)}`],
@@ -841,7 +877,7 @@ function snapshotPlatform(snapshot: JsonObject): string {
     : platformName(object(snapshot.plan).tool);
 }
 
-function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boolean): string {
+function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boolean, contexts?: ReadonlyMap<string, ApprovalReviewContext>): string {
   let state = reviewState(target, snapshot);
   if (active && state === "approved") state = "running";
   if (!active && ["running", "dispatching"].includes(state)) state = "interrupted";
@@ -850,7 +886,8 @@ function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boo
   const total = Number(snapshot.totalChildren || children.length);
   const platform = snapshotPlatform(snapshot);
   const attention = Array.isArray(snapshot.attention) ? snapshot.attention : [];
-  return stateContent(state, platform, attention) + (total ? `<section class="section"><p>${confirmed} of ${total} changes confirmed in ${platform}.</p></section>` : "");
+  const item = state === "verified" ? resultItem(target, snapshot, contexts) : undefined;
+  return stateContent(state, platform, attention, item) + (total ? `<section class="section"><p>${confirmed} of ${total} changes confirmed in ${platform}.</p></section>` : "");
 }
 
 // The nonce is issued on demand so a page that renders no form never takes a
@@ -922,7 +959,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, grant: () => string,
     const displayedRequest = blackboardCourseCopy
       ? { source_course_id: request.course_id, destination_course_id: request.destination_course_id }
       : request;
-    const hiddenFields = ["expected_digest", "expected_connection", "tenant_id", "source_binding_id", "expected_plan_digest", "morrow_new_quiz_settings_guard", "morrow_new_quiz_lifecycle_guard", "morrow_new_quiz_effect_guard", "morrow_new_quiz_item_position_guard", ...(missingNames ? ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "target_section_id"] : []), ...targets.map((item) => item.field)];
+    const hiddenFields = ["expected_digest", "expected_connection", "tenant_id", "source_binding_id", "expected_plan_digest", "morrow_new_quiz_settings_guard", "morrow_new_quiz_lifecycle_guard", "morrow_new_quiz_effect_guard", "morrow_new_quiz_item_position_guard", ...STRUCTURAL_EDIT_FIELDS, ...targets.map((item) => item.field)];
     const guardedImageAlt = ["image_alt", "page_image_alt", "assignment_image_alt", "discussion_image_alt"].includes(String(pageGuard.kind));
     const guardedText = ["text", "page_text"].includes(String(pageGuard.kind));
     const changes = blackboardPatch
@@ -973,7 +1010,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, grant: () => string,
   const reviewContent = batch ? `<section class="batch-review"><div class="change-list-controls" hidden><label for="change-search">Find a change</label><input id="change-search" type="search" placeholder="Search titles or courses" autocomplete="off"></div><div class="change-list">${changed}</div><nav class="change-pagination" aria-label="Review pages" hidden><p id="changes-count" role="status" aria-live="polite"></p><div><button id="changes-previous" type="button" class="secondary">Previous</button><button id="changes-next" type="button" class="secondary">Next</button></div></nav></section>` : changed;
   if (state !== "awaiting_approval") {
     const stop = batch && active ? `<div class="actions" id="stop-work"><form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="cancel" type="submit">Stop remaining changes</button></form></div>` : "";
-    return pageShell("Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active)}</div>${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
+    return pageShell("Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active, contexts)}</div>${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
   }
   const addingQuestion = !batch && plan.tool === "canvas_create_quiz_item";
   const planRouting = object(object(plan.arguments)._morrow);
