@@ -1203,6 +1203,7 @@ const operationApproval = new LoopbackApprovalServer({
       { field: "course_id", label: "Course", name: "Introduction to Human Biology", url: "https://canvas.example.edu/courses/42" },
       { field: "assignment_id", label: "Quiz", name: "Week 3: Blood and Circulation", url: "https://canvas.example.edu/courses/42/assignments/77" },
     ],
+    ...(id === "op:unnamed-file" ? { unnamed: true } : {}),
   }),
   operationList: () => ({ schema: "morrow.operations.v1", operations: [approvalSnapshot] }),
   approveOperation: (id) => {
@@ -1728,15 +1729,17 @@ try {
   // Only an irreversible, destructive admitted write stays review-only: never
   // a standing permission, approved change by change instead. Deleting a New
   // Quiz takes every item in it with it and Canvas does not restore it;
-  // archiving an Item Bank and deleting one of its entries or a quiz's use of
-  // one reach every quiz, in every course, that draws from the bank, which
-  // Canvas gives no complete list of. Every other scoped, admitted write with
-  // exact readback is an ordinary standing Edit grant, including the general
+  // archiving an Item Bank, deleting one of its entries or a quiz's use of one,
+  // moving an entry, removing a tag, and raising a share to edit can reach
+  // content outside the selected course. Canvas gives no complete list of that
+  // reach. Every other scoped, admitted write with exact readback is an
+  // ordinary standing Edit grant, including the general
   // New Quiz question update (its id-preserving guard lives in
   // new-quiz-item-guard.js, not in what is grantable) and creating a New Quiz
   // or any non-destructive Item Bank write.
   const reviewOnlyAdmittedCanvasWrites = new Set([
     "canvas_delete_new_quiz", "canvas_item_bank_archive_bank", "canvas_item_bank_delete_entry", "canvas_item_bank_delete_quiz_bank_entry",
+    "canvas_item_bank_move_entry", "canvas_item_bank_remove_entry_tag", "canvas_item_bank_update_share",
   ]);
   const supportedCanvasWrite = (operation) => {
     const admission = canvasOperationAdmission(operation);
@@ -1754,7 +1757,7 @@ try {
     .map((option) => option.id)
     .sort();
   assert.deepEqual(publishedCanvasEditActions, expectedCanvasEditActions);
-  assert.equal(expectedCanvasEditActions.length, 337);
+  assert.equal(expectedCanvasEditActions.length, 338);
   // A bound write with no exact readback is offered for approval one change at a time.
   const nonexactCanvasActions = canvasWriteOperations
     .filter((operation) => {
@@ -1765,7 +1768,7 @@ try {
     })
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  assert.equal(nonexactCanvasActions.length, 200);
+  assert.equal(nonexactCanvasActions.length, 204);
   const expectedCanvasReviewActions = [...new Set([
     ...[...reviewOnlyAdmittedCanvasWrites].map((toolName) => `action:canvas:${toolName}`),
     ...nonexactCanvasActions,
@@ -2753,13 +2756,12 @@ try {
   assert.equal(removedEvent.result.verification.evidence, "fresh_readback_absent");
   assert.equal(canvas.calendarEvent("502"), null);
 
-  // An event that still answers on its own route is proved gone from the selected course's whole
-  // calendar, asked for by that calendar's context code and read to its last page.
+  // A soft-deleted event that still answers on its own route is proved by its deleted state.
   const cancelledEvent = await calendarCall("canvas_delete_calendar_event", { id: "503" }, "calendar-event-delete-listed");
   assert.equal(cancelledEvent.ok, true, JSON.stringify(cancelledEvent));
   assert.equal(cancelledEvent.result.verification.status, "verified", JSON.stringify(cancelledEvent));
-  assert.equal(cancelledEvent.result.verification.evidence, "fresh_collection_omits_target");
-  assert.equal(cancelledEvent.result.verification.readTool, "canvas_list_calendar_events");
+  assert.equal(cancelledEvent.result.verification.evidence, "fresh_readback_deleted_state");
+  assert.equal(cancelledEvent.result.verification.readTool, "canvas_get_single_calendar_event_or_assignment");
   assert.deepEqual(canvas.courseCalendarEventIds(), ["501", "505"]);
   assert.equal(canvas.calendarEventWrites(), 4);
 
