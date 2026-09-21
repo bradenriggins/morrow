@@ -14,7 +14,7 @@
   };
   const waitForRetry = async (milliseconds, expiresAt) => {
     const remaining = Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 0;
-    if (remaining <= 0) throw new Error("canvas_request_expired_before_send");
+    if (remaining <= 0 || milliseconds >= remaining) throw new Error("canvas_request_expired_before_send");
     await new Promise((resolve) => setTimeout(resolve, Math.min(milliseconds, remaining)));
     if (Date.now() >= expiresAt) throw new Error("canvas_request_expired_before_send");
   };
