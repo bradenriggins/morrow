@@ -50,8 +50,39 @@ export function courseValue(status) {
   const anchor = currentSiteAnchor(status);
   const platform = currentPlatform(status);
   return binding
-    ? binding.runtimeVerified === true ? "Connected" : `${platform || "Course"} tab needed`
-    : anchor?.runtimeVerified === true ? "Ready" : anchor ? `${platform || "Course"} tab needed` : "Not connected";
+    ? binding.runtimeVerified === true ? "Connected" : `${platform || "Course"} is closed`
+    : anchor?.runtimeVerified === true ? "Ready" : anchor ? `${platform || "Course"} is closed` : "Not connected";
+}
+
+// WI-1.1: the saved course or site is otherwise usable, but its Canvas or Moodle tab is not open.
+// The Bridge already holds the permission and the session it needs, so opening it is mechanics, not
+// a new consent step (D1a): the popup offers one button rather than sending the person to Chrome.
+export function platformClosed(status, binding = currentBinding(status), anchor = currentSiteAnchor(status)) {
+  if (!status || status.paired !== true || status.connected !== true || runtimeNeedsReload(status)) return false;
+  return Boolean((binding && binding.runtimeVerified !== true) || (!binding && anchor && anchor.runtimeVerified !== true));
+}
+
+/** "Open Canvas" or "Open Moodle" for the WI-1.1 button: the saved platform, never the detected one. */
+export function openPlatformLabel(status, binding = currentBinding(status), anchor = currentSiteAnchor(status)) {
+  return `Open ${providerName(binding?.provider || anchor?.provider) || "Canvas or Moodle"}`;
+}
+
+function plural(count, singular, pluralForm = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
+}
+
+/** WI-1.4: which bindings from morrow_edit_policy_status can act with no review right now. */
+export function activeEditBindings(bindings) {
+  return (Array.isArray(bindings) ? bindings : []).filter((binding) => {
+    const permission = binding?.editPermission;
+    return Boolean(binding?.sourceBindingId) && Array.isArray(permission?.enabledCategories) && permission.enabledCategories.length > 0
+      && Number.isFinite(permission?.expiresAt) && permission.expiresAt > Date.now();
+  });
+}
+
+/** WI-1.4: null while no connection can act with no review, else the banner's one sentence. */
+export function editBannerText(activeEditCount) {
+  return activeEditCount > 0 ? `Morrow can make some changes with no review in ${plural(activeEditCount, "course")}.` : null;
 }
 
 export function statusAnnouncement(status) {

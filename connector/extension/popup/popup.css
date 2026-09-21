@@ -1,42 +1,45 @@
 html { width: 360px; max-width: 100%; }
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; font-size: 0.8125rem; line-height: 1.4; }
 body { width: 360px; min-width: 320px; max-width: 100%; max-height: 600px; overflow-y: auto; }
-main { padding: 18px; }
-header { margin-bottom: 18px; }
-header .brand-wordmark { flex-basis: auto; }
+main { padding: var(--space-4); }
+header { margin-bottom: var(--space-4); }
+header .brand-wordmark { flex-basis: auto; margin: 0; }
 #pulse { width: 8px; height: 8px; margin-left: auto; flex-shrink: 0; border-radius: 50%; background: var(--text-subtle); }
 #pulse.online { background: var(--success); }
-.connection-status { margin-bottom: 12px; padding: 0 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: 0 1px 2px rgb(23 33 60 / .05), 0 8px 18px rgb(23 33 60 / .06); }
-.status { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 12px 0; }
+.connection-status { margin-bottom: var(--space-3); padding: 0 var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: 0 1px 2px rgb(23 33 60 / .05), 0 8px 18px rgb(23 33 60 / .06); }
+.status { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) 0; }
 .status + .status { border-top: 1px solid var(--border); }
-.status span { color: var(--text-subtle); font-size: 12px; }
-.status strong { font-size: 13px; font-weight: 600; text-align: right; }
-.account { margin-bottom: 12px; padding: 12px 14px; border: 1px solid var(--border); background: var(--surface-sunken); border-radius: 12px; }
-.account span { display: block; color: var(--text-subtle); font-size: 11px; }
-.account strong { display: block; margin-top: 4px; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
-.account time { display: block; margin-top: 4px; color: var(--text-secondary); font-size: 11px; }
-.data-disclosure { margin-bottom: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-sunken); }
-.data-disclosure h2 { margin: 0; font-size: 13px; font-weight: 700; line-height: 1.4; }
-.data-disclosure p { margin: 5px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
-.data-disclosure a { font-weight: 650; }
-#consent-detail { margin: 0 0 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.status span { color: var(--text-subtle); font-size: 0.8125rem; line-height: 1.4; }
+.status strong { font-size: 0.8125rem; font-weight: 600; line-height: 1.4; text-align: right; }
+.account { margin-bottom: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); background: var(--surface-sunken); border-radius: var(--radius-card); }
+.account span { display: block; color: var(--text-subtle); font-size: 0.8125rem; line-height: 1.4; }
+.account strong { display: block; margin-top: var(--space-1); font-size: 0.8125rem; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.account time { display: block; margin-top: var(--space-1); color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.4; }
+.data-disclosure { margin-bottom: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-sunken); }
+.data-disclosure h2 { margin: 0; font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
+.data-disclosure p { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.4; }
+.data-disclosure a { font-weight: 600; }
+#consent-detail { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.4; }
 #consent-action { margin-top: 0; }
 #connection-content { margin-top: 0; }
-button { width: 100%; margin-top: 8px; }
-#detail { margin: 14px 0; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
-#error { padding: 12px; border: 1px solid var(--danger); border-radius: 12px; background: color-mix(in srgb, var(--danger) 6%, var(--surface)); color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
-#notice { margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
-.help-link { width: auto; min-height: 44px; margin-top: 6px; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--accent); font-size: 12px; font-weight: 650; text-align: left; }
+button { width: 100%; margin-top: var(--space-2); }
+#detail { margin: var(--space-4) 0; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.4; }
+#error { padding: var(--space-3); border: 1px solid var(--danger); border-radius: var(--radius-card); background: color-mix(in srgb, var(--danger) 6%, var(--surface)); color: var(--danger); font-size: 0.8125rem; line-height: 1.4; overflow-wrap: anywhere; }
+#notice { margin: 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-sunken); color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.4; }
+.help-link { width: auto; min-height: 44px; margin-top: var(--space-2); padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--accent); font-size: 0.8125rem; font-weight: 600; text-align: left; }
 .help-link:hover { background: transparent; color: var(--accent-hover); text-decoration: underline; }
-.help { margin-top: 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.help { margin-top: var(--space-2); color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.4; }
 .help summary { color: var(--accent); cursor: pointer; font-weight: 600; }
 .help summary:hover { color: var(--accent-hover); }
-.help ol { margin: 8px 0 0; padding-left: 20px; }
-.help li + li { margin-top: 4px; }
-footer { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; color: var(--text-subtle); font-size: 11px; line-height: 1.55; }
-.edit-access { margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-sunken); }
-.edit-access h2 { margin: 0; font-size: 13px; font-weight: 700; line-height: 1.4; }
-.edit-access p { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
+.help ol { margin: var(--space-2) 0 0; padding-left: var(--space-6); }
+.help li + li { margin-top: var(--space-1); }
+footer { margin-top: var(--space-4); border-top: 1px solid var(--border); padding-top: var(--space-4); color: var(--text-subtle); font-size: 0.8125rem; line-height: 1.4; }
+.edit-access-banner { margin-bottom: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border)); border-radius: var(--radius-card); background: color-mix(in srgb, var(--success) 8%, var(--surface)); }
+.edit-access-banner p { margin: 0; color: var(--text); font-size: 0.8125rem; line-height: 1.4; }
+.edit-access-banner button { margin-top: var(--space-2); min-height: 44px; }
+.edit-access { margin-top: var(--space-3); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-sunken); }
+.edit-access h2 { margin: 0; font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
+.edit-access p { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
 .edit-access p strong { color: var(--text); font-weight: 700; }
-.edit-access button { margin-top: 10px; min-height: 44px; padding: 10px 14px; }
-@media (max-width: 340px) { main { padding: 14px; } .connection-status, .account, .data-disclosure, .edit-access { padding-left: 12px; padding-right: 12px; } }
+.edit-access button { margin-top: var(--space-2); min-height: 44px; padding: var(--space-2) var(--space-4); }
+@media (max-width: 340px) { main { padding: var(--space-3); } .connection-status, .account, .data-disclosure, .edit-access, .edit-access-banner { padding-left: var(--space-3); padding-right: var(--space-3); } }

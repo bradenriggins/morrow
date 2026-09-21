@@ -86,6 +86,11 @@ const COPY = {
     detail: "Blackboard Learn uses the REST connection in the Morrow app. No live Blackboard site has been tested.",
     action: "Connect Blackboard in the Morrow app, and use Chrome for your Canvas and Moodle courses.",
   },
+  platform_open_anchor_missing: {
+    title: "Morrow has no saved site for this course",
+    detail: "The saved connection for this course is gone.",
+    action: "Connect the course again from the Morrow Bridge popup.",
+  },
 
   // --- Choosing courses and Edit access in Plan and Edit settings -------------------------------
   edit_policy_failed: {

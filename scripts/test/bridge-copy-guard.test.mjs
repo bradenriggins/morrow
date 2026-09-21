@@ -262,5 +262,5 @@ test("the approval result page states the result without a label above it", asyn
     plan: { tool: "canvas_update_page", arguments: {} },
   });
   refuseDecorativeEyebrows("the approval result page", pages.review);
-  assert.match(pages.review, /<section class="outcome"><h1>Changes confirmed<\/h1>/);
+  assert.match(pages.review, /<section class="outcome outcome-success"><svg class="success-mark"[^>]*>.*?<\/svg><h1>Canvas saved the change\. Morrow checked the result\.<\/h1>/);
 });

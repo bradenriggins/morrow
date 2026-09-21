@@ -23,6 +23,7 @@ The September 6 revision replaces the prior serif, forest, cream, and terracotta
 | Secondary text | `#465572` | `#D2DBEF` |
 | Supporting text | `#53617B` | `#ADBDD8` |
 | Border | `#D6DDEC` | `#41506D` |
+| Control boundary | `#7F8CA8` | `#6B7A99` |
 | Action | `#253FEA` | `#ADC0FF` |
 | Action hover | `#1B2FA8` | `#C3D1FF` |
 | Text on action | `#FFFFFF` | `#11192E` |
@@ -39,7 +40,7 @@ Do not use serif display type, earth tones, parchment textures, decorative grids
 
 `connector/extension/brand/theme.css` is the only file that defines Morrow's colour, type, and control tokens. Every Morrow-owned surface loads it: the extension popup, the onboarding page, the settings page, the pairing pages the local bridge serves, and the review and result pages the approval server serves. A component stylesheet uses the tokens. It does not restate a hex value and it does not define a second palette.
 
-`--page`, `--raised`, and `--sunken` are the surfaces, with the aliases `--paper`, `--surface`, and `--surface-sunken`. `--ink` (alias `--text`), `--text-secondary`, and `--text-subtle` are the text colours. `--border` draws lines. `--action`, `--action-hover`, and `--on-action` (aliases `--accent`, `--accent-hover`, `--on-accent`) belong to controls. `--focus`, `--success`, `--danger`, and `--highlight` carry state. `--shadow` and the focus halo are the only translucent paint.
+`--page`, `--raised`, and `--sunken` are the surfaces, with the aliases `--paper`, `--surface`, and `--surface-sunken`. `--ink` (alias `--text`), `--text-secondary`, and `--text-subtle` are the text colours. `--border` draws dividers and card edges. `--control-border` draws the boundary of an input, a select, a checkbox, or a radio button, at the WCAG 1.4.11 non-text contrast minimum, because `--border` alone is only 1.34:1 against the page and fails that rule. `--action`, `--action-hover`, and `--on-action` (aliases `--accent`, `--accent-hover`, `--on-accent`) belong to controls. `--focus`, `--success`, `--danger`, and `--highlight` carry state. `--shadow` and the focus halo are the only translucent paint.
 
 `--ink` is a text colour. No Morrow surface is painted with it, so the focus ring never sits on it.
 
@@ -59,9 +60,39 @@ The focus ring is `2px solid var(--focus)` at `outline-offset: 3px`, above a 5 p
 
 Every combination a Morrow surface can produce is above 3:1. The `--ink` row is below it, which is why `--ink` stays a text colour: a focus ring drawn on an ink surface would not be identifiable.
 
+Every input, select, checkbox, and radio button draws its boundary in `--control-border`, so WCAG 1.4.11 is met against the surface behind it, in both themes:
+
+| Control boundary against | Light | Dark |
+| --- | --- | --- |
+| `--control-border` on `--page` | 3.32:1 | 4.05:1 |
+| `--control-border` on `--raised` | 3.38:1 | 3.48:1 |
+| `--control-border` on `--sunken` | 3.03:1 | 4.32:1 |
+
 `prefers-reduced-transparency: reduce` removes the translucent paint, the shadow and the focus halo, and keeps each surface token at its own value. Flattening `--raised` and `--sunken` onto `--page` would take away the only boundary a borderless chip or step marker has.
 
 `scripts/test/extension-theme-contract.test.mjs` recomputes this table from the tokens in `theme.css`, checks the 44 px floor and the reduced-transparency rule in the brand stylesheets, and fails when this document and the tokens disagree.
+
+`theme.css` also carries the type, space, and radius scale. No Morrow surface uses a size outside it.
+
+Seven type tokens, each a `font` shorthand (weight, size/line-height, family) so a rule can set `font: var(--text-ui);`. Every token carries `var(--font-sans)`, because the shorthand is invalid without a family; a role that needs tracking sets `letter-spacing` as a separate declaration.
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `--text-display` | `700 2rem/1.1 var(--font-sans)` (32 px) | One page title. Tracking `-0.02em`. |
+| `--text-title` | `700 1.375rem/1.2 var(--font-sans)` (22 px) | Section heading. Tracking `-0.01em`. |
+| `--text-heading` | `700 1.0625rem/1.3 var(--font-sans)` (17 px) | Card title, course name. |
+| `--text-body` | `400 1rem/1.55 var(--font-sans)` (16 px) | Paragraphs, review content. |
+| `--text-ui` | `400 0.875rem/1.45 var(--font-sans)` (14 px) | Rows, labels, controls. |
+| `--text-ui-strong` | `600 0.875rem/1.45 var(--font-sans)` | An emphasised `--text-ui` row. |
+| `--text-caption` | `400 0.8125rem/1.4 var(--font-sans)` (13 px) | Meta line, chips, help. |
+
+Weight is exactly 400, 600, or 700. No text renders under 13 px, and no uppercase label carries tracking. The wordmark keeps its own weight.
+
+Space tokens `--space-1` to `--space-7` are 4, 8, 12, 16, 24, 32, and 48 px. Radius tokens are `--radius-control: 10px`, `--radius-card: 14px`, `--radius-panel: 18px`, and `--radius-pill: 999px`; a radius inside a padded container equals the outer radius minus the padding, and never less than `--radius-control`. `--measure: 68ch` bounds a line of reading text.
+
+A paragraph, a list item, and help text cap at `max-inline-size: var(--measure)`, so a wide panel never carries a line of reading text past a comfortable width. A heading uses `text-wrap: balance`; a paragraph uses `text-wrap: pretty`. Each surface's root sets `font-synthesis: none` and `-webkit-font-smoothing: antialiased`, so a variable font never synthesizes a weight it does not carry. A count or a clock time uses `font-variant-numeric: tabular-nums`, so digits do not shift width as they change. `::selection` paints `--highlight` behind `--ink` text.
+
+`installer/renderer/styles.css` copies these token names and values without change, as `.better-web-ui.md` requires.
 
 ## Type, layout, and motion
 
@@ -71,9 +102,23 @@ Manrope is bundled locally with its SIL Open Font License. Source: [Google Fonts
 
 Build hierarchy with type size, weight, alignment, and spacing. Keep headings short. Check their actual wraps at desktop, tablet, and phone sizes. Do not hide overflow or shrink body text to force a layout. A short desktop hero sentence should fit on one line; narrow screens may use deliberate complete phrases.
 
-Use a 4 px spacing unit. Prefer 8, 12, 16, 24, 32, and 48 px gaps. Keep more space between groups than inside them. Controls need clear boundaries and visible keyboard focus. Keep touch targets at least 44 px high; the token contract states the rule for every surface that loads `theme.css`.
+Use a 4 px spacing unit. Prefer 8, 12, 16, 24, 32, and 48 px gaps. Keep more space between groups than inside them. Controls need clear boundaries and visible keyboard focus. Keep touch targets at least 44 px high; the token contract states the rule for every surface that loads `theme.css`. For a checkbox or a radio button, the label row is the target, not the small square; a link inside a sentence is exempt, as WCAG 2.5.8 permits.
+
+A link uses `--action` for its text and `--action-hover` on hover, with its underline thickness set from the font and a small offset. A disclosure (`<summary>`) drops the browser's own triangle for one chevron, drawn from a single SVG mask so every surface shows the same icon; it turns 90 degrees over 160 ms when the disclosure opens, and every disclosure row stays at least 44 px high.
 
 Motion must clarify an interaction or introduce a useful section. Use brief opacity or position transitions. Respect reduced motion. Do not animate text, shift page layout, or repeat motion to attract attention.
+
+Motion lives in five places and nowhere else: no motion on list filters, search, checkbox changes, or keyboard actions.
+
+| Place | Purpose | Motion |
+| --- | --- | --- |
+| A course detail or a Customize area opens | Shows where content came from | Height and opacity, 180 ms, `cubic-bezier(0.2, 0, 0, 1)` |
+| The result of a review, one time | The end of each task must feel complete | The success mark draws in 300 ms |
+| The banner and the badge appear | Shows a state change | Opacity, 160 ms |
+| A status line appears or goes | Prevents a jump | Opacity and 4 px, 160 ms, exit by the same edge |
+| Button press | Feedback | `scale(0.98)`, 120 ms |
+
+`theme.css` (copied into `installer/renderer/styles.css`) carries these as tokens: `--motion-fast` (120 ms), `--motion-standard` (160 ms), `--motion-panel` (180 ms), `--motion-complete` (300 ms), and `--ease-panel` (`cubic-bezier(0.2, 0, 0, 1)`). It also carries the reusable classes `.morrow-panel` (detail and Customize area opening), `.morrow-appear` (banner and badge), and `.morrow-status-line` (status line, exiting by the same edge it entered from). `prefers-reduced-motion: reduce` removes all five.
 
 ## Website conversation stage
 

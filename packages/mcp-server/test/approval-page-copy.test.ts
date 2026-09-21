@@ -29,7 +29,7 @@ function moodleSnapshot(state: string): JsonObject {
 function approvalServer(
   review: JsonObject,
   approved: JsonObject = review,
-  targets: { field: string; label: string; name: string }[] = [
+  targets: { field: string; label: string; name: string; url?: string }[] = [
     { field: "course_id", label: "Course", name: "Biology 101" },
     { field: "module_id", label: "Page", name: "Week 2 overview" },
   ],
@@ -283,6 +283,27 @@ describe("approval page copy", () => {
     }
   });
 
+  it("never shows a structural ID or URL slug field, even when the review context resolves no target for it", async () => {
+    const snapshot: JsonObject = {
+      ...moodleSnapshot("awaiting_approval"),
+      plan: {
+        tool: "canvas_delete_page_courses",
+        arguments: { course_id: "42", url_or_id: "week-2-overview" },
+      },
+    };
+    const server = approvalServer(snapshot, snapshot, []);
+    try {
+      const baseUrl = await server.start();
+      const { body } = await reviewPage(baseUrl);
+      expect(body).toContain("<h1>Delete page courses?</h1>");
+      expect(body).not.toContain("URL or ID");
+      expect(body).not.toContain("week-2-overview");
+      expect(body).not.toContain("<dt>Course ID</dt>");
+    } finally {
+      await server.close();
+    }
+  });
+
   it("shows New Quiz settings with instructor-facing labels and no internal hashes", async () => {
     const internalHash = "a".repeat(64);
     const snapshot: JsonObject = {
@@ -313,6 +334,49 @@ describe("approval page copy", () => {
       expect(body).toContain("Time limit in seconds");
       expect(body).not.toContain("morrow_new_quiz_settings_guard");
       expect(body).not.toContain(internalHash);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("gives a confirmed result the success mark, the item, and where to go next", async () => {
+    const server = approvalServer(moodleSnapshot("verified"));
+    try {
+      const baseUrl = await server.start();
+      const page = await (await fetch(`${baseUrl}/operations/${encodedId}`)).text();
+      expect(page).toContain('<section class="outcome outcome-success">');
+      expect(page).toContain('<svg class="success-mark"');
+      expect(page).toContain("<h1>Moodle saved the change. Morrow checked the result.</h1>");
+      expect(page).toContain('<p class="result-item">Week 2 overview</p>');
+      expect(page).toContain("Return to your assistant. It continues on its own.");
+      expect(page).toContain('<a href="/recent">See recent changes</a>');
+      expect(page).not.toContain("Open in Moodle");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("links a confirmed result to the item's platform address when the review context read one", async () => {
+    const server = approvalServer(moodleSnapshot("verified"), undefined, [
+      { field: "course_id", label: "Course", name: "Biology 101" },
+      { field: "module_id", label: "Page", name: "Week 2 overview", url: "https://moodle.example/mod/page/view.php?id=6" },
+    ]);
+    try {
+      const baseUrl = await server.start();
+      const page = await (await fetch(`${baseUrl}/operations/${encodedId}`)).text();
+      expect(page).toContain('<a href="https://moodle.example/mod/page/view.php?id=6" target="_blank" rel="noopener noreferrer">Open in Moodle</a>');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("never shows the success mark for a result that is not confirmed", async () => {
+    const server = approvalServer(moodleSnapshot("applied_or_unknown"));
+    try {
+      const baseUrl = await server.start();
+      const page = await (await fetch(`${baseUrl}/operations/${encodedId}`)).text();
+      expect(page).not.toContain("outcome-success");
+      expect(page).not.toContain("success-mark");
     } finally {
       await server.close();
     }

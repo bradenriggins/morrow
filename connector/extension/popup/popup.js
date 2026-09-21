@@ -1,11 +1,12 @@
 import { problemText } from "../src/bridge-problem-copy.js";
-import { canChooseCourses, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, nextError, primaryLabel, runtimeNeedsReload, statusAnnouncement, statusValue } from "./popup-view.js";
+import { activeEditBindings, canChooseCourses, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, editBannerText, nextError, openPlatformLabel, platformClosed, primaryLabel, runtimeNeedsReload, statusAnnouncement, statusValue } from "./popup-view.js";
 
 const primary = document.querySelector("#primary");
 const consentAction = document.querySelector("#consent-action");
 const consentDetail = document.querySelector("#consent-detail");
 const connectionContent = document.querySelector("#connection-content");
 const canvasAction = document.querySelector("#canvas-action");
+const openPlatformAction = document.querySelector("#open-platform-action");
 const disconnect = document.querySelector("#disconnect");
 const label = document.querySelector("#status-label");
 const value = document.querySelector("#status-value");
@@ -23,11 +24,15 @@ const notice = document.querySelector("#notice");
 const editAccess = document.querySelector(".edit-access");
 const editingSettings = document.querySelector("#editing-settings");
 const setupGuide = document.querySelector("#setup-guide");
+const editAccessBanner = document.querySelector("#edit-access-banner");
+const editAccessBannerText = document.querySelector("#edit-access-banner-text");
+const askFirstAllCoursesButton = document.querySelector("#ask-first-all-courses");
 let current = null;
 let actionInFlight = false;
 let banner = null;
 let readGeneration = 0;
 let detectedProvider = null;
+let editActive = [];
 
 // Every failure the service worker answers carries its own code, and the popup keeps that code as
 // the error it raises, so one state reaches the banner instead of one generic sentence.
@@ -41,6 +46,13 @@ function openCourseSelection() {
   void chrome.runtime.openOptionsPage();
 }
 
+/** WI-1.4: the "Ask first in all courses" banner, shown while any connection can act with no review. */
+function renderEditBanner() {
+  const text = editBannerText(editActive.length);
+  editAccessBanner.hidden = text === null;
+  if (text !== null) editAccessBannerText.textContent = text;
+}
+
 function render(status) {
   current = status;
   const nextAnnouncement = statusAnnouncement(status);
@@ -52,8 +64,10 @@ function render(status) {
   consentAction.disabled = actionInFlight;
   if (consentRequired) {
     pulse.classList.remove("online");
+    editAccessBanner.hidden = true;
     return;
   }
+  renderEditBanner();
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
   const chooseCourses = canChooseCourses(status, binding, anchor);
@@ -63,17 +77,22 @@ function render(status) {
   value.textContent = statusValue(status);
   account.hidden = !binding && !anchor;
   if (binding || anchor) {
-    accountLabel.textContent = binding ? "Selected course" : anchor?.runtimeVerified === true ? "Connected platform" : "Saved platform";
+    accountLabel.textContent = binding ? "Course" : anchor?.runtimeVerified === true ? "Connected platform" : "Saved platform";
     accountOrigin.textContent = binding
       ? `${binding.courseName || "Selected course"}${status.bindingCount > 1 ? ` · ${status.bindingCount} courses selected` : ""}`
       : `${anchor?.provider === "moodle" ? "Moodle" : anchor?.provider === "canvas" ? "Canvas" : "Learning platform"}`;
     setLastChecked(binding?.lastSeenAt ?? anchor?.lastSeenAt);
   }
-  courseLabel.textContent = binding ? "Selected course" : anchor?.runtimeVerified === true ? "Course selection" : anchor ? "Learning platform" : "Course";
+  courseLabel.textContent = binding ? "Connection" : anchor?.runtimeVerified === true ? "Course selection" : anchor ? "Learning platform" : "Course";
   canvasValue.textContent = courseValue(status);
   disconnect.hidden = status?.paired !== true;
   primary.hidden = Boolean(runtimeReady && binding?.runtimeVerified === true);
   canvasAction.hidden = !(runtimeReady && binding?.runtimeVerified === true);
+  // WI-1.1: the saved site's own open action. It needs no active matching tab, unlike Connect,
+  // because the Bridge already holds the permission and the session it needs (D1a).
+  const closed = platformClosed(status, binding, anchor);
+  openPlatformAction.hidden = !closed;
+  if (closed) openPlatformAction.textContent = openPlatformLabel(status, binding, anchor);
   editAccess.hidden = status?.paired !== true || !runtimeReady || chooseCourses || (!binding && !anchor);
   setupGuide.hidden = runtimeNeedsReload(status);
   primary.textContent = primaryLabel(status, detectedProvider);
@@ -99,11 +118,13 @@ function updateControls(status = current) {
   primary.disabled = controls.primaryDisabled;
   primary.setAttribute("aria-busy", String(controls.primaryBusy));
   canvasAction.disabled = controls.secondaryDisabled;
+  openPlatformAction.disabled = controls.secondaryDisabled;
   disconnect.disabled = controls.secondaryDisabled;
+  askFirstAllCoursesButton.disabled = controls.secondaryDisabled || editActive.length === 0;
 }
 
 function focusFirstConnectionAction() {
-  for (const control of [primary, canvasAction, disconnect, editingSettings, setupGuide]) {
+  for (const control of [primary, canvasAction, openPlatformAction, disconnect, editingSettings, setupGuide]) {
     if (!control.hidden && !control.disabled) {
       control.focus();
       return;
@@ -117,6 +138,15 @@ async function refresh() {
     const status = await message("morrow_status");
     if (generation !== readGeneration) return;
     detectedProvider = null;
+    editActive = [];
+    // WI-1.4: morrow_status carries no editPermission per binding, so the popup reads the same
+    // command the settings page uses to learn which connections can act with no review. Skipped
+    // while choosing courses: no course is selected yet, so no Edit access can exist.
+    if (status?.consentRequired !== true && status?.paired === true && status?.connected === true && !canChooseCourses(status)) {
+      const editStatus = await message("morrow_edit_policy_status").catch(() => null);
+      if (generation !== readGeneration) return;
+      editActive = activeEditBindings(editStatus?.bindings);
+    }
     if (status?.consentRequired !== true && status?.paired === true && status?.connected === true && !canChooseCourses(status)
       && currentBinding(status)?.runtimeVerified !== true) {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -128,6 +158,7 @@ async function refresh() {
     reportSuccess("status");
   } catch (cause) {
     if (generation !== readGeneration) return;
+    editActive = [];
     render(null);
     reportError("status", cause);
   }
@@ -261,6 +292,34 @@ primary.addEventListener("click", async () => {
 
 canvasAction.addEventListener("click", async () => {
   await runAction(connectCanvasCourse, () => clearNotice());
+});
+
+// WI-1.1: opens the saved, already-permitted site itself. No permission prompt, because Chrome
+// already granted this address; a sign-in is the only thing left that can still be necessary.
+openPlatformAction.addEventListener("click", async () => {
+  const binding = currentBinding(current);
+  const anchor = currentSiteAnchor(current);
+  const siteAnchorId = binding?.siteAnchorId || anchor?.siteAnchorId;
+  if (!siteAnchorId) return;
+  const platform = currentPlatform(current);
+  await runAction(
+    () => message("morrow_open_platform", binding?.sourceBindingId ? { siteAnchorId, sourceBindingId: binding.sourceBindingId } : { siteAnchorId }),
+    (result) => {
+      if (result?.verified === false) showNotice(`Sign in to ${platform || "the learning platform"} in the tab that opened. Morrow continues after that.`);
+      else clearNotice();
+    },
+  );
+});
+
+askFirstAllCoursesButton.addEventListener("click", async () => {
+  const bindings = editActive;
+  if (!bindings.length) return;
+  await runAction(async () => {
+    for (const binding of bindings) {
+      const result = await message("morrow_edit_policy_revoke", { sourceBindingId: binding.sourceBindingId });
+      if (result?.revoked !== true) throw new Error("edit_policy_revoke_unconfirmed");
+    }
+  }, () => showNotice("Done. Morrow asks first in all courses."));
 });
 
 editingSettings.addEventListener("click", () => {

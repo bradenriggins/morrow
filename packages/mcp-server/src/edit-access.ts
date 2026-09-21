@@ -99,7 +99,7 @@ function flaggedText(prepared: BrowserEditAccessPrepared): string {
 
 function confirmationMessage(prepared: BrowserEditAccessPrepared): string {
   const courses = prepared.selections.map((selection) => {
-    const categories = selection.enabledCategories.map((category) => category.label).join(", ");
+    const categories = labelList(selection.enabledCategories);
     return `${selection.courseName} (course ${selection.courseId}, ${selection.site}; ${categories})`;
   }).join("\n");
   const flagged = flaggedText(prepared);
