@@ -408,7 +408,7 @@ describe("Canvas connector gateway path", () => {
         await server.close();
       }
       expect(writeCommands).toBe(0);
-    });
+    }, CASE_TIMEOUT_MS);
 
     it("publishes current Edit actions while the course remains in Plan state", async () => {
       activeEditPermission = undefined;
