@@ -370,6 +370,22 @@ describe("approval page copy", () => {
     }
   });
 
+  it("gives the live status poll the same item name and link as the full page", async () => {
+    const server = approvalServer(moodleSnapshot("verified"), undefined, [
+      { field: "course_id", label: "Course", name: "Biology 101" },
+      { field: "module_id", label: "Page", name: "Week 2 overview", url: "https://moodle.example/mod/page/view.php?id=6" },
+    ]);
+    try {
+      const baseUrl = await server.start();
+      const response = await fetch(`${baseUrl}/operations/${encodedId}/status`);
+      const body = (await response.json()) as { html: string };
+      expect(body.html).toContain('<p class="result-item">Week 2 overview</p>');
+      expect(body.html).toContain('<a href="https://moodle.example/mod/page/view.php?id=6" target="_blank" rel="noopener noreferrer">Open in Moodle</a>');
+    } finally {
+      await server.close();
+    }
+  });
+
   it("never shows the success mark for a result that is not confirmed", async () => {
     const server = approvalServer(moodleSnapshot("applied_or_unknown"));
     try {

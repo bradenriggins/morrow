@@ -181,6 +181,31 @@ test("Open Canvas clears its sign-in notice once the reopened site verifies", as
   assert.equal(page.hidden("#notice"), true);
 });
 
+// WI-F.10: "Open Canvas" shows "Opening Canvas" in the button. Each wait longer than 400 ms shows
+// progress within 100 ms; a fast open never flashes it. Matches settings.js's own open-platform test.
+test("Open Canvas shows progress only once the wait runs long enough to need it", async () => {
+  let resolveOpen;
+  const opening = new Promise((resolve) => { resolveOpen = resolve; });
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding({ runtimeVerified: false })], bindingCount: 1, siteAnchors: [anchor()] }),
+    handlers: { morrow_open_platform: () => opening },
+  });
+  assert.equal(page.text("#open-platform-action"), "Open Canvas");
+
+  await page.click("#open-platform-action");
+  assert.equal(page.query("#open-platform-action").disabled, true, "a second click must not start a second tab");
+  assert.equal(page.text("#open-platform-action"), "Open Canvas", "no progress yet: the wait has not run long enough to need it");
+  assert.equal(page.query("#open-platform-action").getAttribute("aria-busy"), "false");
+
+  await page.waitFor(() => page.text("#open-platform-action") === "Opening Canvas", "no progress appeared once the wait ran long enough to need it");
+  assert.equal(page.query("#open-platform-action").getAttribute("aria-busy"), "true");
+
+  resolveOpen({ opened: true, verified: false });
+  await page.waitFor(() => page.query("#open-platform-action").disabled === false, "opening the site never finished");
+  assert.equal(page.text("#open-platform-action"), "Open Canvas");
+  assert.equal(page.query("#open-platform-action").getAttribute("aria-busy"), "false");
+});
+
 test("the popup uses the platform detected in the active course tab", async () => {
   const page = await openPopup({
     status: () => connection({ paired: true, connected: true }),

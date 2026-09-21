@@ -62,9 +62,15 @@ export function platformClosed(status, binding = currentBinding(status), anchor 
   return Boolean((binding && binding.runtimeVerified !== true) || (!binding && anchor && anchor.runtimeVerified !== true));
 }
 
-/** "Open Canvas" or "Open Moodle" for the WI-1.1 button: the saved platform, never the detected one. */
-export function openPlatformLabel(status, binding = currentBinding(status), anchor = currentSiteAnchor(status)) {
-  return `Open ${providerName(binding?.provider || anchor?.provider) || "Canvas or Moodle"}`;
+/**
+ * "Open Canvas" or "Open Moodle" for the WI-1.1 button: the saved platform, never the detected one;
+ * "Opening Canvas" or "Opening Moodle" once the wait has been visible long enough to need it (WI-F.10).
+ */
+export function openPlatformLabel(status, binding = currentBinding(status), anchor = currentSiteAnchor(status), busy = false) {
+  const platform = providerName(binding?.provider || anchor?.provider);
+  if (platform === "Canvas") return busy ? "Opening Canvas" : "Open Canvas";
+  if (platform === "Moodle") return busy ? "Opening Moodle" : "Open Moodle";
+  return busy ? "Opening Canvas or Moodle" : "Open Canvas or Moodle";
 }
 
 function plural(count, singular, pluralForm = `${singular}s`) {

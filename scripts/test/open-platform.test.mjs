@@ -36,45 +36,69 @@ const STORED_ANCHORS_SOURCE = sliceIncluding("function storedAnchors(value) {", 
 const MESSAGE_CODE_SOURCE = sliceIncluding("function messageCode(error) {", "\n}\n");
 const HANDLER_SOURCE = sliceBefore("function awaitTabLoad(tabId, timeoutMs) {", "\nasync function disconnectConnector()");
 const ROUTER_SOURCE = sliceBefore("chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {", "\nchrome.permissions.onAdded.addListener");
+const ANCHOR_FOR_BINDING_SOURCE = sliceIncluding("function anchorForBinding(binding, anchors) {", "\n}\n");
+const SAVE_EDIT_POLICY_SOURCE = sliceIncluding(
+  "async function saveEditPolicy(sourceBindingId, enabledCategories, expiresInMs, authorityGeneration = state.courseDataAuthorityGeneration) {",
+  "\n}\n",
+);
 
 test("the load-wait budget stays twenty seconds (WI-1.1 acceptance)", () => {
   assert.match(WORKER_SOURCE, /const OPEN_PLATFORM_LOAD_TIMEOUT_MS = 20_000;/);
 });
 
 /**
- * Loads storedAnchors, awaitTabLoad, openPlatform, bindingForCommand and the real onMessage router
- * out of service-worker.js into an isolated context, with storage, publishBindings, bindingFor and
- * siteAnchorMatches stubbed and Chrome's tabs and storage.local API faked. Nothing here reaches a
- * network or a real tab.
+ * Loads storedAnchors, awaitTabLoad, openPlatform, bindingForCommand, saveEditPolicy and the real
+ * onMessage router out of service-worker.js into an isolated context, with storage, publishBindings,
+ * bindingFor and siteAnchorMatches stubbed and Chrome's tabs and storage.local API faked. Nothing
+ * here reaches a network or a real tab.
  *
  * `bindingForResults`, when given, is the queue of binding-check outcomes that the stubbed
  * `bindingFor` returns, in call order: consumed one at a time, the last entry repeats for any call
  * beyond the queue's length (so a test can assert exactly how many times it was called).
+ *
+ * `matchResults`, when given, is the same kind of queue for `siteAnchorMatches` (consumed one call
+ * at a time, the last entry repeating), so a saveEditPolicy test can drive a stale check that turns
+ * fresh after the WI-1.2 openPlatform retry. An empty `matchResults` (the default) falls back to the
+ * fixed `matchResult`, unchanged from before.
  */
-function harness({ anchors = [], bindings = [], matchResult = true, loadOutcome = "complete", consentAccepted = true, openPlatformWhenNeeded, bindingForResults = [] } = {}) {
-  const calls = { tabsCreated: [], tabsUpdated: [], publishBindings: 0, siteAnchorMatches: [], requireConsent: 0, bindingFor: [], storageSet: [] };
+function harness({ anchors = [], bindings = [], matchResult = true, matchResults = [], loadOutcome = "complete", consentAccepted = true, openPlatformWhenNeeded, bindingForResults = [] } = {}) {
+  const calls = { tabsCreated: [], tabsUpdated: [], publishBindings: 0, siteAnchorMatches: [], requireConsent: 0, bindingFor: [], storageSet: [], createEditPermission: [] };
   const script = [
     "globalThis.__morrowOpenPlatformHarness = (() => {",
     `const calls = ${JSON.stringify(calls)};`,
     `let fixture = { anchors: ${JSON.stringify(anchors)}, bindings: ${JSON.stringify(bindings)}, openPlatformWhenNeeded: ${JSON.stringify(openPlatformWhenNeeded === undefined ? null : openPlatformWhenNeeded)} };`,
     `let matchResult = ${JSON.stringify(matchResult)};`,
+    `let matchQueue = ${JSON.stringify(matchResults)};`,
     `let loadOutcome = ${JSON.stringify(loadOutcome)};`,
     `let consentAccepted = ${JSON.stringify(consentAccepted)};`,
     `let bindingForQueue = ${JSON.stringify(bindingForResults)};`,
     // Test-only stand-ins for the rest of the worker. Each is called exactly as openPlatform,
-    // bindingForCommand and the router call the real one; only the body differs.
+    // bindingForCommand, saveEditPolicy and the router call the real one; only the body differs.
     // A missing key (fixture.openPlatformWhenNeeded === null, the "not set in this fixture" marker)
     // is left out of the returned object, the same shape chrome.storage.local.get gives for an
     // unset key, so bindingForCommand's default-on check exercises the real "missing key" path.
     "async function storage() { return { siteAnchors: fixture.anchors, bindings: fixture.bindings, ...(fixture.openPlatformWhenNeeded === null ? {} : { openPlatformWhenNeeded: fixture.openPlatformWhenNeeded }) }; }",
     "async function publishBindings() { calls.publishBindings += 1; }",
-    "async function siteAnchorMatches(anchor, options) { calls.siteAnchorMatches.push({ siteAnchorId: anchor?.siteAnchorId, options }); return matchResult; }",
+    "async function siteAnchorMatches(anchor, options) { calls.siteAnchorMatches.push({ siteAnchorId: anchor?.siteAnchorId, options }); if (matchQueue.length) return matchQueue.length > 1 ? matchQueue.shift() : matchQueue[0]; return matchResult; }",
     "async function requireCourseDataConsent() { if (!consentAccepted) throw new Error('course_data_consent_required'); }",
     "async function bindingFor(sourceBindingId, options) { calls.bindingFor.push({ sourceBindingId, options }); return bindingForQueue.length > 1 ? bindingForQueue.shift() : bindingForQueue[0]; }",
+    // saveEditPolicy's other dependencies: none of them is WI-1.2's concern, so each is the
+    // smallest stand-in that lets the real saveEditPolicy body run end to end.
+    "const state = { courseDataAuthorityGeneration: 0, operations: new Map() };",
+    "function validEditDuration() { return true; }",
+    "async function requireCourseDataAuthority() {}",
+    "async function catalog() { return { catalogDigest: 'digest-1' }; }",
+    "function queueStorageMutation(work) { return work(); }",
+    "function storedPolicies(value) { return value || {}; }",
+    "function storedPolicyRevisions(value) { return value || {}; }",
+    "async function createEditPermission(args) { calls.createEditPermission.push(args); return { schema: 'morrow.edit-permission.v1', sourceBindingId: args.binding.sourceBindingId, revision: args.revision, enabledCategories: args.enabledCategories, expiresAt: args.expiresAt }; }",
+    "async function setCourseDataBoundFields(area, values) { calls.storageSet.push(values); }",
     "const OPEN_PLATFORM_LOAD_TIMEOUT_MS = 40;", // WORKER_SOURCE pins the real 20_000ms budget; this test uses a short one.
     STORED_ANCHORS_SOURCE,
     MESSAGE_CODE_SOURCE,
+    ANCHOR_FOR_BINDING_SOURCE,
     HANDLER_SOURCE,
+    SAVE_EDIT_POLICY_SOURCE,
     "let nextTabId = 1;",
     "let onUpdatedListeners = [];",
     "let routerListener = null;",
@@ -102,6 +126,7 @@ function harness({ anchors = [], bindings = [], matchResult = true, loadOutcome 
     "  calls,",
     "  dispatch: (message, sender = {}) => new Promise((resolve) => { routerListener(message, sender, resolve); }),",
     "  bindingForCommand: (command, operation) => bindingForCommand(command, operation),",
+    "  saveEditPolicy: (sourceBindingId, enabledCategories, expiresInMs) => saveEditPolicy(sourceBindingId, enabledCategories, expiresInMs),",
     "};",
     "})();",
   ].join("\n");
@@ -299,4 +324,55 @@ test("openPlatform's own failure (a gone anchor) is absorbed: the original bindi
   assert.deepEqual(result, UNVERIFIED_BINDING, "the caller still gets a binding, and reports canvas_binding_required as before");
   assert.equal(harness1.calls.tabsCreated.length, 0);
   assert.equal(harness1.calls.bindingFor.length, 1, "no retry read: the open itself never happened");
+});
+
+/**
+ * WI-1.2 (D1a) review fix: saveEditPolicy throws edit_policy_binding_stale on the same stale-anchor
+ * check that bindingForCommand covers for canvas_binding_required. This retries once through
+ * openPlatform first, the same way, before that failure is raised.
+ */
+test("saveEditPolicy retries once through openPlatform on a stale binding, then saves when the retry verifies", async () => {
+  const harness1 = harness({
+    anchors: [ANCHOR],
+    bindings: [BINDING],
+    openPlatformWhenNeeded: true,
+    matchResults: [false, true, true],
+  });
+  const result = await harness1.saveEditPolicy(BINDING.sourceBindingId, ["grades"], 60 * 60 * 1_000);
+  assert.equal(result.editPermission.sourceBindingId, BINDING.sourceBindingId);
+  assert.equal(harness1.calls.tabsCreated.length, 1, "openPlatform opens exactly one tab");
+  assert.deepEqual(harness1.calls.tabsCreated[0], { url: "https://school.instructure.com/courses/42", active: false });
+  assert.equal(harness1.calls.createEditPermission.length, 1, "the retry verified, so the save proceeds");
+  assert.equal(harness1.calls.siteAnchorMatches.length, 3, "the check before the retry, openPlatform's own check, and the check after");
+});
+
+test("saveEditPolicy still throws edit_policy_binding_stale when the retry does not verify", async () => {
+  const harness1 = harness({
+    anchors: [ANCHOR],
+    bindings: [BINDING],
+    openPlatformWhenNeeded: true,
+    matchResults: [false, false, false],
+  });
+  await assert.rejects(
+    harness1.saveEditPolicy(BINDING.sourceBindingId, ["grades"], 60 * 60 * 1_000),
+    /edit_policy_binding_stale/,
+  );
+  assert.equal(harness1.calls.tabsCreated.length, 1, "the retry was still tried once");
+  assert.equal(harness1.calls.createEditPermission.length, 0, "nothing is saved when the binding stays stale");
+});
+
+test("saveEditPolicy opens no tab when openPlatformWhenNeeded is off, and still throws edit_policy_binding_stale", async () => {
+  const harness1 = harness({
+    anchors: [ANCHOR],
+    bindings: [BINDING],
+    openPlatformWhenNeeded: false,
+    matchResults: [false],
+  });
+  await assert.rejects(
+    harness1.saveEditPolicy(BINDING.sourceBindingId, ["grades"], 60 * 60 * 1_000),
+    /edit_policy_binding_stale/,
+  );
+  assert.equal(harness1.calls.tabsCreated.length, 0, "the setting being off opens no tab");
+  assert.equal(harness1.calls.siteAnchorMatches.length, 1, "no retry check: there is nothing to retry");
+  assert.equal(harness1.calls.createEditPermission.length, 0);
 });

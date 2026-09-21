@@ -56,7 +56,7 @@
   --motion-complete: 300ms;
   --ease-panel: cubic-bezier(0.2, 0, 0, 1);
 
-  font: 400 1rem/1.45 var(--font-sans);
+  font: var(--text-body);
   background: var(--page);
   color: var(--text);
   font-synthesis: none;

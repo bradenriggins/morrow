@@ -877,6 +877,33 @@ function snapshotPlatform(snapshot: JsonObject): string {
     : platformName(object(snapshot.plan).tool);
 }
 
+/**
+ * The read that names a change's target in the platform. The full page needs
+ * it whenever it might show a named target or a result; the status poll needs
+ * it only once a change is verified, so a review that is still dispatching
+ * never pays for this read once a second.
+ */
+async function reviewContexts(
+  controller: ApprovalOperationController,
+  operations: readonly JsonObject[],
+  signal: AbortSignal,
+): Promise<Map<string, ApprovalReviewContext>> {
+  const contexts = new Map<string, ApprovalReviewContext>();
+  if (!controller.operationReviewContext) return contexts;
+  const readCache: ApprovalReviewReadCache = new Map();
+  for (let offset = 0; offset < operations.length; offset += 4) {
+    await Promise.all(operations.slice(offset, offset + 4).map(async (operation) => {
+      const operationId = String(operation.operationId || "");
+      if (!operationId) return;
+      try {
+        contexts.set(operationId, await controller.operationReviewContext!(operationId, readCache));
+      } catch { /* keep the exact request visible when Canvas cannot provide its name */ }
+    }));
+    signal.throwIfAborted();
+  }
+  return contexts;
+}
+
 function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boolean, contexts?: ReadonlyMap<string, ApprovalReviewContext>): string {
   let state = reviewState(target, snapshot);
   if (active && state === "approved") state = "running";
@@ -1190,29 +1217,20 @@ export class LoopbackApprovalServer {
           : this.controller.operationGet(target.id);
         if (!snapshot) throw new Error("batch approval is unavailable");
         const active = this.work.has(`${target.kind}:${target.id}`);
-        if (target.action === "status") {
-          const states = object(snapshot.states);
-          sendJson(response, 200, { html: statusContent(target, snapshot, active), active, states });
-          return;
-        }
-        const contexts = new Map<string, ApprovalReviewContext>();
         const operations = target.kind === "batches" && Array.isArray(snapshot.children)
           ? snapshot.children.map((child) => object(object(child).operation)) : [snapshot];
-        const expiry = Date.parse(String(snapshot.approvalExpiresAt || snapshot.expiresAt || ""));
-        if (this.controller.operationReviewContext
-          && (reviewState(target, snapshot) !== "awaiting_approval" || !Number.isFinite(expiry) || expiry > Date.now())) {
-          const readCache: ApprovalReviewReadCache = new Map();
-          for (let offset = 0; offset < operations.length; offset += 4) {
-            await Promise.all(operations.slice(offset, offset + 4).map(async (operation) => {
-              const operationId = String(operation.operationId || "");
-              if (!operationId) return;
-              try {
-                contexts.set(operationId, await this.controller.operationReviewContext!(operationId, readCache));
-              } catch { /* keep the exact request visible when Canvas cannot provide its name */ }
-            }));
-            signal.throwIfAborted();
-          }
+        if (target.action === "status") {
+          const states = object(snapshot.states);
+          const contexts = reviewState(target, snapshot) === "verified"
+            ? await reviewContexts(this.controller, operations, signal)
+            : undefined;
+          sendJson(response, 200, { html: statusContent(target, snapshot, active, contexts), active, states });
+          return;
         }
+        const expiry = Date.parse(String(snapshot.approvalExpiresAt || snapshot.expiresAt || ""));
+        const contexts = reviewState(target, snapshot) !== "awaiting_approval" || !Number.isFinite(expiry) || expiry > Date.now()
+          ? await reviewContexts(this.controller, operations, signal)
+          : new Map<string, ApprovalReviewContext>();
         const nonceKey = `${target.kind}:${target.id}`;
         const canApprove = !namedTargetsMissing(operations, contexts);
         const cookiePath = `/${target.kind}/${encodeURIComponent(target.id)}`;

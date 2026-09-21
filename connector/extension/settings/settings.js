@@ -282,9 +282,11 @@ function platformDisplayName(provider) {
   return provider === "moodle" ? "Moodle" : provider === "canvas" ? "Canvas" : "the learning platform";
 }
 
-/** "Open Canvas" or "Open Moodle" (WI-1.1); "Opening" once the wait has been visible long enough. */
+/** "Open Canvas" or "Open Moodle" (WI-1.1); "Opening Canvas" or "Opening Moodle" once the wait has been visible long enough (WI-F.10). */
 function openPlatformLabel(entity, busy = false) {
-  return `${busy ? "Opening" : "Open"} ${platformDisplayName(entity?.provider)}`;
+  if (entity?.provider === "canvas") return busy ? "Opening Canvas" : "Open Canvas";
+  if (entity?.provider === "moodle") return busy ? "Opening Moodle" : "Open Moodle";
+  return busy ? "Opening the learning platform" : "Open the learning platform";
 }
 
 /**

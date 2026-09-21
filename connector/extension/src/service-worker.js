@@ -1977,8 +1977,17 @@ async function saveEditPolicy(sourceBindingId, enabledCategories, expiresInMs, a
     const stored = await storage();
     const binding = (stored.bindings || []).find((candidate) => candidate.sourceBindingId === sourceBindingId);
     if (!binding) throw new Error("edit_policy_binding_missing");
-    const anchor = anchorForBinding(binding, stored.siteAnchors);
-    if (!anchor || !await siteAnchorMatches(anchor, { fresh: true })) throw new Error("edit_policy_binding_stale");
+    let anchor = anchorForBinding(binding, stored.siteAnchors);
+    let anchorFresh = Boolean(anchor && await siteAnchorMatches(anchor, { fresh: true }));
+    if (!anchorFresh && binding.siteAnchorId && stored.openPlatformWhenNeeded !== false) {
+      // WI-1.2 (D1a): mirrors bindingForCommand's single open-and-recheck retry, so a save fails
+      // with edit_policy_binding_stale only after the Bridge tried opening the site once.
+      await openPlatform(binding.siteAnchorId, binding.sourceBindingId).catch(() => undefined);
+      const retried = await storage();
+      anchor = anchorForBinding(binding, retried.siteAnchors);
+      anchorFresh = Boolean(anchor && await siteAnchorMatches(anchor, { fresh: true }));
+    }
+    if (!anchorFresh) throw new Error("edit_policy_binding_stale");
     const policies = storedPolicies(stored.editPolicies);
     const revisions = storedPolicyRevisions(stored.editPolicyRevisions);
     const priorRevision = Math.max(Number.isSafeInteger(revisions[sourceBindingId]) ? revisions[sourceBindingId] : 0, Number.isSafeInteger(policies[sourceBindingId]?.revision) ? policies[sourceBindingId].revision : 0);
