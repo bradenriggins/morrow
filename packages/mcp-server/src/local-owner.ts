@@ -40,7 +40,7 @@ import {
 import type { GatewayConfig } from "./config.js";
 import { createFullMorrowServer } from "./full-server.js";
 import { BoundedHttpServerLifecycle } from "./approval-server.js";
-import { MorrowRuntime } from "./morrow-runtime.js";
+import { BridgeMaintenanceRefusalError, MorrowRuntime } from "./morrow-runtime.js";
 import { mcpRuntimeHealthFromPayload } from "./runtime.js";
 import {
   LOCAL_OWNER_MAINTENANCE_PATH,
@@ -1036,8 +1036,10 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
         const result = await runtime.bridgeMaintenance(control);
         response.writeHead(200, { "cache-control": "no-store", "content-type": "application/json; charset=utf-8", "x-content-type-options": "nosniff" });
         response.end(JSON.stringify({ schema: "morrow.local-owner-maintenance.v1", status: "bridge", result }));
-      } catch {
-        maintenanceError(response, "local_owner_bridge_maintenance_unavailable");
+      } catch (error) {
+        maintenanceError(response, error instanceof BridgeMaintenanceRefusalError
+          ? error.code
+          : "local_owner_bridge_maintenance_unavailable");
       }
       return;
     }

@@ -179,6 +179,7 @@ test("one section is added, removed, or placed exactly, against the complete cou
   const stateBody = () => {
     renumber();
     return JSON.stringify([{
+      error: false,
       data: JSON.stringify({
         course: { ...model.course },
         section: model.section.map((entry) => ({ ...entry })),
@@ -256,7 +257,7 @@ test("one section is added, removed, or placed exactly, against the complete cou
           return;
         }
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify([{ data: null }]));
+        response.end(JSON.stringify([{ error: false, data: null }]));
         return;
       }
     }

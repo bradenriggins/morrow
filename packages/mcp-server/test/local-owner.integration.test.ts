@@ -877,6 +877,7 @@ describe("Morrow local owner", () => {
     let monitor: ConnectedClient | null = null;
     let bridge: BridgeTestClient | undefined;
     const bridgeActions: string[] = [];
+    let refuseQuiesce = false;
     try {
       monitor = await connect(configPath);
       await assertPortListening(port);
@@ -894,6 +895,15 @@ describe("Morrow local owner", () => {
       bridge.onCommand((command) => {
         if (command.kind !== "bridge_maintenance") return;
         bridgeActions.push(command.maintenance.action);
+        if (command.maintenance.action === "quiesce" && refuseQuiesce) {
+          bridge?.respondProblem(command, {
+            schema: "morrow.bridge.problem.v1",
+            code: "bridge_quiesce_busy",
+            message: "Untrusted Bridge detail must not cross the owner boundary.",
+            recoverable: false,
+          });
+          return;
+        }
         const activeFolderProof = {
           schema: "morrow.bridge.active-folder-proof.v1", extensionId, manifestVersion: "1.0.2",
           challengeId: "local-owner-bridge-challenge", nonce: "local-owner-bridge-nonce", challengeSha256: "d".repeat(64),
@@ -937,6 +947,10 @@ describe("Morrow local owner", () => {
       expect(held.status).toBe("held");
       if (held.status !== "held") throw new Error("maintenance lease was not held");
       const bridgeLease = { journalPath, holderPid: process.pid, workspaceRoot, leaseId: held.leaseId, leaseToken: held.leaseToken };
+      refuseQuiesce = true;
+      await expect(requestLocalOwnerMaintenance({ action: "bridge", ...bridgeLease, control: { action: "quiesce" } }))
+        .rejects.toMatchObject({ code: "bridge_quiesce_busy", message: "bridge_quiesce_busy" });
+      refuseQuiesce = false;
       const quiesced = await requestLocalOwnerMaintenance({ action: "bridge", ...bridgeLease, control: { action: "quiesce" } });
       expect(quiesced).toMatchObject({
         status: "bridge", result: { schema: "morrow.bridge.update-quiesced.v1", quiesceEpoch: "local-owner-bridge-epoch" },
@@ -955,7 +969,7 @@ describe("Morrow local owner", () => {
       expect(resumed).toMatchObject({ status: "bridge", result: { schema: "morrow.bridge.update-resumed.v1", resumed: true } });
       const released = await requestLocalOwnerMaintenance({ action: "release", ...bridgeLease });
       expect(released).toMatchObject({ status: "released", leaseId: held.leaseId });
-      expect(bridgeActions).toEqual(["status", "quiesce", "readback", "commit", "resume"]);
+      expect(bridgeActions).toEqual(["status", "quiesce", "quiesce", "readback", "commit", "resume"]);
       expect((await monitor.client.listTools()).tools.map((tool) => tool.name)).not.toContain("morrow_bridge_maintenance");
     } finally {
       await bridge?.close();

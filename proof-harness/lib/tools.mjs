@@ -142,6 +142,28 @@ export function makeTools(client, logPath) {
       const plan = planned?.structuredContent ?? {};
       entry.plan = { status: plan.status, code: plan.data?.code, text: (planned?.content?.[0]?.text || "").slice(0, 160) };
       if (plan.status === "verified") { entry.outcome = "verified"; await log(`${label}: verified (no approval needed)`); return entry; }
+      if (plan.operationId && ["applied_or_unknown", "awaiting_verification", "cancelled", "failed", "closed_by_person"].includes(plan.effectState)) {
+        entry.operationId = plan.operationId;
+        entry.state = plan.effectState;
+        entry.verification = plan.verification?.status;
+        entry.attention = Array.isArray(plan.attention)
+          ? plan.attention.filter((code) => !/^[0-9a-f]{64}$/.test(String(code)))
+          : [];
+        entry.outcome = plan.effectState === "awaiting_verification" ? "sent_unchecked" : plan.effectState;
+        await log(`${label}: ${entry.outcome}`);
+        return entry;
+      }
+      if (["applied_or_unknown", "awaiting_verification", "cancelled", "failed", "closed_by_person"].includes(plan.status)) {
+        entry.operationId = plan.operationId;
+        entry.state = plan.effectState ?? plan.status;
+        entry.verification = plan.verification?.status;
+        entry.attention = Array.isArray(plan.attention)
+          ? plan.attention.filter((code) => !/^[0-9a-f]{64}$/.test(String(code)))
+          : [];
+        entry.outcome = plan.status === "awaiting_verification" ? "sent_unchecked" : plan.status;
+        await log(`${label}: ${entry.outcome}`);
+        return entry;
+      }
       if (plan.status !== "awaiting_approval" || !plan.receipts?.approvalUrl) {
         entry.outcome = "not_planned";
         await log(`${label}: not_planned ${entry.plan.code || ""} ${entry.plan.text}`);

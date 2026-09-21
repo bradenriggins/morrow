@@ -94,8 +94,31 @@ function activeFolderProof(value: unknown, extensionId: string, manifestVersion:
     && typeof value.challengeSha256 === "string" && BRIDGE_SHA256.test(value.challengeSha256);
 }
 
+const PRIVATE_BRIDGE_MAINTENANCE_REFUSALS = new Set([
+  "bridge_quiesce_busy",
+]);
+
+export class BridgeMaintenanceRefusalError extends Error {
+  readonly code: string;
+
+  constructor(code: string) {
+    super(code);
+    this.name = "BridgeMaintenanceRefusalError";
+    this.code = code;
+  }
+}
+
 function privateBridgeMaintenanceResult(control: BridgeMaintenanceControl, value: JsonObject): JsonObject {
   const source = isJsonObject(value.structuredContent) ? value.structuredContent : null;
+  const problem = source && isJsonObject(source.problem) ? source.problem : null;
+  if (value.isError === true && source && exactKeys(source, ["schema", "ok", "problem"])
+    && source.schema === "morrow.bridge-maintenance-result.v1" && source.ok === false
+    && problem && exactKeys(problem, ["schema", "code", "message", "recoverable"])
+    && problem.schema === "morrow.bridge.problem.v1" && typeof problem.code === "string"
+    && PRIVATE_BRIDGE_MAINTENANCE_REFUSALS.has(problem.code)
+    && typeof problem.message === "string" && typeof problem.recoverable === "boolean") {
+    throw new BridgeMaintenanceRefusalError(problem.code);
+  }
   if (value.isError === true || !source || typeof source.schema !== "string"
     || typeof source.extensionId !== "string" || !BRIDGE_EXTENSION_ID.test(source.extensionId)
     || typeof source.manifestVersion !== "string" || !BRIDGE_VERSION.test(source.manifestVersion)) {

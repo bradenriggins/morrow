@@ -410,6 +410,10 @@ test("Moodle Workshop executor reads, creates hidden, edits bounded settings, an
     assert.equal(prepared.data.visible, true);
     assert.equal(prepared.data.proof.required_capability, "moodle/course:manageactivities");
     assert.equal(prepared.data.proof.phase_change, "not_available");
+    assert.deepEqual(prepared.targets, [
+      { field: "course_id", label: "Course", name: "Peer assessment course" },
+      { field: "module_id", label: "Workshop", name: "Peer review of unit one" },
+    ]);
     assert.equal(JSON.stringify(prepared).includes(SESSION), false);
     assert.equal(JSON.stringify(prepared).includes("500"), false, "no draft item ID may leave the page");
 
@@ -551,6 +555,10 @@ test("Moodle Workshop executor reads, creates hidden, edits bounded settings, an
 
     // 9. The creation form read, then one hidden create with one POST.
     const creation = await creationForm();
+    assert.deepEqual(creation.targets, [
+      { field: "course_id", label: "Course", name: "Peer assessment course" },
+      { field: "section_id", label: "Section", name: "Section 3" },
+    ]);
     assert.equal(creation.ok, true, JSON.stringify(creation));
     assert.equal(creation.data.section_id, 7);
     assert.equal(creation.data.name, "");

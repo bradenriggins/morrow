@@ -929,8 +929,44 @@ function projectNonIdentityText(value: string, exactContext: PreparedLearnerText
 }
 
 function nonIdentityScalar(key: string): boolean {
-  return /^(?:(?:course|assignment|quiz|module|section|file|page|discussion|topic|question|item|group|rubric|context|account|target)[_.]?(?:id|count)|.*(?:score|grade|points|count|total|rows|limit|size|length|percent|status|generation|revision|index|timestamp|duration|attempt|page)|depth)$/iu.test(key);
+  return /^(?:(?:course|assignment|quiz|module|section|file|page|discussion|topic|question|item|group|rubric|context|account|target)[_.]?(?:id|count)|(?:parent)?sectionid|sectionnumber|sectionlist|cmlist|section|number|visibility|option[_.]?(?:label|value)|.*(?:score|grade|points|count|total|rows|limit|size|length|percent|status|generation|revision|index|timestamp|duration|attempt|page)|depth)$/iu.test(key);
 }
+
+function exactNumericAvailableOption(key: string, value: string): boolean {
+  return /^available(?:_|[A-Z])[A-Za-z0-9_]*$/u.test(key) && /^[0-9]+$/u.test(value);
+}
+
+function exactNumericEnumOption(value: JsonObject): boolean {
+  return typeof value.label === "string" && value.label === value.value && /^[0-9]+$/u.test(value.label);
+}
+
+function exactGradeDefinition(value: JsonObject): boolean {
+  const keys = Object.keys(value);
+  if (keys.length === 0 || keys.some((key) => !["type", "maximum_points", "scale_id"].includes(key))) return false;
+  if (!["none", "point", "scale"].includes(String(value.type))) return false;
+  if (value.maximum_points !== undefined && (typeof value.maximum_points !== "number" || !Number.isFinite(value.maximum_points))) return false;
+  if (value.scale_id !== undefined && !(/^[1-9][0-9]*$/u.test(String(value.scale_id)) || (Number.isSafeInteger(value.scale_id) && Number(value.scale_id) > 0))) return false;
+  return true;
+}
+
+const RESOURCE_CONTAINER_KIND = new Map<string, string>([
+  ["courses", "course"],
+  ["assignments", "assignment"],
+  ["quizzes", "quiz"],
+  ["modules", "module"],
+  ["activities", "module"],
+  ["sections", "section"],
+  ["files", "file"],
+  ["pages", "page"],
+  ["discussions", "discussion"],
+  ["topics", "topic"],
+  ["questions", "question"],
+  ["items", "item"],
+  ["groups", "group"],
+  ["rubrics", "rubric"],
+  ["contexts", "context"],
+  ["accounts", "account"],
+]);
 
 /**
  * The label the prepared snapshot already published for one roster identity.
@@ -957,7 +993,8 @@ function redactLearnerNumber(value: number, key: string, context: PreparedLearne
 }
 
 function redactLearnerKey(key: string, context: PreparedLearnerTextRedactionContext): string {
-  if (["schema", "provider", "course", "name", "id", "title", "type", "tool", "code", "status", "data", "result", "content", "text", "learnerToken", "student", "user", "author", "participant", "students", "users", "authors", "participants", "grade", "score"].includes(key)) return key;
+  if (["schema", "provider", "course", "name", "id", "title", "type", "tool", "code", "status", "data", "result", "content", "text", "learnerToken", "student", "user", "author", "participant", "students", "users", "authors", "participants", "grade", "score"].includes(key)
+    || nonIdentityScalar(key)) return key;
   const identity = context.identityById.get(key);
   const output = withoutUnrosteredAddresses(identity ? snapshotLearnerToken(context, identity) : redactKnownLearnerTextPrepared(key, context), context.addresses);
   if (containsSensitiveText(output)) throw new Error("privacy_sensitive_text_refused");
@@ -1246,7 +1283,7 @@ function projectValue(
       || inheritedLearnerPrivacy
       || Boolean(context.learnerRoster && context.learnerVault && context.learnerScope));
   if (typeof value === "string") {
-    if (nonIdentityScalar(scalarKey)) {
+    if (nonIdentityScalar(scalarKey) || exactNumericAvailableOption(scalarKey, value)) {
       return projectNonIdentityText(value, requiresLearnerRedaction ? preparedTextContext ?? learnerTextContext(context) : undefined);
     }
     return projectText(value, descriptor, context, requiresLearnerRedaction, preparedTextContext);
@@ -1256,6 +1293,7 @@ function projectValue(
     return value.map((item) => projectValue(item, descriptor, context, depth + 1, kind, inheritedLearnerPrivacy, preparedTextContext, scalarKey));
   }
   if (!isJsonObject(value)) return value;
+  const numericEnumOption = exactNumericEnumOption(value);
   const detectedIdentity = learnerIdentity(value, kind, preparedTextContext);
   const mayScrubUnrosteredCanvasIdentity = context.allowUnrosteredCanvasIdentities === true
     && (kind !== undefined || detectedIdentity !== null);
@@ -1270,6 +1308,7 @@ function projectValue(
   // it passes; a nested record that names somebody Morrow could not resolve is a
   // second person and is refused exactly as it would be at the top level.
   if (!sourceRedacted && kind && !detectedIdentity && Object.keys(value).length !== 0
+    && !(kind === "grade" && exactGradeDefinition(value))
     && !mayScrubUnrosteredCanvasIdentity
     && !((inheritedLearnerPrivacy || kind === "author" || kind === "member") && !hasIdentityRecordSignal(value))) {
     throw new Error("privacy_identity_record_unresolved");
@@ -1295,7 +1334,7 @@ function projectValue(
   }
   const resourceKind = typeof value.kind === "string" && /^(?:course|assignment|quiz|module|section|file|page|discussion|topic|question|item|group|rubric|context|account)$/iu.test(value.kind)
     ? value.kind
-    : scalarKey;
+    : RESOURCE_CONTAINER_KIND.get(normalizePrivacyKey(scalarKey)) ?? scalarKey;
   for (const [key, child] of Object.entries(value)) {
     const normalizedKey = normalizePrivacyKey(key);
     const allowField = descriptor.fieldPolicy === "scrub-sensitive" || descriptor.allowedFields.includes(key);
@@ -1310,7 +1349,7 @@ function projectValue(
       childKind,
       inheritedLearnerPrivacy || detectedIdentity !== null,
       textContext ?? preparedTextContext,
-      key === "id" ? `${resourceKind}_id` : key,
+      key === "id" ? `${resourceKind}_id` : numericEnumOption && (key === "label" || key === "value") ? `option_${key}` : key,
     );
     const safeKey = textContext ? redactLearnerKey(key, textContext) : key;
     if (Object.hasOwn(output, safeKey)) throw new Error("privacy_identity_key_collision");
@@ -1408,7 +1447,7 @@ function redactLearnerEgressPrepared(value: unknown, exactContext: PreparedLearn
         if (containsSensitiveText(structural)) throw new Error("privacy_sensitive_text_refused");
         return structural;
       }
-      if (nonIdentityScalar(scalarKey)) return projectNonIdentityText(candidate, exactContext);
+      if (nonIdentityScalar(scalarKey) || exactNumericAvailableOption(scalarKey, candidate)) return projectNonIdentityText(candidate, exactContext);
       if (scalarKey === "schema" && /^morrow\.[a-z0-9.-]+\.v[0-9]+$/u.test(candidate)) return candidate;
       if (scalarKey === "provider" && ["canvas", "moodle", "blackboard"].includes(candidate)) return candidate;
       if (scalarKey === "roles" && ["Student", "Teacher", "TA", "Observer", "Designer", "Non-editing teacher"].includes(candidate)) return candidate;
@@ -1418,6 +1457,7 @@ function redactLearnerEgressPrepared(value: unknown, exactContext: PreparedLearn
     }
     if (Array.isArray(candidate)) return candidate.map((entry) => walk(entry, depth + 1, kind, inheritedLearnerPrivacy, scalarKey));
     if (!isJsonObject(candidate)) return candidate;
+    const numericEnumOption = exactNumericEnumOption(candidate);
     if ((["image", "audio"].includes(String(candidate.type)) || candidate.encoding === "base64") && typeof candidate.data === "string") {
       throw new Error("privacy_opaque_artifact_refused");
     }
@@ -1426,6 +1466,7 @@ function redactLearnerEgressPrepared(value: unknown, exactContext: PreparedLearn
     const mayScrubUnrosteredCanvasIdentity = exactContext.allowUnrosteredCanvasIdentities === true
       && (kind !== undefined || detectedIdentity);
     if (kind && !learner && Object.keys(candidate).length !== 0
+      && !(kind === "grade" && exactGradeDefinition(candidate))
       && !((inheritedLearnerPrivacy || kind === "author" || kind === "member" || mayScrubUnrosteredCanvasIdentity)
         && !hasIdentityRecordSignal(candidate))) {
       throw new Error("privacy_identity_record_unresolved");
@@ -1442,7 +1483,7 @@ function redactLearnerEgressPrepared(value: unknown, exactContext: PreparedLearn
     }
     const resourceKind = typeof candidate.kind === "string" && /^(?:course|assignment|quiz|module|section|file|page|discussion|topic|question|item|group|rubric|context|account)$/iu.test(candidate.kind)
       ? candidate.kind
-      : scalarKey;
+      : RESOURCE_CONTAINER_KIND.get(normalizePrivacyKey(scalarKey)) ?? scalarKey;
     const output: JsonObject = {};
     if (learner) output.learnerToken = snapshotLearnerToken(exactContext, learner);
     for (const [key, child] of Object.entries(candidate)) {
@@ -1456,7 +1497,7 @@ function redactLearnerEgressPrepared(value: unknown, exactContext: PreparedLearn
       }
       const safeKey = redactLearnerKey(key, exactContext);
       if (Object.hasOwn(output, safeKey)) throw new Error("privacy_identity_key_collision");
-      Object.defineProperty(output, safeKey, { value: walk(child, depth + 1, identityRecordKind(key), inheritedLearnerPrivacy || detectedIdentity, key === "id" ? `${resourceKind}_id` : key), enumerable: true, writable: true, configurable: true });
+      Object.defineProperty(output, safeKey, { value: walk(child, depth + 1, identityRecordKind(key), inheritedLearnerPrivacy || detectedIdentity, key === "id" ? `${resourceKind}_id` : numericEnumOption && (key === "label" || key === "value") ? `option_${key}` : key), enumerable: true, writable: true, configurable: true });
     }
     return output;
   };

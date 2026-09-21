@@ -456,7 +456,7 @@ describe("approval review context", () => {
         return { structuredContent: {
           schema: "morrow.canvas-connector.result.v1", ok: true, provider: "moodle", commandKind: "invoke_read",
           result: {
-            ok: true, sent: true,
+            ok: true, sent: false,
             data: { name: "Old reflection", instructions: "<p>Review the unit.</p>", due_date: dueDate },
             targets: [{ field: "course_id", label: "Course", name: "Biology" }, { field: "module_id", label: "Activity", name: "Course reflection" }],
             snapshot_digest: "c".repeat(64),
@@ -528,6 +528,60 @@ describe("approval review context", () => {
         { field: "target_section_id", label: "Destination section", name: "Section 2: New section" },
       ],
       current: { current_section: "Section 1: New section" },
+    });
+  });
+
+  it("binds a Moodle grouping update to the exact fresh grouping", async () => {
+    const moodleBindingId = "moodle:demo:3";
+    const operation: ApprovalReviewOperation = {
+      state: "awaiting_approval",
+      publicToolName: "moodle_update_grouping",
+      sourceId,
+      sourceToolName: "moodle_update_grouping",
+      sourceBindingId: moodleBindingId,
+      plan: {
+        schema: "morrow.plan.v1",
+        tool: "moodle_update_grouping",
+        source: sourceId,
+        sourceTool: "moodle_update_grouping",
+        sourceBindingId: moodleBindingId,
+        arguments: {
+          course_id: 3,
+          grouping_id: 12,
+          name: "Reviewed grouping",
+          expected_digest: "d".repeat(64),
+          _morrow: { source_binding_id: moodleBindingId },
+        },
+      },
+    };
+    const context = await resolveApprovalReviewContext({
+      operation,
+      tools: [
+        moodleTool("moodle_update_grouping", "moodle_update_grouping", false, { type: "object" }, "moodle_get_course_groupings"),
+        moodleTool("moodle_get_course_groupings", "moodle_get_course_groupings", true, { type: "object", properties: { course_id: {} } }),
+        moodleTool("morrow_browser_bindings", "morrow_browser_bindings", true, { type: "object" }),
+      ],
+      read: async (publicName, args) => {
+        if (publicName === "morrow_browser_bindings") return { structuredContent: { schema: "morrow.browser-bindings.v1", bindings: [{ sourceBindingId: moodleBindingId, provider: "moodle", runtimeVerified: true, origin: "https://school.example", siteUrl: "https://school.example/moodle", courseId: "3" }] } };
+        expect(publicName).toBe("moodle_get_course_groupings");
+        expect(args).toEqual({ course_id: 3, _morrow: { source_binding_id: moodleBindingId } });
+        return { structuredContent: {
+          schema: "morrow.canvas-connector.result.v1", ok: true, provider: "moodle", commandKind: "invoke_read",
+          result: {
+            ok: true, sent: true,
+            data: { groupings: [{ grouping_id: "12", name: "Original grouping" }, { grouping_id: "13", name: "Another grouping" }] },
+            targets: [{ field: "course_id", label: "Course", name: "Moodle sandbox" }],
+            snapshot_digest: "d".repeat(64),
+          },
+        } };
+      },
+    });
+    expect(context).toEqual({
+      targets: [
+        { field: "course_id", label: "Course", name: "Moodle sandbox" },
+        { field: "grouping_id", label: "Grouping", name: "Original grouping" },
+      ],
+      current: { name: "Original grouping" },
     });
   });
 
@@ -689,6 +743,39 @@ describe("approval review context", () => {
       },
     });
     expect(context).toEqual({ targets: [{ field: "course_id", label: "Course", name: "Biology" }, { field: "section_id", label: "Section", name: "Section 2: New section" }] });
+  });
+
+  it("names a Workshop creation review from its exact fresh course and section", async () => {
+    const moodleBindingId = "moodle:demo:workshop";
+    const operation: ApprovalReviewOperation = {
+      state: "awaiting_approval", publicToolName: "moodle_create_workshop", sourceId, sourceToolName: "moodle_create_workshop", sourceBindingId: moodleBindingId,
+      plan: { schema: "morrow.plan.v1", tool: "moodle_create_workshop", source: sourceId, sourceTool: "moodle_create_workshop", sourceBindingId: moodleBindingId,
+        arguments: { course_id: 3, section_id: 16, name: "Peer workshop", expected_digest: "b".repeat(64), _morrow: { source_binding_id: moodleBindingId } } },
+    };
+    const context = await resolveApprovalReviewContext({
+      operation,
+      tools: [
+        moodleTool("moodle_create_workshop", "moodle_create_workshop", false, { type: "object" }, "moodle_get_workshop_creation_form"),
+        moodleTool("moodle_get_workshop_creation_form", "moodle_get_workshop_creation_form", true, { type: "object", properties: { course_id: {}, section_id: {} } }),
+        moodleTool("morrow_browser_bindings", "morrow_browser_bindings", true, { type: "object" }),
+      ],
+      read: async (publicName, args) => {
+        if (publicName === "morrow_browser_bindings") return { structuredContent: { schema: "morrow.browser-bindings.v1", bindings: [{ sourceBindingId: moodleBindingId, provider: "moodle", runtimeVerified: true, origin: "https://school.example", siteUrl: "https://school.example/moodle", courseId: "3" }] } };
+        expect(publicName).toBe("moodle_get_workshop_creation_form");
+        expect(args).toEqual({ course_id: 3, section_id: 16, _morrow: { source_binding_id: moodleBindingId } });
+        return { structuredContent: {
+          schema: "morrow.canvas-connector.result.v1", ok: true, provider: "moodle", commandKind: "invoke_read",
+          result: { ok: true, sent: true, data: { course_id: 3, section_id: 16, name: "" }, targets: [
+            { field: "course_id", label: "Course", name: "Moodle sandbox" },
+            { field: "section_id", label: "Section", name: "Section 1: Topic 1" },
+          ], snapshot_digest: "b".repeat(64) },
+        } };
+      },
+    });
+    expect(context).toEqual({ targets: [
+      { field: "course_id", label: "Course", name: "Moodle sandbox" },
+      { field: "section_id", label: "Section", name: "Section 1: Topic 1" },
+    ] });
   });
 
   it("reads the exact Moodle URL values before approving its update", async () => {

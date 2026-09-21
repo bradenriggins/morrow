@@ -131,6 +131,7 @@ test("one activity is copied, removed, or placed exactly, against the complete c
     ],
   });
   const stateBody = () => JSON.stringify([{
+    error: false,
     data: JSON.stringify({
       course: model.course,
       section: model.section.map((entry) => ({ ...entry })),
@@ -209,7 +210,7 @@ test("one activity is copied, removed, or placed exactly, against the complete c
         if (model.formatAfterUpdate) model.format = model.formatAfterUpdate;
         if (model.formUnreadableAfterUpdate) model.courseFormReadable = false;
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify([{ data: null }]));
+        response.end(JSON.stringify([{ error: false, data: null }]));
         return;
       }
     }

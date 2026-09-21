@@ -21,7 +21,7 @@
     "@morrow/bridge-protocol": "workspace:*",
     "@morrow/contracts": "workspace:*",
     "@morrow/gateway-core": "workspace:*",
-    "zod": "^4.2.0"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "ws": "^8.18.3",

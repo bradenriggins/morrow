@@ -97,7 +97,7 @@ export interface BrowserReadbackPlan {
   readonly schema: "morrow.browser-readback-plan.v1";
   readonly strategy: string;
   readonly readOperation: CanvasReadbackOperation;
-  readonly arguments: Readonly<Record<string, string | readonly string[]>>;
+  readonly arguments: Readonly<Record<string, string | number | readonly string[]>>;
   readonly assertions: readonly BrowserReadbackAssertion[];
   readonly targetId?: string;
   readonly targetField?: string;
@@ -637,6 +637,24 @@ function equivalent(actual: unknown, expected: unknown): boolean {
   return Number.isFinite(leftDate) && Number.isFinite(rightDate) && leftDate === rightDate;
 }
 
+const HTML_ASSERTION_INPUTS = new Set([
+  "wiki_page_body",
+]);
+
+function normalizeCanvasHtmlSerialization(value: string): string {
+  return value.replace(
+    /<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b([^<>]*?)\s*\/>/gi,
+    (_match, tag: string, attributes: string) => `<${tag}${attributes.trimEnd()}>`,
+  );
+}
+
+function equivalentAssertion(actual: unknown, assertion: BrowserReadbackAssertion): boolean {
+  if (equivalent(actual, assertion.expected)) return true;
+  if (!HTML_ASSERTION_INPUTS.has(assertion.inputName)
+    || typeof actual !== "string" || typeof assertion.expected !== "string") return false;
+  return normalizeCanvasHtmlSerialization(actual) === normalizeCanvasHtmlSerialization(assertion.expected);
+}
+
 function recordsAtPath(value: unknown, path: readonly string[]): unknown[] {
   if (!path?.length) return [];
   if (Array.isArray(value)) return value.flatMap((entry) => recordsAtPath(entry, path));
@@ -807,7 +825,7 @@ export function evaluateBrowserReadback(
       for (const assertion of plan.assertions || []) {
         const values = assertedValues(record, assertion.paths);
         if (values.length === 0) return verification("unconfirmed", plan, "requested_fields_not_returned");
-        if (!values.some((value) => equivalent(value, assertion.expected))) {
+        if (!values.some((value) => equivalentAssertion(value, assertion))) {
           return verification("mismatch", plan, `requested_field_mismatch:${assertion.inputName}`);
         }
       }
@@ -842,7 +860,7 @@ export function evaluateBrowserReadback(
   for (const assertion of plan.assertions || []) {
     const values = assertedValues(record, assertion.paths);
     if (values.length === 0) return verification("unconfirmed", plan, "requested_fields_not_returned");
-    if (!values.some((value) => equivalent(value, assertion.expected))) {
+    if (!values.some((value) => equivalentAssertion(value, assertion))) {
       return verification("mismatch", plan, `requested_field_mismatch:${assertion.inputName}`);
     }
   }
@@ -856,7 +874,7 @@ export function matchesReadbackAssertions(
 ): boolean {
   return assertions.every((assertion) => {
     const values = assertedValues(record, assertion.paths);
-    return values.length > 0 && values.some((value) => equivalent(value, assertion.expected));
+    return values.length > 0 && values.some((value) => equivalentAssertion(value, assertion));
   });
 }
 
@@ -868,7 +886,7 @@ export function readbackFieldValue(record: unknown, field: string): unknown {
 export interface CanvasRecoveryRead {
   readonly readTool: string;
   readonly readOperationKey?: string;
-  readonly arguments: Readonly<Record<string, string | readonly string[]>>;
+  readonly arguments: Readonly<Record<string, string | number | readonly string[]>>;
 }
 
 export interface CanvasRecoveryDescriptor {
@@ -919,7 +937,7 @@ function retainableRead(read: CanvasRecoveryRead | undefined): boolean {
 
 function recoveryRead(
   operation: CanvasReadbackOperation | undefined,
-  argumentsValue: Readonly<Record<string, string | readonly string[]>> | null,
+  argumentsValue: Readonly<Record<string, string | number | readonly string[]>> | null,
 ): CanvasRecoveryRead | undefined {
   if (!operation || !argumentsValue) return undefined;
   return {

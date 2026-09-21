@@ -100,6 +100,7 @@ test("the Moodle Qbank route creates one hidden bank and realizes its category a
 
   const state = {
     activities: [{ id: 5, module: "page", sectionid: Number(SECTION_ID), name: "Overview", visible: true }],
+    banks: [],
     sections: [{ id: Number(SECTION_ID), number: Number(SECTION_NUMBER), title: "Assessment" }],
     creationSessionQueue: [],
     creationView: "core",
@@ -118,8 +119,8 @@ test("the Moodle Qbank route creates one hidden bank and realizes its category a
   const control = (name, value, type = "hidden") => `<input type="${type}" name="${name}" value="${value}">`;
   const qbankForm = (view, sesskey, identity) => {
     const moduleName = view === "wrong-module" ? "page" : "qbank";
-    const bankType = view === "wrong-type" ? "system" : "standard";
-    const visible = view === "visible" ? "1" : "0";
+    const bankType = view === "wrong-type" ? "system" : view === "live-defaults" ? "" : "standard";
+    const visible = view === "visible" || view === "live-defaults" ? "1" : "0";
     const action = view === "query-action" ? "/course/modedit.php?add=qbank&course=2" : view === "external-action" ? "https://outside.example/course/modedit.php" : "/course/modedit.php";
     const fileArea = view === "file-manager" ? '<div data-fieldtype="filemanager"><input type="hidden" name="attachments" value="99"></div>' : "";
     const extraDraft = view === "extra-draft" ? control("attachments[itemid]", "990011") : "";
@@ -129,12 +130,12 @@ test("the Moodle Qbank route creates one hidden bank and realizes its category a
       ${control("module", "41")}${control("modulename", moduleName)}${control("instance", identity.update && identity.update !== "0" ? "1" : "0")}
       ${control("sr", "0")}${control("beforemod", "0")}${control("sesskey", sesskey)}${control("_qf__mod_qbank_mod_form", "1")}
       ${control("visible", visible)}${control("type", bankType)}
-      <input type="text" name="name" value="${identity.update && identity.update !== "0" ? (state.savedNameOverride || state.activities.find((entry) => String(entry.id) === identity.update)?.name || "") : ""}">
+      <input type="text" name="name" value="${identity.update && identity.update !== "0" ? (state.savedNameOverride || state.banks.find((entry) => String(entry.id) === identity.update)?.name || "") : ""}">
       <textarea name="introeditor[text]">${introduction}</textarea>${control("introeditor[format]", "1")}${control("introeditor[itemid]", "884401")}
       ${control("showdescription", "0")}<input type="checkbox" name="showdescription" value="1">
       <input type="text" name="cmidnumber" value="">
       ${fileArea}${extraDraft}
-      <input type="submit" name="submitbutton2" value="Save and return to course">
+      <input type="submit" name="submitbutton2" value="Save and return to question bank list">
       <input type="submit" name="submitbutton" value="Save and display">
       <input type="submit" name="cancel" value="Cancel">
     </form></body></html>`;
@@ -196,7 +197,7 @@ test("the Moodle Qbank route creates one hidden bank and realizes its category a
         return;
       }
       const update = url.searchParams.get("update") || "";
-      if (url.search === `?update=${update}&return=0` && state.activities.some((entry) => String(entry.id) === update)) {
+      if (url.search === `?update=${update}&return=0` && state.banks.some((entry) => String(entry.id) === update)) {
         response.writeHead(200, { "content-type": "text/html" });
         response.end(activityForm(update));
         return;
@@ -212,20 +213,22 @@ test("the Moodle Qbank route creates one hidden bank and realizes its category a
         response.end(creationForm());
         return;
       }
-      state.activities = [...state.activities, {
-        id: Number(NEW_MODULE_ID) + state.activities.length - 1,
-        module: "qbank",
-        sectionid: Number(SECTION_ID),
+      state.banks = [...state.banks, {
+        id: Number(NEW_MODULE_ID) + state.banks.length,
         name: values.get("name") || "",
-        visible: values.get("visible") === "1",
       }];
-      response.writeHead(303, { location: `/course/view.php?id=${COURSE_ID}#module-${state.activities[state.activities.length - 1].id}` });
+      response.writeHead(303, { location: `/question/banks.php?courseid=${COURSE_ID}` });
       response.end();
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/question/banks.php" && url.search === `?courseid=${COURSE_ID}`) {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><body class="path-question"><main>${state.banks.map((bank) => `<a href="/mod/qbank/view.php?id=${bank.id}"><span aria-hidden="true"></span></a><a href="/mod/qbank/view.php?id=${bank.id}">${bank.name}</a>`).join("")}</main></body>`);
       return;
     }
     if (request.method === "GET" && url.pathname === "/mod/qbank/view.php") {
       const moduleId = url.searchParams.get("id") || "";
-      if (!state.activities.some((entry) => String(entry.id) === moduleId && entry.module === "qbank")) { response.writeHead(404).end(); return; }
+      if (!state.banks.some((entry) => String(entry.id) === moduleId)) { response.writeHead(404).end(); return; }
       const target = state.bankRedirect === "no-cat"
         ? `/question/edit.php?cmid=${moduleId}`
         : state.bankRedirect === "foreign-module"
@@ -271,7 +274,7 @@ test("the Moodle Qbank route creates one hidden bank and realizes its category a
         return response;
       };
     }, [pathname, method]);
-    const SOURCE_PATHS = ["/lib/ajax/service.php", "/course/modedit.php", "/mod/qbank/view.php", "/question/edit.php"];
+    const SOURCE_PATHS = ["/lib/ajax/service.php", "/course/modedit.php", "/question/banks.php", "/mod/qbank/view.php", "/question/edit.php"];
     const sourceRequests = () => requests.filter((entry) => SOURCE_PATHS.includes(entry.pathname)).length;
     const bankRouteRequests = () => requests.filter((entry) => entry.pathname === "/mod/qbank/view.php").length;
 
@@ -295,7 +298,6 @@ test("the Moodle Qbank route creates one hidden bank and realizes its category a
     for (const [view, error] of [
       ["wrong-module", "moodle_qbank_module_type_unexpected"],
       ["wrong-type", "moodle_qbank_module_type_unexpected"],
-      ["visible", "moodle_qbank_form_invalid"],
       ["file-manager", "moodle_qbank_file_area_unexpected"],
       ["extra-draft", "moodle_qbank_file_area_unexpected"],
       ["described", "moodle_qbank_form_invalid"],
@@ -305,7 +307,7 @@ test("the Moodle Qbank route creates one hidden bank and realizes its category a
       state.creationView = view;
       assert.deepEqual(await execute(operations.creationForm, { course_id: 2, section_id: 7 }), { ok: false, sent: false, status: 200, error }, view);
     }
-    state.creationView = "core";
+    state.creationView = "live-defaults";
     assert.equal(posts.length, 0);
 
     // 4. The reviewed creation form.
@@ -357,7 +359,7 @@ test("the Moodle Qbank route creates one hidden bank and realizes its category a
       error: "moodle_form_validation_failed",
     });
     assert.equal(posts.length, 1);
-    assert.equal(state.activities.length, 1);
+    assert.equal(state.banks.length, 0);
     state.postOutcome = "saved";
 
     // 7. One approved creation, one POST, and an exact saved readback.
@@ -373,7 +375,7 @@ test("the Moodle Qbank route creates one hidden bank and realizes its category a
     assert.equal(sent.get("add"), "qbank");
     assert.equal(sent.get("course"), COURSE_ID);
     assert.equal(sent.get("section"), SECTION_NUMBER);
-    assert.equal(sent.get("submitbutton2"), "Save and return to course");
+    assert.equal(sent.get("submitbutton2"), "Save and return to question bank list");
     assert.equal(sent.get("submitbutton"), null, "only the reviewed submit control is sent");
     assert.equal(sent.get("introeditor[text]"), "");
     assert.equal(sent.get("showdescription"), "0");
@@ -503,14 +505,14 @@ test("the Moodle Qbank route creates one hidden bank and realizes its category a
       error: "moodle_qbank_create_unconfirmed",
     });
     assert.equal(posts.length, lostCreateBefore + 1);
-    assert.equal(state.activities.filter((entry) => entry.name === "Lost response bank").length, 1, "the site kept the change the browser could not confirm");
+    assert.equal(state.banks.filter((entry) => entry.name === "Lost response bank").length, 1, "the site kept the change the browser could not confirm");
 
     // 15. A saved name that is not the approved name is applied-or-unknown.
     const driftForm = await execute(operations.creationForm, { course_id: 2, section_id: 7 });
     const driftBefore = posts.length;
     state.savedNameOverride = "Name the site kept";
     assert.deepEqual(await execute(operations.create, { course_id: 2, section_id: 7, name: "Requested bank name", expected_digest: driftForm.snapshot_digest }), {
-      // The POST follows Moodle's own redirect, so the status is the course page's.
+      // The POST follows Moodle's own redirect, so the status is the bank list page's.
       ok: false, sent: true, status: 200, outcomeUnknown: true,
       verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "moodle_qbank_create_not_verified" },
       error: "moodle_qbank_create_not_verified",

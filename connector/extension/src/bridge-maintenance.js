@@ -300,7 +300,11 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     try {
       if (await loadFence()) fail("bridge_quiesce_active");
       const entries = await receiptLedger();
-      if (entries.some((entry) => entry.state === "pending" || entry.state === "unknown") || activeWrites.size > 0) {
+      // An unknown receipt is durable evidence that Morrow must not replay that
+      // write. Chrome keeps it across an unpacked-extension reload, so it does
+      // not represent work that can still advance in this worker. Only a
+      // pending or in-memory write must finish before the file layer changes.
+      if (entries.some((entry) => entry.state === "pending") || activeWrites.size > 0) {
         fail("bridge_quiesce_busy");
       }
       const current = await identity();

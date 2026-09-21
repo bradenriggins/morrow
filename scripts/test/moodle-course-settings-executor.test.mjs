@@ -252,7 +252,7 @@ test("Moodle course settings executor changes one bounded group per POST and rep
       draftStates.set(drafts.notes, "empty");
       const sesskey = state.sessionQueue.shift() || state.session;
       response.writeHead(200, { "content-type": "text/html" });
-      response.end(courseForm(state, "/course/edit.php?id=2", sesskey, drafts));
+      response.end(courseForm(state, "/course/edit.php", sesskey, drafts));
       return;
     }
     if (request.method === "POST" && url.pathname === "/repository/draftfiles_ajax.php" && url.search === "?action=list") {
@@ -430,7 +430,7 @@ test("Moodle course settings executor changes one bounded group per POST and rep
     assert.equal(changed.ok, true, JSON.stringify(changed));
     assert.equal(changed.verification.status, "verified");
     assert.equal(posts.length, 1);
-    assert.equal(posts[0].query, "?id=2");
+    assert.equal(posts[0].query, "");
     assert.equal(posts[0].values.get("fullname"), "Nursing Fundamentals I");
     assert.equal(posts[0].values.get("idnumber"), "NURS-101-2026");
     assert.equal(posts[0].values.get("enddate[enabled]"), "1");

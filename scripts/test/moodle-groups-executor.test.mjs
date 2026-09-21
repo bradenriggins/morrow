@@ -243,7 +243,7 @@ test("one group, membership, grouping, or activity group mode changes exactly, a
         + `<td><a href="/group/grouping.php?id=${grouping.id}" title="Edit"><i class="icon"></i></a>`
         + `<a href="/group/grouping.php?id=${grouping.id}&amp;delete=1" title="Delete"><i class="icon"></i></a>`
         + `<a href="/group/assign.php?id=${grouping.id}" title="Show groups in grouping"><i class="icon"></i></a></td></tr>`;
-    }).join("");
+    }).join("") || '<tr><td colspan="4"></td></tr>';
     return `<!doctype html><html><body class="path-group course-2"><select id="tertiary-nav"><option>Groupings</option></select>`
       + `<table class="generaltable table table-hover table-striped"><thead><tr><th>Grouping</th><th>Groups</th><th>Activities</th><th>Edit</th></tr></thead>`
       + `<tbody>${rows}</tbody></table></body></html>`;
@@ -257,6 +257,7 @@ test("one group, membership, grouping, or activity group mode changes exactly, a
     <input type="submit" name="saveanddisplay" value="Save">
   </form></body></html>`;
   const stateBody = () => JSON.stringify([{
+    error: false,
     data: JSON.stringify({
       course: { ...model.course },
       section: model.section.map((entry) => ({ ...entry })),
@@ -397,7 +398,7 @@ test("one group, membership, grouping, or activity group mode changes exactly, a
       record.method_name = call.methodname;
       if (target.searchParams.get("sesskey") !== SESSKEY || target.searchParams.get("info") !== call.methodname) { reply.writeHead(400).end(); return; }
       if (call.methodname === "core_group_get_course_groups") {
-        json(JSON.stringify([{ data: JSON.stringify(model.groups.map((entry) => ({
+        json(JSON.stringify([{ error: false, data: JSON.stringify(model.groups.map((entry) => ({
           id: Number(entry.id), courseid: 2, name: entry.name, description: "", descriptionformat: 1,
           idnumber: `IDN-${entry.id}`, visibility: entry.visibility, participation: entry.participation,
         }))) }]));
@@ -408,7 +409,7 @@ test("one group, membership, grouping, or activity group mode changes exactly, a
         bodies.push({ pathname: target.pathname, search: target.search, body: JSON.stringify(call.args) });
         const activity = model.cm.find((entry) => entry.id === String(call.args.ids[0]));
         if (activity) activity.groupmode = { cm_nogroups: 0, cm_separategroups: 1, cm_visiblegroups: 2 }[call.args.action];
-        json(JSON.stringify([{ data: null }]));
+        json(JSON.stringify([{ error: false, data: null }]));
         return;
       }
     }
@@ -483,8 +484,17 @@ test("one group, membership, grouping, or activity group mode changes exactly, a
       method: "native_groupings_page", route: "/group/groupings.php",
       required_capability: "moodle/course:managegroups", scope: "every_grouping_of_the_approved_course",
     });
+    assert.deepEqual(groupings.targets, [{ field: "course_id", label: "Course", name: "Foundations of Care" }]);
     assert.equal(countWrites(), beforeRead);
     assert.equal(JSON.stringify(groupings).includes(SESSKEY), false);
+
+    const savedGroupings = model.groupings;
+    model.groupings = [];
+    const emptyGroupings = await run(operations.groupings, { course_id: 2 });
+    assert.equal(emptyGroupings.ok, true, JSON.stringify(emptyGroupings));
+    assert.deepEqual(emptyGroupings.data.groupings, []);
+    assert.match(emptyGroupings.snapshot_digest, /^[a-f0-9]{64}$/);
+    model.groupings = savedGroupings;
 
     // 2. Strict arguments, before anything is read or sent.
     await noWrite(await run(operations.groupings, { course_id: 2, extra: true }), countWrites(), "moodle_groups_arguments_invalid");

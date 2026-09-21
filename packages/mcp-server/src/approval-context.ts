@@ -17,6 +17,13 @@ const ITEM_BANK_REVIEW_READ_TIMEOUT_MS = 20_000;
 const REVIEW_READ_BUDGET = 200;
 const ITEM_BANK_UPDATE_TOOL = "canvas_item_bank_update_item";
 const ITEM_BANK_GUARD_KIND = "item_bank_entry_image_alt";
+const MOODLE_ACTIVITY_CREATE_TOOLS = new Set([
+  "moodle_create_assignment", "moodle_create_bigbluebuttonbn", "moodle_create_book", "moodle_create_choice",
+  "moodle_create_database", "moodle_create_feedback", "moodle_create_forum", "moodle_create_glossary",
+  "moodle_create_label", "moodle_create_lesson", "moodle_create_page", "moodle_create_qbank_activity",
+  "moodle_create_quiz", "moodle_create_subsection", "moodle_create_url", "moodle_create_wiki", "moodle_create_workshop",
+  "moodle_create_resource_file", "moodle_create_folder_file", "moodle_create_imscp_package", "moodle_create_scorm_package",
+]);
 /*
  * The review reads one course name for each course the bank reaches, up to this
  * many. Every course is still listed: the ones past this limit are shown by
@@ -246,7 +253,7 @@ function moodleRead(result: JsonObject): {
     || content.provider !== "moodle" || content.commandKind !== "invoke_read") return null;
   const browser = object(content.result);
   const data = object(browser?.data);
-  if (!browser || browser.ok !== true || browser.sent !== true || !data || !Array.isArray(browser.targets)
+  if (!browser || browser.ok !== true || typeof browser.sent !== "boolean" || !data || !Array.isArray(browser.targets)
     || typeof browser.snapshot_digest !== "string" || !/^[0-9a-f]{64}$/.test(browser.snapshot_digest)) return null;
   return {
     data,
@@ -1001,7 +1008,7 @@ export async function resolveApprovalReviewContext(
       return { targets: [], unnamed: true, ...(read.limited ? { limited: true } : {}) };
     }
     let targets = [...result.targets];
-    let current = operation.state === "awaiting_approval" && !["moodle_create_page", "moodle_create_label", "moodle_create_url", "moodle_create_resource_file", "moodle_create_folder_file", "moodle_create_imscp_package", "moodle_create_scorm_package", "moodle_create_assignment", "moodle_create_quiz", "moodle_create_forum", "moodle_create_choice"].includes(browserMapping.upstreamName)
+    let current = operation.state === "awaiting_approval" && !MOODLE_ACTIVITY_CREATE_TOOLS.has(browserMapping.upstreamName)
       ? browserMapping.upstreamName === "moodle_update_url" ? currentMoodleUrlContent(result.data) : currentContent(args, result.data, browserMapping.upstreamName) : {};
     if (/^moodle_(?:show|hide)_(?:section|activity)$/.test(browserMapping.upstreamName)) {
       const section = browserMapping.upstreamName.endsWith("_section");
@@ -1030,6 +1037,16 @@ export async function resolveApprovalReviewContext(
       if (activityName) targets.push({ field: "module_id", label: "Activity", name: activityName });
       if (destinationName) targets.push({ field: "target_section_id", label: "Destination section", name: destinationName });
       if (operation.state === "awaiting_approval" && sourceName) current = { ...current, current_section: sourceName };
+    }
+    if (browserMapping.upstreamName === "moodle_update_grouping") {
+      const groupingId = moodleCourseId(args.grouping_id);
+      const groupings = Array.isArray(result.data.groupings) ? result.data.groupings : [];
+      const matches = groupings.filter((entry) => sameId(object(entry)?.grouping_id, groupingId || ""));
+      const grouping = matches.length === 1 ? object(matches[0]) : null;
+      const name = grouping ? exactText(grouping.name) : null;
+      if (!name) return { targets: [], unnamed: true };
+      targets.push({ field: "grouping_id", label: "Grouping", name });
+      if (operation.state === "awaiting_approval") current = { ...current, name };
     }
     if (["moodle_show_book_chapter", "moodle_hide_book_chapter", "moodle_delete_book_chapter"].includes(browserMapping.upstreamName)) {
       const chapterId = moodleCourseId(args.chapter_id);

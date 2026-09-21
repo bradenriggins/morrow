@@ -13,7 +13,7 @@
  * `/course/modedit.php?add=qbank&course=<course>&sectionid=<section>&return=0`.
  * The Qbank form itself forces `visible = 0` and `type = standard`, adds one
  * name field, one intro editor and one ID-number field, and offers
- * "Save and return to course" as `submitbutton2`. It adds no completion,
+ * "Save and return to question bank list" as `submitbutton2`. It adds no completion,
  * grade, group or availability control.
  * https://github.com/moodle/moodle/blob/v5.2.2/public/mod/qbank/mod_form.php#L30-L94
  * The instance callback writes one `qbank` record and nothing else.
@@ -57,10 +57,10 @@ export async function executeMoodleQbankInPage(rawInput) {
   const BANK_TYPE = "standard";
   const STATE_METHOD = "core_courseformat_get_state";
   const MODEDIT_PATH = "/course/modedit.php";
+  const BANKS_LIST_PATH = "/question/banks.php";
   const BANK_ROUTE_PATH = "/mod/qbank/view.php";
   const BANK_PAGE_PATH = "/question/edit.php";
   const ADD_QUESTION_PATH = "/question/bank/editquestion/addquestion.php";
-  const COURSE_VIEW_PATH = "/course/view.php";
   const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
   const MAX_FORM_ENTRIES = 400;
   const MAX_FORM_BYTES = 256 * 1024;
@@ -302,12 +302,33 @@ export async function executeMoodleQbankInPage(rawInput) {
     const number = sectionNumber(matches[0].number);
     return number === "" ? null : { id: sectionId, number, name: collapsed(matches[0].title || matches[0].rawtitle) || "Selected course section" };
   };
-  const qbankModuleOf = (state, moduleId) => {
-    const matches = state.activities.filter((entry) => object(entry) && id(entry.id) === moduleId);
-    if (matches.length !== 1 || String(matches[0].module || "") !== MODULE) return null;
-    const sectionId = id(matches[0].sectionid);
-    const name = collapsed(matches[0].name);
-    return sectionId && name && matches[0].visible === false ? { id: moduleId, sectionId, name } : null;
+  const questionBanksState = async (context, courseId) => {
+    const endpoint = urlFor(context, BANKS_LIST_PATH, { courseid: courseId });
+    const page = await readPage(context, endpoint);
+    if (page.error) return { error: "moodle_qbank_list_unavailable", status: page.status };
+    const namesById = new Map();
+    for (const anchor of page.document.querySelectorAll("a[href]")) {
+      let target;
+      try { target = new URL(anchor.getAttribute("href"), endpoint); } catch { continue; }
+      if (target.origin !== context.origin || target.pathname !== `${context.basePath}${BANK_ROUTE_PATH}`) continue;
+      const moduleId = id(target.searchParams.get("id"));
+      const name = collapsed(anchor.textContent, MAX_NAME_LENGTH);
+      if (!moduleId || target.searchParams.size !== 1 || target.hash || target.username || target.password) {
+        return { error: "moodle_qbank_list_invalid", status: page.status };
+      }
+      const names = namesById.get(moduleId) || [];
+      if (name) names.push(name);
+      namesById.set(moduleId, names);
+    }
+    if (namesById.size > MAX_ACTIVITIES) return { error: "moodle_qbank_list_invalid", status: page.status };
+    const banks = [];
+    for (const [moduleId, names] of namesById) {
+      // Moodle 5.2 renders an empty icon link and one named link for each bank.
+      // The named link is the identity proof; any other count is ambiguous.
+      if (names.length !== 1) return { error: "moodle_qbank_list_invalid", status: page.status };
+      banks.push({ id: moduleId, name: names[0] });
+    }
+    return { status: page.status, banks };
   };
   const entriesFor = (form) => {
     let values;
@@ -339,7 +360,7 @@ export async function executeMoodleQbankInPage(rawInput) {
     return matches.length === 1 ? matches[0] : null;
   };
   const saveAndReturnSubmit = (form) => {
-    // mod_qbank names its "Save and return to course" control submitbutton2.
+    // mod_qbank names its "Save and return to question bank list" control submitbutton2.
     const buttons = [...form.querySelectorAll('input[type="submit"][name="submitbutton2"], button[type="submit"][name="submitbutton2"]')]
       .filter((element) => !element.disabled && typeof element.value === "string" && element.value.length <= 500);
     return buttons.length === 1 ? { name: buttons[0].name, value: buttons[0].value } : null;
@@ -365,19 +386,38 @@ export async function executeMoodleQbankInPage(rawInput) {
   const qbankFormState = (documentValue, context, endpoint, identity, requireEmptyIntroduction) => {
     const form = nativeForm(documentValue, endpoint);
     if (!form) return { error: "moodle_qbank_form_invalid" };
-    const entries = entriesFor(form);
-    if (!entries) return { error: "moodle_qbank_form_invalid" };
+    const rawEntries = entriesFor(form);
+    if (!rawEntries) return { error: "moodle_qbank_form_invalid" };
+    let entries = rawEntries;
     const byName = (name) => entries.filter(([entryName]) => entryName === name).map(([, value]) => value);
     const one = (name, expected) => {
       const values = byName(name);
       return values.length === 1 && (expected === undefined || values[0] === expected);
     };
     if (!one("sesskey", context.sesskey)) return { error: "moodle_form_session_mismatch" };
-    if (!one("modulename", MODULE) || !one("type", BANK_TYPE)) return { error: "moodle_qbank_module_type_unexpected" };
+    if (!one("modulename", MODULE)) return { error: "moodle_qbank_module_type_unexpected" };
+    const hiddenControl = (name, allowed) => {
+      const controls = [...form.querySelectorAll(`[name="${name}"]`)];
+      return controls.length === 1 && controls[0].tagName === "INPUT"
+        && String(controls[0].getAttribute("type") || "").toLowerCase() === "hidden"
+        && !controls[0].disabled && allowed.has(String(controls[0].value || ""));
+    };
+    if (!hiddenControl("type", requireEmptyIntroduction ? new Set(["", BANK_TYPE]) : new Set([BANK_TYPE]))) {
+      return { error: "moodle_qbank_module_type_unexpected" };
+    }
     for (const [name, value] of Object.entries(identity)) {
       if (!one(name, value)) return { error: "moodle_qbank_form_invalid" };
     }
-    if (!one("visible", "0")) return { error: "moodle_qbank_form_invalid" };
+    if (!hiddenControl("visible", requireEmptyIntroduction ? new Set(["0", "1"]) : new Set(["0"]))) {
+      return { error: "moodle_qbank_form_invalid" };
+    }
+    if (requireEmptyIntroduction) {
+      // Moodle 5.2's PHP form declares these exact safe defaults, but the
+      // generic modedit data pass can render its pre-normalized values instead.
+      // Freeze the native hidden controls to the declared Qbank defaults before
+      // the form is reviewed or sent, then verify the saved module is hidden.
+      entries = entries.map(([name, value]) => name === "visible" ? [name, "0"] : name === "type" ? [name, BANK_TYPE] : [name, value]);
+    }
     if (!one("name") || !one("introeditor[text]")) return { error: "moodle_qbank_form_invalid" };
     // The description is never returned. Moodle rich text can carry draft file
     // references, and phase one neither sets nor changes a description, so the
@@ -458,14 +498,22 @@ export async function executeMoodleQbankInPage(rawInput) {
   const readActivity = async (context, courseId, moduleId) => {
     const state = await courseState(context, courseId);
     if (state.error) return failure(state.error, state.status);
-    const module = qbankModuleOf(state, moduleId);
-    if (!module) return failure("moodle_qbank_module_target_invalid", state.status);
+    const listed = await questionBanksState(context, courseId);
+    if (listed.error) return failure(listed.error, listed.status);
+    const banks = listed.banks.filter((entry) => entry.id === moduleId);
+    if (banks.length !== 1) return failure("moodle_qbank_module_target_invalid", listed.status);
     const endpoint = endpointForActivity(context, moduleId);
     const page = await readPage(context, endpoint);
     if (page.error) return failure(page.error, page.status);
     const form = qbankFormState(page.document, context, endpoint, { update: moduleId, course: courseId, return: "0" }, false);
     if (form.error) return failure(form.error, page.status);
-    if (!form.name || form.name !== module.name) return failure("moodle_qbank_module_target_invalid", page.status);
+    if (!form.name || form.name !== banks[0].name) return failure("moodle_qbank_module_target_invalid", page.status);
+    const sectionValues = form.entries.filter(([name]) => name === "section").map(([, value]) => value);
+    const sections = sectionValues.length === 1
+      ? state.sections.filter((entry) => object(entry) && sectionNumber(entry.number) === sectionValues[0]) : [];
+    const sectionId = sections.length === 1 ? id(sections[0].id) : "";
+    if (!sectionId) return failure("moodle_qbank_module_target_invalid", page.status);
+    const module = { id: moduleId, sectionId, name: banks[0].name };
     const data = activityData(courseId, module, form);
     return {
       ok: true, sent: true, status: page.status, data,
@@ -489,8 +537,8 @@ export async function executeMoodleQbankInPage(rawInput) {
       });
     } catch { return { error: "moodle_qbank_create_unconfirmed" }; }
     if (!sameContext(context, currentContext())) return { error: "moodle_qbank_create_unconfirmed", status: response.status };
-    // "Save and return to course" ends on the course page. A response that
-    // stays on the form is the native validation page, which saved nothing.
+    // "Save and return to question bank list" ends on that course's bank
+    // list. A response that stays on the form is the native validation page.
     let landed;
     try { landed = new URL(response.url); } catch { return { error: "moodle_qbank_create_unconfirmed", status: response.status }; }
     if (!response.ok) return { error: "moodle_qbank_create_unconfirmed", status: response.status };
@@ -498,8 +546,9 @@ export async function executeMoodleQbankInPage(rawInput) {
     // itself, which saved nothing. moodle-executor.js:1186 reports that exact
     // ending with the same code, and the service worker recognises it.
     if (landed.pathname === `${context.basePath}${MODEDIT_PATH}`) return { error: "moodle_form_validation_failed", status: response.status, validation: true };
-    if (landed.origin !== context.origin || landed.pathname !== `${context.basePath}${COURSE_VIEW_PATH}`
-      || landed.searchParams.get("id") !== courseId) return { error: "moodle_qbank_create_unconfirmed", status: response.status };
+    if (landed.origin !== context.origin || landed.pathname !== `${context.basePath}${BANKS_LIST_PATH}`
+      || landed.searchParams.get("courseid") !== courseId || landed.searchParams.size !== 1 || landed.hash
+      || landed.username || landed.password) return { error: "moodle_qbank_create_unconfirmed", status: response.status };
     return { status: response.status };
   };
   const runCreation = async (context, args) => {
@@ -511,21 +560,21 @@ export async function executeMoodleQbankInPage(rawInput) {
     if (refreshed.snapshot_digest !== args.expectedDigest || refreshed.form.action !== before.form.action) {
       return failure("moodle_expected_digest_mismatch", refreshed.status);
     }
-    // The activity list read immediately before the dispatch is the baseline
-    // the new module is found against, so nothing already there can match.
-    const existingIds = new Set(refreshed.state.activities.map((entry) => id(object(entry) ? entry.id : "")).filter(Boolean));
+    // The native bank list read immediately before the dispatch is the
+    // baseline, so nothing already there can be mistaken for the new module.
+    const baseline = await questionBanksState(context, args.courseId);
+    if (baseline.error) return failure(baseline.error, baseline.status);
+    const existingIds = new Set(baseline.banks.map((entry) => entry.id));
     const posted = await postCreation(context, args.courseId, refreshed.form, args.name);
     if (posted.error) {
       if (posted.notSent === true) return failure(posted.error, refreshed.status);
       if (posted.validation === true) return appliedButRefused(posted.error, posted.status);
       return unconfirmedWrite(posted.error, posted.status);
     }
-    const after = await courseState(context, args.courseId);
+    const after = await questionBanksState(context, args.courseId);
     if (after.error) return unconfirmedWrite("moodle_qbank_create_unconfirmed", posted.status);
-    const created = after.activities.filter((entry) => object(entry) && !existingIds.has(id(entry.id))
-      && String(entry.module || "") === MODULE && collapsed(entry.name) === args.name
-      && id(entry.sectionid) === args.targetId && entry.visible === false);
-    const moduleId = created.length === 1 ? id(created[0].id) : "";
+    const created = after.banks.filter((entry) => !existingIds.has(entry.id) && entry.name === args.name);
+    const moduleId = created.length === 1 ? created[0].id : "";
     if (!moduleId) return unconfirmedWrite("moodle_qbank_create_not_verified", posted.status);
     const saved = await readActivity(context, args.courseId, moduleId);
     if (!saved.ok) return unconfirmedWrite("moodle_qbank_create_not_verified", posted.status);

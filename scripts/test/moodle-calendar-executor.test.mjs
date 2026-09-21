@@ -217,7 +217,7 @@ test("course calendar events are read, written, and removed in the configured ci
       const call = JSON.parse(Buffer.concat(chunks).toString("utf8"))[0];
       const send = (payload) => {
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify([payload]));
+        response.end(JSON.stringify([{ error: false, ...payload }]));
       };
       if (target.searchParams.get("sesskey") !== SESSKEY || target.searchParams.get("info") !== call.methodname) {
         send({ error: "Invalid session key" });

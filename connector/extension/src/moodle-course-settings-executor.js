@@ -321,7 +321,11 @@ export async function executeMoodleCourseSettingsInPage(rawInput) {
       if (String(form.getAttribute("method") || "").toLowerCase() !== "post") return false;
       const action = form.getAttribute("action");
       if (!action) return false;
-      try { return sameRoute(new URL(action, endpoint).href, endpoint); } catch { return false; }
+      try {
+        const route = new URL(action, endpoint);
+        return route.origin === endpoint.origin && route.pathname === endpoint.pathname && !route.hash
+          && (!route.search || route.search === endpoint.search);
+      } catch { return false; }
     });
     return matches.length === 1 ? matches[0] : null;
   };

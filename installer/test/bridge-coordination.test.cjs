@@ -63,6 +63,20 @@ test("a quiesce dispatch that fails keeps its maintenance lease", async () => {
   assert.equal(releases, 0);
 });
 
+test("a Bridge busy refusal releases its maintenance lease", async () => {
+  let releases = 0;
+  const refusal = Object.assign(new Error("bridge_quiesce_busy"), { code: "bridge_quiesce_busy" });
+  await assert.rejects(() => stageBridgeSwap({
+    acquire: async () => undefined,
+    prepare: async ({ requestQuiescence }) => requestQuiescence({}),
+    requestQuiescence: async () => { throw refusal; },
+    resumeQuiescence: async () => assert.fail("resume must not run"),
+    refresh: async () => assert.fail("refresh must not run"),
+    release: async () => { releases += 1; }
+  }), (error) => error === refusal);
+  assert.equal(releases, 1);
+});
+
 test("a failure before quiescence releases its maintenance lease", async () => {
   let releases = 0;
   await assert.rejects(() => stageBridgeSwap({

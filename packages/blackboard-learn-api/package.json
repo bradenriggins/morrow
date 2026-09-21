@@ -21,7 +21,7 @@
     "@modelcontextprotocol/server": "2.0.0",
     "@morrow/contracts": "workspace:*",
     "@morrow/gateway-core": "workspace:*",
-    "zod": "^4.2.0"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0"

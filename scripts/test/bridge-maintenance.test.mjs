@@ -152,7 +152,7 @@ test("Store-installed Bridge reports signed status without reading an unpacked-f
   assert.deepEqual(testFixture.calls, [], "Store installs never enter file-layer maintenance");
 });
 
-test("pending and unknown write receipts block quiescence before any file-layer handoff", async () => {
+test("pending writes block quiescence and durable unknown receipts survive a safe file-layer handoff", async () => {
   const testFixture = fixture();
   const maintenance = testFixture.create();
   await maintenance.beginWrite({ operationId: "operation:pending-write", effectReceiptId: "effect:pending-write" });
@@ -160,7 +160,13 @@ test("pending and unknown write receipts block quiescence before any file-layer 
   await maintenance.finishWrite("operation:pending-write", "known");
   await maintenance.beginWrite({ operationId: "operation:unknown-write", effectReceiptId: "effect:unknown-write" });
   await maintenance.finishWrite("operation:unknown-write", "unknown");
-  await rejectsCode(() => maintenance.control({ action: "quiesce" }), "bridge_quiesce_busy");
+  const quiesced = await maintenance.control({ action: "quiesce" });
+  assert.equal(quiesced.quiescent, true);
+  assert.deepEqual(testFixture.values.get("morrowBridgeMaintenanceReceipts"), [{
+    operationId: "operation:unknown-write",
+    effectReceiptId: "effect:unknown-write",
+    state: "unknown",
+  }]);
 });
 
 test("quiesce installs its in-memory admission fence before waiting for the active-folder proof", async () => {

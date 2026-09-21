@@ -17,7 +17,7 @@
     "package:win": "electron-builder --config electron-builder.config.cjs --win nsis --x64 --publish never"
   },
   "devDependencies": {
-    "electron": "44.2.0",
+    "electron": "44.4.3",
     "electron-builder": "26.15.3"
   },
   "dependencies": {

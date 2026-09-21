@@ -516,7 +516,8 @@ export async function executeMoodleQuizStructureInPage(rawInput) {
     return { payload, status: response.status };
   };
   const acceptedResponse = (kind, payload) => {
-    if (!object(payload) || payload.error !== undefined || payload.exception !== undefined) return false;
+    if (!object(payload) || (payload.error !== undefined && payload.error !== false && payload.error !== null)
+      || (payload.exception !== undefined && payload.exception !== false && payload.exception !== null)) return false;
     if (kind === "move") return payload.visible === true;
     if (kind === "mark") return typeof payload.instancemaxmark === "string" && typeof payload.newsummarks === "string";
     if (kind === "pagebreak") return object(payload.slots);

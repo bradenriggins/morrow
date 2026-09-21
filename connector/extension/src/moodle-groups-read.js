@@ -90,7 +90,9 @@ export async function executeMoodleCourseGroupsInPage(rawInput) {
     if (raw === "limit") return raw;
     try {
       const payload = JSON.parse(raw);
-      return Array.isArray(payload) && payload.length === 1 && !object(payload[0]?.error) && typeof payload[0]?.data === "string" ? JSON.parse(payload[0].data) : null;
+      if (!Array.isArray(payload) || payload.length !== 1 || !object(payload[0]) || payload[0].error !== false
+        || (payload[0].exception !== undefined && payload[0].exception !== false)) return null;
+      return typeof payload[0].data === "string" ? JSON.parse(payload[0].data) : payload[0].data;
     } catch { return null; }
   };
   const members = async (groupId) => {
@@ -103,6 +105,15 @@ export async function executeMoodleCourseGroupsInPage(rawInput) {
     if (raw === "limit") return raw;
     try { return JSON.parse(raw); } catch { return null; }
   };
+  const rawCourse = await ajax("core_courseformat_get_state", { courseid: Number(courseId) });
+  if (rawCourse === "expired") return fail("moodle_groups_context_changed");
+  if (rawCourse === "limit") return incomplete();
+  if (!object(rawCourse) || !object(rawCourse.course) || id(rawCourse.course.id) !== courseId) {
+    return fail("moodle_course_groups_invalid");
+  }
+  const courseHeadings = [...globalThis.document.querySelectorAll("h1")].map((heading) => collapsed(heading.textContent, 1_000)).filter(Boolean);
+  if (courseHeadings.length !== 1) return fail("moodle_course_groups_invalid");
+  const courseName = courseHeadings[0];
   const rawGroups = await ajax("core_group_get_course_groups", { courseid: Number(courseId) });
   if (rawGroups === "expired") return fail("moodle_groups_context_changed");
   if (rawGroups === "limit") return incomplete();
@@ -141,6 +152,13 @@ export async function executeMoodleCourseGroupsInPage(rawInput) {
   const data = { course_id: courseId, groups };
   const snapshotDigest = await digest(data);
   return snapshotDigest
-    ? { ok: true, sent: false, complete: true, data, snapshot_digest: snapshotDigest }
+    ? {
+      ok: true,
+      sent: false,
+      complete: true,
+      data,
+      targets: [{ field: "course_id", label: "Course", name: courseName }],
+      snapshot_digest: snapshotDigest,
+    }
     : fail("moodle_groups_digest_unavailable");
 }

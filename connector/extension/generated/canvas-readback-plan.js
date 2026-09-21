@@ -524,6 +524,20 @@ function equivalent(actual, expected) {
     const rightDate = Date.parse(right);
     return Number.isFinite(leftDate) && Number.isFinite(rightDate) && leftDate === rightDate;
 }
+const HTML_ASSERTION_INPUTS = new Set([
+    "wiki_page_body",
+]);
+function normalizeCanvasHtmlSerialization(value) {
+    return value.replace(/<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b([^<>]*?)\s*\/>/gi, (_match, tag, attributes) => `<${tag}${attributes.trimEnd()}>`);
+}
+function equivalentAssertion(actual, assertion) {
+    if (equivalent(actual, assertion.expected))
+        return true;
+    if (!HTML_ASSERTION_INPUTS.has(assertion.inputName)
+        || typeof actual !== "string" || typeof assertion.expected !== "string")
+        return false;
+    return normalizeCanvasHtmlSerialization(actual) === normalizeCanvasHtmlSerialization(assertion.expected);
+}
 function recordsAtPath(value, path) {
     if (!path?.length)
         return [];
@@ -686,7 +700,7 @@ export function evaluateBrowserReadback(plan, readResult) {
                 const values = assertedValues(record, assertion.paths);
                 if (values.length === 0)
                     return verification("unconfirmed", plan, "requested_fields_not_returned");
-                if (!values.some((value) => equivalent(value, assertion.expected))) {
+                if (!values.some((value) => equivalentAssertion(value, assertion))) {
                     return verification("mismatch", plan, `requested_field_mismatch:${assertion.inputName}`);
                 }
             }
@@ -725,7 +739,7 @@ export function evaluateBrowserReadback(plan, readResult) {
         const values = assertedValues(record, assertion.paths);
         if (values.length === 0)
             return verification("unconfirmed", plan, "requested_fields_not_returned");
-        if (!values.some((value) => equivalent(value, assertion.expected))) {
+        if (!values.some((value) => equivalentAssertion(value, assertion))) {
             return verification("mismatch", plan, `requested_field_mismatch:${assertion.inputName}`);
         }
     }
@@ -735,7 +749,7 @@ export function evaluateBrowserReadback(plan, readResult) {
 export function matchesReadbackAssertions(record, assertions) {
     return assertions.every((assertion) => {
         const values = assertedValues(record, assertion.paths);
-        return values.length > 0 && values.some((value) => equivalent(value, assertion.expected));
+        return values.length > 0 && values.some((value) => equivalentAssertion(value, assertion));
     });
 }
 /** Reads one named field from one record using the readback name comparison. */

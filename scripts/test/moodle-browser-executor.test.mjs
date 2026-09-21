@@ -221,6 +221,29 @@ function listInput(expiresAt = Date.now() + 60_000) {
   };
 }
 
+test("Moodle course listing exposes only course IDs and names", async () => {
+  await withMoodlePage(async () => {
+    globalThis.fetch = async () => new Response(JSON.stringify([{ data: { courses: [{
+      id: 2,
+      fullname: "My first course",
+      summary: "Private course summary",
+      contacts: [{ id: 3, fullname: "Course Teacher" }],
+      progress: 75,
+    }] } }]), { status: 200, headers: { "content-type": "application/json" } });
+    const result = await executeMoodleInPage(JSON.stringify(listInput()));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(result.data, {
+      courses: [{ id: "2", name: "My first course" }],
+      offset: 0,
+      limit: 25,
+      next_offset: null,
+      complete: true,
+    });
+    assert.equal(JSON.stringify(result).includes("Course Teacher"), false);
+    assert.equal(JSON.stringify(result).includes("Private course summary"), false);
+  });
+});
+
 function pageForm(state, moduleId = 6, editorItemId = 0) {
   return `<!doctype html><html><body><form method="post" action="/course/modedit.php?update=${moduleId}&amp;return=0">
     <input name="update" value="${moduleId}"><input name="course" value="2"><input name="modulename" value="page"><input name="section" value="4">
@@ -3033,10 +3056,13 @@ test("Moodle executor verifies bounded Forum and Choice forms over HTTPS", async
     const action = creation ? "/course/modedit.php?add=forum&amp;course=2&amp;sectionid=7&amp;return=0" : `/course/modedit.php?update=${moduleId}&amp;return=0`;
     const assessment = state.assessment || { type: "none" };
     return `<!doctype html><html><body><form method="post" action="${action}">${identity("forum", moduleId, creation)}
-      <input name="name" value="${state.name}"><textarea name="introeditor[text]">${state.instructions}</textarea><input name="introeditor[format]" value="1"><input name="introeditor[itemid]" value="7001">
+      <input name="name" value="${state.name}"><textarea name="introeditor[text]">${state.instructions}</textarea><input name="introeditor[format]" value="1"><input name="introeditor[itemid]" value="${creation ? 7001 : 7003}"><input name="filemanager_attachment" value="${creation ? 8101 : 8103}">
       ${select("type", ["general", "qanda", "single"], state.forumType)}${select("forcesubscribe", ["0", "1", "2", "3"], state.subscriptionMode)}${select("trackingtype", ["0", "1", "2"], state.trackingType)}
       ${date("duedate", state.dueDate)}${date("cutoffdate", state.cutoffAt)}${select("grade_forum[modgrade_type]", ["none", "point"], assessment.type)}<input name="grade_forum[modgrade_point]" value="${assessment.maximum_points || 100}">
-      <input name="visible" value="${state.visible ? 1 : 0}"><input name="completion" value="2"><input name="availability" value="forum-availability"><input name="sesskey" value="synthetic-session"><input type="submit" name="submitbutton" value="Save and return to course"></form></body></html>`;
+      <input name="visible" value="${state.visible ? 1 : 0}"><input name="completion" value="0">
+      <select name="completiongradeitemnumber"><option value="0" selected>Rating</option></select><input name="completionpassgrade" value="0">
+      <input type="checkbox" name="completionpostsenabled" value="1" checked><input name="completionposts" value="1">
+      <input name="availability" value="forum-availability"><input name="sesskey" value="synthetic-session"><input type="submit" name="submitbutton" value="Save and return to course"></form></body></html>`;
   };
   const choiceForm = (state, { moduleId = 18, creation = false } = {}) => {
     const action = creation ? "/course/modedit.php?add=choice&amp;course=2&amp;sectionid=7&amp;return=0" : `/course/modedit.php?update=${moduleId}&amp;return=0`;
@@ -3095,6 +3121,9 @@ test("Moodle executor verifies bounded Forum and Choice forms over HTTPS", async
     request.on("end", () => {
       const values = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
       posts.push(values);
+      if (values.get("completion") === "0" && ["completiongradeitemnumber", "completionpassgrade", "completionpostsenabled", "completionposts"].some((name) => values.has(name))) {
+        response.writeHead(200, { "content-type": "text/html" }); response.end(forumForm(defaults.forum, { creation: values.get("add") === "forum" })); return;
+      }
       if (values.get("add") === "forum") { createdForum = saveForum(values); response.writeHead(303, { location: "/mod/forum/view.php?id=71" }).end(); return; }
       if (values.get("add") === "choice") { createdChoice = saveChoice(values); response.writeHead(303, { location: "/mod/choice/view.php?id=72" }).end(); return; }
       if (values.get("update") === "71") { createdForum = saveForum(values, createdForum); response.writeHead(303, { location: "/course/view.php?id=2" }).end(); return; }
@@ -3125,6 +3154,7 @@ test("Moodle executor verifies bounded Forum and Choice forms over HTTPS", async
     assert.equal(posts.length, postsBeforeInvalidForum);
     const forumCreated = await execute(forumCreateWrite, { course_id: 2, section_id: 7, name: "Evidence discussion", instructions: "<p>Use one cited source.</p>", forum_type: "qanda", subscription_mode: "2", tracking_type: "1", assessment: { type: "point", maximum_points: 10 }, due_date: { year: 2026, month: 9, day: 8, hour: 9, minute: 30 }, cutoff_at: { year: 2026, month: 9, day: 9, hour: 9, minute: 30 }, expected_digest: forumPreparation.snapshot_digest });
     assert.equal(forumCreated.ok, true, JSON.stringify(forumCreated));
+    for (const name of ["completiongradeitemnumber", "completionpassgrade", "completionpostsenabled", "completionposts"]) assert.equal(posts.at(-1).has(name), false, name);
     assert.deepEqual(forumCreated.data.assessment, { type: "point", maximum_points: 10 });
     assert.equal(forumCreated.data.visible, false);
     assert.deepEqual(forumCreated.targets, [{ field: "course_id", label: "Course", name: "Moodle evidence" }, { field: "section_id", label: "Section", name: "Forum and Choice" }]);

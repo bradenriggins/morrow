@@ -30,6 +30,24 @@ test("created Canvas pages use their page identity and retain exact content chec
   assert.equal(evaluateBrowserReadback(plan, { ok: true, status: 200, data: { ...page, body: "<p>Different content.</p>" } }).status, "mismatch");
 });
 
+test("created Canvas pages accept Canvas self-closing void-element serialization", () => {
+  const requestedBody = '<p>Before.</p><p><img src="https://example.edu/image.png"></p><p>After.</p>';
+  const savedBody = '<p>Before.</p><p><img src="https://example.edu/image.png" /></p><p>After.</p>';
+  const page = { page_id: "92", url: "image-page", title: "Image page", body: savedBody, published: false };
+  const plan = planBrowserReadback(catalog.operations, operation("canvas_create_page_courses"), {
+    course_id: "42",
+    wiki_page_title: page.title,
+    wiki_page_body: requestedBody,
+    wiki_page_published: false,
+  }, page);
+  assert.equal(evaluateBrowserReadback(plan, { ok: true, status: 200, data: page }).status, "verified");
+  assert.equal(evaluateBrowserReadback(plan, {
+    ok: true,
+    status: 200,
+    data: { ...page, body: savedBody.replace("image.png", "different.png") },
+  }).status, "mismatch");
+});
+
 test("connector-owned readback proves New Quiz postconditions", () => {
   const quizPlan = verify(
     "canvas_update_single_quiz",

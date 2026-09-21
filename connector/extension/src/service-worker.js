@@ -6028,8 +6028,11 @@ chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
     const pending = pendingItemBankLaunches.get(tabId);
     const expected = pending?.launchUrl || [...itemBankCredentials.values()].find((credential) => credential.tabId === tabId)?.launchUrl;
     if (!expected || change.url !== expected) clearItemBankCredentialsForTab(tabId);
-    void canvasTabChanged(tabId);
   }
+  // A same-URL reload can replace an expired Moodle session with a valid one.
+  // Republish after the completed load so the runtime sees the freshly probed
+  // binding even when Chrome reports no URL change.
+  if (change.url || change.status === "complete") void canvasTabChanged(tabId);
   if (change.status !== "complete" || !tab.url?.startsWith(httpUrl("/pair/"))) return;
   void chrome.storage.local.get("pairing").then(({ pairing }) => {
     if (pairing?.approvalUrl === tab.url) return pollPairing();

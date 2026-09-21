@@ -75,8 +75,8 @@
     "onlyBuiltDependencies": ["esbuild"]
   },
   "devDependencies": {
-    "@types/node": "^24.3.0",
-    "playwright": "^1.62.1",
+    "@types/node": "^24.13.6",
+    "playwright": "^1.63.0",
     "typescript": "^5.9.2",
     "vitest": "^4.1.11"
   }

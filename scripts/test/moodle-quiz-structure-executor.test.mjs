@@ -211,6 +211,7 @@ test("Moodle Quiz slot operations change one slot, prove the whole layout, and f
         applyPageBreak(slotId, fields.get("value"));
         payload = { slots: Object.fromEntries(state.slots.map((slot, index) => [index + 1, { id: slot.id, slot: index + 1, page: slot.page }])) };
       }
+      payload = payload ? { error: false, ...payload } : payload;
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(payload));
       return;

@@ -89,6 +89,7 @@ function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbac
   const storageChanged = event();
   const permissionAdded = event();
   const permissionRemoved = event();
+  const tabsUpdated = event();
   const granted = new Set(initialLocal.siteAnchors?.length ? [coursePermission] : []);
   const permissionRemovals = [];
   const createdTabs = [];
@@ -191,7 +192,7 @@ function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbac
           ? { ok: true, profile: { origin: courseOrigin, id: "7" } }
           : null,
       onRemoved: noOpEvent(),
-      onUpdated: noOpEvent(),
+      onUpdated: tabsUpdated,
     },
     scripting: {
       executeScript: async (injection) => {
@@ -221,6 +222,7 @@ function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbac
     scriptExecutions,
     session,
     storageChanged,
+    tabsUpdated,
     catalogWasHeld: () => catalogHeld,
   };
 }
@@ -488,6 +490,20 @@ async function existingCanvasListenerScenario() {
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(providerReads, 1);
   assert.equal(value.scriptExecutions.some((injection) => injection.files?.includes("src/canvas-content.js")), false);
+}
+
+async function sameUrlReloadPublicationScenario() {
+  const value = fixture();
+  await importWorker("same-url-reload-publication");
+  const socket = await authenticate(value);
+  const before = socket.sent.filter((message) => message.schema === "morrow.bridge.bindings.v1").length;
+  assert.equal(value.tabsUpdated.listeners.length, 1);
+  value.tabsUpdated.listeners[0](9, { status: "complete" }, { id: 9, url: `${courseOrigin}/courses/42` });
+  const after = await eventually(() => {
+    const messages = socket.sent.filter((message) => message.schema === "morrow.bridge.bindings.v1");
+    return messages.length > before ? messages.length : 0;
+  });
+  assert.equal(after, before + 1);
 }
 
 async function latePermissionScenario() {
@@ -1128,6 +1144,7 @@ const scenarios = {
   "started-write": startedWriteScenario,
   "socket-read": socketReadScenario,
   "existing-canvas-listener": existingCanvasListenerScenario,
+  "same-url-reload-publication": sameUrlReloadPublicationScenario,
   "late-permission": latePermissionScenario,
   "command-admission-cancel": commandAdmissionCancellationScenario,
   "edit-policy-cancel": () => editPolicyCancellationScenario("cancel"),
@@ -1200,6 +1217,10 @@ test("socket closure fences a provider read still checking its course session", 
 
 test("a ready Canvas listener completes a read when script reinjection is unavailable", async () => {
   await isolatedScenario("existing-canvas-listener");
+});
+
+test("a same-URL course reload republishes the freshly probed binding", async () => {
+  await isolatedScenario("same-url-reload-publication");
 });
 
 test("Disconnect invalidates pending course access and compensates a late grant", async () => {

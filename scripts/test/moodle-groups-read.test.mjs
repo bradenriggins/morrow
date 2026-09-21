@@ -14,7 +14,7 @@ test("Moodle group map uses the core group list and native GET member read with 
   const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-groups-")); const key = join(directory, "key.pem"); const certificate = join(directory, "certificate.pem");
   execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", key, "-out", certificate], { stdio: "ignore" });
   let origin = ""; let browser; const requests = []; let mode = "complete"; let listDelayMs = 0;
-  const response = (value) => JSON.stringify([{ data: JSON.stringify(value) }]);
+  const response = (value) => JSON.stringify([{ error: false, data: value }]);
   const groups = () => mode === "oversize"
     ? Array.from({ length: 501 }, (_, index) => ({ id: index + 1, courseid: 2, name: `Group ${index + 1}`, visibility: 0, participation: true }))
     : mode === "wrong-course"
@@ -30,11 +30,15 @@ test("Moodle group map uses the core group list and native GET member read with 
   };
   const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, async (request, reply) => {
     const target = new URL(request.url || "/", origin); requests.push({ method: request.method, path: target.pathname, search: target.search });
-    if (target.pathname === "/course/view.php") return reply.end(`<!doctype html><body class="course-2"><script>var M={cfg:${JSON.stringify({ wwwroot: origin, sesskey: "private-session", userId: 3, courseId: 2 })}}</script></body>`);
+    if (target.pathname === "/course/view.php") return reply.end(`<!doctype html><body class="course-2"><h1>Foundations of Care</h1><script>var M={cfg:${JSON.stringify({ wwwroot: origin, sesskey: "private-session", userId: 3, courseId: 2 })}}</script></body>`);
     if (target.pathname === "/lib/ajax/service.php") {
       assert.equal(request.method, "POST");
       const chunks = []; for await (const chunk of request) chunks.push(chunk); const call = JSON.parse(Buffer.concat(chunks).toString())[0];
-      assert.equal(call.methodname, "core_group_get_course_groups"); assert.deepEqual(call.args, { courseid: 2 });
+      assert.deepEqual(call.args, { courseid: 2 });
+      if (call.methodname === "core_courseformat_get_state") {
+        return reply.end(response({ course: { id: 2, fullname: "Foundations of Care" }, section: [], cm: [] }));
+      }
+      assert.equal(call.methodname, "core_group_get_course_groups");
       if (listDelayMs) await new Promise((resolve) => setTimeout(resolve, listDelayMs));
       return reply.end(response(groups()));
     }
@@ -59,6 +63,7 @@ test("Moodle group map uses the core group list and native GET member read with 
       { id: "9", name: "Team B", visibility: 2, participation: false, membership: [{ user_id: "3" }] },
     ] });
     assert.equal(JSON.stringify(current).includes("student@example.edu"), false);
+    assert.deepEqual(current.targets, [{ field: "course_id", label: "Course", name: "Foundations of Care" }]);
     assert.equal(requests.filter((request) => request.method === "POST" && request.path !== "/lib/ajax/service.php").length, 0);
     assert.equal(requests.some((request) => request.path === "/group/members.php" || request.path.includes("/mod/")), false);
     const beforeExpired = fixtureCount();

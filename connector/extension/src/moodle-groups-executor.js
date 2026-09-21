@@ -285,7 +285,8 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
     let payload;
     try { payload = typeof raw === "string" ? JSON.parse(raw) : null; } catch { payload = null; }
     const entry = Array.isArray(payload) && payload.length === 1 && object(payload[0]) ? payload[0] : null;
-    if (!entry || entry.error !== undefined || entry.exception !== undefined) {
+    if (!entry || (entry.error !== undefined && entry.error !== false && entry.error !== null)
+      || (entry.exception !== undefined && entry.exception !== false && entry.exception !== null)) {
       return write ? { unconfirmed: "moodle_groups_write_unconfirmed", status: response.status } : { error, status: response.status };
     }
     return { data: entry.data, status: response.status };
@@ -563,8 +564,13 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
     if (page.error) return page;
     const tables = [...page.document.querySelectorAll("table")];
     if (tables.length !== 1) return { error: "moodle_course_groupings_invalid", status: page.status };
-    const rows = [...tables[0].querySelectorAll("tbody > tr")];
+    let rows = [...tables[0].querySelectorAll("tbody > tr")];
     if (rows.length > MAX_GROUPINGS) return { incomplete: true, status: page.status };
+    if (rows.length === 1) {
+      const cells = [...rows[0].querySelectorAll(":scope > td")];
+      if (cells.length === 1 && cells[0].getAttribute("colspan") === "4"
+        && !String(cells[0].textContent || "").trim() && !cells[0].querySelector("*")) rows = [];
+    }
     const linkTarget = (cell, path, expectedSearch) => {
       const found = [...cell.querySelectorAll("a[href]")].map((link) => {
         let target;
@@ -713,6 +719,15 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
     const data = contentData(state);
     return { state, data, status: response.status, snapshotDigest: await digest(data) };
   };
+  const courseTarget = (course) => ({
+    field: "course_id",
+    label: "Course",
+    name: collapsed(course?.fullname || course?.name)
+      || (() => {
+        const headings = [...globalThis.document.querySelectorAll("h1")].map((heading) => collapsed(heading.textContent)).filter(Boolean);
+        return headings.length === 1 ? headings[0] : "Moodle course";
+      })(),
+  });
 
   const exactKeys = (value, keys) => object(value) && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
   const optionalKeys = (value, required, optional) => object(value)
@@ -1257,6 +1272,8 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
     if (!args) return failure("moodle_groups_arguments_invalid");
 
     if (definition.kind === "groupings_read") {
+      const course = await courseState(context, args.courseId);
+      if (course.error) return failure(course.error, course.status);
       const state = await groupingsState(context, args.courseId);
       if (state.error) return failure(state.error, state.status);
       if (state.incomplete) return failure("moodle_course_groupings_incomplete", state.status);
@@ -1274,6 +1291,7 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
             scope: "every_grouping_of_the_approved_course",
           },
         },
+        targets: [courseTarget(course.state.course)],
         snapshot_digest: state.snapshotDigest,
       };
     }

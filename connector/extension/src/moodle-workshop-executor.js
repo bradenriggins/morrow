@@ -147,6 +147,7 @@ export async function executeMoodleWorkshopInPage(rawInput) {
     return /^(?:0|[1-9][0-9]{0,5})$/.test(text) ? text : "";
   };
   const validString = (value, maximum) => typeof value === "string" && value.length <= maximum && !value.includes("\u0000");
+  const collapsed = (value, maximum = 1_000) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, maximum);
   const hasEmbeddedFile = (value) => /(?:draftfile\.php\/|@@PLUGINFILE@@|<\s*(?:img|audio|video|source|track|object|embed|iframe)\b|\b(?:src|poster)\s*=\s*["']?\s*(?:data:|blob:))/i.test(String(value));
   const validDate = (value) => {
     if (!object(value) || Object.keys(value).length !== 5 || !DATE_PARTS.every((key) => Number.isSafeInteger(value[key]))) return false;
@@ -438,7 +439,7 @@ export async function executeMoodleWorkshopInPage(rawInput) {
     if (!object(value) || !object(value.course) || id(value.course.id) !== courseId
       || !Array.isArray(value.section) || value.section.length > MAX_STATE_ENTRIES
       || !Array.isArray(value.cm) || value.cm.length > MAX_STATE_ENTRIES) return { error: "moodle_workshop_state_invalid", status: response.status };
-    return { status: response.status, sections: value.section, activities: value.cm };
+    return { status: response.status, course: value.course, sections: value.section, activities: value.cm };
   };
   const loadForm = async (context, descriptor) => {
     const endpoint = urlFor(context, MODEDIT_PATH, descriptor.route);
@@ -517,8 +518,15 @@ export async function executeMoodleWorkshopInPage(rawInput) {
     if (matches.length !== 1) return { error: "moodle_workshop_section_target_invalid", status: state.status };
     const number = sectionNumberOf(matches[0].number);
     if (!number) return { error: "moodle_workshop_section_target_invalid", status: state.status };
-    return { status: state.status, sectionNumber: number };
+    return {
+      status: state.status,
+      course: state.course,
+      section: matches[0],
+      sectionNumber: number,
+      sectionName: collapsed(matches[0].title || matches[0].rawtitle) || `Section ${number}`,
+    };
   };
+  const courseTarget = (course) => ({ field: "course_id", label: "Course", name: collapsed(course?.fullname || course?.name) || "Moodle course" });
   const filesRefusal = (form) => {
     if (form.fileManagers.some(({ state }) => state === "nonempty")) return "moodle_workshop_form_files_refused";
     return form.fileManagers.some(({ state }) => state !== "empty") ? "moodle_workshop_form_files_unverified" : "";
@@ -712,8 +720,13 @@ export async function executeMoodleWorkshopInPage(rawInput) {
     if (definition.kind === "read") {
       const args = moduleArguments(input.arguments, courseId);
       if (!args) return failure("moodle_workshop_arguments_invalid");
+      const state = await courseState(context, args.courseId);
+      if (state.error) return failure(state.error, state.status);
       const form = await loadForm(context, settingsDescriptor(args.courseId, args.moduleId));
       if (form.error) return failure(form.error, form.status);
+      const module = state.activities.filter((entry) => object(entry) && id(entry.id) === args.moduleId && entry.module === MODULE);
+      const name = one(form.values, "name");
+      if (module.length !== 1 || collapsed(module[0].name) !== name) return failure("moodle_workshop_module_target_invalid", form.status);
       return {
         ok: true,
         sent: true,
@@ -722,6 +735,7 @@ export async function executeMoodleWorkshopInPage(rawInput) {
           ...output(args.courseId, form, { module_id: Number(args.moduleId) }),
           proof: proofFor({ native_route: `${MODEDIT_PATH}?update=${args.moduleId}`, editor_file_areas: form.fileManagers.map(({ name, state }) => `${name}:${state}`) }),
         },
+        targets: [courseTarget(state.course), { field: "module_id", label: "Workshop", name }],
         snapshot_digest: form.snapshotDigest,
       };
     }
@@ -742,6 +756,7 @@ export async function executeMoodleWorkshopInPage(rawInput) {
           ...output(args.courseId, form, { section_id: Number(args.sectionId) }),
           proof: proofFor({ native_route: `${MODEDIT_PATH}?add=${MODULE}`, created_phase: "setup", created_visibility: "hidden" }),
         },
+        targets: [courseTarget(section.course), { field: "section_id", label: "Section", name: section.sectionName }],
         snapshot_digest: form.snapshotDigest,
       };
     }
@@ -818,6 +833,7 @@ export async function executeMoodleWorkshopInPage(rawInput) {
           phase_key: phase.error ? null : phase.phaseKey,
           proof: proofFor({ native_route: `${MODEDIT_PATH}?add=${MODULE}`, created_phase: phase.error ? "unread" : phase.phaseKey, created_visibility: "hidden" }),
         },
+        targets: [courseTarget(savedState.course), { field: "module_id", label: "Workshop", name: args.settings.name }],
         snapshot_digest: after.snapshotDigest,
         verification: { schema: "morrow.browser-verification.v1", status: matches ? "verified" : "mismatch", ...(matches ? {} : { reason: "moodle_workshop_readback_mismatch" }) },
       };
@@ -828,6 +844,11 @@ export async function executeMoodleWorkshopInPage(rawInput) {
     if (!args) return failure("moodle_workshop_arguments_invalid");
     const before = await loadForm(context, settingsDescriptor(args.courseId, args.moduleId));
     if (before.error) return failure(before.error, before.status);
+    const state = await courseState(context, args.courseId);
+    if (state.error) return failure(state.error, state.status);
+    const module = state.activities.filter((entry) => object(entry) && id(entry.id) === args.moduleId && entry.module === MODULE);
+    const beforeName = one(before.values, "name");
+    if (module.length !== 1 || collapsed(module[0].name) !== beforeName) return failure("moodle_workshop_module_target_invalid", before.status);
     if (before.snapshotDigest !== args.expectedDigest) return failure("moodle_expected_digest_mismatch", before.status);
 
     const preflightContext = currentContext();
@@ -872,6 +893,7 @@ export async function executeMoodleWorkshopInPage(rawInput) {
         protected_setting_names: protectedNames(after.values, changed),
         proof: proofFor({ native_route: `${MODEDIT_PATH}?update=${args.moduleId}`, changed_controls: changed }),
       },
+      targets: [courseTarget(state.course), { field: "module_id", label: "Workshop", name: data.name }],
       snapshot_digest: after.snapshotDigest,
       verification: { schema: "morrow.browser-verification.v1", status: matches ? "verified" : "mismatch", ...(matches ? {} : { reason: "moodle_workshop_readback_mismatch" }) },
     };

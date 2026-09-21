@@ -1497,6 +1497,12 @@ export async function executeMoodleInPage(input) {
     return digest(copy);
   };
   const setField = (formData, name, value) => { formData.delete(name); formData.append(name, String(value)); };
+  const normalizeInactiveCompletion = (formData) => {
+    if (formData.get("completion") !== "0") return;
+    for (const name of new Set(formData.keys())) {
+      if (name !== "completion" && name.startsWith("completion")) formData.delete(name);
+    }
+  };
   const dateFieldNames = (name) => [`${name}[enabled]`, `${name}[year]`, `${name}[month]`, `${name}[day]`, `${name}[hour]`, `${name}[minute]`];
   const setDate = (formData, name, value) => {
     if (value === null) {
@@ -3797,6 +3803,7 @@ export async function executeMoodleInPage(input) {
       if (args.password !== undefined) { setField(formData, "quizpassword", ""); names.push("quizpassword"); }
     }
     if (kind === "course-show" || kind === "course-hide") { setField(formData, "visible", kind === "course-show" ? 1 : 0); names.push("visible"); }
+    normalizeInactiveCompletion(formData);
     return names;
   };
   // A native checkbox that is not ticked, and a secret control, are absent from
@@ -4111,6 +4118,11 @@ export async function executeMoodleInPage(input) {
       && ["0", "1"].includes(one(beforeValues, "boundary_repeats")) && ["0", "1"].includes(one(afterValues, "boundary_repeats"))
       && emptyFeedback(beforeValues) && emptyFeedback(afterValues);
     return Object.entries(beforeValues).every(([name, value]) => {
+      // Moodle creates fresh draft areas for the saved activity. Their numeric
+      // item ids identify temporary editor storage, not a setting the person
+      // changed. The form's semantic file checks still prove the file areas.
+      if ((/\[itemid\]$/.test(name) || /^filemanager_[A-Za-z0-9_]+$/.test(name))
+        && /^[1-9][0-9]*$/.test(String(value)) && /^[1-9][0-9]*$/.test(String(afterValues[name]))) return true;
       // Moodle saves an empty new passing grade as zero, then formats it for the edit form.
       if (name === "gradepass" && value === "" && typeof afterValues[name] === "string" && /^0(?:[.,]0+)?$/.test(afterValues[name])) return true;
       // Empty Quiz feedback placeholders can collapse to one row on the first save.
@@ -4902,7 +4914,14 @@ export async function executeMoodleInPage(input) {
     if (definition.kind === "list-courses") {
       const response = await ajax(context, "core_course_get_enrolled_courses_by_timeline_classification", { classification: "allincludinghidden", limit: args.limit, offset: args.offset, sort: null, customfieldname: null, customfieldvalue: null, searchvalue: null, requiredfields: [] });
       if (!response.ok || !isObject(response.data) || !Array.isArray(response.data.courses)) return error(response.error || "moodle_courses_invalid", { status: response.status });
-      const courses = sanitize(response.data.courses.slice(0, args.limit));
+      const courses = response.data.courses.slice(0, args.limit).map((course) => {
+        const courseId = id(course?.id);
+        const name = typeof course?.fullname === "string" && course.fullname.length > 0 && course.fullname.length <= 4096
+          ? course.fullname
+          : "";
+        return courseId && name ? { id: courseId, name } : null;
+      });
+      if (courses.some((course) => course === null)) return error("moodle_courses_invalid", { status: response.status });
       const complete = response.data.courses.length < args.limit;
       const data = { courses, offset: args.offset, limit: args.limit, next_offset: complete ? null : args.offset + courses.length, complete };
       return { ok: true, sent: true, status: response.status, data, snapshot_digest: await digest(data) };

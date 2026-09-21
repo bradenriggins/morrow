@@ -23,6 +23,6 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/server": "2.0.0",
-    "zod": "^4.2.0"
+    "zod": "^4.6.5"
   }
 }

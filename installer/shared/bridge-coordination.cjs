@@ -37,7 +37,8 @@ async function stageBridgeSwap({ acquire, prepare, requestQuiescence, resumeQuie
     if (staged?.manualChromeReloadRequired !== true) throw new Error("Morrow Bridge update staging is incomplete");
     return staged;
   } catch (error) {
-    if (!quiesceAttempted || resumed) await release().catch(() => {});
+    const quiescenceDefinitelyRefused = error?.code === "bridge_quiesce_busy";
+    if (!quiesceAttempted || resumed || quiescenceDefinitelyRefused) await release().catch(() => {});
     throw error;
   }
 }

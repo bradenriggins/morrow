@@ -9,7 +9,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { DurableBatchStore, MAX_BATCH_RESULT_BYTES, loadOrCreateBatchEncryptionKey } from "@morrow/batch-engine";
 import { WebSocket } from "ws";
 import { describe, expect, it, vi } from "vitest";
-import type { BridgeCommand } from "@morrow/bridge-protocol";
+import type { BridgeCommand, BridgeProblem } from "@morrow/bridge-protocol";
 import { canonicalJson, isJsonObject, sha256Json, sha256Text, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { createFullMorrowServer } from "../src/full-server.js";
@@ -163,6 +163,7 @@ async function connectAuditBridge(
     readonly onCommandFinish?: (command: BridgeCommand) => void;
     readonly writeResultForCommand?: (command: BridgeCommand) => JsonObject;
     readonly bridgeMaintenanceResult?: (command: BridgeCommand) => JsonObject;
+    readonly bridgeMaintenanceProblem?: (command: BridgeCommand) => BridgeProblem | null;
   } = {},
 ): Promise<WebSocket> {
   const catalogDigest = bridgeCatalogDigestForTests(resolve("../.."));
@@ -201,6 +202,11 @@ async function connectAuditBridge(
   });
   bridge.onCommand((command) => {
     if (command.kind === "bridge_maintenance") {
+      const problem = options.bridgeMaintenanceProblem?.(command);
+      if (problem) {
+        bridge.respondProblem(command, problem);
+        return;
+      }
       const result = options.bridgeMaintenanceResult?.(command);
       expect(result, "Bridge maintenance needs one exact private response fixture").toBeTruthy();
       bridge.respond(command, result!);
@@ -529,9 +535,16 @@ describe("MorrowRuntime durable batches", () => {
     let server: ReturnType<typeof serveStdio> | undefined;
     let client: Client | undefined;
     let storeStatus = false;
+    let refusalCode: string | null = null;
     try {
       runtime = await MorrowRuntime.connect(connectorConfig(directory, port), { statePath: join(directory, "gateway.sqlite3") });
       socket = await connectAuditBridge(port, [], [], {
+        bridgeMaintenanceProblem: () => refusalCode ? {
+          schema: "morrow.bridge.problem.v1",
+          code: refusalCode,
+          message: "Untrusted Bridge detail must not cross the private boundary.",
+          recoverable: false,
+        } : null,
         bridgeMaintenanceResult: (command) => {
           expect(command.toolName).toBeUndefined();
           expect(command.operationKey).toBeUndefined();
@@ -596,6 +609,15 @@ describe("MorrowRuntime durable batches", () => {
       await expect(runtime.bridgeMaintenance({ action: "status", path: "/tmp/Bridge" }))
         .rejects.toThrow("private Bridge maintenance control");
       await expect(runtime.bridgeMaintenance({ action: "readback" })).rejects.toThrow("private Bridge readback result");
+      refusalCode = "bridge_quiesce_busy";
+      await expect(runtime.bridgeMaintenance({ action: "quiesce" })).rejects.toMatchObject({
+        name: "BridgeMaintenanceRefusalError",
+        code: "bridge_quiesce_busy",
+        message: "bridge_quiesce_busy",
+      });
+      refusalCode = "untrusted_provider_text";
+      await expect(runtime.bridgeMaintenance({ action: "quiesce" })).rejects.toThrow("private Bridge maintenance result is unavailable");
+      refusalCode = null;
 
       const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
       server = serveStdio(() => createFullMorrowServer(runtime!), { transport: serverTransport });

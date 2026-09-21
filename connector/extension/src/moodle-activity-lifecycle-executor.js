@@ -297,7 +297,8 @@ export async function executeMoodleActivityLifecycleInPage(rawInput) {
     let payload;
     try { payload = typeof raw === "string" ? JSON.parse(raw) : null; } catch { payload = null; }
     const entry = Array.isArray(payload) && payload.length === 1 && object(payload[0]) ? payload[0] : null;
-    if (!entry || entry.error !== undefined || entry.exception !== undefined) {
+    if (!entry || (entry.error !== undefined && entry.error !== false && entry.error !== null)
+      || (entry.exception !== undefined && entry.exception !== false && entry.exception !== null)) {
       return write
         ? { unconfirmed: "moodle_activity_lifecycle_write_unconfirmed", status: response.status }
         : { error: "moodle_activity_lifecycle_state_unavailable", status: response.status };

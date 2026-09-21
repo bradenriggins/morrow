@@ -155,6 +155,7 @@ test("one subsection is read, listed, and created hidden, and a delegated move o
   const stateBody = () => {
     derive();
     return JSON.stringify([{
+      error: false,
       data: JSON.stringify({
         course: { ...model.course },
         section: model.section.map((entry) => ({ ...entry })),
@@ -312,7 +313,7 @@ test("one subsection is read, listed, and created hidden, and a delegated move o
         updates.push(call.args);
         applyUpdate(call.args);
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify([{ data: null }]));
+        response.end(JSON.stringify([{ error: false, data: null }]));
         return;
       }
     }

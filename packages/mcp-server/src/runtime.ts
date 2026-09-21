@@ -248,6 +248,12 @@ import {
   projectMoodleSiteAdministrationBrowserResult,
 } from "./moodle-site-inventory.js";
 import {
+  MOODLE_COURSE_LIST_OPERATION,
+  MOODLE_COURSE_LIST_TOOL,
+  moodleCourseListRequest,
+  projectMoodleCourseList,
+} from "./moodle-course-list.js";
+import {
   MOODLE_ENROL_CANDIDATE_INPUT_TOOL,
   MOODLE_ROSTER_LEARNER_INPUT_TOOLS,
   PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION,
@@ -1466,6 +1472,95 @@ function canvasRecoveryAssertions(value: unknown): readonly BrowserReadbackAsser
     assertions.push({ inputName: entry.inputName, paths: paths as string[][], expected: entry.expected });
   }
   return assertions;
+}
+
+const MOODLE_ACTIVITY_CREATE_MODULES: Readonly<Record<string, string>> = Object.freeze({
+  moodle_create_assignment: "assign",
+  moodle_create_bigbluebuttonbn: "bigbluebuttonbn",
+  moodle_create_book: "book",
+  moodle_create_choice: "choice",
+  moodle_create_database: "data",
+  moodle_create_feedback: "feedback",
+  moodle_create_folder_file: "folder",
+  moodle_create_forum: "forum",
+  moodle_create_glossary: "glossary",
+  moodle_create_h5pactivity: "h5pactivity",
+  moodle_create_imscp_package: "imscp",
+  moodle_create_label: "label",
+  moodle_create_lesson: "lesson",
+  moodle_create_lti: "lti",
+  moodle_create_page: "page",
+  moodle_create_qbank_activity: "qbank",
+  moodle_create_quiz: "quiz",
+  moodle_create_resource_file: "resource",
+  moodle_create_scorm_package: "scorm",
+  moodle_create_subsection: "subsection",
+  moodle_create_url: "url",
+  moodle_create_wiki: "wiki",
+  moodle_create_workshop: "workshop",
+});
+
+/** A failed Moodle create can still be settled by the bound course contents. */
+export function moodleActivityCreateRecoveryDescriptor(
+  operation: Pick<EffectOperationRecord, "sourceToolName" | "forwardedRequest">,
+): CanvasRecoveryDescriptor | null {
+  const module = MOODLE_ACTIVITY_CREATE_MODULES[operation.sourceToolName];
+  const request = operation.forwardedRequest;
+  const course = request.course_id;
+  const courseId = typeof course === "number" && Number.isSafeInteger(course) && course > 0
+    ? course
+    : typeof course === "string" && /^[1-9][0-9]*$/u.test(course) && Number.isSafeInteger(Number(course))
+      ? Number(course)
+      : null;
+  const name = typeof request.name === "string" && request.name.trim() && request.name.length <= 1_333
+    ? request.name : "";
+  if (!module || courseId === null || !name) return null;
+  return {
+    schema: "morrow.canvas-recovery-descriptor.v1",
+    strategy: "collection-contains-target",
+    writeMethod: "POST",
+    assertions: [{ inputName: "module", paths: [["module"]], expected: module }],
+    read: {
+      readTool: "moodle_get_contents",
+      arguments: { course_id: courseId },
+      targetId: name,
+      targetField: "name",
+      targetPath: ["activities"],
+    },
+  };
+}
+
+/** A failed Moodle section move can be settled by its exact saved position. */
+export function moodleSectionMoveRecoveryDescriptor(
+  operation: Pick<EffectOperationRecord, "sourceToolName" | "forwardedRequest">,
+): CanvasRecoveryDescriptor | null {
+  if (operation.sourceToolName !== "moodle_move_section") return null;
+  const request = operation.forwardedRequest;
+  const positiveInteger = (value: unknown): number | null => {
+    const parsed = typeof value === "number" && Number.isSafeInteger(value)
+      ? value
+      : typeof value === "string" && /^[1-9][0-9]*$/u.test(value) && Number.isSafeInteger(Number(value))
+        ? Number(value)
+        : null;
+    return parsed !== null && parsed > 0 ? parsed : null;
+  };
+  const courseId = positiveInteger(request.course_id);
+  const sectionId = positiveInteger(request.section_id);
+  const position = positiveInteger(request.position);
+  if (courseId === null || sectionId === null || position === null) return null;
+  return {
+    schema: "morrow.canvas-recovery-descriptor.v1",
+    strategy: "updated-resource",
+    writeMethod: "POST",
+    assertions: [{ inputName: "position", paths: [["section"]], expected: position }],
+    read: {
+      readTool: "moodle_get_contents",
+      arguments: { course_id: courseId },
+      targetId: String(sectionId),
+      targetField: "id",
+      targetPath: ["sections"],
+    },
+  };
 }
 
 /**
@@ -4669,6 +4764,73 @@ export class GatewayRuntime {
       : null;
   }
 
+  private isMoodleCourseList(mapping: CatalogTool): boolean {
+    return mapping.upstreamName === MOODLE_COURSE_LIST_TOOL
+      && mapping.annotations?.readOnlyHint === true
+      && mapping.capability?.provider === "moodle"
+      && isCanvasConnector(mapping);
+  }
+
+  /** A site-level course page has no learner rows and needs no course roster. */
+  private publicMoodleCourseList(
+    mapping: CatalogTool,
+    request: Readonly<Record<string, unknown>>,
+    raw: JsonObject,
+  ): JsonObject {
+    const expected = moodleCourseListRequest(request);
+    const source = isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
+    const browser = source && isJsonObject(source.result) ? source.result : null;
+    if (!expected || !source || source.schema !== "morrow.canvas-connector.result.v1" || source.ok !== true
+      || source.provider !== "moodle" || source.toolName !== MOODLE_COURSE_LIST_TOOL
+      || source.operationKey !== MOODLE_COURSE_LIST_OPERATION || source.commandKind !== "invoke_read"
+      || !browser || browser.schema !== "morrow.canvas-browser-result.v1" || browser.ok !== true
+      || browser.sent !== true || browser.provider !== "moodle" || browser.status !== 200
+      || !isJsonObject(browser.data) || typeof browser.snapshot_digest !== "string"
+      || !/^[0-9a-f]{64}$/u.test(browser.snapshot_digest)) {
+      throw new Error(this.moodleReadFailureCode(raw, "moodle_courses_", "moodle_courses_invalid"));
+    }
+    const projected = projectMoodleCourseList(browser.data, expected);
+    return canonicalMorrowResult({
+      tool: mapping.publicName,
+      backend: mapping.upstreamId,
+      phase: "read",
+      verificationStatus: "not_applicable",
+      result: {
+        content: [{ type: "text", text: "Morrow listed this signed-in Moodle person's courses." }],
+        structuredContent: projected,
+      },
+    });
+  }
+
+  private publicMoodleCourseListEgress(
+    value: JsonObject,
+    request: Readonly<Record<string, unknown>>,
+  ): JsonObject {
+    const expected = moodleCourseListRequest(request);
+    const structured = isJsonObject(value.structuredContent) ? value.structuredContent : null;
+    const result = structured && isJsonObject(structured.data) ? structured.data : null;
+    if (!expected || structured?.schema !== "morrow.result.v1" || structured.tool !== MOODLE_COURSE_LIST_TOOL
+      || result?.schema !== "morrow.result.v1" || result.tool !== MOODLE_COURSE_LIST_TOOL || !isJsonObject(result.data)) {
+      throw new Error("moodle_courses_invalid");
+    }
+    const projected = projectMoodleCourseList(result.data, expected);
+    const output = canonicalMorrowResult({
+      tool: MOODLE_COURSE_LIST_TOOL,
+      backend: typeof structured.backend === "string" ? structured.backend : "gateway",
+      phase: "read",
+      verificationStatus: "not_applicable",
+      result: {
+        content: [{ type: "text", text: "Morrow listed this signed-in Moodle person's courses." }],
+        structuredContent: projected,
+      },
+    });
+    const meta = isJsonObject(value._meta) && isJsonObject(value._meta["io.morrow/gateway"])
+      ? value._meta["io.morrow/gateway"]
+      : null;
+    if (meta) output._meta = { "io.morrow/gateway": structuredClone(meta) };
+    return output;
+  }
+
   private moodleSiteAdministrationTarget(
     request: Readonly<Record<string, unknown>>,
   ): Readonly<{ courseId: string; roleId: number | null }> | null {
@@ -6478,7 +6640,7 @@ export class GatewayRuntime {
   }
 
   private privacyFailure(error: unknown): JsonObject {
-    const code = error instanceof Error && /^[a-z0-9_]{1,160}$/u.test(error.message) && (/^canvas_course_not_connected$|^learner_roster_|^learner_token_|^privacy_|^moodle_assignment_submission_summary_|^moodle_quiz_attempt_summary_|^moodle_quiz_attempt_|^moodle_quiz_manual_grading_queue_|^moodle_quiz_regrade_report_|^moodle_forum_activity_summary_|^moodle_scorm_attempt_summary_|^moodle_scorm_learner_report_|^moodle_grade_report_summary_|^moodle_learner_grade_report_|^moodle_course_participants_|^moodle_enrolment_methods_|^moodle_participant_enrolment_|^moodle_question_bank_impact_scope_|^moodle_course_activity_report_|^moodle_course_participation_report_|^moodle_course_completion_report_|^moodle_course_log_summary_|^moodle_course_dates_report_/u.test(error.message))
+    const code = error instanceof Error && /^[a-z0-9_]{1,160}$/u.test(error.message) && (/^canvas_course_not_connected$|^learner_roster_|^learner_token_|^privacy_|^moodle_assignment_submission_summary_|^moodle_quiz_attempt_summary_|^moodle_quiz_attempt_|^moodle_quiz_manual_grading_queue_|^moodle_quiz_regrade_report_|^moodle_forum_activity_summary_|^moodle_scorm_attempt_summary_|^moodle_scorm_learner_report_|^moodle_grade_report_summary_|^moodle_learner_grade_report_|^moodle_course_participants_|^moodle_enrolment_methods_|^moodle_participant_enrolment_|^moodle_question_bank_impact_scope_|^moodle_course_activity_report_|^moodle_course_participation_report_|^moodle_course_completion_report_|^moodle_course_log_summary_|^moodle_course_dates_report_|^moodle_site_inventory_|^moodle_role_definitions_|^moodle_courses_/u.test(error.message))
       ? error.message
       : "privacy_output_refused";
     return {
@@ -6788,6 +6950,16 @@ export class GatewayRuntime {
       }
       if (this.isMoodleParticipantEnrolment(mapping)) {
         const projected = await this.publicMoodleParticipantEnrolment(mapping, request, raw, options);
+        if (operationMeta) {
+          projected._meta = {
+            ...(isJsonObject(projected._meta) ? projected._meta : {}),
+            "io.morrow/gateway": structuredClone(operationMeta),
+          };
+        }
+        return this.resultArtifacts.bound(projected);
+      }
+      if (this.isMoodleCourseList(mapping)) {
+        const projected = this.publicMoodleCourseList(mapping, request, raw);
         if (operationMeta) {
           projected._meta = {
             ...(isJsonObject(projected._meta) ? projected._meta : {}),
@@ -7682,6 +7854,17 @@ export class GatewayRuntime {
         Object.values(entry).forEach(assertHistoryDictionary);
       };
       assertHistoryDictionary(value);
+      const canonicalTool = isJsonObject(value.structuredContent)
+        && value.structuredContent.schema === "morrow.result.v1"
+        && typeof value.structuredContent.tool === "string"
+        ? value.structuredContent.tool
+        : null;
+      if (options.toolName === MOODLE_COURSE_LIST_TOOL || canonicalTool === MOODLE_COURSE_LIST_TOOL) {
+        const capabilityRequest = isJsonObject(request.arguments)
+          ? request.arguments
+          : this.egressRequest(request);
+        return finish(this.publicMoodleCourseListEgress(value, capabilityRequest));
+      }
       if (this.isMoodleQuizAttemptSummaryEgress(value)) {
         const capabilityRequest = isJsonObject(request.arguments)
           ? request.arguments
@@ -8856,9 +9039,30 @@ export class GatewayRuntime {
     const actorDigest = authority && typeof authority.actorDigest === "string" && /^[0-9a-f]{64}$/u.test(authority.actorDigest)
       ? authority.actorDigest : null;
     if (!operation.personCloseCausalSequence || !operation.sourceBindingId || !operation.targetIdentityDigest || !actorDigest) return null;
-    const names = operation.targetIdentityVersion === EFFECT_TARGET_IDENTITY_VERSION
-      ? [operation.targetIdentityDigest]
-      : [operation.targetIdentityDigest, this.currentTargetIdentityDigest(operation, providerScope)];
+    const descriptor = canvasRecoveryDescriptorOf(operation.connectorReadDescriptor);
+    const exactReadMapping = descriptor?.read
+      ? this.toolByPublicName.get(descriptor.read.readTool)
+      : undefined;
+    let exactReadTargetIdentity: string | null = null;
+    if (providerScope && descriptor?.read && exactReadMapping && isCanvasConnector(exactReadMapping)) {
+      try {
+        exactReadTargetIdentity = stableEffectTargetIdentity(
+          exactReadMapping,
+          descriptor.read.arguments as JsonObject,
+          undefined,
+          providerScope,
+        );
+      } catch {
+        exactReadTargetIdentity = null;
+      }
+    }
+    const names = [...new Set([
+      operation.targetIdentityDigest,
+      ...(operation.targetIdentityVersion === EFFECT_TARGET_IDENTITY_VERSION
+        ? []
+        : [this.currentTargetIdentityDigest(operation, providerScope)]),
+      exactReadTargetIdentity,
+    ])];
     // The same person, site and course, connected again: a course connection made
     // again carries a new generation, and a reading through it is still that
     // person's reading of that course. The strict match runs first.
@@ -8945,9 +9149,11 @@ export class GatewayRuntime {
       });
     }
     const evidence = this.freshReadEvidence(operation, observedState)
-      ?? (operation.targetIdentityVersion === EFFECT_TARGET_IDENTITY_VERSION
-        ? null
-        : this.freshReadEvidence(operation, observedState, await this.historicalProviderScope(operation, options) ?? undefined));
+      ?? this.freshReadEvidence(
+        operation,
+        observedState,
+        await this.historicalProviderScope(operation, options) ?? undefined,
+      );
     if (!evidence) {
       return refused(
         "observed_state_not_from_fresh_read",
@@ -9328,6 +9534,8 @@ export class GatewayRuntime {
   private async recoverCanvasConnectorOperation(operation: EffectOperationRecord): Promise<JsonObject> {
     const mapping = this.toolByPublicName.get(operation.publicToolName);
     const descriptor = canvasRecoveryDescriptorOf(operation.connectorReadDescriptor)
+      ?? moodleActivityCreateRecoveryDescriptor(operation)
+      ?? moodleSectionMoveRecoveryDescriptor(operation)
       ?? (mapping && isCanvasCourseFileTransfer(mapping) ? canvasTransferRecoveryDescriptor(operation) : null);
     if (!mapping || !isCanvasConnector(mapping)) {
       return this.effectResult(operation, "reconciliation_requires_provider_evidence", undefined, [

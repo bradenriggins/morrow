@@ -630,6 +630,87 @@ describe("privacy output boundary", () => {
     expect(serialized).not.toContain("never-return-this");
   });
 
+  it("preserves Moodle course-structure identifiers that collide with learner ids", () => {
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [
+      { id: "3", name: "Section Number Learner" },
+      { id: "4", name: "Section Identifier Learner" },
+    ]);
+    const value = {
+      course: { id: "2", sectionlist: ["1", "4", "5"] },
+      sections: [
+        { id: "4", section: 3, number: 3, cmlist: ["3", "4"], parentsectionid: null },
+      ],
+      activities: [
+        { id: "3", sectionid: "4", sectionnumber: 3 },
+      ],
+    };
+
+    expect(redactLearnerEgress(value, {
+      learnerRoster,
+      learnerVault: new LearnerVault(":memory:"),
+      learnerScope: scope,
+    })).toEqual(value);
+  });
+
+  it("preserves Moodle group visibility when its enum value collides with a learner id", () => {
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [{ id: "3", name: "Visibility Enum Learner" }]);
+    const value = {
+      course_id: "2",
+      groups: [{ id: "1", name: "Study group", visibility: 3, participation: false, membership: [] }],
+    };
+
+    expect(redactLearnerEgress(value, {
+      learnerRoster,
+      learnerVault: new LearnerVault(":memory:"),
+      learnerScope: scope,
+    })).toEqual(value);
+  });
+
+  it("preserves an exact numeric enum option without exempting a learner option", () => {
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [
+      { id: "3", name: "Numeric Option Learner" },
+      { id: "4", name: "Jane Learner" },
+    ]);
+    const result = redactLearnerEgress({
+      available: [
+        { label: "3", value: "3" },
+        { label: "Jane Learner", value: "4" },
+      ],
+    }, {
+      learnerRoster,
+      learnerVault: new LearnerVault(":memory:"),
+      learnerScope: scope,
+    });
+
+    expect(result).toEqual({
+      available: [
+        { label: "3", value: "3" },
+        { label: "Student A2", value: "Student A2" },
+      ],
+    });
+  });
+
+  it("preserves numeric values in a raw available-options array without exempting a learner label", () => {
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [
+      { id: "3", name: "Numeric Option Learner" },
+      { id: "4", name: "Jane Learner" },
+    ]);
+
+    expect(redactLearnerEgress({
+      available_subscription_modes: ["0", "1", "2", "3", "Jane Learner"],
+    }, {
+      learnerRoster,
+      learnerVault: new LearnerVault(":memory:"),
+      learnerScope: scope,
+    })).toEqual({
+      available_subscription_modes: ["0", "1", "2", "3", "Student A2"],
+    });
+  });
+
   it("refuses an identity record that conflicts with the authoritative exact-scope roster", () => {
     const vault = new LearnerVault(":memory:");
     const learnerRoster = new LearnerRoster();
@@ -664,6 +745,20 @@ describe("privacy output boundary", () => {
     });
     expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
     expect(JSON.stringify(result)).not.toContain("ada@example.test");
+  });
+
+  it("preserves an exact Moodle assignment grade definition without treating it as a learner grade record", () => {
+    const context = learnerPrivacy();
+    const value = { assignment: { id: "16", grade: { type: "point", maximum_points: 100 } } };
+    const descriptor = { ...learnerDescriptor, allowedFields: [], fieldPolicy: "scrub-sensitive" as const };
+
+    expect(normalize({ structuredContent: value }, { ...context, descriptor }).structuredContent).toEqual(value);
+    expect(redactLearnerEgress(value, {
+      learnerRoster: context.learnerRoster!, learnerVault: context.learnerVault!, learnerScope: context.learnerScope!,
+    })).toEqual(value);
+    expect(() => redactLearnerEgress({ grade: { type: "point", maximum_points: 100, name: "Unknown Person" } }, {
+      learnerRoster: context.learnerRoster!, learnerVault: context.learnerVault!, learnerScope: context.learnerScope!,
+    })).toThrow("privacy_identity_record_unresolved");
   });
 
   it("keeps identity-free enrollment details nested under a roster-bound learner", () => {
