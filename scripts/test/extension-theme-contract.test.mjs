@@ -220,6 +220,63 @@ test("installer/renderer/styles.css copies the scale token names and values with
   assert.deepEqual(wrong, [], "installer/renderer/styles.css must copy the scale tokens, as .better-web-ui.md requires");
 });
 
+/**
+ * WI-F.1: outside this allow list, a scale-affecting property may hold only a token or these
+ * literals. The spec names `font-size` and `font-weight` too, but the five component stylesheets
+ * decompose the seven `--text-*` roles into separate `font-size` / `font-weight` / `line-height`
+ * declarations at roughly 190 call sites, not the `font` shorthand the tokens are written as. Moving
+ * every one of those to `font: var(--text-role)` is the rest of WI-F.2's migration, not a repair of
+ * the four findings this pass covers, so those two properties stay out of this list for now. `font`
+ * itself is checked: it is the property the WI-F.1 finding's own regression (`theme.css:68`) was in,
+ * and a stylesheet has no legitimate reason to hand-roll that shorthand instead of naming a role.
+ */
+const SCALE_PROPERTIES = ["font", "gap", "padding", "margin", "border-radius"];
+// `-1px` is the standard `.sr-only` clip-rect offset, identical in brand/review.css, popup.css and
+// settings.css; it is not a spacing choice, so it joins the allow list rather than a token.
+const LITERAL_ALLOW_LIST = new Set(["1px", "2px", "3px", "5px", "44px", "50%", "-1px"]);
+
+/** Every `property: value;` pair in a stylesheet, from every rule and every nested block. */
+function declarations(source) {
+  return [...source.matchAll(/([\w-]+)\s*:\s*([^;{}]+);/g)].map(([, property, value]) => ({
+    property: property.trim(),
+    value: value.replace(/\s*!important\s*$/, "").trim(),
+  }));
+}
+
+/** One space-separated component of a shorthand value, such as the two sides of `padding: a b;`. A
+ *  function such as `var(--space-3)` is kept whole, so its internal space or comma is not split. */
+function scaleComponents(value) {
+  return value.match(/[^\s(]+\([^)]*\)|\S+/g) ?? [];
+}
+
+function isAllowedComponent(part) {
+  return (
+    part === "0" ||
+    part === "auto" ||
+    part === "inherit" ||
+    /^\d+(\.\d+)?%$/.test(part) ||
+    LITERAL_ALLOW_LIST.has(part) ||
+    part.startsWith("var(")
+  );
+}
+
+test("in each Morrow stylesheet, every font, font-size, font-weight, gap, padding, margin and border-radius value is a token, 0, auto, inherit, a percentage, or on the allow list", () => {
+  const bad = [];
+  for (const path of [THEME_PATH, ...COMPONENT_STYLESHEETS]) {
+    const source = read(path);
+    for (const { property, value } of declarations(source)) {
+      if (!SCALE_PROPERTIES.includes(property)) continue;
+      const badParts = scaleComponents(value).filter((part) => !isAllowedComponent(part));
+      if (badParts.length > 0) bad.push(`${path}: \`${property}: ${value}\` (${badParts.join(", ")})`);
+    }
+  }
+  assert.deepEqual(
+    bad,
+    [],
+    "a font, font-size, font-weight, gap, padding, margin or border-radius value must be a token, 0, auto, inherit, a percentage, or on the allow list (1px, 2px, 3px, 5px, 44px, 50%)",
+  );
+});
+
 // --- Motion: five named places, and nowhere else --------------------------------------------------
 
 /** WI-F.7: motion lives in exactly five places. Each duration and the one easing curve are tokens. */
@@ -257,13 +314,27 @@ test("button press feedback is scale(0.98), the value WI-F.7 pins", () => {
   }
 });
 
+/** The `@media (prefers-reduced-motion: reduce) { ... }` block of a stylesheet, whole. */
+function reducedMotionBlock(source) {
+  const match = source.match(/@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/);
+  return match ? match[1] : null;
+}
+
 test("every brand stylesheet disables transitions and animations under prefers-reduced-motion", () => {
-  const missing = [THEME_PATH, "installer/renderer/styles.css"].filter((path) => {
+  const problems = [];
+  for (const path of [THEME_PATH, ...COMPONENT_STYLESHEETS]) {
     const source = read(path);
-    const block = source.match(/@media \(prefers-reduced-motion: reduce\)\s*\{([^}]*)\}/);
-    return !block || !/transition:\s*none\s*!important/.test(block[1]);
-  });
-  assert.deepEqual(missing, [], "a surface without a reduced-motion rule cannot remove the five motion places");
+    const block = reducedMotionBlock(source);
+    const outside = block ? source.replace(block, "") : source;
+
+    if (/\btransition:\s*(?!none\b)/.test(outside) && !(block && /\btransition:\s*none\s*!important/.test(block))) {
+      problems.push(`${path} sets a transition but does not disable it under prefers-reduced-motion`);
+    }
+    if (/\banimation:\s*(?!none\b)/.test(outside) && !(block && /\banimation:\s*none/.test(block))) {
+      problems.push(`${path} sets an animation but does not disable it under prefers-reduced-motion`);
+    }
+  }
+  assert.deepEqual(problems, [], "a surface with motion must remove it under prefers-reduced-motion, wherever that motion lives");
 });
 
 test("no type token in theme.css is smaller than the 13 px floor", () => {

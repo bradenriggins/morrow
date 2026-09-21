@@ -33,6 +33,7 @@ let banner = null;
 let readGeneration = 0;
 let detectedProvider = null;
 let editActive = [];
+let openPlatformProgressVisible = false;
 
 // Every failure the service worker answers carries its own code, and the popup keeps that code as
 // the error it raises, so one state reaches the banner instead of one generic sentence.
@@ -92,7 +93,10 @@ function render(status) {
   // because the Bridge already holds the permission and the session it needs (D1a).
   const closed = platformClosed(status, binding, anchor);
   openPlatformAction.hidden = !closed;
-  if (closed) openPlatformAction.textContent = openPlatformLabel(status, binding, anchor);
+  if (closed) {
+    openPlatformAction.textContent = openPlatformLabel(status, binding, anchor, openPlatformProgressVisible);
+    openPlatformAction.setAttribute("aria-busy", String(openPlatformProgressVisible));
+  }
   editAccess.hidden = status?.paired !== true || !runtimeReady || chooseCourses || (!binding && !anchor);
   setupGuide.hidden = runtimeNeedsReload(status);
   primary.textContent = primaryLabel(status, detectedProvider);
@@ -295,20 +299,38 @@ canvasAction.addEventListener("click", async () => {
 });
 
 // WI-1.1: opens the saved, already-permitted site itself. No permission prompt, because Chrome
-// already granted this address; a sign-in is the only thing left that can still be necessary.
+// already granted this address; a sign-in is the only thing left that can still be necessary. The
+// button disables at once, so a second click cannot start a second tab, but its text only changes
+// to "Opening…" once the wait has run long enough to need it (WI-F.10): no flash of progress for a
+// fast open. Matches settings.js's openSavedPlatform.
 openPlatformAction.addEventListener("click", async () => {
+  if (actionInFlight) return;
   const binding = currentBinding(current);
   const anchor = currentSiteAnchor(current);
   const siteAnchorId = binding?.siteAnchorId || anchor?.siteAnchorId;
   if (!siteAnchorId) return;
   const platform = currentPlatform(current);
-  await runAction(
-    () => message("morrow_open_platform", binding?.sourceBindingId ? { siteAnchorId, sourceBindingId: binding.sourceBindingId } : { siteAnchorId }),
-    (result) => {
-      if (result?.verified === false) showNotice(`Sign in to ${platform || "the learning platform"} in the tab that opened. Morrow continues after that.`);
-      else clearNotice();
-    },
-  );
+  actionInFlight = true;
+  openPlatformProgressVisible = false;
+  updateControls();
+  const revealTimer = setTimeout(() => {
+    openPlatformProgressVisible = true;
+    openPlatformAction.textContent = openPlatformLabel(current, binding, anchor, true);
+    openPlatformAction.setAttribute("aria-busy", "true");
+  }, 400);
+  try {
+    const result = await message("morrow_open_platform", binding?.sourceBindingId ? { siteAnchorId, sourceBindingId: binding.sourceBindingId } : { siteAnchorId });
+    reportSuccess("action");
+    if (result?.verified === false) showNotice(`Sign in to ${platform || "the learning platform"} in the tab that opened. Morrow continues after that.`);
+    else clearNotice();
+  } catch (cause) {
+    reportError("action", cause);
+  } finally {
+    clearTimeout(revealTimer);
+    actionInFlight = false;
+    openPlatformProgressVisible = false;
+    await refresh();
+  }
 });
 
 askFirstAllCoursesButton.addEventListener("click", async () => {

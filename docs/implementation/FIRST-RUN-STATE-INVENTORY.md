@@ -197,19 +197,19 @@ choose the assistant, finish Morrow Bridge, then open and connect the course
 
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
-| `read-failed` | Morrow and Course are "Not checked". The detail names the failed read and retry. | **Try again**. | `connector/extension/popup/popup-view.js:121` |
-| `not-paired` | Morrow "Not connected", Course "Not connected", and the detail says to add Morrow to the assistant. | **Connect Morrow**. | `connector/extension/popup/popup-view.js:132` |
-| `pairing` | Morrow "Waiting for approval" and the detail names the Morrow page that opened. | **Allow connection** on that page. | `connector/extension/popup/popup-view.js:128` |
-| `connecting` | Morrow "Connecting…" and a settled waiting detail. | No action. Return in a moment. | `connector/extension/popup/popup-view.js:134` |
-| `paired-not-connected` | Morrow "Not available" and the popup says the assistant must be open. | Open the assistant. | `connector/extension/popup/popup-view.js:136` |
-| `runtime-mismatch` | Morrow "Reload needed", Course "Not available", and a version-mismatch detail. | **Open setup guide**, update or repair, then reload Bridge. | `connector/extension/popup/popup-view.js:122` |
-| `authentication-failed` | Morrow "Reconnect needed", Course "Not connected", and the detail says the saved local connection was refused. | **Reconnect Morrow**, then approve the new local connection. | `connector/extension/popup/popup-view.js:130` |
-| `connected-no-site` | Morrow "Connected", Course "Not connected", disabled **Open Canvas or Moodle**, and instructions to open a signed-in course. | Open a signed-in Canvas or Moodle course in this tab. | `connector/extension/popup/popup-view.js:147` |
-| `detected-platform` | The active Moodle course is detected. The primary action and detail both say **Connect Moodle**. Canvas produces **Connect Canvas** in the same branch. | Select the platform button and allow the exact address Chrome shows. | `connector/extension/popup/popup-view.js:111` |
-| `site-ready-no-course` | Course "Ready", **Choose courses**, and a Plan explanation. | **Choose courses**, which opens Plan and Edit settings. | `connector/extension/popup/popup-view.js:142` |
-| `site-stale` | Course "Canvas is closed" and the detail names the saved Canvas connection. | Open a signed-in Canvas course, then **Connect Canvas**, or select **Open Canvas** (WI-1.1). | `connector/extension/popup/popup-view.js:117` |
-| `course-ready` | Course "Connected", the selected course and last-check time, and a detail that names the Canvas course tab. | Ask the assistant, or use **Check or switch course**. | `connector/extension/popup/popup-view.js:138` |
-| `course-tab-closed` | Course "Canvas is closed" and a detail that names the closed Canvas tab. | Open the course, sign in, then **Connect Canvas**, or select **Open Canvas** (WI-1.1). | `connector/extension/popup/popup-view.js:113` |
+| `read-failed` | Morrow and Course are "Not checked". The detail names the failed read and retry. | **Try again**. | `connector/extension/popup/popup-view.js:127` |
+| `not-paired` | Morrow "Not connected", Course "Not connected", and the detail says to add Morrow to the assistant. | **Connect Morrow**. | `connector/extension/popup/popup-view.js:138` |
+| `pairing` | Morrow "Waiting for approval" and the detail names the Morrow page that opened. | **Allow connection** on that page. | `connector/extension/popup/popup-view.js:134` |
+| `connecting` | Morrow "Connecting…" and a settled waiting detail. | No action. Return in a moment. | `connector/extension/popup/popup-view.js:140` |
+| `paired-not-connected` | Morrow "Not available" and the popup says the assistant must be open. | Open the assistant. | `connector/extension/popup/popup-view.js:142` |
+| `runtime-mismatch` | Morrow "Reload needed", Course "Not available", and a version-mismatch detail. | **Open setup guide**, update or repair, then reload Bridge. | `connector/extension/popup/popup-view.js:128` |
+| `authentication-failed` | Morrow "Reconnect needed", Course "Not connected", and the detail says the saved local connection was refused. | **Reconnect Morrow**, then approve the new local connection. | `connector/extension/popup/popup-view.js:136` |
+| `connected-no-site` | Morrow "Connected", Course "Not connected", disabled **Open Canvas or Moodle**, and instructions to open a signed-in course. | Open a signed-in Canvas or Moodle course in this tab. | `connector/extension/popup/popup-view.js:153` |
+| `detected-platform` | The active Moodle course is detected. The primary action and detail both say **Connect Moodle**. Canvas produces **Connect Canvas** in the same branch. | Select the platform button and allow the exact address Chrome shows. | `connector/extension/popup/popup-view.js:117` |
+| `site-ready-no-course` | Course "Ready", **Choose courses**, and a Plan explanation. | **Choose courses**, which opens Plan and Edit settings. | `connector/extension/popup/popup-view.js:148` |
+| `site-stale` | Course "Canvas is closed" and the detail names the saved Canvas connection. | Open a signed-in Canvas course, then **Connect Canvas**, or select **Open Canvas** (WI-1.1). | `connector/extension/popup/popup-view.js:123` |
+| `course-ready` | Course "Connected", the selected course and last-check time, and a detail that names the Canvas course tab. | Ask the assistant, or use **Check or switch course**. | `connector/extension/popup/popup-view.js:144` |
+| `course-tab-closed` | Course "Canvas is closed" and a detail that names the closed Canvas tab. | Open the course, sign in, then **Connect Canvas**, or select **Open Canvas** (WI-1.1). | `connector/extension/popup/popup-view.js:119` |
 
 The exact status, course, action, and detail strings emitted for these branches are:
 
@@ -248,7 +248,7 @@ The exact status, course, action, and detail strings emitted for these branches 
 
 A saved Canvas course with an active Moodle tab gives a separate mismatch detail. It tells the person
 to connect the detected Moodle platform or reopen the selected Canvas course
-(`connector/extension/popup/popup-view.js:72`).
+(`connector/extension/popup/popup-view.js:117`).
 
 Failures reach one `role="alert"` banner as stable problem codes. Each known code gives what happened,
 why, and one next action; an unknown code remains visible instead of becoming a generic success
@@ -514,14 +514,17 @@ stale name here.
 | `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:532` |
 | `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:532` |
 | `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:532` |
-| `Connect Morrow` | Popup | `connector/extension/popup/popup.html:31`, `connector/extension/popup/popup-view.js:98` |
-| `Try again` | Popup | `connector/extension/popup/popup-view.js:94` |
+| `Connect Morrow` | Popup | `connector/extension/popup/popup.html:31`, `connector/extension/popup/popup-view.js:104` |
+| `Try again` | Popup | `connector/extension/popup/popup-view.js:100` |
 | `Waiting for approval` | Popup | `connector/extension/popup/popup-view.js:42` |
-| `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:100` |
-| `Choose courses` | Popup | `connector/extension/popup/popup-view.js:99` |
-| `Open Canvas or Moodle` | Popup | `connector/extension/popup/popup-view.js:102` |
-| `Connect Canvas` | Popup | `connector/extension/popup/popup-view.js:147` |
-| `Connect Moodle` | Popup | `connector/extension/popup/popup-view.js:147` |
+| `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:106` |
+| `Choose courses` | Popup | `connector/extension/popup/popup-view.js:105` |
+| `Open Canvas or Moodle` | Popup | `connector/extension/popup/popup-view.js:108` |
+| `Connect Canvas` | Popup | `connector/extension/popup/popup-view.js:153` |
+| `Connect Moodle` | Popup | `connector/extension/popup/popup-view.js:153` |
+| `Open Canvas` | Popup | `connector/extension/popup/popup-view.js:71` |
+| `Open Moodle` | Popup | `connector/extension/popup/popup-view.js:72` |
+| `Ask first in all courses` | Popup | `connector/extension/popup/popup.html:24` |
 | `Check or switch course` | Popup | `connector/extension/popup/popup.html:32` |
 | `Disconnect Morrow` | Popup | `connector/extension/popup/popup.html:34` |
 | `Open Plan and Edit settings` | Popup | `connector/extension/popup/popup.html:36` |
@@ -530,23 +533,26 @@ stale name here.
 | `Guide me` | Setup guide | `connector/extension/onboarding/onboarding.html:29` |
 | `Setup overview` | Setup guide | `connector/extension/onboarding/onboarding.html:30` |
 | `Open Plan and Edit settings` | Setup guide | `connector/extension/onboarding/onboarding.html:51`, `connector/extension/onboarding/onboarding.html:51` |
+| `Ask first in all courses` | Plan and Edit settings | `connector/extension/settings/settings.html:23` |
 | `Refresh connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:35` |
 | `Find available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:46` |
-| `Select this page` | Plan and Edit settings | `connector/extension/settings/settings.js:874` |
-| `Select this page to connect` | Plan and Edit settings | `connector/extension/settings/settings.js:874` |
-| `Clear this page` | Plan and Edit settings | `connector/extension/settings/settings.js:873` |
+| `Select this page` | Plan and Edit settings | `connector/extension/settings/settings.js:876` |
+| `Select this page to connect` | Plan and Edit settings | `connector/extension/settings/settings.js:876` |
+| `Clear this page` | Plan and Edit settings | `connector/extension/settings/settings.js:875` |
 | `Previous page` | Plan and Edit settings | `connector/extension/settings/settings.html:64` |
 | `Next page` | Plan and Edit settings | `connector/extension/settings/settings.html:66` |
-| `Load more available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:70`, `connector/extension/settings/settings.js:818` |
+| `Load more available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:70`, `connector/extension/settings/settings.js:820` |
 | `View connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:78` |
-| `Connect selected courses in Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:79`, `connector/extension/settings/settings.js:906` |
-| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:97`, `connector/extension/settings/settings.js:1012` |
-| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:1012` |
+| `Connect selected courses in Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:79`, `connector/extension/settings/settings.js:908` |
+| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:97`, `connector/extension/settings/settings.js:1014` |
+| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:1014` |
 | `Remove HTTPS file access` | Plan and Edit settings | `connector/extension/settings/settings.html:98` |
 | `Return selected courses to Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:146` |
-| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:147`, `connector/extension/settings/settings.js:539` |
+| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:147`, `connector/extension/settings/settings.js:541` |
 | `Keep reviewing` | Plan and Edit settings | `connector/extension/settings/settings.html:156` |
 | `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:157` |
+| `Open Canvas` | Plan and Edit settings | `connector/extension/settings/settings.js:287` |
+| `Open Moodle` | Plan and Edit settings | `connector/extension/settings/settings.js:288` |
 | `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1023` |
 | `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1023` |
 | `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1023` |

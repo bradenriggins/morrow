@@ -1,5 +1,5 @@
 body { min-height: 100vh; }
-.wrap { width: min(680px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0; }
+.wrap { width: min(680px, calc(100% - 32px)); margin: 0 auto; padding: var(--space-6) 0; }
 .brand { margin-bottom: var(--space-5); }
 .card { border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--shadow); }
 .hero, .section, .outcome { padding: var(--space-5) var(--space-6); }

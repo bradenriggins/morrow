@@ -86,7 +86,7 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
 .course-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent); }
 .course-card:focus-within { border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 16%, transparent); }
 .course-card.is-unavailable { background: var(--surface-sunken); }
-.course-select { width: 19px; height: 19px; margin: 4px 0 0; accent-color: var(--accent); border-color: var(--control-border); }
+.course-select { width: 19px; height: 19px; margin: var(--space-1) 0 0; accent-color: var(--accent); border-color: var(--control-border); }
 .course-select:disabled { cursor: not-allowed; }
 .course-content { min-width: 0; }
 .course-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
@@ -134,7 +134,7 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
 .private-chat-fields label, .private-chat-label { color: var(--text-secondary); font-size: 0.8125rem; font-weight: 600; line-height: 1.4; }
 .private-chat-fields select, .private-chat-label textarea { display: block; width: 100%; margin-top: var(--space-1); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-sunken); color: var(--text); font: inherit; }
 .private-chat-fields select { min-height: 44px; border-color: var(--control-border); }
-.private-chat-label textarea { min-height: 76px; resize: vertical; font-size: 0.875rem; line-height: 1.45; }
+.private-chat-label textarea { min-height: 76px; resize: vertical; border-color: var(--control-border); font-size: 0.875rem; line-height: 1.45; }
 .private-chat-label small { display: block; margin-top: var(--space-1); color: var(--text-subtle); font-weight: 400; line-height: 1.45; }
 .private-chat-history { min-height: 150px; max-height: 34vh; overflow: auto; }
 .private-chat-history .state-message { padding: var(--space-5) var(--space-4); }
