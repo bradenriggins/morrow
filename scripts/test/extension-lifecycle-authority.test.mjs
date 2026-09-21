@@ -1072,7 +1072,7 @@ async function pairingStalledBodyScenario() {
 
 async function pairingStalledCancellationScenario() {
   const originalSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = (callback, delay, ...args) => originalSetTimeout(callback, delay === 10_000 ? 20 : delay, ...args);
+  globalThis.setTimeout = (callback, delay, ...args) => originalSetTimeout(callback, delay === 10_000 ? 100 : delay, ...args);
   let bodyCancelled = false;
   const body = new ReadableStream({
     cancel() {
