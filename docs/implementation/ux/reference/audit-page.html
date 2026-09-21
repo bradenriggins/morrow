@@ -1,0 +1,1026 @@
+<title>Morrow Bridge UI Audit</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+<style>
+:root{
+  --page:#FCFDFF; --raised:#FFFFFF; --sunken:#EDF3FC; --ink:#17213C; --text-2:#465572; --text-3:#53617B;
+  --border:#D6DDEC; --action:#253FEA; --action-hover:#1B2FA8; --on-action:#FFFFFF; --action-bg:#E6EAFE;
+  --success:#24684E; --success-bg:#E1F2E8; --danger:#A32D42; --danger-bg:#FBE8EC; --warn:#7A5200; --warn-bg:#FBF0D3;
+  --highlight:#CBDC74; --shadow:0 1px 2px rgba(23,33,60,.06),0 8px 24px rgba(23,33,60,.06);
+  --sans:"Manrope",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --page:#11192E; --raised:#1A2641; --sunken:#0C1223; --ink:#F4F7FD; --text-2:#D2DBEF; --text-3:#ADBDD8;
+    --border:#41506D; --action:#ADC0FF; --action-hover:#C7D4FF; --on-action:#0C1223; --action-bg:#25315A;
+    --success:#A6D9B8; --success-bg:#17372B; --danger:#FFB2C0; --danger-bg:#45212B; --warn:#F2CF7A; --warn-bg:#3D3013;
+    --highlight:#CBDC74; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+  }
+}
+:root[data-theme="dark"]{
+  --page:#11192E; --raised:#1A2641; --sunken:#0C1223; --ink:#F4F7FD; --text-2:#D2DBEF; --text-3:#ADBDD8;
+  --border:#41506D; --action:#ADC0FF; --action-hover:#C7D4FF; --on-action:#0C1223; --action-bg:#25315A;
+  --success:#A6D9B8; --success-bg:#17372B; --danger:#FFB2C0; --danger-bg:#45212B; --warn:#F2CF7A; --warn-bg:#3D3013;
+  --highlight:#CBDC74; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--page);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;margin:0;padding-inline:20px}
+.wrap{max-width:1120px;margin-inline:auto;padding-block:48px 96px;display:flex;flex-direction:column;gap:72px}
+h1,h2,h3,h4{margin:0;text-wrap:balance;letter-spacing:-.015em;line-height:1.2}
+h1{font-size:clamp(2rem,4.4vw,3.1rem);font-weight:800;letter-spacing:-.03em;line-height:1.08}
+h2{font-size:1.7rem;font-weight:800}
+h3{font-size:1.15rem;font-weight:700}
+h4{font-size:1rem;font-weight:700}
+p{margin:0}
+a{color:var(--action)}
+code,.mono{font-family:var(--mono);font-size:.84em}
+code{background:var(--sunken);padding:.1em .35em;border-radius:5px;overflow-wrap:anywhere}
+.prose{max-width:68ch;display:flex;flex-direction:column;gap:14px;color:var(--text-2)}
+.prose strong{color:var(--ink)}
+.eyebrow{font-size:.75rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--text-3)}
+section{display:flex;flex-direction:column;gap:24px}
+:focus-visible{outline:3px solid var(--action);outline-offset:2px;border-radius:6px}
+
+/* masthead */
+.mast{display:flex;flex-direction:column;gap:20px}
+.mast .lead{font-size:1.2rem;color:var(--text-2);max-width:62ch}
+.mast .lead strong{color:var(--ink)}
+.toc{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.9rem;font-weight:600;padding-top:16px;border-top:1px solid var(--border)}
+.toc a{text-decoration:none}
+.toc a:hover{text-decoration:underline}
+.mark{background:linear-gradient(transparent 62%,var(--highlight) 62%);color:inherit;padding-inline:2px}
+:root[data-theme="dark"] .mark{background:none;color:var(--highlight)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .mark{background:none;color:var(--highlight)}}
+
+/* figures */
+.figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:0;border-block:1px solid var(--border)}
+.fig{padding:20px 20px 20px 0;display:flex;flex-direction:column;gap:4px}
+.fig + .fig{padding-left:20px;border-left:1px solid var(--border)}
+.fig b{font-size:2.4rem;font-weight:800;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums}
+.fig span{font-size:.88rem;color:var(--text-2);line-height:1.4}
+@media (max-width:640px){.fig + .fig{border-left:0;padding-left:0;border-top:1px solid var(--border)}}
+
+/* length chart */
+.chart{display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:minmax(150px,260px) 1fr;gap:14px;align-items:center;font-size:.9rem}
+.bar-row .lbl{color:var(--text-2);line-height:1.3}
+.track{position:relative;height:22px;background:var(--sunken);border-radius:4px}
+.track i{position:absolute;inset:0 auto 0 0;background:var(--danger);border-radius:4px;min-width:3px}
+.track i.ok{background:var(--success)}
+.track em{position:absolute;top:50%;transform:translateY(-50%);font-style:normal;font-weight:700;font-size:.8rem;padding-left:8px;white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--ink)}
+.axis{display:grid;grid-template-columns:minmax(150px,260px) 1fr;gap:14px;font-size:.72rem;color:var(--text-3)}
+.axis div{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums}
+@media (max-width:560px){.bar-row,.axis{grid-template-columns:1fr;gap:4px}.axis span:first-child{display:none}}
+
+/* screenshots */
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px}
+.shot{display:flex;flex-direction:column;gap:8px;margin:0}
+.shot .frame{height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;background:var(--sunken)}
+.shot img{display:block;width:100%;height:auto}
+.shot.narrow .frame{display:flex;justify-content:center}
+.shot.narrow img{width:auto;max-width:100%}
+.shot figcaption{font-size:.85rem;color:var(--text-2);line-height:1.45}
+
+/* findings */
+.surface{display:flex;flex-direction:column;gap:0}
+.surface > h3{padding-bottom:10px}
+.finding{display:grid;grid-template-columns:54px 84px 1fr;gap:4px 16px;padding:16px 0;border-top:1px solid var(--border);align-items:start}
+.finding .id{font-family:var(--mono);font-size:.82rem;color:var(--text-3);padding-top:3px}
+.finding .body{display:flex;flex-direction:column;gap:6px}
+.finding .body p{color:var(--text-2);font-size:.95rem;max-width:74ch}
+.finding .ev{font-family:var(--mono);font-size:.78rem;color:var(--text-3);overflow-wrap:anywhere}
+.sev{display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:3px 8px;border-radius:999px;text-align:center;margin-top:1px}
+.sev.c{background:var(--danger-bg);color:var(--danger)}
+.sev.h{background:var(--warn-bg);color:var(--warn)}
+.sev.m{background:var(--sunken);color:var(--text-2)}
+@media (max-width:640px){.finding{grid-template-columns:auto 1fr}.finding .body{grid-column:1 / -1}}
+
+/* tables */
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{text-align:left;padding:10px 14px 10px 0;border-bottom:1px solid var(--border);vertical-align:top}
+th{font-size:.74rem;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:700}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;padding-right:20px}
+tfoot td{font-weight:700;border-bottom:0}
+
+/* mockups */
+.mock{border:1px solid var(--border);border-radius:16px;background:var(--sunken);overflow:hidden;box-shadow:var(--shadow)}
+.mock-bar{display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:space-between;align-items:center;padding:10px 18px;background:var(--raised);border-bottom:1px solid var(--border);font-size:.8rem;color:var(--text-3)}
+.mock-bar b{color:var(--ink);font-weight:700}
+.tag{font-size:.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--highlight);color:#17213C;padding:3px 8px;border-radius:999px}
+.mock-body{padding:22px;display:flex;flex-direction:column;gap:16px}
+@media (max-width:560px){.mock-body{padding:14px}}
+.panel{background:var(--raised);border:1px solid var(--border);border-radius:14px}
+.ui-h{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;justify-content:space-between}
+.ui-h h3{font-size:1.35rem;font-weight:800}
+.ui-h span{font-size:.88rem;color:var(--text-2)}
+
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.search{flex:1 1 240px;min-width:0;position:relative}
+.search input{width:100%;font:inherit;font-size:.95rem;padding:10px 12px 10px 36px;border:1px solid var(--border);border-radius:10px;background:var(--raised);color:var(--ink)}
+.search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--text-3)}
+select.ctl{font:inherit;font-size:.9rem;padding:9px 10px;border:1px solid var(--border);border-radius:10px;background:var(--raised);color:var(--ink);max-width:100%}
+.chips{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
+.chipset{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chipset > span{font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-right:2px}
+.chip{font:inherit;font-size:.84rem;font-weight:600;padding:5px 12px;border-radius:999px;border:1px solid var(--border);background:var(--raised);color:var(--text-2);cursor:pointer}
+.chip:hover{border-color:var(--action);color:var(--ink)}
+.chip[aria-pressed="true"]{background:var(--action);border-color:var(--action);color:var(--on-action)}
+.chip small{font-weight:600;opacity:.75;margin-left:4px;font-size:.78rem}
+
+.group-h{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 16px;font-size:.74rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);background:var(--sunken);border-bottom:1px solid var(--border)}
+.group-h:not(:first-child){border-top:1px solid var(--border)}
+.group-h label{display:flex;gap:8px;align-items:center;cursor:pointer;text-transform:none;letter-spacing:0;font-size:.84rem;font-weight:600;color:var(--text-2)}
+.course{display:grid;grid-template-columns:22px minmax(0,1fr) auto auto;gap:6px 14px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)}
+.course:last-child{border-bottom:0}
+.course.on{background:var(--action-bg)}
+.course .nm{font-weight:700;line-height:1.3}
+.course .meta{font-size:.82rem;color:var(--text-2);display:flex;flex-wrap:wrap;gap:2px 10px}
+.course .meta span + span::before{content:"·";margin-right:10px;color:var(--text-3)}
+.pills{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.pill{font-size:.76rem;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;border:1px solid transparent}
+.pill.plat{background:transparent;border-color:var(--border);color:var(--text-2)}
+.pill.ok{background:var(--success-bg);color:var(--success)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.edit{background:var(--action-bg);color:var(--action)}
+.pill.plan{background:var(--sunken);color:var(--text-2)}
+.pill.none{background:transparent;border-color:var(--border);color:var(--text-3)}
+.pill.rm{background:var(--danger-bg);color:var(--danger)}
+.area-h .cn{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:flex-end}
+.btn{font:inherit;font-size:.86rem;font-weight:700;padding:8px 14px;border-radius:10px;border:1px solid var(--border);background:var(--raised);color:var(--ink);cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--action)}
+.btn.primary{background:var(--action);border-color:var(--action);color:var(--on-action)}
+.btn.primary:hover{background:var(--action-hover);border-color:var(--action-hover)}
+.btn.quiet{border-color:transparent;background:transparent;color:var(--action)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+@media (max-width:760px){.course{grid-template-columns:22px minmax(0,1fr)}.course .pills,.course .act{grid-column:2;justify-content:flex-start}}
+input[type=checkbox]{width:18px;height:18px;accent-color:var(--action);margin:0;cursor:pointer;flex:none}
+.empty{padding:28px 16px;text-align:center;color:var(--text-2);font-size:.95rem}
+.bulk{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--ink);color:var(--page);border-radius:12px;font-size:.92rem;font-weight:600}
+.bulk .btn{background:transparent;color:var(--page);border-color:color-mix(in srgb,var(--page) 40%,transparent)}
+.bulk .btn.primary{background:var(--highlight);border-color:var(--highlight);color:#17213C}
+.bulk div{display:flex;flex-wrap:wrap;gap:8px}
+.toast{font-size:.86rem;color:var(--success);font-weight:600}
+.toast:empty{display:none}
+
+/* access picker */
+.scope{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:.9rem;color:var(--text-2)}
+.scope b{color:var(--ink)}
+.modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.mode{display:flex;gap:12px;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--raised);cursor:pointer;align-items:flex-start}
+.mode:has(input:checked){border-color:var(--action);box-shadow:0 0 0 1px var(--action)}
+.mode input{margin-top:3px;width:18px;height:18px;accent-color:var(--action);flex:none}
+.mode strong{display:block;font-size:1.02rem}
+.mode span{font-size:.88rem;color:var(--text-2);line-height:1.45}
+.presets{display:flex;flex-direction:column;gap:8px}
+.presets .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.lbl-sm{font-size:.8125rem;font-weight:600;color:var(--text-2)}
+.area{border-bottom:1px solid var(--border)}
+.area:last-child{border-bottom:0}
+.area-h{display:grid;grid-template-columns:22px minmax(0,1fr) auto 32px;gap:12px;align-items:center;padding:14px 16px}
+.area-h .t{font-weight:700;line-height:1.3}
+.area-h .d{font-size:.84rem;color:var(--text-2);line-height:1.4}
+.count{font-size:.82rem;font-weight:700;color:var(--text-3);font-variant-numeric:tabular-nums;white-space:nowrap}
+.count.some{color:var(--action)}
+.tw{font:inherit;width:32px;height:32px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--text-2);cursor:pointer;display:grid;place-items:center}
+.tw:hover{border-color:var(--border)}
+.tw svg{transition:transform .15s}
+.tw[aria-expanded="true"] svg{transform:rotate(90deg)}
+@media (prefers-reduced-motion:reduce){.tw svg{transition:none}}
+.area-body{padding:0 16px 16px 50px;display:flex;flex-direction:column;gap:10px}
+@media (max-width:560px){.area-body{padding-left:16px}}
+.vg{border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.vg.rm{border-color:color-mix(in srgb,var(--danger) 45%,var(--border))}
+.vg-h{display:grid;grid-template-columns:20px minmax(0,1fr) auto 28px;gap:10px;align-items:center;padding:9px 12px;background:var(--sunken);font-size:.9rem;font-weight:700}
+.vg.rm .vg-h{background:var(--danger-bg);color:var(--danger)}
+.vg-h small{display:block;font-weight:400;font-size:.8125rem;color:var(--text-2)}
+.vg.rm .vg-h small{color:inherit;opacity:.85}
+.acts{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:0 18px;padding:8px 12px 10px}
+.act-row{display:flex;gap:9px;align-items:flex-start;padding:6px 0;font-size:.9rem;line-height:1.35;cursor:pointer}
+.act-row input{width:16px;height:16px;margin-top:2px}
+.act-row em{font-style:normal;display:block;font-size:.8125rem;color:var(--warn);font-weight:600}
+.locked{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;font-size:.88rem;color:var(--text-2);background:var(--sunken)}
+.locked b{color:var(--ink)}
+.summary{position:sticky;bottom:0;display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;justify-content:space-between;padding:14px 18px;background:var(--raised);border-top:1px solid var(--border)}
+.summary p{font-size:.92rem;color:var(--text-2)}
+.summary p b{color:var(--ink)}
+.review{padding:16px 18px;background:var(--action-bg);border-top:1px solid var(--border);font-size:.95rem;display:flex;flex-direction:column;gap:6px}
+.review b{color:var(--ink)}
+.dim{opacity:.45;pointer-events:none}
+
+/* principles + plan */
+.rules{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:22px 32px}
+.rules.c3{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:900px){.rules,.rules.c3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:520px){.rules,.rules.c3{grid-template-columns:1fr}}
+.rules div{display:flex;flex-direction:column;gap:4px;border-top:2px solid var(--ink);padding-top:12px}
+.rules p{font-size:.92rem;color:var(--text-2)}
+.phase{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px 20px;padding:24px 0;border-top:1px solid var(--border)}
+.phase .num{font-size:2rem;font-weight:800;letter-spacing:-.03em;line-height:1;color:var(--action);font-variant-numeric:tabular-nums}
+.phase .pb{display:flex;flex-direction:column;gap:12px}
+.phase .goal{color:var(--text-2);max-width:72ch}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px 32px}
+.cols h4{font-size:.74rem;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px}
+.cols ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:5px;font-size:.92rem;color:var(--text-2)}
+.size{font-size:.74rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);margin-left:10px}
+@media (max-width:560px){.phase{grid-template-columns:1fr}}
+.decision{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 28px;padding:18px 0;border-top:1px solid var(--border)}
+.decision p{font-size:.94rem;color:var(--text-2)}
+.decision .rec{color:var(--ink)}
+.decision .rec b{color:var(--success)}
+@media (max-width:700px){.decision{grid-template-columns:1fr}}
+.note{font-size:.88rem;color:var(--text-2);border-left:3px solid var(--highlight);padding:2px 0 2px 14px;max-width:80ch}
+footer{font-size:.84rem;color:var(--text-3);border-top:1px solid var(--border);padding-top:20px}
+
+/* version 2 additions */
+.rules.c2{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width:700px){.rules.c2{grid-template-columns:1fr}}
+table.score td{font-size:.88rem;color:var(--text-2);line-height:1.45;min-width:180px}
+table.score td:first-child{color:var(--ink);min-width:150px}
+.v{display:block;width:max-content;font-size:.7rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:999px;margin-bottom:5px}
+.v.y{background:var(--success-bg);color:var(--success)}
+.v.p{background:var(--warn-bg);color:var(--warn)}
+.v.f{background:var(--danger-bg);color:var(--danger)}
+.v.n{background:var(--sunken);color:var(--text-2)}
+.seg{display:inline-flex;flex-wrap:wrap;gap:2px;padding:3px;background:var(--raised);border:1px solid var(--border);border-radius:11px;align-self:flex-start;max-width:100%}
+.seg button{font:inherit;font-size:.84rem;font-weight:600;padding:6px 12px;border-radius:8px;border:0;background:transparent;color:var(--text-2);cursor:pointer}
+.seg button small{opacity:.7;margin-left:5px;font-size:.8125rem}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--page)}
+.course2{display:grid;grid-template-columns:minmax(0,1fr) auto 32px;gap:6px 14px;align-items:center;padding:12px 16px;border-top:1px solid var(--border)}
+.course2.sel{grid-template-columns:22px minmax(0,1fr) auto 32px}
+.course2:first-child{border-top:0}
+.course2 .nm{font-weight:700;line-height:1.3}
+.course2 .nm i{font-style:normal;color:var(--warn);margin-right:6px;font-size:.8em}
+.course2 .meta{font-size:.82rem;color:var(--text-2)}
+.course2 .meta.bad{color:var(--warn);font-weight:600}
+.course2 select.ctl{font-size:.84rem;padding:7px 8px;font-weight:600}
+.course2 select.ctl.routine{border-color:var(--action);color:var(--action)}
+.course-x{padding:4px 16px 16px 16px;display:flex;flex-direction:column;gap:10px;font-size:.9rem;color:var(--text-2);background:var(--sunken);border-top:1px solid var(--border)}
+.course-x p{max-width:70ch;padding-top:10px}
+.allowed{display:flex;flex-direction:column;gap:0;border:1px solid var(--border);border-radius:10px;background:var(--raised);overflow:hidden}
+.allowed div{display:flex;flex-wrap:wrap;gap:4px 12px;justify-content:space-between;align-items:center;padding:8px 12px;border-top:1px solid var(--border)}
+.allowed div:first-child{border-top:0}
+.allowed b{color:var(--ink);font-weight:600}
+.allowed span{font-size:.8rem}
+.listhead{padding:10px 16px;font-size:.8125rem;font-weight:600;color:var(--text-2);background:var(--sunken);border-top:1px solid var(--border)}
+.listhead:first-child{border-top:0}
+@media (max-width:640px){.course2,.course2.sel{grid-template-columns:minmax(0,1fr) 32px}.course2.sel{grid-template-columns:22px minmax(0,1fr) 32px}.course2 .lv{grid-column:1 / -1}.course2.sel .lv{grid-column:2 / -1}}
+.approval{width:100%;max-width:560px;padding:24px;display:flex;flex-direction:column;gap:14px;box-shadow:var(--shadow)}
+.approval .who{font-size:.82rem;color:var(--text-3)}
+.approval h4{font-size:1.5rem;font-weight:800;letter-spacing:-.02em}
+.approval .where{font-size:.9rem;color:var(--text-2)}
+.approval .pv{border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--sunken);font-size:.92rem;display:flex;gap:14px;align-items:center}
+.approval .pv .img{flex:none;width:72px;height:56px;border-radius:6px;background:repeating-linear-gradient(45deg,var(--border) 0 6px,transparent 6px 12px);border:1px solid var(--border)}
+.approval .pv del{color:var(--danger)}
+.approval .pv ins{color:var(--success);text-decoration:none;font-weight:700}
+.approval .btns{display:flex;flex-direction:column;gap:8px}
+.approval .btns .btn{white-space:normal;text-align:center;padding:11px 14px;font-size:.92rem}
+.approval .fine{font-size:.82rem;color:var(--text-3)}
+.approval .out{font-weight:700;color:var(--success)}
+
+/* version 3 additions */
+.loop{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:stretch}
+.loop .chat{max-height:520px;overflow-y:auto}
+@media (max-width:820px){.loop{grid-template-columns:1fr}}
+.chat{padding:16px;display:flex;flex-direction:column;gap:10px;min-height:340px}
+.msg{max-width:92%;padding:10px 14px;border-radius:14px;font-size:.92rem;line-height:1.45;display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.msg.me{align-self:flex-end;background:var(--action);color:var(--on-action);border-bottom-right-radius:4px}
+.msg.ai{align-self:flex-start;background:var(--sunken);color:var(--ink);border-bottom-left-radius:4px}
+.msg .who{font-size:.8125rem;font-weight:600;opacity:.75}
+.msg .btn{font-size:.85rem}
+.msg .quietline{font-size:.8rem;color:var(--text-2)}
+.loop .approval{max-width:none;min-height:340px;box-shadow:none}
+.approval.danger{border-color:var(--danger);box-shadow:0 0 0 1px var(--danger)}
+.approval.danger h4{color:var(--danger)}
+.btn.danger{background:var(--danger);border-color:var(--danger);color:var(--page)}
+.approval .idle{color:var(--text-3);font-size:.92rem;margin:auto;text-align:center;max-width:30ch}
+.loop-foot{display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:space-between;align-items:center}
+.cost{font-size:.86rem;color:var(--text-2)}
+.cost b{color:var(--ink)}
+.banner{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;padding:12px 16px;border-radius:12px;background:var(--action-bg);border:1px solid var(--action);font-size:.92rem;font-weight:600;color:var(--ink)}
+.tbicon{display:inline-flex;position:relative;vertical-align:middle;margin-left:10px;width:22px;height:22px;border-radius:6px;border:1px solid var(--border);background:var(--sunken);align-items:center;justify-content:center}
+.tbicon i{width:10px;height:10px;border-radius:50%;border:2px solid var(--action)}
+.tbicon b{position:absolute;right:-7px;bottom:-6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:var(--action);color:var(--on-action);font-size:.62rem;font-weight:800;line-height:15px;text-align:center}
+.tbicon b:empty{display:none}
+.course3{display:grid;grid-template-columns:minmax(0,1fr) auto 32px;gap:6px 14px;align-items:center;padding:12px 16px;border-top:1px solid var(--border);width:100%;text-align:left;font:inherit;color:inherit;background:transparent;border-left:0;border-right:0;border-bottom:0;cursor:pointer}
+.course3.sel{grid-template-columns:22px minmax(0,1fr) auto 32px}
+.course3.static{cursor:default}
+.course3:hover:not(.static){background:var(--sunken)}
+.course3 .nm{font-weight:700;line-height:1.3}
+.course3 .nm i{font-style:normal;color:var(--warn);margin-right:6px;font-size:.8em}
+.course3 .meta{font-size:.82rem;color:var(--text-2)}
+.course3 .meta.bad{color:var(--warn);font-weight:600}
+.state{font-size:.86rem;font-weight:600;color:var(--text-2);text-align:right;display:flex;align-items:center;gap:7px;justify-content:flex-end}
+.state.on{color:var(--action)}
+.state.on::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--action);flex:none}
+.course3 .chevbox{display:grid;place-items:center;color:var(--text-2)}
+.course3[aria-expanded="true"] .chevbox svg{transform:rotate(90deg)}
+.detail{padding:6px 16px 18px;display:flex;flex-direction:column;gap:14px;font-size:.9rem;color:var(--text-2);background:var(--sunken);border-top:1px solid var(--border)}
+.detail .rowc{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center}
+.detail p{max-width:72ch}
+.detail .links{display:flex;flex-wrap:wrap;gap:4px 18px}
+.detail .links .btn{padding-left:0}
+@media (max-width:640px){.course3,.course3.sel{grid-template-columns:minmax(0,1fr) 32px}.course3.sel{grid-template-columns:22px minmax(0,1fr) 32px}.course3 .state,.course3 .lv{grid-column:1 / -1;justify-content:flex-start;text-align:left}.course3.sel .state,.course3.sel .lv{grid-column:2 / -1}}
+div.course3{border-left:0;border-right:0}
+.rowbtn{all:unset;display:block;cursor:pointer;width:100%;box-sizing:border-box}
+.rowbtn:focus-visible{outline:3px solid var(--action);outline-offset:3px;border-radius:6px}
+.batchlist{display:flex;flex-direction:column;gap:6px;font-size:.88rem}
+.batchlist div{border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--sunken)}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <span class="eyebrow">Morrow · Bridge and desktop app · UI audit · version 5 · 21 Sep 2026</span>
+  <h1>Design the <span class="mark">four moments</span> a teacher has with Morrow. The settings page is not one of them.</h1>
+  <p class="lead">Third pass. Version 2 moved permission into the approval moment, and that holds. But it still ignored the largest daily cost: <strong>one approved change takes two app switches, a hunt for a link, a click, and a typed “done”</strong>, because Morrow never tells the assistant that the review is complete. The plan puts the moments in order of how often a teacher meets them and gives each one a measured budget. <strong>Every decision is now made.</strong> I made each one from Morrow’s own principles, and no part of the plan waits for an answer from you.</p>
+  <nav class="toc" aria-label="Sections">
+    <a href="#craft">Craft, measured</a><a href="#pass3">Third pass</a><a href="#research">Research</a><a href="#budget">Budget</a><a href="#model">The four moments</a><a href="#access">Customize view</a><a href="#plan">Plan</a><a href="https://claude.ai/artifact/QezfpTpNYd1Q99ZqhmVMcs">Build spec</a><a href="#decisions">Decisions</a><a href="#verdict">Apple test</a><a href="#wrong">Earlier corrections</a><a href="#evidence">Evidence</a><a href="#findings">Findings</a><a href="#map">Option map</a>
+  </nav>
+</header>
+
+<section id="craft">
+  <h2>Craft, measured</h2>
+  <div class="prose"><p>This pass used the Impeccable critique and detector, and the typography, color, motion and interface rule sets. I measured the computed styles on the real pages. I also rendered the review page for the first time, with the project’s own test stub. It is the screen a teacher sees most.</p>
+  <p><strong>Verdict.</strong> Morrow does not look generated. The detector found no generic pattern, text contrast passes in both themes, and the pages are calm. But the token contract in <code>theme.css</code> covers color only. Type, space and radius are free numbers in each stylesheet, so each surface invented its own. That is the distance between calm and Apple level.</p></div>
+  <div class="tbl"><table>
+    <thead><tr><th>Surface</th><th class="n">Font sizes</th><th class="n">Weights</th><th class="n">Line heights</th><th class="n">Radii</th><th class="n">Gap values</th><th class="n">Text under 13 px</th><th class="n">Targets under 44 px</th></tr></thead>
+    <tbody>
+      <tr><td>Settings page</td><td class="n">11</td><td class="n">5</td><td class="n">9</td><td class="n">6</td><td class="n">9</td><td class="n">53 of 86</td><td class="n">9</td></tr>
+      <tr><td>Popup</td><td class="n">4</td><td class="n">4</td><td class="n">5</td><td class="n">4</td><td class="n">3</td><td class="n">25 of 35</td><td class="n">2</td></tr>
+      <tr><td>Setup guide</td><td class="n">5</td><td class="n">4</td><td class="n">6</td><td class="n">4</td><td class="n">3</td><td class="n">0 of 19</td><td class="n">1</td></tr>
+      <tr><td>Edit list</td><td class="n">5</td><td class="n">4</td><td class="n">3</td><td class="n">3</td><td class="n">4</td><td class="n">961 of 1,522</td><td class="n">347</td></tr>
+      <tr><td>Desktop app, set up</td><td class="n">9</td><td class="n">9</td><td class="n">11</td><td class="n">7</td><td class="n">11</td><td class="n">27 of 43</td><td class="n">0</td></tr>
+    </tbody>
+    <tfoot><tr><td>Target for each surface</td><td class="n">7 or fewer</td><td class="n">3</td><td class="n">4</td><td class="n">4</td><td class="n">space tokens only</td><td class="n">0</td><td class="n">0</td></tr></tfoot>
+  </table></div>
+
+  <div class="surface">
+    <div class="finding"><span class="id">C1</span><span class="sev c">Critical</span><div class="body"><h4>Most text is too small</h4><p>The brand document sets the base at 16 px. The settings page renders 53 of 86 text elements under 13 px, and 18 labels at 10 px in capitals. The popup renders 25 of 35 under 13 px. New floor: 13 px, with 14 px for rows and controls and 16 px for paragraphs.</p><span class="ev">computed styles · docs/brand/MORROW-BRAND.md “Type, layout, and motion”</span></div></div>
+    <div class="finding"><span class="id">C2</span><span class="sev h">High</span><div class="body"><h4>No type, space or radius scale</h4><p>Eleven font sizes on one page. Weights of 620, 650, 680 and 700 that no eye can tell apart, and 9 weights from 400 to 780 in the desktop app. Gaps of 5, 9, 17, 22 and 28 px, although the brand document requires a 4 px unit. A heading of level 3 (16 px) is larger than a heading of level 2 (15 px).</p><span class="ev">connector/extension/brand/theme.css has color tokens only · installer/renderer/styles.css</span></div></div>
+    <div class="finding"><span class="id">C3</span><span class="sev h">High</span><div class="body"><h4>Inputs and checkboxes have no visible boundary</h4><p>The border token has a contrast of 1.34 to 1 on the page. A control needs 3 to 1 (WCAG 1.4.11). The automated scan cannot see this. New token: <code>#7F8CA8</code> in light, <code>#6B7A99</code> in dark.</p><span class="ev">--border #D6DDEC on --page #FCFDFF</span></div></div>
+    <div class="finding"><span class="id">C4</span><span class="sev h">High</span><div class="body"><h4>The end of each task is flat</h4><p>After a change is saved and checked, the review page shows “Changes confirmed” in the same grey text as a field list. It has no mark, no link to the item and no next step. People judge an experience by its end. Morrow’s own brand sentence belongs here: “Canvas saved the change. Morrow checked the result.”</p><span class="ev">rendered result state · packages/mcp-server/src/approval-server.ts:761</span></div></div>
+    <div class="finding"><span class="id">C5</span><span class="sev h">High</span><div class="body"><h4>The review page shows machine words</h4><p>A page delete renders as “Delete page courses?”, made from the tool name <code>canvas_delete_page_courses</code>. The page lists “URL or ID: week-2-overview”. A delete review looks the same as an edit review.</p><span class="ev">approval-server.ts:326 readableName · :925 hiddenFields</span></div></div>
+    <div class="finding"><span class="id">C6</span><span class="sev m">Medium</span><div class="body"><h4>Links and disclosures use browser defaults</h4><p>No stylesheet has a rule for links, so “Privacy details” shows in default blue, <code>rgb(0, 0, 238)</code>. Disclosures use the default triangle. A disclosure row is 19 px high.</p><span class="ev">popup/popup.css:21 · onboarding/onboarding.css:13</span></div></div>
+    <div class="finding"><span class="id">C7</span><span class="sev m">Medium</span><div class="body"><h4>Lines are too long, and small details are missing</h4><p>15 lines on the settings page and 9 in the setup guide are longer than 85 characters. No <code>font-synthesis: none</code>. The desktop stylesheet has no antialiasing and no balanced headings. The font ships as <code>.ttf</code>.</p><span class="ev">brand/Manrope-variable.ttf · installer/renderer/styles.css</span></div></div>
+    <div class="finding"><span class="id">C8</span><span class="sev m">Medium</span><div class="body"><h4>My own models broke these rules</h4><p>The models on this page used capital labels at 11.5 px. They now use 13 px, natural case and no tracking, as the new floor requires.</p><span class="ev">this page, versions 1 to 4</span></div></div>
+  </div>
+
+  <h3>The review page today</h3>
+  <div class="shots">
+    <figure class="shot"><div class="frame" tabindex="0"><img src="img/review-edit.png" alt="Review page for a page edit: title Edit Page, a field named URL or ID, and the page content" loading="lazy"></div><figcaption><strong>An edit review.</strong> Calm and clear. But “URL or ID” is a machine field. The approve button is absent here only because the test stub gives no course.</figcaption></figure>
+    <figure class="shot"><div class="frame" tabindex="0"><img src="img/review-delete.png" alt="Review page for a page delete with the title Delete page courses" loading="lazy"></div><figcaption><strong>A delete review.</strong> The title is “Delete page courses?”. It looks the same as an edit.</figcaption></figure>
+    <figure class="shot"><div class="frame" tabindex="0"><img src="img/review-done.png" alt="Review page result: Changes confirmed, in plain grey text" loading="lazy"></div><figcaption><strong>The end of a task.</strong> No mark, no link to the item, no next step.</figcaption></figure>
+  </div>
+
+  <h3>Heuristic score</h3>
+  <div class="prose"><p>Nielsen’s ten heuristics, 0 to 4 each, for the Bridge, the review page and the desktop app together. Most real products score 20 to 32.</p></div>
+  <div class="tbl"><table>
+    <thead><tr><th>Heuristic</th><th class="n">Today</th><th>Main reason</th><th class="n">With the plan</th></tr></thead>
+    <tbody>
+      <tr><td>Visibility of system status</td><td class="n">2</td><td>States exist, but nothing shows that Edit is on, and a waiting review has no sign.</td><td class="n">4</td></tr>
+      <tr><td>Match with the real world</td><td class="n">1</td><td>API text, “URL or ID”, “Delete page courses?”, “Course tab needed”, account numbers.</td><td class="n">4</td></tr>
+      <tr><td>User control and freedom</td><td class="n">2</td><td>Cancel and return to Plan exist. No stop-all. A reversal is a new change.</td><td class="n">3</td></tr>
+      <tr><td>Consistency and standards</td><td class="n">2</td><td>Color is consistent. Type, space and radius differ on each surface.</td><td class="n">4</td></tr>
+      <tr><td>Error prevention</td><td class="n">3</td><td>Strong: review first, one-time codes, stale checks. A delete looks like an edit.</td><td class="n">4</td></tr>
+      <tr><td>Recognition, not recall</td><td class="n">1</td><td>Find the link, remember to type “done”, search 558 options.</td><td class="n">4</td></tr>
+      <tr><td>Flexibility and efficiency</td><td class="n">1</td><td>No bulk action, no “select all”, 6 courses on a page.</td><td class="n">3</td></tr>
+      <tr><td>Minimal design</td><td class="n">2</td><td>Calm visuals, but walls of small text and a list of 24 screens.</td><td class="n">4</td></tr>
+      <tr><td>Recovery from errors</td><td class="n">3</td><td>Each problem has a title, a detail and an action. Good.</td><td class="n">4</td></tr>
+      <tr><td>Help and documentation</td><td class="n">2</td><td>A setup guide and access rules. No help at the point of choice.</td><td class="n">3</td></tr>
+    </tbody>
+    <tfoot><tr><td>Total</td><td class="n">19 of 40</td><td>Band: poor. The core experience needs an overhaul, which is the plan.</td><td class="n">37 of 40</td></tr></tfoot>
+  </table></div>
+  <p class="note">The score “with the plan” is a forecast, not a measurement. Score again after each release batch. The build spec has the Foundation phase with the exact tokens, the five permitted places for motion, and the tests that hold the scale.</p>
+</section>
+
+<section id="pass3">
+  <h2>Third pass: what version 2 still got wrong</h2>
+  <div class="surface">
+    <div class="finding"><span class="id">T1</span><span class="sev c">Missed</span><div class="body"><h4>The review loop is the product, and it has no design</h4><p>Morrow returns a loopback link in a tool result. The assistant writes its own sentence around it. The teacher finds the link, goes to Chrome, approves, comes back, and types that it is done. Only then does the assistant read the result. Morrow’s instructions to the assistant are 3,943 characters and say nothing about how to present the link or how to continue. No tool waits for the approval. The Bridge icon has no badge.</p><span class="ev">packages/mcp-server/src/runtime.ts:3045 approvalUrl · server-instructions.ts · operation-tools.ts:44 · no setBadgeText in service-worker.js</span></div></div>
+    <div class="finding"><span class="id">T2</span><span class="sev c">Wrong</span><div class="body"><h4>My desktop finding D1 was wrong</h4><p>I rendered the desktop app with the project’s own test stub and looked at it. After setup, the large heading is “Your course is connected.” It is clean. The real problems are smaller: it names one course only, the first content after success is about removal, the example prompt has no copy button, and no visible <code>h1</code> exists in that state.</p><span class="ev">three rendered states at 1000 × 800, axe 4.11 · installer/test/renderer-layout.browser.mjs pattern</span></div></div>
+    <div class="finding"><span class="id">T3</span><span class="sev h">Wrong</span><div class="body"><h4>“Until 11:59 PM” and an end time for each kind do not fit the code</h4><p>Edit lasts one of five fixed times (30 minutes to 24 hours). A course has one permission with one end time. Version 3 uses the fixed times, shows them as clock times, and keeps one end time for each course. A new kind never moves the end time later.</p><span class="ev">src/edit-policy.js:7 SETTINGS_EDIT_DURATIONS · :666 validEditDuration · :670 createEditPermission</span></div></div>
+    <div class="finding"><span class="id">T4</span><span class="sev h">Weak</span><div class="body"><h4>A settings control in each list row</h4><p>Version 2 put a menu in each course row, and its label changed width. A list shows state. The detail changes state. Version 3 uses a status line in the row and the controls in the detail.</p><span class="ev">version 2 of this page</span></div></div>
+    <div class="finding"><span class="id">T5</span><span class="sev h">Missed</span><div class="body"><h4>No sign that Morrow can change a course now</h4><p>When Edit is on, nothing outside the settings page shows it. A teacher must be able to see it at a glance and stop it with one click, as with a camera or microphone indicator.</p><span class="ev">no toolbar badge, no banner, no “stop all” control in popup or settings</span></div></div>
+    <div class="finding"><span class="id">T6</span><span class="sev h">Dropped</span><div class="body"><h4>I considered an offer of wider access after repeated approvals</h4><p>That pushes people to grant more. Apple’s repeated prompts push the other way. The idea is out. Wider access stays a choice that the teacher starts.</p><span class="ev">design review</span></div></div>
+    <div class="finding"><span class="id">T7</span><span class="sev h">Missed</span><div class="body"><h4>Undo is not one click, and I implied it could be</h4><p>The undo tool makes a new correction that the assistant must write and the teacher must approve. “Recent changes” can link to the item and can start that correction. For a Canvas Page it can restore the earlier version, because Canvas keeps page revisions.</p><span class="ev">packages/mcp-server/src/operation-tools.ts:141 morrow_operation_undo</span></div></div>
+    <div class="finding"><span class="id">T8</span><span class="sev m">Missed</span><div class="body"><h4>Plan confirms each change, so the dangerous review looks like the routine one</h4><p>Research on confirmation is clear: a person who confirms all day stops reading. Fewer routine reviews make the removal review stronger. The removal review must also look different.</p><span class="ev">Nielsen Norman Group, confirmation dialogs</span></div></div>
+    <div class="finding"><span class="id">T9</span><span class="sev m">Missed</span><div class="body"><h4>No plan to test with real people, and no numbers to reach</h4><p>I am not the user. A plan that claims the best experience needs a baseline, targets and a test with teachers.</p><span class="ev">versions 1 and 2 of this page</span></div></div>
+    <div class="finding"><span class="id">T10</span><span class="sev c">Missed</span><div class="body"><h4>58 of the 347 grantable options grant nothing when selected</h4><p>Found while I wrote the build spec. An option with more than 8 changeable settings gets an empty field list, so a grant of it lets Morrow change nothing. This group includes “Edit an assignment” (49 settings), “Update a topic” (25) and “Edit a quiz” (26). A “select all” or a routine switch on these options would look like a grant and would do nothing. The cure is task bundles with explicit field lists.</p><span class="ev">src/edit-policy.js:26 EDIT_FIELD_GRANT_LIMIT · :496 requiresFieldSelection · :526</span></div></div>
+    <div class="finding"><span class="id">T11</span><span class="sev c">Wrong</span><div class="body"><h4>A computed “routine” set is not safe</h4><p>Version 3 defined routine work as 126 actions from the catalog’s tier and scope. That set holds “post a reply”, “enroll a user”, “create an external tool” (it has a shared secret field) and “set a feature flag”. Routine work is now an explicit list: 7 Canvas bundles and 1 Moodle bundle. I checked each field name in the draft against the catalog. The result was no errors.</p><span class="ev">analysis of categoriesForBinding output · canvas-bundles.draft.json in the build spec</span></div></div>
+  </div>
+</section>
+
+<section id="research">
+  <h2>What the research says</h2>
+  <div class="rules c3">
+    <div><h4>Ask at the moment of need</h4><p>Apple: request access only when the feature needs it, explain why in one active sentence, and give defaults so people can start at once. <a href="https://developer.apple.com/design/human-interface-guidelines/privacy">HIG Privacy</a>, <a href="https://developer.apple.com/design/human-interface-guidelines/onboarding">Onboarding</a></p></div>
+    <div><h4>Keep people in control of AI work</h4><p>Apple: put Undo and Retry near the result, do not automate actions that are hard to reverse, confirm significant actions, show specific progress, and give example requests. <a href="https://developer.apple.com/design/human-interface-guidelines/generative-ai">HIG Generative AI</a></p></div>
+    <div><h4>Confirm only what is serious</h4><p>Routine confirmations train people to click without reading. Name the exact object and action. Prefer recovery to confirmation. <a href="https://www.nngroup.com/articles/confirmation-dialog/">Nielsen Norman Group</a></p></div>
+    <div><h4>Ask one time for each context</h4><p>A field study of 36 Android users found that prompts work when they appear on first use in a context and only for sensitive data. A naive scheme would show 34 prompts on average. <a href="https://www.usenix.org/system/files/conference/usenixsecurity15/sec15-paper-wijesekera.pdf">Wijesekera et al., USENIX Security 2015</a></p></div>
+    <div><h4>The scope ladder is an industry pattern</h4><p>VS Code’s agent asks with four scopes: one time, this session, this workspace, always. It also has one place to review and reset approvals, and it warns before a wide scope. Morrow’s ladder is: one time, this course for a fixed time. It has no “always”. <a href="https://code.visualstudio.com/docs/agents/run/approvals">VS Code approvals</a></p></div>
+    <div><h4>Correction, consequences, global control</h4><p>Microsoft’s guidelines for human and AI interaction: make correction efficient (G9), show what a choice will change later (G16), give global controls (G17), explain why (G11). <a href="https://www.microsoft.com/en-us/haxtoolkit/library/">HAX library</a></p></div>
+  </div>
+</section>
+
+<section id="people">
+  <h2>Who uses this</h2>
+  <div class="rules c2">
+    <div><h4>The teacher</h4><p>Three to six courses in a term. Opens Morrow when there is a task: fix the quiz, move the dates, repair accessibility. Not technical. Will not read a settings page. Success is: ask, look at the preview, approve, done. <strong>The default experience must serve this person with no configuration.</strong></p></div>
+    <div><h4>The course designer or quality reviewer</h4><p>Dozens of courses, many at one time, often the same change in each. Needs search by course code, filters, bulk level changes and a record of what changed. <strong>The list must scale for this person without a cost to the teacher.</strong></p></div>
+  </div>
+</section>
+
+
+<section id="budget">
+  <h2>Interaction budget</h2>
+  <div class="prose"><p>Each moment gets a cost today and a target. The plan is done when the targets hold in a walkthrough with counts. Costs for today come from the code and the UI text. The setup count is an estimate from the setup text, not a timed run.</p></div>
+  <div class="tbl"><table class="score">
+    <thead><tr><th>Moment</th><th>Cost today</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td><b>Setup, to the first read of a course</b></td><td>About 18 actions with a store listing. About 23 with Developer mode.</td><td>9 or fewer. “Add to Chrome” opens the listing. One sign-in tab is sufficient.</td></tr>
+      <tr><td><b>One approved change</b></td><td>2 app switches, find the link, 1 click to approve, 1 typed message.</td><td>1 click on a link named after the change, 1 click to approve. No typed message. The Bridge popup also lists the review.</td></tr>
+      <tr><td><b>The same kind of change again, same course, same day</b></td><td>The full cost again.</td><td>0. The assistant reports it.</td></tr>
+      <tr><td><b>Ten changes of one kind</b></td><td>1 review if the assistant makes a batch. 10 if it does not.</td><td>1 review. Morrow tells the assistant to batch.</td></tr>
+      <tr><td><b>Come back the next day, tabs closed</b></td><td>Open the platform by hand, open a course, reload the Bridge page. 0 of 3 courses were ready on this computer.</td><td>0 clicks. The Bridge opens the site when work arrives.</td></tr>
+      <tr><td><b>“Can Morrow change anything now?”</b></td><td>Open settings and read each course card.</td><td>A glance at the Bridge icon.</td></tr>
+      <tr><td><b>Stop all access</b></td><td>Select courses, then “Return selected courses to Plan”.</td><td>1 click.</td></tr>
+      <tr><td><b>“What did Morrow change today?”</b></td><td>Ask the assistant. No view exists.</td><td>1 click to a list with links to each item.</td></tr>
+      <tr><td><b>Find one course among 40</b></td><td>7 pages of 6. Search by name only.</td><td>Type the course code.</td></tr>
+      <tr><td><b>Allow a whole area of work</b></td><td>Up to 141 checkboxes, one at a time.</td><td>1 switch for routine work, or 1 checkbox for an area.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="model">
+  <h2>The four moments</h2>
+  <div class="rules">
+    <div><h4>1. Start</h4><p>Setup ends with a real result, not only “connected”. Three example requests with a Copy button. The first one finds something useful, for example images with no alternative text.</p></div>
+    <div><h4>2. Ask and review</h4><p>The assistant says one sentence and gives one link, named after the change. The teacher approves. The assistant continues with no typed message. The Bridge popup lists each review that waits.</p></div>
+    <div><h4>3. Trust</h4><p>The review offers “do not ask again for this kind of edit in this course”, for 4 hours, with a clock time. One switch, “Routine edits”, allows edits to what exists: text, titles, order, file names, alternative text. Morrow always asks before it creates, publishes, removes, posts, or changes a date, points or a setting.</p></div>
+    <div><h4>4. Return and oversee</h4><p>The Bridge opens the platform itself. The icon shows when Morrow can change a course. One click stops all access. “Recent changes” shows what Morrow did.</p></div>
+  </div>
+
+  <h3>Moments 2 and 3: ask, review, trust</h3>
+  <div class="prose"><p>Play it. Open the review from the named link. Approve one time, and the next review is a batch. Select “do not ask again”, and the assistant completes the other images with no review. Then it asks to delete a page, and that review is different.</p></div>
+  <div class="mock">
+    <div class="mock-bar"><span><b>Assistant</b> on the left · <b>Morrow review</b> on the right</span><span class="tag">Working model · example requests</span></div>
+    <div class="mock-body">
+      <div class="loop">
+        <div class="panel chat" id="lp-chat" role="log" aria-live="polite" aria-label="Assistant conversation"></div>
+        <div class="panel approval" id="lp-review" aria-live="polite"></div>
+      </div>
+      <div class="loop-foot"><span id="lp-cost" class="cost"></span><button type="button" class="btn quiet" id="lp-restart">Start again</button></div>
+    </div>
+  </div>
+
+  <h3>Moment 4: return and oversee</h3>
+  <div class="prose"><p>A list shows state. A course opens to its controls. The banner and the icon badge show that Morrow can change a course now. Search matches the name and the code. “Select” turns on bulk changes for a person with many courses.</p></div>
+  <div class="mock">
+    <div class="mock-bar"><span><b>Morrow Bridge</b> · Courses and access <span class="tbicon" aria-hidden="true"><i></i><b id="c-badge"></b></span></span><span class="tag">Working model · example data</span></div>
+    <div class="mock-body">
+      <div class="banner" id="c-banner" hidden><span id="c-banner-t"></span><button type="button" class="btn" id="c-stop">Ask first in all courses</button></div>
+      <div class="ui-h"><h3>Your courses</h3><span id="c-count"></span></div>
+      <div class="toolbar">
+        <label class="search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.6"/><path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><input id="c-q" type="search" placeholder="Search by course name or code" aria-label="Search courses"></label>
+        <select id="c-platform" class="ctl" aria-label="Platform"><option value="all">All platforms</option><option>Canvas</option><option>Moodle</option></select>
+        <select id="c-term" class="ctl" aria-label="Term"></select>
+        <button class="btn" id="c-selmode" type="button" aria-pressed="false">Select</button>
+      </div>
+      <div class="seg" id="c-scope" role="group" aria-label="Show"></div>
+      <div class="panel" id="c-list" style="overflow:hidden"></div>
+      <div class="bulk" id="c-bulk" hidden><span id="c-bulk-n"></span><div><button class="btn" data-bulk="ask" type="button">Plan. Ask first.</button><button class="btn primary" data-bulk="routine" type="button">Edit. Routine edits for 4 hours.</button></div></div>
+      <p class="toast" id="c-toast" role="status" aria-live="polite"></p>
+    </div>
+  </div>
+  <p class="note">Safety. A wide grant lets text hidden in course content steer more changes with no review. Morrow tells the assistant to treat course content as data, but that is an instruction, not a barrier. A grant that comes from one approval is the narrowest grant possible, so the simple path is also the safe path. The review page needs a one-time code and a cookie, so the assistant cannot approve for the teacher.</p>
+</section>
+
+<section id="access">
+  <h2>Customize view: Edit access with progressive disclosure</h2>
+  <div class="prose"><p>This is the advanced view. A person reaches it from “Customize” on a course. Most teachers never open it. It has three levels. Level 1 is 8 areas of teacher work. Level 2 is the kind of change: create and edit, publish and organize, remove. Level 3 is the single action. Each level has “select all”. A preset fills the list in one click. The bar at the bottom says the grant in plain words.</p></div>
+
+  <div class="mock">
+    <div class="mock-bar"><span><b>Morrow Bridge</b> · Courses and access · Access</span><span class="tag">Working model · example actions</span></div>
+    <div class="mock-body">
+      <div class="ui-h"><h3>Access</h3><span class="scope">Applies to <b id="a-scope"></b></span></div>
+      <div class="modes" role="radiogroup" aria-label="Access mode">
+        <label class="mode"><input type="radio" name="a-mode" id="a-mode-plan" value="plan"><div><strong>Plan</strong><span>Morrow prepares each change. You review it before it goes to the course.</span></div></label>
+        <label class="mode"><input type="radio" name="a-mode" id="a-mode-edit" value="edit" checked><div><strong>Edit</strong><span>Morrow makes the changes you allow below, for a limited time.</span></div></label>
+      </div>
+
+      <div id="a-edit" style="display:flex;flex-direction:column;gap:16px">
+        <div class="presets">
+          <span class="lbl-sm">Start from</span>
+          <div class="row" id="a-presets"></div>
+        </div>
+        <div class="toolbar">
+          <label class="search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.6"/><path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><input id="a-q" type="search" placeholder="Find an action, for example “rubric” or “delete”" aria-label="Find an action"></label>
+          <select id="a-dur" class="ctl" aria-label="How long Edit lasts"><option value="1 hour">For 1 hour</option><option value="4 hours" selected>For 4 hours</option><option value="8 hours">For 8 hours</option><option value="24 hours">For 24 hours</option></select>
+          <label class="chip" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="a-only" style="width:15px;height:15px">Selected only</label>
+        </div>
+        <div class="panel" style="overflow:hidden">
+          <div id="a-areas"></div>
+          <div class="locked"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true" style="flex:none;margin-top:2px"><rect x="3.5" y="8" width="11" height="7.5" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M6 8V5.8a3 3 0 016 0V8" stroke="currentColor" stroke-width="1.5"/></svg><span><b>Beyond this course · 113 actions.</b> Account settings, people, and shared files and groups. Closed by default. No level and no preset includes them.</span></div>
+          <div class="locked" style="border-top:1px solid var(--border)"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true" style="flex:none;margin-top:2px"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.5"/><path d="M9 5.5v4M9 12v.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span><b>211 actions always wait for your review.</b> They are not in this list because there is nothing to select. <a href="#map">See what they are.</a></span></div>
+          <div class="summary"><p id="a-sum"></p><button class="btn primary" id="a-save" type="button">Review and save</button></div>
+          <div class="review" id="a-review" hidden></div>
+        </div>
+      </div>
+      <p class="toast" id="a-plan-note" hidden>In Plan, Morrow changes nothing in these courses until you approve each change.</p>
+    </div>
+  </div>
+
+  <div class="rules c3">
+    <div><h4>“Select all” never turns on removal</h4><p>The area checkbox selects create, edit, publish and organize. “Remove” has its own checkbox in each area, in a danger style. A person cannot grant deletion by accident.</p></div>
+    <div><h4>Counts on each row</h4><p>“9 of 9” shows what is on before a person opens the row. A partly selected area shows a mixed checkbox. Removal has its own marker.</p></div>
+    <div><h4>Search opens what it finds</h4><p>Type “rubric”. Areas without a match hide. Areas with a match open. No scroll is necessary.</p></div>
+    <div><h4>Plain labels, one line each</h4><p>“Create a rubric”, not the API summary. A short warning only where learners see the result at once.</p></div>
+    <div><h4>Presets for the common grants</h4><p>Course building, accessibility repairs, quizzes and banks. A preset is a start. A person can change it.</p></div>
+    <div><h4>The save step speaks plainly</h4><p>“Morrow may make 45 kinds of change in 3 courses for 4 hours. It may not remove content.”</p></div>
+  </div>
+  <p class="note">The stored grant does not change. The new list selects the same category ids that the Bridge saves today. This is a change to the view and to the option metadata. It needs no protocol change and no migration.</p>
+</section>
+
+
+<section id="plan">
+  <h2>Plan</h2>
+  <p class="note"><strong>Implementation detail is in the <a href="https://claude.ai/artifact/QezfpTpNYd1Q99ZqhmVMcs">Morrow UX Build Spec</a>:</strong> every decision made, a Foundation phase with exact tokens, 47 work items with files, functions, data shapes, text, tests and acceptance checks, and 19 validated Canvas bundles.</p>
+  <div class="prose"><p>Six phases, in order of how often a teacher meets the problem. Each phase ships alone. A baseline walkthrough comes first, so each later phase has a number to beat.</p></div>
+  <div>
+    <div class="phase"><span class="num">0</span><div class="pb"><h3>Baseline walkthrough <span class="size">Small · before any change</span></h3><p class="goal">Measure today’s build, so “better” is a number. No person must be recruited.</p>
+      <div class="cols"><div><h4>Method</h4><ul><li>The implementer does seven tasks on a clean user account with a sandbox course: set up to first read; correct alternative text on one page; move three due dates; come back with tabs closed; find what Morrow changed; set access for 12 courses by code; stop all access.</li><li>Record for each task: clicks, app switches, typed messages, seconds, and each place where the text on screen was not sufficient.</li></ul></div>
+      <div><h4>Done when</h4><ul><li>Each row of the interaction budget has a measured baseline.</li><li>Sessions with teachers come after phase 4. They correct labels. They never block a release.</li></ul></div></div></div></div>
+
+    <div class="phase"><span class="num">F</span><div class="pb"><h3>Foundation: one scale for all surfaces <span class="size">Medium · before or with phase 1</span></h3><p class="goal">Give Morrow the system under its colors, so each later screen is built from the same numbers.</p>
+      <div class="cols"><div><h4>Changes</h4><ul><li><code>theme.css</code> gets seven type roles (32, 22, 17, 16, 14, 14 strong, 13 px), three weights, the 4 px space scale that the brand document already requires, and four radii. No text under 13 px. No capital labels.</li><li>A control border at 3 to 1. A rule for links. One chevron for each disclosure. Each control 44 px or more.</li><li>Lines of 68 characters or fewer. Balanced headings. The same rendering rules on all surfaces, the desktop app included.</li><li>Motion in five places only, each under 300 ms.</li><li>The result of a review gets a success mark, Morrow’s own sentence, a link to the item and the next step. A delete review looks different. No machine field names.</li><li>Loading, empty and progress states.</li></ul></div>
+      <div><h4>Done when</h4><ul><li>The census script reports for each surface: 7 font sizes or fewer, 3 weights, 4 radii or fewer, no text under 13 px, no control under 44 px.</li><li>The contract test fails on a raw size, weight, gap or radius in a Morrow stylesheet.</li><li>axe stays clean, and the control border passes 3 to 1 in both themes.</li></ul></div></div></div></div>
+
+    <div class="phase"><span class="num">1</span><div class="pb"><h3>Dead ends and the indicator <span class="size">Small</span></h3><p class="goal">No Bridge text tells a person to do what the Bridge can do. Access is visible at a glance.</p>
+      <div class="cols"><div><h4>Changes</h4><ul><li>“Open Canvas” or “Open Moodle” on each blocked course and in the popup (<code>chrome.tabs.create</code>, as <code>service-worker.js:2804</code> does now). The Bridge also opens a background tab by itself when work arrives for a closed site. One setting turns this off. The popup says what happened.</li><li>Toolbar badge: a mark when Morrow can change a course now, a count when reviews wait (<code>chrome.action.setBadgeText</code>).</li><li>A banner with “Ask first in all courses”.</li><li>Replace “Course tab needed” with “Canvas is closed”. Correct the B12 text. Add a visible <code>h1</code> to the popup and to the desktop app’s set-up states.</li><li>Cap the label lists in the save notice and in the assistant’s confirm form.</li></ul></div>
+      <div><h4>Done when</h4><ul><li>Return with tabs closed: 0 clicks.</li><li>Stop all access: 1 click, from the popup and from the page.</li><li>axe finds no violation on the three Bridge pages and the desktop app.</li></ul></div></div></div></div>
+
+    <div class="phase"><span class="num">2</span><div class="pb"><h3>The review loop <span class="size">Medium · highest value</span></h3><p class="goal">One approved change costs one click and no typed message.</p>
+      <div class="cols"><div><h4>Changes</h4><ul><li>A wait tool: the assistant waits a bounded time for the review and then continues. On a timeout it says so and the present path remains.</li><li><code>server-instructions.ts</code>: tell the assistant to say one sentence, give one link named after the action, state that it will continue, and put several changes of one kind in a batch.</li><li>The Bridge popup lists each review that waits, and the icon shows the count. The Bridge never opens a review by itself, because a tab that takes focus is not calm.</li><li>The result state of the review page says what happens next: “Return to your assistant. It continues on its own.”</li><li>A removal review looks different: danger style, the exact object named, no default focus on the button.</li></ul></div>
+      <div><h4>Done when</h4><ul><li>In the test, no teacher types “done” and no teacher asks where the link is.</li><li>Ten changes of one kind arrive as one review.</li><li>A new bridge-protocol command passes the release gate, and the review page keeps its one-time code and cookie.</li></ul></div></div></div></div>
+
+    <div class="phase"><span class="num">3</span><div class="pb"><h3>Words and task bundles <span class="size">Medium · data only</span></h3><p class="goal">Name what Morrow does in teacher terms, one time, for all surfaces.</p>
+      <div class="cols"><div><h4>Changes</h4><ul><li><code>src/edit-policy.js</code> <code>CURATED_CATEGORY_SPECS</code>: about 12 Canvas bundles on the Moodle pattern. Alternative text becomes one bundle, not seven.</li><li>Three facts on each option: <code>reach</code>, <code>removes</code>, <code>learnerVisible</code>. The first two exist now as <code>siteClass</code> and <code>tier</code>. A person must check the third by hand.</li><li>The same names feed the review page, the assistant’s confirm form, the picker and “Recent changes”.</li></ul></div>
+      <div><h4>Done when</h4><ul><li>A test fails on a label with markup, more than 40 characters, or a duplicate.</li><li>Each routine action is in a bundle. The 90 unplaced options are placed.</li><li>Three teachers can say what each bundle name means with no description.</li></ul></div></div></div></div>
+
+    <div class="phase"><span class="num">4</span><div class="pb"><h3>Trust in the moment <span class="size">Medium</span></h3><p class="goal">Access grows from approvals. One switch covers routine work.</p>
+      <div class="cols"><div><h4>Changes</h4><ul><li><code>approval-server.ts</code>: a second button, only for bundles that permit it: the routine bundles, and dates. It lasts 4 hours and states the clock time.</li><li>“Routine edits”: one switch for a course. It is an explicit list: 7 Canvas bundles and 1 Moodle bundle. Rule: routine edits change what exists. They never create, publish, remove or post, and they change no date, points or setting. The included bundles are always listed under the switch.</li><li>One end time for each course, from the five fixed times. A new kind never moves it later.</li><li>Fixed in code and proved by a test: creation, publishing, removal, changes beyond the course, learner records and posts to learners always ask.</li><li>The grant uses the policy path and schema that exist now. The assistant cannot start it.</li></ul></div>
+      <div><h4>Done when</h4><ul><li>The same kind of change again costs 0.</li><li>A removal review never shows the second button.</li><li>In the test, each teacher can say what Morrow may do with no review, and until when.</li></ul></div></div></div></div>
+
+    <div class="phase"><span class="num">5</span><div class="pb"><h3>Courses and access page <span class="size">Large</span></h3><p class="goal">The list and the picker you asked for. The list is the page. The picker is one level down.</p>
+      <div class="cols"><div><h4>Changes</h4><ul><li>Course list: search by name or code, a scope control, platform and term filters, Canvas favorites first, “Select” for bulk. Discovery keeps <code>course_code</code>, term, role and favorite (<code>include[]=term</code>, <code>include[]=favorites</code>; both are in the Canvas Courses API).</li><li>A course opens to: level, end time, the allowed list with Remove, Customize, Disconnect.</li><li>Customize: areas, then kinds, then actions. “Select all” with a mixed state at each level. Removal is separate. “Beyond this course” is a closed area.</li><li>Levels and bundles are platform-neutral. The page maps them to Canvas ids or Moodle ids at save, so a mixed selection works.</li><li>“Course file access” and “Access rules” move to the end. The title becomes “Courses and access”.</li></ul></div>
+      <div><h4>Done when</h4><ul><li>A person finds one course among 40 by its code and sets its level with no page change.</li><li>A teacher with four courses sees four rows, a search field and no other filter.</li><li>All areas fit in 1 screen at 1280 × 900. One open area fits in 2.</li><li>Mixed state is announced. A change to one checkbox does not move focus or scroll.</li></ul></div></div></div></div>
+
+    <div class="phase"><span class="num">6</span><div class="pb"><h3>Start, and one home <span class="size">Medium</span></h3><p class="goal">Setup ends with a result. After setup, the desktop app gets out of the way.</p>
+      <div class="cols"><div><h4>Changes</h4><ul><li>First result: after the first read, show what Morrow found and three example requests with Copy.</li><li>“Add to Chrome” opens the store listing in Chrome. The support address becomes a link. These are the only two addresses the app can open.</li><li>After setup: a home view with three status lines and the example requests. “Setup you can change”, Updates, Blackboard and the retention panel move to Settings. No tray or menu bar item, because the plan removes surfaces.</li><li>“Recent changes”: what, where and when, with a link to the item and “Reverse this”, which starts an approved correction. The operation journal has the data.</li><li>Popup: a status line, the connected courses with their state, and one action for the current tab.</li></ul></div>
+      <div><h4>Done when</h4><ul><li>Setup to first read: 9 actions or fewer with a store listing.</li><li>“What did Morrow change today?”: 1 click.</li><li><code>pnpm test:desktop</code> passes with the new view tests.</li></ul></div></div></div></div>
+  </div>
+
+  <h3>Measure again after phases 2, 4 and 5</h3>
+  <div class="prose"><p>Repeat the walkthrough with counts. A phase is not done until its budget rows hold. After phase 4, sessions with three teachers and two course designers are useful: the same tasks, an ease score from 1 to 7, and the words each person says when stuck. They correct labels. They never block a release.</p></div>
+
+  <h3>The gate that no UI work can repair</h3>
+  <div class="prose"><p><strong>Chrome Web Store listing.</strong> Until it exists, a new person must turn on Developer mode and use “Load unpacked”, five manual steps. Plan the listing as its own track.</p></div>
+
+  <h3>Release constraints</h3>
+  <div class="prose">
+    <p><strong>Sealed Bridge releases.</strong> Each Bridge source change needs a manifest version bump, a new sealed entry in <code>connector/release-ledger.json</code> and a run of <code>scripts/package-canvas-connector.mjs</code>. Batch each phase into one release.</p>
+    <p><strong>Pinned tests.</strong> The gate pins option counts, document line citations and a no-em-dash rule. Phases 3 and 5 will move some pins. Update them on purpose, in the same commit.</p>
+    <p><strong>Shared worktree.</strong> A second lane commits to this worktree now. Do the UI work in its own worktree and branch.</p>
+  </div>
+</section>
+
+<section id="decisions">
+  <h2>Decisions, made</h2>
+  <div class="prose"><p>You asked for no decisions. I made each one from what Morrow says about itself: “Show the next useful action before technical details.” “Keep permission, changes, consequences, and uncertainty visible.” People “should not need to understand browser connections or server internals.” “You keep the teaching decisions.” “Morrow does not add another chat interface.” “Calm, clear, capable.” Sources: <code>docs/brand/MORROW-BRAND.md</code>, <code>.better-web-ui.md</code>, <code>README.md</code>. The <a href="https://claude.ai/artifact/QezfpTpNYd1Q99ZqhmVMcs">build spec</a> has the full table with the reason for each.</p></div>
+  <div>
+    <div class="decision"><p><strong>The Bridge opens Canvas or Moodle by itself when work needs a closed site.</strong></p><p class="rec"><b>Yes, by default, with no consent step.</b> A tab is mechanics. It gives Morrow no new data and no new permission. One setting turns it off, and the popup says what happened.</p></div>
+    <div class="decision"><p><strong>The Bridge opens the review page by itself.</strong></p><p class="rec"><b>No.</b> A tab that takes focus is not calm. The assistant gives one link, named after the change, and the popup lists each review that waits.</p></div>
+    <div class="decision"><p><strong>A one-switch level.</strong></p><p class="rec"><b>Yes. Its name is “Routine edits”.</b> It changes what exists: text, titles, order, file names, alternative text. It never creates, publishes, removes or posts, and it changes no date, points or setting. The included bundles are always listed under the switch.</p></div>
+    <div class="decision"><p><strong>Dates with no review.</strong></p><p class="rec"><b>Only from “do not ask again” on a date review. Never from the switch.</b> A date change sends a notice to learners, and a batch of dates costs one click to review.</p></div>
+    <div class="decision"><p><strong>How long “do not ask again” lasts.</strong></p><p class="rec"><b>4 hours, shown as a clock time.</b> One work session. A new kind never moves the end time later.</p></div>
+    <div class="decision"><p><strong>Approval in the assistant’s native form.</strong></p><p class="rec"><b>No. Not built.</b> Morrow’s promise is that you review the exact change in Morrow. One place to approve.</p></div>
+    <div class="decision"><p><strong>Web pages from the desktop app.</strong></p><p class="rec"><b>Exactly two fixed addresses.</b> The store listing opens in Chrome. The support page opens in the default browser.</p></div>
+    <div class="decision"><p><strong>“Select all” and removal.</strong></p><p class="rec"><b>Never together.</b> Removal is a separate checkbox, in the Customize view only, with the present confirm step.</p></div>
+    <div class="decision"><p><strong>The names Plan and Edit.</strong></p><p class="rec"><b>Kept, and always with the meaning:</b> “Plan. Morrow asks first.” and “Edit. Selected edits run without another approval.”</p></div>
+    <div class="decision"><p><strong>A tray or menu bar item.</strong></p><p class="rec"><b>No.</b> The plan removes surfaces. The Bridge icon shows state where the work is.</p></div>
+    <div class="decision"><p><strong>Tests with real people before a release.</strong></p><p class="rec"><b>Not required.</b> A walkthrough with counts proves the budget. Sessions with teachers after phase 4 correct labels and never block.</p></div>
+  </div>
+</section>
+
+<section id="verdict">
+  <h2>Would Apple ship it?</h2>
+  <div class="prose">
+    <p><strong>The model: yes. The product: not until two things are true.</strong> The Chrome Web Store listing must exist, and the interaction budget must hold in the walkthrough with counts. A plan is a claim. The counts are the proof.</p>
+  </div>
+  <div class="tbl"><table class="score">
+    <thead><tr><th>Test</th><th>Today</th><th>The plan</th></tr></thead>
+    <tbody>
+      <tr><td><b>Works with no setup choices</b></td><td><span class="v p">Partly</span>Plan is the default and needs no choices. Edit needs a pick from 347.</td><td><span class="v y">Meets</span>Connect a course and work. Access grows from approvals.</td></tr>
+      <tr><td><b>Asks at the moment of need</b></td><td><span class="v p">Partly</span>The assistant can ask for 30 minutes of Edit. The review page has two choices only.</td><td><span class="v y">Meets</span>The review page offers “do not ask again” for routine work.</td></tr>
+      <tr><td><b>The system does the work</b></td><td><span class="v f">Fails</span>“Course tab needed.” Find the link. Type “done”. Open the three-dot menu.</td><td><span class="v y">Meets</span>The Bridge opens the platform. The assistant gives a named link and continues on its own.</td></tr>
+      <tr><td><b>Attention goes where it matters</b></td><td><span class="v f">Fails</span>Each change gets the same confirmation, so people stop reading.</td><td><span class="v y">Meets</span>Routine reviews drop. A removal review looks different and always appears.</td></tr>
+      <tr><td><b>Visible state and one stop control</b></td><td><span class="v f">Fails</span>Nothing outside the settings page shows that Edit is on.</td><td><span class="v y">Meets</span>Icon badge, banner, “Ask first in all courses”.</td></tr>
+      <tr><td><b>One home</b></td><td><span class="v f">Fails</span>Six surfaces: desktop app, assistant, popup, setup guide, settings page, review pages.</td><td><span class="v p">Partly</span>Daily work needs the assistant and the review beside the course. The rest is setup or advanced.</td></tr>
+      <tr><td><b>Plain words</b></td><td><span class="v f">Fails</span>Raw API text in the list and in the assistant’s confirm form.</td><td><span class="v y">Meets</span>One set of task names feeds all surfaces. Teachers check the names.</td></tr>
+      <tr><td><b>Forgiveness</b></td><td><span class="v f">Fails</span>No view shows what Morrow changed.</td><td><span class="v p">Partly</span>“Recent changes” with links. A reversal is a new approved change, not one click.</td></tr>
+      <tr><td><b>Proven with users</b></td><td><span class="v n">Unknown</span>I found no test record.</td><td><span class="v p">Partly</span>The walkthrough with counts proves the budget. Sessions with teachers come after phase 4.</td></tr>
+      <tr><td><b>Install</b></td><td><span class="v f">Fails</span>Developer mode and “Load unpacked”, five manual steps.</td><td><span class="v n">Outside UI scope</span>The Chrome Web Store listing is the gate.</td></tr>
+      <tr><td><b>Accessibility and craft</b></td><td><span class="v y">Meets</span>axe 4.11: no violation on the settings page, the setup guide and the desktop welcome state. The popup and two desktop states have no visible <code>h1</code>. Dark mode and 420 px hold.</td><td><span class="v y">Meets</span>if the criteria in the plan hold.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="wrong">
+  <h2>Earlier corrections, from the second pass</h2>
+  <div class="prose"><p>These are the errors and gaps that the second pass found in version 1. They still stand.</p></div>
+  <div class="surface">
+    <div class="finding"><span class="id">E1</span><span class="sev c">Wrong</span><div class="body"><h4>“223 site administration options, hide them” was false</h4><p>The 223 options reach beyond the selected course. Only 81 change the Canvas account. 66 change a person’s own settings, 34 change shared objects such as files, groups and calendar items, 26 change learner records, 8 reach other courses and 8 are session credentials. To hide them all would hide work that teachers do.</p><span class="ev">generated/canvas-operation-admission.js:396 canvasSiteAuthorityNote · src/edit-policy.js:482</span></div></div>
+    <div class="finding"><span class="id">E2</span><span class="sev c">Missed</span><div class="body"><h4>The cost of a missing grant is one click, not a failure</h4><p>A change that Edit does not cover goes to an approval page. The assistant can also ask for 30 minutes of Edit with a confirm form. So the settings page is not the main path, and version 1 spent its largest phase on it.</p><span class="ev">packages/mcp-server/src/edit-access.ts:100–108 · src/service-worker.js:2047 applyBridgePolicySet · src/edit-policy.js:15–17</span></div></div>
+    <div class="finding"><span class="id">E3</span><span class="sev c">Missed</span><div class="body"><h4>Task bundles already exist</h4><p>Moodle has three: dates, content, organize. Each one joins several operations and limits the fields they can change. Canvas has nine, but seven of them are “add alternative text” for seven object types. Version 1 planned to relabel 347 API calls. The correct base is about 12 Canvas bundles on the Moodle pattern.</p><span class="ev">src/edit-policy.js:180 CURATED_CATEGORY_SPECS</span></div></div>
+    <div class="finding"><span class="id">E4</span><span class="sev h">Missed</span><div class="body"><h4>“Course tab needed” is the largest daily blocker</h4><p>At this moment all three saved courses on this computer are blocked: “0 connected courses are ready to use.” The page tells the person to open the platform. No button does it, although the Bridge already opens tabs for other work.</p><span class="ev">src/bridge-problem-copy.js:59, :122, :224 · src/service-worker.js:2804 chrome.tabs.create</span></div></div>
+    <div class="finding"><span class="id">E5</span><span class="sev h">Missed</span><div class="body"><h4>A Canvas course and a Moodle course together give zero actions</h4><p>The list shows only actions that every selected course supports. Canvas ids and Moodle ids never match. My course model invited that selection.</p><span class="ev">settings/settings.js:406 supportsCategory · :435 availableCategoriesForSelection</span></div></div>
+    <div class="finding"><span class="id">E6</span><span class="sev h">Missed</span><div class="body"><h4>“Select all” would flood two messages</h4><p>The save notice lists every selected label. The assistant’s confirm form lists every label for every course, up to 24,000 characters. With an area selected, both become a wall of text.</p><span class="ev">settings/settings.js:1197 · packages/mcp-server/src/edit-access.ts:101–107</span></div></div>
+    <div class="finding"><span class="id">E7</span><span class="sev m">Wrong</span><div class="body"><h4>Page lengths were two times too high</h4><p>The tool reported device pixels. Correct values are 1.1, 9.2 and 24.2 screens. The Evidence section uses them.</p><span class="ev">document.documentElement.scrollHeight at 1280 × 900</span></div></div>
+    <div class="finding"><span class="id">E8</span><span class="sev m">Unfair</span><div class="body"><h4>I did not credit what is good</h4><p>The pages pass an automated accessibility scan, dark mode is complete, narrow widths hold, and the approval page uses a question as its title and an action as its button (“Add image alt text?” and “Add alternative text”). The structure and the words are the problem, not the craft.</p><span class="ev">axe-core 4.11 on settings, popup, setup guide · packages/mcp-server/src/approval-server.ts:985–986</span></div></div>
+    <div class="finding"><span class="id">E9</span><span class="sev m">Weak</span><div class="body"><h4>My own models were too heavy</h4><p>The course model had 11 filter chips for 12 rows, four accessories on each row, and two ways to set access. The picker had four controls above its content. A teacher with four courses needs none of that on screen.</p><span class="ev">version 1 of this page</span></div></div>
+  </div>
+</section>
+
+
+<section id="evidence">
+  <h2>Evidence</h2>
+  <div class="prose"><p>All counts come from the code in the worktree at <code>1ff008203</code>, Bridge <code>1.0.111</code>. I called <code>categoriesForBinding()</code> for a Canvas course with the shipped catalog. I measured the length of the Edit list at 1280 × 900 with the real CSS and markup. The default view is short only because 129 of the 131 groups are behind one “Browse” link.</p></div>
+  <div class="figures">
+    <div class="fig"><b>558</b><span>options in the Edit list for one Canvas course</span></div>
+    <div class="fig"><b>131</b><span>groups. Many hold one action.</span></div>
+    <div class="fig"><b>211</b><span>rows (38%) are “Review only”. A person cannot select them.</span></div>
+    <div class="fig"><b>223</b><span>options (40%) reach beyond the selected course. 81 of them change the Canvas account.</span></div>
+    <div class="fig"><b>0</b><span>“select all” controls for actions</span></div>
+  </div>
+
+  <h3>Length of the Edit list, in screens</h3>
+  <div class="chart" role="img" aria-label="Length of the Edit list in screens of 900 pixels. Today by default 1.1. Today with all groups listed 9.2. Today with the remove-content group open 24.2. Target with all areas listed 1 or less. Target with one area fully open 2 or less.">
+    <div class="bar-row"><span class="lbl">Today, default view</span><div class="track"><i style="width:4.4%"></i><em style="left:4.4%">1.1</em></div></div>
+    <div class="bar-row"><span class="lbl">Today, “Browse additional action groups” open</span><div class="track"><i style="width:36.8%"></i><em style="left:36.8%">9.2</em></div></div>
+    <div class="bar-row"><span class="lbl">Today, the 141-action “remove content” group open</span><div class="track"><i style="width:96.8%"></i><em style="right:calc(3.2% + 8px);left:auto;color:var(--page)">24.2</em></div></div>
+    <div class="bar-row"><span class="lbl">Target, all 8 areas listed</span><div class="track"><i class="ok" style="width:4%"></i><em style="left:4%">≤ 1</em></div></div>
+    <div class="bar-row"><span class="lbl">Target, one area fully open</span><div class="track"><i class="ok" style="width:8%"></i><em style="left:8%">≤ 2</em></div></div>
+    <div class="axis"><span></span><div><span>0</span><span>5</span><span>10</span><span>15</span><span>20</span><span>25 screens</span></div></div>
+  </div>
+
+  <h3>Label quality</h3>
+  <div class="figures">
+    <div class="fig"><b>97</b><span>labels appear more than once</span></div>
+    <div class="fig"><b>213</b><span>descriptions are longer than 300 characters</span></div>
+    <div class="fig"><b>29</b><span>descriptions show raw markup, for example <code>&lt;code&gt;204 No Content&lt;/code&gt;</code></span></div>
+    <div class="fig"><b>6</b><span>courses per page in the course list</span></div>
+  </div>
+
+  <h3>Today</h3>
+  <div class="shots">
+    <figure class="shot"><div class="frame" tabindex="0"><img src="img/settings-today.png" alt="Bridge settings page today: course list, then course file access, then course access" loading="lazy"></div><figcaption><strong>Settings page.</strong> Scroll inside. Three unrelated panels. The Plan and Edit choice is far below the courses it changes.</figcaption></figure>
+    <figure class="shot"><div class="frame" tabindex="0"><img src="img/edit-list-today.png" alt="Edit list today: a long wall of checkboxes with long API descriptions" loading="lazy"></div><figcaption><strong>Edit list, middle of one group.</strong> Rebuilt from the real CSS, template and data. Each row is a checkbox with API text.</figcaption></figure>
+    <figure class="shot narrow"><div class="frame" tabindex="0"><img src="img/popup-today.png" alt="Bridge popup today" loading="lazy"></div><figcaption><strong>Popup.</strong> The privacy text stays on top. “Selected course” appears two times with two meanings. “3 courses selected” has no list.</figcaption></figure>
+    <figure class="shot"><div class="frame" tabindex="0"><img src="img/desktop-done.png" alt="Desktop app after setup: Your course is connected, one example request, then setup options and a Remove button" loading="lazy"></div><figcaption><strong>Desktop app, after setup.</strong> Rendered with the project’s test stub. Clean, but it names one course, and removal options follow the success message.</figcaption></figure>
+    <figure class="shot"><div class="frame" tabindex="0"><img src="img/desktop-setup.png" alt="Desktop app during setup: five manual steps to add Morrow Bridge with Developer mode" loading="lazy"></div><figcaption><strong>Desktop app, “Add Morrow Bridge”.</strong> Five manual steps with Developer mode. This is the install gate.</figcaption></figure>
+  </div>
+</section>
+
+
+<section id="findings">
+  <h2>Findings</h2>
+
+  <div class="surface">
+    <h3>Bridge: Edit access</h3>
+    <div class="finding"><span class="id">B1</span><span class="sev c">Critical</span><div class="body"><h4>The Edit list is a dump of the API catalog</h4><p>558 checkboxes in 131 groups. One group holds 141 actions. With that group open the list is 24 screens long. A teacher cannot review this list, so a teacher cannot give informed consent.</p><span class="ev">settings/settings.js:566 renderCategories · src/edit-policy.js categoriesForBinding</span></div></div>
+    <div class="finding"><span class="id">B2</span><span class="sev c">Critical</span><div class="body"><h4>No “select all” at any level</h4><p>To let Morrow build a quiz, a person must find and tick each quiz action in different groups. The only bulk control is “Show selected actions only”, which filters and does not select.</p><span class="ev">settings/settings.js:540 renderCategoryGroup</span></div></div>
+    <div class="finding"><span class="id">B3</span><span class="sev h">High</span><div class="body"><h4>Groups follow API resources, not teacher work</h4><p>Group names include “CANVAS · QUIZ SUBMISSION USER LIST” and “SIS INTEGRATION”. “Delete a page” is not next to “Edit a page”. It is in a separate 141-action “remove content” group.</p><span class="ev">category.group comes from the catalog resource name</span></div></div>
+    <div class="finding"><span class="id">B4</span><span class="sev h">High</span><div class="body"><h4>211 rows cannot be selected</h4><p>“Review only” rows have no checkbox, but they sit in the same list as the rows that do. They add 38% to the length and no choice.</p><span class="ev">settings/settings.js:540 &lt;article class="category-option review-only"&gt;</span></div></div>
+    <div class="finding"><span class="id">B5</span><span class="sev h">High</span><div class="body"><h4>Labels are raw API documentation</h4><p>97 duplicate labels. 213 descriptions longer than 300 characters. 29 with raw markup. One label is a full paragraph about bulk membership deletion. One description says “Deprecated, to remove after VICE-5047”.</p><span class="ev">label and description pass through from canvas-api-catalog.json</span></div></div>
+    <div class="finding"><span class="id">B6</span><span class="sev h">High</span><div class="body"><h4>Actions that reach beyond the course are mixed into the list</h4><p>223 options reach beyond the selected course: 81 change the Canvas account, 66 a person’s own settings, 34 shared objects, 26 learner records, 8 other courses, 8 session credentials. A note marks them, but they sit in the same list as course work. (Corrected in version 2.)</p><span class="ev">src/edit-policy.js:482 · generated/canvas-operation-admission.js:396</span></div></div>
+    <div class="finding"><span class="id">B7</span><span class="sev h">High</span><div class="body"><h4>The grant has no plain-language summary</h4><p>Before save, the page does not say “Morrow may do these things, in these courses, until this time”. A confirmation appears only for flagged actions, and it names 6 labels at most.</p><span class="ev">settings/settings.js:461 categoriesNeedingConfirmation · :470 confirmationDetailText</span></div></div>
+  </div>
+
+  <div class="surface">
+    <h3>Bridge: courses and page structure</h3>
+    <div class="finding"><span class="id">B8</span><span class="sev h">High</span><div class="body"><h4>The course list cannot list courses well</h4><p>6 courses per page. Search matches the name only. No filters, no sort. “Connected” and “available” are two separate views, so a person never sees all courses at one time. Discovery starts only after a person selects a site and selects “Find available courses”.</p><span class="ev">settings/settings.js:62 PAGE_SIZE = 6 · :719 renderCourses · settings.html:40–52</span></div></div>
+    <div class="finding"><span class="id">B9</span><span class="sev h">High</span><div class="body"><h4>Discovery throws away the data that filters need</h4><p>Canvas returns the course code, term, role and publish state. The Bridge keeps <code>{id, name}</code> only. It also asks for <code>enrollment_state=active</code> only, so future and concluded courses never appear.</p><span class="ev">src/canvas-content.js:1170 courseSummary · :1209 listCourses</span></div></div>
+    <div class="finding"><span class="id">B10</span><span class="sev h">High</span><div class="body"><h4>The page order hides what the access applies to</h4><p>Order today: courses, then “Course file access” (a Chrome permission), then Plan or Edit. The Plan and Edit choice is about two screens below the course checkboxes it acts on. No line says “this applies to these 3 courses”.</p><span class="ev">settings/settings.html:25, :80, :99</span></div></div>
+    <div class="finding"><span class="id">B11</span><span class="sev m">Medium</span><div class="body"><h4>Course cards show system data, not course data</h4><p>Each card shows “ACCOUNT 28206” and the platform URL. It does not show the course code, term or role. Status chips use system terms: “Course tab needed”.</p><span class="ev">settings/settings.js:649 renderCourseContext · :611 permissionState</span></div></div>
+    <div class="finding"><span class="id">B12</span><span class="sev m">Medium</span><div class="body"><h4>Wrong text on a course that is not selected</h4><p>“This course remains selected, but its site is closed” shows on a course with an empty checkbox.</p><span class="ev">settings/settings.js:640 bindingNote</span></div></div>
+    <div class="finding"><span class="id">B13</span><span class="sev m">Medium</span><div class="body"><h4>One checkbox, two meanings</h4><p>In the connected view a checkbox means “include in this access change”. In the available view it means “connect this course”. “Select this page” selects 6 rows.</p><span class="ev">settings/settings.js:664 renderAvailableCourse · :681 renderBinding · :796</span></div></div>
+    <div class="finding"><span class="id">B14</span><span class="sev m">Medium</span><div class="body"><h4>The page title names the mechanism</h4><p>“Plan and Edit settings” means nothing until a person learns the two modes. The job is “Courses and access”.</p><span class="ev">settings/settings.html:15</span></div></div>
+  </div>
+
+  <div class="surface">
+    <h3>Bridge: popup and setup guide</h3>
+    <div class="finding"><span class="id">P1</span><span class="sev h">High</span><div class="body"><h4>The privacy text stays on top of the popup</h4><p>It pushes the status and the primary action down on each open. Show it in full one time. After that, show one link.</p><span class="ev">popup/popup.html:14</span></div></div>
+    <div class="finding"><span class="id">P2</span><span class="sev m">Medium</span><div class="body"><h4>“Selected course” has two meanings in one popup</h4><p>One row uses it for the connection state (“Moodle tab needed”). The next block uses it for the course name.</p><span class="ev">popup/popup.js:66, :72</span></div></div>
+    <div class="finding"><span class="id">P3</span><span class="sev m">Medium</span><div class="body"><h4>“3 courses selected” has no list</h4><p>The popup names one course and hides the others. It gives no status for each course.</p><span class="ev">popup/popup.js:68</span></div></div>
+    <div class="finding"><span class="id">P4</span><span class="sev m">Medium</span><div class="body"><h4>The popup acts on one course only</h4><p>With 3 courses selected, the status row and the primary button (“Connect Moodle”) describe one course. The other two courses get no status and no action.</p><span class="ev">popup screenshot, this session</span></div></div>
+    <div class="finding"><span class="id">O1</span><span class="sev m">Medium</span><div class="body"><h4>The setup checklist shows state in words only</h4><p>“Morrow Bridge is connected” and “Saved Moodle needs sign-in” use the same grey row. Done, blocked and pending need different marks.</p><span class="ev">onboarding page screenshot, this session</span></div></div>
+  </div>
+
+  <div class="surface">
+    <h3>Desktop app</h3>
+    <div class="finding"><span class="id">D1</span><span class="sev m">Medium</span><div class="body"><h4>After setup, the desktop app is a finished wizard</h4><p>The heading “Your course is connected.” is good. But the view names one course, its first content after success is “Setup you can change” with a Remove button, the example request has no Copy button, and the view has no course list, no access state and no record of changes. The <code>h1</code> is hidden in this state. (Corrected in version 3. I first said the heading was always “Set up Morrow on this computer”.)</p><span class="ev">rendered state · installer/renderer/index.html:20 · shared/setup-view.mjs:350</span></div></div>
+    <div class="finding"><span class="id">D2</span><span class="sev h">High</span><div class="body"><h4>Courses live in two places</h4><p>Blackboard courses appear in the desktop app. Canvas and Moodle courses appear in the Bridge settings page. One product has two course lists with two designs.</p><span class="ev">installer/renderer/index.html:85 #blackboard-courses</span></div></div>
+    <div class="finding"><span class="id">D3</span><span class="sev m">Medium</span><div class="body"><h4>One long scroll holds six different jobs</h4><p>Setup steps, “Setup you can change”, Updates, Blackboard, “What stays on this computer” and Support all stack in one column. There is no navigation.</p><span class="ev">installer/renderer/index.html:27–98</span></div></div>
+    <div class="finding"><span class="id">D4</span><span class="sev m">Medium</span><div class="body"><h4>Status needs a manual check</h4><p>“Check status” is the only header control. The app has about 15 action states and each one is a heading with a paragraph.</p><span class="ev">shared/setup-view.mjs:258–364</span></div></div>
+  </div>
+  <div class="surface">
+    <h3>Found in the second and third pass</h3>
+    <div class="finding"><span class="id">A1</span><span class="sev h">High</span><div class="body"><h4>The review page has two choices only</h4><p>Apply or cancel. It has no “do not ask again for this kind of change”. If the assistant does not make a batch, ten changes are ten reviews.</p><span class="ev">packages/mcp-server/src/approval-server.ts:996–997</span></div></div>
+    <div class="finding"><span class="id">A2</span><span class="sev h">High</span><div class="body"><h4>The assistant’s side of the review has no script</h4><p>See T1. The link text, the wait and the next step are left to each assistant.</p><span class="ev">packages/mcp-server/src/server-instructions.ts</span></div></div>
+    <div class="finding"><span class="id">D5</span><span class="sev m">Medium</span><div class="body"><h4>No view shows what Morrow changed</h4><p>The operation journal records each change. No surface shows it.</p><span class="ev">no history view in popup, settings, setup guide or renderer</span></div></div>
+    <div class="finding"><span class="id">D6</span><span class="sev m">Medium</span><div class="body"><h4>Setup sends the person through Chrome menus, and no address is a link</h4><p>The store path says: open the three-dot menu, select Extensions, visit the store, search for Morrow Bridge. The temporary path adds Developer mode and “Load unpacked”. The support address is plain text, because the app opens no web page.</p><span class="ev">installer/shared/setup-view.mjs:318–331, :480</span></div></div>
+    <div class="finding"><span class="id">D7</span><span class="sev m">Medium</span><div class="body"><h4>The first result is one read-only example</h4><p>“Summarize the modules in this course and flag anything that needs review.” One request, no Copy button, and no result from the first read.</p><span class="ev">installer/shared/setup-view.mjs:352</span></div></div>
+    <p class="note" style="margin-top:16px">E4, E5 and E6 in “Earlier corrections” are product findings too.</p>
+  </div>
+  <p class="note">Limit: I rendered the desktop app in a browser with the project’s test stub. That proves the stylesheet and the renderer, not the packaged window on macOS or Windows.</p>
+</section>
+
+
+<section id="map">
+  <h2>How the 558 options map to the new areas</h2>
+  <div class="prose"><p>I placed each real option with a keyword pass on its group and label. The pass places 468 options. 90 need a decision by a person. That work is phase 3. The removal column counts the separate “remove content” group only, so the rows for “beyond this course” show 0.</p></div>
+  <div class="tbl"><table>
+    <thead><tr><th>Area</th><th class="n">Options today</th><th class="n">Can be granted</th><th class="n">Review only</th><th class="n">Remove content</th></tr></thead>
+    <tbody>
+      <tr><td>Pages and course content</td><td class="n">39</td><td class="n">29</td><td class="n">10</td><td class="n">10</td></tr>
+      <tr><td>Assignments and grading setup</td><td class="n">69</td><td class="n">48</td><td class="n">21</td><td class="n">19</td></tr>
+      <tr><td>Quizzes and question banks</td><td class="n">50</td><td class="n">35</td><td class="n">15</td><td class="n">12</td></tr>
+      <tr><td>Discussions and announcements</td><td class="n">31</td><td class="n">28</td><td class="n">3</td><td class="n">12</td></tr>
+      <tr><td>Files and media</td><td class="n">9</td><td class="n">5</td><td class="n">4</td><td class="n">5</td></tr>
+      <tr><td>Calendar and scheduling</td><td class="n">7</td><td class="n">7</td><td class="n">0</td><td class="n">4</td></tr>
+      <tr><td>People, sections and groups</td><td class="n">31</td><td class="n">20</td><td class="n">11</td><td class="n">21</td></tr>
+      <tr><td>Accessibility repairs</td><td class="n">9</td><td class="n">9</td><td class="n">0</td><td class="n">0</td></tr>
+      <tr><td>Beyond this course: Canvas account</td><td class="n">81</td><td class="n">40</td><td class="n">41</td><td class="n">0</td></tr>
+      <tr><td>Beyond this course: a person’s own settings</td><td class="n">66</td><td class="n">39</td><td class="n">27</td><td class="n">0</td></tr>
+      <tr><td>Beyond this course: shared files, groups, calendar items</td><td class="n">34</td><td class="n">23</td><td class="n">11</td><td class="n">0</td></tr>
+      <tr><td>Beyond this course: learner records</td><td class="n">26</td><td class="n">7</td><td class="n">19</td><td class="n">0</td></tr>
+      <tr><td>Beyond this course: other courses</td><td class="n">8</td><td class="n">4</td><td class="n">4</td><td class="n">0</td></tr>
+      <tr><td>Beyond this course: session credentials</td><td class="n">8</td><td class="n">0</td><td class="n">8</td><td class="n">0</td></tr>
+      <tr><td>Not placed by the keyword pass</td><td class="n">90</td><td class="n">53</td><td class="n">37</td><td class="n">58</td></tr>
+    </tbody>
+    <tfoot><tr><td>Total</td><td class="n">558</td><td class="n">347</td><td class="n">211</td><td class="n">141</td></tr></tfoot>
+  </table></div>
+</section>
+
+
+<footer>Audit and three adversarial passes by Claude, one agent, read-only. No product code changed. Version 3. Source: worktree <span class="mono">desktop-mcp-bridge-triple-check-20260914</span> at <span class="mono">1ff008203</span>.</footer>
+</div>
+
+<script>
+(function(){
+const $=(s,r=document)=>r.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const smooth=()=>matchMedia("(prefers-reduced-motion:reduce)").matches?"auto":"smooth";
+const chev=`<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const DUR=[["30 minutes","10:45 AM"],["1 hour","11:15 AM"],["4 hours","2:15 PM"],["8 hours","6:15 PM"],["24 hours","10:15 AM tomorrow"]];
+
+/* ---------- courses, version 3: a list shows state, a course opens to its controls ---------- */
+const COURSES=[
+ {id:"c1",name:"Medical Terminology",code:"MED 110",term:"Fall 2026",platform:"Canvas",role:"Teacher",state:"connected",level:"ask",until:"2:15 PM",fav:true,allowed:[]},
+ {id:"c2",name:"Anatomy and Physiology I",code:"BIO 201",term:"Fall 2026",platform:"Canvas",role:"Teacher",state:"connected",level:"routine",until:"2:15 PM",fav:true,allowed:[]},
+ {id:"c3",name:"Pharmacology for Nurses",code:"NUR 240",term:"Fall 2026",platform:"Canvas",role:"Teacher",state:"connected",level:"ask",until:"2:15 PM",fav:true,allowed:["Assignment due dates"]},
+ {id:"c4",name:"Course Design Sandbox",code:"SANDBOX",term:"No term",platform:"Canvas",role:"Teacher",state:"connected",level:"custom",until:"2:15 PM",fav:false,allowed:[]},
+ {id:"c5",name:"Dental Radiography",code:"DEN 215",term:"Fall 2026",platform:"Moodle",role:"Teacher",state:"attention",level:"ask",until:"2:15 PM",fav:false,allowed:[]},
+ {id:"c6",name:"Health Information Systems",code:"HIT 130",term:"Fall 2026",platform:"Canvas",role:"Designer",state:"available",fav:true},
+ {id:"c7",name:"Clinical Externship Seminar",code:"MED 290",term:"Fall 2026",platform:"Canvas",role:"Teacher",state:"available",fav:false},
+ {id:"c8",name:"Phlebotomy Lab",code:"MLT 115",term:"Fall 2026",platform:"Canvas",role:"Teacher",state:"available",fav:false},
+ {id:"c9",name:"Dental Materials",code:"DEN 120",term:"Fall 2026",platform:"Moodle",role:"Teacher",state:"available",fav:false},
+ {id:"c10",name:"Medical Billing and Coding",code:"HIT 150",term:"Summer 2026",platform:"Canvas",role:"Teacher",state:"available",fav:false},
+ {id:"c11",name:"Introduction to Patient Care",code:"NUR 101",term:"Summer 2026",platform:"Canvas",role:"TA",state:"available",fav:false},
+ {id:"c12",name:"Ethics in Healthcare",code:"HUM 205",term:"Spring 2026",platform:"Canvas",role:"Teacher",state:"available",fav:false}
+];
+const cf={q:"",platform:"all",term:"all",scope:"all"};
+let picked=new Set(["c4"]); let selmode=false; const openRows=new Set(["c3"]);
+const SCOPES=[["all","All"],["connected","Connected"],["available","Not connected"],["attention","Needs attention"]];
+const isOn=c=>c.state==="connected"&&(c.level!=="ask"||c.allowed.length>0);
+function passes(c,skipScope){
+ const q=cf.q.trim().toLowerCase();
+ if(q&&!(c.name+" "+c.code).toLowerCase().includes(q))return false;
+ if(cf.platform!=="all"&&c.platform!==cf.platform)return false;
+ if(cf.term!=="all"&&c.term!==cf.term)return false;
+ if(!skipScope&&cf.scope!=="all"&&c.state!==cf.scope)return false;
+ return true;
+}
+const ROUTINE=["Edit page text and titles","Rename and reorder modules and items","Edit assignment titles and instructions","Edit discussion titles and prompts","Edit Classic Quiz titles and instructions","Rename and move files, create folders","Add alternative text to images"];
+function stateText(c){
+ if(c.level==="routine")return`Edit until ${c.until}. Routine edits.`;
+ if(c.level==="custom")return`Edit until ${c.until}. Custom.`;
+ if(c.allowed.length)return`Edit until ${c.until}. ${c.allowed.length} ${c.allowed.length===1?"kind":"kinds"} of edit.`;
+ return"Plan. Asks first.";
+}
+function detailHtml(c){
+ const lead=c.level==="routine"?`Until ${esc(c.until)}, Morrow makes the edits below without another approval. It always asks before it creates, publishes, removes, posts, or changes a date, points or a setting.`
+  :c.level==="custom"?`Morrow makes the changes you selected in the Customize view until ${esc(c.until)}. It asks before all other changes.`
+  :c.allowed.length?`Morrow asks before each change, except the kinds of edit below. They end at ${esc(c.until)}.`:`Morrow asks before each change. To skip the review for one kind of edit, use “do not ask again” on a review.`;
+ const shown=c.level==="routine"?ROUTINE:c.allowed;
+ const list=shown.length&&c.level!=="custom"?`<div class="allowed">${shown.map((a,i)=>`<div><span><b>${esc(a)}</b></span><button type="button" class="btn quiet" data-revoke="${c.id}:${i}">Remove</button></div>`).join("")}</div>`:"";
+ const ends=isOn(c)?`<label class="rowc" for="c-end-${c.id}"><span class="lbl-sm">Ends</span><select class="ctl" id="c-end-${c.id}" data-end="${c.id}">${DUR.map(([d,t])=>`<option value="${esc(t)}" ${t===c.until?"selected":""}>${esc(t)} (${esc(d)})</option>`).join("")}</select></label>`:"";
+ return`<div class="detail" id="c-detail-${c.id}"><div class="rowc"><div class="seg" role="group" aria-label="Level for ${esc(c.name)}"><button type="button" data-set="${c.id}:ask" aria-pressed="${c.level==="ask"}">Plan. Ask first.</button><button type="button" data-set="${c.id}:routine" aria-pressed="${c.level==="routine"}">Edit. Routine edits.</button>${c.level==="custom"?`<button type="button" aria-pressed="true" data-custom="${c.id}">Custom</button>`:""}</div>${ends}</div><p>${lead}</p>${list}<div class="links"><button type="button" class="btn quiet" data-custom="${c.id}">Customize…</button><button type="button" class="btn quiet" data-disconnect="${c.id}">Disconnect</button></div></div>`;
+}
+function rowHtml(c){
+ const meta=`${esc(c.code)} · ${esc(c.term)} · ${esc(c.platform)} · ${esc(c.role)}`;
+ const name=`<div class="nm">${c.fav?`<i title="Favorite in ${esc(c.platform)}" aria-label="Favorite">★</i>`:""}${esc(c.name)}</div><div class="meta">${meta}</div>`;
+ const box=selmode?(c.state==="connected"?`<input type="checkbox" id="c-pick-${c.id}" data-pick="${c.id}" ${picked.has(c.id)?"checked":""} aria-label="Select ${esc(c.name)}">`:"<span></span>"):"";
+ if(c.state==="connected"){
+  const isOpen=openRows.has(c.id);
+  return`<div class="course3 ${selmode?"sel":""}" data-row="${c.id}" aria-expanded="${isOpen}">${box}<button type="button" class="rowbtn" data-x="${c.id}" aria-expanded="${isOpen}" aria-controls="c-detail-${c.id}">${name}</button><span class="state ${isOn(c)?"on":""}">${esc(stateText(c))}</span><span class="chevbox" aria-hidden="true">${chev}</span></div>${isOpen?detailHtml(c):""}`;
+ }
+ const act=c.state==="attention"?`<button type="button" class="btn primary" data-open="${c.id}">Open ${esc(c.platform)}</button>`:`<button type="button" class="btn" data-connect="${c.id}">Connect</button>`;
+ const bad=c.state==="attention"?`<div class="meta bad">${esc(c.platform)} is closed. Morrow Bridge opens it when work arrives, or you can open it now.</div>`:"";
+ return`<div class="course3 static ${selmode?"sel":""}">${box}<div>${name}${bad}</div><span class="lv">${act}</span><span></span></div>`;
+}
+function drawCourses(){
+ $("#c-scope").innerHTML=SCOPES.map(([v,t])=>`<button type="button" id="c-scope-${v}" data-scope="${v}" aria-pressed="${cf.scope===v}">${t}<small>${COURSES.filter(c=>passes(c,true)&&(v==="all"||c.state===v)).length}</small></button>`).join("");
+ const list=COURSES.filter(c=>passes(c)).sort((a,b)=>(b.fav-a.fav)||a.name.localeCompare(b.name));
+ const fix=list.filter(c=>c.state==="attention"), mine=list.filter(c=>c.state==="connected"), rest=list.filter(c=>c.state==="available");
+ let html="";
+ if(fix.length)html+=`<div class="listhead">Needs attention · ${fix.length}</div>`+fix.map(rowHtml).join("");
+ if(mine.length)html+=`<div class="listhead">Connected · ${mine.length}</div>`+mine.map(rowHtml).join("");
+ if(rest.length)html+=`<div class="listhead">Not connected · ${rest.length}</div>`+rest.map(rowHtml).join("");
+ if(!list.length)html=`<div class="empty">No course matches. <button class="btn quiet" type="button" id="c-reset">Clear search and filters</button></div>`;
+ $("#c-list").innerHTML=html;
+ $("#c-count").textContent=`${list.length} of ${COURSES.length} courses`;
+ $("#c-selmode").setAttribute("aria-pressed",String(selmode)); $("#c-selmode").textContent=selmode?"Done":"Select";
+ const n=selmode?picked.size:0; $("#c-bulk").hidden=n===0; $("#c-bulk-n").textContent=`${n} ${n===1?"course":"courses"} selected. Canvas and Moodle can be together.`;
+ const on=COURSES.filter(isOn).length; $("#c-banner").hidden=on===0;
+ $("#c-banner-t").textContent=`Edit is on in ${on} ${on===1?"course":"courses"}. Morrow makes selected edits there without another approval.`; $("#c-badge").textContent=on?String(on):"";
+ drawScope();
+}
+function toast(t){$("#c-toast").textContent=t;}
+function refocus(sel){const again=$(sel);if(again)again.focus();}
+$("#c-scope").addEventListener("click",e=>{const b=e.target.closest("[data-scope]");if(b){cf.scope=b.dataset.scope;drawCourses();refocus(`#c-scope-${cf.scope}`);}});
+$("#c-q").addEventListener("input",e=>{cf.q=e.target.value;drawCourses();});
+$("#c-platform").addEventListener("change",e=>{cf.platform=e.target.value;drawCourses();});
+$("#c-term").innerHTML=`<option value="all">All terms</option>`+[...new Set(COURSES.map(c=>c.term))].map(t=>`<option>${esc(t)}</option>`).join("");
+$("#c-term").addEventListener("change",e=>{cf.term=e.target.value;drawCourses();});
+$("#c-selmode").addEventListener("click",()=>{selmode=!selmode;picked=selmode?new Set():new Set(["c4"]);drawCourses();});
+$("#c-stop").addEventListener("click",()=>{const n=COURSES.filter(isOn).length;COURSES.forEach(c=>{if(c.state==="connected"){c.level="ask";c.allowed=[];}});drawCourses();toast(`Done. Morrow asks first in all courses. ${n} ${n===1?"course":"courses"} changed.`);});
+$("#c-bulk").addEventListener("click",e=>{const b=e.target.closest("[data-bulk]");if(!b)return;const n=picked.size;COURSES.filter(c=>picked.has(c.id)).forEach(c=>{c.level=b.dataset.bulk;if(b.dataset.bulk==="routine")c.until="2:15 PM";else c.allowed=[];});selmode=false;picked=new Set(["c4"]);drawCourses();toast(b.dataset.bulk==="routine"?`Routine edits are on for ${n} ${n===1?"course":"courses"} until 2:15 PM.`:`${n} ${n===1?"course asks":"courses ask"} first.`);});
+$("#c-list").addEventListener("change",e=>{
+ const t=e.target;
+ if(t.dataset.pick){t.checked?picked.add(t.dataset.pick):picked.delete(t.dataset.pick);drawCourses();refocus(`#${t.id}`);return;}
+ if(t.dataset.end){const c=COURSES.find(x=>x.id===t.dataset.end);c.until=t.value;drawCourses();refocus(`#${t.id}`);toast(`Access in ${c.name} ends at ${c.until}.`);}
+});
+$("#c-list").addEventListener("click",e=>{
+ const b=e.target.closest("button");
+ if(!b){const row=e.target.closest("[data-row]");if(row&&!e.target.closest("input")){const id=row.dataset.row;openRows.has(id)?openRows.delete(id):openRows.add(id);drawCourses();refocus(`[data-x="${id}"]`);}return;}
+ if(b.id==="c-reset"){Object.assign(cf,{q:"",platform:"all",term:"all",scope:"all"});$("#c-q").value="";$("#c-platform").value="all";$("#c-term").value="all";drawCourses();return;}
+ if(b.dataset.x){const id=b.dataset.x;openRows.has(id)?openRows.delete(id):openRows.add(id);drawCourses();refocus(`[data-x="${id}"]`);return;}
+ if(b.dataset.set){const [id,lv]=b.dataset.set.split(":");const c=COURSES.find(x=>x.id===id);c.level=lv;if(lv==="routine"){c.until=c.until||"2:15 PM";c.allowed=[];}drawCourses();refocus(`[data-set="${id}:${lv}"]`);toast(lv==="routine"?`Routine edits are on for ${c.name} until ${c.until}.`:`${c.name} is in Plan. Morrow asks first.`);return;}
+ if(b.dataset.revoke){const [id,i]=b.dataset.revoke.split(":");const c=COURSES.find(x=>x.id===id);if(c.level==="routine"){c.allowed=ROUTINE.slice();c.level="ask";}const gone=c.allowed.splice(Number(i),1)[0];drawCourses();toast(`Removed. Morrow asks again before it changes ${gone.toLowerCase()} in ${c.name}.`);return;}
+ if(b.dataset.custom){const c=COURSES.find(x=>x.id===b.dataset.custom);picked=new Set([c.id]);drawCourses();toast(`Choose the changes for ${c.name} in the Customize view.`);$("#access").scrollIntoView({behavior:smooth()});return;}
+ if(b.dataset.disconnect){toast("Disconnect asks for one confirmation. Morrow then stops reading this course.");return;}
+ if(b.dataset.open){const c=COURSES.find(x=>x.id===b.dataset.open);c.state="connected";drawCourses();toast(`Morrow Bridge opened ${c.platform} in a background tab. ${c.name} is ready.`);return;}
+ if(b.dataset.connect){const c=COURSES.find(x=>x.id===b.dataset.connect);Object.assign(c,{state:"connected",level:"ask",allowed:[],until:"2:15 PM"});drawCourses();toast(`${c.name} is connected in Plan. Morrow asks before each change.`);}
+});
+
+/* ---------- moments 2 and 3: ask, review, trust ---------- */
+const BUNDLE="alternative text for images";
+let lp;
+function lpReset(){lp={log:[],rv:"idle",pending:"r1",clicks:0,again:false,done:false};
+ lp.log.push(["me","Fix the missing alternative text in Week 2 of Medical Terminology."]);
+ lp.log.push(["ai","I found 3 images with no alternative text. Here is the first change. I continue when you approve it.","","r1","Review: Add alternative text on “Week 2 Overview”"]);
+ drawLoop();}
+function say(who,text,quiet,linkFor,linkLabel){lp.log.push([who,text,quiet,linkFor,linkLabel]);}
+function toDelete(){say("me","Also delete the old syllabus draft page.");say("ai","This removes a page, and Canvas does not restore it. Review it when you are ready.","","delete","Review: Delete the page “Old Syllabus Draft”");lp.rv="idle";lp.pending="delete";}
+function drawLoop(){
+ $("#lp-chat").innerHTML=lp.log.map(([w,t,q,lf,ll])=>`<div class="msg ${w}"><span class="who">${w==="me"?"Teacher":"Claude"}</span><span>${esc(t)}</span>${q?`<span class="quietline">${esc(q)}</span>`:""}${lf&&lp.pending===lf&&lp.rv!==lf?`<button type="button" class="btn primary" data-open-review="${lf}">${esc(ll)}</button>`:""}</div>`).join("");
+ const card=$("#lp-review"); card.classList.toggle("danger",lp.rv==="delete");
+ if(lp.rv==="r1")card.innerHTML=`<span class="who">Requested by Claude · Medical Terminology</span><h4>Add image alt text?</h4><span class="where">Page “Week 2 Overview”</span><div class="pv"><span class="img" role="img" aria-label="Image placeholder"></span><span><b>Alternative text</b><br>Diagram of the human heart with the four chambers labelled.</span></div><div class="btns"><button type="button" class="btn primary" data-lp="once">Add alternative text</button><button type="button" class="btn" data-lp="again">Add it, and do not ask again for ${BUNDLE} in this course until 2:15 PM</button><button type="button" class="btn quiet" data-lp="cancel">Cancel</button></div><p class="fine">Morrow applies the change and checks the saved result in Canvas.</p>`;
+ else if(lp.rv==="batch")card.innerHTML=`<span class="who">Requested by Claude · Medical Terminology</span><h4>Review 2 changes</h4><span class="where">Add image alt text · Page “Week 2 Overview”</span><div class="batchlist"><div><b>Image 2.</b> Bar chart of resting heart rate by age group.</div><div><b>Image 3.</b> Photo of a stethoscope on an open textbook.</div></div><div class="btns"><button type="button" class="btn primary" data-lp="batch">Apply all 2 changes</button><button type="button" class="btn" data-lp="batch-again">Apply all, and do not ask again for ${BUNDLE} in this course until 2:15 PM</button><button type="button" class="btn quiet" data-lp="batch-cancel">Cancel</button></div>`;
+ else if(lp.rv==="delete")card.innerHTML=`<span class="who">Requested by Claude · Medical Terminology</span><h4>Delete this page?</h4><span class="where">Page “Old Syllabus Draft” · last edited Aug 14</span><div class="pv"><span><b>This removes the page.</b><br>Canvas does not restore a deleted page. Two modules link to it.</span></div><div class="btns"><button type="button" class="btn danger" data-lp="delete">Delete “Old Syllabus Draft”</button><button type="button" class="btn" data-lp="keep">Keep the page</button></div><p class="fine">Morrow always asks before it removes content. This review has no “do not ask again”.</p>`;
+ else card.innerHTML=lp.pending?`<p class="idle">1 review waits. Open it from the named link in the assistant. The Morrow Bridge popup lists it too.</p>`:`<p class="idle">No review waits. The teacher is back in the assistant, and typed nothing to continue.</p>`;
+ $("#lp-cost").innerHTML=lp.done?`This run: <b>${lp.clicks} ${lp.clicks===1?"click":"clicks"}, 0 typed messages.</b> The same work in today’s build: 6 clicks, 3 typed messages, and 3 links with no name.`:`Clicks so far: <b>${lp.clicks}</b> · typed messages to continue: <b>0</b>`;
+ const chat=$("#lp-chat"); chat.scrollTop=chat.scrollHeight;
+}
+function allowAlt(){lp.again=true;const c=COURSES[0];if(c.state==="connected"&&!c.allowed.includes("Alternative text for images")){c.allowed.push("Alternative text for images");c.until="2:15 PM";}openRows.add("c1");drawCourses();}
+$("#lp-review").addEventListener("click",e=>{
+ const b=e.target.closest("[data-lp]");if(!b)return;const a=b.dataset.lp;lp.clicks+=1;
+ if(a==="once"){say("ai","Done, and checked in Canvas. The other 2 images are ready in one review.","","batch","Review 2 changes: alternative text on “Week 2 Overview”");lp.rv="idle";lp.pending="batch";}
+ else if(a==="again"){allowAlt();say("ai","Done. I also added alternative text to the other 2 images. You allowed this kind of change in Medical Terminology until 2:15 PM, so no review was necessary. All 3 are checked in Canvas.");toDelete();}
+ else if(a==="cancel"){say("ai","Cancelled. Nothing changed.");toDelete();}
+ else if(a==="batch"||a==="batch-again"){if(a==="batch-again")allowAlt();say("ai","All 3 images have alternative text now, checked in Canvas.");toDelete();}
+ else if(a==="batch-cancel"){say("ai","Cancelled. 1 of 3 images has alternative text. Nothing else changed.");toDelete();}
+ else if(a==="delete"){lp.pending=null;say("ai","Deleted “Old Syllabus Draft”. It is in Recent changes. Two modules linked to it. I can prepare a review to remove those links.");lp.rv="idle";lp.done=true;}
+ else if(a==="keep"){lp.pending=null;say("ai","I kept the page. Nothing changed.");lp.rv="idle";lp.done=true;}
+ drawLoop();const f=$("#lp-review button");if(f)f.focus();
+});
+$("#lp-restart").addEventListener("click",lpReset);
+$("#lp-chat").addEventListener("click",e=>{const b=e.target.closest("[data-open-review]");if(!b)return;lp.clicks+=1;lp.rv=b.dataset.openReview;drawLoop();const f=$("#lp-review button");if(f)f.focus();});
+
+/* ---------- access ---------- */
+const AREAS=[
+ {id:"pages",t:"Pages and course content",d:"Pages, modules, the syllabus and the front page.",g:{
+  edit:["Create a page","Edit the content of a page","Rename a page","Set the course front page","Edit the syllabus","Create a module","Add an item to a module","Change the order of module items"],
+  publish:["Publish or unpublish a page","Publish or unpublish a module","Change the course navigation"],
+  remove:["Delete a page","Delete a module","Remove an item from a module"]}},
+ {id:"assign",t:"Assignments and grading setup",d:"Assignments, due dates, rubrics and assignment groups.",g:{
+  edit:["Create an assignment","Edit assignment instructions","Change due dates and availability","Create a rubric","Attach a rubric to an assignment","Create an assignment group","Set assignment group weights"],
+  publish:["Publish or unpublish an assignment","Set the late policy"],
+  remove:["Delete an assignment","Delete a rubric","Delete an assignment group"]}},
+ {id:"quiz",t:"Quizzes and question banks",d:"New Quizzes, questions, item banks and bank draws.",g:{
+  edit:["Create a quiz","Edit quiz settings","Add a question","Edit a question","Create an item bank","Add a question to a bank","Tag bank questions","Draw questions from a bank"],
+  publish:["Publish or unpublish a quiz","Share an item bank with a course"],
+  remove:["Delete a quiz","Delete a question","Delete an item bank","Remove a bank share"]}},
+ {id:"disc",t:"Discussions and announcements",d:"Discussion topics and course announcements.",g:{
+  edit:["Create a discussion","Edit a discussion prompt","Post an announcement|Learners see this at once","Schedule an announcement"],
+  publish:["Pin or lock a discussion"],
+  remove:["Delete a discussion","Delete an announcement"]}},
+ {id:"files",t:"Files and media",d:"Course files and folders.",g:{
+  edit:["Upload a file","Rename or move a file","Create a folder"],
+  remove:["Delete a file","Delete a folder"]}},
+ {id:"cal",t:"Calendar and scheduling",d:"Course calendar events.",g:{
+  edit:["Create a calendar event","Edit a calendar event"],
+  remove:["Delete a calendar event"]}},
+ {id:"people",t:"Sections and groups",d:"Sections, group sets and group membership.",g:{
+  edit:["Create a section","Create a group set","Assign learners to groups|Changes what learners see"],
+  remove:["Delete a section","Delete a group"]}},
+ {id:"a11y",t:"Accessibility repairs",d:"Focused fixes that Morrow checks after it saves them.",g:{
+  edit:["Add alternative text to images","Correct the heading order","Add table headers","Correct low-contrast text","Give links a clear name","Correct list markup"]}}
+];
+const KIND={edit:["Create and edit","New content and changes to content"],publish:["Publish and organize","What learners can see, and where"],remove:["Remove content","Off unless you turn it on here"]};
+const ACTS=[]; // {id, area, kind, label, flag}
+AREAS.forEach(a=>Object.entries(a.g).forEach(([k,arr])=>arr.forEach((raw,i)=>{const [label,flag]=raw.split("|");ACTS.push({id:`${a.id}-${k}-${i}`,area:a.id,kind:k,label,flag});})));
+const sel=new Set(); const open=new Set(); const openKinds=new Set();
+const PRESETS=[
+ ["build","Course building",x=>x.kind!=="remove"&&x.area!=="people"&&!x.flag],
+ ["a11y","Accessibility repairs only",x=>x.area==="a11y"],
+ ["quiz","Quizzes and banks",x=>x.area==="quiz"&&x.kind!=="remove"],
+ ["none","Nothing selected",()=>false]
+];
+let preset="build"; let aq=""; let only=false;
+function applyPreset(id){preset=id;sel.clear();const f=PRESETS.find(p=>p[0]===id)[2];ACTS.filter(f).forEach(x=>sel.add(x.id));drawAccess();}
+function tri(box,items){const on=items.filter(x=>sel.has(x.id)).length;box.checked=on===items.length&&on>0;box.indeterminate=on>0&&on<items.length;box.setAttribute("aria-checked",box.indeterminate?"mixed":String(box.checked));}
+function visible(x){const q=aq.trim().toLowerCase();if(q&&!(x.label+" "+KIND[x.kind][0]).toLowerCase().includes(q))return false;if(only&&!sel.has(x.id))return false;return true;}
+function drawAccess(){
+ $("#a-presets").innerHTML=PRESETS.map(p=>`<button type="button" class="chip" id="a-preset-${p[0]}" data-preset="${p[0]}" aria-pressed="${preset===p[0]}">${p[1]}</button>`).join("")+(preset==="custom"?`<span class="chip" aria-pressed="true" style="cursor:default">Custom</span>`:"");
+ const filtering=aq.trim()!==""||only; let html="";
+ for(const a of AREAS){
+  const mine=ACTS.filter(x=>x.area===a.id), shown=mine.filter(visible); if(filtering&&!shown.length)continue;
+  const isOpen=filtering||open.has(a.id); const safe=mine.filter(x=>x.kind!=="remove"), rmv=mine.filter(x=>x.kind==="remove"); const on=safe.filter(x=>sel.has(x.id)).length, ron=rmv.filter(x=>sel.has(x.id)).length;
+  html+=`<div class="area"><div class="area-h"><input type="checkbox" id="a-area-${a.id}" data-area="${a.id}" aria-label="Select all in ${esc(a.t)}, except removal"><div><div class="t">${esc(a.t)}</div><div class="d">${esc(a.d)}</div></div><span class="cn"><span class="count ${on?"some":""}">${on} of ${safe.length}</span>${rmv.length?`<span class="pill ${ron?"rm":"none"}">${ron?`Removal ${ron} of ${rmv.length}`:"Removal off"}</span>`:""}</span><button type="button" class="tw" data-tw="${a.id}" aria-expanded="${isOpen}" aria-controls="a-body-${a.id}" aria-label="Show actions in ${esc(a.t)}">${chev}</button></div>`;
+  if(isOpen){html+=`<div class="area-body" id="a-body-${a.id}">`;
+   for(const k of Object.keys(a.g)){const ks=mine.filter(x=>x.kind===k), kshown=ks.filter(visible); if(filtering&&!kshown.length)continue;
+    const key=a.id+"/"+k, kOpen=filtering||openKinds.has(key), kon=ks.filter(x=>sel.has(x.id)).length;
+    html+=`<div class="vg ${k==="remove"?"rm":""}"><div class="vg-h"><input type="checkbox" id="a-kind-${a.id}-${k}" data-kind="${key}" aria-label="Select all: ${KIND[k][0]} in ${esc(a.t)}"><div>${KIND[k][0]}<small>${KIND[k][1]}</small></div><span class="count ${kon?"some":""}">${kon} of ${ks.length}</span><button type="button" class="tw" style="width:28px;height:28px" data-twk="${key}" aria-expanded="${kOpen}" aria-label="Show each action">${chev}</button></div>`;
+    if(kOpen)html+=`<div class="acts">`+(filtering?kshown:ks).map(x=>`<label class="act-row"><input type="checkbox" id="a-act-${x.id}" data-act="${x.id}" ${sel.has(x.id)?"checked":""}><span>${esc(x.label)}${x.flag?`<em>${esc(x.flag)}</em>`:""}</span></label>`).join("")+`</div>`;
+    html+=`</div>`;}
+   html+=`</div>`;}
+  html+=`</div>`;
+ }
+ if(!html)html=`<div class="empty">No action matches “${esc(aq)}”.</div>`;
+ $("#a-areas").innerHTML=html;
+ document.querySelectorAll("[data-area]").forEach(b=>tri(b,ACTS.filter(x=>x.area===b.dataset.area&&x.kind!=="remove")));
+ document.querySelectorAll("[data-kind]").forEach(b=>{const [ar,k]=b.dataset.kind.split("/");tri(b,ACTS.filter(x=>x.area===ar&&x.kind===k));});
+ drawSummary();
+}
+function counts(){const on=ACTS.filter(x=>sel.has(x.id));return{n:on.length,areas:new Set(on.map(x=>x.area)).size,rm:on.filter(x=>x.kind==="remove").length};}
+function scopeText(){const names=COURSES.filter(c=>picked.has(c.id)).map(c=>c.name);if(!names.length)return"no course. Select a course above.";return names.length<=2?names.join(" and "):`${names[0]}, ${names[1]} and ${names.length-2} more`;}
+function drawScope(){$("#a-scope").textContent=scopeText();drawSummary();}
+function drawSummary(){
+ const c=counts(), n=picked.size;
+ $("#a-sum").innerHTML=`<b>${c.n} ${c.n===1?"action":"actions"}</b> in ${c.areas} ${c.areas===1?"area":"areas"} · <b style="color:${c.rm?"var(--danger)":"inherit"}">${c.rm?c.rm+" remove content":"no removal"}</b> · ${n} ${n===1?"course":"courses"} · ${esc($("#a-dur").value)}`;
+ $("#a-save").disabled=!c.n||!n; $("#a-review").hidden=true;
+}
+$("#a-areas").addEventListener("change",e=>{
+ const t=e.target; preset="custom";
+ if(t.dataset.area){ACTS.filter(x=>x.area===t.dataset.area&&x.kind!=="remove").forEach(x=>t.checked?sel.add(x.id):sel.delete(x.id));}
+ else if(t.dataset.kind){const [ar,k]=t.dataset.kind.split("/");ACTS.filter(x=>x.area===ar&&x.kind===k).forEach(x=>t.checked?sel.add(x.id):sel.delete(x.id));}
+ else if(t.dataset.act){t.checked?sel.add(t.dataset.act):sel.delete(t.dataset.act);}
+ const id=t.id; drawAccess(); const again=document.getElementById(id); if(again)again.focus();
+});
+$("#a-areas").addEventListener("click",e=>{
+ const b=e.target.closest("button"); if(!b)return; let focusSel=null;
+ if(b.dataset.tw){open.has(b.dataset.tw)?open.delete(b.dataset.tw):open.add(b.dataset.tw);focusSel=`[data-tw="${b.dataset.tw}"]`;}
+ if(b.dataset.twk){openKinds.has(b.dataset.twk)?openKinds.delete(b.dataset.twk):openKinds.add(b.dataset.twk);focusSel=`[data-twk="${b.dataset.twk}"]`;}
+ drawAccess(); if(focusSel){const again=$(focusSel); if(again)again.focus();}
+});
+$("#a-presets").addEventListener("click",e=>{const b=e.target.closest("[data-preset]");if(b)applyPreset(b.dataset.preset);});
+$("#a-q").addEventListener("input",e=>{aq=e.target.value;drawAccess();});
+$("#a-only").addEventListener("change",e=>{only=e.target.checked;drawAccess();});
+$("#a-dur").addEventListener("change",drawSummary);
+document.querySelectorAll('input[name="a-mode"]').forEach(r=>r.addEventListener("change",()=>{const edit=$("#a-mode-edit").checked;$("#a-edit").style.display=edit?"flex":"none";$("#a-plan-note").hidden=edit;}));
+$("#a-save").addEventListener("click",()=>{
+ const c=counts(), on=ACTS.filter(x=>sel.has(x.id));
+ const areas=AREAS.filter(a=>on.some(x=>x.area===a.id)).map(a=>a.t.toLowerCase());
+ const rm=on.filter(x=>x.kind==="remove").map(x=>x.label.toLowerCase());
+ const r=$("#a-review"); r.hidden=false;
+ r.innerHTML=`<span class="lbl-sm">What you are about to allow</span><span>Morrow may make <b>${c.n} kinds of change</b> in <b>${esc(scopeText())}</b> for <b>${esc($("#a-dur").value)}</b>.</span><span>Areas: ${esc(areas.join(", "))}.</span><span>${rm.length?`<b style="color:var(--danger)">It may remove content:</b> ${esc(rm.join(", "))}.`:"<b>It may not remove content.</b>"}</span><span>After ${esc($("#a-dur").value)}, these courses go back to Plan.</span>`;
+});
+open.add("quiz"); openKinds.add("quiz/edit");
+ACTS.filter(PRESETS[0][2]).forEach(x=>sel.add(x.id));
+drawCourses(); drawAccess(); lpReset();
+})();
+</script>

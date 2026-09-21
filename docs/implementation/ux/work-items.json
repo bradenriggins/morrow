@@ -1,0 +1,1137 @@
+{
+ "schema": "morrow.ux.work-items.v1",
+ "batches": [
+  "B",
+  "S1",
+  "S2",
+  "S3"
+ ],
+ "cards": [
+  {
+   "id": "WI-T.1",
+   "batch": "B",
+   "lane": "TOOLS",
+   "deps": [],
+   "spec": "WI-T.1",
+   "files": [
+    "scripts/ux/**"
+   ],
+   "verify": "pnpm build && node scripts/ux/census.mjs",
+   "notes": "Reuse the Chromium start-up of scripts/test/canvas-connector-browser.mjs. No new dependency. Never use port 9222."
+  },
+  {
+   "id": "WI-0.1",
+   "batch": "B",
+   "lane": "TOOLS",
+   "deps": [
+    "WI-T.1"
+   ],
+   "spec": "WI-0.1",
+   "files": [
+    "docs/implementation/ux/UX-BASELINE.md"
+   ],
+   "verify": "node scripts/ux/census.mjs && node --test scripts/test/no-em-dash.test.mjs",
+   "notes": "Measure before any product file changes."
+  },
+  {
+   "id": "WI-F.1",
+   "batch": "S1",
+   "lane": "CSS",
+   "deps": [],
+   "spec": "WI-F.1",
+   "files": [
+    "connector/extension/brand/theme.css",
+    "connector/extension/brand/review.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/settings/settings.css",
+    "connector/extension/onboarding/onboarding.css",
+    "installer/renderer/styles.css",
+    "docs/brand/MORROW-BRAND.md",
+    "scripts/test/extension-theme-contract.test.mjs"
+   ],
+   "verify": "node --test scripts/test/extension-theme-contract.test.mjs scripts/test/bridge-copy-guard.test.mjs && node scripts/ux/census.mjs",
+   "notes": "Add tokens only. Do not move rules yet. Update the brand document's token contract in the same card."
+  },
+  {
+   "id": "WI-F.3",
+   "batch": "S1",
+   "lane": "CSS",
+   "deps": [
+    "WI-F.1"
+   ],
+   "spec": "WI-F.3",
+   "files": [
+    "connector/extension/brand/theme.css",
+    "connector/extension/brand/review.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/settings/settings.css",
+    "connector/extension/onboarding/onboarding.css",
+    "installer/renderer/styles.css",
+    "docs/brand/MORROW-BRAND.md",
+    "scripts/test/extension-theme-contract.test.mjs"
+   ],
+   "verify": "node --test scripts/test/extension-theme-contract.test.mjs scripts/test/bridge-copy-guard.test.mjs && node scripts/ux/census.mjs",
+   "notes": "The contrast table in the brand document needs the new row, or the contract test fails."
+  },
+  {
+   "id": "WI-F.4",
+   "batch": "S1",
+   "lane": "CSS",
+   "deps": [
+    "WI-F.3"
+   ],
+   "spec": "WI-F.4",
+   "files": [
+    "connector/extension/brand/theme.css",
+    "connector/extension/brand/review.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/settings/settings.css",
+    "connector/extension/onboarding/onboarding.css",
+    "installer/renderer/styles.css",
+    "docs/brand/MORROW-BRAND.md",
+    "scripts/test/extension-theme-contract.test.mjs"
+   ],
+   "verify": "node --test scripts/test/extension-theme-contract.test.mjs scripts/test/bridge-copy-guard.test.mjs && node scripts/ux/census.mjs",
+   "notes": ""
+  },
+  {
+   "id": "WI-F.2",
+   "batch": "S1",
+   "lane": "CSS",
+   "deps": [
+    "WI-F.4"
+   ],
+   "spec": "WI-F.2",
+   "files": [
+    "connector/extension/brand/theme.css",
+    "connector/extension/brand/review.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/settings/settings.css",
+    "connector/extension/onboarding/onboarding.css",
+    "installer/renderer/styles.css",
+    "docs/brand/MORROW-BRAND.md",
+    "scripts/test/extension-theme-contract.test.mjs"
+   ],
+   "verify": "node --test scripts/test/extension-theme-contract.test.mjs scripts/test/bridge-copy-guard.test.mjs && node scripts/ux/census.mjs --check",
+   "notes": "The largest CSS card. Move one stylesheet at a time and run the census after each."
+  },
+  {
+   "id": "WI-F.5",
+   "batch": "S1",
+   "lane": "CSS",
+   "deps": [
+    "WI-F.2"
+   ],
+   "spec": "WI-F.5",
+   "files": [
+    "connector/extension/brand/theme.css",
+    "connector/extension/brand/review.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/settings/settings.css",
+    "connector/extension/onboarding/onboarding.css",
+    "installer/renderer/styles.css",
+    "docs/brand/MORROW-BRAND.md",
+    "scripts/test/extension-theme-contract.test.mjs"
+   ],
+   "verify": "node --test scripts/test/extension-theme-contract.test.mjs scripts/test/bridge-copy-guard.test.mjs && node scripts/ux/census.mjs --check",
+   "notes": ""
+  },
+  {
+   "id": "WI-F.6",
+   "batch": "S1",
+   "lane": "CSS",
+   "deps": [
+    "WI-F.5"
+   ],
+   "spec": "WI-F.6",
+   "files": [
+    "connector/extension/brand/theme.css",
+    "connector/extension/brand/review.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/settings/settings.css",
+    "connector/extension/onboarding/onboarding.css",
+    "installer/renderer/styles.css",
+    "docs/brand/MORROW-BRAND.md",
+    "scripts/test/extension-theme-contract.test.mjs"
+   ],
+   "verify": "node --test scripts/test/extension-theme-contract.test.mjs scripts/test/bridge-copy-guard.test.mjs && node scripts/ux/census.mjs --check",
+   "notes": ""
+  },
+  {
+   "id": "WI-F.7",
+   "batch": "S1",
+   "lane": "CSS",
+   "deps": [
+    "WI-F.6"
+   ],
+   "spec": "WI-F.7",
+   "files": [
+    "connector/extension/brand/theme.css",
+    "connector/extension/brand/review.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/settings/settings.css",
+    "connector/extension/onboarding/onboarding.css",
+    "installer/renderer/styles.css",
+    "docs/brand/MORROW-BRAND.md",
+    "scripts/test/extension-theme-contract.test.mjs"
+   ],
+   "verify": "node --test scripts/test/extension-theme-contract.test.mjs scripts/test/bridge-copy-guard.test.mjs && node scripts/ux/census.mjs",
+   "notes": "CSS only. The success mark of the review page belongs to WI-F.8."
+  },
+  {
+   "id": "WI-F.11",
+   "batch": "S1",
+   "lane": "CSS",
+   "deps": [
+    "WI-F.7"
+   ],
+   "spec": "WI-F.11",
+   "files": [
+    "connector/extension/brand/Manrope-variable.*",
+    "connector/extension/brand/theme.css",
+    "docs/brand/MORROW-BRAND.md"
+   ],
+   "verify": "node --test scripts/test/extension-theme-contract.test.mjs scripts/test/bridge-copy-guard.test.mjs && node scripts/ux/census.mjs",
+   "notes": "If no woff2 tool is on the machine, report blocked. Do not add a dependency. This card may be skipped without harm."
+  },
+  {
+   "id": "WI-F.8",
+   "batch": "S1",
+   "lane": "REVIEW",
+   "deps": [
+    "WI-F.2"
+   ],
+   "spec": "WI-F.8",
+   "files": [
+    "packages/mcp-server/src/approval-server.ts",
+    "connector/extension/brand/review.css",
+    "packages/mcp-server/test/approval-page-copy.test.ts"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run test/approval-page-copy.test.ts test/approval-server-http-lifecycle.test.ts test/approval-server-maintenance.test.ts --maxWorkers=2 && node --test scripts/test/bridge-copy-guard.test.mjs",
+   "notes": "review.css belongs to the CSS lane until WI-F.2 is done. Start after it."
+  },
+  {
+   "id": "WI-F.9a",
+   "batch": "S1",
+   "lane": "REVIEW",
+   "deps": [
+    "WI-F.8"
+   ],
+   "spec": "WI-F.9",
+   "files": [
+    "packages/mcp-server/src/approval-server.ts",
+    "packages/mcp-server/test/approval-page-copy.test.ts"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run test/approval-page-copy.test.ts test/approval-server-http-lifecycle.test.ts test/approval-server-maintenance.test.ts --maxWorkers=2 && node --test scripts/test/bridge-copy-guard.test.mjs",
+   "notes": "Only the RF part: structural fields move into Technical details. Titles wait for WI-3.5b."
+  },
+  {
+   "id": "WI-F.10",
+   "batch": "S1",
+   "lane": "PAGES",
+   "deps": [
+    "WI-F.7"
+   ],
+   "spec": "WI-F.10",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup.html",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs",
+   "notes": "May edit the two page stylesheets, because the CSS lane is done by then."
+  },
+  {
+   "id": "WI-1.1a",
+   "batch": "S1",
+   "lane": "SW",
+   "deps": [],
+   "spec": "WI-1.1",
+   "files": [
+    "connector/extension/src/service-worker.js",
+    "connector/extension/src/bridge-problem-copy.js",
+    "scripts/test/open-platform.test.mjs"
+   ],
+   "verify": "node --test scripts/test/open-platform.test.mjs && node --test scripts/test/bridge-problem-copy.test.mjs scripts/test/extension-lifecycle-authority.test.mjs scripts/test/no-em-dash.test.mjs",
+   "notes": "Handler and router entry only. The buttons are WI-1.1b."
+  },
+  {
+   "id": "WI-1.2",
+   "batch": "S1",
+   "lane": "SW",
+   "deps": [
+    "WI-1.1a"
+   ],
+   "spec": "WI-1.2",
+   "files": [
+    "connector/extension/src/service-worker.js",
+    "scripts/test/open-platform.test.mjs"
+   ],
+   "verify": "node --test scripts/test/open-platform.test.mjs && node --test scripts/test/bridge-problem-copy.test.mjs scripts/test/extension-lifecycle-authority.test.mjs scripts/test/no-em-dash.test.mjs",
+   "notes": ""
+  },
+  {
+   "id": "WI-1.3",
+   "batch": "S1",
+   "lane": "SW",
+   "deps": [
+    "WI-1.2"
+   ],
+   "spec": "WI-1.3",
+   "files": [
+    "connector/extension/src/service-worker.js",
+    "scripts/test/toolbar-badge.test.mjs"
+   ],
+   "verify": "node --test scripts/test/toolbar-badge.test.mjs && node --test scripts/test/bridge-problem-copy.test.mjs scripts/test/extension-lifecycle-authority.test.mjs scripts/test/no-em-dash.test.mjs",
+   "notes": "state.reviewsWaiting does not exist before R2. Read it as 0 when absent."
+  },
+  {
+   "id": "WI-1.1b",
+   "batch": "S1",
+   "lane": "PAGES",
+   "deps": [
+    "WI-1.1a",
+    "WI-F.7"
+   ],
+   "spec": "WI-1.1",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs",
+   "notes": "Buttons, chip text and notes. Sends morrow_open_platform. New component rules go into the page stylesheets with tokens only. The CSS lane must be done first, so this card waits for WI-F.7."
+  },
+  {
+   "id": "WI-1.4",
+   "batch": "S1",
+   "lane": "PAGES",
+   "deps": [
+    "WI-1.1b"
+   ],
+   "spec": "WI-1.4",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs",
+   "notes": ""
+  },
+  {
+   "id": "WI-1.5a",
+   "batch": "S1",
+   "lane": "PAGES",
+   "deps": [
+    "WI-1.4"
+   ],
+   "spec": "WI-1.5",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs",
+   "notes": "Popup h1, the two 'Selected course' labels, the settings.js:640 sentence. The desktop part is WI-1.5b."
+  },
+  {
+   "id": "WI-1.6a",
+   "batch": "S1",
+   "lane": "PAGES",
+   "deps": [
+    "WI-1.5a"
+   ],
+   "spec": "WI-1.6",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs",
+   "notes": "Settings page part only."
+  },
+  {
+   "id": "WI-1.5b",
+   "batch": "S1",
+   "lane": "DESKTOP",
+   "deps": [],
+   "spec": "WI-1.5",
+   "files": [
+    "installer/renderer/index.html",
+    "installer/renderer/renderer.js",
+    "installer/shared/setup-view.mjs",
+    "installer/test/**",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md (desktop rows)"
+   ],
+   "verify": "node --test installer/test/setup-view.test.mjs installer/test/setup-view.test.cjs installer/test/renderer.test.cjs && node --test scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs && pnpm --dir installer test:layout",
+   "notes": "PAGES also edits the inventory document in this batch. Edit only desktop rows, and re-read the file immediately before each edit."
+  },
+  {
+   "id": "WI-1.6b",
+   "batch": "S1",
+   "lane": "RUNTIME",
+   "deps": [],
+   "spec": "WI-1.6",
+   "files": [
+    "packages/mcp-server/src/edit-access.ts",
+    "packages/mcp-server/test/*edit-access*"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run test --maxWorkers=2",
+   "notes": "Runtime part only. Run the package's full vitest once for this card."
+  },
+  {
+   "id": "WI-2.4a",
+   "batch": "S2",
+   "lane": "PROTOCOL",
+   "deps": [],
+   "spec": "WI-2.4",
+   "files": [
+    "packages/bridge-protocol/**"
+   ],
+   "verify": "pnpm --dir packages/bridge-protocol build && pnpm --dir packages/bridge-protocol exec vitest run --maxWorkers=2",
+   "notes": "Types and normalizeBridgeUiState only."
+  },
+  {
+   "id": "WI-2.4b",
+   "batch": "S2",
+   "lane": "PROTOCOL",
+   "deps": [
+    "WI-2.4a"
+   ],
+   "spec": "WI-2.4",
+   "files": [
+    "packages/canvas-connector-mcp/**",
+    "packages/bridge-loopback/**"
+   ],
+   "verify": "pnpm --dir packages/bridge-protocol build && pnpm --dir packages/bridge-protocol exec vitest run --maxWorkers=2 && pnpm --dir packages/bridge-loopback build && pnpm --dir packages/bridge-loopback exec vitest run --maxWorkers=2 && pnpm --dir packages/canvas-connector-mcp build && pnpm --dir packages/canvas-connector-mcp exec vitest run --maxWorkers=2",
+   "notes": "The upstream tool morrow_browser_ui_state and the send path."
+  },
+  {
+   "id": "WI-2.1",
+   "batch": "S2",
+   "lane": "RUNTIME",
+   "deps": [],
+   "spec": "WI-2.1",
+   "files": [
+    "packages/gateway-core/src/result.ts",
+    "packages/gateway-core/test/result.test.ts",
+    "packages/mcp-server/src/runtime.ts"
+   ],
+   "verify": "pnpm --dir packages/gateway-core build && pnpm --dir packages/gateway-core exec vitest run test/result.test.ts --maxWorkers=2",
+   "notes": ""
+  },
+  {
+   "id": "WI-2.2",
+   "batch": "S2",
+   "lane": "RUNTIME",
+   "deps": [
+    "WI-2.1"
+   ],
+   "spec": "WI-2.2",
+   "files": [
+    "packages/mcp-server/src/operation-tools.ts",
+    "packages/mcp-server/src/native-tool-manifest.ts",
+    "packages/mcp-server/test/operation-wait.test.ts",
+    "tests that list tools"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run  --maxWorkers=2",
+   "notes": "A new tool breaks each test that lists tools. Correct them from the failure messages."
+  },
+  {
+   "id": "WI-2.3",
+   "batch": "S2",
+   "lane": "RUNTIME",
+   "deps": [
+    "WI-2.2"
+   ],
+   "spec": "WI-2.3",
+   "files": [
+    "packages/mcp-server/src/server-instructions.ts",
+    "the guidance resource file beside course-audit-v1",
+    "packages/mcp-server/test/server-instructions.test.ts"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run test/server-instructions.test.ts --maxWorkers=2",
+   "notes": "The instructions must stay under 4,000 characters. Measure before and after."
+  },
+  {
+   "id": "WI-2.4c",
+   "batch": "S2",
+   "lane": "RUNTIME",
+   "deps": [
+    "WI-2.4b",
+    "WI-2.3"
+   ],
+   "spec": "WI-2.4",
+   "files": [
+    "packages/mcp-server/src/runtime.ts",
+    "packages/gateway-core/src/source-mcp-privacy.ts",
+    "packages/mcp-server/test/**"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run  --maxWorkers=2",
+   "notes": "A failed ui_state must never fail a plan. Prove it with a test."
+  },
+  {
+   "id": "WI-2.4d",
+   "batch": "S2",
+   "lane": "SW",
+   "deps": [
+    "WI-2.4a"
+   ],
+   "spec": "WI-2.4",
+   "files": [
+    "connector/extension/src/service-worker.js",
+    "scripts/test/ui-state-command.test.mjs",
+    "scripts/test/toolbar-badge.test.mjs"
+   ],
+   "verify": "node --test scripts/test/ui-state-command.test.mjs scripts/test/toolbar-badge.test.mjs && node --test scripts/test/bridge-problem-copy.test.mjs scripts/test/extension-lifecycle-authority.test.mjs scripts/test/no-em-dash.test.mjs",
+   "notes": ""
+  },
+  {
+   "id": "WI-2.4e",
+   "batch": "S2",
+   "lane": "PAGES",
+   "deps": [
+    "WI-2.4d"
+   ],
+   "spec": "WI-2.4",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs",
+   "notes": "The popup part: 'Waiting for your review'."
+  },
+  {
+   "id": "WI-2.5",
+   "batch": "S2",
+   "lane": "REVIEW",
+   "deps": [],
+   "spec": "WI-2.5",
+   "files": [
+    "packages/mcp-server/src/approval-server.ts",
+    "packages/mcp-server/test/approval-page-copy.test.ts"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run test/approval-page-copy.test.ts test/approval-server-http-lifecycle.test.ts test/approval-server-maintenance.test.ts --maxWorkers=2 && node --test scripts/test/bridge-copy-guard.test.mjs",
+   "notes": ""
+  },
+  {
+   "id": "WI-2.6",
+   "batch": "S2",
+   "lane": "REVIEW",
+   "deps": [
+    "WI-2.5"
+   ],
+   "spec": "WI-2.6",
+   "files": [
+    "packages/mcp-server/src/approval-server.ts",
+    "connector/extension/brand/review.css",
+    "packages/mcp-server/test/approval-page-copy.test.ts"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run test/approval-page-copy.test.ts test/approval-server-http-lifecycle.test.ts test/approval-server-maintenance.test.ts --maxWorkers=2 && node --test scripts/test/bridge-copy-guard.test.mjs",
+   "notes": ""
+  },
+  {
+   "id": "WI-3.5a",
+   "batch": "S2",
+   "lane": "CATALOG",
+   "deps": [],
+   "spec": "WI-3.5",
+   "files": [
+    "packages/canvas-api-catalog/**",
+    "scripts/generate-canvas-api-catalog.mjs",
+    "connector/extension/generated/**"
+   ],
+   "verify": "pnpm catalog:canvas && pnpm generated:check && pnpm --dir packages/canvas-api-catalog exec vitest run --maxWorkers=2",
+   "notes": "The catalog digest changes. Tests that pin it must change on purpose."
+  },
+  {
+   "id": "WI-3.1b",
+   "batch": "S2",
+   "lane": "PROTOCOL",
+   "deps": [],
+   "spec": "WI-3.1",
+   "files": [
+    "packages/bridge-protocol/**"
+   ],
+   "verify": "pnpm --dir packages/bridge-protocol build && pnpm --dir packages/bridge-protocol exec vitest run --maxWorkers=2",
+   "notes": "The option validator accepts the six new optional keys."
+  },
+  {
+   "id": "WI-3.1c",
+   "batch": "S2",
+   "lane": "RUNTIME",
+   "deps": [
+    "WI-3.1b"
+   ],
+   "spec": "WI-3.1",
+   "files": [
+    "packages/mcp-server/src/runtime.ts (browserEditOptionsResult near :7121)",
+    "packages/mcp-server/test/**"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run  --maxWorkers=2",
+   "notes": "The runtime filters option keys too. Pass the new keys through."
+  },
+  {
+   "id": "WI-3.1a",
+   "batch": "S2",
+   "lane": "POLICY",
+   "deps": [
+    "WI-3.5a"
+   ],
+   "spec": "WI-3.1",
+   "files": [
+    "connector/extension/src/edit-policy.js",
+    "scripts/test/edit-option-facts.test.mjs",
+    "scripts/test/edit-bundles.test.mjs",
+    "script tests that mention edit-policy"
+   ],
+   "verify": "pnpm scripts:test",
+   "notes": "21 script tests mention edit-policy, so run all script tests for POLICY cards."
+  },
+  {
+   "id": "WI-3.2",
+   "batch": "S2",
+   "lane": "POLICY",
+   "deps": [
+    "WI-3.1a"
+   ],
+   "spec": "WI-3.2",
+   "files": [
+    "connector/extension/src/edit-policy.js",
+    "scripts/test/edit-option-facts.test.mjs",
+    "scripts/test/edit-bundles.test.mjs",
+    "script tests that mention edit-policy"
+   ],
+   "verify": "pnpm scripts:test",
+   "notes": "Use docs/implementation/ux/canvas-bundles.draft.json. Option counts are pinned in tests. Change the pins on purpose."
+  },
+  {
+   "id": "WI-3.3",
+   "batch": "S2",
+   "lane": "POLICY",
+   "deps": [
+    "WI-3.2"
+   ],
+   "spec": "WI-3.3",
+   "files": [
+    "connector/extension/src/edit-policy.js",
+    "scripts/test/edit-option-facts.test.mjs",
+    "scripts/test/edit-bundles.test.mjs",
+    "script tests that mention edit-policy"
+   ],
+   "verify": "pnpm scripts:test",
+   "notes": ""
+  },
+  {
+   "id": "WI-3.4",
+   "batch": "S2",
+   "lane": "PAGES",
+   "deps": [
+    "WI-3.2"
+   ],
+   "spec": "WI-3.4",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs",
+   "notes": ""
+  },
+  {
+   "id": "WI-3.5b",
+   "batch": "S2",
+   "lane": "REVIEW",
+   "deps": [
+    "WI-3.5a"
+   ],
+   "spec": "WI-3.5",
+   "files": [
+    "packages/mcp-server/src/approval-server.ts",
+    "packages/mcp-server/test/approval-page-copy.test.ts"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run test/approval-page-copy.test.ts test/approval-server-http-lifecycle.test.ts test/approval-server-maintenance.test.ts --maxWorkers=2 && node --test scripts/test/bridge-copy-guard.test.mjs",
+   "notes": "Review titles from the plain labels. This completes WI-F.9."
+  },
+  {
+   "id": "WI-3.5c",
+   "batch": "S2",
+   "lane": "RUNTIME",
+   "deps": [
+    "WI-3.5a",
+    "WI-3.1c"
+   ],
+   "spec": "WI-3.5",
+   "files": [
+    "packages/mcp-server/src/edit-access.ts",
+    "packages/mcp-server/src/runtime.ts",
+    "packages/mcp-server/test/**"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run  --maxWorkers=2",
+   "notes": "The confirm form and the link label of WI-2.1 use the plain labels."
+  },
+  {
+   "id": "WI-4.1",
+   "batch": "S3",
+   "lane": "PROTOCOL",
+   "deps": [],
+   "spec": "WI-4.1",
+   "files": [
+    "packages/bridge-protocol/**",
+    "packages/canvas-connector-mcp/**",
+    "packages/bridge-loopback/**"
+   ],
+   "verify": "pnpm --dir packages/bridge-protocol build && pnpm --dir packages/bridge-protocol exec vitest run --maxWorkers=2 && pnpm --dir packages/bridge-loopback build && pnpm --dir packages/bridge-loopback exec vitest run --maxWorkers=2 && pnpm --dir packages/canvas-connector-mcp build && pnpm --dir packages/canvas-connector-mcp exec vitest run --maxWorkers=2",
+   "notes": ""
+  },
+  {
+   "id": "WI-4.2",
+   "batch": "S3",
+   "lane": "SW",
+   "deps": [
+    "WI-4.1"
+   ],
+   "spec": "WI-4.2",
+   "files": [
+    "connector/extension/src/service-worker.js",
+    "the policy set script tests"
+   ],
+   "verify": "pnpm scripts:test",
+   "notes": ""
+  },
+  {
+   "id": "WI-4.3",
+   "batch": "S3",
+   "lane": "RUNTIME",
+   "deps": [
+    "WI-4.1"
+   ],
+   "spec": "WI-4.3",
+   "files": [
+    "packages/mcp-server/src/runtime.ts",
+    "packages/mcp-server/test/remember-kind.test.ts"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run test/remember-kind.test.ts --maxWorkers=2",
+   "notes": ""
+  },
+  {
+   "id": "WI-4.6",
+   "batch": "S3",
+   "lane": "RUNTIME",
+   "deps": [
+    "WI-4.3"
+   ],
+   "spec": "WI-4.6",
+   "files": [
+    "packages/mcp-server/test/remember-kind.test.ts"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run test/remember-kind.test.ts --maxWorkers=2",
+   "notes": ""
+  },
+  {
+   "id": "WI-4.4",
+   "batch": "S3",
+   "lane": "REVIEW",
+   "deps": [
+    "WI-4.3"
+   ],
+   "spec": "WI-4.4",
+   "files": [
+    "packages/mcp-server/src/approval-server.ts",
+    "packages/mcp-server/test/approval-*.test.ts"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run test/approval-page-copy.test.ts test/approval-server-http-lifecycle.test.ts test/approval-server-maintenance.test.ts --maxWorkers=2 && node --test scripts/test/bridge-copy-guard.test.mjs",
+   "notes": "Approve first. A failed grant must not stop the change."
+  },
+  {
+   "id": "WI-4.5",
+   "batch": "S3",
+   "lane": "PAGES",
+   "deps": [],
+   "spec": "WI-4.5",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs",
+   "notes": ""
+  },
+  {
+   "id": "WI-5.1a",
+   "batch": "S3",
+   "lane": "SW",
+   "deps": [],
+   "spec": "WI-5.1",
+   "files": [
+    "connector/extension/src/canvas-content.js",
+    "connector/extension/src/moodle-executor.js",
+    "connector/extension/src/service-worker.js",
+    "the discovery script tests"
+   ],
+   "verify": "pnpm scripts:test",
+   "notes": "32 script tests mention canvas-content.js."
+  },
+  {
+   "id": "WI-5.1b",
+   "batch": "S3",
+   "lane": "PAGES",
+   "deps": [
+    "WI-5.1a"
+   ],
+   "spec": "WI-5.1",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs",
+   "notes": ""
+  },
+  {
+   "id": "WI-5.2",
+   "batch": "S3",
+   "lane": "PAGES",
+   "deps": [
+    "WI-5.1b"
+   ],
+   "spec": "WI-5.2",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs && node scripts/ux/census.mjs --check",
+   "notes": "Read 'Page structure for WI-5.2 to WI-5.5, for an agent' in the spec and the two models in reference/audit-page.html first."
+  },
+  {
+   "id": "WI-5.3",
+   "batch": "S3",
+   "lane": "PAGES",
+   "deps": [
+    "WI-5.2"
+   ],
+   "spec": "WI-5.3",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs && node scripts/ux/census.mjs --check",
+   "notes": "Read 'Page structure for WI-5.2 to WI-5.5, for an agent' in the spec and the two models in reference/audit-page.html first."
+  },
+  {
+   "id": "WI-5.4",
+   "batch": "S3",
+   "lane": "PAGES",
+   "deps": [
+    "WI-5.3"
+   ],
+   "spec": "WI-5.4",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs && node scripts/ux/census.mjs --check",
+   "notes": "Read 'Page structure for WI-5.2 to WI-5.5, for an agent' in the spec and the two models in reference/audit-page.html first."
+  },
+  {
+   "id": "WI-5.5",
+   "batch": "S3",
+   "lane": "PAGES",
+   "deps": [
+    "WI-5.4"
+   ],
+   "spec": "WI-5.5",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs && node scripts/ux/census.mjs --check",
+   "notes": "Read 'Page structure for WI-5.2 to WI-5.5, for an agent' in the spec and the two models in reference/audit-page.html first."
+  },
+  {
+   "id": "WI-5.6",
+   "batch": "S3",
+   "lane": "PAGES",
+   "deps": [
+    "WI-5.5"
+   ],
+   "spec": "WI-5.6",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs && node scripts/ux/census.mjs --check",
+   "notes": ""
+  },
+  {
+   "id": "WI-5.7",
+   "batch": "S3",
+   "lane": "PAGES",
+   "deps": [
+    "WI-5.6"
+   ],
+   "spec": "WI-5.7",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs && node scripts/ux/census.mjs --check",
+   "notes": ""
+  },
+  {
+   "id": "WI-5.8",
+   "batch": "S3",
+   "lane": "PAGES",
+   "deps": [
+    "WI-5.7"
+   ],
+   "spec": "WI-5.8",
+   "files": [
+    "connector/extension/settings/settings.js",
+    "connector/extension/settings/settings.html",
+    "connector/extension/popup/popup.js",
+    "connector/extension/popup/popup-view.js",
+    "connector/extension/popup/popup.html",
+    "scripts/test/lib/extension-dom.mjs",
+    "scripts/test/settings-page.test.mjs",
+    "scripts/test/popup-page.test.mjs",
+    "scripts/test/popup-view.test.mjs",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
+    "connector/extension/settings/settings.css",
+    "connector/extension/popup/popup.css",
+    "connector/extension/onboarding/onboarding.css"
+   ],
+   "verify": "node --test scripts/test/settings-page.test.mjs scripts/test/popup-page.test.mjs scripts/test/popup-view.test.mjs scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs scripts/test/bridge-settings-announcement.test.mjs scripts/test/no-em-dash.test.mjs && node scripts/ux/census.mjs --check",
+   "notes": ""
+  },
+  {
+   "id": "WI-6.1",
+   "batch": "S3",
+   "lane": "DESKTOP",
+   "deps": [],
+   "spec": "WI-6.1",
+   "files": [
+    "installer/**",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md (desktop rows)"
+   ],
+   "verify": "node --test installer/test/setup-view.test.mjs installer/test/setup-view.test.cjs installer/test/renderer.test.cjs && node --test scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs && pnpm --dir installer test:layout",
+   "notes": ""
+  },
+  {
+   "id": "WI-6.2",
+   "batch": "S3",
+   "lane": "DESKTOP",
+   "deps": [
+    "WI-6.1"
+   ],
+   "spec": "WI-6.2",
+   "files": [
+    "installer/**",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md (desktop rows)"
+   ],
+   "verify": "node --test installer/test/setup-view.test.mjs installer/test/setup-view.test.cjs installer/test/renderer.test.cjs && node --test scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs && pnpm --dir installer test:layout",
+   "notes": "The store listing does not exist. Build the allow list and the support link. Keep the store address in one constant that is null, and keep the present steps while it is null."
+  },
+  {
+   "id": "WI-6.3",
+   "batch": "S3",
+   "lane": "DESKTOP",
+   "deps": [
+    "WI-6.2"
+   ],
+   "spec": "WI-6.3",
+   "files": [
+    "installer/**",
+    "docs/implementation/FIRST-RUN-STATE-INVENTORY.md (desktop rows)"
+   ],
+   "verify": "node --test installer/test/setup-view.test.mjs installer/test/setup-view.test.cjs installer/test/renderer.test.cjs && node --test scripts/test/first-run-state-inventory.test.mjs scripts/test/bridge-copy-guard.test.mjs && pnpm --dir installer test:layout && pnpm test:desktop",
+   "notes": ""
+  },
+  {
+   "id": "WI-6.4a",
+   "batch": "S3",
+   "lane": "REVIEW",
+   "deps": [],
+   "spec": "WI-6.4",
+   "files": [
+    "packages/mcp-server/src/approval-server.ts",
+    "packages/mcp-server/test/recent-changes.test.ts",
+    "connector/extension/brand/review.css"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run test/approval-page-copy.test.ts test/approval-server-http-lifecycle.test.ts test/approval-server-maintenance.test.ts --maxWorkers=2 && node --test scripts/test/bridge-copy-guard.test.mjs",
+   "notes": ""
+  },
+  {
+   "id": "WI-6.4b",
+   "batch": "S3",
+   "lane": "RUNTIME",
+   "deps": [
+    "WI-6.4a",
+    "WI-4.6"
+   ],
+   "spec": "WI-6.4",
+   "files": [
+    "packages/mcp-server/src/operation-tools.ts",
+    "packages/mcp-server/src/native-tool-manifest.ts",
+    "packages/mcp-server/test/**"
+   ],
+   "verify": "pnpm --dir packages/mcp-server build && pnpm --dir packages/mcp-server exec vitest run  --maxWorkers=2",
+   "notes": ""
+  }
+ ]
+}
