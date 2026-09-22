@@ -12,27 +12,29 @@ const ROUTINE_CATEGORY_IDS_BY_PROVIDER = CURATED_CATEGORY_SPECS.filter((spec) =>
     return byProvider;
   }, {});
 
-function clockTime(ms) {
-  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(ms);
+/**
+ * A grant saved while Edit was timed still carries its own end time, and it lapses to Plan then.
+ * Every newer grant has none: Edit stays on until the educator turns it off.
+ */
+function permissionLapsed(permission) {
+  return Number.isFinite(permission?.expiresAt) && permission.expiresAt <= Date.now();
 }
 
 /**
  * D7: one connection's own state text, read only from its editPermission summary. A permission
  * present in morrow_edit_policy_status's bindings is already fresh (the service worker filters out
- * an expired or catalog-stale one), so the popup needs no separate staleness check to show it (see
+ * a lapsed or catalog-stale one), so the popup needs no separate staleness check to show it (see
  * settings.js's isStale for the fuller check the Courses and access page keeps for other reasons).
  */
 export function courseStateText(binding) {
   const permission = binding?.editPermission;
   const ids = Array.isArray(permission?.enabledCategories) ? permission.enabledCategories.filter((id) => typeof id === "string") : [];
-  const expiresAt = Number.isFinite(permission?.expiresAt) ? permission.expiresAt : null;
-  if (!ids.length || (expiresAt !== null && expiresAt <= Date.now())) return "Plan. Asks first.";
-  const until = expiresAt !== null ? `Edit until ${clockTime(expiresAt)}.` : "Edit.";
-  const routineIds = ROUTINE_CATEGORY_IDS_BY_PROVIDER[binding.provider] || [];
+  if (!ids.length || permissionLapsed(permission)) return "Plan. Asks first.";
+    const routineIds = ROUTINE_CATEGORY_IDS_BY_PROVIDER[binding.provider] || [];
   const isRoutine = routineIds.length > 0 && ids.length === routineIds.length && routineIds.every((id) => ids.includes(id));
-  if (isRoutine) return `${until} Routine edits.`;
-  if (ids.length === 1) return `${until} 1 kind of edit.`;
-  return `${until} Custom.`;
+  if (isRoutine) return "Edit. Routine edits.";
+  if (ids.length === 1) return "Edit. 1 kind of edit.";
+  return "Edit. Custom.";
 }
 
 /**
@@ -65,9 +67,10 @@ export function currentBinding(status) {
 }
 
 // WI-2.4 (D1b): the reviews that wait, pushed by the runtime's ui_state command and kept by the
-// Bridge in memory only. The popup lists them; it never opens one by itself.
+// Bridge in memory only. The popup lists them; it never opens one by itself. They belong to the
+// Morrow connection that sent them, so none shows while Morrow is not connected.
 export function pendingReviews(status) {
-  return Array.isArray(status?.reviews)
+  return status?.connected === true && Array.isArray(status?.reviews)
     ? status.reviews.filter((review) => review && typeof review.url === "string" && typeof review.label === "string")
     : [];
 }
@@ -143,7 +146,7 @@ export function activeEditBindings(bindings) {
   return (Array.isArray(bindings) ? bindings : []).filter((binding) => {
     const permission = binding?.editPermission;
     return Boolean(binding?.sourceBindingId) && Array.isArray(permission?.enabledCategories) && permission.enabledCategories.length > 0
-      && Number.isFinite(permission?.expiresAt) && permission.expiresAt > Date.now();
+      && !permissionLapsed(permission);
   });
 }
 

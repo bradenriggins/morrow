@@ -136,7 +136,7 @@ test("the one status region carries the course-list summary and every notice", a
     runtimeVerified: true,
     editPolicyRevision: 0,
   }));
-  const status = { bindings: courses, editDurations: [{ value: 60 * 60 * 1_000, label: "1 hour" }], catalogDigest: "a".repeat(64), siteAnchors: [] };
+  const status = { bindings: courses, catalogDigest: "a".repeat(64), siteAnchors: [] };
   let filePermission = false;
   const stored = {};
   globalThis.document = { activeElement: null, querySelector: (selector) => nodes[selector] || null, addEventListener() {} };

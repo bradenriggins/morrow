@@ -25,7 +25,6 @@ const ONE_HOUR_MS = 60 * 60 * 1_000;
 const CATALOG_DIGEST = "c".repeat(64);
 const SCOPE_DIGEST = "d".repeat(64);
 const COURSE_FILE_ACCESS_KEY = "courseFileStorageAccessEnabled";
-const EDIT_DURATIONS = [{ value: 15 * 60 * 1_000, label: "15 minutes" }, { value: ONE_HOUR_MS, label: "1 hour" }, { value: 4 * ONE_HOUR_MS, label: "4 hours" }];
 
 // WI-5.3: the D7 row state text distinguishes "Routine edits" from "Custom" by comparing a
 // binding's enabledCategories against the full routine set for its provider. Read from the same
@@ -79,26 +78,18 @@ const MOODLE_ROUTINE_OPTIONS = CURATED_CATEGORY_SPECS.filter((spec) => spec.prov
   .map((spec) => ({ id: spec.id, group: spec.group, label: spec.label, description: spec.description, availability: "edit", destructive: false, verification: "checked", routine: true, rememberable: true }));
 
 function statusFixture(bindings, fields = {}) {
-  return { bindings, editDurations: EDIT_DURATIONS, catalogDigest: CATALOG_DIGEST, siteAnchors: [], bindingLimit: 500, ...fields };
+  return { bindings, catalogDigest: CATALOG_DIGEST, siteAnchors: [], bindingLimit: 500, ...fields };
 }
 
 function optionsFixture(sourceBindingId, options, fields = {}) {
   return { schema: "morrow.bridge.edit-options.v1", sourceBindingId, provider: "canvas", catalogDigest: CATALOG_DIGEST, policyRevision: 0, runtimeVerified: true, options, ...fields };
 }
 
-function editPermissionSummary(sourceBindingId, expiresAt, fields = {}) {
-  return { schema: "morrow.bridge.edit-permission.v1", sourceBindingId, revision: 1, scopeDigest: SCOPE_DIGEST, catalogDigest: CATALOG_DIGEST, expiresAt, ...fields };
+/** A saved Edit grant's summary. Edit is not timed, so only a grant saved while it was carries `expiresAt`. */
+function editPermissionSummary(sourceBindingId, fields = {}) {
+  return { schema: "morrow.bridge.edit-permission.v1", sourceBindingId, revision: 1, scopeDigest: SCOPE_DIGEST, catalogDigest: CATALOG_DIGEST, ...fields };
 }
 
-/** The date form the page writes for a temporary Edit access that ends. */
-function expiryLabel(expiresAt) {
-  return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(expiresAt);
-}
-
-/** D7, D3: the clock time the row's own state text and the "Ends" menu show. */
-function clockTime(ms) {
-  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(ms);
-}
 
 /** Loads Plan and Edit settings with the answers the service worker would give. */
 async function openSettings({ status, options = () => null, handlers = {}, ...rest } = {}) {
@@ -106,8 +97,8 @@ async function openSettings({ status, options = () => null, handlers = {}, ...re
     handlers: {
       morrow_edit_policy_status: () => status(),
       morrow_edit_policy_options: ({ sourceBindingId }) => options(sourceBindingId),
-      morrow_edit_policy_save: ({ sourceBindingId, enabledCategories, expiresInMs }) => ({
-        editPermission: { ...editPermissionSummary(sourceBindingId, Date.now() + expiresInMs), enabledCategories },
+      morrow_edit_policy_save: ({ sourceBindingId, enabledCategories }) => ({
+        editPermission: { ...editPermissionSummary(sourceBindingId), enabledCategories },
       }),
       morrow_edit_policy_revoke: () => ({ revoked: true }),
       ...handlers,
@@ -369,15 +360,15 @@ test("Select shows a checkbox on each connected course and the bulk bar", async 
   assert.equal(page.hidden("#course-bulk-bar"), false);
   assert.equal(page.text("#course-bulk-count"), "2 courses selected. Canvas and Moodle courses can be selected together.");
   assert.equal(page.text("#course-bulk-plan"), "Plan. Ask first.");
-  assert.equal(page.text("#course-bulk-routine"), "Edit. Routine edits for 4 hours.");
+  assert.equal(page.text("#course-bulk-routine"), "Edit. Routine edits.");
 
   await page.click("#course-select-mode");
   assert.equal(page.query("#course-select-mode").textContent, "Select");
   assert.equal(page.queryAll(".course-select").length, 0);
 });
 
-// WI-5.3, D2a, D3: the bulk bar's Edit shortcut always grants the full routine set for 4 hours.
-test("the bulk bar's Edit shortcut saves the routine set at 4 hours for every selected course", async () => {
+// WI-5.3, D2a: the bulk bar's Edit shortcut always grants the full routine set. Edit is not timed.
+test("the bulk bar's Edit shortcut saves the routine set for every selected course, with no end time", async () => {
   const page = await openSettings({
     status: () => statusFixture([ANATOMY, PHYSIOLOGY]),
     options: (sourceBindingId) => optionsFixture(sourceBindingId, [FIELD_SELECTION_BUNDLE, ROUTINE_BUNDLE_B]),
@@ -390,9 +381,10 @@ test("the bulk bar's Edit shortcut saves the routine set at 4 hours for every se
   await page.click("#course-bulk-routine");
   await page.waitFor(() => page.messages("morrow_edit_policy_save").length === 2, "the page never saved Edit access for both courses");
   assert.deepEqual(page.messages("morrow_edit_policy_save"), [
-    { type: "morrow_edit_policy_save", sourceBindingId: ANATOMY.sourceBindingId, enabledCategories: [FIELD_SELECTION_BUNDLE.id, ROUTINE_BUNDLE_B.id], expiresInMs: 4 * ONE_HOUR_MS },
-    { type: "morrow_edit_policy_save", sourceBindingId: PHYSIOLOGY.sourceBindingId, enabledCategories: [FIELD_SELECTION_BUNDLE.id, ROUTINE_BUNDLE_B.id], expiresInMs: 4 * ONE_HOUR_MS },
+    { type: "morrow_edit_policy_save", sourceBindingId: ANATOMY.sourceBindingId, enabledCategories: [FIELD_SELECTION_BUNDLE.id, ROUTINE_BUNDLE_B.id] },
+    { type: "morrow_edit_policy_save", sourceBindingId: PHYSIOLOGY.sourceBindingId, enabledCategories: [FIELD_SELECTION_BUNDLE.id, ROUTINE_BUNDLE_B.id] },
   ]);
+  assert.equal(page.text("#course-bulk-routine"), "Edit. Routine edits.");
   assert.equal(page.query("#mode-edit").checked, true);
 });
 
@@ -421,8 +413,8 @@ test("the bulk bar's Edit shortcut grants each connection its own routine action
   const forMoodle = saved.find((message) => message.sourceBindingId === chemistry.sourceBindingId);
   assert.deepEqual([...forCanvas.enabledCategories].sort(), CANVAS_ROUTINE_OPTIONS.map((option) => option.id).sort());
   assert.deepEqual([...forMoodle.enabledCategories].sort(), MOODLE_ROUTINE_OPTIONS.map((option) => option.id).sort());
-  assert.equal(forCanvas.expiresInMs, 4 * ONE_HOUR_MS);
-  assert.equal(forMoodle.expiresInMs, 4 * ONE_HOUR_MS);
+  assert.equal(Object.hasOwn(forCanvas, "expiresInMs"), false);
+  assert.equal(Object.hasOwn(forMoodle, "expiresInMs"), false);
   assert.equal(page.hidden("#error"), true);
   assert.equal(page.query("#mode-edit").checked, true);
 });
@@ -464,6 +456,21 @@ test("the bulk bar's Plan shortcut returns every selected course to Plan", async
   await page.click("#course-bulk-plan");
   await page.waitFor(() => page.text("#notice") !== "", "the page never reported the returned courses");
   assert.deepEqual(revoked.sort(), [ANATOMY.sourceBindingId, PHYSIOLOGY.sourceBindingId].sort());
+});
+
+// Canvas and Moodle courses can be selected together, so a selection with no Edit action in common
+// is named for what it is, not blamed on the platforms.
+test("courses that share no Edit action say so, and name the step that helps", async () => {
+  const page = await openSettings({
+    status: () => statusFixture([ANATOMY, PHYSIOLOGY]),
+    options: (sourceBindingId) => optionsFixture(sourceBindingId, sourceBindingId === ANATOMY.sourceBindingId ? [CHECKED_ACTION] : [ROUTINE_BUNDLE_B]),
+  });
+  await selectCourse(page, ANATOMY.sourceBindingId);
+  await selectCourse(page, PHYSIOLOGY.sourceBindingId);
+  await page.click("#mode-edit");
+  assert.equal(page.text("#selection-summary"), "2 courses selected. These courses share no Edit action.");
+  assert.equal(page.text("#action-help"), "These courses share no Edit action. Select fewer courses, then choose Edit.");
+  assert.doesNotMatch(page.text("#mode-panel"), /platform/i);
 });
 
 test("Edit actions stay closed until a course is selected and Edit is chosen", async () => {
@@ -553,6 +560,15 @@ test("a closed course row offers its own Open Canvas action, targeted at that ex
   await page.click(`[data-open-platform="${closed.sourceBindingId}"]`);
   assert.deepEqual(opened, [{ type: "morrow_open_platform", siteAnchorId: "canvas:site-1", sourceBindingId: closed.sourceBindingId }]);
   assert.equal(page.hidden("#error"), true);
+});
+
+// Every recovery step the page names is one the person can take from a control that exists.
+test("recovery text names the Open and Connect controls that exist, not a reconnect step", async () => {
+  const unnamed = { sourceBindingId: "canvas:unnamed", provider: "canvas", runtimeVerified: true, editPolicyRevision: 0 };
+  const page = await openSettings({ status: () => statusFixture([unnamed]) });
+  assert.equal(page.text('[data-row-kind="attention"] .course-row-note'), "Morrow cannot identify this course. Open it in Canvas or Moodle and select Connect this course in the Morrow Bridge popup.");
+  assert.match(page.text(".access-rules-list"), /If a course needs sign-in again, select Open Canvas or Open Moodle on its row, and sign in if asked\./);
+  assert.doesNotMatch(page.text("body"), /reconnect it from the Morrow popup|Open and reconnect/i);
 });
 
 test("a closed course's Open Canvas shows a sign-in notice when the reopened site is still unverified", async () => {
@@ -672,26 +688,26 @@ test("the action search and the checked-only filter change which actions a perso
   assert.equal(listedActions(page).includes(UNCHECKED_ACTION.label), true);
 });
 
-test("Edit access defaults to one hour and saves one exact request for each selected course", async () => {
+// Edit is not timed: it stays on until the educator returns the course to Plan. The page offers no
+// length, sends none, and promises no end time.
+test("Edit access has no length to choose and saves one exact request for each selected course", async () => {
   const page = await openEditStage([CHECKED_ACTION]);
-  assert.deepEqual(page.query("#edit-duration").options.map((option) => [option.value, option.text]),
-    [["900000", "15 minutes"], ["3600000", "1 hour"], ["14400000", "4 hours"]]);
-  assert.equal(page.query("#edit-duration").value, String(ONE_HOUR_MS));
+  assert.equal(page.queryAll("#edit-duration, select[data-end-duration]").length, 0);
+  assert.doesNotMatch(page.text("main"), /ends after|hours|minutes/);
 
   await selectCourse(page, PHYSIOLOGY.sourceBindingId);
   await openCustomizeGroup(page, "pages", "edit");
   await page.click(`#category-list input[value="${CHECKED_ACTION.id}"]`);
-  assert.equal(page.text("#selection-summary"), `1 action in 1 area, no removal, 2 courses, until ${clockTime(Date.now() + ONE_HOUR_MS)}`);
-  await page.choose("#edit-duration", String(4 * ONE_HOUR_MS));
-  assert.equal(page.text("#action-help"), "Morrow can apply only the checked actions in these courses for 4 hours. Save again if available actions change.");
+  assert.equal(page.text("#selection-summary"), "1 action in 1 area, no removal, 2 courses");
+  assert.equal(page.text("#action-help"), "Morrow can apply only the checked actions in these courses until you return them to Plan. Save again if available actions change.");
 
   await page.click("#save-edit");
   await page.waitFor(() => page.messages("morrow_edit_policy_save").length === 2, "the page never saved Edit access for both courses");
   assert.deepEqual(page.messages("morrow_edit_policy_save"), [
-    { type: "morrow_edit_policy_save", sourceBindingId: ANATOMY.sourceBindingId, enabledCategories: [CHECKED_ACTION.id], expiresInMs: 4 * ONE_HOUR_MS },
-    { type: "morrow_edit_policy_save", sourceBindingId: PHYSIOLOGY.sourceBindingId, enabledCategories: [CHECKED_ACTION.id], expiresInMs: 4 * ONE_HOUR_MS },
+    { type: "morrow_edit_policy_save", sourceBindingId: ANATOMY.sourceBindingId, enabledCategories: [CHECKED_ACTION.id] },
+    { type: "morrow_edit_policy_save", sourceBindingId: PHYSIOLOGY.sourceBindingId, enabledCategories: [CHECKED_ACTION.id] },
   ]);
-  assert.match(page.text("#notice"), /^Edit access saved for 2 courses\. Allowed actions: Page content\. It ends /);
+  assert.equal(page.text("#notice"), "Edit access saved for 2 courses. Allowed actions: Page content. It stays on until you return these courses to Plan.");
 });
 
 // WI-4.5 (D2): the "Routine edits" switch is offered only when a routine bundle exists for every
@@ -702,9 +718,9 @@ test("the Routine edits switch stays hidden with no routine bundle available", a
   assert.equal(page.hidden("#category-list"), false);
 });
 
-// WI-4.5 (D2, D2a, D3, P2): the switch selects every routine bundle at 4 hours, lists them under
-// itself with no disclosure, and hides manual Customize browsing while it is engaged.
-test("the Routine edits switch selects every routine bundle at 4 hours and lists them with no disclosure", async () => {
+// WI-4.5 (D2, D2a, P2): the switch selects every routine bundle, lists them under itself with no
+// disclosure, and hides manual Customize browsing while it is engaged.
+test("the Routine edits switch selects every routine bundle and lists them with no disclosure", async () => {
   const page = await openEditStage([CHECKED_ACTION, FIELD_SELECTION_BUNDLE, ROUTINE_BUNDLE_B], [ANATOMY]);
   assert.equal(page.hidden("#routine-switch"), false);
   assert.equal(page.query("#routine-edits").checked, false);
@@ -712,7 +728,6 @@ test("the Routine edits switch selects every routine bundle at 4 hours and lists
 
   await page.click("#routine-edits");
   assert.equal(page.query("#routine-edits").checked, true);
-  assert.equal(page.query("#edit-duration").value, String(4 * ONE_HOUR_MS));
   assert.equal(page.hidden("#category-list"), true);
   assert.equal(page.hidden("#action-filter-field"), true);
   assert.equal(page.hidden("#action-checked-only-field"), true);
@@ -720,13 +735,13 @@ test("the Routine edits switch selects every routine bundle at 4 hours and lists
   const items = page.queryAll("#routine-bundle-list .routine-bundle-item span").map((span) => span.textContent);
   assert.deepEqual(items, [FIELD_SELECTION_BUNDLE.label, ROUTINE_BUNDLE_B.label]);
   // FIELD_SELECTION_BUNDLE is area "assignments", ROUTINE_BUNDLE_B is area "pages": 2 areas.
-  assert.equal(page.text("#selection-summary"), `2 actions in 2 areas, no removal, 1 course, until ${clockTime(Date.now() + 4 * ONE_HOUR_MS)}`);
+  assert.equal(page.text("#selection-summary"), "2 actions in 2 areas, no removal, 1 course");
 
   await page.click("#save-edit");
   await page.waitFor(() => page.messages("morrow_edit_policy_save").length === 1, "the page never saved Edit access");
   assert.deepEqual(page.messages("morrow_edit_policy_save")[0], {
     type: "morrow_edit_policy_save", sourceBindingId: ANATOMY.sourceBindingId,
-    enabledCategories: [FIELD_SELECTION_BUNDLE.id, ROUTINE_BUNDLE_B.id], expiresInMs: 4 * ONE_HOUR_MS,
+    enabledCategories: [FIELD_SELECTION_BUNDLE.id, ROUTINE_BUNDLE_B.id],
   });
 });
 
@@ -768,7 +783,7 @@ test("the save notice caps the list of allowed actions at six, then counts the r
   await page.click("#save-edit");
   await page.waitFor(() => page.messages("morrow_edit_policy_save").length === 1, "the page never saved Edit access");
   assert.match(page.text("#notice"),
-    /^Edit access saved for 1 course\. Allowed actions: Action 1, Action 2, Action 3, Action 4, Action 5, Action 6, and 2 more actions\. It ends /);
+    /^Edit access saved for 1 course\. Allowed actions: Action 1, Action 2, Action 3, Action 4, Action 5, Action 6, and 2 more actions\. It stays on until you return the course to Plan\.$/);
 });
 
 test("saving Edit access for several courses shows progress only once the wait runs long enough to need it", async () => {
@@ -777,8 +792,8 @@ test("saving Edit access for several courses shows progress only once the wait r
     status: () => statusFixture([ANATOMY, PHYSIOLOGY]),
     options: (sourceBindingId) => optionsFixture(sourceBindingId, [CHECKED_ACTION]),
     handlers: {
-      morrow_edit_policy_save: ({ sourceBindingId, enabledCategories, expiresInMs }) => new Promise((resolve) => {
-        releases.push(() => resolve({ editPermission: { ...editPermissionSummary(sourceBindingId, Date.now() + expiresInMs), enabledCategories } }));
+      morrow_edit_policy_save: ({ sourceBindingId, enabledCategories }) => new Promise((resolve) => {
+        releases.push(() => resolve({ editPermission: { ...editPermissionSummary(sourceBindingId), enabledCategories } }));
       }),
     },
   });
@@ -915,24 +930,23 @@ test("the summary bar states the grant in one sentence before save", async () =>
   await openCustomizeGroup(page, "pages", "remove");
   await page.click(`#category-list input[value="${CHECKED_ACTION.id}"]`);
   await page.click(`#category-list input[value="${DESTRUCTIVE_ACTION.id}"]`);
-  assert.equal(page.text("#selection-summary"), `2 actions in 1 area, 1 action remove content, 1 course, until ${clockTime(Date.now() + ONE_HOUR_MS)}`);
+  assert.equal(page.text("#selection-summary"), "2 actions in 1 area, 1 action remove content, 1 course");
   assert.equal(page.text("#save-edit"), "Review and save");
 });
 
 // WI-5.3, D7: the row's own state text, read straight from the saved editPermission summary (no
 // options fetch needed). "Custom" and "1 kind of edit" are told apart from "Routine edits" by
 // comparing the saved set against every routine bundle for that provider.
-test("a saved Edit access names its state on the row, and an ended one reads as Plan", async () => {
-  const expiresAt = Date.now() + ONE_HOUR_MS;
-  const oneKind = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1", expiresAt), enabledCategories: [CHECKED_ACTION.id] } });
-  const routine = canvasCourse(2, "Physiology", { editPermission: { ...editPermissionSummary("canvas:course-2", expiresAt), enabledCategories: CANVAS_ROUTINE_IDS } });
-  const custom = canvasCourse(3, "Genetics", { editPermission: { ...editPermissionSummary("canvas:course-3", expiresAt), enabledCategories: [CHECKED_ACTION.id, "canvas_publish_state"] } });
-  const ended = canvasCourse(4, "Immunology", { editPermission: { ...editPermissionSummary("canvas:course-4", Date.now() - 1_000), enabledCategories: [CHECKED_ACTION.id] } });
+test("a saved Edit access names its state on the row, and a saved grant past its old end time reads as Plan", async () => {
+  const oneKind = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1"), enabledCategories: [CHECKED_ACTION.id] } });
+  const routine = canvasCourse(2, "Physiology", { editPermission: { ...editPermissionSummary("canvas:course-2"), enabledCategories: CANVAS_ROUTINE_IDS } });
+  const custom = canvasCourse(3, "Genetics", { editPermission: { ...editPermissionSummary("canvas:course-3", { expiresAt: Date.now() + ONE_HOUR_MS }), enabledCategories: [CHECKED_ACTION.id, "canvas_publish_state"] } });
+  const ended = canvasCourse(4, "Immunology", { editPermission: { ...editPermissionSummary("canvas:course-4", { expiresAt: Date.now() - 1_000 }), enabledCategories: [CHECKED_ACTION.id] } });
   const page = await openSettings({ status: () => statusFixture([oneKind, routine, custom, ended]) });
   const state = (sourceBindingId) => page.query(`[data-binding-id="${sourceBindingId}"] .course-row-state`).textContent;
-  assert.equal(state("canvas:course-1"), `Edit until ${clockTime(expiresAt)}. 1 kind of edit.`);
-  assert.equal(state("canvas:course-2"), `Edit until ${clockTime(expiresAt)}. Routine edits.`);
-  assert.equal(state("canvas:course-3"), `Edit until ${clockTime(expiresAt)}. Custom.`);
+  assert.equal(state("canvas:course-1"), "Edit. 1 kind of edit.");
+  assert.equal(state("canvas:course-2"), "Edit. Routine edits.");
+  assert.equal(state("canvas:course-3"), "Edit. Custom.", "a grant saved while Edit was timed promises no end time");
   assert.equal(state("canvas:course-4"), "Plan. Asks first.");
   assert.equal(page.query('[data-binding-id="canvas:course-1"] .course-row-state').classList.contains("on"), true);
   assert.equal(page.query('[data-binding-id="canvas:course-4"] .course-row-state').classList.contains("on"), false);
@@ -942,7 +956,7 @@ test("a saved Edit access names its state on the row, and an ended one reads as 
 // paused until it is reviewed and saved again.
 test("a course whose available actions changed is paused until it is saved again", async () => {
   const stale = canvasCourse(1, "Anatomy", {
-    staleEditPermission: editPermissionSummary("canvas:course-1", Date.now() + ONE_HOUR_MS, { catalogDigest: "a".repeat(64) }),
+    staleEditPermission: editPermissionSummary("canvas:course-1", { catalogDigest: "a".repeat(64) }),
   });
   const page = await openSettings({ status: () => statusFixture([stale]) });
   assert.equal(page.query('[data-binding-id="canvas:course-1"] .course-row-state').textContent, "Plan. Asks first.");
@@ -971,9 +985,9 @@ test("a connected row's name button opens and closes its detail in place", async
   assert.equal(page.text(`#${detailId}`), "");
 });
 
-// WI-5.4: a Plan-level course's detail states what Morrow may do, with no Ends menu and no
-// allowed list (there is nothing allowed to list).
-test("a Plan-level course's detail states what Morrow may do, with no Ends menu or allowed list", async () => {
+// WI-5.4: a Plan-level course's detail states what Morrow may do, with no allowed list (there is
+// nothing allowed to list).
+test("a Plan-level course's detail states what Morrow may do, with no allowed list", async () => {
   const page = await openSettings({ status: () => statusFixture([ANATOMY]) });
   const detail = await openCourseDetail(page, ANATOMY.sourceBindingId);
   assert.equal(detail.querySelector('[data-set-level="plan"]').getAttribute("aria-pressed"), "true");
@@ -986,36 +1000,35 @@ test("a Plan-level course's detail states what Morrow may do, with no Ends menu 
   assert.notEqual(detail.querySelector('[data-disconnect="1"]'), null);
 });
 
-// WI-5.4, D7: a Routine-level course's detail shows the routine set (with Remove for each) and an
-// Ends menu, from the saved summary alone (no options fetch needed to show it).
-test("a Routine-level course's detail lists the routine bundles with Remove and an Ends menu", async () => {
-  const expiresAt = Date.now() + ONE_HOUR_MS;
-  const routine = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1", expiresAt), enabledCategories: CANVAS_ROUTINE_IDS } });
+// WI-5.4, D7: a Routine-level course's detail shows the routine set (with Remove for each), from
+// the saved summary alone (no options fetch needed to show it). Edit is not timed, so the detail
+// offers no end time.
+test("a Routine-level course's detail lists the routine bundles with Remove, and no end time", async () => {
+  const routine = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1"), enabledCategories: CANVAS_ROUTINE_IDS } });
   const page = await openSettings({ status: () => statusFixture([routine]) });
   const detail = await openCourseDetail(page, routine.sourceBindingId);
   assert.equal(detail.querySelector('[data-set-level="routine"]').getAttribute("aria-pressed"), "true");
-  assert.match(detail.textContent, new RegExp(`Until ${clockTime(expiresAt)}, Morrow makes the routine edits below without another approval\\.`));
+  assert.match(detail.textContent, /Morrow makes the routine edits below without another approval until you choose Plan\./);
   assert.deepEqual(detail.querySelectorAll(".routine-bundle-item span").map((el) => el.textContent), CANVAS_ROUTINE_IDS.map(curatedLabel));
-  assert.notEqual(detail.querySelector("[data-end-duration]"), null);
+  assert.equal(detail.querySelector("[data-end-duration]"), null);
+  assert.equal(detail.querySelector("select"), null);
 });
 
 // WI-5.4: a saved list that is neither empty nor the full routine set reads as "custom", with its
 // own third pressed chip and its own allowed list.
 test("a custom-level course's detail shows the Custom chip and its own allowed list", async () => {
-  const expiresAt = Date.now() + ONE_HOUR_MS;
   const ids = ["canvas_assignment_text", "canvas_publish_state"];
-  const custom = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1", expiresAt), enabledCategories: ids } });
+  const custom = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1"), enabledCategories: ids } });
   const page = await openSettings({ status: () => statusFixture([custom]) });
   const detail = await openCourseDetail(page, custom.sourceBindingId);
   assert.equal(detail.querySelector('[data-open-customize="1"][aria-pressed="true"]').textContent, "Custom");
   assert.deepEqual(detail.querySelectorAll(".routine-bundle-item span").map((el) => el.textContent), ids.map(curatedLabel));
-  assert.match(detail.textContent, new RegExp(`Morrow makes the changes you selected in Customize until ${clockTime(expiresAt)}\\.`));
+  assert.match(detail.textContent, /Morrow makes the changes you selected in Customize until you choose Plan\. It asks before every other change\./);
 });
 
 test("the detail's own Plan button returns just that course to Plan", async () => {
-  const expiresAt = Date.now() + ONE_HOUR_MS;
   const revoked = [];
-  const routine = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1", expiresAt), enabledCategories: CANVAS_ROUTINE_IDS } });
+  const routine = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1"), enabledCategories: CANVAS_ROUTINE_IDS } });
   const page = await openSettings({
     status: () => statusFixture([routine]),
     handlers: { morrow_edit_policy_revoke: ({ sourceBindingId }) => { revoked.push(sourceBindingId); return { revoked: true }; } },
@@ -1027,9 +1040,9 @@ test("the detail's own Plan button returns just that course to Plan", async () =
   assert.equal(page.text("#notice"), "Anatomy is in Plan. Morrow asks first.");
 });
 
-// D2, D3: the detail's own Edit shortcut is always the full routine set, always 4 hours, for this
-// one course only (the same rule the bulk bar's Edit shortcut already applies).
-test("the detail's own Edit. Routine edits. button turns on the routine set for that course, at 4 hours", async () => {
+// D2: the detail's own Edit shortcut is always the full routine set, for this one course only (the
+// same rule the bulk bar's Edit shortcut already applies).
+test("the detail's own Edit. Routine edits. button turns on the routine set for that course", async () => {
   const plan = canvasCourse(1, "Anatomy");
   const page = await openSettings({
     status: () => statusFixture([plan]),
@@ -1040,23 +1053,22 @@ test("the detail's own Edit. Routine edits. button turns on the routine set for 
   await page.waitFor(() => page.messages("morrow_edit_policy_save").length === 1, "the page never saved routine edits for this course");
   assert.deepEqual(page.messages("morrow_edit_policy_save")[0], {
     type: "morrow_edit_policy_save", sourceBindingId: plan.sourceBindingId,
-    enabledCategories: [FIELD_SELECTION_BUNDLE.id, ROUTINE_BUNDLE_B.id], expiresInMs: 4 * ONE_HOUR_MS,
+    enabledCategories: [FIELD_SELECTION_BUNDLE.id, ROUTINE_BUNDLE_B.id],
   });
-  await page.waitFor(() => page.text("#notice").startsWith("Routine edits are on for Anatomy until"), "the page never confirmed routine edits");
+  await page.waitFor(() => page.text("#notice") !== "", "the page never confirmed routine edits");
+  assert.equal(page.text("#notice"), "Routine edits are on for Anatomy. They stay on until you choose Plan.");
 });
 
-// WI-5.4: "Remove" saves the list without that bundle and keeps the end time (the fixed duration,
-// F5, closest to what remains).
-test("Remove saves the list without that bundle and keeps the end time", async () => {
-  const expiresAt = Date.now() + ONE_HOUR_MS;
-  const custom = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1", expiresAt), enabledCategories: ["canvas_assignment_text", "canvas_publish_state"] } });
+// WI-5.4: "Remove" saves the list without that bundle.
+test("Remove saves the list without that bundle", async () => {
+  const custom = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1"), enabledCategories: ["canvas_assignment_text", "canvas_publish_state"] } });
   const page = await openSettings({ status: () => statusFixture([custom]) });
   const detail = await openCourseDetail(page, custom.sourceBindingId);
   await page.click(`#${detail.getAttribute("id")} [data-remove-category="canvas_publish_state"]`);
   await page.waitFor(() => page.messages("morrow_edit_policy_save").length === 1, "the page never saved the reduced list");
   assert.deepEqual(page.messages("morrow_edit_policy_save")[0], {
     type: "morrow_edit_policy_save", sourceBindingId: custom.sourceBindingId,
-    enabledCategories: ["canvas_assignment_text"], expiresInMs: ONE_HOUR_MS,
+    enabledCategories: ["canvas_assignment_text"],
   });
   await page.waitFor(() => page.text("#notice") !== "", "the page never confirmed the removal");
   assert.equal(page.text("#notice"), `Removed. Morrow asks again before it changes ${curatedLabel("canvas_publish_state").toLowerCase()} in Anatomy.`);
@@ -1065,8 +1077,7 @@ test("Remove saves the list without that bundle and keeps the end time", async (
 // WI-5.4: the protocol refuses an empty enabledCategories list, so removing the last bundle
 // returns the course to Plan instead, exactly what an empty allowed list means everywhere else (D7).
 test("Remove on the last remaining bundle returns the course to Plan", async () => {
-  const expiresAt = Date.now() + ONE_HOUR_MS;
-  const oneKind = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1", expiresAt), enabledCategories: ["canvas_assignment_text"] } });
+  const oneKind = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1"), enabledCategories: ["canvas_assignment_text"] } });
   const revoked = [];
   const page = await openSettings({
     status: () => statusFixture([oneKind]),
@@ -1078,19 +1089,6 @@ test("Remove on the last remaining bundle returns the course to Plan", async () 
   assert.deepEqual(revoked, [oneKind.sourceBindingId]);
   assert.equal(page.text("#notice"), "Anatomy is in Plan. Morrow asks first.");
   assert.equal(page.messages("morrow_edit_policy_save").length, 0);
-});
-
-test("the Ends menu re-saves the same categories with the chosen duration", async () => {
-  const expiresAt = Date.now() + ONE_HOUR_MS;
-  const routine = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1", expiresAt), enabledCategories: CANVAS_ROUTINE_IDS } });
-  const page = await openSettings({ status: () => statusFixture([routine]) });
-  const detail = await openCourseDetail(page, routine.sourceBindingId);
-  await page.choose(`#${detail.getAttribute("id")} [data-end-duration]`, String(4 * ONE_HOUR_MS));
-  await page.waitFor(() => page.messages("morrow_edit_policy_save").length === 1, "the page never saved the new duration");
-  assert.deepEqual(page.messages("morrow_edit_policy_save")[0], {
-    type: "morrow_edit_policy_save", sourceBindingId: routine.sourceBindingId,
-    enabledCategories: CANVAS_ROUTINE_IDS, expiresInMs: 4 * ONE_HOUR_MS,
-  });
 });
 
 // WI-5.4: "Customize" (and the "Custom" chip) select only that one course, so a visit cannot
@@ -1110,16 +1108,49 @@ test("Customize selects only that course and switches to Edit in Course access b
   assert.equal(page.text("#notice"), "Choose the changes for Anatomy in Course access, below.");
 });
 
-// WI-5.4: there is no per-course disconnect primitive yet (only the whole-Bridge "morrow_disconnect"
-// exists), so "Disconnect" states that plainly and changes nothing rather than claiming an action it
-// cannot perform.
-test("Disconnect states it is not available yet, and changes nothing", async () => {
-  const page = await openSettings({ status: () => statusFixture([ANATOMY]) });
+// WI-5.4: Disconnect removes this one course, with its Edit access, after the person confirms it
+// in place. Keeping the course changes nothing.
+test("Disconnect asks once in place, then disconnects just that course", async () => {
+  const routine = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1"), enabledCategories: CANVAS_ROUTINE_IDS } });
+  let bindings = [routine, PHYSIOLOGY];
+  const page = await openSettings({
+    status: () => statusFixture(bindings),
+    handlers: {
+      morrow_course_disconnect: ({ sourceBindingId }) => {
+        bindings = bindings.filter((binding) => binding.sourceBindingId !== sourceBindingId);
+        return { disconnected: true, sourceBindingId };
+      },
+    },
+  });
+  const detail = await openCourseDetail(page, routine.sourceBindingId);
+  const detailId = detail.getAttribute("id");
+  await page.click(`#${detailId} [data-disconnect="1"]`);
+  assert.equal(page.messages("morrow_course_disconnect").length, 0, "one click must not disconnect");
+  assert.equal(page.text(`#${detailId} .course-disconnect-confirm p`), "Disconnect Anatomy? Morrow stops reading and changing this course, and its Edit access is removed. Your course in Canvas is not changed. You can connect it again from this list.");
+  await page.click(`#${detailId} [data-disconnect-cancel="1"]`);
+  assert.equal(page.queryAll(`#${detailId} .course-disconnect-confirm`).length, 0);
+  assert.equal(page.messages("morrow_course_disconnect").length, 0);
+
+  await page.click(`#${detailId} [data-disconnect="1"]`);
+  await page.click(`#${detailId} [data-disconnect-confirm="1"]`);
+  await page.waitFor(() => page.text("#notice") !== "", "the page never reported the disconnected course");
+  assert.deepEqual(page.messages("morrow_course_disconnect"), [{ type: "morrow_course_disconnect", sourceBindingId: routine.sourceBindingId }]);
+  assert.equal(page.text("#notice"), "Anatomy is disconnected. Its Edit access was removed.");
+  await page.waitFor(() => page.queryAll(`[data-binding-id="${routine.sourceBindingId}"]`).length === 0, "the disconnected course still shows as connected");
+  assert.equal(page.queryAll(`[data-binding-id="${PHYSIOLOGY.sourceBindingId}"]`).length, 1);
+});
+
+test("a refused Disconnect names the problem and leaves the course connected", async () => {
+  const page = await openSettings({
+    status: () => statusFixture([ANATOMY]),
+    handlers: { morrow_course_disconnect: () => ({ ok: false, code: "edit_policy_binding_missing", error: "edit_policy_binding_missing" }) },
+  });
   const detail = await openCourseDetail(page, ANATOMY.sourceBindingId);
   await page.click(`#${detail.getAttribute("id")} [data-disconnect="1"]`);
-  assert.equal(page.text("#notice"), "Disconnecting a course here is not available yet.");
-  assert.equal(page.messages("morrow_edit_policy_revoke").length, 0);
-  assert.equal(page.messages("morrow_disconnect").length, 0);
+  await page.click(`#${detail.getAttribute("id")} [data-disconnect-confirm="1"]`);
+  await page.waitFor(() => !page.hidden("#error"), "the refused disconnect was not reported");
+  assert.equal(page.text("#error"), problemText("edit_policy_binding_missing"));
+  assert.equal(page.queryAll(`[data-binding-id="${ANATOMY.sourceBindingId}"][data-row-kind="connected"]`).length, 1);
 });
 
 test("returning courses to Plan removes each access, and says how far it got when one is refused", async () => {
@@ -1162,8 +1193,7 @@ test("returning courses to Plan removes each access, and says how far it got whe
 // any course. It reuses returnToPlan (the same handler "Return selected courses to Plan" uses), so
 // only its own result text and count differ from that flow.
 test("a banner offers to ask first in all courses while any connection can act with no review, and clears once none can", async () => {
-  const expiresAt = Date.now() + ONE_HOUR_MS;
-  let editingPermission = { ...editPermissionSummary("canvas:course-1", expiresAt), enabledCategories: [CHECKED_ACTION.id] };
+  let editingPermission = { ...editPermissionSummary("canvas:course-1"), enabledCategories: [CHECKED_ACTION.id] };
   const planOnly = canvasCourse(2, "Physiology");
   const revoked = [];
   const page = await openSettings({
@@ -1191,11 +1221,10 @@ test("a banner offers to ask first in all courses while any connection can act w
   assert.equal(page.hidden("#edit-access-banner"), true);
 });
 
-test("the banner counts every connection that can act with no review, and ignores an ended one", async () => {
-  const expiresAt = Date.now() + ONE_HOUR_MS;
-  const first = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1", expiresAt), enabledCategories: [CHECKED_ACTION.id] } });
-  const second = canvasCourse(2, "Physiology", { editPermission: { ...editPermissionSummary("canvas:course-2", expiresAt), enabledCategories: [CHECKED_ACTION.id] } });
-  const ended = canvasCourse(3, "Genetics", { editPermission: { ...editPermissionSummary("canvas:course-3", Date.now() - 1_000), enabledCategories: [CHECKED_ACTION.id] } });
+test("the banner counts every connection that can act with no review, and ignores a saved grant past its old end time", async () => {
+  const first = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1"), enabledCategories: [CHECKED_ACTION.id] } });
+  const second = canvasCourse(2, "Physiology", { editPermission: { ...editPermissionSummary("canvas:course-2", { expiresAt: Date.now() + ONE_HOUR_MS }), enabledCategories: [CHECKED_ACTION.id] } });
+  const ended = canvasCourse(3, "Genetics", { editPermission: { ...editPermissionSummary("canvas:course-3", { expiresAt: Date.now() - 1_000 }), enabledCategories: [CHECKED_ACTION.id] } });
   const page = await openSettings({ status: () => statusFixture([first, second, ended]) });
   assert.equal(page.text("#edit-access-banner-text"), "Morrow can make some changes with no review in 2 courses.");
 
@@ -1214,7 +1243,7 @@ test("a state the page cannot read is named as itself, with the next action", as
   assert.equal(page.text("#selection-summary"), "Course access was not checked. Select Refresh connected courses.");
   assert.equal(page.query("#refresh").disabled, false);
 
-  const unreadable = await openSettings({ status: () => ({ bindings: [], editDurations: "hourly" }) });
+  const unreadable = await openSettings({ status: () => ({ bindings: "none" }) });
   assert.equal(unreadable.text("#error"), problemText("edit_policy_status_unreadable"));
   assert.equal(unreadable.text("#connection-status"), "Connected courses were not checked.");
 });
@@ -1355,6 +1384,127 @@ test("an empty discovery result leaves the connected course list showing", async
   await page.flush();
   assert.equal(page.queryAll("[data-connect-row]").length, 0);
   assert.equal(page.queryAll(".course-row-name").map((el) => el.textContent).includes("Anatomy"), true);
+});
+
+function discoverySite(siteAnchorId, provider = "canvas") {
+  return {
+    siteAnchorId, provider, origin: provider === "moodle" ? "https://moodle.example.edu" : "https://canvas.example.edu",
+    principalId: "teacher@example.edu", sessionGeneration: 1, runtimeVerified: true,
+  };
+}
+
+function discoveryResult(site, receiptId, courses, fields = {}) {
+  return { ...site, discoveryReceiptId: receiptId, expiresAt: Date.now() + 60_000, courses, pageNumber: 1, complete: true, courseCount: courses.length, ...fields };
+}
+
+// Each signed-in site keeps its own list of available courses, so a second site never replaces
+// the first, and Connect on a row uses that row's own site and list.
+test("every signed-in site lists its own available courses, and Connect uses that row's own site", async () => {
+  const canvas = discoverySite("canvas-site-a");
+  const moodle = discoverySite("moodle-site-b", "moodle");
+  const saved = [];
+  const page = await openSettings({
+    status: () => statusFixture([], { siteAnchors: [canvas, moodle] }),
+    handlers: {
+      morrow_course_discovery_start: ({ siteAnchorId }) => siteAnchorId === canvas.siteAnchorId
+        ? discoveryResult(canvas, "discovery-canvas", [{ id: "7", name: "Anatomy" }])
+        : discoveryResult(moodle, "discovery-moodle", [{ id: "8", name: "Chemistry" }]),
+      morrow_course_selection_save: ({ siteAnchorId, discoveryReceiptId, courseIds }) => {
+        saved.push({ siteAnchorId, discoveryReceiptId, courseIds });
+        return { siteAnchorId, bindings: courseIds.map((courseId) => ({ courseId })) };
+      },
+    },
+  });
+  await page.waitFor(() => page.queryAll("[data-connect-row]").length === 2, "both sites' available courses never showed together");
+  assert.deepEqual(page.queryAll('.course-row[data-row-kind="available"] .course-row-name').map((el) => el.textContent), ["Anatomy", "Chemistry"]);
+  await page.click('[data-connect-row="https://moodle.example.edu|8"]');
+  await page.waitFor(() => saved.length === 1, "Connect never reached the Moodle site");
+  assert.deepEqual(saved[0], { siteAnchorId: moodle.siteAnchorId, discoveryReceiptId: "discovery-moodle", courseIds: ["8"] });
+});
+
+// A list of available courses is good for a few minutes only. The rows stay, and Connect reads
+// the list again first, so a person never has to find the courses again by hand.
+test("Connect on a list that expired reads that site's list again, then connects from the new list", async () => {
+  const site = discoverySite("canvas-site-expiring");
+  let reads = 0;
+  const saved = [];
+  const page = await openSettings({
+    status: () => statusFixture([], { siteAnchors: [site] }),
+    handlers: {
+      morrow_course_discovery_start: () => {
+        reads += 1;
+        return discoveryResult(site, `discovery-${reads}`, [{ id: "7", name: "Anatomy" }], reads === 1 ? { expiresAt: Date.now() + 40 } : {});
+      },
+      morrow_course_selection_save: ({ siteAnchorId, discoveryReceiptId, courseIds }) => {
+        saved.push(discoveryReceiptId);
+        return { siteAnchorId, bindings: courseIds.map((courseId) => ({ courseId })) };
+      },
+    },
+  });
+  await page.waitFor(() => page.queryAll("[data-connect-row]").length === 1, "the available course never showed");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await page.click('[data-connect-row="https://canvas.example.edu|7"]');
+  await page.waitFor(() => saved.length === 1, "Connect never ran after the list expired");
+  assert.equal(reads, 2);
+  assert.deepEqual(saved, ["discovery-2"]);
+  assert.equal(page.hidden("#error"), true);
+  assert.equal(page.text("#notice"), "Anatomy is connected in Plan. Morrow asks before each change.");
+});
+
+test("Connect that the Bridge answers with an old or missing list reads the list again and tries once more", async () => {
+  for (const code of ["course_discovery_receipt_stale", "course_discovery_receipt_missing"]) {
+    const site = discoverySite(`canvas-site-${code}`);
+    let reads = 0;
+    const saved = [];
+    const page = await openSettings({
+      status: () => statusFixture([], { siteAnchors: [site] }),
+      handlers: {
+        morrow_course_discovery_start: () => {
+          reads += 1;
+          return discoveryResult(site, `discovery-${reads}`, [{ id: "7", name: "Anatomy" }]);
+        },
+        morrow_course_selection_save: ({ siteAnchorId, discoveryReceiptId, courseIds }) => {
+          saved.push(discoveryReceiptId);
+          if (saved.length === 1) return { ok: false, code, error: code };
+          return { siteAnchorId, bindings: courseIds.map((courseId) => ({ courseId })) };
+        },
+      },
+    });
+    await page.waitFor(() => page.queryAll("[data-connect-row]").length === 1, "the available course never showed");
+    await page.click('[data-connect-row="https://canvas.example.edu|7"]');
+    await page.waitFor(() => saved.length === 2, `Connect was not tried again after ${code}`);
+    assert.deepEqual(saved, ["discovery-1", "discovery-2"], code);
+    await page.waitFor(() => page.text("#notice") !== "", "the connection was never reported");
+    assert.equal(page.hidden("#error"), true, code);
+  }
+});
+
+// A failed read is not tried again on every background refresh. Refresh connected courses reads
+// every site's list again, the one next step the failure copy names.
+test("a failed list of available courses is read again when the person selects Refresh connected courses", async () => {
+  const site = discoverySite("canvas-site-failing");
+  let reads = 0;
+  const page = await openSettings({
+    status: () => statusFixture([], { siteAnchors: [site] }),
+    handlers: {
+      morrow_course_discovery_start: () => {
+        reads += 1;
+        if (reads === 1) return { ok: false, code: "course_discovery_failed", error: "course_discovery_failed" };
+        return discoveryResult(site, "discovery-after-refresh", [{ id: "7", name: "Anatomy" }]);
+      },
+    },
+  });
+  await page.waitFor(() => !page.hidden("#error"), "the failed read was not reported");
+  assert.equal(page.text("#error"), problemText("course_discovery_failed"));
+  assert.match(page.text("#error"), /Refresh connected courses/);
+  page.listeners.message[0]({ type: "morrow_bridge_status_changed" });
+  await page.flush();
+  assert.equal(reads, 1, "a background refresh must not retry a failed read on its own");
+
+  await page.click("#refresh");
+  await page.waitFor(() => page.queryAll("[data-connect-row]").length === 1, "Refresh connected courses never read the list again");
+  assert.equal(reads, 2);
+  assert.equal(page.hidden("#error"), true);
 });
 
 // WI-1.2 (D1a): the checkbox reads the stored setting service-worker.js's openPlatform reads

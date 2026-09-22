@@ -42,7 +42,7 @@ const HANDLE_UI_STATE_SOURCE = sliceIncluding("async function handleUiState(comm
  * stubbed. Nothing here reaches a real socket, a real tab or the real refreshBadge.
  */
 function harness({ generation = 1, cancelled = false } = {}) {
-  const calls = { sendResult: [], refreshBadge: 0, bridgeCommandCancelled: 0 };
+  const calls = { sendResult: [], refreshBadge: 0, bridgeCommandCancelled: 0, runtimeMessages: [] };
   const script = [
     "globalThis.__morrowUiStateHarness = (() => {",
     `const calls = ${JSON.stringify(calls)};`,
@@ -51,6 +51,7 @@ function harness({ generation = 1, cancelled = false } = {}) {
     "async function refreshBadge() { calls.refreshBadge += 1; }",
     "async function bridgeCommandCancelled() { calls.bridgeCommandCancelled += 1; return cancelled; }",
     "function sendResult(command, ok, result, failure) { calls.sendResult.push({ ok, result, failure }); }",
+    "const chrome = { runtime: { sendMessage: async (message) => { calls.runtimeMessages.push(message); } } };",
     PROTOCOL_VERSION_SOURCE,
     PROBLEM_SOURCE,
     UI_STATE_VALIDATOR_SOURCE,
@@ -151,12 +152,13 @@ test("an expired or missing expiresAt is stale", () => {
   assert.throws(() => h.bridgeUiState(command({ expiresAt: undefined })), /ui_state_stale/);
 });
 
-test("a checked ui_state is stored in memory and refreshes the badge once", async () => {
+test("a checked ui_state is stored in memory, refreshes the badge once, and tells an open popup", async () => {
   const h = harness({ generation: 1 });
   await h.handleUiState(command({ uiState: { reviews: [REVIEW, BATCH_REVIEW] } }));
   assert.deepEqual(h.state.reviews, [REVIEW, BATCH_REVIEW]);
   assert.equal(h.state.reviewsWaiting, 2);
   assert.equal(h.calls.refreshBadge, 1);
+  assert.deepEqual(h.calls.runtimeMessages, [{ type: "morrow_bridge_status_changed" }]);
   assert.equal(h.calls.sendResult.length, 1);
   assert.deepEqual(h.calls.sendResult[0], { ok: true, result: { schema: "morrow.bridge.ui-state.v1", accepted: 2 }, failure: null });
 });
