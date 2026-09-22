@@ -926,7 +926,8 @@ test("the repair panel starts the in-app repair and then shows the state repair 
   let current = state({ lifecycle: "repair_required", runtimeStatus: "repair_required", assistants: [], selectedAssistantId: null });
   const dom = await load("repair", async (method) => {
     methods.push(method);
-    if (method === "installer:repair") current = state();
+    // The state repair reaches here offers no primary action, so focus has to land on its heading.
+    if (method === "installer:repair") current = state({ bridgeDelivery: "unavailable" });
     return ok(current);
   });
 
@@ -938,8 +939,9 @@ test("the repair panel starts the in-app repair and then shows the state repair 
   await dom.element("#action-body").dispatch("click", { target: repair });
   await settle();
   assert.deepEqual(methods, ["installer:get-state", "installer:repair"]);
-  assert.equal(dom.element("#action-title").textContent, "Connect Morrow Bridge.");
-  assert.equal(dom.element("#header-status").textContent, "Assistant is ready");
+  assert.equal(dom.element("#action-title").textContent, "Morrow Bridge is not available yet.");
+  assert.equal(dom.element("#header-status").textContent, "Morrow Bridge is not available yet");
+  assert.equal(dom.element("#action-body").querySelector(".primary-button"), null);
   assert.equal(dom.element("#problem").innerHTML, "", "a repair that finished reports no problem");
   assert.equal(dom.document.activeElement, dom.element("#action-title"), "a completed step with no primary action focuses its new heading");
 });
