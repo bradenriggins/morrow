@@ -45,6 +45,25 @@ for _p in (REPO, os.path.join(REPO, "dispatch"),
 # raises. Importing plain `executor`/`admission` would create second
 # module objects whose exception classes never match.
 from dispatch import executor as ex
+
+# Selftest harness: the approvals here are minted on the driver
+# channel, so dispatch runs with require_educator_channel=False (the
+# production default is True).
+def _driver_channel(fn):
+    def call(*a, **k):
+        k.setdefault("require_educator_channel", False)
+        return fn(*a, **k)
+    return call
+
+
+ex.dispatch_entry = _driver_channel(ex.dispatch_entry)
+ex.dispatch_catalog_op = _driver_channel(ex.dispatch_catalog_op)
+ex.dispatch_undo = _driver_channel(ex.dispatch_undo)
+
+# The scenarios use literal ids and synthetic paths that are not
+# catalog path templates; the live-proven catalog gate is covered by
+# dispatch/test_direct_lane_hardening.py and is a no-op here.
+ex.live_proven_gate = lambda *a, **k: None  # noqa: E731
 from dispatch import admission as ad
 import chromium_session as _cs_mod
 from chromium_session import ChromiumSession
@@ -423,8 +442,8 @@ def main():
                    "missing target_identity fails closed", failures)
         _check(session._fake_transport.calls == [],
                "missing target: zero provider calls", failures)
-        # B4 control: agreeing target -> dispatch proceeds (DELETE has no
-        # member readback; verification is recorded as skipped).
+        # B4 control: agreeing target -> dispatch proceeds; the DELETE is
+        # then verified by the member GET answering 404.
         del_entry = ex.catalog_descriptor_to_entry(
             "w4-del", "DELETE",
             "/api/v1/courses/112/assignment_groups/5", "write",
@@ -435,7 +454,8 @@ def main():
                      readback="frozen (course 112) Intended Course")
         session = _session([("ok", 200, json.dumps(
             {"id": 112, "name": "Intended Course"})),
-            ("ok", 200, json.dumps({"id": 5}))])
+            ("ok", 200, json.dumps({"id": 5})),
+            ("ok", 404, json.dumps({"errors": []}))])
         approval = _approve(del_entry, params, BASE, target_identity=ti)
         ex.dispatch_entry(del_entry, params, session, _pack(), plan,
                             op_id=_oid("w4-b4"),
@@ -445,8 +465,9 @@ def main():
                "agreeing target: write dispatches (journaled complete)",
                failures)
         methods = [m for m, _u in session._fake_transport.calls]
-        _check(methods == ["GET", "DELETE"],
-               "agreeing target: course GET precheck then the write",
+        _check(methods == ["GET", "DELETE", "GET"],
+               "agreeing target: course GET precheck, the write, then "
+               "the absence readback",
                failures)
         rec = _find_journal(journal, _oid("w4-b4"))
         verified = (rec or {}).get("target") or {}

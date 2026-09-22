@@ -619,6 +619,18 @@ def is_tenant_url(url, base_url):
     return want is not None and _origin_of(url) == want
 
 
+def _is_unauthenticated(body):
+    """True for Canvas's 401 session-expiry body ({"status":
+    "unauthenticated"}). A 401 {"status": "unauthorized"} is a
+    permission refusal on a live session and returns False."""
+    try:
+        doc = json.loads(body or "")
+    except (ValueError, TypeError):
+        return False
+    return isinstance(doc, dict) and \
+        str(doc.get("status") or "").lower() == "unauthenticated"
+
+
 def _looks_like_login_page(body):
     """True when body is an HTML login page, even with HTTP 200.
 
@@ -2472,6 +2484,11 @@ class LocalChromiumTransport:
                 "Canvas served a login page (HTTP %s) for the API call; "
                 "the browser session is dead (sign in again through the "
                 "login helper)." % (resp.get("status"),))
+        if resp.get("status") == 401 and _is_unauthenticated(resp.get("body")):
+            raise SessionRejected(
+                "Canvas answered HTTP 401 unauthenticated for the API "
+                "call; the browser session expired or was revoked (sign "
+                "in again through the login helper).")
         headers = {}
         if resp.get("link"):
             headers["link"] = resp["link"]
@@ -2486,6 +2503,12 @@ class LocalChromiumTransport:
 class SessionDead(RuntimeError):
     """The local browser has no live Canvas session; re-authentication is
     required (educator signs in again through the connector's browser)."""
+
+
+class SessionRejected(SessionDead):
+    """Canvas answered 401 with status "unauthenticated": the session
+    expired or was revoked. The provider answered, so the request was
+    NOT applied (unlike a session that died mid-call)."""
 
 
 class CDPError(RuntimeError):
@@ -2521,8 +2544,11 @@ def _probe_binary_version(path):
             "could not probe Chromium version for %r: %s" % (path, exc))
     out = (proc.stdout or "").strip().splitlines()
     text = out[0].strip() if out else ""
-    m = re.match(r"^(Chromium|Google Chrome)\s+(\d+)\.(\d+)\.(\d+)\.(\d+)\s*$",
-                 text)
+    # Distro builds append build notes after the version ("built on
+    # Debian GNU/Linux 13 (trixie)", "snap"); the version itself must
+    # still be exactly four numeric parts.
+    m = re.match(r"^(Chromium|Google Chrome)\s+(\d+)\.(\d+)\.(\d+)\.(\d+)"
+                 r"(?:\s+\S.*)?\s*$", text)
     if not m or proc.returncode != 0:
         raise RuntimeError(
             "refusing Chromium binary %r: --version did not report a sane "
@@ -2637,20 +2663,17 @@ def default_profile_dir():
         "helper_profile_dir() for the connector's unified live profile)")
 
 
-# The live helper's canonical profile. Hardcoded here (not derived):
-# every tree compares its own resolved profile against this to decide
-# whether it is asking for production identity.
-LIVE_HELPER_PROFILE_DIR = "/home/hatch/workspace/canvas-login-helper/profile"
-
-
 def helper_profile_dir():
     """The connector's unified live profile: the login helper's Chromium
     profile, which holds the educator's authenticated Canvas session.
 
+    It is this tree's helper profile (tree_helper_profile_dir: the
+    LOGIN_HELPER_PROFILE_DIR the helper runs with, else
+    <tree>/helper/profile, the directory install.sh creates), so the
+    executor's self-launch fallback and the provision launch driver ride
+    the same single profile as the helper for any install user.
+
     Explicit by name, never a silent default: default_profile_dir() raises
-    so nothing can open the live session by accident. Used by the
-    executor's self-launch fallback (transport/chromium_session.py) and the
-    provision launch driver, which ride the same single profile as the
-    helper (one profile, one browser, one CDP pipe).
+    so nothing can open the live session by accident.
     """
-    return os.path.expanduser(LIVE_HELPER_PROFILE_DIR)
+    return tree_helper_profile_dir()

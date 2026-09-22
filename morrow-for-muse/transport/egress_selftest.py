@@ -195,9 +195,8 @@ def main():
             egress.CA_PEM_CANDIDATES = orig
 
     # ---- 6. launcher defaults: explicit profile, canonical port -------
-    helper_profile = os.path.expanduser(
-        "~/workspace/canvas-login-helper/profile")
-    check("helper_profile_dir is the helper profile",
+    helper_profile = lc.tree_helper_profile_dir()
+    check("helper_profile_dir is this tree's helper profile",
           lc.helper_profile_dir() == helper_profile,
           lc.helper_profile_dir())
     check("no morrow-chromium default",
@@ -322,7 +321,15 @@ def main():
     # W4-P2-9: the forwarder now requires MORROW_FORWARDER_LAUNCHER_PID;
     # the selftest passes its own PID (it spawns no authorized client
     # here, it only checks the serving line).
-    fw_env = dict(os.environ)
+    # The check sets up its own authenticated proxy env: the caller's
+    # environment may have no proxy or an unauthenticated one (direct
+    # egress is supported), and the forwarder then rightly declines to
+    # serve.
+    fw_env = {k: v for k, v in os.environ.items()
+              if k not in ("https_proxy", "HTTPS_PROXY",
+                           "http_proxy", "HTTP_PROXY")}
+    fw_env["https_proxy"] = FAKE_PROXY_AUTH
+    fw_env["HTTPS_PROXY"] = FAKE_PROXY_AUTH
     fw_env["MORROW_FORWARDER_LAUNCHER_PID"] = str(os.getpid())
     r = subprocess.Popen(
         [sys.executable, fw, "18098"],

@@ -871,6 +871,12 @@ class ChromiumSession:
         raw_text = json.dumps(merged) if merged is not None else pages[0]
         if truncated:
             headers["x-morrow-pagination"] = note or "truncated"
+            headers["x-morrow-pagination-partial"] = "true"
+            if next_url and lc.is_tenant_url(next_url, self._base):
+                nparsed = urllib.parse.urlsplit(next_url)
+                headers["x-morrow-next-page"] = (
+                    (nparsed.path or "/")
+                    + ("?" + nparsed.query if nparsed.query else ""))
         elif page_count > 1:
             headers["x-morrow-pagination"] = (
                 "complete: followed %d pages" % page_count)
@@ -932,7 +938,7 @@ class ChromiumSession:
                 # W4-P2-2: sticky -- mark before raising so a retry of
                 # THIS session never touches the provider again.
                 self._mark_session_dead(exc)
-                if is_write:
+                if is_write and not isinstance(exc, lc.SessionRejected):
                     raise ex.UncertainWrite(
                         "chromium write hit a dead session (%s); the write "
                         "may have executed before the session died; not "

@@ -103,6 +103,20 @@ def _translate_helper_failure(exc):
     return _translate("helper health check", evidence)
 
 
+_SUBMISSIONS_READ = {
+    "method": "GET",
+    "url": "{canvas_base}/api/v1/courses/{course_id}/assignments/"
+           "{assignment_id}/submissions"}
+
+
+def _require_live_proven(block):
+    """Refuse unless the block is a live-proven row of
+    proof-battery/OPERATION_CATALOG.md (same gate as the executor)."""
+    from dispatch import executor as _ex
+    _ex.live_proven_gate({"name": "query.failed_students",
+                          "request": block}, journal=False)
+
+
 def _translate(operation, exc):
     """Route a chain failure through failures/translator.py.
 
@@ -211,6 +225,13 @@ def run_query(text, course_id, reader=None, tenant_base=None,
             provenance = "SYNTHETIC fixtures (clearly labeled; no live " \
                 "learner data read)"
         else:
+            # Only live-proven catalog operations may run: the
+            # submissions list (a learner-data row) must be proven
+            # through the catalog before this chain reads it live.
+            try:
+                _require_live_proven(_SUBMISSIONS_READ)
+            except Exception as exc:  # CatalogNotProven or unreadable catalog
+                raise _translate(operation, exc)
             status, submissions, note = reader.get_paginated(
                 "/api/v1/courses/%s/assignments/%s/submissions"
                 "?per_page=100&include[]=user" % (course_id, aid))
@@ -332,7 +353,8 @@ def main(argv):
         description="Failed-students query chain")
     ap.add_argument("text", help="educator query, e.g. "
                     "\"show me all the students that failed last week's quiz\"")
-    ap.add_argument("--course", default="89585")
+    ap.add_argument("--course", required=True,
+                    help="Canvas course id the query is about")
     ap.add_argument("--tenant", default=_live_read.TENANT_BASE)
     ap.add_argument("--progress", action="store_true",
                     help="QOL-3: print chain progress lines to stderr as "

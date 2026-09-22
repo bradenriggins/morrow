@@ -120,12 +120,14 @@ try:
         admit, persist_signed_record, consume_approval,
         load_policy, check_never_dispatch, check_unsupported,
         check_evidence_holds, check_learner_data, check_unproven_override,
+        touches_learner_data as admission_touches_learner_data,
     )
 except ImportError:  # run as a script: dispatch/ itself is on sys.path
     from admission import (
         admit, persist_signed_record, consume_approval,
         load_policy, check_never_dispatch, check_unsupported,
         check_evidence_holds, check_learner_data, check_unproven_override,
+        touches_learner_data as admission_touches_learner_data,
     )
 
 # W4-P1-17: the morrow state root (and the stable tree UUID) has ONE
@@ -281,7 +283,8 @@ class VerificationFailed(ExecutorError):
 
 
 class RedirectDowngradeRefused(ExecutorError):
-    """An https:// -> http:// redirect was refused (W4-P2-7).
+    """An https:// -> http:// redirect, or a redirect off the LMS host,
+    was refused (W4-P2-7).
 
     The provider HTTPS lane carries bearer tokens in the Authorization
     header; silently following a downgrade would resend them over
@@ -518,6 +521,14 @@ class StaleBeforeState(ExecutorError):
     """The frozen plan's before_state_digest does not match a fresh
     provider read of the same state (W4-P1-15): the world moved since
     the plan was frozen. The write is refused; the op_id stays reusable."""
+
+
+class CourseResolutionRequired(ExecutorError):
+    """A mode-gated write that targets a course carried no course
+    resolution, or a resolution naming a different course than the
+    write targets. The mode gate's ambiguous-course check needs the
+    resolution, so its absence fails closed instead of skipping that
+    check."""
 
 
 class TenantBindingMismatch(ExecutorError):
@@ -4129,8 +4140,61 @@ def resolve_ref(value, params: dict, result_payload=None, transients: dict = Non
     return value
 
 
+# Path slots that are not numeric ids even though some end in "_id".
+_FREE_SEGMENT_SLOTS = frozenset({
+    "url_or_id", "tab_id", "anonymous_id", "report_type", "feature",
+    "date", "title", "item", "bank", "page_url", "url",
+})
+# Numeric ids, Canvas SIS ids, and the learner-vault tokens (lrn_...,
+# learner_<uuid>) that stand in for learner ids until the lane
+# resolves them.
+_ID_SEGMENT_RE = re.compile(
+    r"^(?:\d+|sis_[a-z_]+:[A-Za-z0-9_.@\-]+|lrn_[A-Za-z0-9_\-]+"
+    r"|learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$")
+_FREE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_.~:@\-]+$")
+_MAX_SEGMENT_LEN = 256
+
+
+def _checked_path_segment(token: str, value) -> str:
+    """Validate and percent-encode one caller-supplied path parameter.
+
+    A path parameter is exactly one URL path segment: "/", "?", "#",
+    "\\", "..", whitespace, and control characters could re-route the
+    request (another endpoint, an injected query, a dropped suffix), so
+    they are refused, never encoded. Id-shaped slots (id, *_id) must be
+    numeric, a Canvas SIS id (sis_<kind>:<value>), or a learner token; user_id may also be
+    "self"."""
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ExecutorError(
+            "path parameter {%s} must be a string or integer, got %s"
+            % (token, type(value).__name__))
+    text = str(value)
+    if (not text or len(text) > _MAX_SEGMENT_LEN or text in (".", "..")
+            or ".." in text or not _FREE_SEGMENT_RE.fullmatch(text)):
+        raise ExecutorError(
+            "path parameter {%s} is not a single safe URL path segment "
+            "(refused: empty, '/', '?', '#', '\\', '..', whitespace, or "
+            "control characters); nothing was sent" % token)
+    if token not in _FREE_SEGMENT_SLOTS and (
+            token == "id" or token.endswith("_id")):
+        if not (_ID_SEGMENT_RE.fullmatch(text)
+                or (token == "user_id" and text == "self")):
+            raise ExecutorError(
+                "path parameter {%s} must be a numeric id, a Canvas SIS id "
+                "(sis_<kind>:<value>), or a learner token; got a value of "
+                "another shape. "
+                "Nothing was sent." % token)
+    return urllib.parse.quote(text, safe=":@~._-")
+
+
 def render_template(template: str, config: dict, params: dict,
                     result_payload=None, transients: dict = None) -> str:
+    """Fill {slot} tokens. Config values (the tenant base) and captured
+    transients are trusted and inserted as-is; caller params are
+    validated as one path segment in the path part of the template and
+    percent-encoded in the query part."""
+    query_start = template.find("?")
+
     def repl(match):
         token = match.group(1)
         if token in config:
@@ -4140,9 +4204,40 @@ def render_template(template: str, config: dict, params: dict,
         resolved = resolve_ref("params." + token, params, result_payload, transients)
         if resolved is None:
             raise ExecutorError("template slot {%s} has no value" % token)
-        return str(resolved)
+        if 0 <= query_start < match.start():
+            if isinstance(resolved, bool) or not isinstance(
+                    resolved, (str, int, float)):
+                raise ExecutorError(
+                    "query parameter {%s} must be a scalar" % token)
+            return urllib.parse.quote(str(resolved), safe="")
+        return _checked_path_segment(token, resolved)
 
     return _TEMPLATE_TOKEN.sub(repl, template)
+
+
+def transients_supply_base(block: dict, transients) -> bool:
+    """True when the block's URL starts with a discovery-captured base
+    ({<name>} resolved from transients, e.g. the quiz-api host the
+    tenant's own tool list names). Such a request is bound to the
+    discovered host, not the tenant origin."""
+    match = re.match(r"^\{([^{}]+)\}", str(block.get("url") or ""))
+    return bool(match and transients and match.group(1) in transients)
+
+
+def _same_origin(url: str, base: str) -> bool:
+    try:
+        a = urllib.parse.urlsplit(url)
+        b = urllib.parse.urlsplit(base)
+    except ValueError:
+        return False
+    if a.username or a.password or "@" in (a.netloc or ""):
+        return False
+
+    def port(parts):
+        return parts.port or {"https": 443, "http": 80}.get(parts.scheme)
+    return (a.scheme.lower() == b.scheme.lower()
+            and (a.hostname or "").lower() == (b.hostname or "").lower()
+            and port(a) == port(b))
 
 
 # --------------------------------------------------------------------------
@@ -4261,11 +4356,10 @@ class _NoDowngradeRedirectHandler(urllib.request.HTTPRedirectHandler):
     - REFUSES an https->http downgrade loudly (fail closed): a
       redirect that would drop the provider bearer token onto
       plaintext raises RedirectDowngradeRefused.
-    - STRIPS Authorization and Proxy-Authorization when the redirect
-      target's host differs from the request's (matching the requests
-      library's safer behavior), and additionally on ANY scheme
-      change, even same-host (stock stdlib keeps the headers;
-      stock requests keeps them on same-host scheme downgrade).
+    - REFUSES a redirect to any other host or port: the lane only
+      talks to the configured LMS host.
+    - STRIPS Authorization and Proxy-Authorization on any scheme
+      change, even same-host (stock stdlib keeps the headers).
 
     Same-scheme, same-host redirects are followed as before.
     """
@@ -4279,6 +4373,13 @@ class _NoDowngradeRedirectHandler(urllib.request.HTTPRedirectHandler):
         # downgrade target would slip past the check.
         new = urllib.parse.urlparse(
             urllib.parse.urljoin(req.full_url, newurl))
+        if (new.hostname or "").lower() != (old.hostname or "").lower() \
+                or (new.port or None) != (old.port or None):
+            raise RedirectDowngradeRefused(
+                "refused redirect off the LMS host: %s -> %s (every "
+                "request stays on the configured tenant host)"
+                % (_redacted_url(req.full_url), _redacted_url(
+                    urllib.parse.urljoin(req.full_url, newurl))))
         if old.scheme == "https" and new.scheme == "http":
             raise RedirectDowngradeRefused(
                 "refused https->http redirect downgrade: %s -> %s "
@@ -4573,6 +4674,13 @@ def build_request(entry: dict, block: dict, params: dict, session: SessionStore,
             "the network executor does not run it" % entry.get("name"))
     is_write = (entry.get("effects") == "write")
     url = render_template(block["url"], config, params, result_payload, transients)
+    canvas_base = (config or {}).get("canvas_base")
+    if canvas_base and not transients_supply_base(block, transients) \
+            and not _same_origin(url, canvas_base):
+        raise ExecutorError(
+            "request for entry %r leaves the configured LMS origin %s; "
+            "refusing (every request stays on the tenant host)"
+            % (entry.get("name"), canvas_base))
 
     # New Quiz write contract (P0-2, P0-7): PUT never on New Quiz paths,
     # 506477 refused on every write, quiz-API-route delete only, stimulus
@@ -4631,10 +4739,12 @@ def apply_result_block(entry: dict, raw: bytes, resp_headers: dict) -> dict:
     bounded = raw
     if len(raw) > max_bytes:
         truncated = True
-        if policy == "head":
-            bounded = raw[:max_bytes]
-        else:
-            bounded = raw[-max_bytes:]
+        bounded = _truncate_json_list_by_items(raw, max_bytes, policy)
+        if bounded is None:
+            if policy == "head":
+                bounded = raw[:max_bytes]
+            else:
+                bounded = raw[-max_bytes:]
     text = bounded.decode("utf-8", errors="replace")
     ctype = ""
     for k, v in resp_headers.items():
@@ -4665,6 +4775,33 @@ def apply_result_block(entry: dict, raw: bytes, resp_headers: dict) -> dict:
     }
 
 
+def _truncate_json_list_by_items(raw: bytes, max_bytes: int, policy: str):
+    """Bound a complete JSON array by whole leading items, keeping valid
+    JSON; returns the re-encoded bytes, or None when raw is not a
+    complete JSON array (byte truncation applies instead).
+
+    A merged paginated collection is complete JSON, so cutting it by
+    bytes would break the structure mid-object. The leading items are
+    kept whatever the entry's truncate policy says: the result is then
+    a prefix of the collection, which is what the partial-collection
+    notice describes."""
+    try:
+        items = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(items, list):
+        return None
+    kept = []
+    size = 2
+    for item in items:
+        encoded = len(json.dumps(item).encode("utf-8")) + (2 if kept else 0)
+        if size + encoded > max_bytes:
+            break
+        kept.append(item)
+        size += encoded
+    return json.dumps(kept).encode("utf-8")
+
+
 def extract_receipt(payload, fields, text_preview_chars=500):
     if not fields:
         if isinstance(payload, dict):
@@ -4690,6 +4827,7 @@ def run_discovery(entry: dict, session: SessionStore, pack: dict,
     discovery = entry.get("discovery")
     if not discovery:
         return transients
+    _assert_read_only_block(entry, discovery, "discovery")
     transients = dict(transients)
     method, url, headers, body_bytes = build_request(
         entry, discovery, params, session, pack, config, transients)
@@ -5296,6 +5434,7 @@ def run_multi_step(entry: dict, session: SessionStore, pack: dict,
     transients = dict(transients)
     last_result = None
     completed_steps = []
+    step_readbacks = []
     for step in entry.get("multi_step") or []:
         step_name = step.get("name")
         method = url = None
@@ -5323,16 +5462,23 @@ def run_multi_step(entry: dict, session: SessionStore, pack: dict,
                 is_write=is_write_step,
                 max_bytes=max_bytes)
             result = apply_result_block(entry, raw, resp_headers)
-            if entry.get("effects") == "write" and status in (200, 201):
+            if entry.get("effects") == "write" and (
+                    status in (200, 201) or str(method).upper() == "DELETE"):
                 # D-009 defense for multi-step writes: read back the step's
                 # written object and compare it against the step's requested
                 # intent. A proven mismatch fails the whole entry immediately;
                 # an unconfirmed readback keeps it uncertain.
-                run_write_readback(
+                step_readbacks.append(dict(run_write_readback(
                     entry, session, pack, config, params, transients,
                     method, url,
                     resolved_request_body(step, params, transients),
-                    result["payload"], max_bytes=max_bytes)
+                    result["payload"], max_bytes=max_bytes),
+                    step=step_name))
+            elif entry.get("effects") == "write":
+                step_readbacks.append({
+                    "step": step_name, "status": "unverified",
+                    "detail": "HTTP %s answer carries no object to read "
+                              "back" % status})
         except UncertainWrite as exc:
             exc.evidence = list(completed_steps) + [{
                 "step": step_name, "method": method,
@@ -5352,6 +5498,8 @@ def run_multi_step(entry: dict, session: SessionStore, pack: dict,
         last_result = result
         last_result["step_name"] = step.get("name")
         last_result["attempts"] = attempts
+    if last_result is not None:
+        last_result["step_readbacks"] = step_readbacks
     return last_result, transients
 
 
@@ -5370,6 +5518,7 @@ def run_verify(entry: dict, session: SessionStore, pack: dict, config: dict,
     verify = entry.get("verify")
     if not verify:
         return {"status": "none_declared", "detail": "entry declares no verify block"}
+    _assert_read_only_block(entry, verify, "verify")
     method, url, headers, body_bytes = build_request(
         entry, verify, params, session, pack, config, transients, result_payload)
     status, resp_headers, raw, attempts = session.raw_request(
@@ -5389,25 +5538,21 @@ def _assert_verify_expect(entry: dict, verify: dict, payload, params: dict,
     response_path = verify.get("response_path")
     failures = []
     for field, ref in (verify.get("expect") or {}).items():
-        if isinstance(ref, str) and ref.startswith("result."):
-            actual = resolve_path(payload, ref[len("result."):])
-        elif isinstance(ref, str) and ref.startswith("params."):
-            actual = resolve_ref(ref, params)
-        elif response_path:
-            try:
+        # actual always comes from the verify readback payload; expected
+        # comes from the reference (params, the write's result, a
+        # transient, or a literal). A "result.<path>" ref reads the same
+        # path from the readback.
+        try:
+            if isinstance(ref, str) and ref.startswith("result."):
+                actual = resolve_path(payload, ref[len("result."):])
+            elif response_path:
                 actual = resolve_path(payload, response_path)
-            except ExecutorError as exc:
-                failures.append("%s: %s" % (field, exc))
-                continue
-            expected = resolve_ref(ref, params, result_payload, transients)
-            if str(actual) != str(expected):
-                failures.append("%s: expected %r, read back %r" % (field, expected, actual))
-            continue
-        else:
-            actual = payload if isinstance(payload, str) else resolve_path(payload, field)
-            expected = resolve_ref(ref, params, result_payload, transients)
-            if str(actual) != str(expected):
-                failures.append("%s: expected %r, read back %r" % (field, expected, actual))
+            elif isinstance(payload, str):
+                actual = payload
+            else:
+                actual = resolve_path(payload, field)
+        except ExecutorError as exc:
+            failures.append("%s: %s" % (field, exc))
             continue
         expected = resolve_ref(ref, params, result_payload, transients)
         if str(actual) != str(expected):
@@ -5918,8 +6063,8 @@ def recompute_before_state(entry, params, plan, session, pack, config,
             "{\"unsupported\": true, \"reason\": ...} when it has no "
             "stable re-readable surface." % (entry.get("name"),
                                              str(digest)[:12]))
-    block = {"method": str(reader.get("method") or "GET").upper(),
-             "url": reader["url"], "headers": {}}
+    _assert_read_only_block(entry, reader, "before_state")
+    block = {"method": "GET", "url": reader["url"], "headers": {}}
     try:
         rmethod, rurl, rheaders, rbody = build_request(
             entry, block, params, session, pack, config, transients or {})
@@ -6076,8 +6221,9 @@ def _readback_skip_reason(method, url):
     except Exception:  # noqa: BLE001 - report the unparsable URL itself
         path = ""
     if method not in ("POST", "PUT", "PATCH"):
-        return ("%s has no safe readback: the resource is gone and a "
-                "re-GET cannot verify the deletion" % method)
+        return ("%s has no safe readback on this route: there is no "
+                "known member GET that would confirm the object is gone"
+                % method)
     if "/accommodations" in path:
         return "New Quiz accommodations routes are not covered by readback derivation"
     if "/reports/" in path:
@@ -6106,15 +6252,22 @@ def _readback_skip_reason(method, url):
     return "no readback route derivable for %s %s" % (method, url)
 
 
-def _write_field_matches(want, got):
-    """Compare one requested field against the readback value.
+def _is_empty_value(value) -> bool:
+    return value is None or value == "" or value == [] or value == {}
 
-    Exact match first; numbers compare across int/float; booleans compare
-    against "true"/"false" strings case-insensitively; anything else
-    compares as strings (Canvas may echo 3 for a requested "3"). None
-    matches only None."""
-    if want is None or got is None:
-        return want is None and got is None
+
+def _write_field_matches(want, got):
+    """Compare one requested scalar against the readback value.
+
+    Empty equivalents match each other: a cleared field sent as "" (or
+    an empty list) may be stored and echoed as null, and that
+    representation difference is not evidence of a failed write.
+    Otherwise: exact match first; numbers compare across int/float;
+    booleans compare against "true"/"false" strings case-insensitively;
+    anything else compares as strings (Canvas may echo 3 for a
+    requested "3")."""
+    if _is_empty_value(want) or _is_empty_value(got):
+        return _is_empty_value(want) and _is_empty_value(got)
     if isinstance(want, bool) or isinstance(got, bool):
         return str(want).lower() == str(got).lower()
     if isinstance(want, (int, float)) and isinstance(got, (int, float)):
@@ -6122,6 +6275,60 @@ def _write_field_matches(want, got):
     if type(want) is type(got):
         return want == got
     return str(want) == str(got)
+
+
+def _compare_intent(want, got, path, compared, unechoed, mismatches):
+    """Recursive intent-vs-readback comparison.
+
+    Requested dict keys the provider did not echo go to unechoed (the
+    field cannot be confirmed, so the write cannot be called verified);
+    compared leaves go to compared; proven differences go to
+    mismatches. Scalar lists compare as multisets (order is not
+    persisted state). Lists of objects compare element by element when
+    the lengths agree; a length difference is not a proof (the provider
+    may add defaults), so the list is recorded as unechoed."""
+    if isinstance(want, dict):
+        if _is_empty_value(want) and _is_empty_value(got):
+            compared.append(path)
+            return
+        if not isinstance(got, dict):
+            mismatches.append("%s: requested %r, persisted %r"
+                              % (path, want, got))
+            return
+        for key, sub in want.items():
+            sub_path = "%s.%s" % (path, key) if path else str(key)
+            if key not in got:
+                unechoed.append(sub_path)
+                continue
+            _compare_intent(sub, got[key], sub_path, compared, unechoed,
+                            mismatches)
+        return
+    if isinstance(want, list):
+        if _is_empty_value(want) and _is_empty_value(got):
+            compared.append(path)
+            return
+        if not isinstance(got, list):
+            mismatches.append("%s: requested %r, persisted %r"
+                              % (path, want, got))
+            return
+        if all(not isinstance(v, (dict, list)) for v in want + got):
+            if sorted(map(str, want)) == sorted(map(str, got)):
+                compared.append(path)
+            else:
+                mismatches.append("%s: requested %r, persisted %r"
+                                  % (path, want, got))
+            return
+        if len(want) != len(got):
+            unechoed.append(path)
+            return
+        for index, (w, g) in enumerate(zip(want, got)):
+            _compare_intent(w, g, "%s[%d]" % (path, index), compared,
+                            unechoed, mismatches)
+        return
+    compared.append(path)
+    if not _write_field_matches(want, got):
+        mismatches.append("%s: requested %r, persisted %r"
+                          % (path, want, got))
 
 
 # --------------------------------------------------------------------------
@@ -6156,35 +6363,121 @@ def _quiz_settings_write_block(method, url, resolved_body):
     return block if isinstance(block, dict) else None
 
 
+def _delete_readback_target(url):
+    """The member GET that confirms a DELETE, or None when the route has
+    no known member read (only the covered member routes qualify)."""
+    target = str(url).split("?")[0].split("#")[0].rstrip("/")
+    try:
+        path = urllib.parse.urlparse(target).path or ""
+    except Exception:  # noqa: BLE001 - an unparsable URL has no readback
+        return None
+    if _WRITE_READBACK_MEMBER_RE.search(path):
+        return target
+    return None
+
+
+def _readback_get(entry, session, pack, config, params, transients, target,
+                  method, max_bytes):
+    block = {"method": "GET", "url": target, "headers": {}}
+    rmethod, rurl, rheaders, rbody = build_request(
+        entry, block, params, session, pack, config, transients or {})
+    _status, resp_headers, raw, _attempts = session.raw_request(
+        rmethod, rurl, rheaders, rbody, is_write=False, max_bytes=max_bytes)
+    return apply_result_block(entry, raw, resp_headers)["payload"]
+
+
+def _verify_delete(entry, session, pack, config, params, transients, method,
+                   url, max_bytes):
+    target = _delete_readback_target(url)
+    if target is None:
+        return {"status": "unverified",
+                "detail": "readback not run: %s"
+                          % _readback_skip_reason(method, url)}
+    try:
+        parsed = _readback_get(entry, session, pack, config, params,
+                               transients, target, method, max_bytes)
+    except ProviderHttpError as exc:
+        if exc.status in (404, 410):
+            return {"status": "pass",
+                    "detail": "readback %s returned HTTP %s: the object is "
+                              "gone" % (target, exc.status)}
+        raise UncertainWrite(
+            "delete readback GET %s failed HTTP %s; the %s effect is "
+            "unconfirmed, not a proven failure" % (target, exc.status, method))
+    except ExecutorError as exc:
+        raise UncertainWrite(
+            "delete readback GET %s failed (%s); the %s effect is "
+            "unconfirmed, not a proven failure"
+            % (target, type(exc).__name__, method))
+    if isinstance(parsed, dict) and (
+            str(parsed.get("workflow_state") or "").lower() == "deleted"
+            or parsed.get("deleted") is True or parsed.get("deleted_at")):
+        return {"status": "pass",
+                "detail": "readback %s shows the object marked deleted"
+                          % target}
+    if not (isinstance(parsed, dict) and (parsed.get("id") is not None
+                                          or parsed.get("url"))):
+        return {"status": "unverified",
+                "detail": "readback %s answered without a recognizable "
+                          "object; the deletion is not confirmed" % target}
+    exc = WriteFieldMismatch(
+        "delete readback mismatch on %s %s: the object is still present "
+        "(readback %s)" % (method, url, target))
+    exc.readback_payload = parsed
+    raise exc
+
+
+def _combine_step_readbacks(step_readbacks):
+    """One verification for a multi_step write: verified only when every
+    write step's readback verified."""
+    if not step_readbacks:
+        return {"status": "unverified",
+                "detail": "multi_step write: no write step was read back"}
+    status = ("pass" if all(r.get("status") == "pass" for r in step_readbacks)
+              else "unverified")
+    return {"status": status,
+            "detail": "; ".join("step %s: %s" % (r.get("step"), r.get("detail"))
+                                for r in step_readbacks)}
+
+
 def run_write_readback(entry, session, pack, config, params, transients,
                        method, url, resolved_body, result_payload,
                        max_bytes: int = None):
     """D-009 defense: fresh GET of the written object, compared field by
-    field against the requested intent.
+    field (nested objects and lists included) against the requested
+    intent.
 
-    Returns {"status": "pass"/"skipped", "detail": ...}. Raises
-    WriteFieldMismatch when the readback proves a field mismatch: the
-    write is a hard failure, journaled with the mismatched fields named.
-    Raises UncertainWrite when the readback GET itself fails (429/5xx/
-    transport/4xx or a non-object response): the effect is unconfirmed,
-    never a hard failure."""
+    Returns {"status": ..., "detail": ...} with status:
+      "pass"        every requested field was read back and matched
+                    (for DELETE: the member GET shows the object gone);
+      "unverified"  the write returned success but the readback could
+                    not confirm it: no readback route, zero comparable
+                    fields, or requested fields the provider did not
+                    echo. Never reported as a verified success.
+    Raises WriteFieldMismatch when the readback proves a mismatch (hard
+    failed write, mismatched fields named). Raises UncertainWrite when
+    the readback GET itself fails (429/5xx/transport/4xx or a non-object
+    response): the effect is unconfirmed, never a hard failure."""
     if not method or not url:
-        return {"status": "skipped",
-                "detail": "multi_step write: no single request to read back; skipped"}
+        return {"status": "unverified",
+                "detail": "multi_step write: each write step was read back "
+                          "as it ran; there is no single request to re-read"}
+    if str(method).upper() == "DELETE":
+        return _verify_delete(entry, session, pack, config, params,
+                              transients, method, url, max_bytes)
     target = _readback_target(method, url, result_payload)
     if target is None:
-        return {"status": "skipped",
-                "detail": "readback skipped: %s"
+        return {"status": "unverified",
+                "detail": "readback not run: %s"
                           % _readback_skip_reason(method, url)}
-    intent = {k: v for k, v in _unwrap_canvas_body(resolved_body).items()
-              if isinstance(v, (str, int, float, bool)) or v is None}
-    block = {"method": "GET", "url": target, "headers": {}}
+    settings_block = _quiz_settings_write_block(method, url, resolved_body)
+    intent = dict(_unwrap_canvas_body(resolved_body))
+    if settings_block is not None:
+        # Compared below with the New Quiz cleared-equivalence rule.
+        intent.pop("quiz_settings", None)
     try:
-        rmethod, rurl, rheaders, rbody = build_request(
-            entry, block, params, session, pack, config, transients or {})
-        _status, resp_headers, raw, _attempts = session.raw_request(
-            rmethod, rurl, rheaders, rbody, is_write=False,
-            max_bytes=max_bytes)
+        parsed = _readback_get(entry, session, pack, config, params,
+                               transients, target, method, max_bytes)
     except ProviderHttpError as exc:
         raise UncertainWrite(
             "write readback GET %s failed HTTP %s; the %s effect is "
@@ -6194,20 +6487,24 @@ def run_write_readback(entry, session, pack, config, params, transients,
             "write readback GET %s failed (%s); the %s effect is "
             "unconfirmed, not a proven mismatch"
             % (target, type(exc).__name__, method))
-    parsed = apply_result_block(entry, raw, resp_headers)["payload"]
     if not isinstance(parsed, dict):
         raise UncertainWrite(
             "write readback GET %s did not return a JSON object; the %s "
             "effect is unconfirmed, not a proven mismatch" % (target, method))
-    mismatches = []
-    compared = []
-    for key, want in intent.items():
-        if key not in parsed:
-            continue  # the provider did not echo it; nothing to compare
-        compared.append(key)
-        if not _write_field_matches(want, parsed[key]):
-            mismatches.append("%s: requested %r, persisted %r"
-                              % (key, want, parsed[key]))
+    compared, unechoed, mismatches = [], [], []
+    _compare_intent(intent, parsed, "", compared, unechoed, mismatches)
+    if settings_block is not None:
+        read_block = parsed.get("quiz_settings")
+        if isinstance(read_block, dict):
+            settings_ok, settings_mismatches = new_quiz_settings_match(
+                settings_block, read_block)
+            if settings_ok:
+                compared.append("quiz_settings")
+            else:
+                mismatches.append("quiz_settings %s"
+                                  % "; ".join(settings_mismatches))
+        else:
+            unechoed.append("quiz_settings")
     if mismatches:
         # W3-P2-5: the mismatch detail formats raw readback values with
         # %r, which can be learner names or identifiers. Carry the raw
@@ -6219,27 +6516,16 @@ def run_write_readback(entry, session, pack, config, params, transients,
             % (method, url, target, "; ".join(mismatches)))
         exc.readback_payload = parsed
         raise exc
-    # New Quiz settings writes carry a complete merged block that the
-    # generic intent extractor drops (nested dicts are not compared
-    # above). Compare it against the readback's quiz_settings with the
-    # cleared-equivalence rule. A readback that does not echo
-    # quiz_settings at all is unconfirmable for settings, never a proven
-    # mismatch (same philosophy as the scalar fields above).
-    settings_block = _quiz_settings_write_block(method, url, resolved_body)
-    if settings_block is not None:
-        read_block = parsed.get("quiz_settings")
-        if isinstance(read_block, dict):
-            settings_ok, settings_mismatches = new_quiz_settings_match(
-                settings_block, read_block)
-            if not settings_ok:
-                exc = WriteFieldMismatch(
-                    "write readback mismatch on %s %s (readback %s): "
-                    "quiz_settings %s"
-                    % (method, url, target,
-                       "; ".join(settings_mismatches)))
-                exc.readback_payload = parsed
-                raise exc
-            compared.append("quiz_settings")
+    if unechoed or not compared:
+        return {"status": "unverified",
+                "detail": "readback %s matched %d field(s) (%s) but could "
+                          "not confirm %s"
+                          % (target, len(compared),
+                             ", ".join(sorted(compared)) or "none",
+                             ("requested field(s) the provider did not "
+                              "echo: %s" % ", ".join(sorted(unechoed)))
+                             if unechoed else
+                             "any requested field (nothing comparable)")}
     return {"status": "pass",
             "detail": "readback %s matched %d requested field(s): %s"
                       % (target, len(compared), ", ".join(sorted(compared)))}
@@ -6303,22 +6589,52 @@ def _browser_block_is_write(block: dict) -> str | None:
     return None
 
 
+def _entry_request_blocks(entry: dict) -> list:
+    """Every block of the entry that can issue a provider request, as
+    (where, block) pairs: request, multi_step steps, discovery, verify,
+    before_state, undo, and any other top-level block (or list of
+    blocks) that carries a method, url, or browser action. Derived
+    readbacks are not entry blocks and are not listed."""
+    blocks = []
+    for key, value in entry.items():
+        if isinstance(value, dict):
+            candidates = [(key, value)]
+        elif isinstance(value, list):
+            candidates = [("%s[%d]" % (key, i), v)
+                          for i, v in enumerate(value) if isinstance(v, dict)]
+        else:
+            continue
+        for where, block in candidates:
+            if key in ("request", "multi_step") or any(
+                    k in block for k in ("method", "url", "browser")):
+                blocks.append((where, block))
+    return blocks
+
+
+# Blocks that exist only to read (discovery pre-pass, declared verify,
+# before-state freshness reader): they are sent with is_write=False,
+# so anything but GET would be an unjournaled, unapproved write.
+_READ_ONLY_BLOCK_KEYS = ("discovery", "verify", "before_state")
+
+
+def _assert_read_only_block(entry: dict, block: dict, where: str) -> None:
+    method = str(block.get("method") or "GET").upper()
+    if method != "GET":
+        raise EffectClassMismatch(
+            "entry %r: its %s block uses %s; %s blocks are sent as reads "
+            "and must be GET. Refusing." % (entry.get("name"), where,
+                                            method, where))
+
+
 def derive_effect_class(entry: dict) -> tuple:
     """Derive ("read"|"write", reason|None) from the entry's blocks.
 
-    Scans the single "request" block and every "multi_step" step.
+    Scans every request-issuing block (see _entry_request_blocks).
     "plan" is not derivable from blocks: a plan-class entry performs no
     write, so derivation yields "read" for it and the declared "plan" is
     allowed only when nothing writes (enforcing the documented "plan
     performs no write" contract that W4-P0-10 found unenforced)."""
-    blocks = []
-    request = entry.get("request")
-    if isinstance(request, dict):
-        blocks.append(("request", request))
-    for index, step in enumerate(entry.get("multi_step") or []):
-        if isinstance(step, dict):
-            blocks.append(("multi_step[%d]" % index, step))
-    for where, block in blocks:
+    for where, block in _entry_request_blocks(entry):
         reason = _request_block_is_write(block) or _browser_block_is_write(block)
         if reason:
             return "write", "%s: %s" % (where, reason)
@@ -6792,11 +7108,71 @@ def _burn_write_approval(approval_record, override_record, op_id) -> None:
         consume_approval(override_record)
 
 
+def _projection_entry(entry: dict, url, raw_payload) -> dict:
+    """The entry view the learner privacy boundary decides on.
+
+    Two corrections over the bare manifest entry: the single request
+    carries its RENDERED url (so the boundary sees the real course id,
+    not a {course_id} template), and an entry the policy does not flag
+    as learner data is still projected when the provider payload itself
+    carries learner-shaped records (user/student/author objects, or
+    records with identity fields). Labeling those identifiers replaces
+    the old outcome for such reads, a refusal of the whole read."""
+    from privacy import executor_wire as _wire
+    view = dict(entry)
+    request = entry.get("request")
+    if url and isinstance(request, dict):
+        view["request"] = dict(request, url=url.split("?", 1)[0])
+    if not admission_touches_learner_data(view) and \
+            _wire._harvest_roster(raw_payload):
+        view["catalog_learner_data"] = True
+    return view
+
+
+def _check_auxiliary_learner_data(entry: dict, vault_ready: bool) -> None:
+    """Run the learner-data gate over the entry's auxiliary blocks
+    (discovery, verify, before_state, undo, ...). admit() scans only
+    the request and multi_step URLs, so a roster read hidden in a
+    discovery pre-pass would otherwise reach a lane with no projection
+    point."""
+    policy = load_policy()
+    for where, block in _entry_request_blocks(entry):
+        if where == "request" or where.startswith("multi_step"):
+            continue
+        if not block.get("url"):
+            continue
+        check_learner_data({"name": "%s#%s" % (entry.get("name"), where),
+                            "request": block}, policy, vault_ready)
+
+
+def _require_course_resolution(entry: dict, params: dict, mode_ctx) -> None:
+    """Mode-gated course writes must carry the course resolution for
+    the course they target (fail closed when absent or mismatched).
+    The legacy signed-approval path (no user_id) binds the course in
+    the approval record instead."""
+    if not isinstance(mode_ctx, dict) or not mode_ctx.get("user_id"):
+        return
+    course_id = _write_target_course_id(entry, params)
+    if course_id is None:
+        return
+    resolution = mode_ctx.get("course_resolution")
+    if not isinstance(resolution, dict):
+        raise CourseResolutionRequired(
+            "write to course %s has no course resolution; the dispatcher "
+            "must say how the course was resolved (course_id, confidence, "
+            "user_confirmed) so an ambiguous course is never written. "
+            "Refusing." % course_id)
+    if str(resolution.get("course_id")) != str(course_id):
+        raise CourseResolutionRequired(
+            "write targets course %s, but the course resolution names "
+            "course %r. Refusing." % (course_id, resolution.get("course_id")))
+
+
 def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                    plan: FrozenPlan = None, op_id: str = None,
                    kind: str = "dispatch", approval: dict = None,
                    unproven_override=None, catalog_status=None,
-                   dry_run=False, require_educator_channel: bool = False,
+                   dry_run=False, require_educator_channel: bool = True,
                    mode_ctx: dict = None) -> dict:
     """Execute one manifest entry through the full pipeline and journal it.
 
@@ -6830,6 +7206,13 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
     entry_name = entry.get("name")
     effects = declared
     is_write = effects == "write"
+    for _key in _READ_ONLY_BLOCK_KEYS:
+        _aux = entry.get(_key)
+        if isinstance(_aux, dict) and _aux.get("url"):
+            _assert_read_only_block(entry, _aux, _key)
+    live_proven_gate(entry, unproven_override, journal=not dry_run)
+    if is_write:
+        _require_course_resolution(entry, params, mode_ctx)
 
     # Admission gate: never-dispatch, unsupported, tenant-restricted,
     # learner-data, and per-action write approval. Runs before anything else.
@@ -6846,6 +7229,8 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
         # signed into) and refuses loudly when they differ, so a
         # globally-wrong tenant cannot sail through.
         _chromium_session_mod().verify_helper_tenant_binding(tenant_base)
+    _check_auxiliary_learner_data(
+        entry, bool(getattr(session, "browser_owned_auth", False)))
     approval_audit, approval_record = admit(
         entry, params, tenant_base=tenant_base, approval=approval, op_id=op_id,
         require_educator_channel=require_educator_channel,
@@ -6955,7 +7340,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
     # failure classifier below can tell "nothing could have applied"
     # (release the claim, op_id reusable) from "ambiguous" (journal it).
     attempt_state = {"write_attempted": False}
-    pagination_note = None
+    pagination = None
     try:
         if entry.get("multi_step"):
             if is_write:
@@ -7023,7 +7408,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
             status, resp_headers, raw, attempts = session.raw_request(
                 method, url, headers, body_bytes, is_write=is_write,
                 max_bytes=entry_max_bytes)
-            pagination_note = (resp_headers or {}).get("x-morrow-pagination")
+            pagination = _pagination_state(resp_headers)
             result = apply_result_block(entry, raw, resp_headers)
         else:
             raise UnsupportedEntry("entry %r has neither request nor multi_step" % entry_name)
@@ -7082,7 +7467,8 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                          "truncated": False, "bytes_received": 0}
         verification = {"status": "fail", "detail": _provider_detail(exc)}
         verification = _project_verification_detail(
-            entry, verification, getattr(exc, "readback_payload", None),
+            _projection_entry(entry, url, getattr(exc, "readback_payload", None)),
+            verification, getattr(exc, "readback_payload", None),
             tenant_base, entry_name)
         record = _journal_record(entry_name, kind, effects, params, plan,
                                  op_id, None, verification,
@@ -7163,19 +7549,28 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
     # with the mismatched fields named; a readback GET failure keeps the
     # op uncertain, never failed.
     verification = {"status": "skipped", "detail": "read effect; no verify block run"}
+    projection_entry = _projection_entry(entry, url, result.get("payload"))
     if is_write:
         try:
-            readback = run_write_readback(
-                entry, session, pack, config, params, transients,
-                method, url, resolved_body, result["payload"],
-                max_bytes=entry_max_bytes)
+            if entry.get("multi_step"):
+                readback = _combine_step_readbacks(
+                    result.get("step_readbacks") or [])
+            else:
+                readback = run_write_readback(
+                    entry, session, pack, config, params, transients,
+                    method, url, resolved_body, result["payload"],
+                    max_bytes=entry_max_bytes)
             verification = readback
             if entry.get("verify"):
                 declared = run_verify(entry, session, pack, config, params,
                                       result["payload"], transients,
                                       max_bytes=entry_max_bytes)
+                # A declared verify block with at least one expect
+                # assertion is itself a provider readback that held.
+                declared_proves = bool((entry["verify"] or {}).get("expect"))
                 verification = {
-                    "status": "pass",
+                    "status": ("pass" if readback.get("status") == "pass"
+                               or declared_proves else "unverified"),
                     "detail": "write readback: %s; verify block: %s"
                               % (readback.get("detail"), declared.get("detail")),
                 }
@@ -7189,7 +7584,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
             # %r; project it through the learner boundary before it is
             # journaled, same as the success path below.
             verification = _project_verification_detail(
-                entry, verification, result.get("payload"), tenant_base,
+                projection_entry, verification, result.get("payload"), tenant_base,
                 entry_name)
             after_digest = digest_of(result["receipt"])
             record = _journal_record(entry_name, kind, effects, params, plan,
@@ -7211,7 +7606,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
             # W3-P2-5: the failure detail can carry raw readback values;
             # project it through the learner boundary before journaling.
             verification = _project_verification_detail(
-                entry, verification, result.get("payload"), tenant_base,
+                projection_entry, verification, result.get("payload"), tenant_base,
                 entry_name)
             after_digest = digest_of(result["receipt"])
             record = _journal_record(entry_name, kind, effects, params, plan,
@@ -7261,12 +7656,12 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
     # projection uses, so the journal never carries learner names or
     # identifiers in verification_detail.
     verification = _project_verification_detail(
-        entry, verification, result.get("payload"), tenant_base, entry_name)
+        projection_entry, verification, result.get("payload"), tenant_base, entry_name)
     pii_reveal = None
     try:
         from privacy import executor_wire as _wire
         result, pii_reveal = _wire.project_learner_result(
-            entry, result, tenant_base, lane_context=None,
+            projection_entry, result, tenant_base, lane_context=None,
             error_cls=ExecutorError)
     except ExecutorError:
         raise
@@ -7282,9 +7677,10 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                                                           unproven_override=override_audit,
                                                           catalog_status=catalog_status,
                                                           pii_reveal=pii_reveal,
-                                                          pagination=({"note": pagination_note}
-                                                                      if pagination_note
-                                                                      else None),
+                                                          pagination=(
+                                                              {"note": pagination.get("note"),
+                                                               "partial": pagination.get("partial")}
+                                                              if pagination else None),
                                                           target=target_identity_verified,
                                                           undo_available=bool(entry.get("undo")),
                                                           before_state=before_state_check)
@@ -7292,18 +7688,76 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
     # W5-P2-1: the outcome is journaled (drained); a pending shutdown
     # stops the run here instead of reporting success to a dying caller.
     _raise_if_shutdown_requested()
+    truncation = None
+    if pagination and pagination.get("partial"):
+        truncation = {"note": pagination.get("note"),
+                      "next_page": pagination.get("next_page")}
+    if result.get("truncated"):
+        byte_note = ("response exceeded %s bytes; only part of it is "
+                     "returned" % entry_max_bytes)
+        truncation = truncation or {"note": None, "next_page": None}
+        truncation["note"] = "; ".join(
+            n for n in (truncation.get("note"), byte_note) if n)
+    if is_write:
+        outcome = ("verified" if verification.get("status") == "pass"
+                   else "unverified")
+    else:
+        outcome = "read"
     return {
         "op_id": op_id,
         "entry_name": entry_name,
+        # Writes: "verified" (the provider readback confirmed the
+        # requested state) or "unverified" (the provider answered
+        # success but nothing confirmed it). A proven failed or
+        # uncertain write raises instead of returning.
+        "outcome": outcome,
+        "verified": outcome == "verified",
         "verification": verification,
         "receipt": result["receipt"],
-        "truncated": result["truncated"],
+        "truncated": truncation is not None,
+        "truncation": truncation,
         "bytes_received": result["bytes_received"],
         "attempts": attempts,
         # W6-P1-H1: the receipt half of the undoability promise (the
         # journal record carries the same field).
         "undo_available": bool(entry.get("undo")),
     }
+
+
+def _pagination_state(resp_headers):
+    """Pagination evidence from a provider response, or None.
+
+    The Chromium lane follows Link rel="next" and reports through
+    x-morrow-pagination (note), x-morrow-pagination-partial ("true" when
+    the collection is incomplete), and x-morrow-next-page (the next
+    page's path). A lane that does not follow pagination leaves a raw
+    Link rel="next": the collection is then partial by definition."""
+    headers = {str(k).lower(): v for k, v in (resp_headers or {}).items()}
+    note = headers.get("x-morrow-pagination")
+    partial = str(headers.get("x-morrow-pagination-partial") or "").lower() \
+        == "true"
+    next_page = headers.get("x-morrow-next-page")
+    if not note:
+        link_next = _link_next_url(headers.get("link"))
+        if link_next:
+            return {"note": "more pages remain; only the first page was "
+                            "read", "partial": True, "next_page": link_next}
+        return None
+    if not partial and not str(note).startswith("complete"):
+        partial = True
+    return {"note": note, "partial": partial, "next_page": next_page}
+
+
+def _link_next_url(link_header):
+    for part in str(link_header or "").split(","):
+        segments = part.split(";")
+        rels = [seg.strip().lower().replace('"', "").replace("'", "")
+                for seg in segments[1:]]
+        if "rel=next" in rels:
+            match = re.match(r"\s*<([^>]+)>", segments[0])
+            if match:
+                return match.group(1)
+    return None
 
 
 def _journal_record(entry_name, kind, effects, params, plan, op_id,
@@ -7540,7 +7994,7 @@ def _journal_catalog_refusal(name, method, path_template, params, status,
 def _catalog_provenance_gate(entry: dict, name: str, method: str,
                              path_template: str, params: dict,
                              provider: str, approval, allow_unproven: bool,
-                             session, require_educator_channel: bool = False):
+                             session, require_educator_channel: bool = True):
     """F-2 catalog provenance gate for catalog dispatch.
 
     Runs BEFORE any session is loaded or admission runs. Returns
@@ -7617,6 +8071,77 @@ def _catalog_provenance_gate(entry: dict, name: str, method: str,
         entry, params, approval, tenant_base,
         require_educator_channel=require_educator_channel)
     return status, (audit, record)
+
+_BLOCK_BASE_TOKEN_RE = re.compile(r"^\{[A-Za-z_][A-Za-z0-9_]*\}")
+_PATH_SLOT_RE = re.compile(r"\{[^{}]+\}")
+
+
+def _normalized_catalog_key(method: str, path: str) -> tuple:
+    path = _PATH_SLOT_RE.sub("{}", str(path or "")).rstrip("/") or "/"
+    return str(method or "GET").upper(), path
+
+
+def _catalog_rows_by_key() -> dict:
+    index = {}
+    for descriptor in _load_operation_catalog().values():
+        key = _normalized_catalog_key(descriptor["method"],
+                                      descriptor["path"])
+        index.setdefault(key, []).append(descriptor)
+    return index
+
+
+def _block_catalog_key(block: dict) -> tuple:
+    """(METHOD, normalized path template) for one request block. The
+    leading {<provider>_base} token and any query/fragment are dropped;
+    an absolute literal URL contributes its path."""
+    url = str(block.get("url") or "")
+    url = url.split("#", 1)[0].split("?", 1)[0]
+    stripped = _BLOCK_BASE_TOKEN_RE.sub("", url, count=1)
+    if stripped == url and "://" in url:
+        stripped = urllib.parse.urlsplit(url).path
+    return _normalized_catalog_key(block.get("method") or "GET", stripped)
+
+
+def live_proven_gate(entry: dict, unproven_override=None,
+                     journal: bool = True) -> None:
+    """Refuse unless every request-issuing block of the entry is a
+    live-proven row of proof-battery/OPERATION_CATALOG.md.
+
+    Applies to every dispatch path (manifest entries, catalog-synthetic
+    entries, undo), not only to dispatch_catalog_op: the catalog is the
+    authority on what may run. Blocks are matched by method and path
+    template (slot names ignored). The one exception is the F-2
+    educator-signed unproven override issued by the catalog provenance
+    gate: with a signed override record present, the entry's own
+    request block may be a known non-live-proven row; every other block
+    must still be live-proven. Unknown operations are never runnable.
+    Readbacks derived by the executor itself are not entry blocks and
+    are not gated here. Raises CatalogNotProven."""
+    _audit, override_record = unproven_override or (None, None)
+    index = _catalog_rows_by_key()
+    name = entry.get("name")
+    for where, block in _entry_request_blocks(entry):
+        if isinstance(block.get("browser"), dict) and not block.get("url"):
+            continue
+        method, path = _block_catalog_key(block)
+        rows = index.get((method, path)) or []
+        statuses = sorted({row["status"] for row in rows})
+        if "live-proven" in statuses:
+            continue
+        if rows and override_record is not None and where == "request":
+            continue
+        detail = ("entry %r %s block %s %s is %s in "
+                  "proof-battery/OPERATION_CATALOG.md; only live-proven "
+                  "operations may run. Refusing."
+                  % (name, where, method, path,
+                     ("marked %s" % "/".join(s or "unmarked" for s in statuses))
+                     if rows else "not a dispatchable row"))
+        if journal:
+            _journal_catalog_refusal(name, method, path, {},
+                                     statuses[0] if statuses else "unknown",
+                                     detail)
+        raise CatalogNotProven(detail)
+
 
 def catalog_descriptor_to_entry(name: str, method: str, path_template: str,
                                 effect_class: str | None = None,
@@ -7725,7 +8250,7 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
                         pack: dict = None, extra: dict = None,
                         approval: dict = None, session=None,
                         allow_unproven: bool = False, dry_run=False,
-                        require_educator_channel: bool = False,
+                        require_educator_channel: bool = True,
                         mode_ctx: dict = None) -> dict:
     """Dispatch one generated-catalog operation through the full pipeline.
 
@@ -7743,7 +8268,7 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
     dry_run=True (W4-P2-26): render the request without sending anything
     and without journaling anything.
     """
-    pack = pack or load_pack(os.environ.get("MORROW_DIRECT_PACK", DEFAULT_PACK))
+    pack = pack or load_pack(DEFAULT_PACK)
     params = params or {}
     entry = catalog_descriptor_to_entry(name, method, path_template,
                                         effect_class, provider, auth_slot, extra)
@@ -7768,7 +8293,7 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
 def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
                   session: SessionStore, pack: dict, approval: dict = None,
                   dry_run=False,
-                  require_educator_channel: bool = False,
+                  require_educator_channel: bool = True,
                   mode_ctx: dict = None) -> dict:
     """Execute the entry's undo block as a new op that references the original.
 
@@ -7789,6 +8314,18 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
             "entry %r: undo block derives effect class %r, not 'write'; "
             "an undo must reverse a write. Refusing." % (entry.get("name"),
                                                         _undo_derived))
+    # The undo rides on the entry's admission, so the entry itself must
+    # derive and declare as a write (a "read" entry carrying a DELETE
+    # undo block would otherwise be admitted without write approval).
+    enforce_effect_class(entry)
+    if entry.get("effects") != "write":
+        raise EffectClassMismatch(
+            "entry %r declares effects=%r but carries an undo block; an "
+            "undo is a write and needs a write-declared entry. Refusing."
+            % (entry.get("name"), entry.get("effects")))
+    live_proven_gate({"name": "%s#undo" % entry.get("name"),
+                      "request": undo}, journal=not dry_run)
+    _require_course_resolution(entry, params, mode_ctx)
     # Admission gate: undo is a write; it needs its own educator approval
     # bound to the undo action, plus the never-dispatch / learner-data checks.
     provider = entry.get("provider")
@@ -7796,6 +8333,7 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
         tenant_base = session.base_for(provider or "canvas")
     except Exception:
         tenant_base = None
+    _check_auxiliary_learner_data(entry, vault_ready=False)
     approval_audit, approval_record = admit(
         entry, params, tenant_base=tenant_base, approval=approval,
         require_educator_channel=require_educator_channel,
@@ -8092,8 +8630,6 @@ def main(argv=None):
     _install_shutdown_handlers()
     parser = argparse.ArgumentParser(
         description="Morrow Direct dispatch executor")
-    parser.add_argument("--pack", default=os.environ.get("MORROW_DIRECT_PACK", DEFAULT_PACK),
-                        help="path to pack.json (entry digest pins)")
     parser.add_argument("--session", default=SESSION_PATH,
                         help="path to session.json (https backend only)")
     parser.add_argument("--canvas-base", default=None,
@@ -8179,6 +8715,10 @@ def main(argv=None):
                             "Omit to use the catalog's class; required only for names the catalog "
                             "does not know.")
     p_cat.add_argument("--params", default="{}", help="params as a JSON object string")
+    p_cat.add_argument("--body", default=None,
+                       help="request body as a JSON object string (the write's "
+                            "intent; the readback compares against it). Values "
+                            "may reference params as \"params.<name>\"")
     p_cat.add_argument("--provider", default="canvas")
     p_cat.add_argument("--slot", default=None, help="credential slot override (https backend only)")
     p_cat.add_argument("--plan", default=None, help="frozen plan file (required for writes)")
@@ -8316,7 +8856,10 @@ def main(argv=None):
     add_channel_gate(p_undo)
 
     args = parser.parse_args(argv)
-    pack = load_pack(args.pack)
+    # Only the shipped pack runs from the CLI: a caller-chosen pack would
+    # let the caller pin any entry it authored, so there is no --pack
+    # flag and no environment override.
+    pack = load_pack(DEFAULT_PACK)
 
     def need_chromium_session():
         csm = _chromium_session_mod()
@@ -8362,6 +8905,15 @@ def main(argv=None):
         print(canonical(out))
     elif args.command == "catalog":
         params = _load_params(args.params)
+        extra = None
+        if args.body is not None:
+            try:
+                body = json.loads(args.body)
+            except ValueError:
+                raise ExecutorError("--body is not valid JSON")
+            if not isinstance(body, dict):
+                raise ExecutorError("--body must be a JSON object")
+            extra = {"body": body}
         plan = load_frozen_plan(args.plan, args.name) if args.plan else None
         approval = _load_approval(args.approval)
         mode_ctx = _mode_ctx_from_args(args)
@@ -8372,7 +8924,7 @@ def main(argv=None):
                                           args.effect_class, params,
                                           provider=args.provider, auth_slot=args.slot,
                                           plan=plan, op_id=args.op_id, pack=pack,
-                                          approval=approval,
+                                          extra=extra, approval=approval,
                                           allow_unproven=args.allow_unproven,
                                           session=session,
                                           dry_run=args.dry_run,
@@ -8385,7 +8937,7 @@ def main(argv=None):
                                       args.effect_class, params,
                                       provider=args.provider, auth_slot=args.slot,
                                       plan=plan, op_id=args.op_id, pack=pack,
-                                      approval=approval,
+                                      extra=extra, approval=approval,
                                       allow_unproven=args.allow_unproven,
                                       dry_run=args.dry_run,
                                       require_educator_channel=not args.allow_driver_channel,

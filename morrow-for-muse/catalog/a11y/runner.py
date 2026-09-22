@@ -274,8 +274,9 @@ def _read_target_html(target_kind, course_id, target_ids, session):
     from dispatch import executor as ex
     result = ex.dispatch_catalog_op(
         op_name, method, path_template, effect_class="read",
-        params=params, provider="canvas", session=session)
-    body = result.get("result") or result.get("body") or {}
+        params=params, provider="canvas", session=session,
+        require_educator_channel=True)
+    body = result.get("receipt") or {}
     if isinstance(body, str):
         try:
             body = json.loads(body)
