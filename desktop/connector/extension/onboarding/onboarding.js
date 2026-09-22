@@ -4,6 +4,7 @@ import { SETUP_CHECK_IDS, SETUP_MODE_KEY, setupGuideState, shouldRefreshForStora
 const guideMode = document.querySelector("#guide-mode");
 const consentAction = document.querySelector("#consent-action");
 const consentDetail = document.querySelector("#consent-detail");
+const dataDisclosure = document.querySelector("#data-disclosure");
 const setupContent = document.querySelector("#setup-content");
 const quickMode = document.querySelector("#quick-mode");
 const guidePanel = document.querySelector("#guide-panel");
@@ -15,7 +16,6 @@ const statusDot = document.querySelector("#status-dot");
 const nextTitle = document.querySelector("#next-title");
 const nextDetail = document.querySelector("#next-detail");
 const openSettings = document.querySelector("#open-settings");
-const guideAssistant = document.querySelector("#guide-assistant");
 const quickOpenSettings = document.querySelector("#quick-open-settings");
 const error = document.querySelector("#error");
 
@@ -25,6 +25,7 @@ const REFRESH_DELAY_MS = 250;
 let refreshTimer = null;
 let readGeneration = 0;
 let consentInFlight = false;
+let lastConsentRequired = null;
 
 // Every failure the service worker answers carries its own code, and this guide keeps that code as
 // the error it raises, so the page can name the state and the next action.
@@ -39,6 +40,10 @@ function render(status) {
   const consentRequired = status?.consentRequired === true;
   consentAction.hidden = !consentRequired;
   consentDetail.hidden = !consentRequired;
+  // The disclosure stays open while it is the agreement a person is reading. Once they agree it
+  // folds away, one select from being read again, and stays as they leave it after that.
+  if (consentRequired !== lastConsentRequired) dataDisclosure.open = consentRequired;
+  lastConsentRequired = consentRequired;
   setupContent.hidden = consentRequired;
   consentAction.disabled = consentInFlight;
   if (consentRequired) return;
@@ -50,7 +55,6 @@ function render(status) {
   for (const check of state.checks) checkLines[check.id].textContent = check.text;
   nextTitle.textContent = state.title;
   nextDetail.textContent = state.detail;
-  guideAssistant.hidden = !state.showAssistantGuide;
   openSettings.hidden = !state.canOpenSettings;
 }
 
