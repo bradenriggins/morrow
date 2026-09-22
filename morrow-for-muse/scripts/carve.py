@@ -68,6 +68,8 @@ DEV_ONLY = (
     # tests the dev-only moodle/ package; lives in dispatch/ so pytest does
     # not put moodle/ on sys.path and shadow reauth
     "dispatch/test_moodle_redirect_host.py",
+    # pytest-only: the suite's scratch-HOME isolation and its check
+    "conftest.py", "test_suite_isolation.py",
 )
 # proof-battery/ is dev evidence except the catalog the executor reads
 # and the one driver integration_selftest checks for hygiene.
