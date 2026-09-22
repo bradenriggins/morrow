@@ -37,7 +37,13 @@ checks it.
 
 If you only want a different mode in one conversation, say "use edit
 mode for this conversation" or "use plan mode for this conversation".
-That override lasts for that conversation and is never saved.
+That override applies to that conversation only. An edit override for
+one conversation ends when you turn edit mode off, or as soon as you
+start a different conversation.
+
+You can ask in your own words. The agent works out what you mean and
+makes the change through a fixed command; if it is not sure what you
+want, it asks you instead of guessing.
 
 When more than one of these is in play, the last thing you said wins.
 "What mode am I in" always tells you the effective mode right now and

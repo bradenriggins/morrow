@@ -783,6 +783,54 @@ def end_conversation(user_id, conversation_id):
                         conversation_id=key)
 
 
+def observe_conversation(user_id, conversation_id):
+    """Morrow saw conversation_id for user_id: end other conversations' edit.
+
+    An edit override (and an edit grant bound to one conversation) lives
+    only as long as its conversation. The harness may never call
+    end_conversation, so the lifetime cannot depend on it: when any
+    command or write gate sees a conversation id for this educator, every
+    EDIT override and conversation-bound edit grant for a DIFFERENT
+    conversation ends (journaled). Plan overrides are the safe direction
+    and are left alone. Returns the number of edit overrides ended.
+    """
+    _slug_user_id(user_id)
+    if conversation_id is None or str(conversation_id) == "":
+        return 0
+    key = str(conversation_id)
+    stale = [conv for conv, entry in
+             _read_doc_locked(user_id)["conversation_overrides"].items()
+             if conv != key and entry.get("mode") == "edit"]
+    if stale:
+        def mutate(doc):
+            overrides = doc.get("conversation_overrides") or {}
+            old = {conv: overrides.pop(conv) for conv in stale
+                   if conv in overrides}
+            return old, None
+
+        _transact(user_id, mutate, "settings.conversation_superseded",
+                  "conversation_mode", None,
+                  extra={"conversation_id": key})
+    _modes_revoke_grant(user_id, reason="conversation superseded",
+                        except_conversation_id=key)
+    return len(stale)
+
+
+def has_plan_override(user_id):
+    """True when any conversation carries a plan override for user_id.
+
+    The write gate uses this when no conversation id is supplied: a plan
+    override the educator set cannot be matched to the write, so the
+    write is treated as plan. An unreadable store counts as True.
+    """
+    _slug_user_id(user_id)
+    try:
+        overrides = _read_doc_locked(user_id)["conversation_overrides"]
+    except SettingsCorrupt:
+        return True
+    return any(entry.get("mode") == "plan" for entry in overrides.values())
+
+
 def effective_mode(user_id, conversation_id=None):
     """The mode in force right now: "edit" or "plan".
 

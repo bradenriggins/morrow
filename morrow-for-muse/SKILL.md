@@ -327,33 +327,30 @@ both modes.
   until the educator turns it off. Never offer, promise, or imply a
   time limit. An old install's saved timed grant is not honored; it
   lapses to plan mode.
-- Turning edit off ("turn off edit mode", "stop edit mode", "use plan
-  mode", "back to plan mode", "don't use edit mode", "no more edit
-  mode") means plan everywhere: `default_mode` goes back to plan and
-  every grant and per-conversation override is cleared
-  (`modes.state.switch_mode(user_id, "plan")`). It applies at once,
-  with no confirmation round trip. The parser proposes edit mode ONLY
-  when the whole utterance is one of a short allowlist of affirmative
-  commands ("use edit mode", "switch to edit mode", "turn on edit
-  mode", "edit mode on", "enable edit mode", "make edit mode my
-  default", "use edit mode for this conversation", and close variants
-  with "please", "thanks", case, or "edit-mode" spelling), with no
-  question mark. Any other utterance that mentions edit mode is plan
-  when it carries any off or negative signal (off, stop, pause, avoid,
-  skip, undo, without, instead, gone, away, less, not, a contraction
-  such as "didn't", or a mention of plan mode), and otherwise changes
-  nothing and asks a clarifying question. A negated plan phrasing
-  ("turn off plan mode") also changes nothing and asks. The allowlist
-  is pinned by `settings/test_mode_allowlist.py`.
+- Turning edit off means plan everywhere: `default_mode` goes back to
+  plan and every grant and per-conversation override is cleared
+  (`morrow mode set plan`, which runs
+  `modes.state.switch_mode(user_id, "plan")`). It applies at once, with
+  no confirmation round trip.
+- You decide what the educator means; no Morrow code reads the
+  educator's words. When the educator asks, in any words, to turn edit
+  mode on or off, to check the mode, to change a setting, or to stop
+  (or start) being asked before deletions, call the matching command
+  below. If you are not sure what they want, ask them; never guess, and
+  never turn edit mode on from an unclear, negated, or questioning
+  request. Relay the command's `message`: it states the true resulting
+  mode, read back after the change.
 - Most recent explicit action wins between a per-conversation override
   ("use plan mode for this conversation", "use edit mode for this
   conversation") and the persisted default. Both are tamper-sealed in
   the settings file, journaled, and seen by every later dispatch
-  process. A plan override applies at once and stays until the
-  conversation ends. An edit override needs the educator's yes and
-  ends when the conversation ends (`settings.store.end_conversation`)
-  or when edit mode is turned off anywhere. An unreadable or tampered
-  override store resolves to plan. Resolve with
+  process. A plan override applies at once. An edit override needs the
+  educator's yes and ends when edit mode is turned off anywhere, when
+  the conversation ends (`settings.store.end_conversation`), or as soon
+  as Morrow sees a different conversation id for the educator (any mode
+  command or write gate). An unreadable or tampered override store
+  resolves to plan, and a write with no conversation id is plan while
+  any plan override exists. Resolve with
   `modes.state.current_mode(user_id, conversation_id)` (the single
   authoritative resolver; `settings.store.effective_mode` delegates to
   it); Agent A's contract `settings.store.get_setting(user_id, key)`
@@ -364,24 +361,47 @@ both modes.
   need approval in either mode, and edit never surfaces per-write
   approval, including for destructive writes. `confirm_destructive_writes`
   is an opt-in guardrail (default off, matching the model; the
-  educator can turn it on with "always confirm deletions").
+  educator can turn it on: `morrow settings set
+  confirm_destructive_writes true`).
 - The agent can never grant itself edit mode or change a
-  consequential setting: consequential changes require
-  educator_confirmed=True (SettingsTamperRefused otherwise), echoed in
-  plain language before applying.
+  consequential setting: consequential changes require the educator's
+  yes (`--educator-confirmed`, educator_confirmed=True in Python;
+  SettingsTamperRefused otherwise), asked in plain language first.
 - Every change is journaled to `~/.morrow/settings/<user_id>.changes.jsonl`
   with old value, new value, and educator identity (hash-chained,
   tamper-evident). Settings live under `~/.morrow/settings/`, never in
   the tree, and survive restarts and reinstalls.
-- Conversational control: "use edit mode", "turn off edit mode",
-  "use plan mode for this conversation", "stop asking me to confirm
-  deletions", "show me my settings", "what mode am I in", "be more
-  concise". Parse with `settings.commands.parse_command`; consequential
-  utterances return needs_confirmation=True and the agent echoes before
-  applying. Carry out an op with `settings.commands.apply_command(op,
-  user_id, conversation_id, educator_confirmed=<educator said yes>)`
-  and speak the sentence it returns: it is built from the mode actually
-  in force after the change.
+- Commands (the CLI prints one JSON object with `ok`, `status`, `mode`,
+  and `message`; the Python API in `settings/commands.py` returns the
+  same dict). `--user-id` defaults to `MORROW_USER_ID` and
+  `--conversation-id` to `MORROW_CONVERSATION_ID`:
+  - `morrow mode status --user-id U --conversation-id C`: the mode in
+    force and where it comes from.
+  - `morrow mode set plan --user-id U --conversation-id C`: edit off,
+    plan everywhere.
+  - `morrow mode set plan --this-conversation ...`: plan for this
+    conversation only.
+  - `morrow mode set edit ...` (add `--this-conversation` for this
+    conversation only): first run it WITHOUT `--educator-confirmed`.
+    Nothing changes; the result has status `needs_confirmation` and a
+    `confirm_question`. Ask the educator that question. Only after the
+    educator says yes, run it again with `--educator-confirmed`.
+  - `morrow settings show|get KEY|set KEY VALUE`: booleans are `true`
+    or `false`. Consequential settings (`confirm_destructive_writes`,
+    `confirm_bulk_actions`, `default_course_id`,
+    `write_approval_style`) follow the same `needs_confirmation`, ask,
+    then `--educator-confirmed` flow. "Stop asking me to confirm
+    deletions" is `settings set confirm_destructive_writes false`;
+    "always confirm deletions" is `... true`.
+  - If a result has `settings_untrusted: true`, the settings file failed
+    its integrity check: tell the educator they are in plan mode and
+    relay the repair steps in `message`.
+- Every dispatch must carry the educator's identity for the mode gate:
+  pass `--user-id` and `--conversation-id` to `dispatch/executor.py`
+  (or set `MORROW_USER_ID` and `MORROW_CONVERSATION_ID`). Without a
+  user id the write gate is plan (every write needs approval). Without
+  a conversation id, per-conversation edit overrides cannot apply and
+  any plan override makes the write plan.
 - Other knobs, all user-settable: `verbosity` (concise | balanced |
   detailed, default balanced), `write_approval_style` (per_write |
   batched, default per_write), `failure_verbosity` (concise | detailed,
@@ -422,10 +442,10 @@ relay, and every row not marked live-proven. Full declaration:
 - `transport/`: the Chromium lane (`local_chromium.py`, `chromium_session.py`,
   `egress.py`, `proxy_forwarder.py`) and its selftests.
 - `dispatch/`: the governed executor, the admission gate, the policy, selftests.
-- `settings/`: the conversational settings system (`store.py`,
+- `settings/`: the settings system (`store.py`, the typed commands in
   `commands.py`, `test_settings.py`, `README.md`): modes,
-  per-conversation overrides, and every behavioral knob, all
-  educator-settable in plain language.
+  per-conversation overrides, and every behavioral knob. The educator
+  asks in plain language; the agent calls the typed command.
 - `helper/`: the Canvas Login Helper server, UI, and keepalive, plus
   `live_behavior_check.py` (the manual live proof: session persistence
   across restarts, single-Chromium, dead-session redirect, and the

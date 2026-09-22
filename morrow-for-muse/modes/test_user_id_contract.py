@@ -88,9 +88,9 @@ def test_real_muse_id_can_turn_edit_off():
         conversation_id="c1")
     store.set_setting(uid, "default_mode", "edit", educator_confirmed=True)
     assert ms.current_mode(uid, "c1") == "edit"
-    op, _ = commands.parse_command("turn off edit mode", uid, "c1")
-    reply = commands.apply_command(op, uid, "c1")
-    assert "plan mode" in reply
+    out = commands.mode_set(uid, "plan", "c1")
+    assert out["ok"] and out["mode"] == "plan", out
+    assert "plan mode" in out["message"]
     assert ms.current_mode(uid, "c1") == "plan"
     assert ms.current_mode(uid) == "plan"
     assert store.get_setting(uid, "default_mode") == "plan"

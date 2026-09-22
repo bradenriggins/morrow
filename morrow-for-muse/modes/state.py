@@ -415,6 +415,36 @@ def _conversation_override(user_id, conversation_id):
     return mode, entry.get("set_at")
 
 
+def _any_plan_override(user_id):
+    """True when the educator holds a plan override in any conversation.
+
+    Lazy import, like _conversation_override. Any failure counts as
+    True: an override store that cannot be read may hold a plan
+    override.
+    """
+    try:
+        from settings.store import has_plan_override as _has
+    except Exception:
+        return False
+    try:
+        return bool(_has(user_id))
+    except Exception:
+        return True
+
+
+def _observe_conversation(user_id, conversation_id):
+    """End edit state left over from other conversations (see
+    settings.store.observe_conversation). Never raises: an unreadable
+    store already resolves to plan."""
+    if not conversation_id:
+        return
+    try:
+        from settings.store import observe_conversation as _observe
+        _observe(user_id, conversation_id)
+    except Exception:
+        pass
+
+
 def _newest_authority(user_id, conversation_id, now):
     """Most-recent-wins authority among the educator's explicit
     actions for this conversation: the settings conversation override
@@ -434,6 +464,10 @@ def _newest_authority(user_id, conversation_id, now):
     admitted under an older action the resolver says is superseded).
     """
     candidates = []  # (stamp, specificity, kind)
+    if not conversation_id and _any_plan_override(user_id):
+        # A plan override exists but this caller named no conversation,
+        # so it cannot be matched: fail safe to plan.
+        return ("override", "plan", None, "plan")
     override_mode, override_at = _conversation_override(
         user_id, conversation_id)
     if override_mode is not None:
@@ -583,11 +617,12 @@ def request_edit_grant(user_id, scope_type="conversation",
 
 def revoke_edit_grant(user_id, reason="revoked", grant_id=None,
                       conversation_id=None, scope_type=None,
-                      unbound_only=False):
+                      unbound_only=False, except_conversation_id=None):
     """Revoke live grants for user_id.
 
     Filters combine: grant_id names one grant; conversation_id keeps
-    only grants bound to that conversation; scope_type keeps only
+    only grants bound to that conversation; except_conversation_id keeps
+    only grants bound to a DIFFERENT conversation; scope_type keeps only
     grants of that scope; unbound_only
     keeps only grants with no conversation binding. With no filters,
     every live grant is revoked. Idempotent: revoking when nothing is
@@ -611,6 +646,10 @@ def revoke_edit_grant(user_id, reason="revoked", grant_id=None,
                         and str(bound) == str(conversation_id)):
                     continue
             elif unbound_only and bound is not None:
+                continue
+            if except_conversation_id is not None and (
+                    bound is None
+                    or str(bound) == str(except_conversation_id)):
                 continue
             if _is_live(g, now):
                 g["revoked"] = True
@@ -715,6 +754,7 @@ def authorize_write(user_id, course_id=None, resolution=None,
     uses this form for the audit block and usage journaling.
     """
     _validate_user_id(user_id)
+    _observe_conversation(user_id, conversation_id)
     now = _utcnow()
     # THE critical invariant: admission uses the same most-recent-wins
     # authority as current_mode, via _newest_authority. A newer
