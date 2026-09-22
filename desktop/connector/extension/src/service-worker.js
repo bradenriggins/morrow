@@ -4725,7 +4725,7 @@ function lostCourseSiteProblem(binding, operation) {
   const course = String(binding.courseName || "").trim().slice(0, 200);
   return problem("canvas_binding_required", [
     `Morrow sent nothing: the ${platform} site tab for ${course || "this selected course"} is not open and signed in.`,
-    `Open ${site} in Chrome, sign in, then select Connect ${platform} in Morrow Bridge.`,
+    `Select Open ${platform} in the Morrow Bridge popup, or open ${site} in Chrome yourself, and sign in if asked.`,
   ].join(" ").slice(0, 900), true);
 }
 

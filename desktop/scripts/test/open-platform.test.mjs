@@ -376,3 +376,23 @@ test("saveEditPolicy opens no tab when openPlatformWhenNeeded is off, and still 
   assert.equal(harness1.calls.siteAnchorMatches.length, 1, "no retry check: there is nothing to retry");
   assert.equal(harness1.calls.createEditPermission.length, 0);
 });
+
+// A write refused because the course's site tab is closed names the control the popup really shows
+// for that course: Open Canvas or Open Moodle. There is no Connect Canvas button.
+test("a closed course site names Open Canvas or Open Moodle, the popup's own control", () => {
+  const script = [
+    "globalThis.__morrowLostSite = (() => {",
+    sliceIncluding("const MORROW_REFUSAL_TOKEN = ", "\n}\n"),
+    sliceIncluding("function lostCourseSiteProblem(binding, operation) {", "\n}\n"),
+    "return lostCourseSiteProblem;",
+    "})();",
+  ].join("\n");
+  runInThisContext(script, { filename: "service-worker-lost-site-region.js" });
+  const lostCourseSiteProblem = globalThis.__morrowLostSite;
+  delete globalThis.__morrowLostSite;
+  for (const [provider, platform] of [["canvas", "Canvas"], ["moodle", "Moodle"]]) {
+    const refusal = lostCourseSiteProblem({ provider, origin: `https://${provider}.example.edu`, courseName: "Anatomy" }, { provider });
+    assert.equal(refusal.code, "canvas_binding_required");
+    assert.equal(refusal.message, `Morrow sent nothing: the ${platform} site tab for Anatomy is not open and signed in. Select Open ${platform} in the Morrow Bridge popup, or open https://${provider}.example.edu in Chrome yourself, and sign in if asked.`);
+  }
+});
