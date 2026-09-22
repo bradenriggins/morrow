@@ -2045,6 +2045,7 @@ def dispatch_browser_entry(entry, params, lane_state, pack, plan=None,
     _, base, _principal0 = _lane_for(provider, lane_state)
     # Admission gate: never-dispatch, unsupported, tenant-restricted,
     # learner-data, per-action write approval. Runs before planning.
+    ex._check_auxiliary_learner_data(entry, _vault.vault_available())
     _, _approval_record = admit(
         entry, params, tenant_base=base, approval=approval, op_id=op_id,
         vault_ready=_vault.vault_available())
@@ -2129,6 +2130,7 @@ def dispatch_browser_undo(entry, params, result_payload, of_op_id, lane_state,
     provider = entry.get("provider") or "canvas"
     _, base, _principal0 = _lane_for(provider, lane_state)
     # Admission gate: undo is a write; it needs its own educator approval.
+    ex._check_auxiliary_learner_data(entry, _vault.vault_available())
     _, _approval_record = admit(
         entry, params, tenant_base=base, approval=approval,
         vault_ready=_vault.vault_available())

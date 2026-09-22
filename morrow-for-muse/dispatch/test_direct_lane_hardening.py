@@ -679,3 +679,19 @@ def test_browser_lane_refuses_unproven_undo_block():
                      "url": "{canvas_base}/api/v1/courses/{course_id}/nope"}
     with pytest.raises(ex.CatalogNotProven):
         bb.dispatch_browser_undo(entry, {"course_id": 1}, {}, "x", {}, _pack())
+
+
+# ----------------------------------------------------------------------
+# 7 (learner data). Auxiliary blocks count for the learner-data gate:
+# a discovery pre-pass cannot read a roster on a lane with no
+# projection point.
+# ----------------------------------------------------------------------
+
+def test_learner_discovery_block_refused_on_raw_lane():
+    entry = _read_entry(PROVEN_READ, discovery={
+        "method": "GET", "url": "{canvas_base}/api/v1/courses/{course_id}/users",
+        "pick": "[0].id", "store_as": "uid"})
+    sess = FakeSession()
+    with pytest.raises(admission_mod.LearnerDataGated):
+        ex.dispatch_entry(entry, {"course_id": 1}, sess, _pack())
+    assert sess.calls == []

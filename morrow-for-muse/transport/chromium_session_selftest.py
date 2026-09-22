@@ -57,6 +57,10 @@ for _p in (REPO, os.path.join(REPO, "dispatch"), os.path.join(REPO, "transport")
         sys.path.insert(0, _p)
 
 from dispatch import executor as ex  # noqa: E402
+# The fixtures use literal ids and synthetic paths that are not catalog
+# path templates; the live-proven catalog gate is covered by
+# dispatch/test_direct_lane_hardening.py and is a no-op here.
+ex.live_proven_gate = lambda *a, **k: None  # noqa: E731
 import chromium_session as cs  # noqa: E402
 import local_chromium as lc  # noqa: E402
 

@@ -7127,6 +7127,22 @@ def _projection_entry(entry: dict, url, raw_payload) -> dict:
     return view
 
 
+def _check_auxiliary_learner_data(entry: dict, vault_ready: bool) -> None:
+    """Run the learner-data gate over the entry's auxiliary blocks
+    (discovery, verify, before_state, undo, ...). admit() scans only
+    the request and multi_step URLs, so a roster read hidden in a
+    discovery pre-pass would otherwise reach a lane with no projection
+    point."""
+    policy = load_policy()
+    for where, block in _entry_request_blocks(entry):
+        if where == "request" or where.startswith("multi_step"):
+            continue
+        if not block.get("url"):
+            continue
+        check_learner_data({"name": "%s#%s" % (entry.get("name"), where),
+                            "request": block}, policy, vault_ready)
+
+
 def _require_course_resolution(entry: dict, params: dict, mode_ctx) -> None:
     """Mode-gated course writes must carry the course resolution for
     the course they target (fail closed when absent or mismatched).
@@ -7211,6 +7227,8 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
         # signed into) and refuses loudly when they differ, so a
         # globally-wrong tenant cannot sail through.
         _chromium_session_mod().verify_helper_tenant_binding(tenant_base)
+    _check_auxiliary_learner_data(
+        entry, bool(getattr(session, "browser_owned_auth", False)))
     approval_audit, approval_record = admit(
         entry, params, tenant_base=tenant_base, approval=approval, op_id=op_id,
         require_educator_channel=require_educator_channel,
@@ -8313,6 +8331,7 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
         tenant_base = session.base_for(provider or "canvas")
     except Exception:
         tenant_base = None
+    _check_auxiliary_learner_data(entry, vault_ready=False)
     approval_audit, approval_record = admit(
         entry, params, tenant_base=tenant_base, approval=approval,
         require_educator_channel=require_educator_channel,

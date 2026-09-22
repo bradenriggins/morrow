@@ -13,6 +13,8 @@ import pytest
 requests = pytest.importorskip("requests")
 
 TREE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Lives outside moodle/: pytest would put moodle/ (no __init__.py) on
+# sys.path, where moodle/reauth.py shadows the reauth package.
 if TREE not in sys.path:
     sys.path.insert(0, TREE)
 
