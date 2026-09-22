@@ -228,9 +228,15 @@ the wired vault file above.
   row whose path names a people resource is not classified. Course
   content (pages, quizzes, assignments, modules) is deliberately not
   classified, because projecting it would rewrite names inside content
-  an educator may save back. The consequence: a page body, or the
-  `last_edited_by` field of a page read, can carry a person's name
-  unprojected. Additions go through admission-policy review.
+  an educator may save back. The consequence: a page body can carry a
+  person's name unprojected. Person fields on content (a page's
+  `last_edited_by`, any `created_by`/`updated_by`/`editor`) are replaced
+  field by field: a learner the vault already labeled in that course
+  gets their label, anyone else becomes "a Canvas user Morrow has not
+  labeled". Course search (`smartsearch`) is learner data: result text
+  naming a learner the receipt or the vault knows for that course is
+  labeled, but a learner Morrow has never seen in that course stays raw
+  in result text. Additions go through admission-policy review.
 - Small cohorts: labels are stable across ops and restarts, so in a
   cohort of 1-3 anyone who knows the roster can re-identify students
   by elimination (matching scores or distinctive work to known

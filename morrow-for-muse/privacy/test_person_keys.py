@@ -210,3 +210,75 @@ def test_collaboration_free_text_names_the_same_record_learner(vault):
         {"course_id": 1})
     assert _leaks(text) == [], text
     assert "Notes for" in text and "group" in text
+
+
+# --- residual gaps closed (integrator follow-up, 2026-09-22) -------------
+#   6. smartsearch results named learners in free text ("Zed Quill's
+#      essay feedback") and were not learner data at all.
+#   7. outcome_alignments takes a student_id and was not learner data.
+#   8. A page read's last_edited_by carried a person's id and name raw.
+
+def test_smartsearch_and_outcome_alignments_are_learner_data():
+    from dispatch import admission
+    from dispatch import executor as ex
+    for name, path in (
+            ("canvas_search_course_content",
+             "/api/v1/courses/{course_id}/smartsearch"),
+            ("canvas_get_outcome_alignments_for_student_or_assignment",
+             "/api/v1/courses/{course_id}/outcome_alignments")):
+        entry = ex.catalog_descriptor_to_entry(name, "GET", path)
+        assert admission.touches_learner_data(entry), name
+
+
+USERS = ("canvas_list_users_in_course_users",
+         "/api/v1/courses/{course_id}/users")
+PAGE = ("canvas_show_page_courses",
+        "/api/v1/courses/{course_id}/pages/{url_or_id}")
+EDITOR = {"id": 55501, "display_name": "Zed Quill",
+          "avatar_image_url": "https://x/images/thumbnails/55501/a",
+          "html_url": "https://school.instructure.com/courses/1/users/55501"}
+
+
+def test_smartsearch_labels_vault_known_learners(vault):
+    _project(*USERS, [{"id": 55501, "name": "Zed Quill"}], {"course_id": 1})
+    text = _project("canvas_search_course_content",
+                    "/api/v1/courses/{course_id}/smartsearch",
+                    {"results": [{"content_id": 1,
+                                  "title": "Zed Quill's essay feedback",
+                                  "body": "Notes for Zed Quill"}]},
+                    {"course_id": 1})
+    assert _leaks(text) == [], text
+    assert "essay feedback" in text
+
+
+def _page(payload):
+    from dispatch import executor as ex
+    name, path = PAGE
+    entry = ex.catalog_descriptor_to_entry(name, "GET", path)
+    url = ex.render_template(entry["request"]["url"], {"canvas_base": BASE},
+                             {"course_id": 1, "url_or_id": "p"})
+    view = ex._projection_entry(entry, url, payload)
+    out, _ = wire.project_learner_result(
+        view, {"receipt": payload, "truncated": False, "bytes_received": 0},
+        BASE, error_cls=RuntimeError)
+    return out["receipt"]
+
+
+def test_page_editor_is_labeled_and_body_untouched_without_the_vault(
+        monkeypatch, tmp_path):
+    monkeypatch.setenv(wire.SOURCE_VAULT_ENV_VAR, str(tmp_path / "v.json"))
+    body = "<p>Welcome, class</p>"
+    out = _page({"url": "p", "title": "Home", "body": body,
+                 "last_edited_by": dict(EDITOR)})
+    assert out["body"] == body and out["title"] == "Home"
+    assert _leaks(json.dumps(out)) == [], out
+
+
+def test_page_editor_known_to_the_vault_gets_their_label(vault):
+    _project(*USERS, [{"id": 55501, "name": "Zed Quill"}], {"course_id": 1})
+    body = "<p>Welcome, class</p>"
+    out = _page({"url": "p", "title": "Home", "body": body,
+                 "last_edited_by": dict(EDITOR)})
+    assert out["body"] == body
+    assert _leaks(json.dumps(out)) == [], out
+    assert "Student A1" in json.dumps(out)

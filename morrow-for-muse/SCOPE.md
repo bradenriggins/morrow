@@ -81,7 +81,9 @@ marked `live-proven` is not a v1 claim.
   data, so they are refused like every other learner-data row (see
   "Out for v1"): C-78 potential collaborators, C-105/C-106 activity
   stream, C-112 effective due dates, C-274/C-343/C-344 assignment
-  overrides, and C-327/C-331/C-332 page revisions. The live-proven
+  overrides, C-327/C-331/C-332 page revisions, C-231/C-234/C-235/C-236
+  date details (override student lists), C-403 course search, and
+  C-322 outcome alignments for a student. The live-proven
   override writes (C-34, C-36, C-39, C-41, C-51, C-284) and the page
   revision revert (C-328) are refused for the same reason.
 - The governance layer that makes it safe: frozen plans, the admission

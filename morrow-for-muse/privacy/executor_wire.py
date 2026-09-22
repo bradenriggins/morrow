@@ -178,6 +178,85 @@ def _neutralize_adhoc_override_titles(node):
     return out
 
 
+# Fields on course content (a page's last_edited_by, a record's
+# created_by) that hold the person who edited it. The content itself is
+# not learner data (it is course material an educator may save back),
+# so only these person fields are replaced.
+_EDITOR_KEY_RE = re.compile(
+    r"^(?:last_)?(?:edited|created|updated|modified|deleted)_by$|"
+    r"^(?:last_)?(?:editor|modifier)$")
+UNLABELED_PERSON = "a Canvas user Morrow has not labeled"
+
+
+def _editor_slots(node, out):
+    """(container, key) for every person record under an editor key."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if _EDITOR_KEY_RE.match(str(key).lower()) and \
+                    isinstance(value, dict) and value:
+                out.append((node, key))
+            else:
+                _editor_slots(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            _editor_slots(value, out)
+    return out
+
+
+def _vault_labels_for(entry, tenant_base, lane_context):
+    """{learner id: label} for learners the vault already labeled in this
+    entry's course scope, or {} when there is no vault to ask."""
+    if _privacy_core.AESGCM is None:
+        return {}
+    course_id = _entry_course_id(entry)
+    path = _source_vault_path()
+    if not course_id or not os.path.exists(path):
+        return {}
+    try:
+        origin = _exact_origin(tenant_base, ValueError)
+    except ValueError:
+        return {}
+    provider = entry.get("provider") or "canvas"
+    principal = (lane_context or {}).get("principal") or "local-educator"
+    scope = {"canvasOrigin": origin,
+             "account": "%s:%s:%s" % (provider, provider, origin),
+             "course": str(course_id), "principal": principal,
+             "profile": "source:%s" % provider}
+    try:
+        vault = _privacy_core.LearnerVault(path)
+        known = vault.identities_for_scope(scope)
+        labels = vault.tokenize_many(scope, known) if known else []
+    except Exception:
+        return {}
+    return {str(identity["id"]): label
+            for identity, label in zip(known, labels)}
+
+
+def _label_editor_records(entry, result, tenant_base, lane_context,
+                          error_cls):
+    """Replace person records under editor keys on a non-learner read.
+
+    A learner the vault already labeled in this course becomes
+    {"learnerToken": <their label>}; anyone else becomes
+    {"person": UNLABELED_PERSON}. Nothing else in the receipt changes.
+    The educator's consent file (pii_reveal_audit) leaves them raw."""
+    receipt = result.get("receipt") if isinstance(result, dict) else None
+    if not _editor_slots(receipt, []):
+        return result
+    if pii_reveal_audit(error_cls) is not None:
+        return result
+    import copy
+    receipt = copy.deepcopy(receipt)
+    labels = _vault_labels_for(entry, tenant_base, lane_context)
+    for container, key in _editor_slots(receipt, []):
+        label = labels.get(str(container[key].get("id")))
+        container[key] = {"learnerToken": label} if label else \
+            {"person": UNLABELED_PERSON}
+    out = dict(result)
+    out["receipt"] = receipt
+    return out
+
+
 def _harvest_roster(receipt, items_are_people=False):
     """Recursively harvest learner records from a receipt.
 
@@ -384,7 +463,8 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
     (projected_result, reveal_audit_or_None).
     """
     if not _admission.touches_learner_data(entry):
-        return result, None
+        return _label_editor_records(entry, result, tenant_base,
+                                     lane_context, error_cls), None
     reveal = pii_reveal_audit(error_cls)
     if reveal is not None:
         revealed = dict(result)

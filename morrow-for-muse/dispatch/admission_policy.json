@@ -71,6 +71,8 @@
    "assignment_overrides",
    "effective_due_dates",
    "date_details",
+   "smartsearch",
+   "outcome_alignments",
    "revisions",
    "audit",
    "audit_events",

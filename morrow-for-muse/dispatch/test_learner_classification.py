@@ -59,6 +59,8 @@ PEOPLE_BEARING = {
              "students [{id, name}]",
     "C-236": "quiz date_details: overrides carry student_ids and "
              "students [{id, name}]",
+    "C-403": "smartsearch: result titles and bodies can name learners",
+    "C-322": "outcome alignments for a student (student_id)",
     "C-227": "course groups: group names are free text that often name "
              "the students in them, and include[]=users returns user "
              "objects",
@@ -223,7 +225,9 @@ PERSON_KEY_EXCEPTIONS = {
     ("C-85", "user_id"): "content migration: the educator who started it",
     ("C-329", "last_edited_by"): "front page is course content an educator "
                                  "may save back (see CONTENT_ONLY); its "
-                                 "last editor is a documented residual",
+                                 "last editor is replaced field by field "
+                                 "(privacy/executor_wire.py "
+                                 "_label_editor_records)",
     ("C-329", "hide_from_students"): "boolean page setting",
     ("C-111", "filter_speed_grader_by_student_group"): "boolean setting",
 }
