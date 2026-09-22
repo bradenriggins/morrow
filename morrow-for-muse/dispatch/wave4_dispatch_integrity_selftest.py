@@ -819,7 +819,9 @@ def main():
                            "url": "{canvas_base}/api/v1/courses/112/"
                                   "assignment_groups/7"}
         u_params = {"course_id": "112"}
-        u_approval = _approve(u_entry, u_params, BASE, target_identity=w_ti)
+        u_approval = _approve(*ex.undo_approval_subject(
+            u_entry, u_params, _oid("w4-gw"), {}), BASE,
+            target_identity=w_ti)
         u_session = _session([("ok", 200, json.dumps(
             {"id": 112, "name": "Other Course"}))])
         try:
@@ -832,8 +834,9 @@ def main():
                "refused undo: target GET only; the undo was never sent",
                failures)
         try:
-            ad.check_write_approval(u_entry, u_params, u_approval,
-                                    _oid("w4-gu2b"), tenant_base=BASE)
+            ad.check_write_approval(*ex.undo_approval_subject(
+                u_entry, u_params, _oid("w4-gw"), {}), u_approval,
+                _oid("w4-gu2b"), tenant_base=BASE)
             _check(True, "refused undo: approval NOT consumed (reusable)",
                    failures)
         except Exception as e:
@@ -845,8 +848,9 @@ def main():
         u_entry3["undo"] = {"method": "DELETE",
                             "url": "{canvas_base}/api/v1/courses/112/"
                                    "assignment_groups/7"}
-        u_approval3 = _approve(u_entry3, u_params, BASE,
-                               target_identity=w_ti)
+        u_approval3 = _approve(*ex.undo_approval_subject(
+            u_entry3, u_params, _oid("w4-gw"), {}), BASE,
+            target_identity=w_ti)
         u_session3 = _session([
             ("ok", 200, json.dumps({"id": 112, "name": "Intended Course"})),
             ("ok", 200, json.dumps({"id": 5})),

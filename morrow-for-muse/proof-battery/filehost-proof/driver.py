@@ -238,7 +238,11 @@ def cmd_dispatch_undo(args):
     # Undo resolves {result.id} against the parsed result receipt.
     result_payload = result_file.get("receipt", result_file)
     of_op_id = args.of_op_id
-    approval = _approval(entry, WRITE_ENTRY["params"], suffix="-undo")
+    # The undo is approved as its own write: bound to the undo action
+    # and its target, never the forward write's approval.
+    u_entry, u_params = ex.undo_approval_subject(
+        entry, WRITE_ENTRY["params"], of_op_id, result_payload)
+    approval = _approval(u_entry, u_params, suffix="-undo")
     env = bb.dispatch_browser_undo(entry, WRITE_ENTRY["params"],
                                    result_payload, of_op_id, lane,
                                    pack=None, approval=approval)
@@ -255,7 +259,7 @@ def cmd_complete_undo(args):
     out = bb.complete_browser_request(
         env["op_id"], entry, WRITE_ENTRY["params"], plan=None,
         report_text=report, lane_state=lane, pack=None, kind="undo",
-        of_op_id=env["undo_of"])
+        of_op_id=env["undo_of"], undo_params=env.get("undo_params"))
     _save("receipt-undo.json", out)
 
 

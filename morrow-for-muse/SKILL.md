@@ -258,7 +258,13 @@ educator as part of the approval.
 
 Entry manifests: `execute --entry <manifest.json> --params '{...}'`
 dispatches a manifest entry the same way. `undo` runs an entry's undo
-block as a new, separately journaled operation.
+block as a new, separately journaled operation. An undo is its own
+write: in plan mode it needs its own educator approval, minted for
+`dispatch.executor.undo_approval_subject(entry, params, of_op_id,
+result)` (bound to the undo action and the object it targets). The
+forward write's approval never admits its undo, and a DELETE undo asks
+for deletion confirmation in edit mode when `confirm_destructive_writes`
+is on. `--dry-run` journals nothing, in either mode.
 
 ## Governance (not optional)
 

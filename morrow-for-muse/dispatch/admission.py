@@ -1835,7 +1835,8 @@ def check_mode_authority(entry: dict, params: dict,
                          approval: dict | None, mode_ctx,
                          tenant_base: str | None = None,
                          op_id: str | None = None,
-                         require_educator_channel: bool = True):
+                         require_educator_channel: bool = True,
+                         journal: bool = True):
     """Mode-aware write authority gate (modes workstream).
 
     mode_ctx carries the calling user and, when the dispatcher has one,
@@ -1875,9 +1876,16 @@ def check_mode_authority(entry: dict, params: dict,
 
     Every other gate (never-dispatch, unsupported, evidence-holds,
     learner-data) runs in admit() before this hook, in both modes.
+
+    journal=False (a dry run) evaluates the same decision but journals
+    nothing: no mode.write_admitted, no mode.write_refused.
     """
     from modes import state as mode_state
     from modes import errors as mode_errors
+
+    def refused(*args, **kwargs):
+        if journal:
+            mode_state.journal_write_refused(*args, **kwargs)
     if not _entry_is_write(entry):
         return None, None
     ctx = mode_ctx if isinstance(mode_ctx, dict) else {}
@@ -1897,7 +1905,7 @@ def check_mode_authority(entry: dict, params: dict,
             user_id, course_id=course_id, resolution=resolution,
             conversation_id=conversation_id)
     except mode_errors.ModeError as exc:
-        mode_state.journal_write_refused(
+        refused(
             user_id, entry_name, course_id, op_id,
             "mode_error:%s" % type(exc).__name__, str(exc))
         raise
@@ -1913,7 +1921,7 @@ def check_mode_authority(entry: dict, params: dict,
                 tenant_base=tenant_base,
                 require_educator_channel=require_educator_channel)
         except WriteApprovalMissing as exc:
-            mode_state.journal_write_refused(
+            refused(
                 user_id, entry_name, course_id, op_id,
                 "plan_mode_write_without_approval", str(exc))
             raise mode_errors.PlanModeWriteWithoutApproval(
@@ -1922,7 +1930,7 @@ def check_mode_authority(entry: dict, params: dict,
                 course_id=course_id) from exc
     if decision == "refuse":
         auth = auth or {}
-        mode_state.journal_write_refused(
+        refused(
             user_id, entry_name, course_id, op_id, code,
             "mode authority refused this write", auth=auth,
             resolution=resolution)
@@ -1943,7 +1951,7 @@ def check_mode_authority(entry: dict, params: dict,
     if _is_destructive(entry) and \
             _destructive_confirmation_required(user_id) and \
             not ctx.get("destructive_confirmed"):
-        mode_state.journal_write_refused(
+        refused(
             user_id, entry_name, course_id, op_id,
             "destructive_confirmation_required",
             "destructive write needs the educator's explicit confirmation",
@@ -1957,8 +1965,9 @@ def check_mode_authority(entry: dict, params: dict,
     if ctx.get("destructive_confirmed"):
         auth = dict(auth or {})
         auth["destructive_confirmed"] = ctx.get("destructive_confirmed")
-    mode_state.journal_write_admitted(auth, entry_name, course_id, op_id,
-                                      user_id, resolution=resolution)
+    if journal:
+        mode_state.journal_write_admitted(auth, entry_name, course_id, op_id,
+                                          user_id, resolution=resolution)
     educator = auth.get("educator_identity") or {}
     audit = {
         "mode": "edit",
@@ -1972,11 +1981,21 @@ def check_mode_authority(entry: dict, params: dict,
     return audit, None
 
 
+def check_policy_gates(entry: dict, vault_ready: bool = False) -> None:
+    """The policy gates admit() runs first: never-dispatch, unsupported,
+    evidence-holds, learner-data. Raises an AdmissionRefused subclass."""
+    policy = load_policy()
+    check_never_dispatch(entry, policy)
+    check_unsupported(entry, policy)
+    check_evidence_holds(entry, policy)
+    check_learner_data(entry, policy, vault_ready)
+
+
 def admit(entry: dict, params: dict, tenant_base: str | None = None,
           approval: dict | None = None, op_id: str | None = None,
           vault_ready: bool = False,
           require_educator_channel: bool = True,
-          mode_ctx: dict | None = None):
+          mode_ctx: dict | None = None, journal: bool = True):
     """Run the full admission gate for one entry.
 
     Returns (approval_audit, signed_record): the journal audit block for
@@ -2002,16 +2021,15 @@ def admit(entry: dict, params: dict, tenant_base: str | None = None,
     reply). Pass require_educator_channel=False explicitly ONLY for
     proof drivers and tests; production dispatch paths must never do
     this.
+
+    journal=False (a dry run) journals nothing from the mode gate.
     """
-    policy = load_policy()
-    check_never_dispatch(entry, policy)
-    check_unsupported(entry, policy)
-    check_evidence_holds(entry, policy)
-    check_learner_data(entry, policy, vault_ready)
+    check_policy_gates(entry, vault_ready)
     if mode_ctx is not None:
         return check_mode_authority(entry, params, approval, mode_ctx,
                                     tenant_base=tenant_base, op_id=op_id,
-                                    require_educator_channel=require_educator_channel)
+                                    require_educator_channel=require_educator_channel,
+                                    journal=journal)
     return check_write_approval(entry, params, approval, op_id,
                                 tenant_base=tenant_base,
                                 require_educator_channel=require_educator_channel)

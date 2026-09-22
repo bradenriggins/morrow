@@ -117,14 +117,14 @@ from datetime import datetime, timezone
 
 try:
     from dispatch.admission import (
-        admit, persist_signed_record, consume_approval,
+        admit, persist_signed_record, consume_approval, check_policy_gates,
         load_policy, check_never_dispatch, check_unsupported,
         check_evidence_holds, check_learner_data, check_unproven_override,
         touches_learner_data as admission_touches_learner_data,
     )
 except ImportError:  # run as a script: dispatch/ itself is on sys.path
     from admission import (
-        admit, persist_signed_record, consume_approval,
+        admit, persist_signed_record, consume_approval, check_policy_gates,
         load_policy, check_never_dispatch, check_unsupported,
         check_evidence_holds, check_learner_data, check_unproven_override,
         touches_learner_data as admission_touches_learner_data,
@@ -4201,7 +4201,14 @@ def render_template(template: str, config: dict, params: dict,
             return str(config[token])
         if transients and token in transients:
             return str(transients[token])
-        resolved = resolve_ref("params." + token, params, result_payload, transients)
+        if token.startswith("result."):
+            # Undo and verify blocks address the object the write created.
+            resolved = resolve_ref(token, params, result_payload, transients)
+            slot = token.rsplit(".", 1)[-1]
+        else:
+            resolved = resolve_ref("params." + token, params, result_payload,
+                                   transients)
+            slot = token
         if resolved is None:
             raise ExecutorError("template slot {%s} has no value" % token)
         if 0 <= query_start < match.start():
@@ -4210,7 +4217,7 @@ def render_template(template: str, config: dict, params: dict,
                 raise ExecutorError(
                     "query parameter {%s} must be a scalar" % token)
             return urllib.parse.quote(str(resolved), safe="")
-        return _checked_path_segment(token, resolved)
+        return _checked_path_segment(slot, resolved)
 
     return _TEMPLATE_TOKEN.sub(repl, template)
 
@@ -7441,7 +7448,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
     approval_audit, approval_record = admit(
         entry, params, tenant_base=tenant_base, approval=approval, op_id=op_id,
         require_educator_channel=require_educator_channel,
-        mode_ctx=mode_ctx,
+        mode_ctx=mode_ctx, journal=not dry_run,
         # The Chromium lane (browser_owned_auth) has the projection point:
         # learner receipts are de-identified through the ported
         # SourceMcpPrivacyBoundary in dispatch_entry's success path
@@ -8529,6 +8536,45 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
 # Undo: an entry's undo block as a new, separately journaled operation
 # --------------------------------------------------------------------------
 
+def undo_approval_subject(entry: dict, params: dict, of_op_id: str,
+                          result_payload) -> tuple:
+    """(undo_entry, undo_params): what an undo is approved and admitted as.
+
+    An undo is its own write, so its approval must never be the forward
+    write's: the entry is "<name>#undo" with the undo block as its
+    request (so destructiveness and learner-data checks see the request
+    that is actually sent), and the params bind the original op and the
+    undo target (the result payload the undo block resolves against).
+    Mint the educator's undo approval with
+    admission.mint_approval(undo_entry, undo_params, tenant_base)."""
+    undo = entry.get("undo")
+    undo_entry = undo_admission_entry(entry)
+    undo_params = dict(params or {})
+    undo_params["_undo_of"] = str(of_op_id)
+    undo_params["_undo_target"] = digest_of({"undo": undo,
+                                             "result": result_payload})
+    return undo_entry, undo_params
+
+
+def undo_admission_entry(entry: dict) -> dict:
+    """The entry an undo is admitted as: "<name>#undo" with the undo
+    block as its request (see undo_approval_subject)."""
+    undo = entry.get("undo")
+    if not isinstance(undo, dict):
+        raise ExecutorError("entry %r declares no undo block"
+                            % entry.get("name"))
+    undo_entry = {key: value for key, value in entry.items()
+                  if key not in ("undo", "verify", "before_state",
+                                 "discovery", "multi_step", "request",
+                                 "destructive", "effects")}
+    undo_entry["name"] = "%s#undo" % entry.get("name")
+    undo_entry["request"] = undo
+    undo_entry["effects"] = "write"
+    if undo.get("destructive") is True:
+        undo_entry["destructive"] = True
+    return undo_entry
+
+
 def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
                   session: SessionStore, pack: dict, approval: dict = None,
                   dry_run=False,
@@ -8573,10 +8619,16 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
     except Exception:
         tenant_base = None
     _check_auxiliary_learner_data(entry, vault_ready=False)
+    # The forward entry's own policy gates still apply to its undo.
+    check_policy_gates(entry)
+    undo_entry, undo_params = undo_approval_subject(entry, params, of_op_id,
+                                                    result_payload)
     approval_audit, approval_record = admit(
-        entry, params, tenant_base=tenant_base, approval=approval,
+        undo_entry, undo_params, tenant_base=tenant_base, approval=approval,
         require_educator_channel=require_educator_channel,
-        mode_ctx=mode_ctx)
+        mode_ctx=mode_ctx, journal=not dry_run)
+    mode_edit_undo = (isinstance(approval_audit, dict)
+                      and approval_audit.get("mode") == "edit")
     # Same learner-data decision as execute: no vault_ready, so the raw lane
     # refuses learner-bearing undo rather than projecting it.
     # Undo is a write: claim a fresh op_id atomically under the journal
@@ -8648,7 +8700,8 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
                                      max_bytes=entry_max_bytes,
                                      declared=_undo_declared,
                                      approval_target=(approval_record or {}).get(
-                                         "target"))
+                                         "target"),
+                                     no_approval_target_ok=mode_edit_undo)
         # W4 approval ordering: the target precheck passed; burn the undo
         # approval now, immediately before the undo write is sent, so a
         # target refusal leaves the approval reusable and the undo op_id

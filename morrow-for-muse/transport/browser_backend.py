@@ -2129,10 +2129,14 @@ def dispatch_browser_undo(entry, params, result_payload, of_op_id, lane_state,
     ex.live_proven_gate({"name": "%s#undo" % entry_name, "request": undo})
     provider = entry.get("provider") or "canvas"
     _, base, _principal0 = _lane_for(provider, lane_state)
-    # Admission gate: undo is a write; it needs its own educator approval.
+    # Admission gate: undo is a write; it needs its own educator approval,
+    # bound to the undo action and its target (never the forward write's).
     ex._check_auxiliary_learner_data(entry, _vault.vault_available())
+    _admission.check_policy_gates(entry, _vault.vault_available())
+    undo_entry, undo_params = ex.undo_approval_subject(
+        entry, params, of_op_id, result_payload)
     _, _approval_record = admit(
-        entry, params, tenant_base=base, approval=approval,
+        undo_entry, undo_params, tenant_base=base, approval=approval,
         vault_ready=_vault.vault_available())
     undo_op_id = str(uuid.uuid4())
     op_id, claim_token = ex._check_write_gates(entry, params, None,
@@ -2174,6 +2178,9 @@ def dispatch_browser_undo(entry, params, result_payload, of_op_id, lane_state,
         "phase": "request",
         "op_id": op_id,
         "undo_of": str(of_op_id),
+        # The approval subject the undo was admitted under; the complete
+        # phase re-verifies the persisted approval against it.
+        "undo_params": undo_params,
         "entry_name": entry_name,
         "kind": "undo",
         "batch_id": "batch-%s-undo" % op_id[:8],
@@ -2332,7 +2339,8 @@ def complete_browser_request(op_id, entry, params, plan, report_text,
                              lane_state, pack, form_host=None, brief_dir=None,
                              pending_dir=None, kind="dispatch", of_op_id=None,
                              expected_generation=None,
-                             pinned_principal=None, claim_token=None):
+                             pinned_principal=None, claim_token=None,
+                             undo_params=None):
     """Ingest a request-phase browser report; journal or park for verify.
 
     Returns the executor receipt on completion, or an awaiting_browser_task
@@ -2350,6 +2358,9 @@ def complete_browser_request(op_id, entry, params, plan, report_text,
     claim_token: the journal claim token from the dispatch envelope. When
     given, the claim is re-validated (resume=True) instead of claimed
     twice; when absent, the op_id is claimed fresh (W2-P0-18).
+    undo_params: for kind="undo", the dispatch envelope's "undo_params"
+    (the undo's approval subject). An undo is approved as its own write,
+    so its persisted approval is re-verified against that subject.
     """
     entry_name = entry.get("name")
     effects = entry.get("effects", "read")
@@ -2363,7 +2374,17 @@ def complete_browser_request(op_id, entry, params, plan, report_text,
     # re-verified: the persisted record must match this complete's
     # entry/params/tenant and be in the consumed set.
     _admission_hard_checks(entry, params, base)
-    approval_audit = _admission.reverify_approval(entry, params, base, op_id)
+    if kind == "undo":
+        if not isinstance(undo_params, dict):
+            raise _admission.ApprovalMismatch(
+                "undo complete needs the dispatch envelope's undo_params: "
+                "an undo is approved as its own write, never under the "
+                "forward write's approval")
+        approval_audit = _admission.reverify_approval(
+            ex.undo_admission_entry(entry), undo_params, base, op_id)
+    else:
+        approval_audit = _admission.reverify_approval(entry, params, base,
+                                                      op_id)
     # De-id override, validated before any journaling: an explicit
     # educator-documented purpose reveals raw student PII and is journaled
     # with the op; a stub reason fails closed here.

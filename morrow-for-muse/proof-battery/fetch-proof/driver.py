@@ -204,7 +204,11 @@ def cmd_dispatch_undo(args):
     lane = _lane()
     result_file = json.load(open(args.result_file))
     result_payload = result_file.get("receipt", result_file)
-    approval = _approval(WRITE_ENTRY, {}, suffix="-undo")
+    # The undo is approved as its own write: bound to the undo action
+    # and its target, never the forward write's approval.
+    u_entry, u_params = ex.undo_approval_subject(
+        WRITE_ENTRY, {}, args.of_op_id, result_payload)
+    approval = _approval(u_entry, u_params, suffix="-undo")
     env = bb.dispatch_browser_undo(WRITE_ENTRY, {}, result_payload,
                                    args.of_op_id, lane,
                                    pack=None, approval=approval)
@@ -220,7 +224,7 @@ def cmd_complete_undo(args):
     out = bb.complete_browser_request(
         env["op_id"], WRITE_ENTRY, {}, plan=None,
         report_text=report, lane_state=lane, pack=None, kind="undo",
-        of_op_id=env["undo_of"])
+        of_op_id=env["undo_of"], undo_params=env.get("undo_params"))
     _save("receipt-undo.json", out)
 
 
