@@ -25,7 +25,7 @@
 # listed hash, including transitive dependencies:
 #   - requests==2.34.2 requires charset-normalizer, idna, urllib3, certifi
 #   - opencv-python-headless==5.0.0.93 requires numpy (>=2 on Python 3.9+)
-#   - numpy==2.2.6 is the latest numpy supporting the Python 3.11 floor
+#   - numpy==2.5.3 is the latest numpy supporting the Python 3.11 floor
 #     (numpy 2.5.x requires Python >=3.12); it has no dependencies.
 #   - charset-normalizer, idna, urllib3, certifi have no runtime deps
 #     (idna/urllib3 extras are not used).
@@ -66,6 +66,6 @@ urllib3==2.8.0 \
 certifi==2026.7.22 \
     --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775 \
     --hash=sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55
-numpy==2.2.6 \
+numpy==2.5.3 \
     --hash=sha256:ba10f8411898fc418a521833e014a77d3ca01c15b0c6cdcce6a0d2897e6dbbdf \
     --hash=sha256:fd83c01228a688733f1ded5201c678f0c53ecc1006ffbc404db9f7a899ac6249
