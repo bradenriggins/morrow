@@ -363,3 +363,18 @@ test("the macOS job mounts and tests the same disk image it uploads", () => {
   assert.notEqual(uploadedFromDesktop, uploaded[1].trim(), "the upload path must name the desktop working directory");
   assert.ok(job.includes(`artifactRoot="$PWD/${uploadedFromDesktop}"`), "the uploaded directory must be the one the job writes its receipts into");
 });
+
+test("each release job preflights the signed release configuration and reports it", () => {
+  for (const [id, target] of [["windows-installer", "win32-x64"], ["macos-installer", "darwin-arm64"]]) {
+    const job = jobs(release).get(id);
+    const step = new RegExp(`- name: Preflight the signed release configuration\\n(?: {8}.*\\n)*? {8}run: node installer/signed-release-preflight\\.cjs --target ${target} --summary`);
+    assert.match(job, step, `${id} must preflight the signed configuration for ${target}`);
+    const commands = [...job.matchAll(/^\s+run: (?!\|)(.+)$/gm)].map((match) => match[1].trim());
+    assert.ok(commands.indexOf(`node installer/signed-release-preflight.cjs --target ${target} --summary`) > commands.indexOf("pnpm --dir installer --ignore-workspace install --frozen-lockfile"));
+    for (const name of target.startsWith("darwin")
+      ? ["CSC_LINK", "CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID", "GH_TOKEN"]
+      : ["WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD", "GH_TOKEN"]) {
+      assert.match(job, new RegExp(`^ {10}${name}: \\$\\{\\{ secrets\\.MORROW_${name} \\}\\}$`, "m"), `${id} preflight reads ${name}`);
+    }
+  }
+});
