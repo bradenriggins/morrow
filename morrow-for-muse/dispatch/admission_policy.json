@@ -20,7 +20,7 @@
   ]
  },
  "learner_data": {
-  "note": "Operations touching learner PII are refused until the learner vault/tokenization boundary lands. users/self is the educator's own profile and is not learner data. Substrings were extended in the wave-3 hardening to cover every learner-bearing path the lane-8 gap scan found (students, search_users, recent_students, bulk_user_tags, gradeable_students, moderated_students, provisional_grades, custom_gradebook_columns, rubric_assessments, peer_reviews, bulk_user_progress, outcome_results, anonymous submissions, collaborations, conferences, audits, what-if grades, test-student reads, content-share users, submission summaries).",
+  "note": "Operations touching learner PII. They are admitted only on a lane with a projection point and the encrypted learner vault (the Chromium lane with the optional 'cryptography' package), where every receipt is de-identified before the agent or the journal sees it; everywhere else they are refused (LearnerDataGated). users/self is the educator's own profile and is not learner data. Substrings were extended in the wave-3 hardening to cover every learner-bearing path the lane-8 gap scan found (students, search_users, recent_students, bulk_user_tags, gradeable_students, moderated_students, provisional_grades, custom_gradebook_columns, rubric_assessments, peer_reviews, bulk_user_progress, outcome_results, anonymous submissions, collaborations, conferences, audits, what-if grades, test-student reads, content-share users, submission summaries).",
   "url_exceptions": [
    "/users/self"
   ],

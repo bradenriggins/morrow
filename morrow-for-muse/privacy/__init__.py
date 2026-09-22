@@ -10,16 +10,19 @@ New (faithful port of the desktop Morrow source privacy boundary,
   exact-scope roster, alias machinery, identity-text normalization,
   structural egress redaction, write-direction token resolution.
 - privacy/boundary.py: SourceMcpPrivacyBoundary plus the roster/schema
-  helpers. This is the de-identification layer the browser lane's
-  learner-data completion path invokes
-  (transport/browser_backend.py::_project_learner_result, on both the
-  request and verify completion phases): learner labels (Student A<n>)
-  replace identities on the way out, and the boundary's resolver turns
-  labels back into real identities for the provider. Anything
-  unverifiable fails closed. The synchronous executor path does not
-  project: it refuses learner-data operations outright
-  (LearnerDataGated). Paths that neither invoke this boundary nor
-  refuse learner-data ops are outside its protection; see
+  helpers. This is the de-identification layer every learner receipt
+  passes through (privacy/executor_wire.py:project_learner_result,
+  called from dispatch/executor.py dispatch_entry and delegated to by
+  transport/browser_backend.py::_project_learner_result): learner
+  labels (Student A<n>) replace identities on the way out. Anything
+  unverifiable fails closed. People-bearing operations dispatch only on
+  the Chromium lane with the encrypted vault; elsewhere they are
+  refused (LearnerDataGated).
+- privacy/executor_wire.py and privacy/name_echo.py: working by name.
+  `morrow students find` issues labels for the name the educator
+  typed and records it as educator-introduced for that conversation;
+  writes carry labels, which the executor resolves to real ids at the
+  LMS boundary and relabels everywhere afterwards. See
   privacy/FERPA_POLICY.md for the honest scope.
 
 Legacy / reference only. No live path imports these modules; the
@@ -39,13 +42,12 @@ structural egress redaction) plus privacy/boundary.py
   package; both live only on the educator's VM. See the module header.
 
 De-identification is ON by default for learner-data reads. The only
-override is explicit educator consent: a regular file named
-`educator_pii_reveal` in the tree-state dir, mode 0600, carrying the
-educator's documented instructional purpose (minimum 12 characters).
-The reason is journaled verbatim with the op
-(`revealed_by: "educator-consent-file"`). The legacy environment
-variable `MORROW_REVEAL_STUDENT_PII_REASON` is ignored: it is not a
-consent channel. See privacy/FERPA_POLICY.md.
+reveal is a sealed educator record for one course
+(dispatch/admission.mint_pii_reveal: verbatim educator words, the
+educator-chat channel, at most 30 minutes), journaled as
+`revealed_by: "educator-sealed-record"`. No file and no environment
+variable (`MORROW_REVEAL_STUDENT_PII_REASON` is ignored) reveals
+names. See privacy/FERPA_POLICY.md.
 """
 
 from privacy.core import (

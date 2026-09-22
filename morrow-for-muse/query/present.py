@@ -2,15 +2,14 @@
 """Result presentation for the failed-students query chain.
 
 Privacy posture (the tree's standing rule): learner PII is NEVER
-agent-visible without the educator's explicit consent. Live results are
-projected through privacy/executor_wire.project_learner_result before
-they become agent-visible:
-
-- no consent file -> stable "Student A<n>" labels (deterministic per
-  course scope, persisted in the educator-local source vault)
-- educator hand-created consent file
-  <tree-state-dir>/educator_pii_reveal (0600, documented purpose >= 12
-  chars) -> real names, with the reveal audited on the result
+agent-visible. Live results are projected through
+privacy/executor_wire.project_learner_result before they become
+agent-visible: each student is a stable "Student A<n>" label
+(deterministic per course scope, persisted in the educator-local source
+vault). A student the educator named in this conversation (resolved with
+`morrow students find`) shows as "<name as the educator typed it>
+(Student A<n>)" (privacy/name_echo). This read takes no reveal record,
+so no other name is ever shown.
 
 Synthetic fixtures are fake people: they render with their fixture
 names under a loud SYNTHETIC banner and never touch the vault.
@@ -30,16 +29,21 @@ if _TREE_ROOT not in sys.path:
 from privacy import executor_wire as _wire  # noqa: E402
 
 
-def project_live(course_id, rows, tenant_base):
+def project_live(course_id, rows, tenant_base, conversation_id=None):
     """Project live learner rows through the privacy boundary.
 
     rows: list of {"user_id", "name", ...} harvested from submissions,
-    in a stable order. Returns (projected_rows, reveal_audit_or_None).
+    in a stable order. Returns (projected_rows, reveal_audit_or_None);
+    the reveal audit is always None here (no reveal record is taken).
     Each projected row carries "display_name": the stable "Student
-    A<n>" label, or the real name when the educator's consent file
-    reveals it. Correlation back to the caller's rows uses the
-    non-PII "qord" key, which the boundary preserves.
+    A<n>" label, echoed as "<typed name> (Student A<n>)" when the
+    educator introduced that student in this conversation
+    (conversation_id, default MORROW_CONVERSATION_ID). Correlation back
+    to the caller's rows uses the non-PII "qord" key, which the boundary
+    preserves.
     """
+    if conversation_id is None:
+        conversation_id = os.environ.get("MORROW_CONVERSATION_ID")
     entry = {
         "name": "query_failed_students",
         "provider": "canvas",
@@ -56,12 +60,10 @@ def project_live(course_id, rows, tenant_base):
         entry, {"receipt": receipt}, tenant_base, error_cls=RuntimeError)
     out = []
     for prow in projected.get("receipt", []):
-        name = prow.get("learnerToken")
-        if reveal is not None:
-            # Consent reveal: the boundary returns the real identity.
-            name = (prow.get("name") or prow.get("sortable_name")
-                    or prow.get("short_name") or name)
-        out.append({"qord": prow.get("qord"), "display_name": name})
+        out.append({"qord": prow.get("qord"),
+                    "display_name": prow.get("learnerToken")})
+    out = _wire.apply_name_echo(out, tenant_base, course_id,
+                                conversation_id)
     out.sort(key=lambda r: (r["qord"] is None, r["qord"]))
     return out, reveal
 
@@ -110,12 +112,8 @@ def render(report, synthetic=False):
             late_txt = " [late]" if row.get("late") else ""
             lines.append("  - %s: %s%s (%s)" % (
                 row["display_name"], score_txt, late_txt, row["detail"]))
-    if report.get("reveal_audit"):
-        lines.append("Real names shown under your consent file (%s)" %
-                     report["reveal_audit"].get("reason", ""))
-    else:
-        lines.append("Names are de-identified (Student A<n> labels); the "
-                     "educator can reveal them via the consent file at %s"
-                     % _wire.consent_path())
+    lines.append("Names are de-identified (Student A<n> labels). A "
+                 "student you name in this conversation shows by that "
+                 "name next to the label.")
     lines.append("Data source: %s" % report["data_provenance"])
     return "\n".join(lines)

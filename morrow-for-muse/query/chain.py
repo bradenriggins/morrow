@@ -19,7 +19,8 @@ Links:
   4. thresholds.classify: per-submission failed/passed/excused/
      ungraded with a named threshold source.
   5. present: de-identified educator result through the privacy
-     boundary (names only with the educator's explicit consent file).
+     boundary (labels; a student the educator named in this
+     conversation is echoed by that name, see privacy/name_echo).
 
 Every chain failure routes through failures/translator.py so the
 agent-visible message is the catalog's, never a raw traceback.
