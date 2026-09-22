@@ -649,7 +649,7 @@
     },
     {
       "path": "connector/extension/src/review-approval.js",
-      "sha256": "fb6a9672da147241f886383b959d6a35c974dea42f9ef21f004a363b86843dcf",
+      "sha256": "09a4dacbeef0fbd681840d693ce7adce933cd6bdbaccb5a97a9a4532a831585a",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.4 publication; reviewer=Claude technical source review; source=HEAD"
     },

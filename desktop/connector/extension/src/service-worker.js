@@ -66,7 +66,7 @@ import { serializeBridgeResult } from "./bridge-transport.js";
 import { canvasProtectedRoster, protectLocalRequest, sourceProtectedRoster } from "./protected-request.js";
 import { MAX_RENDER_CHECK_SOURCE_CHARS, RENDER_CHECK_MESSAGE_TYPE, RENDER_CHECK_SCHEMA, renderCheckField } from "../render-check/render-check.js";
 import { PRIVATE_BRIDGE_OPERATION_CONTRACTS, bridgeCatalogCompatibilityContract, browserCatalogCompatibilityContract, canvasApiCompatibilityContract, fetchBoundedCatalogText, parseBrowserCatalogText, parseCanvasApiCatalogText, privateBridgeCompatibilityContract, stableJson } from "./catalog-compatibility.js";
-import { clearReviewApprovalPresence, installReviewApproval, parseReviewApprovalPresence, storeReviewApprovalPresence } from "./review-approval.js";
+import { clearReviewApprovalPresence, handleReviewApprovalMessage, installReviewApproval, parseReviewApprovalPresence, storeReviewApprovalPresence } from "./review-approval.js";
 
 const PORT = 32147;
 const BRIDGE_PATH = "/morrow-bridge/v1";
@@ -6291,9 +6291,9 @@ async function cancelPairingAfterConsentWithdrawal() {
   });
 }
 
-// Registered before the worker's own message listener, which answers every other message.
 installReviewApproval();
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "morrow_review_approval_sign") return handleReviewApprovalMessage(message, sender, sendResponse);
   const fromPopup = POPUP_EDIT_POLICY_MESSAGES.has(message?.type) && popupSender(sender);
   const settingsAction = message?.type === "morrow_edit_policy_status" ? (authorityGeneration) => editPolicyStatus(authorityGeneration, { includePrivateChat: !fromPopup })
     : message?.type === "morrow_edit_policy_options" ? (authorityGeneration) => editPolicyOptions(message.sourceBindingId, authorityGeneration)

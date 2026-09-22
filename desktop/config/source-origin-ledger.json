@@ -1299,7 +1299,7 @@
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
       "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "fb6a9672da147241f886383b959d6a35c974dea42f9ef21f004a363b86843dcf"
+      "afterDigest": "09a4dacbeef0fbd681840d693ce7adce933cd6bdbaccb5a97a9a4532a831585a"
     },
     {
       "path": "connector/extension/src/service-worker.js",
