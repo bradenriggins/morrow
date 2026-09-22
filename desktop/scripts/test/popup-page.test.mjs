@@ -533,6 +533,14 @@ test("a review tab already open is made active instead of opening a second one",
   assert.deepEqual(page.tabsCreated, []);
 });
 
+test("a disconnected popup lists no review, even one the Bridge still reports", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: false, reviews: [{ url: "http://127.0.0.1:44210/operations/op-1", label: "Update due date in Anatomy" }] }),
+  });
+  assert.equal(page.hidden("#reviews-waiting"), true);
+  assert.equal(page.query("#reviews-list").children.length, 0);
+});
+
 test("no reviews waiting keeps the section out of the page entirely", async () => {
   const page = await openPopup({
     status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),

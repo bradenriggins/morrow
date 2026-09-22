@@ -106,9 +106,11 @@ test("each failure the popup can receive names its own state, and only an unname
 test("pendingReviews keeps only well-formed entries, and reviewButtonLabel names the change", () => {
   assert.deepEqual(pendingReviews(null), []);
   assert.deepEqual(pendingReviews({}), []);
-  assert.deepEqual(pendingReviews({ reviews: [] }), []);
+  assert.deepEqual(pendingReviews({ connected: true, reviews: [] }), []);
   const good = { url: "http://127.0.0.1:9/operations/op-1", label: "Update due date in Anatomy" };
-  assert.deepEqual(pendingReviews({ reviews: [good, { url: 4, label: "bad url type" }, { label: "no url" }, null] }), [good]);
+  assert.deepEqual(pendingReviews({ connected: true, reviews: [good, { url: 4, label: "bad url type" }, { label: "no url" }, null] }), [good]);
+  // A review belongs to the Morrow connection that sent it, so none shows once Morrow is not connected.
+  assert.deepEqual(pendingReviews({ connected: false, paired: false, reviews: [good] }), []);
   assert.equal(reviewButtonLabel(good), "Review: Update due date in Anatomy");
 });
 

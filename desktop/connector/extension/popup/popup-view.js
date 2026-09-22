@@ -67,9 +67,10 @@ export function currentBinding(status) {
 }
 
 // WI-2.4 (D1b): the reviews that wait, pushed by the runtime's ui_state command and kept by the
-// Bridge in memory only. The popup lists them; it never opens one by itself.
+// Bridge in memory only. The popup lists them; it never opens one by itself. They belong to the
+// Morrow connection that sent them, so none shows while Morrow is not connected.
 export function pendingReviews(status) {
-  return Array.isArray(status?.reviews)
+  return status?.connected === true && Array.isArray(status?.reviews)
     ? status.reviews.filter((review) => review && typeof review.url === "string" && typeof review.label === "string")
     : [];
 }

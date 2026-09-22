@@ -805,6 +805,58 @@ async function popupEditStatusScenario() {
   socket.close(1000, "done");
 }
 
+function uiStateCommand(reviews, overrides = {}) {
+  return bridgeCommand({
+    requestId: `request-ui-state-${reviews.length}-${Math.random()}`,
+    operationId: `operation-ui-state-${reviews.length}`,
+    kind: "ui_state",
+    toolName: undefined,
+    operationKey: undefined,
+    sourceBindingId: undefined,
+    arguments: undefined,
+    uiState: { reviews },
+    ...overrides,
+  });
+}
+
+// The reviews that wait belong to one Morrow connection. The popup is told as soon as they
+// change, and they are gone, with their badge count, once that connection ends in any way.
+async function reviewsFollowConnectionScenario(ending) {
+  const value = fixture();
+  const notices = [];
+  const badge = [];
+  globalThis.chrome.runtime.sendMessage = async (message) => { notices.push(message?.type); };
+  globalThis.chrome.action = {
+    setBadgeText: async ({ text }) => { badge.push(text); },
+    setBadgeBackgroundColor: async () => undefined,
+    setTitle: async () => undefined,
+  };
+  await importWorker(`reviews-${ending}`);
+  const socket = await authenticate(value);
+  const reviews = [{ url: "http://127.0.0.1:44300/operations/op-12345678", label: "Update the syllabus page in Biology" }];
+  notices.length = 0;
+  const command = uiStateCommand(reviews);
+  socket.receive(command);
+  await eventually(() => socket.sent.find((message) => message.requestId === command.requestId));
+  await eventually(() => notices.includes("morrow_bridge_status_changed"));
+  assert.equal(badge.at(-1), "1");
+  const waiting = await sendRuntime(value, { type: "morrow_status" });
+  assert.deepEqual(waiting.result.reviews, reviews);
+
+  notices.length = 0;
+  if (ending === "socket") socket.close(1006, "transport_lost");
+  else if (ending === "disconnect") assert.equal((await sendRuntime(value, { type: "morrow_disconnect" })).ok, true);
+  else withdrawConsent(value);
+  // Disconnect Morrow clears stored state, and the popup already reads again on that storage change.
+  if (ending !== "disconnect") await eventually(() => notices.includes("morrow_bridge_status_changed"));
+  await eventually(() => badge.at(-1) !== "1");
+  assert.notEqual(badge.at(-1), "1", "the badge still counts reviews from an ended connection");
+  if (ending !== "consent") {
+    const after = await sendRuntime(value, { type: "morrow_status" });
+    assert.deepEqual(after.result.reviews, [], "the popup still lists reviews from an ended connection");
+  }
+}
+
 // Plan and Edit settings saves Edit access with no duration, and the saved grant has no end time.
 async function settingsSaveUntimedScenario() {
   const value = fixture();
@@ -1490,6 +1542,9 @@ const scenarios = {
   "policy-merge-legacy": policySetMergeLegacyTimedScenario,
   "settings-save-untimed": settingsSaveUntimedScenario,
   "popup-edit-status": popupEditStatusScenario,
+  "reviews-socket": () => reviewsFollowConnectionScenario("socket"),
+  "reviews-disconnect": () => reviewsFollowConnectionScenario("disconnect"),
+  "reviews-consent": () => reviewsFollowConnectionScenario("consent"),
   "policy-merge-stale-revision": policySetMergeStaleRevisionScenario,
   "maintenance-cancel": () => maintenanceMutationScenario("cancel"),
   "maintenance-expiry": () => maintenanceMutationScenario("expiry"),
@@ -1602,6 +1657,18 @@ test("a policy-set merge into a grant saved with an end time keeps that end time
 
 test("the popup reads Edit status and returns a course to Plan, and nothing else, from its exact page", async () => {
   await isolatedScenario("popup-edit-status");
+});
+
+test("reviews that wait reach the open popup at once, and a closed Morrow connection clears them and their badge", async () => {
+  await isolatedScenario("reviews-socket");
+});
+
+test("Disconnect Morrow clears the reviews that wait and their badge", async () => {
+  await isolatedScenario("reviews-disconnect");
+});
+
+test("withdrawing course data consent clears the reviews that wait and their badge", async () => {
+  await isolatedScenario("reviews-consent");
 });
 
 test("a Settings save creates Edit access with no end time", async () => {

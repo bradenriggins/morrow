@@ -2136,12 +2136,24 @@ function bridgeUiState(command) {
   return { reviews };
 }
 
-/** Stores the checked list in memory only, and lets the badge reflect the new count (WI-1.3). */
+/**
+ * Stores the checked list in memory only, lets the badge reflect the new count (WI-1.3), and tells
+ * an open popup to read it.
+ */
 async function applyBridgeUiState(uiState) {
   state.reviews = uiState.reviews;
   state.reviewsWaiting = uiState.reviews.length;
   await refreshBadge();
+  void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
   return { schema: "morrow.bridge.ui-state.v1", accepted: uiState.reviews.length };
+}
+
+// The reviews that wait belong to one Morrow connection, so they end with it.
+function clearBridgeReviews() {
+  if (!state.reviews.length && !state.reviewsWaiting) return;
+  state.reviews = [];
+  state.reviewsWaiting = 0;
+  void refreshBadge().catch(() => undefined);
 }
 
 async function editPolicyOptions(sourceBindingId, authorityGeneration = state.courseDataAuthorityGeneration) {
@@ -2576,6 +2588,7 @@ function retireBridgeSocket(socket, { closeCode = null, reason = "", reconnect =
   state.generation = 0;
   state.accepted = null;
   clearPrivateChat();
+  clearBridgeReviews();
   if (Number.isInteger(closeCode)) {
     try { socket.close(closeCode, reason); } catch {}
   }
@@ -6067,7 +6080,7 @@ async function status() {
     anchorCount: siteAnchors.length,
     siteAnchors,
     bindingCount: bindings.length,
-    reviews: state.reviews,
+    reviews: connected ? state.reviews : [],
     bindings: bindings.map((binding) => ({ sourceBindingId: binding.sourceBindingId, provider: binding.provider, origin: binding.origin, siteUrl: binding.siteUrl, courseId: binding.courseId, courseName: binding.courseName, runtimeVerified: binding.runtimeVerified, ...(binding.firstReadCompleted ? { firstReadCompleted: true } : {}), lastSeenAt: binding.lastSeenAt })),
   };
 }
@@ -6164,6 +6177,7 @@ async function disconnectConnector() {
   state.generation = 0;
   state.accepted = null;
   state.authenticationProblem = null;
+  clearBridgeReviews();
   socket?.close(1000, "user_disconnected");
   await chrome.alarms.clear("morrow-pairing");
   await queueStorageMutation(async () => {
@@ -6330,6 +6344,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   state.socket = null;
   state.generation = 0;
   state.accepted = null;
+  clearBridgeReviews();
   socket?.close(1000, "course_data_consent_removed");
   void cancelPairingAfterConsentWithdrawal().catch(() => {});
   void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
