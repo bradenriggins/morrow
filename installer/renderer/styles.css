@@ -187,7 +187,6 @@ h3 { margin: 0; font-size: 0.875rem; font-weight: 700; letter-spacing: -.015em; 
 .instructions li::before { position: absolute; top: 0; left: 0; display: grid; width: 22px; height: 22px; place-items: center; border-radius: var(--radius-pill); background: var(--surface-sunken); color: var(--text-secondary); content: counter(instruction); font-size: 0.8125rem; font-weight: 700; line-height: 1; }
 .instructions strong { color: var(--text); font-weight: 700; }
 .prompt { padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-sunken); color: var(--text); font-size: 0.875rem; font-weight: 600; line-height: 1.45; }
-.setup-heading { margin-top: var(--space-2); border-top: 1px solid var(--border); padding-top: var(--space-4); font-size: 0.875rem; line-height: 1.45; }
 .materials-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); }
 .materials-row > :first-child { flex: 1 1 240px; min-width: 0; }
 .materials-row p { margin-top: 3px; font-size: 0.8125rem; line-height: 1.45; }

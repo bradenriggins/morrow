@@ -492,7 +492,7 @@ export function supportView(current) {
   const supportRow = `<li><span class="support-label">Support</span><button class="quiet-button" type="button" data-action="open-support">${escapeHtml(SUPPORT_ADDRESS)}</button></li>`;
   return {
     title: "Where to get help",
-    copy: "Morrow opens two pages only: its Chrome Web Store listing and its support page. Select Support to open its page, and name the version below when you write.",
+    copy: "Morrow opens its support page. Select Support to open it, and name the version below when you write.",
     body: `<ul class="support-list">${rows.map((row) => `<li><span class="support-label">${escapeHtml(row.label)}</span><span class="${row.path ? "support-path" : "support-value"}">${escapeHtml(row.value)}</span></li>`).join("")}${supportRow}</ul>`
   };
 }

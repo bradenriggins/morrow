@@ -133,4 +133,30 @@ describe("GET /recent", () => {
       await server.close();
     }
   });
+
+  it("links the verified result page to /recent with a working one-time entry code", async () => {
+    const operation = finishedOperation();
+    const controller: ApprovalOperationController = {
+      ...recentController([operation]),
+      operationGet: () => operation,
+      operationReviewContext: async () => ({
+        targets: [{ field: "content_id", label: "Page", name: "Week 2 overview" }],
+      }),
+    };
+    const server = new LoopbackApprovalServer(controller);
+    try {
+      const baseUrl = await server.start();
+      const resultPage = await (await fetch(`${baseUrl}/operations/${encodeURIComponent("op:recent-1234")}`)).text();
+      const match = resultPage.match(/<a href="\/recent\?entry=([A-Za-z0-9_-]+)">See recent changes<\/a>/);
+      expect(match).toBeTruthy();
+      const exchanged = await fetch(`${baseUrl}/recent?entry=${encodeURIComponent(match![1])}`, { redirect: "manual" });
+      expect(exchanged.status).toBe(303);
+      const cookie = exchanged.headers.get("set-cookie")!.split(";", 1)[0];
+      const page = await fetch(`${baseUrl}/recent`, { headers: { cookie, accept: "text/html" } });
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain("Recent changes");
+    } finally {
+      await server.close();
+    }
+  });
 });

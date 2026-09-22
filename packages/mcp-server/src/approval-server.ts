@@ -859,15 +859,17 @@ function keepOpenInstruction(platform: string): string {
  * Every other state stays the plain, calm outcome section below. It never earns
  * the success mark, confirmed or not.
  */
-function verifiedResultContent(platform: string, item?: { name: string; url?: string }): string {
+function verifiedResultContent(platform: string, item?: { name: string; url?: string }, recentEntry?: string | null): string {
   const itemName = item?.name ? `<p class="result-item">${escapeHtml(item.name)}</p>` : "";
   const openLink = item?.url ? `<p><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">Open in ${escapeHtml(platform)}</a></p>` : "";
   const title = "Canvas saved the change. Morrow checked the result.".replaceAll("Canvas", platform);
-  return `<section class="outcome outcome-success"><svg class="success-mark" viewBox="0 0 40 40" aria-hidden="true" focusable="false"><circle cx="20" cy="20" r="17"></circle><path d="M12 21l6 6L29 13"></path></svg><h1>${title}</h1>${itemName}${openLink}<p>Return to your assistant. It continues on its own.</p><p><a href="/recent">See recent changes</a></p></section>`;
+  // The Recent changes page needs a one-time entry code; a bare /recent link answers 403.
+  const recentLink = recentEntry ? `<p><a href="/recent?entry=${escapeHtml(recentEntry)}">See recent changes</a></p>` : "";
+  return `<section class="outcome outcome-success"><svg class="success-mark" viewBox="0 0 40 40" aria-hidden="true" focusable="false"><circle cx="20" cy="20" r="17"></circle><path d="M12 21l6 6L29 13"></path></svg><h1>${title}</h1>${itemName}${openLink}<p>Return to your assistant. It continues on its own.</p>${recentLink}</section>`;
 }
 
-function stateContent(state: string, platform = "Canvas", attention: readonly unknown[] = [], item?: { name: string; url?: string }): string {
-  if (state === "verified") return verifiedResultContent(platform, item);
+function stateContent(state: string, platform = "Canvas", attention: readonly unknown[] = [], item?: { name: string; url?: string }, recentEntry?: string | null): string {
+  if (state === "verified") return verifiedResultContent(platform, item, recentEntry);
   const content: Record<string, [string, string]> = {
     approved: ["Changes not started", "Your approval was saved, but this request is not running. Return to your assistant and ask Morrow to check this saved request before starting anything else."],
     cancelled: ["Request cancelled", "Morrow will not start more changes for this request. Changes already sent may still finish. Return to the assistant where you started this request to check the result."],
@@ -978,7 +980,7 @@ async function reviewContexts(
   return contexts;
 }
 
-function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boolean, contexts?: ReadonlyMap<string, ApprovalReviewContext>, rememberText?: string): string {
+function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boolean, contexts?: ReadonlyMap<string, ApprovalReviewContext>, rememberText?: string, recentEntry?: string | null): string {
   let state = reviewState(target, snapshot);
   if (active && state === "approved") state = "running";
   if (!active && ["running", "dispatching"].includes(state)) state = "interrupted";
@@ -988,7 +990,7 @@ function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boo
   const platform = snapshotPlatform(snapshot);
   const attention = Array.isArray(snapshot.attention) ? snapshot.attention : [];
   const item = state === "verified" ? resultItem(target, snapshot, contexts) : undefined;
-  return stateContent(state, platform, attention, item)
+  return stateContent(state, platform, attention, item, recentEntry)
     + (total ? `<section class="section"><p>${confirmed} of ${total} changes confirmed in ${platform}.</p></section>` : "")
     + (rememberText ? `<section class="section remember-result"><p>${escapeHtml(rememberText)}</p></section>` : "");
 }
@@ -1003,6 +1005,7 @@ function html(
   active: boolean,
   rememberOffer: RememberOffer | null,
   rememberText: string | undefined,
+  recentEntry: string | null,
 ): string {
   let issued: string | null = null;
   const nonce = (): string => (issued ??= grant());
@@ -1121,7 +1124,7 @@ function html(
   const reviewContent = batch ? `<section class="batch-review"><div class="change-list-controls" hidden><label for="change-search">Find a change</label><input id="change-search" type="search" placeholder="Search titles or courses" autocomplete="off"></div><div class="change-list">${changed}</div><nav class="change-pagination" aria-label="Review pages" hidden><p id="changes-count" role="status" aria-live="polite"></p><div><button id="changes-previous" type="button" class="secondary">Previous</button><button id="changes-next" type="button" class="secondary">Next</button></div></nav></section>` : changed;
   if (state !== "awaiting_approval") {
     const stop = batch && active ? `<div class="actions" id="stop-work"><form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="cancel" type="submit">Stop remaining changes</button></form></div>` : "";
-    return pageShell("Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active, contexts, rememberText)}</div>${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
+    return pageShell("Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active, contexts, rememberText, recentEntry)}</div>${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
   }
   const addingQuestion = !batch && plan.tool === "canvas_create_quiz_item";
   const planRouting = object(object(plan.arguments)._morrow);
@@ -1484,10 +1487,12 @@ export class LoopbackApprovalServer {
           ? snapshot.children.map((child) => object(object(child).operation)) : [snapshot];
         if (target.action === "status") {
           const states = object(snapshot.states);
-          const contexts = reviewState(target, snapshot) === "verified"
+          const verifiedNow = reviewState(target, snapshot) === "verified";
+          const contexts = verifiedNow
             ? await reviewContexts(this.controller, operations, signal)
             : undefined;
-          sendJson(response, 200, { html: statusContent(target, snapshot, active, contexts, this.rememberText(target)), active, states });
+          const recentEntry = verifiedNow ? this.issueRecentChangesEntry() : null;
+          sendJson(response, 200, { html: statusContent(target, snapshot, active, contexts, this.rememberText(target), recentEntry), active, states });
           return;
         }
         const expiry = Date.parse(String(snapshot.approvalExpiresAt || snapshot.expiresAt || ""));
@@ -1502,7 +1507,8 @@ export class LoopbackApprovalServer {
         const rememberOffer = target.kind === "operations" && state === "awaiting_approval" && this.controller.rememberOffer
           ? await this.controller.rememberOffer(target.id).catch(() => null)
           : null;
-        const body = html(target, snapshot, () => (nonce = this.issueNonce(nonceKey, canApprove)), contexts, active, rememberOffer, this.rememberText(target));
+        const recentEntry = state === "verified" ? this.issueRecentChangesEntry() : null;
+        const body = html(target, snapshot, () => (nonce = this.issueNonce(nonceKey, canApprove)), contexts, active, rememberOffer, this.rememberText(target), recentEntry);
         sendHtml(
           response,
           200,
