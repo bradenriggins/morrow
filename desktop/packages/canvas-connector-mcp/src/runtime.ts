@@ -635,7 +635,7 @@ export class CanvasConnectorRuntime {
       });
       if (!response.ok || !isJsonObject(response.result)
         || response.result.schema !== "morrow.private-chat.exchange.v1"
-        || !["message", "closed"].includes(String(response.result.status))) {
+        || !["message", "closed", "labels_required"].includes(String(response.result.status))) {
         return {
           schema: "morrow.private-chat.exchange.v1",
           ok: false,

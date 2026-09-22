@@ -2462,7 +2462,7 @@ export class GatewayRuntime {
   ): Promise<ApprovalReviewContext> {
     try {
       const operation = this.effects.get(operationId);
-      return resolveApprovalReviewContext({
+      const context = await resolveApprovalReviewContext({
         operation,
         tools: this.catalog.tools,
         ...(cache ? { cache } : {}),
@@ -2470,11 +2470,44 @@ export class GatewayRuntime {
           await this.callSourceOwned(publicName, args, { signal }),
         ),
       });
+      const learnerNames = await this.reviewLearnerNames(operation, context).catch(() => null);
+      return learnerNames ? { ...context, learnerNames } : context;
     } catch {
       // A review that could not be resolved names nothing, and a page that names
       // nothing approves nothing.
       return { targets: [], unnamed: true };
     }
+  }
+
+  /**
+   * The student behind each learner label a reviewed change names, read from the
+   * learner vault in the change's current course scope. It serves only the
+   * educator's loopback review page. A label that does not resolve leaves the
+   * whole change without names, so the page never shows a partial guess.
+   */
+  private async reviewLearnerNames(
+    operation: EffectOperationRecord,
+    context: ApprovalReviewContext,
+  ): Promise<Record<string, string> | null> {
+    const labels = [...new Set(JSON.stringify([operation.plan, context]).match(/\bStudent A[1-9][0-9]*\b/gu) ?? [])];
+    const mapping = this.toolByPublicName.get(operation.publicToolName);
+    if (!labels.length || !operation.sourceBindingId || !mapping || !isCanvasConnector(mapping)) return null;
+    const args = isJsonObject(operation.plan.arguments) ? operation.plan.arguments : {};
+    const request = { ...args, _morrow: { source_binding_id: operation.sourceBindingId } };
+    const binding = await this.verifiedBrowserBindingBySource(mapping, request);
+    const courseId = this.requestCourseId(args) ?? this.exactString(binding.courseId, 160);
+    if (!courseId || binding.courseId !== courseId) return null;
+    const scope = binding.provider === "moodle"
+      ? this.moodleBindingScope(binding, operation.sourceBindingId, courseId)
+      : this.canvasBindingScope(binding, operation.sourceBindingId, courseId);
+    if (!scope) return null;
+    const names: Record<string, string> = {};
+    for (const label of labels) {
+      const name = this.learnerVault.resolve(scope, label).name;
+      if (!name) return null;
+      names[label] = name;
+    }
+    return names;
   }
 
   operationsRecent(input: RecentOperationsInput = {}): JsonObject {
@@ -3863,23 +3896,94 @@ export class GatewayRuntime {
     const source = this.editAccessBindingsTool();
     const upstream = source ? this.upstreams.get(source.upstreamId) : undefined;
     if (!source || !upstream) throw new Error("The current browser connection is unavailable or ambiguous.");
-    const raw = await upstream.callTool("morrow_private_chat_exchange", input, { safeToRetry: false, signal });
-    const result = isJsonObject(raw) && isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
-    if (!result || result.schema !== "morrow.private-chat.exchange.v1") throw new Error("The Private Chat relay returned an invalid result.");
-    if (result.status === "closed" && Object.keys(result).every((key) => ["schema", "status"].includes(key))) return result;
-    if (result.status !== "message"
-      || Object.keys(result).some((key) => !["schema", "status", "sessionId", "sourceBindingId", "courseId", "protectedText"].includes(key))
-      || result.sessionId !== input.sessionId
-      || typeof result.sourceBindingId !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(result.sourceBindingId)
-      || typeof result.courseId !== "string" || !/^[1-9][0-9]{0,18}$/.test(result.courseId)
-      || typeof result.protectedText !== "string" || !result.protectedText.trim() || result.protectedText.length > 100_000) {
-      throw new Error("The Private Chat relay returned an invalid protected message.");
+    let request = input;
+    // The Bridge asks once per message for the labels of the students it names,
+    // then answers the labels exchange with the protected message.
+    for (let round = 0; round < 2; round += 1) {
+      const raw = await upstream.callTool("morrow_private_chat_exchange", request, { safeToRetry: false, signal });
+      const result = isJsonObject(raw) && isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
+      if (!result || result.schema !== "morrow.private-chat.exchange.v1") throw new Error("The Private Chat relay returned an invalid result.");
+      if (result.status === "closed" && Object.keys(result).every((key) => ["schema", "status"].includes(key))) return result;
+      if (result.status === "labels_required" && round === 0) {
+        const learnerIds = result.learnerIds;
+        if (Object.keys(result).some((key) => !["schema", "status", "sessionId", "sourceBindingId", "courseId", "learnerIds"].includes(key))
+          || result.sessionId !== input.sessionId
+          || typeof result.sourceBindingId !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(result.sourceBindingId)
+          || typeof result.courseId !== "string" || !/^[1-9][0-9]{0,18}$/.test(result.courseId)
+          || !Array.isArray(learnerIds) || learnerIds.length < 1 || learnerIds.length > 500
+          || learnerIds.some((id) => typeof id !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(id))
+          || new Set(learnerIds).size !== learnerIds.length) {
+          throw new Error("The Private Chat relay returned an invalid label request.");
+        }
+        if (input.action === "reply_and_listen"
+          && (result.sourceBindingId !== input.sourceBindingId || result.courseId !== input.courseId)) {
+          throw new Error("The Private Chat course changed during the exchange.");
+        }
+        request = {
+          schema: "morrow.private-chat.exchange.v1",
+          action: "labels",
+          sessionId: input.sessionId as string,
+          assistantName: input.assistantName as string,
+          sourceBindingId: result.sourceBindingId,
+          courseId: result.courseId,
+          labelsById: await this.privateChatLearnerLabels(result.sourceBindingId, result.courseId, learnerIds as string[], signal),
+        };
+        continue;
+      }
+      if (result.status !== "message"
+        || Object.keys(result).some((key) => !["schema", "status", "sessionId", "sourceBindingId", "courseId", "protectedText"].includes(key))
+        || result.sessionId !== input.sessionId
+        || typeof result.sourceBindingId !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(result.sourceBindingId)
+        || typeof result.courseId !== "string" || !/^[1-9][0-9]{0,18}$/.test(result.courseId)
+        || typeof result.protectedText !== "string" || !result.protectedText.trim() || result.protectedText.length > 100_000) {
+        throw new Error("The Private Chat relay returned an invalid protected message.");
+      }
+      if ((input.action === "reply_and_listen" || request.action === "labels")
+        && (result.sourceBindingId !== request.sourceBindingId || result.courseId !== request.courseId)) {
+        throw new Error("The Private Chat course changed during the exchange.");
+      }
+      return result;
     }
-    if (input.action === "reply_and_listen"
-      && (result.sourceBindingId !== input.sourceBindingId || result.courseId !== input.courseId)) {
-      throw new Error("The Private Chat course changed during the exchange.");
-    }
-    return result;
+    throw new Error("The Private Chat relay asked for course labels more than once.");
+  }
+
+  /**
+   * The labels the learner vault holds for these students in the exact course
+   * scope every tool result uses, so Private Chat and tool results give one
+   * student one label. The whole roster is published first, in roster order, so
+   * a label never depends on which surface asked first.
+   */
+  private async privateChatLearnerLabels(
+    sourceBindingId: string,
+    courseId: string,
+    learnerIds: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<Record<string, string>> {
+    const source = this.editAccessBindingsTool();
+    const rosterTool = (name: string): CatalogTool | undefined => this.catalog.tools.find((candidate) => (
+      candidate.upstreamId === source?.upstreamId && candidate.upstreamName === name
+      && candidate.annotations?.readOnlyHint === true && isCanvasConnector(candidate)
+    ));
+    const canvas = rosterTool("canvas_list_users_in_course_users");
+    const moodle = rosterTool("moodle_get_course_participant_roster");
+    const mapping = canvas ?? moodle;
+    if (!source || !mapping) throw new Error("The course roster is unavailable for Private Chat.");
+    const request = { course_id: courseId, _morrow: { source_binding_id: sourceBindingId } };
+    const binding = await this.verifiedBrowserBinding(mapping, request, { signal });
+    const context = binding.provider === "moodle" && moodle
+      ? await this.moodleLearnerContextForBinding(moodle, sourceBindingId, courseId, binding, { signal })
+      : binding.provider === "canvas" && canvas
+        ? await this.canvasLearnerContextForBinding(canvas, sourceBindingId, courseId, binding, { signal })
+        : null;
+    if (!context) throw new Error("The course roster is unavailable for Private Chat.");
+    const identities = context.learnerRoster.identities(context.learnerScope);
+    const { labels } = this.learnerVault.prepareTextReferences(context.learnerScope, identities);
+    const byId = new Map(identities.map((identity, index) => [identity.id, labels[index]!]));
+    return Object.fromEntries(learnerIds.map((id) => {
+      const label = byId.get(id);
+      if (!label) throw new Error("A student in this Private Chat message is not on the current course roster.");
+      return [id, label];
+    }));
   }
 
   private async resolveCurrentEditAuthorization(

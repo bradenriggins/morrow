@@ -168,6 +168,59 @@ test("local protection fails closed for ambiguity, unknown data, stale or incomp
   );
 });
 
+const COURSE = [
+  { id: 98765, name: "Jane Doe", sortable_name: "Doe, Jane", short_name: "Janie D", login_id: "jdoe", email: "jane.doe@school.edu", sis_user_id: "20231234" },
+  { id: 55123, name: "José García", sortable_name: "García, José", login_id: "jgarcia", email: "jgarcia@school.edu" },
+  { id: 44001, name: "Will Grant", sortable_name: "Grant, Will", login_id: "wgrant" },
+  { id: 44002, name: "Mia Chen", sortable_name: "Chen, Mia" },
+];
+
+function protectCourse(text, assertedIdentifiers, fields = {}) {
+  return protectLocalRequest({
+    sourceBindingId: "canvas:course-1", courseId: "1", text, assertedIdentifiers,
+    roster: canvasProtectedRoster(COURSE, [], "1"), rosterComplete: true, rosterFreshAt: NOW, now: NOW, ...fields,
+  });
+}
+
+test("local protection matches a rostered name written without its accents, on both sides", () => {
+  const unasserted = protectCourse("Jane Doe and Jose Garcia are failing", ["Jane Doe"]).protectedText;
+  assert.doesNotMatch(unasserted, /Jos|Garc/iu);
+  assert.match(unasserted, /^Student A\d+ and Student A\d+ are failing$/u);
+  const asserted = protectCourse("Please review Jose Garcia.", ["Jose Garcia"]).protectedText;
+  assert.match(asserted, /^Please review Student A\d+\.$/u);
+  const accented = protectCourse("Please review José García.", ["Jose Garcia"]).protectedText;
+  assert.equal(accented, asserted);
+});
+
+test("local protection replaces a rostered platform id written after a person word or bare", () => {
+  const result = protectCourse("Jane Doe is user 98765 and 55123", ["Jane Doe"]);
+  assert.doesNotMatch(result.protectedText, /98765|55123/u);
+  assert.match(result.protectedText, /^(Student A\d+) is user \1 and Student A\d+$/u);
+  assert.equal(protectCourse("Jane Doe scored 44 in module 44001", ["Jane Doe"]).protectedText.endsWith("in module 44001"), true);
+});
+
+test("local protection does not turn common words that match a lone name part into labels", () => {
+  const ordinary = protectCourse("Jane Doe will get a grant for this", ["Jane Doe"]);
+  assert.match(ordinary.protectedText, /^Student A\d+ will get a grant for this$/u);
+  assert.deepEqual(ordinary.unmatchedNames, []);
+  const fullName = protectCourse("Will Grant needs help, and so does Jane Doe.", ["Will Grant", "Jane Doe"]).protectedText;
+  assert.doesNotMatch(fullName, /Will|Grant/u);
+  const surname = protectCourse("Ask Grant about Jane Doe.", ["Jane Doe"]).protectedText;
+  assert.doesNotMatch(surname, /Grant/u);
+});
+
+test("local protection reports name-like words it could not match instead of passing them silently", () => {
+  const nickname = protectCourse("Jane Doe (goes by Janey) and Bobby Smith are failing", ["Jane Doe"]);
+  assert.deepEqual(nickname.unmatchedNames, ["Janey", "Bobby Smith"]);
+  const typo = protectCourse("Jane Doe and Mia Chenn", ["Jane Doe"]);
+  assert.deepEqual(typo.unmatchedNames, ["Chenn"]);
+  const sentenceStart = protectCourse("Will you check Jane Doe? Grant needs one too.", ["Jane Doe"]);
+  assert.deepEqual(sentenceStart.unmatchedNames, ["Will", "Grant"]);
+  assert.deepEqual(protectCourse("\"Will you check Jane Doe?\"\nGrant asked.", ["Jane Doe"]).unmatchedNames, ["Will", "Grant"]);
+  const plain = protectCourse("On Monday, check Jane Doe in Canvas. The Module 2 quiz is late.", ["Jane Doe"]);
+  assert.deepEqual(plain.unmatchedNames, []);
+});
+
 test("the tucked-away drawer sends through an active relay and closing it clears local raw fields", async () => {
   const status = {
     catalogDigest: "c".repeat(64),
@@ -304,4 +357,139 @@ test("the service worker clears only the exact cancelled Private Chat request", 
   context.cancel({ ...exact, requestId: startedWrite.requestId, operationId: startedWrite.operationId });
   assert.equal(started.cancelled, true);
   assert.equal(context.results.at(-1).failure.code, "write_outcome_unknown");
+});
+
+function privateChatWorker() {
+  const worker = readFileSync(new URL("connector/extension/src/service-worker.js", root), "utf8");
+  const start = worker.indexOf("function privateChatStatus()");
+  const end = worker.indexOf("\nfunction editPermissionSummary", start);
+  assert.ok(start >= 0 && end > start);
+  const sent = [];
+  const context = {
+    state: { generation: 3, privateChat: null, privateChatClosed: null, courseDataAuthorityGeneration: 1, operations: new Map([
+      ["canvas_list_users_in_course_users", { name: "canvas_list_users_in_course_users" }],
+      ["canvas_list_enrollments_courses", { name: "canvas_list_enrollments_courses" }],
+    ]) },
+    sent,
+    chrome: { runtime: { sendMessage: async () => undefined } },
+    setTimeout, clearTimeout, Date, Promise, Error, Object, Array, Number, String, Set, Map, JSON, RegExp,
+    protectLocalRequest, canvasProtectedRoster, sourceProtectedRoster,
+    problem(code, message, recoverable) { return { code, message, recoverable }; },
+    sendResult(command, ok, result, failure) { sent.push({ command, ok, result, failure }); },
+    async courseDataAuthorityCurrent() { return true; },
+    async catalog() {},
+    async bindingFor(id) {
+      return { sourceBindingId: id, provider: "canvas", courseId: "1", runtimeVerified: true };
+    },
+    async executeOperation(_binding, operation) {
+      return operation.name === "canvas_list_users_in_course_users"
+        ? { ok: true, truncated: false, data: COURSE }
+        : { ok: true, truncated: false, data: [] };
+    },
+  };
+  vm.runInNewContext(`${worker.slice(start, end)}
+globalThis.api = { handlePrivateChatExchange, submitPrivateChatMessage, privateChatStatus, clearPrivateChat };`, context);
+  let request = 0;
+  const command = (args) => ({
+    requestId: `bridge:request-${++request}`, operationId: `private-chat:operation-${request}`, generation: 3,
+    expiresAt: Date.now() + 60_000,
+    arguments: { schema: "morrow.private-chat.exchange.v1", sessionId: "session-12345678", assistantName: "Desktop assistant", ...args },
+  });
+  return { api: context.api, sent, command };
+}
+
+test("Private Chat takes each student's label from the gateway and shows the educator real names", async () => {
+  const { api, sent, command } = privateChatWorker();
+  await api.handlePrivateChatExchange(command({ action: "listen" }));
+  const submitted = api.submitPrivateChatMessage("canvas:course-1", "Extend Jane Doe's due date. Will Grant too.", ["Jane Doe", "Will Grant"]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const request = sent.at(-1);
+  assert.equal(request.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(request.result)), {
+    schema: "morrow.private-chat.exchange.v1", status: "labels_required", sessionId: "session-12345678",
+    sourceBindingId: "canvas:course-1", courseId: "1", learnerIds: ["44001", "98765"],
+  });
+  await api.handlePrivateChatExchange(command({
+    action: "labels", sourceBindingId: "canvas:course-1", courseId: "1",
+    labelsById: { 98765: "Student A1", 44001: "Student A3" },
+  }));
+  assert.deepEqual(JSON.parse(JSON.stringify(await submitted)), { status: "sent" });
+  const message = sent.at(-1).result;
+  assert.equal(message.status, "message");
+  assert.equal(message.protectedText, "Extend Student A1's due date. Student A3 too.");
+  // Only ids reach the gateway, to ask for labels; no name leaves the Bridge.
+  assert.doesNotMatch(JSON.stringify(sent), /Jane|Doe|Will|Grant|jdoe|school\.edu/u);
+
+  await api.handlePrivateChatExchange(command({
+    action: "reply_and_listen", sourceBindingId: "canvas:course-1", courseId: "1",
+    assistantReply: "Student A1 now has until Friday; Student A3 still needs one.",
+  }));
+  const status = JSON.parse(JSON.stringify(api.privateChatStatus()));
+  assert.deepEqual(status.messages.map((entry) => entry.text), [
+    "Extend Student A1's due date. Student A3 too.",
+    "Student A1 now has until Friday; Student A3 still needs one.",
+  ]);
+  assert.deepEqual(status.messages[1].parts, [
+    { name: "Jane Doe", label: "Student A1" }, { text: " now has until Friday; " },
+    { name: "Will Grant", label: "Student A3" }, { text: " still needs one." },
+  ]);
+  api.clearPrivateChat({ answerPending: true });
+  assert.equal(api.privateChatStatus().messages.length, 0);
+});
+
+test("Private Chat asks the educator to confirm name-like words it could not match before sending", async () => {
+  const { api, sent, command } = privateChatWorker();
+  await api.handlePrivateChatExchange(command({ action: "listen" }));
+  const before = sent.length;
+  const review = await api.submitPrivateChatMessage("canvas:course-1", "Compare Mia Chen with Bobby Smith.", ["Mia Chen"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(review)), { status: "review", names: ["Bobby Smith"] });
+  assert.equal(sent.length, before);
+  const submitted = api.submitPrivateChatMessage("canvas:course-1", "Compare Mia Chen with Bobby Smith.", ["Mia Chen"], ["Bobby Smith"]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual([...sent.at(-1).result.learnerIds], ["44002"]);
+  await assert.rejects(api.handlePrivateChatExchange(command({
+    action: "labels", sourceBindingId: "canvas:course-1", courseId: "1", labelsById: { 44001: "Student A3" },
+  })).then(() => submitted), /private_chat_labels_invalid/u);
+});
+
+test("the drawer shows the educator real names and asks before sending unmatched names", async () => {
+  const status = {
+    catalogDigest: "c".repeat(64), bindingLimit: 500, siteAnchors: [],
+    bindings: [{
+      sourceBindingId: "canvas:course-1", provider: "canvas", origin: "https://canvas.example.edu",
+      siteUrl: "https://canvas.example.edu", principalId: "teacher@example.edu", courseId: "1",
+      courseName: "Biology", runtimeVerified: true, editPolicyRevision: 0,
+    }],
+    privateChat: {
+      schema: "morrow.private-chat.status.v1", transportAvailable: true,
+      clients: [{ id: "assistant-1", name: "Desktop assistant", protocolVersion: "2025-06-18", sampling: true, pushSampling: true }],
+      sourceBindingId: "canvas:course-1", courseId: "1",
+      messages: [
+        { role: "user", text: "Extend Student A1's due date.", parts: [{ text: "Extend " }, { name: "Jane <Doe>", label: "Student A1" }, { text: "'s due date." }] },
+        { role: "assistant", text: "Student A1 now has until Friday.", parts: [{ name: "Jane <Doe>", label: "Student A1" }, { text: " now has until Friday." }] },
+      ],
+    },
+  };
+  let sends = 0;
+  const page = await loadExtensionPage("settings/settings.html", {
+    handlers: {
+      morrow_edit_policy_status: () => status,
+      morrow_private_chat_send: () => (++sends === 1 ? { status: "review", names: ["Bobby Smith"] } : { status: "sent" }),
+      morrow_private_chat_close: () => ({ status: "closed" }),
+    },
+  });
+  await page.click("#private-chat-open");
+  const history = page.query("#private-chat-history").innerHTML;
+  assert.match(history, /Jane &lt;Doe&gt;/u);
+  assert.match(history, /title="The assistant sees Student A1"/u);
+  assert.doesNotMatch(page.text("#private-chat-history"), /Student A1/u);
+  await page.type("#private-chat-identifiers", "Mia Chen");
+  await page.type("#private-chat-message", "Compare Mia Chen with Bobby Smith.");
+  await page.click("#private-chat-send");
+  assert.match(page.text("#private-chat-status"), /Bobby Smith/u);
+  assert.equal(page.query("#private-chat-message").value, "Compare Mia Chen with Bobby Smith.");
+  assert.equal(page.messages("morrow_private_chat_send")[0].confirmedNames, undefined);
+  await page.click("#private-chat-send");
+  assert.deepEqual(page.messages("morrow_private_chat_send")[1].confirmedNames, ["Bobby Smith"]);
+  assert.equal(page.query("#private-chat-message").value, "");
 });

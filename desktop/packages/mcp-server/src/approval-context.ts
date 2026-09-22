@@ -49,6 +49,11 @@ export interface ApprovalReviewContext {
   readonly unnamed?: true;
   readonly current?: JsonObject;
   readonly question?: JsonObject;
+  /**
+   * The student each learner label in this change names, for the educator's own
+   * review page on this computer. It is never part of a tool result or receipt.
+   */
+  readonly learnerNames?: Readonly<Record<string, string>>;
 }
 
 export type ApprovalReviewReadCache = Map<string, Promise<JsonObject | null>>;

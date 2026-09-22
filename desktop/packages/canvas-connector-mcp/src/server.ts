@@ -285,6 +285,14 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
         sourceBindingId: z.string().min(1).max(160).regex(/^[A-Za-z0-9_.:@-]+$/),
         courseId: z.string().regex(/^[1-9][0-9]{0,18}$/),
       }),
+      z.strictObject({
+        ...privateChatBase,
+        action: z.literal("labels"),
+        sourceBindingId: z.string().min(1).max(160).regex(/^[A-Za-z0-9_.:@-]+$/),
+        courseId: z.string().regex(/^[1-9][0-9]{0,18}$/),
+        labelsById: z.record(z.string().regex(/^[A-Za-z0-9_.:@-]{1,160}$/), z.string().regex(/^Student A[1-9][0-9]{0,6}$/))
+          .refine((labels) => Object.keys(labels).length >= 1 && Object.keys(labels).length <= 500),
+      }),
     ]),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async (input, context) => toolResult(await runtime.privateChatExchange(input as unknown as JsonObject, context.mcpReq.signal)));
