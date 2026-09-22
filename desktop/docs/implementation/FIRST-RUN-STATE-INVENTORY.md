@@ -590,25 +590,25 @@ stale name here.
 | `Load more available courses` | Courses and access | `connector/extension/settings/settings.html:60` |
 | `Plan. Ask first.` | Courses and access | `connector/extension/settings/settings.html:65` |
 | `Edit. Routine edits.` | Courses and access | `connector/extension/settings/settings.html:66` |
-| `Enable course file access` | Courses and access | `connector/extension/settings/settings.html:162`, `connector/extension/settings/settings.js:1453` |
-| `Turn on course file access` | Courses and access | `connector/extension/settings/settings.js:1453` |
+| `Enable course file access` | Courses and access | `connector/extension/settings/settings.html:162`, `connector/extension/settings/settings.js:1479` |
+| `Turn on course file access` | Courses and access | `connector/extension/settings/settings.js:1479` |
 | `Remove HTTPS file access` | Courses and access | `connector/extension/settings/settings.html:163` |
 | `Return selected courses to Plan` | Courses and access | `connector/extension/settings/settings.html:121` |
-| `Save Edit access` | Courses and access | `connector/extension/settings/settings.html:122`, `connector/extension/settings/settings.js:772` |
-| `Review and save` | Courses and access (WI-5.5 Customize view summary bar) | `connector/extension/settings/settings.js:1427` |
+| `Save Edit access` | Courses and access | `connector/extension/settings/settings.html:122`, `connector/extension/settings/settings.js:798` |
+| `Review and save` | Courses and access (WI-5.5 Customize view summary bar) | `connector/extension/settings/settings.js:1453` |
 | `Keep reviewing` | Courses and access | `connector/extension/settings/settings.html:131` |
 | `Save Edit access anyway` | Courses and access | `connector/extension/settings/settings.html:132` |
-| `Open Canvas` | Courses and access | `connector/extension/settings/settings.js:403` |
-| `Open Moodle` | Courses and access | `connector/extension/settings/settings.js:404` |
-| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1166` |
-| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1166` |
-| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1166` |
-| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:1166` |
-| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:1166` |
-| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:1184` |
-| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:1150` |
-| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:1147` |
-| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:1149` |
+| `Open Canvas` | Courses and access | `connector/extension/settings/settings.js:429` |
+| `Open Moodle` | Courses and access | `connector/extension/settings/settings.js:430` |
+| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1186` |
+| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1186` |
+| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1186` |
+| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:1186` |
+| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:1186` |
+| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:1204` |
+| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:1170` |
+| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:1167` |
+| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:1169` |
 
 Names a person reads as landmarks rather than presses:
 
