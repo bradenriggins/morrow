@@ -41,10 +41,16 @@ Run `install.sh` from the dist root. Expected:
 
 1. The educator signs in on the login helper page, exactly as they
    normally would, including MFA. The agent never sees the password.
-2. Agent verifies immediately: GET /api/v1/users/self must return the
-   educator's profile. The principal id and name are pinned into the
-   lane state. A login page here means the sign-in did not stick: ask
-   once more, then stop and report.
+2. Agent verifies immediately and pins the account:
+   `python3 reauth/state_machine.py pin --first-signin`. It checks the
+   helper `/status` shows a live session, reads GET
+   /api/v1/users/self, and pins that principal id and name into the
+   lane state (`~/.morrow/browser_lane.json`). Confirm the printed
+   name with the educator. (keepalive also runs this on its first
+   healthy tick, so a pin exists even if this step is skipped.) A
+   failure here means the sign-in did not stick: ask once more, then
+   stop and report. Later re-sign-ins resume paused work only for
+   this pinned account.
 3. The one-time notice stops repeating only when a genuinely
    authenticated session with stored cookies is confirmed
    (`logged_in=true`, `profile_has_cookies=true`).
@@ -64,8 +70,10 @@ Expected behavior:
 
 - Plan mode is the default: reads need no approval, writes require
   approval of a validated plan.
-- Edit mode is one blanket grant: "make edit mode my default". Reads
-  stay unrestricted; writes stop surfacing per-change approval.
+- Edit mode is one blanket grant with no time limit: "use edit mode"
+  turns it on, "turn off edit mode" puts the educator back in plan
+  mode everywhere. Reads stay unrestricted; in edit mode writes stop
+  surfacing per-change approval.
   That is the only difference between the two modes: reads never
   need approval in either one, and the agent confirms the course
   with you conversationally instead of guessing, in either mode.
@@ -89,13 +97,17 @@ every setup state above has a classified mode with a regression test.
 
 - Rerunning `install.sh` revalidates everything, migrates keepalive
   entries, and never wipes an existing helper profile.
-- Revocation: signing out in the helper browser ends the session;
-  removing the tree state directory disconnects fully. Reconnecting
-  repeats steps 2 to 4.
+- Revocation: signing out in the helper browser ends the session.
+  `bin/morrow disconnect --yes` disconnects fully: it stops the helper,
+  stops the keepalive background loop and removes the keepalive cron
+  entry (either would otherwise relaunch the
+  signed-in helper within 5 minutes), deletes `<tree>/helper/profile/`
+  and the pinned account, and verifies each step. Reconnecting is
+  rerunning `install.sh`, then steps 2 to 4.
 
 ## Regression coverage
 
-- `failures/test_error_translation.py`: every catalog mode (now 77)
+- `failures/test_error_translation.py`: every catalog mode (now 86)
   has a fixture; `setup-tenant-not-configured` and `helper-down`
   fixtures use evidence the producers actually emit.
 - `failures/selftest_smoke.py` and `failures/selftest_wiring.py`:

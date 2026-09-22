@@ -28,8 +28,11 @@ Resolution contract (fail-closed, never a silent wrong pick):
     6. name (fuzzy: diacritics stripped, punctuation dropped, tokens
        sorted; SequenceMatcher ratio >= 0.85)
   The first ladder rung with at least one candidate wins. One
-  candidate -> resolve. More than one -> StudentAmbiguous. None at
-  any rung -> StudentNotFound.
+  candidate -> resolve, except at the fuzzy rung: a close spelling is
+  never auto-picked, so even one fuzzy candidate is StudentAmbiguous
+  (the educator confirms). More than one -> StudentAmbiguous. None at
+  any rung -> StudentNotFound. The query itself is never put into the
+  agent-visible evidence.
 * State filtering (applied before matching, so stale records never
   shadow live ones): default pool is enrollment_state == "active".
   include_inactive adds "inactive"; include_concluded adds
@@ -215,6 +218,8 @@ def build_candidate(user):
             "role": str(enr.get("role") or enr.get("type") or ""),
             "enrollment_state": str(enr.get("enrollment_state") or ""),
             "section_id": enr.get("course_section_id"),
+            "last_activity_at": enr.get("last_activity_at")
+            if isinstance(enr.get("last_activity_at"), str) else None,
         })
     return {
         "user_id": uid,
@@ -423,7 +428,7 @@ def match_query(candidates, query, *, label_for=None, fuzzy_threshold=None):
         raise StudentNotFound(
             "empty student query matches no roster entry",
             query=query,
-            evidence={"query": "", "match_count": 0,
+            evidence={"match_count": 0,
                       "candidates_examined": len(candidates)})
     global FUZZY_THRESHOLD
     saved_threshold = FUZZY_THRESHOLD
@@ -434,10 +439,12 @@ def match_query(candidates, query, *, label_for=None, fuzzy_threshold=None):
             hits = _match_rung(candidates, query, rung)
             if not hits:
                 continue
-            if len(hits) == 1:
+            # A fuzzy (typo) match is never auto-picked, even when only
+            # one student is close: the educator confirms which student
+            # they mean (round-4 privacy audit H3).
+            if len(hits) == 1 and rung != RUNG_NAME_FUZZY:
                 cand = hits[0]
                 evidence = {
-                    "query": query,
                     "match_kind": rung,
                     "match_count": 1,
                     "candidates_examined": len(candidates),
@@ -447,14 +454,17 @@ def match_query(candidates, query, *, label_for=None, fuzzy_threshold=None):
                     "test_student": candidate_is_test_student(cand),
                 }
                 return Resolution(cand["user_id"], cand, rung, evidence)
-            # More than one hit at the winning rung: ambiguous, ask.
+            # More than one hit at the winning rung, or a fuzzy hit:
+            # ambiguous, ask. The educator's query is never echoed into
+            # the evidence (it is agent-visible).
             public = public_candidate_summary(hits, label_for=label_for)
             raise StudentAmbiguous(
-                "student query matched %d roster entries; "
-                "asking the educator to disambiguate" % len(hits),
+                "student query matched %d roster entries%s; "
+                "asking the educator to disambiguate"
+                % (len(hits), " by a close spelling only"
+                   if rung == RUNG_NAME_FUZZY else ""),
                 query=query,
-                evidence={"query": query,
-                          "match_kind": rung,
+                evidence={"match_kind": rung,
                           "match_count": len(hits),
                           "candidates_examined": len(candidates),
                           "candidates_public": public})
@@ -463,7 +473,7 @@ def match_query(candidates, query, *, label_for=None, fuzzy_threshold=None):
     raise StudentNotFound(
         "student query matched no roster entry",
         query=query,
-        evidence={"query": query, "match_count": 0,
+        evidence={"match_count": 0,
                   "candidates_examined": len(candidates)})
 
 
@@ -582,8 +592,12 @@ def fetch_course_candidates(fetcher, tenant_base, course_id, *, per_page=100):
 def resolve_in_course(fetcher, tenant_base, course_id, query, *,
                       section_id=None, include_inactive=False,
                       include_concluded=False, include_test_student=False,
-                      label_for=None):
+                      label_for=None, make_label_for=None):
     """Full pipeline: fetch, filter, match. Returns Resolution.
+
+    make_label_for(tenant_base, course_id, candidates) -> label_for,
+    when given, builds the labeler from the fetched roster (so labels
+    come from the same course-scoped vault the executor projects with).
 
     Raises StudentAmbiguous / StudentNotFound (funnel via
     failures/translator.py), ValueError (bad tenant base), or
@@ -597,6 +611,8 @@ def resolve_in_course(fetcher, tenant_base, course_id, query, *,
         include_states |= CONCLUDED_STATES
     candidates, fetch_ev = fetch_course_candidates(
         fetcher, tenant_base, course_id)
+    if make_label_for is not None:
+        label_for = make_label_for(tenant_base, course_id, candidates)
     kept, excluded = filter_candidates(
         candidates, section_id=section_id, include_states=include_states,
         include_test_student=include_test_student)
@@ -759,14 +775,55 @@ def helper_fetch_factory(canvas_base, timeout=60):
     return fetch
 
 
+def vault_label_for(tenant_base, course_id, candidates):
+    """label_for(user_id) -> the course-scoped "Student A<n>" label.
+
+    Labels come from the privacy boundary (privacy/executor_wire.py),
+    the same vault and course binding the executor projects learner
+    receipts with, so a label printed here names the same student
+    everywhere. Raises when no label can be issued (for example, the
+    optional vault dependency is missing): the caller fails closed.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo = os.path.dirname(here)
+    if repo not in sys.path:
+        sys.path.insert(0, repo)
+    from privacy import executor_wire
+    # Every identifier the roster knows goes into the vault record, so a
+    # later read that mentions this student's email or login in free
+    # text still projects it to the label.
+    identities = []
+    for c in candidates:
+        identity = {"id": str(c["user_id"])}
+        for src, dst in (("name", "name"), ("email", "email"),
+                         ("login_id", "loginId"),
+                         ("sis_user_id", "sisUserId")):
+            if c.get(src):
+                identity[dst] = c[src]
+        aliases = [c[k] for k in ("sortable_name", "short_name",
+                                  "sis_login_id")
+                   if c.get(k) and c.get(k) != c.get("name")]
+        if aliases:
+            identity["aliases"] = aliases
+        identities.append(identity)
+    issued = executor_wire.issue_labels(tenant_base, course_id, identities)
+    labels = {}
+    for c, label in zip(candidates, issued):
+        if not isinstance(label, str) or not label.startswith("Student A"):
+            raise RuntimeError("the privacy boundary returned no label")
+        labels[c["user_id"]] = label
+    return lambda uid: labels[int(uid)]
+
+
 # ---------------------------------------------------------------------------
 # CLI (read-only resolution probe)
 # ---------------------------------------------------------------------------
 
 def _cli():
     parser = argparse.ArgumentParser(
-        description="Resolve an instructor's student query to a Canvas "
-                    "user_id (read-only, via the login helper browser).")
+        description="Resolve an instructor's student query to the "
+                    "student's course-scoped label (read-only, via the "
+                    "login helper browser; raw ids and names never print).")
     parser.add_argument("--tenant-base", required=True,
                         help="Canvas origin, e.g. https://x.instructure.com")
     parser.add_argument("--course-id", required=True)
@@ -785,6 +842,14 @@ def _cli():
         except ValueError:
             section_id = args.section_id
 
+    # The output is agent-visible: students appear only as course-scoped
+    # labels from the privacy boundary. No label, no answer.
+    labels = {}
+
+    def make_label_for(tenant_base, course_id, candidates):
+        labels["fn"] = vault_label_for(tenant_base, course_id, candidates)
+        return labels["fn"]
+
     fetch = helper_fetch_factory(args.tenant_base)
     try:
         resolution = resolve_in_course(
@@ -792,7 +857,8 @@ def _cli():
             section_id=section_id,
             include_inactive=args.include_inactive,
             include_concluded=args.include_concluded,
-            include_test_student=args.include_test_student)
+            include_test_student=args.include_test_student,
+            make_label_for=make_label_for)
     except StudentResolutionError as exc:
         print(json.dumps({
             "resolved": False,
@@ -801,13 +867,26 @@ def _cli():
             "evidence": exc.resolution_evidence,
         }, indent=1))
         return 1
+    except Exception as exc:
+        if "fn" in labels:
+            raise
+        print(json.dumps({
+            "resolved": False,
+            "error_class": "StudentLabelUnavailable",
+            "message": "no course-scoped student label could be issued "
+                       "(%s); refusing to print raw student identity"
+                       % type(exc).__name__,
+        }, indent=1))
+        return 2
     finally:
         fetch.close()
+    evidence = {k: v for k, v in resolution.evidence.items()
+                if k not in ("user_id", "query")}
     print(json.dumps({
         "resolved": True,
-        "user_id": resolution.user_id,
+        "student": labels["fn"](resolution.user_id),
         "match_kind": resolution.match_kind,
-        "evidence": resolution.evidence,
+        "evidence": evidence,
     }, indent=1))
     return 0
 

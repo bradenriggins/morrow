@@ -14,6 +14,10 @@ fake dispatch_catalog_op to prove:
 
 Stdlib only. Exit 0 on pass, 1 on failure.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '../..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 
 import io
 import json
@@ -54,15 +58,16 @@ class FakeSession:
 
 
 def _fake_dispatch(op_name, method, path_template, effect_class=None,
-                   params=None, provider=None, session=None):
+                   params=None, provider=None, session=None,
+                   require_educator_channel=None):
     DISPATCH_CALLS.append({
         "op_name": op_name, "method": method, "path_template": path_template,
         "effect_class": effect_class, "params": params, "provider": provider,
     })
     if op_name == "canvas_show_page_courses":
-        return {"result": {"title": "Fake", "body": FAKE_HTML}}
+        return {"receipt": {"title": "Fake", "body": FAKE_HTML}}
     if op_name == "canvas_get_single_assignment":
-        return {"result": {"name": "Fake", "description": FAKE_HTML}}
+        return {"receipt": {"name": "Fake", "description": FAKE_HTML}}
     raise AssertionError("unexpected op " + op_name)
 
 

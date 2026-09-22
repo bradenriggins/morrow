@@ -5,7 +5,7 @@ import { runInThisContext } from "node:vm";
 
 /**
  * WI-1.3: the toolbar badge, refreshBadge(). This exercises the real service-worker.js source for
- * refreshBadge and its badgeClockTime helper, the way scripts/test/open-platform.test.mjs isolates
+ * refreshBadge, the way scripts/test/open-platform.test.mjs isolates
  * one handler from the rest of the worker. storage(), catalog() and validEditPermission (owned by
  * edit-policy.js, exercised by its own tests) are stubbed; storedPolicies is the real source.
  */
@@ -27,7 +27,6 @@ function sliceIncluding(startMarker, endMarker) {
 }
 
 const BADGE_CONSTANTS_SOURCE = sliceIncluding('const BADGE_ALARM_NAME = "morrow-badge";', 'const BADGE_ACTION_COLOR = "#253FEA";');
-const BADGE_CLOCK_TIME_SOURCE = sliceIncluding("function badgeClockTime(expiresAt) {", "\n}\n");
 const REFRESH_BADGE_SOURCE = sliceIncluding("async function refreshBadge() {", "\n}\n");
 const STORED_POLICIES_SOURCE = sliceIncluding("function storedPolicies(value) {", "\n}\n");
 
@@ -38,7 +37,7 @@ test("the action color in refreshBadge matches the brand document's Action swatc
 });
 
 /**
- * Loads badgeClockTime, refreshBadge and storedPolicies out of service-worker.js into an isolated
+ * Loads refreshBadge and storedPolicies out of service-worker.js into an isolated
  * context, with storage, catalog and validEditPermission stubbed and chrome.action / chrome.alarms
  * faked. Nothing here reaches a real tab, a network, or the real edit-policy.js.
  *
@@ -65,7 +64,6 @@ function harness({ reviewsWaiting, bindings = [], editValidity = {} } = {}) {
     "}",
     STORED_POLICIES_SOURCE,
     BADGE_CONSTANTS_SOURCE,
-    BADGE_CLOCK_TIME_SOURCE,
     REFRESH_BADGE_SOURCE,
     "globalThis.chrome = {",
     "  action: {",
@@ -115,38 +113,36 @@ test("reviews waiting: one review reads as singular", async () => {
   assert.equal(h.calls.setTitle[0].title, "Morrow Bridge. 1 review waits.");
 });
 
-test("no reviews, one valid Edit permission: text is ON, the title names the course and the end time", async () => {
-  const expiresAt = Date.UTC(2026, 8, 21, 18, 15);
-  const h = harness({ reviewsWaiting: 0, bindings: [BINDING_1], editValidity: { [BINDING_1.sourceBindingId]: { expiresAt } } });
+// Edit is not timed, so the title names no end time, and nothing needs an alarm.
+test("no reviews, one valid Edit permission: text is ON, the title names the course, no alarm", async () => {
+  const h = harness({ reviewsWaiting: 0, bindings: [BINDING_1], editValidity: { [BINDING_1.sourceBindingId]: {} } });
   await h.refreshBadge();
   assert.deepEqual(h.calls.setBadgeText, [{ text: "ON" }]);
   assert.deepEqual(h.calls.setBadgeBackgroundColor, [{ color: "#253FEA" }]);
-  const expectedClockTime = new Date(expiresAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  assert.equal(h.calls.setTitle[0].title, `Morrow Bridge. Morrow can change 1 course with no review until ${expectedClockTime}.`);
-  assert.deepEqual(h.calls.alarmsCreate, [{ name: "morrow-badge", options: { when: expiresAt } }]);
-  assert.equal(h.calls.alarmsClear.length, 0);
+  assert.deepEqual(h.calls.setTitle, [{ title: "Morrow Bridge. Morrow can change 1 course with no review." }]);
+  assert.deepEqual(h.calls.alarmsClear, ["morrow-badge"]);
+  assert.equal(h.calls.alarmsCreate.length, 0);
 });
 
 test("a missing state.reviewsWaiting (before R2) reads as 0, so it falls through to the Edit check", async () => {
-  const expiresAt = Date.now() + 60_000;
-  const h = harness({ reviewsWaiting: undefined, bindings: [BINDING_1], editValidity: { [BINDING_1.sourceBindingId]: { expiresAt } } });
+  const h = harness({ reviewsWaiting: undefined, bindings: [BINDING_1], editValidity: { [BINDING_1.sourceBindingId]: {} } });
   await h.refreshBadge();
   assert.deepEqual(h.calls.setBadgeText, [{ text: "ON" }], "no thrown error, no reviews-branch text");
 });
 
-test("two connections have valid Edit; the title's end time is the sooner of the two, and the count is 2", async () => {
+// A grant saved while Edit was timed still has its own end time. The title does not promise it, and
+// the alarm refreshes the badge when the sooner of those grants lapses to Plan.
+test("two connections have valid Edit; the count is 2, and the alarm tracks a saved grant's end", async () => {
   const sooner = Date.now() + 60_000;
-  const later = Date.now() + 3_600_000;
   const h = harness({
     reviewsWaiting: 0,
     bindings: [BINDING_1, BINDING_2],
-    editValidity: { [BINDING_1.sourceBindingId]: { expiresAt: later }, [BINDING_2.sourceBindingId]: { expiresAt: sooner } },
+    editValidity: { [BINDING_1.sourceBindingId]: {}, [BINDING_2.sourceBindingId]: { expiresAt: sooner } },
   });
   await h.refreshBadge();
   assert.deepEqual(h.calls.setBadgeText, [{ text: "ON" }]);
-  const expectedClockTime = new Date(sooner).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  assert.equal(h.calls.setTitle[0].title, `Morrow Bridge. Morrow can change 2 courses with no review until ${expectedClockTime}.`);
-  assert.deepEqual(h.calls.alarmsCreate, [{ name: "morrow-badge", options: { when: sooner } }], "the alarm tracks the soonest end, not the latest");
+  assert.equal(h.calls.setTitle[0].title, "Morrow Bridge. Morrow can change 2 courses with no review.");
+  assert.deepEqual(h.calls.alarmsCreate, [{ name: "morrow-badge", options: { when: sooner } }]);
 });
 
 test("no reviews and no valid Edit permission: empty text, plain title, no alarm", async () => {

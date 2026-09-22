@@ -343,6 +343,10 @@ function settingsSender() {
   return { id: extensionId, url: `${extensionPrefix}settings/settings.html` };
 }
 
+function popupSender() {
+  return { id: extensionId, url: `${extensionPrefix}popup/popup.html` };
+}
+
 async function consentConnectScenario() {
   const value = fixture({ holdCatalog: true });
   const importing = importWorker("consent-connect");
@@ -613,8 +617,8 @@ async function editPolicyCancellationScenario(mode) {
   assert.equal(socket.sent.some((message) => message.schema === "morrow.bridge.result.v1" && message.requestId === command.requestId && message.ok === true), false);
 }
 
-// WI-4.2 (F7, D3): a policy-set merge unions the sent categories into an active grant and keeps
-// that grant's own end time, even when the command also carries a later expiresInMs.
+// WI-4.2 (F7): a policy-set merge unions the sent categories into an active grant. Edit is not
+// timed, so neither grant carries an end time.
 async function policySetMergeUnionScenario() {
   const value = fixture();
   await importWorker("policy-merge-union");
@@ -633,15 +637,13 @@ async function policySetMergeUnionScenario() {
   const initialResult = await eventually(() => socket.sent.find((message) => message.requestId === initial.requestId));
   assert.equal(initialResult.ok, true);
   assert.equal(initialResult.result.entries[0].code, undefined);
-  const grantedExpiresAt = value.local.values.editPolicies[bindingId].expiresAt;
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(Object.hasOwn(value.local.values.editPolicies[bindingId], "expiresAt"), false, "a grant from a conversation must not end by itself");
   const merge = policySetCommand({
     requestId: "request-policy-merge-apply",
     operationId: "operation-policy-merge-apply",
     editPolicySet: {
       mode: "edit",
       merge: true,
-      expiresInMs: 60 * 60 * 1_000,
       selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: 1, enabledCategories: [second.id] }],
     },
   });
@@ -651,12 +653,12 @@ async function policySetMergeUnionScenario() {
   assert.equal(mergeResult.result.entries[0].code, undefined);
   const merged = value.local.values.editPolicies[bindingId];
   assert.deepEqual(merged.enabledCategories, [first.id, second.id].sort());
-  assert.equal(merged.expiresAt, grantedExpiresAt, "a merge must keep the active grant's end time, not the later expiresInMs it carried");
+  assert.equal(Object.hasOwn(merged, "expiresAt"), false);
   assert.equal(merged.revision, 2);
 }
 
-// WI-4.2 (D3): with no active grant to merge into, a merge command starts a fresh grant at the
-// duration it chose.
+// WI-4.2: with no active grant to merge into, a merge command ("remember this kind") starts a
+// fresh grant, and that grant has no end time.
 async function policySetMergeFreshGrantScenario() {
   const value = fixture();
   await importWorker("policy-merge-fresh");
@@ -664,24 +666,246 @@ async function policySetMergeFreshGrantScenario() {
   const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
   const category = options.result.options.find((candidate) => candidate.availability === "edit");
   assert.ok(category);
-  const chosenDurationMs = 4 * 60 * 60 * 1_000;
-  const before = Date.now();
   const merge = policySetCommand({
     requestId: "request-policy-merge-fresh",
     operationId: "operation-policy-merge-fresh",
     editPolicySet: {
       mode: "edit",
       merge: true,
-      expiresInMs: chosenDurationMs,
       selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: 0, enabledCategories: [category.id] }],
     },
   });
   socket.receive(merge);
   const result = await eventually(() => socket.sent.find((message) => message.requestId === merge.requestId));
   assert.equal(result.ok, true);
+  assert.equal(result.result.entries[0].code, undefined);
   const granted = value.local.values.editPolicies[bindingId];
   assert.deepEqual(granted.enabledCategories, [category.id]);
-  assert.ok(granted.expiresAt >= before + chosenDurationMs && granted.expiresAt <= Date.now() + chosenDurationMs);
+  assert.equal(Object.hasOwn(granted, "expiresAt"), false);
+}
+
+// Edit is not timed, so a command that still names a duration is refused whole, and nothing is saved.
+async function policySetDurationRefusedScenario() {
+  const value = fixture();
+  await importWorker("policy-duration-refused");
+  const socket = await authenticate(value);
+  const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
+  const category = options.result.options.find((candidate) => candidate.availability === "edit");
+  const command = policySetCommand({
+    requestId: "request-policy-duration",
+    operationId: "operation-policy-duration",
+    editPolicySet: {
+      mode: "edit",
+      merge: true,
+      expiresInMs: 4 * 60 * 60 * 1_000,
+      selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: 0, enabledCategories: [category.id] }],
+    },
+  });
+  socket.receive(command);
+  const result = await eventually(() => socket.sent.find((message) => message.requestId === command.requestId));
+  assert.equal(result.ok, false);
+  assert.equal(result.problem.code, "edit_policy_set_invalid");
+  assert.deepEqual(value.local.values.editPolicies, {});
+}
+
+/** A grant saved before Edit stopped being timed: the same shape, with its own end time in its scope. */
+async function legacyTimedGrant(permission, binding, expiresAt) {
+  const stable = (entry) => Array.isArray(entry) ? `[${entry.map(stable).join(",")}]`
+    : entry && typeof entry === "object" ? `{${Object.keys(entry).sort().map((key) => `${JSON.stringify(key)}:${stable(entry[key])}`).join(",")}}`
+      : JSON.stringify(entry === undefined ? null : entry);
+  const scope = {
+    schema: permission.schema, sourceBindingId: binding.sourceBindingId, provider: binding.provider, origin: binding.origin,
+    siteUrl: binding.siteUrl || "", principalFingerprint: binding.principalFingerprint, courseId: binding.courseId || "",
+    sessionGeneration: binding.sessionGeneration, catalogDigest: permission.catalogDigest, revision: permission.revision,
+    expiresAt, enabledCategories: permission.enabledCategories, rules: permission.rules,
+  };
+  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(stable(scope))));
+  return { ...permission, expiresAt, scopeDigest: Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("") };
+}
+
+// A merge into a grant saved while Edit was timed keeps that grant's own end time. It lapses to Plan
+// then; a later conversation grant never turns it into Edit with no end.
+async function policySetMergeLegacyTimedScenario() {
+  const value = fixture();
+  await importWorker("policy-merge-legacy");
+  const socket = await authenticate(value);
+  const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
+  const [first, second] = options.result.options.filter((candidate) => candidate.availability === "edit");
+  const initial = policySetCommand({
+    requestId: "request-policy-legacy-initial",
+    operationId: "operation-policy-legacy-initial",
+    editPolicySet: { mode: "edit", selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: 0, enabledCategories: [first.id] }] },
+  });
+  socket.receive(initial);
+  await eventually(() => socket.sent.find((message) => message.requestId === initial.requestId));
+  const expiresAt = Date.now() + 60 * 60 * 1_000;
+  value.local.values.editPolicies[bindingId] = await legacyTimedGrant(value.local.values.editPolicies[bindingId], connectedState().bindings[0], expiresAt);
+  const status = await sendRuntime(value, { type: "morrow_edit_policy_status" }, settingsSender());
+  assert.equal(status.result.bindings[0].editPermission?.expiresAt, expiresAt, "the legacy grant must still validate before its end time");
+  const merge = policySetCommand({
+    requestId: "request-policy-legacy-merge",
+    operationId: "operation-policy-legacy-merge",
+    editPolicySet: { mode: "edit", merge: true, selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: 1, enabledCategories: [second.id] }] },
+  });
+  socket.receive(merge);
+  const result = await eventually(() => socket.sent.find((message) => message.requestId === merge.requestId));
+  assert.equal(result.ok, true);
+  assert.equal(result.result.entries[0].code, undefined);
+  const merged = value.local.values.editPolicies[bindingId];
+  assert.deepEqual(merged.enabledCategories, [first.id, second.id].sort());
+  assert.equal(merged.expiresAt, expiresAt);
+}
+
+// The popup reads Edit status and can return a course to Plan, the safe direction. Saving,
+// granting, reading the Edit action list and course discovery stay with Plan and Edit settings, and
+// every sender check is exact: this extension's id and the exact page address.
+async function popupEditStatusScenario() {
+  const value = fixture();
+  await importWorker("popup-edit-status");
+  const socket = await authenticate(value);
+  const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
+  const category = options.result.options.find((candidate) => candidate.availability === "edit");
+  const granted = await sendRuntime(value, { type: "morrow_edit_policy_save", sourceBindingId: bindingId, enabledCategories: [category.id] }, settingsSender());
+  assert.equal(granted.ok, true);
+
+  const status = await sendRuntime(value, { type: "morrow_edit_policy_status" }, popupSender());
+  assert.equal(status.ok, true, JSON.stringify(status));
+  assert.equal(status.result.bindings[0].sourceBindingId, bindingId);
+  assert.deepEqual(status.result.bindings[0].editPermission.sourceBindingId, bindingId);
+  assert.equal(Object.hasOwn(status.result, "privateChat"), false, "the popup's read carries no Private Chat conversation");
+
+  for (const message of [
+    { type: "morrow_edit_policy_save", sourceBindingId: bindingId, enabledCategories: [category.id] },
+    { type: "morrow_edit_policy_options", sourceBindingId: bindingId },
+    { type: "morrow_course_discovery_start", siteAnchorId: anchorId },
+    { type: "morrow_course_selection_save", siteAnchorId: anchorId, discoveryReceiptId: "discovery:x", courseIds: ["42"] },
+    { type: "morrow_private_chat_send", sourceBindingId: bindingId, text: "hi", assertedIdentifiers: ["x"] },
+  ]) {
+    const refused = await sendRuntime(value, message, popupSender());
+    assert.equal(refused.ok, false, message.type);
+    assert.match(refused.code, /_sender_refused$/, message.type);
+  }
+  for (const sender of [
+    { id: "b".repeat(32), url: `${extensionPrefix}popup/popup.html` },
+    { id: extensionId, url: `${extensionPrefix}popup/popup.html?x=1` },
+    { id: extensionId, url: `${extensionPrefix}onboarding/onboarding.html` },
+    { id: extensionId, url: "https://school.instructure.com/courses/42" },
+  ]) {
+    for (const type of ["morrow_edit_policy_status", "morrow_edit_policy_revoke"]) {
+      const refused = await sendRuntime(value, { type, sourceBindingId: bindingId }, sender);
+      assert.deepEqual(refused, { ok: false, code: "edit_policy_sender_refused", error: "edit_policy_sender_refused" }, `${type} from ${sender.url}`);
+    }
+  }
+  assert.equal(Object.hasOwn(value.local.values.editPolicies, bindingId), true, "a refused sender changed nothing");
+
+  const revoked = await sendRuntime(value, { type: "morrow_edit_policy_revoke", sourceBindingId: bindingId }, popupSender());
+  assert.equal(revoked.ok, true, JSON.stringify(revoked));
+  assert.equal(revoked.result.revoked, true);
+  assert.equal(Object.hasOwn(value.local.values.editPolicies, bindingId), false);
+  socket.close(1000, "done");
+}
+
+function uiStateCommand(reviews, overrides = {}) {
+  return bridgeCommand({
+    requestId: `request-ui-state-${reviews.length}-${Math.random()}`,
+    operationId: `operation-ui-state-${reviews.length}`,
+    kind: "ui_state",
+    toolName: undefined,
+    operationKey: undefined,
+    sourceBindingId: undefined,
+    arguments: undefined,
+    uiState: { reviews },
+    ...overrides,
+  });
+}
+
+// The reviews that wait belong to one Morrow connection. The popup is told as soon as they
+// change, and they are gone, with their badge count, once that connection ends in any way.
+async function reviewsFollowConnectionScenario(ending) {
+  const value = fixture();
+  const notices = [];
+  const badge = [];
+  globalThis.chrome.runtime.sendMessage = async (message) => { notices.push(message?.type); };
+  globalThis.chrome.action = {
+    setBadgeText: async ({ text }) => { badge.push(text); },
+    setBadgeBackgroundColor: async () => undefined,
+    setTitle: async () => undefined,
+  };
+  await importWorker(`reviews-${ending}`);
+  const socket = await authenticate(value);
+  const reviews = [{ url: "http://127.0.0.1:44300/operations/op-12345678", label: "Update the syllabus page in Biology" }];
+  notices.length = 0;
+  const command = uiStateCommand(reviews);
+  socket.receive(command);
+  await eventually(() => socket.sent.find((message) => message.requestId === command.requestId));
+  await eventually(() => notices.includes("morrow_bridge_status_changed"));
+  assert.equal(badge.at(-1), "1");
+  const waiting = await sendRuntime(value, { type: "morrow_status" });
+  assert.deepEqual(waiting.result.reviews, reviews);
+
+  notices.length = 0;
+  if (ending === "socket") socket.close(1006, "transport_lost");
+  else if (ending === "disconnect") assert.equal((await sendRuntime(value, { type: "morrow_disconnect" })).ok, true);
+  else withdrawConsent(value);
+  // Disconnect Morrow clears stored state, and the popup already reads again on that storage change.
+  if (ending !== "disconnect") await eventually(() => notices.includes("morrow_bridge_status_changed"));
+  await eventually(() => badge.at(-1) !== "1");
+  assert.notEqual(badge.at(-1), "1", "the badge still counts reviews from an ended connection");
+  if (ending !== "consent") {
+    const after = await sendRuntime(value, { type: "morrow_status" });
+    assert.deepEqual(after.result.reviews, [], "the popup still lists reviews from an ended connection");
+  }
+}
+
+// One course can be disconnected on its own from Plan and Edit settings. Its connection, its Edit
+// access and its first-read record go; the site, the other courses and Chrome site access stay, and
+// the runtime learns the new course list at once.
+async function courseDisconnectScenario() {
+  const initial = connectedState();
+  const other = { ...initial.bindings[0], sourceBindingId: `${anchorId}:c43`, courseId: "43", courseName: "Chemistry" };
+  initial.bindings.push(other);
+  const value = fixture({ initialLocal: initial });
+  await importWorker("course-disconnect");
+  const socket = await authenticate(value);
+  const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
+  const category = options.result.options.find((candidate) => candidate.availability === "edit");
+  assert.equal((await sendRuntime(value, { type: "morrow_edit_policy_save", sourceBindingId: bindingId, enabledCategories: [category.id] }, settingsSender())).ok, true);
+  const revisionBefore = value.local.values.editPolicyRevisions[bindingId];
+
+  const refused = await sendRuntime(value, { type: "morrow_course_disconnect", sourceBindingId: bindingId }, popupSender());
+  assert.deepEqual(refused, { ok: false, code: "edit_policy_sender_refused", error: "edit_policy_sender_refused" });
+  assert.equal(value.local.values.bindings.length, 2);
+
+  const sentBefore = socket.sent.length;
+  const result = await sendRuntime(value, { type: "morrow_course_disconnect", sourceBindingId: bindingId }, settingsSender());
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.result, { disconnected: true, sourceBindingId: bindingId });
+  assert.deepEqual(value.local.values.bindings.map((binding) => binding.sourceBindingId), [other.sourceBindingId]);
+  assert.equal(Object.hasOwn(value.local.values.editPolicies, bindingId), false);
+  assert.ok(value.local.values.editPolicyRevisions[bindingId] > revisionBefore, "a change prepared under the old access must not apply later");
+  assert.equal(value.local.values.siteAnchors.length, 1, "the site stays connected for its other courses");
+  assert.deepEqual(value.permissionRemovals, [], "Chrome site access stays for the other courses");
+  const published = socket.sent.slice(sentBefore).filter((message) => message.schema === "morrow.bridge.bindings.v1").at(-1);
+  assert.deepEqual(published.bindings.map((binding) => binding.sourceBindingId), [other.sourceBindingId]);
+
+  const missing = await sendRuntime(value, { type: "morrow_course_disconnect", sourceBindingId: bindingId }, settingsSender());
+  assert.deepEqual(missing, { ok: false, code: "edit_policy_binding_missing", error: "edit_policy_binding_missing" });
+}
+
+// Plan and Edit settings saves Edit access with no duration, and the saved grant has no end time.
+async function settingsSaveUntimedScenario() {
+  const value = fixture();
+  await importWorker("settings-save-untimed");
+  await authenticate(value);
+  const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
+  const category = options.result.options.find((candidate) => candidate.availability === "edit");
+  const saved = await sendRuntime(value, { type: "morrow_edit_policy_save", sourceBindingId: bindingId, enabledCategories: [category.id] }, settingsSender());
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  assert.equal(Object.hasOwn(saved.result.editPermission, "expiresAt"), false);
+  assert.equal(Object.hasOwn(value.local.values.editPolicies[bindingId], "expiresAt"), false);
+  const status = await sendRuntime(value, { type: "morrow_edit_policy_status" }, settingsSender());
+  assert.equal(Object.hasOwn(status.result, "editDurations"), false, "the settings page is offered no Edit length");
+  assert.equal(status.result.bindings[0].editPermission.sourceBindingId, bindingId);
 }
 
 // WI-4.2: a merge is still refused, like any other selection, when the sender's expected
@@ -708,7 +932,6 @@ async function policySetMergeStaleRevisionScenario() {
     editPolicySet: {
       mode: "edit",
       merge: true,
-      expiresInMs: 60 * 60 * 1_000,
       selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: 0, enabledCategories: [second.id] }],
     },
   });
@@ -1129,7 +1352,6 @@ async function settingsPolicyConsentScenario() {
     type: "morrow_edit_policy_save",
     sourceBindingId: bindingId,
     enabledCategories: [category.id],
-    expiresInMs: 60 * 60 * 1_000,
   }, settingsSender());
   await eventually(() => probeStarted);
   withdrawConsent(value);
@@ -1351,6 +1573,14 @@ const scenarios = {
   "edit-policy-expiry": () => editPolicyCancellationScenario("expiry"),
   "policy-merge-union": policySetMergeUnionScenario,
   "policy-merge-fresh": policySetMergeFreshGrantScenario,
+  "policy-duration-refused": policySetDurationRefusedScenario,
+  "policy-merge-legacy": policySetMergeLegacyTimedScenario,
+  "settings-save-untimed": settingsSaveUntimedScenario,
+  "popup-edit-status": popupEditStatusScenario,
+  "course-disconnect": courseDisconnectScenario,
+  "reviews-socket": () => reviewsFollowConnectionScenario("socket"),
+  "reviews-disconnect": () => reviewsFollowConnectionScenario("disconnect"),
+  "reviews-consent": () => reviewsFollowConnectionScenario("consent"),
   "policy-merge-stale-revision": policySetMergeStaleRevisionScenario,
   "maintenance-cancel": () => maintenanceMutationScenario("cancel"),
   "maintenance-expiry": () => maintenanceMutationScenario("expiry"),
@@ -1445,12 +1675,44 @@ test("expiresAt fences a queued Edit-policy mutation", async () => {
   await isolatedScenario("edit-policy-expiry");
 });
 
-test("a policy-set merge unions new categories into an active grant and keeps its end time", async () => {
+test("a policy-set merge unions new categories into an active grant, and neither grant ends by itself", async () => {
   await isolatedScenario("policy-merge-union");
 });
 
-test("a policy-set merge with no active grant starts a fresh grant at its chosen duration", async () => {
+test("a policy-set merge with no active grant starts a fresh grant with no end time", async () => {
   await isolatedScenario("policy-merge-fresh");
+});
+
+test("a policy-set that still names a duration is refused and saves nothing", async () => {
+  await isolatedScenario("policy-duration-refused");
+});
+
+test("a policy-set merge into a grant saved with an end time keeps that end time", async () => {
+  await isolatedScenario("policy-merge-legacy");
+});
+
+test("the popup reads Edit status and returns a course to Plan, and nothing else, from its exact page", async () => {
+  await isolatedScenario("popup-edit-status");
+});
+
+test("reviews that wait reach the open popup at once, and a closed Morrow connection clears them and their badge", async () => {
+  await isolatedScenario("reviews-socket");
+});
+
+test("Disconnect Morrow clears the reviews that wait and their badge", async () => {
+  await isolatedScenario("reviews-disconnect");
+});
+
+test("withdrawing course data consent clears the reviews that wait and their badge", async () => {
+  await isolatedScenario("reviews-consent");
+});
+
+test("Plan and Edit settings disconnects one course, its Edit access, and nothing else", async () => {
+  await isolatedScenario("course-disconnect");
+});
+
+test("a Settings save creates Edit access with no end time", async () => {
+  await isolatedScenario("settings-save-untimed");
 });
 
 test("a policy-set merge is refused, and leaves the active grant untouched, on a stale revision", async () => {

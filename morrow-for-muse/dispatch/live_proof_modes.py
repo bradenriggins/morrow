@@ -15,7 +15,7 @@ uses for driver-channel approvals.
 
 Battery:
   M-1: helper health (logged_in, chromium_alive) before and after.
-  M-2: educator-issued timed edit grant (proof driver, channel=driver).
+  M-2: educator-issued conversation edit grant (proof driver, channel=driver).
   M-3: create a disposable wiki page with NO per-write approval and NO
        frozen plan -> must succeed (edit mode admits).
   M-4: read it back (GET) and verify the title.
@@ -157,7 +157,7 @@ def main():
 
     # ------------------------------------------------ M-2: grant ---
     grant = mode_state.request_edit_grant(
-        USER, duration_min=30, conversation_id=CONV,
+        USER, conversation_id=CONV,
         educator_confirmation={"by": "educator",
                                "authorization": _AUTH,
                                "channel": "driver"})
@@ -268,7 +268,7 @@ def main():
     # ceremony instead). No provider call happens either way: the gate
     # refuses before dispatch.
     mode_state.request_edit_grant(
-        USER, duration_min=30, conversation_id=CONV,
+        USER, conversation_id=CONV,
         educator_confirmation={"by": "educator",
                                "authorization": _AUTH,
                                "channel": "driver"})

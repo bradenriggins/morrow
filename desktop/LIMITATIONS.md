@@ -1,6 +1,6 @@
 # Limitations
 
-Morrow `1.0.4` is the current release build. Publication and live verification remain subject to the evidence below. The version is not an Instructure authorization claim.
+Morrow `1.0.5` is the current release build. Publication and live verification remain subject to the evidence below. The version is not an Instructure authorization claim.
 
 ## Platform coverage
 
@@ -93,11 +93,23 @@ its own ability to change the course, and nothing but a person can undo that.
 - A running request group reports each course as it finishes, but only to a caller that asked for it. `morrow_batch_run` and `morrow_batch_resume` send one MCP progress notification for each child the run finishes: the children the group has settled, the children it froze, and one sentence naming the course and its outcome. That sentence is built from the frozen manifest and the settled child state, never from a provider result, so no learner identity reaches it. A caller that supplies no progress token sees the behaviour it saw before. Whether an assistant displays these notifications is that assistant's own behaviour, which Morrow neither controls nor proves.
 - Morrow does not bypass Canvas role, course, account, New Quizzes, or Item Bank permissions.
 
+## Learner privacy
+
+- Morrow replaces only what it can match to the complete course roster: a student's roster name and its common orders, a unique given name, email address, login, SIS id, and platform id. A nickname the roster does not hold, a misspelled name, and the name of a person who is not on the student roster, such as a parent, pass through as written.
+- In links, Morrow replaces a rostered platform id in any path segment that does not follow a course object such as `courses`, `assignments`, or `files`, and in a query value whose key names a person, such as `user_id`, `student_id`, or `userid`. Moodle's plain `id` is replaced only on its person pages, such as `user/view.php` and `user/profile.php`, because on other Moodle pages it names the course or the activity. A rostered id under another query key stays in the link.
+- In text, a rostered platform id of five or more digits is replaced on its own. A shorter number is kept unless a person word such as "student" or "user" comes before it, because short numbers are usually counts, scores, or object ids. A number after a course object word such as "course" or "assignment" is kept.
+- A label names one student within one course connection. The learner vault scopes labels to the course and to the connection Morrow Bridge made to that Canvas or Moodle site. Connecting the site again starts a new connection, and a student can get a different label there. Within one connection, Private Chat, tool results, and the review page use the same label.
+- Private Chat protects only what the educator types in the drawer. The educator must list each student the message names. A lone first name or family name that is also an everyday word, such as "Will" or "Grant", is replaced only where it is capitalized as a name and not at the start of a sentence; at the start of a sentence Morrow Bridge asks the educator instead. A capitalized word that looks like a name and matches no student stops the message until the educator sends it again. A lowercase nickname that matches no student is not detected.
+- The drawer and the review tab show student names only in Chrome on this computer. The review server serves labels only: its pages and status answers never carry a name, so a program that reads them over local HTTP, such as `curl` or an assistant's shell command, gets labels. Morrow Bridge receives the names over the paired connection and adds them to the review tab's page text. Software that reads Chrome's pages, such as browser automation, another extension with access to that tab, or operating-system accessibility control, can read the names the tab shows, and a same-user process that reads Morrow's process memory or takes over the paired Bridge connection can read them too, as the [security boundary](#security-boundary) describes. When Morrow Bridge is not connected, the review tab shows labels only.
+- These rules are proved against local fixtures and a synthetic roster. No live Canvas or Moodle course has run the link and Private Chat protections.
+
 ## Security boundary
 
 The browser connector prevents credentials from entering MCP messages, client configuration, logs, or durable operation records. It does not protect a computer that is already compromised, a malicious Chrome extension with broader access, or a malicious local process running as the same operating-system user.
 
-The local approval page requires a separate decision outside the MCP tool surface. It checks the local origin, page nonce, and browser cookie. It cannot prove human presence against software with local HTTP or browser control. It is not multi-person institutional approval.
+The local approval page requires a separate decision outside the MCP tool surface. It checks the local origin, page nonce, and browser cookie, and it requires a signature from Morrow Bridge over that exact form. The runtime sends the Bridge the signing key over the paired connection; the key never appears in a page, header, URL, or tool result. The Bridge signs only a trusted click or key press on the approve button, in the top frame of a tab that shows a review from that same review server. A program that reads and posts the review page over local HTTP, such as `curl`, a script, or an assistant's shell command, cannot approve a change or save "do not ask again".
+
+This is not proof that a person is present. It does not stop software that controls Chrome input, such as browser automation or operating-system accessibility control, and it does not stop a same-user process that reads Morrow's process memory or takes over the paired Bridge connection with the local pairing token. Every approval, for Canvas, Moodle, and Blackboard, needs Chrome with Morrow Bridge connected. It is not multi-person institutional approval.
 
 The desktop app's own half of that boundary is exercised as executed tests in `installer/test/adversarial.test.cjs` and `installer/test/adversarial-bridge.test.mjs`. They run the shipped code and check both halves of each answer: the refusal, and that the refused step changed nothing.
 

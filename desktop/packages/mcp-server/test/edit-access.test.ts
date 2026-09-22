@@ -33,7 +33,7 @@ const planPrepared: BrowserEditAccessPrepared = {
   selections: prepared.selections.map((selection) => ({ ...selection, enabledCategories: [] })),
 };
 
-function fixture() {
+function fixture(expiresAt: number | undefined = undefined) {
   const result: BrowserEditAccessResult = {
     mode: "edit",
     outcome: "received",
@@ -52,7 +52,7 @@ function fixture() {
         sourceBindingId: selection.sourceBindingId,
         revision: selection.expectedPolicyRevision + 1,
         catalogDigest: selection.catalogDigest,
-        expiresAt: Date.now() + 30 * 60 * 1_000,
+        ...(expiresAt === undefined ? {} : { expiresAt }),
         enabledCategories: selection.enabledCategories.map((category) => category.id),
       },
     })),
@@ -77,6 +77,37 @@ async function connected(runtime: GatewayRuntime) {
   return { client, server };
 }
 
+async function confirmEdit(runtime: GatewayRuntime) {
+  const { client, server } = await connected(runtime);
+  try {
+    const round = await client.callTool({ name: "morrow_request_edit_access", arguments: input }, { allowInputRequired: true }) as unknown as { requestState: string };
+    return await client.callTool({
+      name: "morrow_request_edit_access",
+      arguments: input,
+      requestState: round.requestState,
+      inputResponses: { edit_access: { action: "accept", content: { confirm: true } } },
+    });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+}
+
+describe("untimed Edit grants", () => {
+  it("confirms a grant the Bridge saved with no end time", async () => {
+    const confirmed = await confirmEdit(fixture().runtime);
+    expect(confirmed.isError, JSON.stringify(confirmed.content)).not.toBe(true);
+    expect(confirmed.structuredContent).toMatchObject({ ok: true, mode: "edit" });
+  });
+
+  it("still confirms a legacy grant with a future end time, and refuses one that already ended", async () => {
+    expect((await confirmEdit(fixture(Date.now() + 60_000).runtime)).structuredContent).toMatchObject({ ok: true });
+    const lapsed = await confirmEdit(fixture(Date.now() - 1_000).runtime);
+    expect(lapsed.isError).toBe(true);
+    expect(lapsed.structuredContent).toMatchObject({ ok: false });
+  });
+});
+
 describe("conversational Edit access", () => {
   it("seals multiple exact course scopes in one native confirmation before applying them", async () => {
     const { runtime, prepare, apply } = fixture();
@@ -89,7 +120,8 @@ describe("conversational Edit access", () => {
       expect(round.requestState).toMatch(/^v1\./);
       expect(round.inputRequests.edit_access.params.message).toContain("Biology (course 42, https://canvas.example.edu; Assignment due dates)");
       expect(round.inputRequests.edit_access.params.message).toContain("Chemistry (course 51, https://moodle.example.edu; Page content)");
-      expect(round.inputRequests.edit_access.params.message).toContain("expires in 30 minutes");
+      expect(round.inputRequests.edit_access.params.message).toContain("Edit stays on for these courses until you return them to Plan in Morrow Bridge.");
+      expect(round.inputRequests.edit_access.params.message).not.toMatch(/expires|minutes|temporary/);
       const confirmed = await client.callTool({
         name: "morrow_request_edit_access",
         arguments: input,

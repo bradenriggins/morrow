@@ -19,6 +19,10 @@ Proves, standalone (exit 0 on success, loud non-zero on failure):
 
 Synthetic evidence only: no provider calls, no live writes.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 
 import json
 import os

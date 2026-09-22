@@ -160,3 +160,71 @@ describe("GET /recent", () => {
     }
   });
 });
+
+describe("one-time /recent codes", () => {
+  function verifiedServer(ids: readonly string[]): LoopbackApprovalServer {
+    const operations = ids.map((operationId) => finishedOperation({ operationId }));
+    return new LoopbackApprovalServer({
+      ...recentController(operations),
+      operationGet: (id) => operations.find((operation) => operation.operationId === id)!,
+      operationReviewContext: async () => ({ targets: [{ field: "content_id", label: "Page", name: "Week 2 overview" }] }),
+    });
+  }
+  const linkIn = (html: string) => /\/recent\?entry=([A-Za-z0-9_-]+)/.exec(html)?.[1];
+
+  it("keeps the link the tool handed out valid while result pages reload and poll", async () => {
+    const ids = Array.from({ length: 20 }, (_, index) => `op:recent-${1000 + index}`);
+    const server = verifiedServer(ids);
+    try {
+      const baseUrl = await server.start();
+      const code = server.issueRecentChangesEntry();
+      for (const id of ids) {
+        const path = `${baseUrl}/operations/${encodeURIComponent(id)}`;
+        for (let load = 0; load < 3; load += 1) {
+          await (await fetch(path)).text();
+          await (await fetch(`${path}/status`)).json();
+        }
+      }
+      const opened = await fetch(`${baseUrl}/recent?entry=${encodeURIComponent(code)}`, { redirect: "manual" });
+      expect(opened.status).toBe(303);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("gives one result page the same link on every reload and poll until it is used", async () => {
+    const server = verifiedServer(["op:recent-1234"]);
+    try {
+      const baseUrl = await server.start();
+      const path = `${baseUrl}/operations/${encodeURIComponent("op:recent-1234")}`;
+      const first = linkIn(await (await fetch(path)).text());
+      const reloaded = linkIn(await (await fetch(path)).text());
+      const polled = linkIn(String(((await (await fetch(`${path}/status`)).json()) as JsonObject).html));
+      expect(first).toBeTruthy();
+      expect(reloaded).toBe(first);
+      expect(polled).toBe(first);
+
+      expect((await fetch(`${baseUrl}/recent?entry=${first}`, { redirect: "manual" })).status).toBe(303);
+      expect((await fetch(`${baseUrl}/recent?entry=${first}`, { redirect: "manual" })).status).toBe(409);
+      const next = linkIn(await (await fetch(path)).text());
+      expect(next).toBeTruthy();
+      expect(next).not.toBe(first);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not let one result page's link open from another operation's code", async () => {
+    const server = verifiedServer(["op:recent-1234", "op:recent-5678"]);
+    try {
+      const baseUrl = await server.start();
+      const one = linkIn(await (await fetch(`${baseUrl}/operations/${encodeURIComponent("op:recent-1234")}`)).text());
+      const two = linkIn(await (await fetch(`${baseUrl}/operations/${encodeURIComponent("op:recent-5678")}`)).text());
+      expect(one).toBeTruthy();
+      expect(two).toBeTruthy();
+      expect(one).not.toBe(two);
+    } finally {
+      await server.close();
+    }
+  });
+});

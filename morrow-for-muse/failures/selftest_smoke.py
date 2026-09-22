@@ -8,12 +8,17 @@ and genuinely unknown errors get the structured fallback (never a shrug).
 Exits 0 on success, non-zero with a loud reason on failure. The sibling
 test lane owns the full suite; this is the smoke check only.
 
-Catalog under test: the merged 79-entry catalog (53 canonical inventory
-modes + 3 kept seeded modes + 4 query-chain modes + 6 edit/plan-mode
+Catalog under test: the merged 86-entry catalog (53 canonical inventory
+modes + 3 kept seeded modes + 5 query-chain modes + 4 edit/plan-mode
 modes + 1 destructive-confirmation mode + 2 CSRF/422-tier modes + 8
-newer workstream modes + 2 query-chain read/ref-resolution modes),
+newer workstream modes + 2 query-chain read/ref-resolution modes + 6 dispatch-outcome modes
++ 2 signed-in-account modes),
 at failures/catalog.json.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 
 import os
 import sys
@@ -36,8 +41,8 @@ def _check(cond, reason):
 
 def main():
     catalog = load_catalog()
-    _check(len(catalog.entries) == 79,
-           "expected 79 merged entries, got %d" % len(catalog.entries))
+    _check(len(catalog.entries) == 86,
+           "expected 86 merged entries, got %d" % len(catalog.entries))
     _check(catalog.by_id["unknown"].get("fallback") is True,
            "unknown entry must be the fallback")
 
@@ -92,8 +97,6 @@ def main():
         ("edit_self_grant_refused",
          {"error_class": "ModeSelfGrantRefused",
           "error_text": "agent attempted a self-grant"}),
-        ("edit_grant_revoked",
-         {"error_class": "ModeGrantRevoked", "grant_id": "grant-7"}),
         ("ambiguous_course_write_refused",
          {"error_class": "AmbiguousCourseWriteRefused",
           "query": "Bio 101",

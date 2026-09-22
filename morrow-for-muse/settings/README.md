@@ -22,25 +22,33 @@ oversight.
 ## Edit mode
 
 In edit mode writes do not surface approval. The agent does the work
-and reports what it did. Making edit mode your default is a standing
-edit grant: it is recorded in your settings journal, and the agent
-tells you plainly what it means before it applies. Say "make edit mode
-my default" and confirm when it echoes back.
+and reports what it did. Edit mode is one blanket grant, and it is not
+timed: it stays on until you turn it off. Say "use edit mode" (or "make
+edit mode my default"); it takes effect at once, the agent tells you
+plainly what it means, and it is recorded in your settings journal.
 
-There are two lighter-weight ways to get edit behavior without changing
-your default:
+To turn it off, say any of "turn off edit mode", "stop edit mode",
+"use plan mode", or "back to plan mode". That takes effect at once and
+everywhere: your saved default goes back to plan, and any
+per-conversation edit override or grant is cleared. From then on every
+write asks for your approval. The agent confirms the result after it
+checks it.
 
-- **Standing edit grant.** Say "use edit mode" and the agent sets your
-  default to edit (no time limit), during which writes do not surface
-  approval. Say "use plan mode" to go back. You can still request timed
-  sessions explicitly if you want them:
-  "set my edit sessions to 60 minutes" (allowed: 5 to 480).
-- **This conversation only.** Say "use edit mode for this conversation"
-  or "use plan mode for this conversation". The override lasts for that
-  conversation and is never saved. Your default is untouched.
+If you only want a different mode in one conversation, say "use edit
+mode for this conversation" or "use plan mode for this conversation".
+That override applies to that conversation only. An edit override for
+one conversation ends when you turn edit mode off, or as soon as you
+start a different conversation.
 
-When more than one of these is in play, the last thing you said wins.
-"What mode am I in" always tells you the effective mode right now and
+You can ask in your own words. The agent works out what you mean and
+makes the change through a fixed command; if it is not sure what you
+want, it asks you instead of guessing.
+
+Changing the saved default ends every per-conversation override: "use
+edit mode" (or "use plan mode") for everywhere takes effect in every
+conversation at once. A per-conversation mode you set after that
+applies in that conversation only. "What mode am I in" always tells
+you the effective mode right now, for the conversation you are in, and
 where it comes from.
 
 ## The safety rules that stay on
@@ -48,24 +56,28 @@ where it comes from.
 Two guardrails are always in force, and the agent enforces them no
 matter the mode:
 
-1. **Student privacy.** Student data is de-identified before the agent
-   can see it. This is not a setting and cannot be turned off.
-2. **Safe operations in Canvas.** Destructive writes (deletes and the
-   like) still ask for confirmation even in edit mode. This one IS
-   yours to control: say "stop asking me to confirm deletions" to turn
-   it off, or "always confirm deletions" to turn it back on. Turning it
-   off requires your explicit confirmation, and it is journaled.
+1. **Student privacy.** Student data from Canvas is de-identified
+   before the agent can see it. You can still name a student; the
+   agent then shows that student by the name you typed, in that
+   conversation only. This is not a setting and cannot be turned off.
+   Morrow cannot intercept what you type to Muse, so the names you
+   type reach the Muse model.
+2. **Safe operations in Canvas.** Every write runs only through the
+   governed dispatcher (live-proven operations only, never-dispatch
+   routes refused). If you also want deletes and other destructive
+   writes to ask first while in edit mode, say "always confirm
+   deletions" (off by default: edit mode does not ask per write). Say
+   "stop asking me to confirm deletions" to turn it back off. Either
+   change is journaled.
 
 And three rules about the agent itself:
 
-- The agent can never grant itself edit mode, start an edit session,
-  or change a consequential setting on its own. Anything that changes
-  whether writes surface approval needs your explicit "yes" after the
-  agent echoes the exact change back to you. An agent-side attempt
-  without your confirmation is refused outright.
+- The agent changes your mode or a setting only because you asked,
+  and it tells you what the change means right after it is made. If
+  your request is unclear, it asks you first.
 - Every settings change is journaled with the old value, the new
-  value, and your identity, including edit sessions and conversation
-  overrides.
+  value, and your identity, including turning edit mode off and
+  conversation overrides.
 - Nothing here is restricted by which Canvas tenant you are on.
   Settings are yours, per educator, everywhere.
 
@@ -73,8 +85,7 @@ And three rules about the agent itself:
 
 | Setting | What it does | Default |
 |---|---|---|
-| default_mode | Your saved mode: plan or edit. Edit is the standing edit grant. | plan |
-| edit_grant_duration_min | Length of timed edit sessions (explicit duration requests), in minutes (5 to 480). | 30 |
+| default_mode | Your saved mode: plan or edit. Edit is the standing edit grant, with no time limit. | plan |
 | verbosity | How much the agent says: concise, balanced, or detailed. | balanced |
 | confirm_destructive_writes | Ask before deletes and destructive writes, even in edit mode. | off |
 | write_approval_style | One approval per write, or one ceremony covering a listed set of writes in a single validated plan. | per_write |
@@ -94,8 +105,11 @@ Try: "be more concise", "use batched approvals", "suggest follow-ups",
 
 Your settings live at `~/.morrow/settings/<your-id>.json`, with the
 change journal alongside it. They survive restarts, reinstalls, and
-upgrades, and they are never inside the connector's own files. Timed
-edit sessions are real persisted edit grants (tamper-sealed, like
-approval records), so they survive a restart too; per-conversation
-overrides are the exception, held in memory on purpose, so a restart
-always fails safe back toward plan mode.
+upgrades, and they are never inside the connector's own files. The
+file is tamper-sealed, like approval records. Per-conversation
+overrides ("use plan mode for this conversation") are saved in the same
+sealed file, so they hold for the whole conversation. A plan override
+stays until the conversation ends. An edit override ends when the
+conversation ends or when you turn edit mode off anywhere. If the file
+cannot be read or trusted, Morrow uses plan mode. Timed edit grants saved by an older
+install are not honored: they lapse to plan mode.

@@ -8,6 +8,7 @@ import { validateTestOutput } from "../create-zero-tolerance-receipt.mjs";
 import { bindWindowsSmokeObservation, createWindowsSmokeBinding } from "../lib/windows-smoke-evidence.mjs";
 
 const COMMIT = "a".repeat(40);
+const VERSION = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
 const SKIP_LOG = [
   "﹣ the smoke access-control classification reads a real Windows access-control list (0.1ms) # Windows access control needs a Windows host",
   "ℹ skipped 1",
@@ -25,7 +26,7 @@ function writeFixture({ installer = Buffer.from("native Windows installer"), run
   const installerSha256 = sha256(installer);
   const packageReceipt = JSON.stringify({
     schema: "morrow.desktop-installer.v1",
-    version: "1.0.4",
+    version: VERSION,
     target: "win32-x64",
     source: { head: COMMIT, dirty: false },
     payload: { releaseGraph: { schema: "morrow.desktop-packager-admission.v1", sha256: "c".repeat(64) } },
@@ -35,7 +36,7 @@ function writeFixture({ installer = Buffer.from("native Windows installer"), run
       publicRelease: false,
       artifactSignature: "authenticode_absent",
     },
-    artifacts: [{ name: "Morrow-1.0.4-win-x64.exe", sha256: installerSha256 }],
+    artifacts: [{ name: `Morrow-${VERSION}-win-x64.exe`, sha256: installerSha256 }],
   });
   const smokeObservation = {
     schema: "morrow.desktop-windows-smoke.v1",
@@ -62,11 +63,11 @@ function writeFixture({ installer = Buffer.from("native Windows installer"), run
     sourceCommit: COMMIT,
     packageReceiptSha256: sha256(packageReceipt),
     releaseGraphSha256: "c".repeat(64),
-    installerFileName: "Morrow-1.0.4-win-x64.exe",
+    installerFileName: `Morrow-${VERSION}-win-x64.exe`,
     installerSha256,
   });
   const smoke = bindWindowsSmokeObservation(smokeObservation, binding);
-  writeFileSync(resolve(evidence, "Morrow-1.0.4-win-x64.exe"), installer);
+  writeFileSync(resolve(evidence, `Morrow-${VERSION}-win-x64.exe`), installer);
   writeFileSync(resolve(evidence, "package-receipt.json"), packageReceipt);
   writeFileSync(resolve(evidence, "smoke.json"), JSON.stringify(smoke));
   writeFileSync(resolve(evidence, "smoke.harness.json"), JSON.stringify({
@@ -141,15 +142,15 @@ function writeFixture({ installer = Buffer.from("native Windows installer"), run
     statePresentAfterUpgrade: true,
     newApplication: {
       sha256: "d".repeat(64),
-      fileVersion: "1.0.4",
-      productVersion: "1.0.4.0",
+      fileVersion: VERSION,
+      productVersion: `${VERSION}.0`,
       productName: "Morrow",
       companyName: "Braden Riggins",
       fileDescription: "Morrow",
       signatureStatus: "NotSigned",
       signerCertificate: null,
     },
-    registration: { displayName: "Morrow 1.0.4", displayVersion: "1.0.4", publisher: "Braden Riggins" },
+    registration: { displayName: `Morrow ${VERSION}`, displayVersion: VERSION, publisher: "Braden Riggins" },
     uninstall: {
       completed: true,
       uninstallerSignatureStatus: "NotSigned",
@@ -226,7 +227,7 @@ test("only the native-Windows ACL skip is accepted, and only with bound evidence
     platform: "win32",
     windowsEvidenceDirectory: evidence,
   }), /skipped required tests/);
-  writeFileSync(resolve(evidence, "Morrow-1.0.4-win-x64.exe"), "different installer");
+  writeFileSync(resolve(evidence, `Morrow-${VERSION}-win-x64.exe`), "different installer");
   assert.throws(() => validateTestOutput({
     id: "workspace-test",
     output: SKIP_LOG,

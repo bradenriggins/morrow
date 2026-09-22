@@ -1,6 +1,7 @@
 import { request, type ClientRequest } from "node:http";
 import { describe, expect, it } from "vitest";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
+import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
@@ -72,7 +73,7 @@ describe("approval maintenance admission", () => {
       rejected.request.end(`nonce=${encodeURIComponent(nonce!)}`);
       await expect(rejected.response).resolves.toMatchObject({ status: 409, body: expect.stringContaining("approval_maintenance_held") });
 
-      first.request.end(encodeURIComponent(nonce!));
+      first.request.end(`${encodeURIComponent(nonce!)}&presence=${bridgeSignedPresence(approval, target.href, nonce!)}`);
       await expect(first.response).resolves.toMatchObject({ status: 303 });
       expect(approvals).toBe(1);
       await waitFor(() => !approval.maintenanceQuiescent());

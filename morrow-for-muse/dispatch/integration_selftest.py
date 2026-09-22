@@ -21,6 +21,10 @@ and the removed hooks must stay absent.
 
 No network, no Chromium, no session. Fakes only.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import os
 import subprocess
 import sys
@@ -55,8 +59,8 @@ _old_retry = ex.request_with_retry
 ex.request_with_retry = fake_request_with_retry
 try:
     session = ex.SessionStore({"canvas": {
-        "base": "https://chcp.instructure.com", "pat": "P" * 40}})
-    config = {"canvas_base": "https://chcp.instructure.com"}
+        "base": "https://example.instructure.com", "pat": "P" * 40}})
+    config = {"canvas_base": "https://example.instructure.com"}
     pack = {"credential_slots": {
         "canvas_pat": {"inject": {"header": "Authorization",
                                   "scheme": "Bearer"}}}}
@@ -166,7 +170,13 @@ for rel in ("dispatch/executor.py", "provision/launch_driver.py",
             "DEPLOY.md", "INTEGRATION_NOTES.md", "CHANGELOG.md",
             "audit/desktop-parity-audit.md",
             "audit/DESKTOP_TO_MUSE_MATRIX.md"):
-    src = open(os.path.join(REPO, rel), encoding="utf-8").read()
+    path = os.path.join(REPO, rel)
+    if not os.path.exists(path) and os.path.exists(
+            os.path.join(REPO, "pack", "carve-manifest.json")):
+        # A carved distribution leaves dev-only files out
+        # (scripts/carve.py DEV_ONLY); the source tree has them all.
+        continue
+    src = open(path, encoding="utf-8").read()
     check("hygiene %s: no em dashes" % rel, "\u2014" not in src)
     check("hygiene %s: no /tmp" % rel, ("/t" + "mp/") not in src)
 

@@ -8,6 +8,10 @@ Cert fixtures are generated under transport/.selftest-work/ (never /tmp).
 
 Run: python3 transport/egress_selftest.py
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import contextlib
 import os
 import shutil
@@ -195,9 +199,8 @@ def main():
             egress.CA_PEM_CANDIDATES = orig
 
     # ---- 6. launcher defaults: explicit profile, canonical port -------
-    helper_profile = os.path.expanduser(
-        "~/workspace/canvas-login-helper/profile")
-    check("helper_profile_dir is the helper profile",
+    helper_profile = lc.tree_helper_profile_dir()
+    check("helper_profile_dir is this tree's helper profile",
           lc.helper_profile_dir() == helper_profile,
           lc.helper_profile_dir())
     check("no morrow-chromium default",
@@ -211,8 +214,18 @@ def main():
           retired_raised)
     check("canonical CDP port",
           lc.HELPER_CDP_PORT == 19223, str(lc.HELPER_CDP_PORT))
-    launcher = lc.ChromiumLauncher(
-        lc.default_binary(), lc.helper_profile_dir())
+    # These checks never start a browser, so they need no real
+    # Chromium: a stub executable stands in when none is installed
+    # (a dev machine), and the real binary is used when it is.
+    try:
+        _binary = lc.default_binary()
+    except RuntimeError:
+        os.makedirs(WORK, exist_ok=True)
+        _binary = os.path.join(WORK, "stub-chrome")
+        with open(_binary, "w") as fh:
+            fh.write("#!/bin/sh\nexit 1\n")
+        os.chmod(_binary, 0o755)
+    launcher = lc.ChromiumLauncher(_binary, lc.helper_profile_dir())
     check("launcher default port is 19223",
           launcher.cdp_port == 19223, str(launcher.cdp_port))
 
@@ -223,13 +236,10 @@ def main():
     # The egress-relevant assertions survive without any browser: the
     # launcher's probe reports proxy_auth, wants the forwarder, and
     # never leaks credentials into detail/proxy.
-    probe_profile = os.path.join(
-        os.path.expanduser(
-            "~/workspace/audits/adversarial-wave-4-2026-09-21/scratch/worker-browser"),
-        ".egress-selftest-probe-profile")
+    # Round-4 L6: scratch under this tree, never an external path.
+    probe_profile = os.path.join(WORK, "egress-selftest-probe-profile")
     with fake_env(https_proxy=FAKE_PROXY_AUTH, HTTPS_PROXY=None):
-        launcher = lc.ChromiumLauncher(
-            lc.default_binary(), probe_profile)
+        launcher = lc.ChromiumLauncher(_binary, probe_profile)
         probe = launcher._probe()
         check("launcher probe mode here", probe["mode"] == "proxy_auth",
               probe["mode"])
@@ -322,7 +332,15 @@ def main():
     # W4-P2-9: the forwarder now requires MORROW_FORWARDER_LAUNCHER_PID;
     # the selftest passes its own PID (it spawns no authorized client
     # here, it only checks the serving line).
-    fw_env = dict(os.environ)
+    # The check sets up its own authenticated proxy env: the caller's
+    # environment may have no proxy or an unauthenticated one (direct
+    # egress is supported), and the forwarder then rightly declines to
+    # serve.
+    fw_env = {k: v for k, v in os.environ.items()
+              if k not in ("https_proxy", "HTTPS_PROXY",
+                           "http_proxy", "HTTP_PROXY")}
+    fw_env["https_proxy"] = FAKE_PROXY_AUTH
+    fw_env["HTTPS_PROXY"] = FAKE_PROXY_AUTH
     fw_env["MORROW_FORWARDER_LAUNCHER_PID"] = str(os.getpid())
     r = subprocess.Popen(
         [sys.executable, fw, "18098"],
@@ -698,86 +716,94 @@ def main():
     check("W5-P2-3: _read_headers times out on stalled peer",
           got is None and dt < 5, "got=%r dt=%.1f" % (got, dt))
 
-    # f4. PID hints: after one verified lookup, the pid becomes a hint,
-    # so a second connection from the same process is found without a
-    # full /proc scan.
-    import socket as _sock3
-    srv = _sock3.socket()
-    srv.setsockopt(_sock3.SOL_SOCKET, _sock3.SO_REUSEADDR, 1)
-    srv.bind(("127.0.0.1", 0))
-    srv.listen(1)
-    srv_port = srv.getsockname()[1]
-    holder = subprocess.Popen(
-        [sys.executable, "-c",
-         "import socket,time;"
-         "a=socket.create_connection(('127.0.0.1',%d));"
-         "b=socket.create_connection(('127.0.0.1',%d));"
-         "time.sleep(10)" % (srv_port, srv_port)],
-        start_new_session=True)
-    try:
-        srv.settimeout(10)
-        c1, _ = srv.accept()
-        c2, _ = srv.accept()
-        fwmod._PID_HINTS.clear()
-
-        def _inode_of(sock):
-            tgt = os.readlink("/proc/self/fd/%d" % sock.fileno())
-            assert tgt.startswith("socket:["), tgt
-            return int(tgt[8:-1])
-
-        # Server-side inodes differ from the holder's; find the
-        # holder's inodes via the snapshot instead.
-        snap = fwmod._proc_socket_snapshot()
-        holder_inodes = [ino for ino, (p, _st) in snap.items()
-                         if p == holder.pid]
-        assert len(holder_inodes) >= 2, \
-            "expected 2 holder sockets, got %d" % len(holder_inodes)
-
-        # First lookup: hint miss -> snapshot scan -> pid remembered.
-        scans_before = len(fwmod._PID_HINTS)
-        p1 = fwmod._socket_holder_pid_verified(holder_inodes[0])
-        check("W5-P2-3: verified lookup finds the holder pid",
-              p1 == holder.pid, repr(p1))
-        check("W5-P2-3: holder pid becomes a hint",
-              len(fwmod._PID_HINTS) == scans_before + 1)
-
-        # Second lookup (different inode, same pid): served from the
-        # hint. Prove no full scan by breaking the snapshot builder.
-        orig_snap = fwmod._proc_socket_snapshot
-        fwmod._proc_socket_snapshot = lambda: (_ for _ in ()).throw(
-            AssertionError("full scan on hint hit"))
+    # f4/f5 exercise the /proc snapshot implementation, which exists
+    # only where there is /proc (Linux, the product platform). Without
+    # /proc the forwarder authenticates clients with lsof/ps instead
+    # (covered by the descendant-client checks above).
+    if not os.path.isdir("/proc"):
+        print("SKIP W5-P2-3 /proc snapshot checks: no /proc on this "
+              "machine (Linux only)")
+    else:
+        # f4. PID hints: after one verified lookup, the pid becomes a hint,
+        # so a second connection from the same process is found without a
+        # full /proc scan.
+        import socket as _sock3
+        srv = _sock3.socket()
+        srv.setsockopt(_sock3.SOL_SOCKET, _sock3.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        srv_port = srv.getsockname()[1]
+        holder = subprocess.Popen(
+            [sys.executable, "-c",
+             "import socket,time;"
+             "a=socket.create_connection(('127.0.0.1',%d));"
+             "b=socket.create_connection(('127.0.0.1',%d));"
+             "time.sleep(10)" % (srv_port, srv_port)],
+            start_new_session=True)
         try:
-            p2 = fwmod._socket_holder_pid_verified(holder_inodes[1])
-        finally:
-            fwmod._proc_socket_snapshot = orig_snap
-        check("W5-P2-3: second connection served from pid hint (no scan)",
-              p2 == holder.pid, repr(p2))
-    finally:
-        holder.terminate()
-        holder.wait(timeout=10)
-        srv.close()
+            srv.settimeout(10)
+            c1, _ = srv.accept()
+            c2, _ = srv.accept()
+            fwmod._PID_HINTS.clear()
 
-    # f5. _socket_holder_pid_verified: this process's own sockets are
-    # never attributed (the snapshot excludes self: fail closed).
-    import socket as _sock2
-    a, b = _sock2.socketpair()
-    try:
-        inode = None
-        for fd in (a.fileno(), b.fileno()):
+            def _inode_of(sock):
+                tgt = os.readlink("/proc/self/fd/%d" % sock.fileno())
+                assert tgt.startswith("socket:["), tgt
+                return int(tgt[8:-1])
+
+            # Server-side inodes differ from the holder's; find the
+            # holder's inodes via the snapshot instead.
+            snap = fwmod._proc_socket_snapshot()
+            holder_inodes = [ino for ino, (p, _st) in snap.items()
+                             if p == holder.pid]
+            assert len(holder_inodes) >= 2, \
+                "expected 2 holder sockets, got %d" % len(holder_inodes)
+
+            # First lookup: hint miss -> snapshot scan -> pid remembered.
+            scans_before = len(fwmod._PID_HINTS)
+            p1 = fwmod._socket_holder_pid_verified(holder_inodes[0])
+            check("W5-P2-3: verified lookup finds the holder pid",
+                  p1 == holder.pid, repr(p1))
+            check("W5-P2-3: holder pid becomes a hint",
+                  len(fwmod._PID_HINTS) == scans_before + 1)
+
+            # Second lookup (different inode, same pid): served from the
+            # hint. Prove no full scan by breaking the snapshot builder.
+            orig_snap = fwmod._proc_socket_snapshot
+            fwmod._proc_socket_snapshot = lambda: (_ for _ in ()).throw(
+                AssertionError("full scan on hint hit"))
             try:
-                tgt = os.readlink("/proc/self/fd/%d" % fd)
-            except OSError:
-                continue
-            if tgt.startswith("socket:["):
-                inode = int(tgt[8:-1])
-                break
-        assert inode is not None, "no socket inode found"
-        found = fwmod._socket_holder_pid_verified(inode)
-        check("W5-P2-3: verified lookup excludes own process (fail closed)",
-              found is None, repr(found))
-    finally:
-        a.close()
-        b.close()
+                p2 = fwmod._socket_holder_pid_verified(holder_inodes[1])
+            finally:
+                fwmod._proc_socket_snapshot = orig_snap
+            check("W5-P2-3: second connection served from pid hint (no scan)",
+                  p2 == holder.pid, repr(p2))
+        finally:
+            holder.terminate()
+            holder.wait(timeout=10)
+            srv.close()
+
+        # f5. _socket_holder_pid_verified: this process's own sockets are
+        # never attributed (the snapshot excludes self: fail closed).
+        import socket as _sock2
+        a, b = _sock2.socketpair()
+        try:
+            inode = None
+            for fd in (a.fileno(), b.fileno()):
+                try:
+                    tgt = os.readlink("/proc/self/fd/%d" % fd)
+                except OSError:
+                    continue
+                if tgt.startswith("socket:["):
+                    inode = int(tgt[8:-1])
+                    break
+            assert inode is not None, "no socket inode found"
+            found = fwmod._socket_holder_pid_verified(inode)
+            check("W5-P2-3: verified lookup excludes own process (fail closed)",
+                  found is None, repr(found))
+        finally:
+            a.close()
+            b.close()
 
     # f6. Connection shedding: a full semaphore gets an immediate 503
     # and never reaches the inner handler.

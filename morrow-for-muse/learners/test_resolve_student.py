@@ -8,6 +8,10 @@ fixtures only; no network, no credentials, no tenant.
 Run from the tree root: python3 -m unittest learners.test_resolve_student
 Stdlib unittest only.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 
 import os
 import sys
@@ -200,11 +204,17 @@ class LadderTests(unittest.TestCase):
         self.assertEqual(res.user_id, 8)
         self.assertEqual(res.match_kind, "name_exact")
 
-    def test_fuzzy_typo_single_match_resolves(self):
+    def test_fuzzy_typo_single_match_asks_the_educator(self):
+        # Round-4 privacy audit H3: a close spelling is never
+        # auto-picked; the one fuzzy candidate goes back to the
+        # educator for confirmation.
         cands = _cands(_user(1, "John Smith"), _user(2, "Zara Khan"))
-        res = match_query(cands, "Jonh Smith")
-        self.assertEqual(res.user_id, 1)
-        self.assertEqual(res.match_kind, "name_fuzzy")
+        with self.assertRaises(StudentAmbiguous) as ctx:
+            match_query(cands, "Jonh Smith")
+        self.assertEqual(ctx.exception.resolution_evidence["match_kind"],
+                         "name_fuzzy")
+        self.assertEqual(ctx.exception.resolution_evidence["match_count"],
+                         1)
 
     def test_fuzzy_multiple_matches_ambiguous(self):
         # CORRECT: a typo near two similar names is ambiguous.
@@ -474,6 +484,63 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("Student A2", public)
         self.assertNotIn("Jane", public)
         self.assertNotIn("Jane", str(exc))
+
+
+class CliPrivacyBoundaryTests(unittest.TestCase):
+    """The CLI output is agent-visible: it must carry course-scoped
+    labels, never raw Canvas user ids or names, and must fail closed
+    when no label can be issued."""
+
+    def _run_cli(self, argv, labeler):
+        import contextlib
+        import io
+        import json as _json
+        from learners import resolve_student as rs
+        body = _json.dumps([
+            _user(5550101, "Jane Doe", login_id="jdoe"),
+            _user(5550102, "Omar Haddad", section_id=12),
+        ])
+        fetch = _fetcher([(200, {}, body)])
+        fetch.close = lambda: None
+        saved = (rs.helper_fetch_factory, rs.vault_label_for, sys.argv)
+        rs.helper_fetch_factory = lambda base, timeout=60: fetch
+        rs.vault_label_for = labeler
+        sys.argv = ["resolve_student.py", "--tenant-base",
+                    "https://canvas.example.edu", "--course-id", "89585"] \
+            + argv
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                code = rs._cli()
+        finally:
+            rs.helper_fetch_factory, rs.vault_label_for, sys.argv = saved
+        return code, out.getvalue()
+
+    def _labeler(self, tenant_base, course_id, candidates):
+        labels = {c["user_id"]: "Student A%d" % (i + 1)
+                  for i, c in enumerate(candidates)}
+        return lambda uid: labels[uid]
+
+    def test_resolved_prints_label_not_raw_id(self):
+        code, out = self._run_cli(["--query", "jdoe"], self._labeler)
+        self.assertEqual(code, 0, out)
+        self.assertIn("Student A1", out)
+        for raw in ("5550101", "Jane", "jdoe\"", "user_id"):
+            self.assertNotIn(raw, out)
+
+    def test_ambiguous_lists_labels_not_names(self):
+        code, out = self._run_cli(["--query", "Student"], self._labeler)
+        self.assertNotIn("Jane", out)
+        self.assertNotIn("5550101", out)
+
+    def test_no_vault_fails_closed(self):
+        def broken(*_a):
+            raise RuntimeError("vault unavailable (cryptography missing)")
+        code, out = self._run_cli(["--query", "jdoe"], broken)
+        self.assertNotEqual(code, 0)
+        self.assertNotIn("5550101", out)
+        self.assertNotIn("Jane", out)
+        self.assertIn("label", out)
 
 
 if __name__ == "__main__":

@@ -30,6 +30,10 @@ Hermetic: scratch journal under this file's directory (never /tmp, per
 the standing rule); no network, no provider. Signal state is saved and
 restored so the test runner's own handlers are untouched.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import contextlib
 import io
 import os
@@ -45,6 +49,46 @@ for _p in (REPO, os.path.join(REPO, "dispatch")):
         sys.path.insert(0, _p)
 
 from dispatch import executor as ex  # noqa: E402
+
+# Selftest harness: the approvals here are minted on the driver
+# channel, so dispatch runs with require_educator_channel=False (the
+# production default is True).
+
+def _journal_forward_write(ex, entry, params, receipt):
+    """Journal a completed forward write for entry: an undo binds its
+    target ONLY to a journaled forward op (H1)."""
+    import uuid as _uuid
+    op_id = str(_uuid.uuid4())
+    token = ex.claim_op_id(op_id, "dispatch", entry["name"], "write",
+                           ex.digest_of(params))
+    ex.journal_claimed_outcome(op_id, {
+        "op_id": op_id, "entry_name": entry["name"], "kind": "dispatch",
+        "effect": "write", "wal": "complete",
+        "params_digest": ex.digest_of(params), "receipt": receipt,
+        "verification": "pass", "uncertain": False}, token)
+    return op_id
+
+def _driver_channel(fn):
+    def call(*a, **k):
+        k.setdefault("require_educator_channel", False)
+        return fn(*a, **k)
+    return call
+
+
+ex.dispatch_entry = _driver_channel(ex.dispatch_entry)
+ex.dispatch_catalog_op = _driver_channel(ex.dispatch_catalog_op)
+ex.dispatch_undo = _driver_channel(ex.dispatch_undo)
+
+# The scenarios use literal ids and synthetic paths that are not
+# catalog path templates; the live-proven catalog gate is covered by
+# dispatch/test_direct_lane_hardening.py and is a no-op here.
+ex.live_proven_gate = lambda *a, **k: None  # noqa: E731
+# The signed-in account check (final muse audit M3) reads users/self
+# before writes; these fakes script every provider call, so it is a
+# no-op here. It is covered by transport/test_principal_check.py.
+from transport import chromium_session as _cs_pkg  # noqa: E402
+_cs_pkg.ChromiumSession._verify_principal = lambda *a, **k: None  # noqa: E731
+
 from dispatch import admission as _ad_mod  # noqa: E402
 
 PASS = []
@@ -311,8 +355,11 @@ try:
         cs._auth_state = "ready"
         return cs
 
-    def _u_approve(entry, params):
-        rec = _ad.mint_approval(entry, params, "https://canvas.example.edu")
+    def _u_approve(entry, params, of_op_id):
+        u_entry, u_params = ex.undo_approval_subject(entry, params,
+                                                     of_op_id, {})
+        rec = _ad.mint_approval(u_entry, u_params,
+                                "https://canvas.example.edu")
         _ad.sign_approval(
             rec, "I, the educator, authorize this wave-5 selftest undo",
             channel="driver")
@@ -323,9 +370,10 @@ try:
     _u0 = _u_entry("w5-undo-ok")
     _s0 = _u_session([("ok", 200, '{"id": 112, "name": "Intended Course"}'),
                       ("ok", 200, '{"id": 5}')])
-    _out0 = ex.dispatch_undo(_u0, _u_params, {}, str(uuid.uuid4()),
+    _of0 = _journal_forward_write(ex, _u0, _u_params, {"id": 7})
+    _out0 = ex.dispatch_undo(_u0, _u_params, {}, _of0,
                              _s0, {"max_body_bytes": 262144},
-                             approval=_u_approve(_u0, _u_params))
+                             approval=_u_approve(_u0, _u_params, _of0))
     check("undo harness baseline: dispatched and journaled",
           bool(_out0.get("op_id"))
           and [m for m, _u in _s0._fake_transport.calls] == ["GET", "DELETE"])
@@ -336,9 +384,10 @@ try:
     _s1 = _u_session([("ok", 200, '{"id": 112, "name": "Intended Course"}'),
                       ("ok", 200, '{"id": 5}')])
     try:
-        ex.dispatch_undo(_u1, _u_params, {}, str(uuid.uuid4()),
+        _of1 = _journal_forward_write(ex, _u1, _u_params, {"id": 7})
+        ex.dispatch_undo(_u1, _u_params, {}, _of1,
                          _s1, {"max_body_bytes": 262144},
-                         approval=_u_approve(_u1, _u_params))
+                         approval=_u_approve(_u1, _u_params, _of1))
         check("undo with pending signal stops before provider I/O",
               False, "no exception")
     except ex.ExecutorShutdown:

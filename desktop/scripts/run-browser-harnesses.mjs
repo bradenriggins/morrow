@@ -56,6 +56,13 @@ export const HARNESSES = Object.freeze([
     summary: "Loads an isolated Bridge folder into Chromium and reads back its exact active-folder challenge.",
   }),
   Object.freeze({
+    id: "installer_renderer_layout",
+    script: "installer/test/renderer-layout.browser.mjs",
+    timeoutMs: 300_000,
+    attendedOnly: false,
+    summary: "Renders the desktop app's setup views in Chromium at desktop and 320px widths and checks text, paths and Copy feedback fit.",
+  }),
+  Object.freeze({
     id: "canvas_file_optional_permission",
     script: "scripts/test/canvas-file-optional-permission-proof.mjs",
     timeoutMs: 3_600_000,

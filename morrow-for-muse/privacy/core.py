@@ -529,15 +529,36 @@ def _decode_vault_state(content, key):
     return state
 
 
-def _add_vault_identities(state, scope, identities):
+def _label_order(order_key, scope, identity):
+    """Keyed-hash position of a new learner inside one label batch.
+
+    Round-4 audit L1: labels used to follow first-read order, so a
+    roster read in alphabetical order leaked each student's
+    alphabetical rank. New labels in one batch are issued in the order
+    of an HMAC over (scope, learner id) under the vault key: stable for
+    one vault, meaningless without the key. Learners who already have a
+    label keep it."""
+    return hmac.new(bytes(order_key or b"morrow.label-order"),
+                    ("%s\x00%s" % (scope_key(scope), identity["id"]))
+                    .encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _add_vault_identities(state, scope, identities, order_key=None):
     changed = False
-    labels = []
-    for identity in identities:
+    labels = [None] * len(identities)
+    fresh = []
+    for index, identity in enumerate(identities):
         key = identity_key(scope, identity)
         existing = state["entries"].get(key)
         if existing is not None:
-            labels.append(existing["label"])
+            labels[index] = existing["label"]
             continue
+        if any(identity_key(scope, identities[i]) == key for i, _ in fresh):
+            continue
+        fresh.append((index, identity))
+    fresh.sort(key=lambda pair: _label_order(order_key, scope, pair[1]))
+    for index, identity in fresh:
+        key = identity_key(scope, identity)
         token = "learner_%s" % uuid.uuid4()
         while token in state["by_token"]:
             token = "learner_%s" % uuid.uuid4()
@@ -548,7 +569,10 @@ def _add_vault_identities(state, scope, identities):
         state["by_label"]["%s\x00%s" % (scope_key(scope),
                                         entry["label"])] = entry
         changed = True
-        labels.append(entry["label"])
+    for index, identity in enumerate(identities):
+        if labels[index] is None:
+            labels[index] = state["entries"][identity_key(scope,
+                                                          identity)]["label"]
     return labels, changed
 
 
@@ -716,7 +740,8 @@ class LearnerVault:
         if self._path == ":memory:":
             labels_by_request = [
                 _add_vault_identities(self._state, item["scope"],
-                                      item["identities"])[0]
+                                      item["identities"],
+                                      self._key.view())[0]
                 for item in normalized
             ]
         else:
@@ -726,7 +751,8 @@ class LearnerVault:
                 labels = []
                 for item in normalized:
                     outcome = _add_vault_identities(state, item["scope"],
-                                                    item["identities"])
+                                                    item["identities"],
+                                                    self._key.view())
                     changed = changed or outcome[1]
                     labels.append(outcome[0])
                 if changed:
@@ -750,6 +776,12 @@ class LearnerVault:
         return output
 
     def resolve(self, scope_value, token_value):
+        return self.resolve_with_token(scope_value, token_value)[0]
+
+    def resolve_with_token(self, scope_value, token_value):
+        """(identity, token) for a label or token issued in this exact
+        scope. The token (learner_<uuid>) is new on every issue, so it
+        tells a re-issued label apart from the one an approval saw."""
         scope = exact_scope(scope_value)
         token = str(token_value or "").strip()
         if self._path != ":memory:":
@@ -761,7 +793,7 @@ class LearnerVault:
             entry = self._state["by_token"].get(token)
         if entry is None or scope_key(entry["scope"]) != scope_key(scope):
             raise PrivacyError("learner token is unavailable for this exact scope")
-        return dict(entry["identity"])
+        return dict(entry["identity"]), entry["token"]
 
     def identities_for_scope(self, scope_value):
         """Every identity this vault has published a label for under the
@@ -1404,6 +1436,45 @@ def _url_safe_replacement(source, replacement, url_spans):
     return replacement
 
 
+# Round-4 audit H1: Canvas puts a learner's id in URL paths under many
+# route names (/grades/<id>, /submissions/<id>, speed_grader?student_id=)
+# and a list of route names always misses one. Inside a URL, any whole
+# path segment or query value equal to a rostered learner id is that
+# learner. The one exception is the segment right after a context root
+# (/courses/<id>, /accounts/<id>): by Canvas URL grammar that number is
+# the course or account, never a person.
+_URL_ID_SEGMENT_RE = re.compile(r"/([0-9]{1,500})(?=[/?#]|$)")
+_URL_ID_QUERY_RE = re.compile(r"[?&][^=&#]*=([0-9]{1,500})(?=[&#]|$)")
+_URL_CONTEXT_ROOTS = frozenset({"courses", "accounts"})
+
+
+def _replace_url_learner_ids(value, lookup):
+    view = _normalized_identity_text_view(value)
+    text = view["text"]
+    replacements = []
+    for span_start, span_end in _url_token_spans(text):
+        url = text[span_start:span_end]
+        hits = []
+        for match in _URL_ID_SEGMENT_RE.finditer(url):
+            before = url[:match.start()].rsplit("/", 1)[-1]
+            if before.lower() in _URL_CONTEXT_ROOTS:
+                continue
+            hits.append(match.span(1))
+        hits.extend(m.span(1) for m in _URL_ID_QUERY_RE.finditer(url))
+        for start, end in hits:
+            token = lookup(url[start:end])
+            if not token:
+                continue
+            source = _source_range_for_view(view, span_start + start,
+                                            span_start + end)
+            if source is not None:
+                replacements.append({
+                    "start": source["start"], "end": source["end"],
+                    "replacement": urllib.parse.quote(token, safe="")})
+    return _apply_source_replacements(value, replacements) \
+        if replacements else value
+
+
 def _replace_known_identity_references(value, identities):
     def lookup(ident):
         entry = identities.get(str(ident).strip())
@@ -1414,10 +1485,10 @@ def _replace_known_identity_references(value, identities):
                    re.IGNORECASE),
         re.compile(r"((?:\b(?:learner|student|user|recipient|enrollment|submission|grade)\b\s*(?:id\b\s*)?[#:=]\s*))([0-9]{1,500})\b",
                    re.IGNORECASE),
-        re.compile(r"(/(?:users|learners|students)/)([0-9]{1,500})\b",
-                   re.IGNORECASE),
+        re.compile(r"(/(?:users|learners|students|grades|submissions)/)"
+                   r"([0-9]{1,500})\b", re.IGNORECASE),
     ]
-    output = value
+    output = _replace_url_learner_ids(value, lookup)
     for matcher in patterns:
         view = _normalized_identity_text_view(output)
         url_spans = _url_token_spans(output)
@@ -1454,11 +1525,31 @@ def _learner_text_preparation(context):
     # id conflicts (it is the fresher record).
     vault = context.get("learnerVault")
     if vault is not None:
-        known_ids = {identity["id"] for identity in identities}
+        by_id = {identity["id"]: index
+                 for index, identity in enumerate(identities)}
         for identity in vault.identities_for_scope(scope):
-            if identity["id"] not in known_ids:
-                known_ids.add(identity["id"])
+            index = by_id.get(identity["id"])
+            if index is None:
+                by_id[identity["id"]] = len(identities)
                 identities.append(identity)
+                continue
+            # The fresher record keeps its fields, but a name the vault
+            # already knows for this learner (a receipt such as
+            # bulk_user_tags carries only the id) still projects to her
+            # label wherever it appears in free text.
+            current = identities[index]
+            extra = [value for value in (
+                identity.get("name"), identity.get("email"),
+                identity.get("loginId"), identity.get("sisUserId"))
+                + tuple(identity.get("aliases") or ())
+                if isinstance(value, str) and value.strip()
+                and value != current.get("name")]
+            if extra:
+                merged = dict(current)
+                merged["aliases"] = list(current.get("aliases") or []) + [
+                    value for value in extra
+                    if value not in (current.get("aliases") or [])]
+                identities[index] = merged
     return {"context": context, "scope": scope,
             "identities": identities}
 
@@ -1828,6 +1919,10 @@ _IDENTITY_VALUE_FIELDS = frozenset([
     "loginid", "sisloginid", "firstname", "lastname", "pronouns",
     "avatarimageurl", "accommodations",
 ])
+_PERSON_ID_ARRAY_FIELDS = frozenset([
+    "userids", "studentids", "learnerids", "recipientids",
+    "participantids", "authorids", "participatinguserids",
+])
 _IDENTITY_RECORD_VALUE_FIELDS = frozenset([
     "id", "name", "fullname", "username", "sortablename", "shortname",
 ])
@@ -1928,10 +2023,12 @@ def _learner_identity(value, kind=None, context=None):
             raise PrivacyError("learner_roster_identity_unavailable")
         return current
     normalized_keys = set(fields.keys())
+    # The SIS id is an identifier to label, never the record's primary
+    # id: the roster is keyed by the Canvas user id, so taking the SIS
+    # id as primary made a roster read refuse whenever it was set.
     direct_id = _identity_value(fields, [
         "user_id", "userId", "learner_id", "learnerId", "student_id",
-        "studentId", "canvas_user_id", "canvasUserId", "sis_user_id",
-        "sisUserId"])
+        "studentId", "canvas_user_id", "canvasUserId"])
     has_person_id = any(k in normalized_keys for k in
                         ("userid", "learnerid", "studentid", "canvasuserid",
                          "sisuserid"))
@@ -1940,15 +2037,25 @@ def _learner_identity(value, kind=None, context=None):
                                 "displayname", "fullname", "studentname",
                                 "avatarimageurl", "pronouns", "firstname",
                                 "lastname"))
+    # Round-4 audit L2: an assignment read with include[]=submission is
+    # {"id", "name", "submission": {"user_id", ...}}. The person there is
+    # the submission's user_id, not the assignment, so a nested
+    # submission that names its own user is not a person signal for the
+    # record that carries it.
+    person_signals = ("grade", "score", "enrollments", "grades",
+                      "submission", "attempts")
+    nested = fields.get("submission")
+    if isinstance(nested, dict) and any(
+            _normalize_privacy_key(k) == "userid" for k in nested):
+        person_signals = tuple(k for k in person_signals
+                               if k != "submission")
     has_generic_signal = (
         (has_person_id and (has_identity_profile or bool(
             direct_id and context is not None
             and direct_id in context["identityById"])))
         or (context is not None and "id" in normalized_keys
             and "name" in normalized_keys
-            and any(k in normalized_keys for k in
-                    ("grade", "score", "enrollments", "grades", "submission",
-                     "attempts")))
+            and any(k in normalized_keys for k in person_signals))
         or (("avatarimageurl" in normalized_keys
              or "pronouns" in normalized_keys)
             and ("name" in normalized_keys
@@ -1959,6 +2066,15 @@ def _learner_identity(value, kind=None, context=None):
     if (kind or has_generic_signal) and kind not in ("submission", "enrollment"):
         fallback_id = _identity_value(fields, ["id"])
     ident = direct_id or fallback_id
+    sis_user_id = _identity_value(fields, ["sis_user_id", "sisUserId"])
+    if not ident and sis_user_id and context is not None:
+        matches = [candidate["id"]
+                   for candidate in context["identityById"].values()
+                   if candidate.get("sisUserId") == sis_user_id]
+        if len(matches) == 1:
+            ident = matches[0]
+    if not ident and sis_user_id:
+        ident = sis_user_id
     if not ident:
         return None
     identity = {"id": ident}
@@ -1967,7 +2083,6 @@ def _learner_identity(value, kind=None, context=None):
                                     "studentName"])
     email = _identity_value(fields, ["email", "primary_email", "primaryEmail"])
     login_id = _identity_value(fields, ["login_id", "loginId"])
-    sis_user_id = _identity_value(fields, ["sis_user_id", "sisUserId"])
     if name:
         identity["name"] = name
     if email:
@@ -2144,6 +2259,24 @@ def _redact_learner_egress_prepared(value, exact_context):
                 if safe_key in output:
                     raise PrivacyError("privacy_identity_key_collision")
                 output[safe_key] = "Staff"
+                continue
+            # Round-4 audit H3: a person-id array (an override's
+            # student_ids) projects to the learners' labels in place, so
+            # a readback still says WHO a record is for. Every id must be
+            # rostered; an unknown one fails closed.
+            if normalized_key in _PERSON_ID_ARRAY_FIELDS \
+                    and isinstance(child, list) and all(
+                        isinstance(item, (int, str))
+                        and not isinstance(item, bool) for item in child):
+                labels = []
+                for item in child:
+                    entry = exact_context["tokensById"].get(
+                        str(item).strip())
+                    if entry is None or not entry.get("token"):
+                        raise PrivacyError(
+                            "learner_roster_identity_unavailable")
+                    labels.append(entry["token"])
+                output[_redact_learner_key(key, exact_context)] = labels
                 continue
             if _is_secret_field(key) \
                     or _is_identity_value_field(

@@ -1282,6 +1282,71 @@ describe("LoopbackBridgeServer", () => {
     expect(calls).toBe(2);
   });
 
+  it("reports a write cancelled while its Edit permission is read as cancelled, not as an unreadable permission", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+    });
+    servers.push(server);
+    const socket = await connect(server, [editableCanvasBinding()]);
+    let optionsRead: BridgeCommand | undefined;
+    let writes = 0;
+    socket.on("message", (raw) => {
+      const message = parseBridgeJson(raw.toString()) as { schema?: string; kind?: string } | undefined;
+      if (message?.schema === BRIDGE_SCHEMAS.command) {
+        const command = message as unknown as BridgeCommand;
+        if (command.kind === "edit_policy_options_get") optionsRead = command;
+        else writes += 1;
+        return;
+      }
+      if (message?.schema !== BRIDGE_SCHEMAS.cancel || !optionsRead) return;
+      socket.send(serializeBridgeMessage({
+        schema: BRIDGE_SCHEMAS.result,
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        requestId: optionsRead.requestId,
+        operationId: optionsRead.operationId,
+        generation: optionsRead.generation,
+        ok: false,
+        problem: {
+          schema: "morrow.bridge.problem.v1",
+          code: "request_cancelled_before_dispatch",
+          message: "Morrow cancelled this request before the provider change started.",
+          recoverable: true,
+        },
+        completedAt: Date.now(),
+      }));
+    });
+    const abort = new AbortController();
+    const pending = server.invoke({
+      kind: "invoke_write",
+      toolName: "canvas_update_create_page_courses",
+      operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page",
+      sourceBindingId: "canvas-course-42",
+      arguments: { course_id: "42", url_or_id: "week-1", morrow_page_guard: pageGuard },
+      outerGrant: {
+        planDigest: digest,
+        approvalGrantDigest: "b".repeat(64),
+        effectReceiptId: "effect:cancel-during-permission-read",
+        dispatchAttempt: 1 as const,
+        gatewayProcessId: "gateway:12345678",
+        authorization: { kind: "edit_scope" as const, policyDigest: "c".repeat(64), policyRevision: 1 },
+      },
+      signal: abort.signal,
+    });
+    await vi.waitFor(() => expect(optionsRead).toBeDefined());
+    abort.abort();
+
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      problem: { code: "request_cancelled_before_dispatch" },
+    });
+    expect(writes).toBe(0);
+    expect(server.health().pendingCount).toBe(0);
+  });
+
   it("refuses a revoked edit permission before sending", async () => {
     const server = new LoopbackBridgeServer({
       token,

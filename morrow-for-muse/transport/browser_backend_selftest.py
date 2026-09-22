@@ -5,6 +5,10 @@ session-dead, uncertain writes, fail-fast, and duplicate protection.
 
 No browser needed. Run: python3 transport/browser_backend_selftest.py
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import json
 import os
 import re
@@ -43,9 +47,26 @@ import browser_backend as bb  # noqa: E402
 import batch  # noqa: E402
 
 
-def _approve(name, params):
-    """Test-only educator approval for a write fixture (v2 record)."""
-    entry = {"name": name, "provider": "canvas"}
+
+def _journal_forward_write(ex, entry, params, receipt):
+    """Journal a completed forward write for entry: an undo binds its
+    target ONLY to a journaled forward op (H1)."""
+    import uuid as _uuid
+    op_id = str(_uuid.uuid4())
+    token = ex.claim_op_id(op_id, "dispatch", entry["name"], "write",
+                           ex.digest_of(params))
+    ex.journal_claimed_outcome(op_id, {
+        "op_id": op_id, "entry_name": entry["name"], "kind": "dispatch",
+        "effect": "write", "wal": "complete",
+        "params_digest": ex.digest_of(params), "receipt": receipt,
+        "verification": "pass", "uncertain": False}, token)
+    return op_id
+
+def _approve(entry, params):
+    """Test-only educator approval for a write fixture (v2 record).
+
+    Minted against the entry itself: the approval binds the exact
+    request (method, path, body) the entry sends (round-4 H1)."""
     rec = mint_approval(entry, params,
                         tenant_base="https://chcp.instructure.com",
                         ttl_seconds=3600,
@@ -89,6 +110,10 @@ _admission_mod.APPROVALS_DIR = os.path.join(WORK, "approvals")
 os.makedirs(_admission_mod.APPROVALS_DIR, exist_ok=True)
 
 ex.JOURNAL_PATH = JOURNAL
+# The fixtures use literal ids and synthetic paths that are not catalog
+# path templates; the live-proven catalog gate is covered by
+# dispatch/test_direct_lane_hardening.py and is a no-op here.
+ex.live_proven_gate = lambda *a, **k: None  # noqa: E731
 ex.WRITE_HALT_PATH = HALT
 
 LANE_STATE = {"canvas": {"base": "https://chcp.instructure.com",
@@ -282,7 +307,7 @@ def main():
             plan=kw.get("plan", fake_plan(entry["name"])),
             brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
             approval=kw.get("approval",
-                            _approve(entry["name"], params)))
+                            _approve(entry, params)))
         check("write dispatch renders fetch brief: " + label,
               out["status"] == "awaiting_browser_task")
         with open(out["brief_file"], encoding="utf-8") as fh:
@@ -302,21 +327,21 @@ def main():
 
     _wparams = {"course_id": "89585", "name": "Weasel Test"}
     _write_renders_fetch(WRITE_ENTRY, _wparams, "POST create",
-                         approval=_approve("test.create_assignment", _wparams))
+                         approval=_approve(WRITE_ENTRY, _wparams))
 
     put_entry = {"name": "test.put", "provider": "canvas", "effects": "write",
                  "request": {"method": "PUT",
                              "url": "{canvas_base}/api/v1/x/1",
                              "body": {"a": "params.a"}}}
     _write_renders_fetch(put_entry, {"a": "b"}, "PUT",
-                         approval=_approve("test.put", {"a": "b"}))
+                         approval=_approve(put_entry, {"a": "b"}))
 
     list_entry = {"name": "test.list", "provider": "canvas", "effects": "write",
                   "request": {"method": "POST",
                               "url": "{canvas_base}/api/v1/x",
                               "body": {"ids[]": ["params.a", "params.b"]}}}
     _write_renders_fetch(list_entry, {"a": "1", "b": "2"}, "POST list fields",
-                         approval=_approve("test.list", {"a": "1", "b": "2"}))
+                         approval=_approve(list_entry, {"a": "1", "b": "2"}))
 
     # -- capability classification --------------------------------------
     json_entry = {"name": "test.json", "provider": "canvas", "effects": "write",
@@ -331,7 +356,7 @@ def main():
         json_entry, {"a": "b"}, LANE_STATE, {},
         plan=fake_plan("test.json"), brief_dir=BRIEF_DIR,
         pending_dir=PENDING_DIR,
-        approval=_approve("test.json", {"a": "b"}))
+        approval=_approve(json_entry, {"a": "b"}))
     check("JSON body write dispatches to the fetch lane",
           _json_out["status"] == "awaiting_browser_task")
 
@@ -399,7 +424,7 @@ def main():
                   bb.dispatch_browser_entry, chain_entry, {"n": "x", "n2": "y"},
                   LANE_STATE, {}, plan=fake_plan("test.chain"),
                   brief_dir=BRIEF_DIR,
-                  approval=_approve("test.chain", {"n": "x", "n2": "y"}))
+                  approval=_approve(chain_entry, {"n": "x", "n2": "y"}))
 
     local_entry = {"name": "test.local", "provider": "canvas", "effects": "read",
                    "request": {"method": "GET", "url": "local://governance/check"}}
@@ -434,7 +459,7 @@ def main():
                   bb.dispatch_browser_entry, WRITE_ENTRY,
                   {"course_id": "1", "name": "x"}, LANE_STATE, {},
                   brief_dir=BRIEF_DIR,
-                  approval=_approve("test.create_assignment",
+                  approval=_approve(WRITE_ENTRY,
                                     {"course_id": "1", "name": "x"}))
 
     # -- admission gate ------------------------------------------------
@@ -798,7 +823,7 @@ def main():
             entry, params, LANE_STATE, {},
             plan=fake_plan(entry["name"], op_id), op_id=op_id,
             brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
-            approval=_approve(entry["name"], params))
+            approval=_approve(entry, params))
         return op_id
 
     _wbody = json.dumps({"id": 79, "name": "Weasel Test"})
@@ -932,7 +957,7 @@ def main():
         WRITE_ENTRY, _wparams, LANE_STATE, {},
         plan=fake_plan("test.create_assignment", _wop), op_id=_wop,
         brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
-        approval=_approve("test.create_assignment", _wparams))
+        approval=_approve(WRITE_ENTRY, _wparams))
     check("422 op id reusable for a corrected retry",
           _wop2["op_id"] == _wop)
 
@@ -958,7 +983,7 @@ def main():
         WRITE_ENTRY, _wparams, LANE_STATE, {},
         plan=fake_plan("test.create_assignment", _wop), op_id=_wop,
         brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
-        approval=_approve("test.create_assignment", _wparams))
+        approval=_approve(WRITE_ENTRY, _wparams))
     check("CSRF_MISSING op id reusable for a corrected retry",
           _wop2["op_id"] == _wop)
 
@@ -998,7 +1023,7 @@ def main():
                   bb.dispatch_browser_entry, WRITE_ENTRY,
                   {"course_id": "1", "name": "x"}, LANE_STATE, {},
                   fake_plan("test.create_assignment"), BRIEF_DIR,
-                  approval=_approve("test.create_assignment",
+                  approval=_approve(WRITE_ENTRY,
                                     {"course_id": "1", "name": "x"}))
     os.remove(HALT)
 
@@ -1009,14 +1034,17 @@ def main():
     # (kind="undo" with the DELETE report).
     op_id = str(uuid.uuid4())
     _up = {"course_id": "89585"}
+    _orig = _journal_forward_write(ex, WRITE_ENTRY, _up, {"id": 99})
+    _uentry, _uparams = ex.undo_approval_subject(
+        WRITE_ENTRY, _up, _orig, {"id": 99})
     uout = bb.dispatch_browser_undo(
-        WRITE_ENTRY, _up, {"id": 99}, "orig-op-1",
+        WRITE_ENTRY, _up, {"id": 99}, _orig,
         LANE_STATE, {}, brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
-        approval=_approve("test.create_assignment", _up))
+        approval=_approve(_uentry, _uparams))
     check("undo dispatch renders fetch brief",
           uout["status"] == "awaiting_browser_task"
           and uout["kind"] == "undo"
-          and uout["undo_of"] == "orig-op-1")
+          and uout["undo_of"] == _orig)
     with open(uout["brief_file"], encoding="utf-8") as fh:
         _ubrief = fh.read()
     check("undo brief routes the DELETE through page-context fetch with "
@@ -1029,14 +1057,15 @@ def main():
     urec = bb.complete_browser_request(
         uout["op_id"], WRITE_ENTRY, _up, None,
         report((uout["ops"][0], 200, json.dumps({"id": 99}))),
-        LANE_STATE, {}, kind="undo", of_op_id="orig-op-1",
-        brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR)
+        LANE_STATE, {}, kind="undo", of_op_id=_orig,
+        brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
+        undo_params=uout["undo_params"])
     check("undo completion journals the undo",
-          urec["op_id"] == uout["op_id"] and urec["undo_of"] == "orig-op-1")
+          urec["op_id"] == uout["op_id"] and urec["undo_of"] == _orig)
     _urec = ex.find_journal_op(uout["op_id"])
     check("undo outcome journaled as kind=undo",
           _urec is not None and _urec["kind"] == "undo"
-          and _urec["undo_of"] == "orig-op-1")
+          and _urec["undo_of"] == _orig)
 
     no_undo = {"name": "test.noundo", "provider": "canvas", "effects": "write",
                "request": {"method": "POST", "url": "{canvas_base}/api/v1/x",
@@ -1453,7 +1482,7 @@ def main():
         WRITE_ENTRY, _wparams, LANE_STATE, {},
         plan=fake_plan("test.create_assignment", _pm_op), op_id=_pm_op,
         brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
-        approval=_approve("test.create_assignment", _wparams))
+        approval=_approve(WRITE_ENTRY, _wparams))
     _other_lane = {"canvas": {"base": "https://chcp.instructure.com",
                               "principal": {"id": 99999,
                                             "name": "Someone Else"},
@@ -1577,7 +1606,7 @@ def main():
             WRITE_ENTRY, _wparams, LANE_STATE, {},
             plan=fake_plan("test.create_assignment", _t408), op_id=_t408,
             brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
-            approval=_approve("test.create_assignment", _wparams))
+            approval=_approve(WRITE_ENTRY, _wparams))
         check("uncertain write cannot be re-dispatched", False)
     except (bb.ConflictLockHeld, ex.DuplicateOpId):
         check("uncertain write cannot be re-dispatched", True)

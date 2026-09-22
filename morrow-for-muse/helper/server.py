@@ -122,6 +122,7 @@ env tuning knobs.
 """
 
 import base64
+import fcntl
 import hashlib
 import hmac
 import ipaddress
@@ -298,23 +299,32 @@ def _educator_write_halt_active():
 
 
 def _educator_principal_name():
-    # W6-P2-A4: who the pinned session belongs to, so the helper UI
-    # can show WHO is signed in (not just that someone is). Reads the
-    # session.json principal pinned at re-sign-in; name only, never
-    # secrets. None when no session is pinned yet.
+    # W6-P2-A4: who the pinned account is, so the helper UI can show
+    # WHO is signed in (not just that someone is). Reads the principal
+    # pinned at first sign-in (browser_lane.json), with the rig
+    # session.json as fallback; name only, never secrets. None when no
+    # account is pinned yet.
     try:
         _root = os.path.normpath(os.path.join(_HERE, ".."))
         if _root not in sys.path:
             sys.path.insert(0, _root)
         from config.paths import morrow_home  # noqa: E402
-        with open(os.path.join(morrow_home(), "session.json"),
-                  encoding="utf-8") as fh:
-            principal = (json.load(fh) or {}).get("canvas", {}) \
-                .get("principal", {})
-        name = principal.get("name")
-        return name if isinstance(name, str) and name.strip() else None
-    except (OSError, ValueError, AttributeError):
+        home = morrow_home()
+    except (ImportError, OSError):
         return None
+    for fname in ("browser_lane.json", "session.json"):
+        try:
+            with open(os.path.join(home, fname), encoding="utf-8") as fh:
+                principal = (json.load(fh) or {}).get("canvas", {}) \
+                    .get("principal", {})
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError, AttributeError):
+            return None
+        name = principal.get("name") if isinstance(principal, dict) else None
+        if isinstance(name, str) and name.strip():
+            return name
+    return None
 
 
 _source_morrow_env()
@@ -691,7 +701,7 @@ def _normalize_tenant_base(base_url):
             lab in _PLACEHOLDER_LABELS for lab in labels):
         raise ValueError(
             "CANVAS_BASE looks like a placeholder (%r); set your school's "
-            "real Canvas URL, e.g. https://yourschool.instructure.com "
+            "real Canvas URL, e.g. https://<your-school>.instructure.com "
             "(got %r)" % (host, base_url))
     try:
         literal = ipaddress.ip_address(host)
@@ -853,8 +863,9 @@ def _display_profile_dir(path):
 # 4. Log rotation: server.log rotates when it passes LOG_ROTATE_BYTES
 #    (default 1 MiB), keeping LOG_ROTATE_KEEP archives (server.log.1 ..
 #    server.log.4, newest first). Rotation is copytruncate against the
-#    file stdout is appended to (discovered via /proc/self/fd/1, which is
-#    how keepalive.sh launches the server): the live file is copied to
+#    file stdout is appended to (discovered via /proc/self/fd/1, or
+#    F_GETPATH where there is no /proc; that file is how keepalive.sh
+#    launches the server): the live file is copied to
 #    server.log.1 and truncated in place, so the O_APPEND descriptor
 #    keepalive holds keeps working and no log line is reformatted. The
 #    server forces O_APPEND on its own stdout at import
@@ -967,6 +978,15 @@ def _stdout_log_path():
     try:
         path = os.readlink("/proc/self/fd/1")
     except OSError:
+        path = None
+    if path is None and hasattr(fcntl, "F_GETPATH"):
+        # No /proc (macOS): the kernel names the fd's file directly.
+        try:
+            raw = fcntl.fcntl(1, fcntl.F_GETPATH, b"\0" * 1024)
+            path = raw.split(b"\0", 1)[0].decode("utf-8", "replace")
+        except (OSError, ValueError):
+            path = None
+    if not path:
         return None
     try:
         if os.path.isfile(path):

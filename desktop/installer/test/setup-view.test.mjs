@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { installerState } from "../shared/contract.cjs";
-import { actionView, blackboardSetupOffered, escapeHtml, progress, removalAnnouncement, retentionView, setupManagementView, setupUnavailableView, statusSummary, supportView } from "../shared/setup-view.mjs";
+import { errorDetails, installerState } from "../shared/contract.cjs";
+import { actionView, awaitingBridgeFolder, blackboardSetupOffered, escapeHtml, progress, removalAnnouncement, retentionView, setupManagementView, setupUnavailableView, statusSummary, supportView } from "../shared/setup-view.mjs";
 
 const CHATGPT = Object.freeze({ id: "codex", title: "ChatGPT", tier: "primary", supported: true, needsWorkspace: true });
 const CLAUDE_DESKTOP = Object.freeze({ id: "claude-desktop", title: "Claude Desktop", tier: "primary", supported: true, needsWorkspace: true });
@@ -38,7 +38,7 @@ function step(current, label) {
 // The state fields, not a built state, so a case can spread and extend them.
 const READY_ASSISTANT = Object.freeze({
   lifecycle: "assistant_ready",
-  assistants: [{ ...CHATGPT, detected: true, configured: true, selected: true }],
+  assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }],
   selectedAssistantId: "codex",
   bridgeFolderReady: true
 });
@@ -229,6 +229,14 @@ test("a paired Bridge without a connected course asks for the course", () => {
   const current = state(PAIRED);
   const view = actionView(current, { chosenAssistantId: "codex" });
   assert.equal(view.title, "Open your course in Chrome.");
+  // Every control the steps name exists in Morrow Bridge, and the panel ends with an action.
+  for (const label of ["Connect this course", "Open Plan and Edit settings", "Your courses", "Connect", "Check Bridge"]) {
+    assert.ok(view.body.includes(`<strong>${label}</strong>`), `the steps name ${label}`);
+  }
+  for (const missing of ["Connect selected courses in Plan", "Connect Canvas", "Connect Moodle", "Plan and Edit settings</strong>, choose"]) {
+    assert.equal(view.body.includes(missing), false, `the steps name a control that does not exist: ${missing}`);
+  }
+  assert.match(view.body, /data-action="check-bridge"/);
   assert.equal(statusSummary(current), "Morrow Bridge is connected");
   assert.equal(step(current, "Morrow Bridge").status, "done");
   assert.equal(step(current, "Course").status, "current");
@@ -325,6 +333,10 @@ test("the data-retention section names every place, what it removes, and the ste
   assert.match(windows.body, /select Apps, select Morrow, and select Uninstall/);
   assert.equal(/Trash/.test(windows.body), false);
 
+  assert.match(retention().body, /Chrome loaded Morrow Bridge from the Bridge folder above/, "the temporary route loads the Bridge folder");
+  const store = retentionView(state({ bridgeDelivery: "available", retention: { uninstall: "move_to_trash", locations: RETENTION_LOCATIONS } }));
+  assert.doesNotMatch(store.body, /Bridge folder/, "a Chrome Web Store install did not load the Bridge folder");
+  assert.match(store.body, /remove <strong>Morrow Bridge<\/strong>/);
   assert.equal(retentionView(state()), null, "a state that names no place shows no section");
   assert.equal(retentionView(null), null);
 });
@@ -389,7 +401,7 @@ test("the repair state offers the repair alone, with no setup to change", () => 
   const current = state({
     lifecycle: "repair_required",
     runtimeStatus: "repair_required",
-    assistants: [{ ...CHATGPT, detected: true, configured: true, selected: true }],
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }],
     materialsFolder: MATERIALS
   });
   const view = actionView(current, { chosenAssistantId: null });
@@ -403,8 +415,8 @@ test("the repair state offers the repair alone, with no setup to change", () => 
 const TWO_ASSISTANTS = Object.freeze({
   lifecycle: "ready",
   assistants: [
-    { ...CHATGPT, detected: true, configured: true },
-    { ...CLAUDE_DESKTOP, detected: true, configured: true, selected: true }
+    { ...CHATGPT, detected: true, configured: true, connected: true },
+    { ...CLAUDE_DESKTOP, detected: true, configured: true, connected: true, selected: true }
   ],
   selectedAssistantId: "claude-desktop",
   bridgeFolderReady: true,
@@ -440,9 +452,9 @@ test("the folder row names every assistant the change writes to, in one sentence
   const settings = setupManagementView(state({
     ...CONNECTED_COURSE,
     assistants: [
-      { ...CHATGPT, detected: true, configured: true, selected: true },
-      { ...CLAUDE_DESKTOP, detected: true, configured: true },
-      { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, needsWorkspace: true, detected: true, configured: true }
+      { ...CHATGPT, detected: true, configured: true, connected: true, selected: true },
+      { ...CLAUDE_DESKTOP, detected: true, configured: true, connected: true },
+      { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, needsWorkspace: true, detected: true, configured: true, connected: true }
     ],
     materialsFolder: MATERIALS
   }));
@@ -456,7 +468,7 @@ test("a second assistant waiting for approval keeps the first assistant's steps"
     ...CONNECTED_COURSE,
     lifecycle: "ready",
     assistants: [
-      { ...CHATGPT, detected: true, configured: true },
+      { ...CHATGPT, detected: true, configured: true, connected: true },
       { ...CLAUDE_DESKTOP, detected: true, pending: true, selected: true }
     ],
     selectedAssistantId: "claude-desktop",
@@ -487,7 +499,7 @@ test("an assistant on this computer that is not set up can be set up after setup
   const current = state({
     ...CONNECTED_COURSE,
     assistants: [
-      { ...CHATGPT, detected: true, configured: true, selected: true },
+      { ...CHATGPT, detected: true, configured: true, connected: true, selected: true },
       { ...CLAUDE_DESKTOP, detected: true },
       { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, needsWorkspace: true, detected: false }
     ],
@@ -630,6 +642,7 @@ test("the support surface names this Morrow, the folders it uses, and where to w
   assert.equal(view.body.includes("<a "), false);
   assert.match(view.body, /<button class="quiet-button" type="button" data-action="open-support">https:\/\/meetmorrow\.app\/support<\/button>/);
   assert.match(view.copy, /Morrow opens its support page\. Select Support to open it, and name the version below when you write\./);
+  assert.doesNotMatch(supportView(state({ ...CONNECTED_COURSE })).copy, /version below/, "no version row, so the copy names none");
 
   // A state Morrow could not read names no version and no folder, and still
   // says where to write.
@@ -650,4 +663,157 @@ test("a data removal is announced in the words the panel shows", () => {
   assert.match(incomplete, /Morrow could not remove everything\. One place is still on this computer/);
   assert.equal(/removed its data/.test(incomplete), false, "an incomplete removal never announces a complete one");
   assert.match(announced({ status: "incomplete", removed: [], remaining: ["/Morrow/State", "/Morrow/Bridge"], kept: [] }), /2 places are still on this computer/);
+});
+
+test("kept copies of assistant settings, and the entry a data removal takes out, are each explained", () => {
+  const view = retentionView(state({ retention: { uninstall: "move_to_trash", locations: [
+    ...RETENTION_LOCATIONS,
+    { id: "backups", label: "Copies of assistant settings Morrow changed", path: "/Morrow/Assistant settings backups", removable: false, keptReason: "assistant_backup" }
+  ] } }));
+  assert.match(view.body, /Morrow keeps these copies so you can put a settings file back/);
+  assert.match(view.body, /Remove Morrow&#39;s data takes only Morrow&#39;s own entry out of it/);
+  assert.match(view.body, /first select Remove Morrow&#39;s data/);
+});
+
+test("an assistant card says Claude Desktop is not installed and where to get it", () => {
+  const view = actionView(state({ assistants: [{ ...CHATGPT, detected: true }, { ...CLAUDE_DESKTOP, detected: false }] }));
+  assert.match(view.body, /Claude Desktop is not installed on this computer\. Get it from claude\.ai\/download, then select Check status\./);
+  const button = view.body.match(/<button class="assistant-card"[^>]*data-assistant-id="claude-desktop"[^>]*>/)[0];
+  assert.match(button, /disabled/);
+});
+
+function connectedCourseFields() {
+  return {
+    lifecycle: "ready",
+    selectedAssistantId: "codex",
+    bridgeFolderReady: true,
+    bridgeLoadedInChrome: true,
+    bridgePaired: true,
+    courseSite: true,
+    runtimeVerifiedCourseCount: 1,
+    selectedCourseName: "BIO 101",
+    firstPreviewCourseName: "BIO 101",
+    firstPreview: { available: true, completed: true },
+  };
+}
+
+function connectedCourse(overrides = {}) {
+  return state({
+    lifecycle: "ready",
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true, connected: false, ...overrides }],
+    selectedAssistantId: "codex",
+    bridgeFolderReady: true,
+    bridgeLoadedInChrome: true,
+    bridgePaired: true,
+    courseSite: true,
+    runtimeVerifiedCourseCount: 1,
+    selectedCourseName: "BIO 101",
+    firstPreviewCourseName: "BIO 101",
+    firstPreview: { available: true, completed: true },
+  });
+}
+
+test("setup asks the teacher to quit and reopen the assistant before it says to continue there", () => {
+  const waiting = actionView(connectedCourse());
+  assert.equal(waiting.title, "Quit and reopen your assistant.");
+  assert.match(waiting.body, /data-action="check-assistant-connection"/);
+  assert.match(waiting.body, /Check ChatGPT/);
+  assert.doesNotMatch(waiting.copy, /Continue in ChatGPT/);
+  assert.equal(statusSummary(connectedCourse()), "Quit and reopen ChatGPT");
+
+  const connected = actionView(connectedCourse({ connected: true }));
+  assert.equal(connected.title, "Your course is connected.");
+  assert.match(connected.copy, /Continue in ChatGPT/);
+});
+
+test("a failed assistant check names the button the panel shows, not a Check again button it does not have", () => {
+  const panel = actionView(connectedCourse());
+  const button = panel.body.match(/data-action="check-assistant-connection">([^<]+)</)[1];
+  assert.equal(button, "Check ChatGPT");
+  assert.doesNotMatch(panel.body, />Check again</);
+  for (const code of ["assistant_not_connected", "assistant_connection_unconfirmed"]) {
+    const { recovery } = errorDetails(code);
+    assert.doesNotMatch(recovery, /Check again/, code);
+    assert.match(recovery, /select the Check button that names your assistant\.$/, code);
+  }
+});
+
+test("with more than one assistant set up, the reopen panel says Morrow cannot tell which one reopened", () => {
+  const CLAUDE_CODE = { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, detected: true, configured: true, connected: false };
+  const one = actionView(connectedCourse());
+  assert.doesNotMatch(one.body, /cannot tell which/);
+  const two = actionView(state({
+    ...connectedCourseFields(),
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: false, selected: true }, CLAUDE_CODE],
+  }));
+  assert.equal(two.title, "Quit and reopen your assistant.");
+  assert.match(two.body, /Morrow can tell that an assistant opened Morrow, but it cannot tell which one\. Quit and reopen each assistant you set up: ChatGPT and Claude Code\./);
+});
+
+test("while the panel says to quit and reopen the assistant, the rail shows the Assistant step as the current one", () => {
+  const waiting = connectedCourse();
+  assert.equal(step(waiting, "Assistant").status, "current");
+  assert.equal(step(waiting, "Assistant").current, true);
+  assert.equal(step(waiting, "Assistant").detail, "Quit and reopen ChatGPT");
+  assert.deepEqual(progress(waiting).filter((entry) => entry.current).map((entry) => entry.label), ["Assistant"]);
+  assert.equal(step(waiting, "Morrow Bridge").status, "done");
+  assert.equal(step(waiting, "Course").status, "done");
+
+  const connected = connectedCourse({ connected: true });
+  assert.equal(step(connected, "Assistant").status, "done");
+  assert.deepEqual(progress(connected).filter((entry) => entry.current), []);
+});
+
+test("a Mac Morrow outside Applications offers only the move", () => {
+  const view = actionView(state({ lifecycle: "move_required", appLocation: "move_required", assistants: [{ ...CHATGPT, detected: true }] }));
+  assert.equal(view.title, "Move Morrow to Applications.");
+  assert.match(view.body, /data-action="move-to-applications"/);
+  assert.doesNotMatch(view.body, /install-assistant/);
+  assert.equal(statusSummary(state({ lifecycle: "move_required", appLocation: "move_required" })), "Move Morrow to Applications");
+});
+
+test("an assistant that still starts Morrow from where it was asks for the repair that re-points it", () => {
+  const view = actionView(state({ assistantsNeedRepoint: true, assistants: [{ ...CHATGPT, detected: true, configured: false, selected: true }] }));
+  assert.equal(view.title, "Update your assistant settings.");
+  assert.match(view.body, /data-action="repair"/);
+});
+
+function addBridgeState() {
+  return state({
+    lifecycle: "assistant_ready",
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }],
+    selectedAssistantId: "codex",
+    bridgeFolderReady: true,
+    bridgeFolderPath: "/Users/t/Library/Application Support/Morrow/Bridge",
+  });
+}
+
+test("the Chrome step shows the full Bridge folder path, a Copy button, and the way to reach a hidden folder", () => {
+  const mac = actionView(addBridgeState(), { platform: "darwin" });
+  assert.equal(mac.title, "Add Morrow Bridge.");
+  assert.match(mac.body, /\/Users\/t\/Library\/Application Support\/Morrow\/Bridge/);
+  assert.match(mac.body, /data-action="copy-example-prompt" data-prompt="\/Users\/t\/Library\/Application Support\/Morrow\/Bridge"/);
+  assert.match(mac.body, /Command\+Shift\+G/);
+  const windows = actionView(state({ ...addBridgeStateInput(), bridgeFolderPath: "C:\\Users\\t\\AppData\\Roaming\\Morrow\\Bridge" }), { platform: "win32" });
+  assert.match(windows.body, /address bar at the top of the folder picker/);
+  assert.doesNotMatch(windows.body, /Command\+Shift\+G/);
+  assert.doesNotMatch(mac.body, /Chrome has not loaded Morrow Bridge yet/);
+
+  const late = actionView(addBridgeState(), { platform: "darwin", bridgeWaitExpired: true });
+  assert.match(late.body, /Chrome has not loaded Morrow Bridge yet/);
+});
+
+function addBridgeStateInput() {
+  return {
+    lifecycle: "assistant_ready",
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }],
+    selectedAssistantId: "codex",
+    bridgeFolderReady: true,
+  };
+}
+
+test("the renderer can tell when the Chrome folder step is the one on screen", () => {
+  assert.equal(awaitingBridgeFolder(addBridgeState()), true);
+  assert.equal(awaitingBridgeFolder(state({ ...addBridgeStateInput(), bridgeLoadedInChrome: true })), false);
+  assert.equal(awaitingBridgeFolder(state({ lifecycle: "ready_for_assistant" })), false);
 });

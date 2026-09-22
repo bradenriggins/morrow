@@ -21,6 +21,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Workflows live at the repository root, one level above the desktop product.
+const REPOSITORY_ROOT = resolve(ROOT, "..");
 const RELEASE_WORKFLOW = ".github/workflows/desktop-release.yml";
 const IDENTITY_QUERY = "security find-identity -v -p codesigning";
 const INSPECTION_REASONS = Object.freeze(["host_is_not_macos", "security_tool_unavailable"]);
@@ -285,7 +287,7 @@ function readSigningIdentities(platform) {
 
 function readReleaseWorkflow() {
   try {
-    return readFileSync(resolve(ROOT, RELEASE_WORKFLOW), "utf8");
+    return readFileSync(resolve(REPOSITORY_ROOT, RELEASE_WORKFLOW), "utf8");
   } catch (error) {
     if (error?.code === "ENOENT") return null;
     throw error;

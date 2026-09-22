@@ -60,12 +60,13 @@ import { executeMoodleBigBlueButtonInPage } from "./moodle-bbb-executor.js";
 import { executeMoodleSubsectionInPage } from "./moodle-subsection-executor.js";
 import { executeMoodleBackupInPage } from "./moodle-backup-executor.js";
 import { collectMoodleCourseParticipantRoster } from "./moodle-privacy.js";
-import { CONVERSATIONAL_EDIT_DURATION_MS, EDIT_PERMISSION_SCHEMA, EDIT_POLICY_SELECTION_LIMIT, SETTINGS_EDIT_DURATIONS, categoriesForBinding, changedFields, createEditPermission, guardedItemBankUpdate, migrateLegacyEditPermission, validEditDuration, validEditPermission } from "./edit-policy.js";
+import { EDIT_PERMISSION_SCHEMA, EDIT_POLICY_SELECTION_LIMIT, categoriesForBinding, changedFields, createEditPermission, guardedItemBankUpdate, migrateLegacyEditPermission, validEditPermission } from "./edit-policy.js";
 import { BridgeMaintenanceError, createBridgeMaintenance } from "./bridge-maintenance.js";
 import { serializeBridgeResult } from "./bridge-transport.js";
 import { canvasProtectedRoster, protectLocalRequest, sourceProtectedRoster } from "./protected-request.js";
 import { MAX_RENDER_CHECK_SOURCE_CHARS, RENDER_CHECK_MESSAGE_TYPE, RENDER_CHECK_SCHEMA, renderCheckField } from "../render-check/render-check.js";
 import { PRIVATE_BRIDGE_OPERATION_CONTRACTS, bridgeCatalogCompatibilityContract, browserCatalogCompatibilityContract, canvasApiCompatibilityContract, fetchBoundedCatalogText, parseBrowserCatalogText, parseCanvasApiCatalogText, privateBridgeCompatibilityContract, stableJson } from "./catalog-compatibility.js";
+import { clearReviewApprovalPresence, clearReviewLearnerNames, handleReviewApprovalMessage, handleReviewLearnerNamesMessage, installReviewApproval, parseReviewApprovalPresence, parseReviewLearnerNames, storeReviewApprovalPresence, storeReviewLearnerNames } from "./review-approval.js";
 
 const PORT = 32147;
 const BRIDGE_PATH = "/morrow-bridge/v1";
@@ -1599,10 +1600,6 @@ function forgetTabSiteAnchorVerifications(tabId) {
   }
 }
 
-function badgeClockTime(expiresAt) {
-  return new Date(expiresAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
 /**
  * WI-1.3. A count of reviews wins over Edit, because a wait for the person's decision is the more
  * urgent state. `state.reviewsWaiting` does not exist before R2 (WI-2.4 sets it); it reads as 0
@@ -1639,10 +1636,12 @@ async function refreshBadge() {
   await chrome.action?.setBadgeText({ text: editCount > 0 ? "ON" : "" });
   if (editCount > 0) await chrome.action?.setBadgeBackgroundColor({ color: BADGE_ACTION_COLOR });
   await chrome.action?.setTitle({
-    title: editCount === 0 || earliestExpiresAt === null
+    title: editCount === 0
       ? "Morrow Bridge"
-      : `Morrow Bridge. Morrow can change ${editCount} course${editCount === 1 ? "" : "s"} with no review until ${badgeClockTime(earliestExpiresAt)}.`,
+      : `Morrow Bridge. Morrow can change ${editCount} course${editCount === 1 ? "" : "s"} with no review.`,
   });
+  // Only a grant saved while Edit was timed has an end time. The alarm refreshes the badge when that
+  // grant lapses to Plan.
   if (earliestExpiresAt === null) await chrome.alarms.clear(BADGE_ALARM_NAME);
   else await chrome.alarms.create(BADGE_ALARM_NAME, { when: earliestExpiresAt });
 }
@@ -1687,6 +1686,14 @@ function settingsSender(sender) {
   return sender?.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("settings/settings.html");
 }
 
+// The popup reads Edit status and can return a course to Plan. Returning to Plan only removes
+// access, so it is safe from the popup; every grant, save and course read stays with settings.
+function popupSender(sender) {
+  return sender?.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("popup/popup.html");
+}
+
+const POPUP_EDIT_POLICY_MESSAGES = new Set(["morrow_edit_policy_status", "morrow_edit_policy_revoke"]);
+
 function policyCode(error) {
   const code = String(error?.message || "");
   return /^(?:edit_policy|course_discovery|course_selection)_[a-z_]+$/.test(code)
@@ -1704,7 +1711,7 @@ function messageCode(error) {
   return /^[a-z][a-z0-9_]{2,80}$/.test(code) ? code : "bridge_request_failed";
 }
 
-async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityGeneration) {
+async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityGeneration, { includePrivateChat = true } = {}) {
   await requireCourseDataAuthority(authorityGeneration);
   const api = await catalog();
   await requireCourseDataAuthority(authorityGeneration);
@@ -1712,8 +1719,13 @@ async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityG
   const published = new Map((await publicBindings()).map((binding) => [binding.sourceBindingId, binding]));
   const siteAnchors = await publicSiteAnchors(stored);
   const bindings = await Promise.all((stored.bindings || []).map(async (binding) => {
-    const staleEditPermission = stalePermissionSummary(storedPolicies(stored.editPolicies)[binding.sourceBindingId], binding, api.catalogDigest, [...state.operations.values()]);
+    const storedPermission = storedPolicies(stored.editPolicies)[binding.sourceBindingId];
+    const staleEditPermission = stalePermissionSummary(storedPermission, binding, api.catalogDigest, [...state.operations.values()]);
     const current = published.get(binding.sourceBindingId);
+    // The binding Morrow receives names its grant by digest only. Settings and the popup show which
+    // actions the grant allows, so this status adds them from the stored grant that digest names.
+    const enabledCategories = current?.editPermission && storedPermission?.scopeDigest === current.editPermission.scopeDigest
+      && Array.isArray(storedPermission.enabledCategories) ? [...storedPermission.enabledCategories] : null;
     return {
       sourceBindingId: binding.sourceBindingId,
       provider: binding.provider,
@@ -1726,7 +1738,7 @@ async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityG
       runtimeVerified: current?.runtimeVerified === true,
       editPolicyRevision: current?.editPolicyRevision || 0,
       editOptionsAvailable: current?.editOptionsAvailable === true,
-      ...(current?.editPermission ? { editPermission: current.editPermission } : {}),
+      ...(current?.editPermission ? { editPermission: { ...current.editPermission, ...(enabledCategories ? { enabledCategories } : {}) } } : {}),
       ...(staleEditPermission ? { staleEditPermission: editPermissionSummary(staleEditPermission) } : {}),
     };
   }));
@@ -1734,10 +1746,9 @@ async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityG
   return {
     catalogDigest: api.catalogDigest,
     bindingLimit: BRIDGE_BINDING_LIMIT,
-    editDurations: SETTINGS_EDIT_DURATIONS,
     siteAnchors,
     bindings,
-    privateChat: privateChatStatus(),
+    ...(includePrivateChat ? { privateChat: privateChatStatus() } : {}),
   };
 }
 
@@ -1754,10 +1765,29 @@ function privateChatStatus() {
       sampling: true,
       pushSampling: false,
     }] : [],
-    messages: chat ? chat.messages.map((message) => ({ ...message })) : [],
+    messages: chat ? chat.messages.map((message) => ({ ...message, parts: privateChatDisplayParts(message.text, chat.namesByLabel) })) : [],
     ...(chat?.sourceBindingId ? { sourceBindingId: chat.sourceBindingId, courseId: chat.courseId } : {}),
     code: chat?.pending ? "private_chat_ready" : "private_chat_start_required",
   };
+}
+
+/**
+ * The educator's own view of a protected message: each label this chat assigned is
+ * shown with the student's name. These parts go only to the Bridge's own settings
+ * page. The assistant and the gateway receive the protected text alone.
+ */
+function privateChatDisplayParts(text, namesByLabel = {}) {
+  const parts = [];
+  let cursor = 0;
+  for (const match of String(text).matchAll(/\bStudent A[1-9][0-9]*\b/gu)) {
+    const name = Object.hasOwn(namesByLabel, match[0]) ? namesByLabel[match[0]] : null;
+    if (!name) continue;
+    if (match.index > cursor) parts.push({ text: text.slice(cursor, match.index) });
+    parts.push({ name, label: match[0] });
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < text.length) parts.push({ text: text.slice(cursor) });
+  return parts;
 }
 
 function notifyPrivateChatChanged() {
@@ -1779,6 +1809,12 @@ function clearPrivateChat({ answerPending = false, rememberClosed = false } = {}
   }
   chat.messages.splice(0, chat.messages.length);
   for (const id of Object.keys(chat.labelsById || {})) delete chat.labelsById[id];
+  for (const label of Object.keys(chat.namesByLabel || {})) delete chat.namesByLabel[label];
+  if (chat.awaitingLabels) {
+    clearTimeout(chat.awaitingLabels.timer);
+    chat.awaitingLabels.reject(new Error("private_chat_closed"));
+    chat.awaitingLabels = null;
+  }
   state.privateChat = null;
   notifyPrivateChatChanged();
 }
@@ -1786,22 +1822,28 @@ function clearPrivateChat({ answerPending = false, rememberClosed = false } = {}
 function privateChatCommandInput(command) {
   const value = command?.arguments;
   if (!value || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value).some((key) => !["schema", "sessionId", "assistantName", "action", "assistantReply", "sourceBindingId", "courseId"].includes(key))
+    || Object.keys(value).some((key) => !["schema", "sessionId", "assistantName", "action", "assistantReply", "sourceBindingId", "courseId", "labelsById"].includes(key))
     || value.schema !== "morrow.private-chat.exchange.v1"
     || typeof value.sessionId !== "string" || !/^[A-Za-z0-9_.:@-]{8,160}$/.test(value.sessionId)
     || typeof value.assistantName !== "string" || !value.assistantName.trim() || value.assistantName.length > 200
-    || !["listen", "reply_and_listen"].includes(value.action)) return null;
+    || !["listen", "reply_and_listen", "labels"].includes(value.action)) return null;
   const reply = value.assistantReply;
   const hasScope = typeof value.sourceBindingId === "string" && /^[A-Za-z0-9_.:@-]{1,160}$/.test(value.sourceBindingId)
     && typeof value.courseId === "string" && /^[1-9][0-9]{0,18}$/.test(value.courseId);
+  const labels = value.labelsById;
   if (value.action === "listen") {
-    if (reply !== undefined || value.sourceBindingId !== undefined || value.courseId !== undefined) return null;
-  } else if (!hasScope || typeof reply !== "string" || !reply.trim() || reply.length > 100_000) return null;
+    if (reply !== undefined || labels !== undefined || value.sourceBindingId !== undefined || value.courseId !== undefined) return null;
+  } else if (value.action === "labels") {
+    if (!hasScope || reply !== undefined || !labels || typeof labels !== "object" || Array.isArray(labels)
+      || Object.keys(labels).length > 500
+      || Object.entries(labels).some(([id, label]) => !/^[A-Za-z0-9_.:@-]{1,160}$/.test(id) || typeof label !== "string" || !/^Student A[1-9][0-9]{0,6}$/.test(label))) return null;
+  } else if (!hasScope || labels !== undefined || typeof reply !== "string" || !reply.trim() || reply.length > 100_000) return null;
   return {
     sessionId: value.sessionId,
     assistantName: value.assistantName.trim(),
     action: value.action,
     ...(reply === undefined ? {} : { assistantReply: reply }),
+    ...(labels === undefined ? {} : { labelsById: { ...labels } }),
     ...(hasScope ? { sourceBindingId: value.sourceBindingId, courseId: value.courseId } : {}),
   };
 }
@@ -1814,20 +1856,38 @@ async function handlePrivateChatExchange(command) {
   }
   const closed = state.privateChatClosed;
   if (closed && closed.expiresAt <= Date.now()) state.privateChatClosed = null;
-  if (input.action === "reply_and_listen" && !state.privateChat && closed?.sessionId === input.sessionId
+  if (input.action !== "listen" && !state.privateChat && closed?.sessionId === input.sessionId
     && closed.assistantName === input.assistantName && closed.expiresAt > Date.now()) {
     state.privateChatClosed = null;
     sendResult(command, true, { schema: "morrow.private-chat.exchange.v1", status: "closed" }, null);
     return;
   }
   let chat = state.privateChat;
-  if (input.action === "listen") {
+  if (input.action === "labels") {
+    const awaiting = chat?.awaitingLabels;
+    if (!chat || !awaiting || chat.pending || chat.sessionId !== input.sessionId || chat.assistantName !== input.assistantName
+      || awaiting.sourceBindingId !== input.sourceBindingId || awaiting.courseId !== input.courseId) {
+      sendResult(command, false, null, problem("private_chat_scope_changed", "The Private Chat assistant or course changed.", false));
+      return;
+    }
+    chat.awaitingLabels = null;
+    clearTimeout(awaiting.timer);
+    const ids = Object.keys(input.labelsById).sort();
+    if (ids.join("\n") !== [...awaiting.learnerIds].sort().join("\n")
+      || new Set(Object.values(input.labelsById)).size !== ids.length) {
+      sendResult(command, false, null, problem("private_chat_labels_invalid", "Morrow could not match the course labels to this message.", false));
+      awaiting.reject(new Error("private_chat_labels_invalid"));
+      clearPrivateChat();
+      return;
+    }
+    awaiting.resolve({ command, labelsById: input.labelsById });
+  } else if (input.action === "listen") {
     if (chat && (chat.sessionId !== input.sessionId || chat.assistantName !== input.assistantName)) {
       sendResult(command, false, null, problem("private_chat_busy", "Another Private Chat is already open.", true));
       return;
     }
     state.privateChatClosed = null;
-    if (!chat) chat = state.privateChat = { sessionId: input.sessionId, assistantName: input.assistantName, messages: [], labelsById: {}, pending: null, timer: null };
+    if (!chat) chat = state.privateChat = { sessionId: input.sessionId, assistantName: input.assistantName, messages: [], labelsById: {}, namesByLabel: {}, awaitingLabels: null, pending: null, timer: null };
   } else {
     if (!chat || chat.sessionId !== input.sessionId || chat.assistantName !== input.assistantName
       || chat.sourceBindingId !== input.sourceBindingId || chat.courseId !== input.courseId || chat.pending) {
@@ -1910,16 +1970,49 @@ async function privateChatRoster(binding, expiresAt, authorityGeneration) {
   return canvasProtectedRoster(current.data, history.data, binding.courseId);
 }
 
-async function submitPrivateChatMessage(sourceBindingId, text, assertedIdentifiers) {
+/**
+ * Asks the gateway for the course labels of the students this message names, so
+ * a student has the same label here as in every tool result. Only platform ids
+ * cross; the gateway answers from its own course roster and learner vault.
+ */
+function privateChatCourseLabels(chat, command, binding, learnerIds) {
+  if (chat.timer) clearTimeout(chat.timer);
+  chat.timer = null;
+  chat.pending = null;
+  return new Promise((resolve, reject) => {
+    chat.awaitingLabels = {
+      sourceBindingId: binding.sourceBindingId,
+      courseId: binding.courseId,
+      learnerIds: [...learnerIds],
+      resolve,
+      reject,
+      timer: setTimeout(() => {
+        if (state.privateChat !== chat || !chat.awaitingLabels) return;
+        chat.awaitingLabels = null;
+        reject(new Error("private_chat_labels_unavailable"));
+        clearPrivateChat();
+      }, 60_000),
+    };
+    sendResult(command, true, {
+      schema: "morrow.private-chat.exchange.v1", status: "labels_required",
+      sessionId: chat.sessionId, sourceBindingId: binding.sourceBindingId, courseId: binding.courseId,
+      learnerIds: [...learnerIds].sort(),
+    }, null);
+  });
+}
+
+async function submitPrivateChatMessage(sourceBindingId, text, assertedIdentifiers, confirmedNames = []) {
   const authorityGeneration = state.courseDataAuthorityGeneration;
   if (!await courseDataAuthorityCurrent(authorityGeneration)) throw new Error("course_data_consent_required");
   const chat = state.privateChat;
-  const command = chat?.pending;
+  let command = chat?.pending;
   if (!chat || !command) throw new Error("private_chat_start_required");
   if (typeof sourceBindingId !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(sourceBindingId)
     || typeof text !== "string" || !text.trim() || text.length > 100_000
     || !Array.isArray(assertedIdentifiers) || assertedIdentifiers.length < 1 || assertedIdentifiers.length > 100
-    || assertedIdentifiers.some((value) => typeof value !== "string" || !value.trim() || value.length > 500)) {
+    || assertedIdentifiers.some((value) => typeof value !== "string" || !value.trim() || value.length > 500)
+    || !Array.isArray(confirmedNames) || confirmedNames.length > 100
+    || confirmedNames.some((value) => typeof value !== "string" || !value.trim() || value.length > 500)) {
     throw new Error("private_chat_message_invalid");
   }
   const binding = await bindingFor(sourceBindingId, { fresh: true });
@@ -1929,7 +2022,7 @@ async function submitPrivateChatMessage(sourceBindingId, text, assertedIdentifie
     throw new Error("private_chat_scope_change_refused");
   }
   const roster = await privateChatRoster(binding, Math.min(command.expiresAt, Date.now() + 60_000), authorityGeneration);
-  const protectedRequest = protectLocalRequest({
+  const request = {
     sourceBindingId: binding.sourceBindingId,
     courseId: binding.courseId,
     text,
@@ -1938,12 +2031,28 @@ async function submitPrivateChatMessage(sourceBindingId, text, assertedIdentifie
     rosterComplete: true,
     rosterFreshAt: Date.now(),
     labelsById: chat.labelsById,
-  });
+  };
+  const draft = protectLocalRequest(request);
+  if (state.privateChat !== chat || chat.pending !== command || command.expiresAt <= Date.now()) throw new Error("private_chat_exchange_changed");
+  const unconfirmed = draft.unmatchedNames.filter((name) => !confirmedNames.includes(name));
+  if (unconfirmed.length) return { status: "review", names: unconfirmed };
+  let assignedLabelsById;
+  if (draft.usedIds.length) {
+    const assigned = await privateChatCourseLabels(chat, command, binding, draft.usedIds);
+    command = assigned.command;
+    assignedLabelsById = assigned.labelsById;
+  }
+  const protectedRequest = protectLocalRequest({ ...request, ...(assignedLabelsById ? { assignedLabelsById } : {}) });
   const protectedText = protectedRequest.protectedText;
   if (state.privateChat !== chat || chat.pending !== command || command.expiresAt <= Date.now()) throw new Error("private_chat_exchange_changed");
   chat.sourceBindingId = binding.sourceBindingId;
   chat.courseId = binding.courseId;
   chat.labelsById = protectedRequest.labelsById;
+  const names = new Map(roster.map((identity) => [String(identity.id), identity.name]));
+  for (const id of protectedRequest.usedIds) {
+    const label = protectedRequest.labelsById[id];
+    if (label && names.get(id)) chat.namesByLabel[label] = names.get(id);
+  }
   chat.messages.push({ role: "user", text: protectedText });
   if (chat.timer) clearTimeout(chat.timer);
   chat.timer = null;
@@ -1967,9 +2076,8 @@ function editPermissionSummary(permission) {
   };
 }
 
-async function saveEditPolicy(sourceBindingId, enabledCategories, expiresInMs, authorityGeneration = state.courseDataAuthorityGeneration) {
+async function saveEditPolicy(sourceBindingId, enabledCategories, authorityGeneration = state.courseDataAuthorityGeneration) {
   if (typeof sourceBindingId !== "string" || !sourceBindingId || !Array.isArray(enabledCategories) || !enabledCategories.length) throw new Error("edit_policy_categories_invalid");
-  if (!validEditDuration(expiresInMs)) throw new Error("edit_policy_expiration_invalid");
   await requireCourseDataAuthority(authorityGeneration);
   const api = await catalog();
   const result = await queueStorageMutation(async () => {
@@ -1991,7 +2099,7 @@ async function saveEditPolicy(sourceBindingId, enabledCategories, expiresInMs, a
     const policies = storedPolicies(stored.editPolicies);
     const revisions = storedPolicyRevisions(stored.editPolicyRevisions);
     const priorRevision = Math.max(Number.isSafeInteger(revisions[sourceBindingId]) ? revisions[sourceBindingId] : 0, Number.isSafeInteger(policies[sourceBindingId]?.revision) ? policies[sourceBindingId].revision : 0);
-    const editPermission = await createEditPermission({ binding, catalogDigest: api.catalogDigest, revision: priorRevision + 1, enabledCategories, operations: [...state.operations.values()], expiresAt: Date.now() + expiresInMs });
+    const editPermission = await createEditPermission({ binding, catalogDigest: api.catalogDigest, revision: priorRevision + 1, enabledCategories, operations: [...state.operations.values()] });
     await setCourseDataBoundFields(chrome.storage.local, {
       editPolicies: { ...policies, [sourceBindingId]: editPermission },
       editPolicyRevisions: { ...revisions, [sourceBindingId]: editPermission.revision },
@@ -2027,6 +2135,36 @@ async function revokeEditPolicy(sourceBindingId, authorityGeneration = state.cou
   return { revoked: true, revision: result };
 }
 
+/**
+ * Disconnects one course. Its connection, its Edit access and its first-read record are removed,
+ * and its policy revision still rises, so a change prepared under the old access cannot apply if
+ * the course is connected again. The site, the other courses and Chrome site access stay.
+ */
+async function disconnectCourse(sourceBindingId, authorityGeneration = state.courseDataAuthorityGeneration) {
+  if (typeof sourceBindingId !== "string" || !sourceBindingId) throw new Error("edit_policy_binding_missing");
+  await queueStorageMutation(async () => {
+    await requireCourseDataAuthority(authorityGeneration);
+    const stored = await storage();
+    const binding = (stored.bindings || []).find((candidate) => candidate.sourceBindingId === sourceBindingId);
+    if (!binding) throw new Error("edit_policy_binding_missing");
+    const policies = storedPolicies(stored.editPolicies);
+    const revisions = storedPolicyRevisions(stored.editPolicyRevisions);
+    const priorRevision = Math.max(Number.isSafeInteger(revisions[sourceBindingId]) ? revisions[sourceBindingId] : 0, Number.isSafeInteger(policies[sourceBindingId]?.revision) ? policies[sourceBindingId].revision : 0);
+    const nextPolicies = { ...policies };
+    delete nextPolicies[sourceBindingId];
+    await setCourseDataBoundFields(chrome.storage.local, {
+      bindings: (stored.bindings || []).filter((candidate) => candidate.sourceBindingId !== sourceBindingId),
+      editPolicies: nextPolicies,
+      editPolicyRevisions: { ...revisions, [sourceBindingId]: priorRevision + 1 },
+      ...(stored.firstCourseRead?.sourceBindingId === sourceBindingId ? { firstCourseRead: null } : {}),
+    }, stored, authorityGeneration);
+  });
+  await requireCourseDataAuthority(authorityGeneration);
+  await publishBindings();
+  await requireCourseDataAuthority(authorityGeneration);
+  return { disconnected: true, sourceBindingId };
+}
+
 function bridgePolicySet(command) {
   if (!command || command.protocolVersion !== PROTOCOL_VERSION || command.kind !== "edit_policy_set"
     || Object.keys(command).some((key) => !["schema", "protocolVersion", "requestId", "operationId", "kind", "editPolicySet", "generation", "createdAt", "expiresAt"].includes(key))) {
@@ -2036,14 +2174,13 @@ function bridgePolicySet(command) {
     throw new Error("edit_policy_set_stale");
   }
   const value = command.editPolicySet;
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["mode", "selections", "merge", "expiresInMs"].includes(key))
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["mode", "selections", "merge"].includes(key))
     || !["edit", "plan"].includes(value.mode) || !Array.isArray(value.selections) || !value.selections.length || value.selections.length > EDIT_POLICY_SELECTION_LIMIT) {
     throw new Error("edit_policy_set_invalid");
   }
   // WI-4.1/WI-4.2: checked again here, the same as normalizeBridgeEditPolicySet in
   // packages/bridge-protocol, because a command reaches this worker straight from the socket.
   if (value.merge !== undefined && (value.mode !== "edit" || value.merge !== true)) throw new Error("edit_policy_set_invalid");
-  if (value.expiresInMs !== undefined && !validEditDuration(value.expiresInMs)) throw new Error("edit_policy_set_invalid");
   const selections = value.selections.map((selection) => {
     if (!selection || typeof selection !== "object" || Array.isArray(selection)
       || Object.keys(selection).some((key) => !["sourceBindingId", "expectedPolicyRevision", "enabledCategories"].includes(key))
@@ -2071,7 +2208,6 @@ function bridgePolicySet(command) {
     mode: value.mode,
     selections,
     ...(value.merge === undefined ? {} : { merge: value.merge }),
-    ...(value.expiresInMs === undefined ? {} : { expiresInMs: value.expiresInMs }),
   };
 }
 
@@ -2107,9 +2243,11 @@ function bridgeUiState(command) {
     throw new Error("ui_state_stale");
   }
   const value = command.uiState;
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["reviews"].includes(key))) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["reviews", "presence", "learnerNames"].includes(key))) {
     throw new Error("ui_state_invalid");
   }
+  const presence = value.presence === undefined ? null : parseReviewApprovalPresence(value.presence);
+  const learnerNames = parseReviewLearnerNames(value.learnerNames);
   if (!Array.isArray(value.reviews) || value.reviews.length > MAX_BRIDGE_UI_REVIEWS) {
     throw new Error("ui_state_invalid");
   }
@@ -2131,15 +2269,33 @@ function bridgeUiState(command) {
     if (typeof entry.label !== "string" || !entry.label.length || entry.label.length > 120) throw new Error("ui_state_invalid");
     return { url: entry.url, label: entry.label };
   });
-  return { reviews };
+  return { reviews, ...(presence ? { presence } : {}), ...(learnerNames.length ? { learnerNames } : {}) };
 }
 
-/** Stores the checked list in memory only, and lets the badge reflect the new count (WI-1.3). */
+/**
+ * Stores the checked list in memory only, lets the badge reflect the new count (WI-1.3), and tells
+ * an open popup to read it.
+ */
 async function applyBridgeUiState(uiState) {
+  if (uiState.presence) await storeReviewApprovalPresence(uiState.presence).catch(() => undefined);
+  // The runtime sends every review's names each time, so an absent list forgets them all.
+  await storeReviewLearnerNames(uiState.learnerNames || []).catch(() => undefined);
   state.reviews = uiState.reviews;
   state.reviewsWaiting = uiState.reviews.length;
   await refreshBadge();
+  void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
   return { schema: "morrow.bridge.ui-state.v1", accepted: uiState.reviews.length };
+}
+
+// The waiting reviews, the approval key, and the learner names belong to one Morrow connection, so
+// they end with it.
+function clearBridgeReviews() {
+  // Names first: open review tabs are found by the key's origin, so the key must outlast them.
+  void clearReviewLearnerNames().finally(clearReviewApprovalPresence);
+  if (!state.reviews.length && !state.reviewsWaiting) return;
+  state.reviews = [];
+  state.reviewsWaiting = 0;
+  void refreshBadge().catch(() => undefined);
 }
 
 async function editPolicyOptions(sourceBindingId, authorityGeneration = state.courseDataAuthorityGeneration) {
@@ -2210,15 +2366,14 @@ async function applyBridgePolicySet(policySet, command) {
         continue;
       }
       try {
-        // WI-4.2 (F7, D3): a merge unions the sent categories into an active grant and keeps its
-        // end time (a merge never moves the end time later). Without an active grant there is
-        // nothing to merge, so it starts a fresh grant at the chosen or the conversational
-        // duration, same as a non-merge grant.
+        // WI-4.2 (F7): a merge unions the sent categories into an active grant. Edit is not timed, so
+        // a new grant has no end time. A grant saved while Edit was timed keeps its own end time
+        // through a merge: it lapses to Plan then, and a merge never extends it.
         const merging = policySet.merge === true && Boolean(permission);
         const enabledCategories = merging
           ? [...new Set([...permission.enabledCategories, ...selection.enabledCategories])].sort()
           : selection.enabledCategories;
-        const expiresAt = merging ? permission.expiresAt : Date.now() + (policySet.expiresInMs ?? CONVERSATIONAL_EDIT_DURATION_MS);
+        const expiresAt = merging ? permission.expiresAt : undefined;
         const editPermission = await createEditPermission({
           binding,
           catalogDigest: api.catalogDigest,
@@ -2575,6 +2730,7 @@ function retireBridgeSocket(socket, { closeCode = null, reason = "", reconnect =
   state.generation = 0;
   state.accepted = null;
   clearPrivateChat();
+  clearBridgeReviews();
   if (Number.isInteger(closeCode)) {
     try { socket.close(closeCode, reason); } catch {}
   }
@@ -4681,7 +4837,7 @@ function lostCourseSiteProblem(binding, operation) {
   const course = String(binding.courseName || "").trim().slice(0, 200);
   return problem("canvas_binding_required", [
     `Morrow sent nothing: the ${platform} site tab for ${course || "this selected course"} is not open and signed in.`,
-    `Open ${site} in Chrome, sign in, then select Connect ${platform} in Morrow Bridge.`,
+    `Select Open ${platform} in the Morrow Bridge popup, or open ${site} in Chrome yourself, and sign in if asked.`,
   ].join(" ").slice(0, 900), true);
 }
 
@@ -6066,7 +6222,7 @@ async function status() {
     anchorCount: siteAnchors.length,
     siteAnchors,
     bindingCount: bindings.length,
-    reviews: state.reviews,
+    reviews: connected ? state.reviews : [],
     bindings: bindings.map((binding) => ({ sourceBindingId: binding.sourceBindingId, provider: binding.provider, origin: binding.origin, siteUrl: binding.siteUrl, courseId: binding.courseId, courseName: binding.courseName, runtimeVerified: binding.runtimeVerified, ...(binding.firstReadCompleted ? { firstReadCompleted: true } : {}), lastSeenAt: binding.lastSeenAt })),
   };
 }
@@ -6163,6 +6319,7 @@ async function disconnectConnector() {
   state.generation = 0;
   state.accepted = null;
   state.authenticationProblem = null;
+  clearBridgeReviews();
   socket?.close(1000, "user_disconnected");
   await chrome.alarms.clear("morrow-pairing");
   await queueStorageMutation(async () => {
@@ -6237,20 +6394,25 @@ async function cancelPairingAfterConsentWithdrawal() {
   });
 }
 
+installReviewApproval();
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  const settingsAction = message?.type === "morrow_edit_policy_status" ? (authorityGeneration) => editPolicyStatus(authorityGeneration)
+  if (message?.type === "morrow_review_approval_sign") return handleReviewApprovalMessage(message, sender, sendResponse);
+  if (message?.type === "morrow_review_learner_names") return handleReviewLearnerNamesMessage(message, sender, sendResponse);
+  const fromPopup = POPUP_EDIT_POLICY_MESSAGES.has(message?.type) && popupSender(sender);
+  const settingsAction = message?.type === "morrow_edit_policy_status" ? (authorityGeneration) => editPolicyStatus(authorityGeneration, { includePrivateChat: !fromPopup })
     : message?.type === "morrow_edit_policy_options" ? (authorityGeneration) => editPolicyOptions(message.sourceBindingId, authorityGeneration)
-      : message?.type === "morrow_edit_policy_save" ? (authorityGeneration) => saveEditPolicy(message.sourceBindingId, message.enabledCategories, message.expiresInMs, authorityGeneration)
+      : message?.type === "morrow_edit_policy_save" ? (authorityGeneration) => saveEditPolicy(message.sourceBindingId, message.enabledCategories, authorityGeneration)
         : message?.type === "morrow_edit_policy_revoke" ? (authorityGeneration) => revokeEditPolicy(message.sourceBindingId, authorityGeneration)
+          : message?.type === "morrow_course_disconnect" ? (authorityGeneration) => disconnectCourse(message.sourceBindingId, authorityGeneration)
           : message?.type === "morrow_course_discovery_start" ? (authorityGeneration) => startCourseDiscovery(message.siteAnchorId, authorityGeneration)
             : message?.type === "morrow_course_discovery_more" ? (authorityGeneration) => continueCourseDiscovery(message.siteAnchorId, message.discoveryReceiptId, authorityGeneration)
               : message?.type === "morrow_course_selection_save" ? (authorityGeneration) => saveCourseSelection(message.siteAnchorId, message.discoveryReceiptId, message.courseIds, authorityGeneration)
-                : message?.type === "morrow_private_chat_send" ? () => submitPrivateChatMessage(message.sourceBindingId, message.text, message.assertedIdentifiers)
+                : message?.type === "morrow_private_chat_send" ? () => submitPrivateChatMessage(message.sourceBindingId, message.text, message.assertedIdentifiers, message.confirmedNames)
                   : message?.type === "morrow_private_chat_close" ? () => { clearPrivateChat({ answerPending: true, rememberClosed: true }); return { status: "closed" }; }
         : null;
   if (settingsAction) {
-    if (!settingsSender(sender)) {
-      const code = String(message?.type || "").startsWith("morrow_course_") ? "course_discovery_sender_refused" : "edit_policy_sender_refused";
+    if (!settingsSender(sender) && !fromPopup) {
+      const code = /^morrow_course_(?:discovery|selection)_/.test(String(message?.type || "")) ? "course_discovery_sender_refused" : "edit_policy_sender_refused";
       sendResponse({ ok: false, code, error: code });
       return false;
     }
@@ -6328,6 +6490,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   state.socket = null;
   state.generation = 0;
   state.accepted = null;
+  clearBridgeReviews();
   socket?.close(1000, "course_data_consent_removed");
   void cancelPairingAfterConsentWithdrawal().catch(() => {});
   void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);

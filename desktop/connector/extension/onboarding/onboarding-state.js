@@ -56,7 +56,6 @@ function unreadState() {
     ],
     title: "Follow the setup steps",
     detail: "Morrow could not read this setup state, so it cannot name one next step. Select Setup overview to see the three stages. This guide reads the state again when you return to this tab.",
-    showAssistantGuide: false,
     canOpenSettings: false,
   };
 }
@@ -180,65 +179,56 @@ function readState(status) {
     ...state,
     title: "Plan your first change",
     detail: "Ask your assistant for a change in your selected course. Morrow keeps every change in Plan for your review.",
-    showAssistantGuide: false,
     canOpenSettings: false,
   };
   if (pairing) return {
     ...state,
     title: "Allow connection",
     detail: "Select Allow connection in the Morrow page that opened. Then return here while Morrow connects.",
-    showAssistantGuide: false,
     canOpenSettings: false,
   };
   if (connecting) return {
     ...state,
     title: "Connecting Morrow",
     detail: "Keep your assistant open while Morrow connects. Return here in a moment.",
-    showAssistantGuide: false,
     canOpenSettings: false,
   };
   if (open === "assistant") return {
     ...state,
     title: "Open Morrow",
     detail: "Open Morrow and choose your assistant. Then return to Morrow Bridge, select Connect Morrow, and allow the connection you started.",
-    showAssistantGuide: true,
     canOpenSettings: false,
   };
   if (open === "connection") return {
     ...state,
     title: "Open Morrow again",
     detail: "Open Morrow and choose your assistant again. Then return to Morrow Bridge.",
-    showAssistantGuide: false,
     canOpenSettings: false,
   };
   if (open === "runtime") return {
     ...state,
     title: "Reload Morrow Bridge",
     detail: "Morrow and Morrow Bridge report different versions. Update Morrow, then reload Morrow Bridge on the Chrome extensions page and select Connect Morrow again.",
-    showAssistantGuide: false,
     canOpenSettings: false,
   };
   if (open === "course" && readySites === 0) return {
     ...state,
     title: anchors.length ? `Reconnect ${platform || "your learning platform"}` : "Open Canvas or Moodle",
     detail: anchors.length
-      ? `Open the saved ${platform || "learning platform"} course in Chrome and sign in. Morrow Bridge identifies it and shows ${platform ? `Connect ${platform}` : "the matching platform button"}. Select that button and allow Chrome access to the exact address shown.`
-      : "Open a permitted Canvas or Moodle course in Chrome and sign in. Morrow Bridge identifies the platform and shows Connect Canvas or Connect Moodle. Select that button and allow Chrome access to the exact address shown.",
-    showAssistantGuide: false,
+      ? `Select ${platform ? `Open ${platform}` : "Open Canvas or Open Moodle"} in the Morrow Bridge popup, or open the saved ${platform || "learning platform"} course in Chrome yourself, and sign in if ${platform || "it"} asks.`
+      : "Open a Canvas or Moodle course in Chrome and sign in. The Morrow Bridge popup then shows Connect this course. Select it and allow Chrome access to the exact address shown.",
     canOpenSettings: false,
   };
   if (open === "course") return {
     ...state,
     title: "Select a course in Plan",
-    detail: "Open Plan and Edit settings. Find available courses, choose a course, then select Connect selected courses in Plan.",
-    showAssistantGuide: false,
+    detail: "Open Plan and Edit settings. The courses on your signed-in site are listed under Not connected. Select Connect on a course. It connects in Plan.",
     canOpenSettings: true,
   };
   return {
     ...state,
     title: "Try a first read",
     detail: "Return to your assistant and ask: Use Morrow to list the modules in my selected course.",
-    showAssistantGuide: false,
     canOpenSettings: false,
   };
 }

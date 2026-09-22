@@ -26,6 +26,10 @@ Proves, per finding:
     zero provider calls, zero journal changes, zero claims, and zero
     approval consumption.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 
 import json
 import os
@@ -45,6 +49,25 @@ for _p in (REPO, os.path.join(REPO, "dispatch"),
 # raises. Importing plain `executor`/`admission` would create second
 # module objects whose exception classes never match.
 from dispatch import executor as ex
+
+# Selftest harness: the approvals here are minted on the driver
+# channel, so dispatch runs with require_educator_channel=False (the
+# production default is True).
+def _driver_channel(fn):
+    def call(*a, **k):
+        k.setdefault("require_educator_channel", False)
+        return fn(*a, **k)
+    return call
+
+
+ex.dispatch_entry = _driver_channel(ex.dispatch_entry)
+ex.dispatch_catalog_op = _driver_channel(ex.dispatch_catalog_op)
+ex.dispatch_undo = _driver_channel(ex.dispatch_undo)
+
+# The scenarios use literal ids and synthetic paths that are not
+# catalog path templates; the live-proven catalog gate is covered by
+# dispatch/test_direct_lane_hardening.py and is a no-op here.
+ex.live_proven_gate = lambda *a, **k: None  # noqa: E731
 from dispatch import admission as ad
 import chromium_session as _cs_mod
 from chromium_session import ChromiumSession
@@ -55,6 +78,11 @@ TenantBindingMismatch = ex.TenantBindingMismatch
 # fake tenant so this hermetic selftest stays self-consistent (the
 # real lane state on a dev machine names a different tenant).
 _cs_mod._lane_state_base = lambda: BASE  # noqa: E731
+# The signed-in account check (final muse audit M3) reads users/self
+# before writes; these fakes script every provider call, so it is a
+# no-op here. It is covered by transport/test_principal_check.py.
+_cs_mod.ChromiumSession._verify_principal = lambda *a, **k: None  # noqa: E731
+
 
 BASE = "https://canvas.example.edu"
 WRONG = "https://wrong-tenant.example.edu"
@@ -423,8 +451,8 @@ def main():
                    "missing target_identity fails closed", failures)
         _check(session._fake_transport.calls == [],
                "missing target: zero provider calls", failures)
-        # B4 control: agreeing target -> dispatch proceeds (DELETE has no
-        # member readback; verification is recorded as skipped).
+        # B4 control: agreeing target -> dispatch proceeds; the DELETE is
+        # then verified by the member GET answering 404.
         del_entry = ex.catalog_descriptor_to_entry(
             "w4-del", "DELETE",
             "/api/v1/courses/112/assignment_groups/5", "write",
@@ -435,7 +463,8 @@ def main():
                      readback="frozen (course 112) Intended Course")
         session = _session([("ok", 200, json.dumps(
             {"id": 112, "name": "Intended Course"})),
-            ("ok", 200, json.dumps({"id": 5}))])
+            ("ok", 200, json.dumps({"id": 5})),
+            ("ok", 404, json.dumps({"errors": []}))])
         approval = _approve(del_entry, params, BASE, target_identity=ti)
         ex.dispatch_entry(del_entry, params, session, _pack(), plan,
                             op_id=_oid("w4-b4"),
@@ -445,8 +474,9 @@ def main():
                "agreeing target: write dispatches (journaled complete)",
                failures)
         methods = [m for m, _u in session._fake_transport.calls]
-        _check(methods == ["GET", "DELETE"],
-               "agreeing target: course GET precheck then the write",
+        _check(methods == ["GET", "DELETE", "GET"],
+               "agreeing target: course GET precheck, the write, then "
+               "the absence readback",
                failures)
         rec = _find_journal(journal, _oid("w4-b4"))
         verified = (rec or {}).get("target") or {}
@@ -792,13 +822,15 @@ def main():
                           op_id=_oid("w4-gw"), approval=w_approval)
         # G2: undo whose provider target disagrees -> refused, approval
         # reusable, nothing sent.
-        u_entry = _entry("w4-gu2", "POST",
+        u_entry = _entry("w4-gw", "POST",
                          "/api/v1/courses/112/assignment_groups")
         u_entry["undo"] = {"method": "DELETE",
                            "url": "{canvas_base}/api/v1/courses/112/"
                                   "assignment_groups/7"}
         u_params = {"course_id": "112"}
-        u_approval = _approve(u_entry, u_params, BASE, target_identity=w_ti)
+        u_approval = _approve(*ex.undo_approval_subject(
+            u_entry, u_params, _oid("w4-gw"), {}), BASE,
+            target_identity=w_ti)
         u_session = _session([("ok", 200, json.dumps(
             {"id": 112, "name": "Other Course"}))])
         try:
@@ -811,21 +843,23 @@ def main():
                "refused undo: target GET only; the undo was never sent",
                failures)
         try:
-            ad.check_write_approval(u_entry, u_params, u_approval,
-                                    _oid("w4-gu2b"), tenant_base=BASE)
+            ad.check_write_approval(*ex.undo_approval_subject(
+                u_entry, u_params, _oid("w4-gw"), {}), u_approval,
+                _oid("w4-gu2b"), tenant_base=BASE)
             _check(True, "refused undo: approval NOT consumed (reusable)",
                    failures)
         except Exception as e:
             _check(False, "refused undo: approval reusable; got %r" % e,
                    failures)
         # G3: undo with agreeing target -> dispatches and journals.
-        u_entry3 = _entry("w4-gu3", "POST",
+        u_entry3 = _entry("w4-gw", "POST",
                           "/api/v1/courses/112/assignment_groups")
         u_entry3["undo"] = {"method": "DELETE",
                             "url": "{canvas_base}/api/v1/courses/112/"
                                    "assignment_groups/7"}
-        u_approval3 = _approve(u_entry3, u_params, BASE,
-                               target_identity=w_ti)
+        u_approval3 = _approve(*ex.undo_approval_subject(
+            u_entry3, u_params, _oid("w4-gw"), {}), BASE,
+            target_identity=w_ti)
         u_session3 = _session([
             ("ok", 200, json.dumps({"id": 112, "name": "Intended Course"})),
             ("ok", 200, json.dumps({"id": 5})),

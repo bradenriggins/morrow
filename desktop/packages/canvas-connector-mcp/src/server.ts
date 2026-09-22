@@ -285,6 +285,14 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
         sourceBindingId: z.string().min(1).max(160).regex(/^[A-Za-z0-9_.:@-]+$/),
         courseId: z.string().regex(/^[1-9][0-9]{0,18}$/),
       }),
+      z.strictObject({
+        ...privateChatBase,
+        action: z.literal("labels"),
+        sourceBindingId: z.string().min(1).max(160).regex(/^[A-Za-z0-9_.:@-]+$/),
+        courseId: z.string().regex(/^[1-9][0-9]{0,18}$/),
+        labelsById: z.record(z.string().regex(/^[A-Za-z0-9_.:@-]{1,160}$/), z.string().regex(/^Student A[1-9][0-9]{0,6}$/))
+          .refine((labels) => Object.keys(labels).length >= 1 && Object.keys(labels).length <= 500),
+      }),
     ]),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async (input, context) => toolResult(await runtime.privateChatExchange(input as unknown as JsonObject, context.mcpReq.signal)));
@@ -325,7 +333,6 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
           enabledCategories: z.array(z.string().min(1).max(160)).min(1).max(500),
         })).min(1).max(500),
         merge: z.literal(true).optional(),
-        expiresInMs: z.number().int().positive().optional(),
       }),
       z.strictObject({
         mode: z.literal("plan"),
@@ -339,12 +346,20 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
   }, async (input) => toolResult(await runtime.editPolicySet(input)));
   registerTool("morrow_browser_ui_state", {
     title: "Show reviews waiting in the Bridge popup",
-    description: "Internal Morrow control that pushes the present list of reviews waiting for the person to the Bridge popup (D1b). The Bridge never opens one of these by itself. This tool is not a catalog capability.",
+    description: "Internal Morrow control that pushes the present list of reviews waiting for the person to the Bridge popup (D1b), the key the Bridge uses to sign a person's approval click, and who each learner label in a review is, for the review tab only. The Bridge never opens one of these by itself. This tool is not a catalog capability.",
     inputSchema: z.strictObject({
       reviews: z.array(z.strictObject({
         url: z.string().min(1).max(300),
         label: z.string().min(1).max(120),
       })).max(20),
+      presence: z.strictObject({
+        origin: z.string().min(1).max(40),
+        key: z.string().length(43),
+      }).optional(),
+      learnerNames: z.array(z.strictObject({
+        path: z.string().min(1).max(200),
+        names: z.record(z.string().min(1).max(20), z.string().min(1).max(120)),
+      })).max(20).optional(),
     }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async (input) => toolResult(await runtime.uiState(input)));

@@ -57,8 +57,6 @@
   --radius-panel: 18px;
   --radius-pill: 999px;
 
-  --measure: 68ch;
-
   --motion-fast: 120ms;
   --motion-standard: 160ms;
   --motion-panel: 180ms;
@@ -98,8 +96,6 @@ html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--page); font-family: var(--font-sans); }
 [hidden] { display: none !important; }
 h1, h2, h3, h4, h5, h6 { text-wrap: balance; }
-p { text-wrap: pretty; }
-p, li { max-inline-size: var(--measure); }
 button, input, select, textarea { font: inherit; }
 button {
   min-height: 44px;
@@ -131,19 +127,21 @@ a { color: var(--action); text-decoration-thickness: from-font; text-underline-o
 a:hover { color: var(--action-hover); }
 summary { list-style: none; cursor: pointer; min-height: 44px; }
 summary::-webkit-details-marker { display: none; }
+/* A drawn chevron, not a mask image: the pairing page's CSP refuses data: images, which left its
+   disclosures with no marker at all. */
 summary::before {
   content: "";
   display: inline-block;
-  width: 16px;
-  height: 16px;
-  margin-inline-end: var(--space-2);
-  vertical-align: -3px;
-  background-color: currentColor;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 4l4 4-4 4' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 4l4 4-4 4' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  width: 6px;
+  height: 6px;
+  margin-inline: 3px calc(var(--space-2) + 3px);
+  vertical-align: 2px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
   transition: transform 160ms ease;
 }
-details[open] > summary::before { transform: rotate(90deg); }
+details[open] > summary::before { transform: rotate(45deg); }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; box-shadow: 0 0 0 5px color-mix(in srgb, var(--focus) 20%, transparent); }
 ::selection { background: var(--highlight); color: var(--ink); }
 .brand { display: flex; align-items: center; gap: var(--space-3); }

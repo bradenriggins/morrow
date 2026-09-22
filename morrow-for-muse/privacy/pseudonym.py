@@ -34,14 +34,11 @@ Design:
   reverse a pseudonym. It never leaves the VM and never ships in the
   package (pack/deny-list.txt denies privacy_salt* and privacy_map*).
 - De-identification is ON by default for every learner-data read. The
-  only override is explicit educator consent: a regular file named
-  `educator_pii_reveal` in the tree-state dir, mode 0600, carrying a
-  documented instructional purpose (minimum 12 characters). The
-  reason is journaled verbatim with the op
-  (`revealed_by: "educator-consent-file"`). The legacy environment
-  variable MORROW_REVEAL_STUDENT_PII_REASON is ignored: it is not a
-  consent channel. A stub reason, a wrong mode, or a nonregular file
-  fails closed.
+  shipped pipeline's only reveal is a sealed educator record for one
+  course (dispatch/admission.mint_pii_reveal); see
+  privacy/FERPA_POLICY.md. The legacy environment variable
+  MORROW_REVEAL_STUDENT_PII_REASON is ignored: it is not a consent
+  channel.
 
 Retention: purge --tenant drops that tenant's map records (issued
 pseudonyms stop resolving); wipe deletes the salt and the whole map,

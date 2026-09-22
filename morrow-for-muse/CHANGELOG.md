@@ -1,6 +1,78 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-09-22)
+
+Release: `morrow-muse-connector-0.4.0.zip` from the `muse/v0.4.0`
+GitHub release. This release fixes every Critical and High defect
+found in the adversarial audits after 0.3.0.
+
+In plain words:
+
+- Every write path goes through the mode gate (discovery, pack
+  override, and undo included), and only live-proven operations run.
+  Undo is its own approved write, bound to the journaled operation.
+- An approval binds the exact method, path, query, and body, and the
+  vault token of each student label it names. Any non-empty educator
+  reply approves. The typed `plan-write` and `approve-write` commands
+  run the ceremony.
+- The phrase parser is gone. The agent calls typed `mode`, `settings`,
+  `query`, and `students` commands. Edit mode is one untimed grant,
+  and turning it off means Plan everywhere. Conversation overrides
+  last.
+- Work with students by name: `morrow students find` asks the
+  educator when a match is unsure, the model sees only labels, a write
+  by label reaches the right student, and a name reveal is
+  educator-only, for one course, short-lived, and never journaled in
+  the clear.
+- More learner data is labeled: ids inside URLs, SIS ids, bare user
+  records, content editors, date details, smart search, and outcome
+  alignments.
+- Write verification has three honest outcomes: verified, failed (a
+  proven wrong value), and uncertain (the readback could not confirm).
+- The sign-in pin fails closed, and the Chromium lane refuses a Canvas
+  account other than the pinned one. `disconnect` really disconnects.
+  Keepalive supervision works without cron, and `stop` ends the whole
+  loop.
+- `install.sh` installs from a carved tree of this repository. The
+  test suite never touches the real `~/.morrow`. The tree's packages
+  are regular packages, so installed packages cannot shadow them.
+
+The detailed notes below cover the work since 0.3.0.
+
+### Privacy round 4: working by name, de-identified everywhere else (2026-09-22)
+
+- Working by name (design chosen by the integrator): `morrow students
+  find --course C "<name>"` (`learners/find.py`) resolves the name the
+  educator typed to a course label; ambiguous or close-spelling
+  matches list every candidate as a label with section, enrollment
+  state, and last activity date, and are never auto-picked. A resolved
+  name is echoed as "<typed name> (Student A3)" in that conversation
+  only (`privacy/name_echo.py`, encrypted, ends with the conversation).
+  Writes carry labels; the executor resolves them to real ids at the
+  LMS boundary after the mode gate, only for the course the write
+  targets, and relabels every journal record, result, and error.
+- Live-proven people-bearing catalog rows now dispatch on the Chromium
+  lane with the encrypted vault (receipts de-identified); they stay
+  refused on the raw lane and without `cryptography`.
+- The `educator_pii_reveal` consent file is retired (an agent could
+  write it). The only reveal is a sealed educator record for one
+  course, at most 30 minutes, journaled (`mint_pii_reveal`,
+  `--pii-reveal`).
+- Any URL path segment or query value equal to a rostered learner id
+  is labeled (`/grades/<id>`, `/submissions/<id>`, `?student_id=`).
+  `student_ids` arrays read back as labels. New labels follow a keyed
+  order, not first-read (alphabetical) order.
+- Page revisions with a teacher editor and assignment reads with an
+  embedded submission project instead of failing closed.
+- Write-verification failures carry only the projected detail to the
+  agent, and failure journal records carry the projected receipt.
+- Student-resolution errors no longer echo the educator's query; a
+  fuzzy match is never auto-picked.
+- Docs: SKILL.md teaches the by-name flow; FERPA_POLICY.md,
+  privacy/README.md, knowledge/privacy-ferpa.md, SCOPE.md, and
+  content/consent.md state plainly that names the educator types
+  reach the Muse model and Morrow keeps every other identifier from
+  the LMS out.
 
 ### Installer, carve, and packaging (Worker 4, 2026-09-21)
 

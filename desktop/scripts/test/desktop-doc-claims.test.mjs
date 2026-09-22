@@ -22,7 +22,9 @@ const root = new URL("../../", import.meta.url);
 const rootPath = fileURLToPath(root);
 const require = createRequire(import.meta.url);
 const read = (relativePath) => readFileSync(new URL(relativePath, root), "utf8");
-const present = (relativePath) => existsSync(new URL(relativePath, root));
+// `.github/` is at the repository root, one level above the desktop product; every other named
+// path is relative to the desktop product.
+const present = (relativePath) => existsSync(new URL(relativePath, relativePath.startsWith(".github/") ? new URL("../", root) : root));
 
 /** The documents that carry a desktop claim, public first. */
 const DOCS = [
@@ -369,7 +371,7 @@ test("the data-removal action the Windows guide describes is the one the policy 
     platform: "win32",
     userData,
     state: join(userData, "State"),
-    backups: join(userData, "State", "Backups"),
+    backups: join(userData, "Assistant settings backups"),
     bridge: join(userData, "Bridge"),
     materials: join(userData, "Materials"),
     blackboardCredentials: credentials,
@@ -383,12 +385,12 @@ test("the data-removal action the Windows guide describes is the one the policy 
   const removable = snapshot.locations.filter((location) => location.removable).map((location) => location.id);
   assert.deepEqual(removable, [
     "state",
-    "backups",
     "bridge",
     "materials",
     "blackboard_credentials",
     "blackboard_configuration",
   ]);
+  assert.equal(snapshot.locations.find((location) => location.id === "backups").keptReason, "assistant_backup");
   const assistant = snapshot.locations.find((location) => location.id === "assistant_configuration");
   assert.equal(assistant.removable, false);
   assert.equal(assistant.keptReason, "assistant_configuration");

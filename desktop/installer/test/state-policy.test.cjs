@@ -190,10 +190,13 @@ test("the retention snapshot names every place this installation keeps data, by 
 
 test("only app-owned data is removable, and every other place carries its reason", () => {
   const current = snapshot();
-  for (const id of ["state", "backups", "bridge", "materials", "blackboard_credentials"]) {
+  for (const id of ["state", "bridge", "materials", "blackboard_credentials"]) {
     assert.equal(location(current, id).removable, true, `${id} is inside the folders Morrow owns`);
     assert.equal(location(current, id).keptReason, null);
   }
+  // Copies of a person's assistant settings stay, so a removal never takes away the way back.
+  assert.equal(location(current, "backups").removable, false);
+  assert.equal(location(current, "backups").keptReason, "assistant_backup");
   // The Blackboard route is app-owned even though it sits beside the secret
   // folder. It must be removed with the secret so no dangling pair remains.
   assert.equal(location(current, "blackboard_configuration").removable, true);

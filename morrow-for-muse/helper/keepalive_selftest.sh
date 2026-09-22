@@ -57,6 +57,10 @@ test_shipped() {
     # inherits it; the memory-watch cases below assert against
     # ${TREE_STATE_DIR}, which the keepalive itself computes from this.
     export MORROW_TREE_STATE_DIR="${SCRATCH}/tree-state"
+    # Everything else under MORROW_HOME (the legacy env, lane state)
+    # resolves under scratch too, never the real ~/.morrow.
+    export MORROW_HOME="${SCRATCH}/morrow-home"
+    mkdir -p "${MORROW_HOME}"
     export KEEPALIVE_SOURCE_ONLY=1
     # shellcheck disable=SC1090
     . "${ka}"
@@ -221,7 +225,7 @@ test_shipped() {
           "a helper_token file" "none found"
       else
         t "helper auth token file is mode 0600" "600" \
-          "$(stat -c '%a' "${_tokfile}" 2>/dev/null)"
+          "$(python3 -c 'import os, sys; print("%o" % (os.stat(sys.argv[1]).st_mode & 0o777))' "${_tokfile}" 2>/dev/null)"
         if grep -qE '^[0-9a-f]{64}$' "${_tokfile}"; then pass; else
           fail "${label}" "helper auth token is 64 hex chars" \
             "64 hex" "malformed"; fi

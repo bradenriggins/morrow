@@ -755,7 +755,16 @@ function replaceKnownAliases(
   return applySourceReplacements(value, replacements);
 }
 
-function replaceKnownIdentityReferences(value: string, identities: ReadonlyMap<string, LearnerAlias>): string {
+// A number this long in prose is a platform id, not a count or a score. A word
+// before it that names a course object says whose id it is.
+const BARE_LEARNER_ID = /(?<![\p{L}\p{N}_/=.#:%&-])([0-9]{5,500})(?![\p{L}\p{N}_/.%])/gu;
+const BARE_OBJECT_WORD = /\b(?:course|courses|assignment|assignments|quiz|quizzes|module|modules|page|pages|file|files|section|sections|group|groups|item|items|question|questions|rubric|outcome|term|account|attempt|version|order|room|zip|phone|ext)\s*$/iu;
+
+function replaceKnownIdentityReferences(
+  value: string,
+  identities: ReadonlyMap<string, LearnerAlias>,
+  bareIds = false,
+): string {
   const lookup = (id: string): string | null => identities.get(String(id).trim())?.token ?? null;
   const patterns = [
     /((?:["']?(?:learner|student|user|recipient|enrollment|submission)[_-]?id["']?)\s*[:=]\s*["']?)([0-9]{1,500})/giu,
@@ -775,7 +784,70 @@ function replaceKnownIdentityReferences(value: string, identities: ReadonlyMap<s
     }
     output = applySourceReplacements(output, replacements);
   }
-  return output;
+  output = replaceLinkedIdentityReferences(output, lookup);
+  if (!bareIds) return output;
+  const view = normalizedIdentityTextView(output);
+  const replacements: SourceReplacement[] = [];
+  for (const match of view.text.matchAll(BARE_LEARNER_ID)) {
+    const token = lookup(match[1]!);
+    if (!token || BARE_OBJECT_WORD.test(view.text.slice(Math.max(0, match.index! - 40), match.index!))) continue;
+    const source = sourceRangeForView(view, match.index!, match.index! + match[1]!.length);
+    if (source) replacements.push({ ...source, replacement: token });
+  }
+  return replacements.length ? applySourceReplacements(output, replacements) : output;
+}
+
+// A numeric path segment after one of these names a course object, never a
+// person. Every other container is treated as a person route, so a learner id
+// in a route Morrow has not seen before is still replaced.
+const LINK_OBJECT_CONTAINERS = new Set([
+  "api", "v1", "courses", "course", "accounts", "account", "terms", "sections", "section", "enrollments",
+  "assignments", "assignment", "assignment_groups", "quizzes", "quiz", "quiz_submissions", "attempts", "questions",
+  "question_banks", "assessment_questions", "item_banks", "banks", "bank_entries", "items", "modules", "module",
+  "pages", "page", "files", "file", "folders", "attachments", "attachment", "media_objects", "media_attachments",
+  "thumbnails", "images", "discussion_topics", "discussions", "entries", "replies", "announcements", "conversations",
+  "groups", "group_categories", "rubrics", "rubric_associations", "outcomes", "outcome_groups", "external_tools",
+  "tools", "calendar_events", "collaborations", "content_migrations", "migrations", "blueprint_templates",
+  "grading_periods", "grading_standards", "reports", "progress", "versions", "revisions", "contexts", "context",
+  "pluginfile.php", "draftfile.php", "tokenpluginfile.php", "webservice", "draft", "content", "intro", "post",
+]);
+
+const LINK_PERSON_QUERY_KEY = /^(?:(?:[a-z]+_)?(?:user|student|learner|author|recipient|participant|member|observee|relateduser)s?_?ids?|user|users|student|students|learner|learners|uid)$/u;
+
+// Moodle names the person by a plain `id` only on its person pages.
+const MOODLE_PERSON_ROUTE = /\/(?:user\/(?:view|profile|edit|editadvanced)\.php|mod\/forum\/user\.php|message\/index\.php|report\/(?:outline|log|completion)\/user\.php|blog\/index\.php)$/u;
+
+/**
+ * Replaces a learner's platform id wherever a link carries it: a numeric path
+ * segment after any container that does not name a course object, a query
+ * value under a person key, and Moodle's `id` on its person pages. Only ids on
+ * this roster change, so an object id that equals a learner id elsewhere in the
+ * same link is kept.
+ */
+function replaceLinkedIdentityReferences(value: string, lookup: (id: string) => string | null): string {
+  const view = normalizedIdentityTextView(value);
+  const replacements: SourceReplacement[] = [];
+  const replace = (start: number, id: string): void => {
+    const token = lookup(id);
+    if (!token) return;
+    const source = sourceRangeForView(view, start, start + id.length);
+    if (source) replacements.push({ ...source, replacement: token });
+  };
+  for (const match of view.text.matchAll(/(\/([A-Za-z_][A-Za-z0-9_.~-]{0,80})\/)([0-9]{1,500})(?![0-9A-Za-z_])/gu)) {
+    const container = match[2]!.toLocaleLowerCase("en-US");
+    if (LINK_OBJECT_CONTAINERS.has(container) || /^(?:mod|block|core|local|tool|report|qtype|assignsubmission|assignfeedback)_/u.test(container)) continue;
+    replace(match.index! + match[1]!.length, match[3]!);
+  }
+  for (const match of view.text.matchAll(/([?&;]([A-Za-z_][A-Za-z0-9_.-]{0,80})(?:\[\]|%5B%5D)?=)([0-9]{1,500})(?![0-9A-Za-z_])/gu)) {
+    const key = match[2]!.toLocaleLowerCase("en-US");
+    const person = LINK_PERSON_QUERY_KEY.test(key) || (key === "id" && (() => {
+      const before = view.text.slice(0, match.index!);
+      const link = before.slice(Math.max(...[" ", "\n", "\t", "\"", "'", "<", ">", "("].map((mark) => before.lastIndexOf(mark))) + 1);
+      return MOODLE_PERSON_ROUTE.test(link.split("?")[0]!);
+    })());
+    if (person) replace(match.index! + match[1]!.length, match[3]!);
+  }
+  return replacements.length ? applySourceReplacements(value, replacements) : value;
 }
 
 interface LearnerTextPreparation {
@@ -912,6 +984,7 @@ function redactKnownLearnerTextPrepared(
   return replaceKnownIdentityReferences(
     replaceKnownAliases(value, exactContext.aliases, exactContext.aliasMatcher),
     exactContext.tokensById,
+    shape.wholeNumericIdIsIdentity,
   );
 }
 

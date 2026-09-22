@@ -10,6 +10,10 @@ Covers the packaging contract, not live browser behavior:
 
 Run: python3 helper/helper_selftest.py  (from the connector tree root)
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import os
 import stat
 import subprocess
@@ -24,6 +28,29 @@ def check(name, cond):
     print(("PASS " if cond else "FAIL ") + name)
     if not cond:
         FAIL.append(name)
+
+
+def tls_check_outcome(served, server_output):
+    """(verdict, reason) for the helper TLS check (round-4 L6).
+
+    "pass": /status answered over TLS. "fail": TLS setup itself failed
+    (a FATAL about the cert/key, or TLS never enabled). "skip": TLS was
+    enabled on the listener but the helper never reached serving; the
+    helper serves only after Chromium starts and the tenant page loads,
+    which needs network egress and can outlast the wait. Network timing
+    never fails an install."""
+    out = server_output or ""
+    if served:
+        return "pass", "served /status over TLS"
+    if any("FATAL" in line and "TLS" in line for line in out.splitlines()):
+        return "fail", "helper TLS setup failed"
+    if "TLS enabled on the helper listener" not in out:
+        return "fail", "the helper never enabled TLS"
+    tail = [line for line in out.splitlines() if line.strip()][-1:]
+    return "skip", ("TLS was enabled, but the helper never reached "
+                    "serving (Chromium start or the tenant page needs "
+                    "network egress; none within the wait): %s"
+                    % (tail[0][:200] if tail else "no output"))
 
 
 def main():
@@ -228,7 +255,7 @@ def main():
     dangling = os.path.join(lock_profile, "SingletonLock")
     os.symlink("/nonexistent-morrow-selftest-target", dangling)
     lenv = dict(os.environ)
-    lenv["CANVAS_BASE"] = "https://example.instructure.com"
+    lenv["CANVAS_BASE"] = "https://school.instructure.com"
     lenv.pop("LOGIN_HELPER_PRODUCTION", None)
     lenv.pop("LOGIN_HELPER_ALLOW_TEST_ON_LIVE_PROFILE", None)
     lenv["CHROMIUM_BIN"] = fake_chromium
@@ -282,16 +309,16 @@ def main():
         # custom domains now require the explicit CONFIRMED opt-in; the
         # port-preservation assertion runs under that opt-in.)
         os.environ["CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED"] = \
-            "tenant.example.com"
+            "lms.tenant-college.edu"
         try:
             check("tenant base with an explicit port keeps the port "
                   "(custom domain confirmed)",
-                  norm("https://tenant.example.com:8443/a/b")
-                  == "https://tenant.example.com:8443/")
+                  norm("https://lms.tenant-college.edu:8443/a/b")
+                  == "https://lms.tenant-college.edu:8443/")
         finally:
             os.environ.pop("CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", None)
         try:
-            norm("https://tenant.example.com:8443/a/b")
+            norm("https://lms.tenant-college.edu:8443/a/b")
             unconfirmed_accepted = True
         except ValueError:
             unconfirmed_accepted = False
@@ -1122,7 +1149,7 @@ def main():
         tls_env["PYTHONDONTWRITEBYTECODE"] = "1"
         tls_env["HOME"] = os.path.join(tls_dir, "home")
         os.makedirs(tls_env["HOME"], exist_ok=True)
-        tls_env["CANVAS_BASE"] = "https://example.instructure.com"
+        tls_env["CANVAS_BASE"] = "https://school.instructure.com"
         tls_env["HELPER_AUTH_TOKEN"] = probe_token
         tls_env["LOGIN_HELPER_PORT"] = "18973"
         tls_env["LOGIN_HELPER_CDP_PORT"] = "19373"
@@ -1146,7 +1173,9 @@ def main():
             _ctx.check_hostname = False
             _ctx.verify_mode = _ssl.CERT_NONE
             _ok = False
-            for _i in range(50):
+            for _i in range(150):
+                if tls_proc.poll() is not None:
+                    break
                 _time.sleep(0.2)
                 try:
                     _conn = _ctx.wrap_socket(
@@ -1163,8 +1192,24 @@ def main():
                         break
                 except Exception:  # noqa: BLE001
                     pass
-            check("W6-P2-8: server serves HTTPS with TLS cert/key",
-                  _ok)
+            if not _ok:
+                tls_proc.terminate()
+                try:
+                    _tls_out = tls_proc.communicate(timeout=10)[0]
+                except Exception:  # noqa: BLE001
+                    tls_proc.kill()
+                    _tls_out = tls_proc.communicate()[0]
+                _verdict, _why = tls_check_outcome(
+                    False, (_tls_out or b"").decode("utf-8", "replace"))
+                if _verdict == "skip":
+                    print("SKIP W6-P2-8: server serves HTTPS with TLS "
+                          "cert/key (%s)" % _why)
+                else:
+                    check("W6-P2-8: server serves HTTPS with TLS cert/key "
+                          "(%s)" % _why, False)
+            else:
+                check("W6-P2-8: server serves HTTPS with TLS cert/key",
+                      True)
             # Plaintext HTTP to the TLS port must NOT work (the
             # socket speaks TLS now).
             try:

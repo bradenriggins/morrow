@@ -30,7 +30,7 @@ import {
 } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { parse as parseToml } from "@iarna/toml";
+import { parse as parseToml } from "smol-toml";
 import { sha256Text } from "@morrow/contracts";
 
 export const SUPPORTED_MORROW_CLIENTS = Object.freeze([
@@ -84,6 +84,57 @@ export class MorrowClientConfigRefusal extends Error {
   }
 }
 
+export const MORROW_CLIENT_WRITE_REFUSAL_CODES = Object.freeze([
+  "config_invalid",
+  "config_unreadable",
+  "config_read_only",
+  "config_permission_denied",
+  "config_symlink",
+  "config_busy",
+  "config_existing_entry",
+  "config_entry_not_morrow",
+  "config_changed",
+] as const);
+export type MorrowClientWriteRefusalCode = typeof MORROW_CLIENT_WRITE_REFUSAL_CODES[number];
+
+/**
+ * A client configuration file Morrow would not change, with the reason as a code and the exact
+ * file. The installer shows its own words for each code, so the message stays technical.
+ */
+export class MorrowClientConfigWriteRefusal extends Error {
+  readonly schema = "morrow.client-config-error.v1";
+  readonly code: MorrowClientWriteRefusalCode;
+  readonly path: string;
+
+  constructor(code: MorrowClientWriteRefusalCode, path: string, message: string, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause });
+    this.name = "MorrowClientConfigWriteRefusal";
+    this.code = code;
+    this.path = path;
+  }
+}
+
+function writeRefusal(code: MorrowClientWriteRefusalCode, path: string, message: string, cause?: unknown): MorrowClientConfigWriteRefusal {
+  return new MorrowClientConfigWriteRefusal(code, path, message, cause);
+}
+
+/**
+ * Whether one parsed server entry is one Morrow wrote. Every client shape Morrow writes passes
+ * the upstream configuration through MORROW_UPSTREAMS_FILE, and no other server uses that name.
+ */
+export function isMorrowServerEntry(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const env = (value as Record<string, unknown>).env;
+  if (!env || typeof env !== "object" || Array.isArray(env)) return false;
+  const upstreams = (env as Record<string, unknown>).MORROW_UPSTREAMS_FILE;
+  return typeof upstreams === "string" && upstreams.length > 0;
+}
+
+export interface MorrowEntryRemovalOptions {
+  /** Refuse, instead of removing, a server of that name that does not carry Morrow's marker. */
+  readonly requireMorrowEntry?: boolean;
+}
+
 export interface ClientConfigBundleOptions {
   readonly repositoryRoot: string;
   readonly upstreamConfigPath: string;
@@ -127,6 +178,8 @@ export interface InstallMorrowClientOptions extends ClientConfigBundleOptions {
   readonly projectRoot?: string;
   /** Replace the client file only when its complete bytes still match this recorded digest. */
   readonly expectedConfigSha256?: string;
+  /** Replace an existing server of this name when it carries Morrow's marker, whatever else changed. */
+  readonly replaceMorrowEntry?: boolean;
 }
 
 export interface InstalledMorrowClient {
@@ -262,7 +315,6 @@ function codexConfig(input: {
     `env = { MORROW_UPSTREAMS_FILE = ${tomlString(input.upstreamConfigPath)} }`,
     `startup_timeout_sec = ${input.startupTimeoutSeconds}`,
     `tool_timeout_sec = ${input.toolTimeoutSeconds}`,
-    "required = true",
     'default_tools_approval_mode = "writes"',
     "",
   ].join("\n");
@@ -444,8 +496,8 @@ function verificationText(serverName: string): string {
     "6. Call morrow_catalog with a narrow query before choosing a tool.",
     "7. Run one read-only operation.",
     "8. For a write, inspect the frozen plan and open its local approval URL.",
-    "9. Approve only on the separate loopback approval page.",
-    "10. Dispatch once and require connector-owned fresh readback before stating success.",
+    "9. Approve on the separate loopback approval page in Chrome with Morrow Bridge connected. A request sent to that page by another program cannot approve.",
+    "10. The approval page starts the change once. Require connector-owned fresh readback before stating success.",
     "11. Never repeat a write whose operation state is source_unknown or inspection_required.",
     "",
   ].join("\n");
@@ -605,7 +657,7 @@ function assertNoSymlinkPath(root: string, path: string): void {
   for (let current = target; ; current = dirname(current)) {
     try {
       if (lstatSync(current).isSymbolicLink()) {
-        throw new Error(`Refusing to write ${target} because ${current} is a symbolic link`);
+        throw writeRefusal("config_symlink", target, `Refusing to write ${target} because ${current} is a symbolic link`);
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -847,6 +899,7 @@ interface ExpectedFileText {
   readonly exists: boolean;
   readonly content: string;
   readonly identity?: BigIntStats;
+  readonly mode?: number;
 }
 
 // An assistant configuration file is a hand-edited JSON or TOML document. Four
@@ -856,7 +909,9 @@ interface ExpectedFileText {
 const MAX_CLIENT_CONFIG_BYTES = 4 * 1024 * 1024;
 
 function currentFileText(path: string, requirePrivate = false): ExpectedFileText {
-  const invalid = (): Error => new Error(
+  const invalid = (): Error => writeRefusal(
+    "config_unreadable",
+    path,
     `Refusing to replace ${path} because it is not a regular file under 4 MiB with stable single-link identity`,
   );
   let named: BigIntStats;
@@ -896,8 +951,9 @@ function currentFileText(path: string, requirePrivate = false): ExpectedFileText
       throw invalid();
     }
     let content: string;
-    try { content = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { throw invalid(); }
-    return { exists: true, content, identity: after };
+    // A byte-order mark is kept, so a rewrite leaves the file's own encoding marker in place.
+    try { content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); } catch { throw invalid(); }
+    return { exists: true, content, identity: after, mode: Number(after.mode) & 0o7777 };
   } catch (error) {
     if (error instanceof Error && error.message === invalid().message) throw error;
     throw invalid();
@@ -912,24 +968,48 @@ function sameFileText(left: ExpectedFileText, right: ExpectedFileText): boolean 
     && sameExactSnapshot(left.identity, right.identity);
 }
 
+const PERMISSION_ERRORS = new Set(["EACCES", "EPERM", "EROFS"]);
+
 function writePrivateText(
   path: string,
   content: string,
   expected?: ExpectedFileText,
   restriction?: PrivateFileRestriction,
+  finalMode?: number,
+): void {
+  try {
+    writePrivateTextOnce(path, content, expected, restriction, finalMode);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (typeof code === "string" && PERMISSION_ERRORS.has(code)) {
+      throw writeRefusal("config_permission_denied", path, `Refusing to write ${path} because this account may not change it or its folder`, error);
+    }
+    throw error;
+  }
+}
+
+function writePrivateTextOnce(
+  path: string,
+  content: string,
+  expected: ExpectedFileText | undefined,
+  restriction: PrivateFileRestriction | undefined,
+  finalMode: number | undefined,
 ): void {
   const parent = dirname(path);
   const created = mkdirSync(parent, { recursive: true, mode: 0o700 });
   if (created !== undefined) safeChmod(parent, 0o700);
   if (expected && !sameFileText(currentFileText(path), expected)) {
-    throw new Error(`Refusing to replace ${path} because it changed during installation`);
+    throw writeRefusal("config_changed", path, `Refusing to replace ${path} because it changed during installation`);
   }
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
   let prepared: BigIntStats | undefined;
+  const posix = (restriction?.platform ?? process.platform) !== "win32";
   try {
     prepared = writeRestrictedFile(temporary, content, 0o600, restriction);
+    // An existing file keeps the mode its owner gave it. Only a file Morrow creates is private.
+    if (finalMode !== undefined && posix && finalMode !== 0o600) chmodSync(temporary, finalMode);
     if (expected && !sameFileText(currentFileText(path), expected)) {
-      throw new Error(`Refusing to replace ${path} because it changed during installation`);
+      throw writeRefusal("config_changed", path, `Refusing to replace ${path} because it changed during installation`);
     }
     // The rename carries the file, and on Windows its restricted access list,
     // onto the final path. A file that could not be restricted never gets here.
@@ -937,11 +1017,11 @@ function writePrivateText(
       renameSync(temporary, path);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EBUSY") {
-        throw new Error(`Refusing to replace ${path} because the assistant that uses it is running and holds it open. Close the assistant, then run the same command again.`);
+        throw writeRefusal("config_busy", path, `Refusing to replace ${path} because the assistant that uses it is running and holds it open. Close the assistant, then run the same command again.`, error);
       }
       throw error;
     }
-    const installed = currentFileText(path, true);
+    const installed = currentFileText(path, finalMode === undefined);
     if (!installed.exists || installed.identity === undefined || !sameExactFile(prepared, installed.identity)
       || installed.content !== content) {
       throw new Error(`Morrow could not confirm the exact configuration written to ${path}`);
@@ -1242,15 +1322,34 @@ function codexSection(bundle: ClientConfigBundle): string {
   return fragment;
 }
 
+/** An empty file, or one holding only whitespace and a byte-order mark, has no settings yet. */
+function blankClientJson(content: string): boolean {
+  return content.replace(/^\uFEFF/u, "").trim() === "";
+}
+
 function parseClientJson(path: string, content: string): Record<string, unknown> {
+  if (blankClientJson(content)) return {};
   let parsed: unknown;
   try {
     parsed = JSON.parse(jsoncForJsonParse(content));
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Refusing to replace ${path} because it is not valid JSON: ${detail}`);
+    throw writeRefusal("config_invalid", path, `Refusing to replace ${path} because it is not valid JSON: ${detail}`);
   }
-  return jsonObject(parsed, path);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw writeRefusal("config_invalid", path, `Refusing to replace ${path} because it must contain a JSON object`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/** The server map of one client document. A missing or null map is an empty one. */
+function clientJsonServers(path: string, document: Record<string, unknown>, container: string): Record<string, unknown> {
+  const servers = document[container];
+  if (servers === undefined || servers === null) return {};
+  if (typeof servers !== "object" || Array.isArray(servers)) {
+    throw writeRefusal("config_invalid", path, `Refusing to replace ${path} because ${container} must contain a JSON object`);
+  }
+  return servers as Record<string, unknown>;
 }
 
 /**
@@ -1260,6 +1359,7 @@ function parseClientJson(path: string, content: string): Record<string, unknown>
  */
 function jsoncForJsonParse(content: string): string {
   const prepared = content.split("");
+  if (prepared[0] === "\uFEFF") prepared[0] = " ";
   let inString = false;
   for (let index = 0; index < content.length; index += 1) {
     const current = content[index]!;
@@ -1546,9 +1646,11 @@ export function withoutMorrowClientJson(
   content: string,
   container = "mcpServers",
   serverName = "morrow",
+  options: MorrowEntryRemovalOptions = {},
 ): string | null {
   const label = "assistant configuration";
   const parsed = parseClientJson(label, content);
+  if (blankClientJson(content)) return null;
   const tokens = tokenizeJson(content);
   const document = jsonObjectText(content, tokens, 0, label);
   const containerMember = oneJsonMember(document, container, label);
@@ -1556,7 +1658,8 @@ export function withoutMorrowClientJson(
     if (Object.hasOwn(parsed, container)) throw new Error(`Refusing to remove ${serverName} from ${label}`);
     return null;
   }
-  const parsedServers = jsonObject(parsed[container], `${label}.${container}`);
+  const parsedServers = clientJsonServers(label, parsed, container);
+  if (parsed[container] === null) return null;
   const containerOpen = tokens.findIndex((token) => token.start === containerMember.valueStart);
   const servers = jsonObjectText(content, tokens, containerOpen, `${label}.${container}`);
   const server = oneJsonMember(servers, serverName, `${label}.${container}`);
@@ -1564,10 +1667,13 @@ export function withoutMorrowClientJson(
     if (Object.hasOwn(parsedServers, serverName)) throw new Error(`Refusing to remove ${serverName} from ${label}`);
     return null;
   }
+  if (options.requireMorrowEntry === true && !isMorrowServerEntry(parsedServers[serverName])) {
+    throw writeRefusal("config_entry_not_morrow", label, `Refusing to remove ${serverName} from ${label} because it was not written by Morrow`);
+  }
 
   const updated = removeJsonMember(content, servers, server);
   const checked = parseClientJson(label, updated);
-  const checkedServers = jsonObject(checked[container], `${label}.${container}`);
+  const checkedServers = clientJsonServers(label, checked, container);
   if (Object.hasOwn(checkedServers, serverName)) {
     throw new Error(`Refusing to remove ${serverName} from ${label}`);
   }
@@ -1587,10 +1693,13 @@ function editClientJson(
   const containerMember = oneJsonMember(document, container, path);
   if (!containerMember) return addJsonMember(content, document, container, { [serverName]: entry });
   const containerOpen = tokens.findIndex((token) => token.start === containerMember.valueStart);
+  if (tokens[containerOpen]?.text === "null") {
+    return replaceJsonMemberValue(content, document, containerMember, { [serverName]: entry });
+  }
   const servers = jsonObjectText(content, tokens, containerOpen, `${path}.${container}`);
   const server = oneJsonMember(servers, serverName, `${path}.${container}`);
   if (!server) return addJsonMember(content, servers, serverName, entry);
-  if (!replace) throw new Error(`Refusing to replace existing Morrow server ${serverName} in ${path}`);
+  if (!replace) throw writeRefusal("config_existing_entry", path, `Refusing to replace existing Morrow server ${serverName} in ${path}`);
   return replaceJsonMemberValue(content, servers, server, entry);
 }
 
@@ -1609,8 +1718,44 @@ function assertExpectedClientConfig(
 ): void {
   if (expectedConfigSha256 === undefined) return;
   if (!current.exists || sha256Text(current.content) !== expectedConfigSha256) {
-    throw new Error(`Refusing to replace ${path} because it changed after Morrow recorded it`);
+    throw writeRefusal("config_changed", path, `Refusing to replace ${path} because it changed after Morrow recorded it`);
   }
+}
+
+interface ClientEntryWrite {
+  readonly expectedConfigSha256?: string;
+  readonly replaceMorrowEntry?: boolean;
+}
+
+/**
+ * Whether an existing, different server of Morrow's name may be replaced. A recorded whole-file
+ * digest still admits it; otherwise the entry itself must carry Morrow's marker.
+ */
+function assertReplaceableEntry(path: string, serverName: string, existing: unknown, write: ClientEntryWrite): void {
+  if (write.expectedConfigSha256 !== undefined) return;
+  if (write.replaceMorrowEntry === true) {
+    if (isMorrowServerEntry(existing)) return;
+    throw writeRefusal("config_entry_not_morrow", path, `Refusing to replace existing Morrow server ${serverName} in ${path} because it was not written by Morrow`);
+  }
+  throw writeRefusal("config_existing_entry", path, `Refusing to replace existing Morrow server ${serverName} in ${path}`);
+}
+
+/**
+ * The mode an existing client file keeps when Morrow rewrites it. Group and other accounts lose
+ * write access, because the file names a program the assistant runs. A read-only file is refused.
+ */
+function preservedClientMode(path: string, current: ExpectedFileText): number | undefined {
+  if (!current.exists || current.mode === undefined) return undefined;
+  if ((current.mode & 0o200) === 0) {
+    throw writeRefusal("config_read_only", path, `Refusing to change ${path} because it is read-only`);
+  }
+  return current.mode & 0o755;
+}
+
+/** The unchanged-file path: nothing is written, and only write access for other accounts is removed. */
+function tightenUnchangedClientFile(path: string, current: ExpectedFileText): void {
+  if (process.platform === "win32" || current.mode === undefined || (current.mode & 0o022) === 0) return;
+  safeChmod(path, current.mode & 0o755);
 }
 
 function installJsonEntry(
@@ -1618,35 +1763,32 @@ function installJsonEntry(
   container: string,
   serverName: string,
   entry: Record<string, unknown>,
-  expectedConfigSha256?: string,
+  write: ClientEntryWrite,
 ): boolean {
   const current = currentFileText(path);
-  assertExpectedClientConfig(path, current, expectedConfigSha256);
+  assertExpectedClientConfig(path, current, write.expectedConfigSha256);
   const document = current.exists
     ? parseClientJson(path, current.content)
     : {};
-  const servers = document[container] === undefined
-    ? {}
-    : jsonObject(document[container], `${path}.${container}`);
+  const servers = clientJsonServers(path, document, container);
   const existing = servers[serverName];
   if (existing !== undefined) {
     if (isDeepStrictEqual(existing, entry)) {
-      restrictToCurrentAccount(path);
+      tightenUnchangedClientFile(path, current);
       return false;
     }
-    if (expectedConfigSha256 === undefined) {
-      throw new Error(`Refusing to replace existing Morrow server ${serverName} in ${path}`);
-    }
+    assertReplaceableEntry(path, serverName, existing, write);
   }
-  const content = current.exists
+  const mode = preservedClientMode(path, current);
+  const content = current.exists && !blankClientJson(current.content)
     ? editClientJson(path, current.content, container, serverName, entry, existing !== undefined)
     : jsonFile({ [container]: { [serverName]: entry } });
   const checked = parseClientJson(path, content);
-  const checkedServers = jsonObject(checked[container], `${path}.${container}`);
+  const checkedServers = clientJsonServers(path, checked, container);
   if (!isDeepStrictEqual(checkedServers[serverName], entry)) {
     throw new Error(`Refusing to write ${path} because the prepared Morrow entry is invalid`);
   }
-  writePrivateText(path, content, current);
+  writePrivateText(path, content, current, undefined, mode);
   return true;
 }
 
@@ -1657,12 +1799,21 @@ function tomlObject(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/** The TOML parser builds null-prototype tables; Morrow compares them with ordinary objects. */
+function ordinaryTomlValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(ordinaryTomlValue);
+  if (value && typeof value === "object" && (Object.getPrototypeOf(value) === null || Object.getPrototypeOf(value) === Object.prototype)) {
+    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, ordinaryTomlValue(nested)]));
+  }
+  return value;
+}
+
 function parseCodexToml(path: string, content: string): Record<string, unknown> {
   try {
-    return tomlObject(parseToml(content), path);
+    return tomlObject(ordinaryTomlValue(parseToml(content.replace(/^\uFEFF/u, ""))), path);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Refusing to replace ${path} because it is not valid TOML: ${detail}`);
+    throw writeRefusal("config_invalid", path, `Refusing to replace ${path} because it is not valid TOML: ${detail}`);
   }
 }
 
@@ -1672,18 +1823,37 @@ function codexMcpServer(document: Record<string, unknown>, serverName: string, p
   return tomlObject(servers, `${path}.mcp_servers`)[serverName];
 }
 
+/**
+ * The part of a Codex server entry Morrow owns. Codex keeps per-tool approvals under
+ * [mcp_servers.<name>.tools.*]; those belong to the person and do not make the entry different.
+ */
+function codexEntryWithoutTools(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const { tools: _tools, ...rest } = value as Record<string, unknown>;
+  return rest;
+}
+
+function sameCodexEntry(actual: unknown, expected: unknown): boolean {
+  return isDeepStrictEqual(codexEntryWithoutTools(actual), expected);
+}
+
 function tomlHeaderPath(line: string): readonly string[] | null {
   const trimmed = line.trimStart();
-  if (!trimmed.startsWith("[") || trimmed.startsWith("[[")) return null;
+  if (!trimmed.startsWith("[")) return null;
+  const arrayHeader = trimmed.startsWith("[[");
   const marker = "__morrow_header_marker__";
   let parsed: Record<string, unknown>;
   try {
-    parsed = tomlObject(parseToml(`${line}\n${marker} = true\n`), "TOML header");
+    parsed = tomlObject(parseToml(`${line.replace(/^\uFEFF/u, "")}\n${marker} = true\n`), "TOML header");
   } catch {
     return null;
   }
   const paths: string[][] = [];
   const visit = (value: unknown, path: string[]): void => {
+    if (Array.isArray(value) && arrayHeader) {
+      for (const item of value) visit(item, path);
+      return;
+    }
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
     for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
       if (key === marker && nested === true) paths.push(path);
@@ -1694,33 +1864,101 @@ function tomlHeaderPath(line: string): readonly string[] | null {
   return paths.length === 1 ? paths[0]! : null;
 }
 
-/**
- * Removes the exact Codex table that Morrow appends. The TOML parser decides
- * key identity, so bare, quoted, and escaped spellings of `morrow` cannot leave
- * a live server behind. A later table still causes a refusal because it is a
- * document shape Morrow's append-only install path did not create.
- */
-export function withoutMorrowCodexTable(content: string, serverName = "morrow"): string | null {
-  const path = "Codex configuration";
-  const document = parseCodexToml(path, content);
-  if (codexMcpServer(document, serverName, path) === undefined) return null;
-  const lines = content.match(/[^\n]*(?:\n|$)/g) || [];
+interface TomlLine {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+  readonly header: readonly string[] | null;
+}
+
+function tomlLines(content: string): readonly TomlLine[] {
+  const lines: TomlLine[] = [];
   let offset = 0;
-  let start = -1;
-  for (const line of lines) {
-    const withoutNewline = line.endsWith("\n") ? line.slice(0, -1) : line;
-    const headerPath = tomlHeaderPath(withoutNewline);
-    if (headerPath?.length === 2 && headerPath[0] === "mcp_servers" && headerPath[1] === serverName) {
-      if (start !== -1) throw new Error(`Refusing to remove Morrow from ${path} without rewriting existing TOML`);
-      start = offset;
-    } else if (start !== -1 && withoutNewline.trimStart().startsWith("[")) {
-      throw new Error(`Refusing to remove Morrow from ${path} without rewriting existing TOML`);
-    }
+  for (const line of content.match(/[^\n]*(?:\n|$)/g) || []) {
+    if (line.length === 0) continue;
+    const text = line.endsWith("\n") ? line.slice(0, -1) : line;
+    lines.push({ start: offset, end: offset + line.length, text, header: tomlHeaderPath(text) });
     offset += line.length;
   }
-  if (start === -1) throw new Error(`Refusing to remove Morrow from ${path} without rewriting existing TOML`);
-  const kept = content.slice(0, start).trimEnd();
-  return kept.length === 0 ? "" : `${kept}\n`;
+  return lines;
+}
+
+function morrowHeader(header: readonly string[] | null, serverName: string): boolean {
+  return header !== null && header.length >= 2 && header[0] === "mcp_servers" && header[1] === serverName;
+}
+
+function blankOrComment(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed === "" || trimmed.startsWith("#");
+}
+
+/**
+ * The byte range of one table section, from its header to the next header. A closing run of
+ * blank and comment lines that holds a comment belongs to the table that follows it.
+ */
+function sectionRanges(lines: readonly TomlLine[], contentLength: number): readonly { readonly index: number; readonly start: number; readonly end: number; readonly bodyEnd: number }[] {
+  const headers = lines.map((line, index) => ({ line, index })).filter(({ line }) => line.header !== null);
+  return headers.map(({ line, index }, position) => {
+    const nextIndex = position + 1 < headers.length ? headers[position + 1]!.index : lines.length;
+    const end = nextIndex < lines.length ? lines[nextIndex]!.start : contentLength;
+    let tail = nextIndex;
+    while (tail - 1 > index && blankOrComment(lines[tail - 1]!.text)) tail -= 1;
+    const trailing = lines.slice(tail, nextIndex);
+    const firstComment = trailing.findIndex((entry) => entry.text.trim().startsWith("#"));
+    const bodyEnd = firstComment === -1 ? end : trailing[firstComment]!.start;
+    return { index, start: line.start, end, bodyEnd };
+  });
+}
+
+function withoutCodexServer(document: Record<string, unknown>, serverName: string, reference: Record<string, unknown>): Record<string, unknown> {
+  const servers = { ...(document.mcp_servers as Record<string, unknown>) };
+  delete servers[serverName];
+  const { mcp_servers: _servers, ...rest } = document;
+  return Object.keys(servers).length === 0 && reference.mcp_servers === undefined ? rest : { ...rest, mcp_servers: servers };
+}
+
+/**
+ * Removes Morrow's Codex server: its table and every [mcp_servers.<name>.*] subtable, wherever
+ * each one is. The TOML parser decides key identity, so bare, quoted, and escaped spellings of
+ * `morrow` cannot leave a live server behind. Every other byte stays as it was, and the result
+ * must parse to the same document without that server, or nothing is returned.
+ */
+export function withoutMorrowCodexTable(
+  content: string,
+  serverName = "morrow",
+  options: MorrowEntryRemovalOptions = {},
+): string | null {
+  const path = "Codex configuration";
+  const document = parseCodexToml(path, content);
+  const existing = codexMcpServer(document, serverName, path);
+  if (existing === undefined) return null;
+  if (options.requireMorrowEntry === true && !isMorrowServerEntry(existing)) {
+    throw writeRefusal("config_entry_not_morrow", path, `Refusing to remove ${serverName} from ${path} because it was not written by Morrow`);
+  }
+  const refusal = () => new Error(`Refusing to remove Morrow from ${path} without rewriting existing TOML`);
+  const lines = tomlLines(content);
+  const removed = sectionRanges(lines, content.length)
+    .filter((section) => morrowHeader(lines[section.index]!.header, serverName));
+  if (!removed.some((section) => lines[section.index]!.header!.length === 2)) throw refusal();
+  let updated = "";
+  let cursor = 0;
+  for (const section of removed) {
+    updated += content.slice(cursor, section.start);
+    cursor = section.bodyEnd;
+  }
+  updated += content.slice(cursor);
+  if (cursor === content.length) {
+    const kept = updated.trimEnd();
+    updated = kept.length === 0 ? "" : `${kept}\n`;
+  }
+  let checked: Record<string, unknown>;
+  try {
+    checked = parseCodexToml(path, updated);
+  } catch {
+    throw refusal();
+  }
+  if (!isDeepStrictEqual(checked, withoutCodexServer(document, serverName, checked))) throw refusal();
+  return updated;
 }
 
 function appendCodexSection(content: string, section: string): string {
@@ -1729,73 +1967,63 @@ function appendCodexSection(content: string, section: string): string {
   return `${content}${separator}${section}`;
 }
 
-function replaceRecordedCodexSection(
+/**
+ * Replaces the body of Morrow's own [mcp_servers.<name>] table and nothing else. Subtables,
+ * later tables, and a closing comment block stay byte-exact.
+ */
+function replaceMorrowCodexSection(
   path: string,
   content: string,
   serverName: string,
   section: string,
 ): string {
-  const headers = new Set([
-    `[mcp_servers.${serverName}]`,
-    `[mcp_servers.${JSON.stringify(serverName)}]`,
-    `[mcp_servers.'${serverName}']`,
-  ]);
-  let offset = 0;
-  let start = -1;
-  let end = content.length;
-  for (const line of content.match(/[^\n]*(?:\n|$)/g) || []) {
-    const withoutNewline = line.endsWith("\n") ? line.slice(0, -1) : line;
-    const header = withoutNewline.trim().replace(/\s+#.*$/, "");
-    if (headers.has(header)) {
-      if (start !== -1) {
-        throw new Error(`Refusing to replace Morrow in ${path} without rewriting existing TOML`);
-      }
-      start = offset;
-    } else if (start !== -1 && header.startsWith("[")) {
-      end = offset;
-      break;
-    }
-    offset += line.length;
-  }
-  if (start === -1) {
+  const lines = tomlLines(content);
+  const main = sectionRanges(lines, content.length).filter((candidate) => {
+    const header = lines[candidate.index]!.header;
+    return header !== null && header.length === 2 && morrowHeader(header, serverName) && !lines[candidate.index]!.text.trimStart().startsWith("[[");
+  });
+  if (main.length !== 1) {
     throw new Error(`Refusing to replace Morrow in ${path} without rewriting existing TOML`);
   }
-  return `${content.slice(0, start)}${section}${content.slice(end)}`;
+  const range = main[0]!;
+  let end = range.bodyEnd;
+  // Blank lines between Morrow's table and the next one stay, so the spacing a person chose is kept.
+  while (end > range.start && content[end - 1] === "\n" && content[end - 2] === "\n") end -= 1;
+  return `${content.slice(0, range.start)}${section}${content.slice(end)}`;
 }
 
 function installCodexEntry(
   path: string,
   serverName: string,
   section: string,
-  expectedConfigSha256?: string,
+  write: ClientEntryWrite,
 ): boolean {
   const current = currentFileText(path);
-  assertExpectedClientConfig(path, current, expectedConfigSha256);
+  assertExpectedClientConfig(path, current, write.expectedConfigSha256);
   const document = parseCodexToml(path, current.content);
   const expected = codexMcpServer(parseCodexToml(path, section), serverName, path);
   const existing = codexMcpServer(document, serverName, path);
   if (existing !== undefined) {
-    if (isDeepStrictEqual(existing, expected)) {
-      restrictToCurrentAccount(path);
+    if (sameCodexEntry(existing, expected)) {
+      tightenUnchangedClientFile(path, current);
       return false;
     }
-    if (expectedConfigSha256 === undefined) {
-      throw new Error(`Refusing to replace existing Morrow server ${serverName} in ${path}`);
-    }
+    assertReplaceableEntry(path, serverName, existing, write);
   }
+  const mode = preservedClientMode(path, current);
   const content = existing === undefined
     ? appendCodexSection(current.content, section)
-    : replaceRecordedCodexSection(path, current.content, serverName, section);
+    : replaceMorrowCodexSection(path, current.content, serverName, section);
   let prepared: Record<string, unknown>;
   try {
     prepared = parseCodexToml(path, content);
   } catch {
     throw new Error(`Refusing to add Morrow to ${path} without rewriting existing TOML`);
   }
-  if (!isDeepStrictEqual(codexMcpServer(prepared, serverName, path), expected)) {
+  if (!sameCodexEntry(codexMcpServer(prepared, serverName, path), expected)) {
     throw new Error(`Refusing to replace Morrow in ${path} without rewriting existing TOML`);
   }
-  writePrivateText(path, content, current);
+  writePrivateText(path, content, current, undefined, mode);
   return true;
 }
 
@@ -1806,16 +2034,40 @@ function installedClientDigest(
   serverName: string,
   expected: Record<string, unknown>,
 ): string {
-  const current = currentFileText(path, true);
+  const current = currentFileText(path);
   if (!current.exists) throw new Error(`Morrow could not confirm its configuration in ${path}`);
   const content = current.content;
-  const actual = client === "codex"
-    ? codexMcpServer(parseCodexToml(path, content), serverName, path)
-    : jsonObject(parseClientJson(path, content)[container!], `${path}.${container}`)[serverName];
-  if (!isDeepStrictEqual(actual, expected)) {
+  const confirmed = client === "codex"
+    ? sameCodexEntry(codexMcpServer(parseCodexToml(path, content), serverName, path), expected)
+    : isDeepStrictEqual(clientJsonServers(path, parseClientJson(path, content), container!)[serverName], expected);
+  if (!confirmed) {
     throw new Error(`Morrow could not confirm its configuration in ${path}`);
   }
   return sha256Text(content);
+}
+
+/**
+ * The arguments of Morrow's own entry in one client file, or null when the file has no entry
+ * carrying Morrow's marker or cannot be read. Setup uses the first argument to see whether an
+ * assistant still starts Morrow from a place Morrow has since moved away from.
+ */
+export function morrowServerEntryArguments(
+  clientValue: SupportedMorrowClient,
+  content: string,
+  serverName = "morrow",
+): readonly string[] | null {
+  const client = exactClient(clientValue);
+  let entry: unknown;
+  try {
+    entry = client === "codex"
+      ? codexMcpServer(parseCodexToml("assistant configuration", content), serverName, "assistant configuration")
+      : clientJsonServers("assistant configuration", parseClientJson("assistant configuration", content), CLIENT_JSON[client].container)[serverName];
+  } catch {
+    return null;
+  }
+  if (!isMorrowServerEntry(entry)) return null;
+  const args = (entry as Record<string, unknown>).args;
+  return Array.isArray(args) && args.every((value) => typeof value === "string") ? [...args] as string[] : null;
 }
 
 /**
@@ -1863,7 +2115,7 @@ export function morrowClientConfigurationStatus(
       ? dirname(dirname(path))
       : homeDirectory;
   assertNoSymlinkPath(clientConfigurationRoot, path);
-  const current = currentFileText(path, true);
+  const current = currentFileText(path);
   if (!current.exists) return { path, configured: false, sha256: null };
   const expected = client === "codex"
     ? tomlObject(
@@ -1871,12 +2123,12 @@ export function morrowClientConfigurationStatus(
       `${path}.mcp_servers.${bundle.serverName}`,
     )
     : serverEntry(bundle, client, canonicalUpstreamConfigPath);
-  const actual = client === "codex"
-    ? codexMcpServer(parseCodexToml(path, current.content), bundle.serverName, path)
-    : jsonObject(parseClientJson(path, current.content)[CLIENT_JSON[client].container], `${path}.${CLIENT_JSON[client].container}`)[bundle.serverName];
+  const configured = client === "codex"
+    ? sameCodexEntry(codexMcpServer(parseCodexToml(path, current.content), bundle.serverName, path), expected)
+    : isDeepStrictEqual(clientJsonServers(path, parseClientJson(path, current.content), CLIENT_JSON[client].container)[bundle.serverName], expected);
   return {
     path,
-    configured: isDeepStrictEqual(actual, expected),
+    configured,
     sha256: sha256Text(current.content),
   };
 }
@@ -1926,9 +2178,13 @@ export function installMorrowClient(options: InstallMorrowClientOptions): Instal
       `${path}.mcp_servers.${bundle.serverName}`,
     )
     : serverEntry(bundle, client, canonicalUpstreamConfigPath);
+  const write: ClientEntryWrite = {
+    ...(expectedConfigSha256 !== undefined ? { expectedConfigSha256 } : {}),
+    replaceMorrowEntry: options.replaceMorrowEntry === true,
+  };
   const changed = client === "codex"
-    ? installCodexEntry(path, bundle.serverName, codexSection(bundle), expectedConfigSha256)
-    : installJsonEntry(path, CLIENT_JSON[client].container, bundle.serverName, expectedEntry, expectedConfigSha256);
+    ? installCodexEntry(path, bundle.serverName, codexSection(bundle), write)
+    : installJsonEntry(path, CLIENT_JSON[client].container, bundle.serverName, expectedEntry, write);
   const container = client === "codex" ? undefined : CLIENT_JSON[client].container;
   const sha256 = installedClientDigest(path, client, container, bundle.serverName, expectedEntry);
   return { client, scope, path, changed, sha256 };

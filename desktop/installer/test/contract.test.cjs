@@ -335,6 +335,11 @@ test("the installer uses the shared knot with a live-text wordmark and the ChatG
   assert.doesNotMatch(renderer, /\.png/);
   assert.match(renderer, /id="windows-note"[^>]*data-platform="win32" hidden/);
   assert.match(renderer, /id="macos-note"[^>]*data-platform="darwin" hidden/);
+  // Moving to Applications uses macOS's own move, which asks for an administrator password when
+  // this account cannot write to Applications, as on many managed Macs. The note must not deny it.
+  const macNote = /id="macos-note"[^>]*>([^<]+)</.exec(renderer)[1];
+  assert.doesNotMatch(macNote, /does not ask for an administrator password/);
+  assert.match(macNote, /can ask for an administrator password/);
   for (const raster of ["morrow-wordmark.png", "morrow-wordmark-dark.png"]) {
     assert.equal(fs.existsSync(path.join(installerRoot, "assets", raster)), false, `${raster} is no longer used`);
   }
@@ -721,4 +726,21 @@ test("routine installer state does not create or rotate the app-owned Bridge dir
   assert.match(main, /await installer\.initializeBridgeAtStartup\(\)\.catch\(\(\) => \{\}\);/);
   assert.match(controller, /bridgeInstallationStatus/);
   assert.doesNotMatch(state, /initializeBridgeAtStartup|ensureBridgeDirectory|initializeBridgeDirectory|issueBridgeActiveFolderChallenge|bridgeInstallationStatus/);
+});
+
+test("an assistant settings error names only that absolute file, and only for errors about it", () => {
+  const file = "/Users/teacher/.codex/config.toml";
+  const named = envelope(repairRequiredState(), errorDetails("assistant_config_read_only", file));
+  assert.equal(named.error.file, file);
+  assert.equal(named.error.recovery, `Morrow changed nothing. Allow changes to ${file}, then try again.`);
+  const windows = envelope(repairRequiredState(), { code: "assistant_config_busy", file: "C:\\Users\\t\\AppData\\Roaming\\Claude\\config.json" });
+  assert.match(windows.error.recovery, /C:\\Users\\t\\AppData/);
+  for (const unsafe of ["relative/config.toml", "/tmp/a\nb", "", 42]) {
+    const result = envelope(repairRequiredState(), { code: "assistant_config_invalid", file: unsafe });
+    assert.equal(result.error.file, undefined);
+    assert.equal(result.error.recovery.includes("Morrow changed nothing."), true);
+  }
+  const unrelated = envelope(repairRequiredState(), { code: "setup_failed", file });
+  assert.equal(unrelated.error.file, undefined);
+  assert.equal(JSON.stringify(unrelated).includes(file), false);
 });

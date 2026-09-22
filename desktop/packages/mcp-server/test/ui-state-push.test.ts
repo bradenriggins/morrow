@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BridgeCommand } from "@morrow/bridge-protocol";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
@@ -138,6 +138,103 @@ describe("WI-2.4: the reviews that wait, pushed to the Bridge popup", () => {
     const cancelled = runtime.cancelOperation(id);
     expect(cancelled).toMatchObject({ state: "cancelled" });
     expect(runtime.operationGet(id)).toMatchObject({ state: "cancelled" });
+  }, CASE_TIMEOUT_MS);
+
+  it("hands the approval key to the Bridge with each push, and again when a review page opens", async () => {
+    directory = mkdtempSync(join(tmpdir(), "morrow-ui-state-"));
+    const port = await reserveLoopbackPort();
+    const config = connectorConfig(directory, port);
+    runtime = await GatewayRuntime.connect(config);
+    runtime.setApprovalBaseUrl("http://127.0.0.1:4317");
+    const presence = { origin: "http://127.0.0.1:4317", key: "q".repeat(43) };
+    runtime.setApprovalPresence(presence);
+
+    const root = resolve("../..");
+    const browserDigest = bridgeCatalogDigestForTests(root);
+    bridge = await connectBridgeTestClient({
+      port,
+      token: "gateway-connector-secret-".repeat(3),
+      extensionId: "a".repeat(32),
+      catalogDigest: browserDigest,
+      bindings: [],
+    });
+    bridge.onCommand((command) => {
+      if (command.kind === "ui_state") {
+        bridge!.respond(command, {});
+        return;
+      }
+      bridge!.respondProblem(command, { schema: "morrow.bridge.problem.v1", code: "unexpected_command", message: "unexpected command in this case", recoverable: false });
+    });
+    await assertPortListening(port);
+
+    runtime.announceApprovalPresence();
+    const announced = await bridge.waitForCommand((command) => command.kind === "ui_state");
+    expect(announced.uiState).toEqual({ reviews: [], presence });
+  }, CASE_TIMEOUT_MS);
+
+  it("sends a review's label-to-name map only to the paired Bridge, and drops it when the review ends", async () => {
+    directory = mkdtempSync(join(tmpdir(), "morrow-ui-state-"));
+    const port = await reserveLoopbackPort();
+    runtime = await GatewayRuntime.connect(connectorConfig(directory, port));
+    runtime.setApprovalBaseUrl("http://127.0.0.1:4317");
+    const root = resolve("../..");
+    const browserDigest = bridgeCatalogDigestForTests(root);
+    const sourceBindingId = "canvas:ui-state-names-test";
+    bridge = await connectBridgeTestClient({
+      port,
+      token: "gateway-connector-secret-".repeat(3),
+      extensionId: "a".repeat(32),
+      catalogDigest: browserDigest,
+      bindings: [{
+        sourceBindingId, provider: "canvas", origin: "https://school.instructure.com",
+        courseId: "42", principalFingerprint: "c".repeat(64), sessionGeneration: 1,
+        catalogDigest: browserDigest, runtimeVerified: true, editPolicyRevision: 0, editOptionsAvailable: true,
+      }],
+    });
+    const uiStates: BridgeCommand[] = [];
+    bridge.onCommand((command) => {
+      if (command.kind === "ui_state") {
+        uiStates.push(command);
+        bridge!.respond(command, {});
+        return;
+      }
+      bridge!.respondProblem(command, { schema: "morrow.bridge.problem.v1", code: "unexpected_command", message: "unexpected command in this case", recoverable: false });
+    });
+    await assertPortListening(port);
+
+    const planned = await runtime.call("canvas_edit_assignment", {
+      course_id: "42", id: "88", assignment_due_at: "2026-09-10T17:00:00Z",
+      _morrow: { source_binding_id: sourceBindingId },
+    });
+    const id = operationId(planned);
+    const pushed = (predicate: (command: BridgeCommand) => boolean) => vi.waitFor(() => {
+      const found = uiStates.find(predicate);
+      if (!found) throw new Error("no matching ui_state yet");
+      return found;
+    }, { timeout: 10_000, interval: 20 });
+    await pushed((command) => command.uiState?.reviews.length === 1);
+
+    runtime.setReviewLearnerNames(`/operations/${id}`, { "Student A1": "Jane Doe" });
+    const named = await pushed((command) => Boolean(command.uiState?.learnerNames));
+    expect(named.uiState?.learnerNames).toEqual([{ path: `/operations/${id}`, names: { "Student A1": "Jane Doe" } }]);
+    // A path that is not a review, and a map with a label that is not Morrow's, are never sent.
+    runtime.setReviewLearnerNames("/recent", { "Student A1": "Jane Doe" });
+    runtime.setReviewLearnerNames(`/operations/${id}x`, { "Student 1": "Jane Doe" });
+    // The educator cancels: the review ends, and the next push carries no names.
+    runtime.cancelOperation(id);
+    const ended = await pushed((command) => command.uiState?.reviews.length === 0);
+    expect(ended.uiState?.learnerNames).toBeUndefined();
+    expect(uiStates.at(-1)?.uiState?.learnerNames).toBeUndefined();
+    expect(JSON.stringify(uiStates.map((command) => command.uiState?.learnerNames ?? []))).not.toContain("/recent");
+  }, CASE_TIMEOUT_MS);
+
+  it("never sends a key that belongs to another review origin", async () => {
+    directory = mkdtempSync(join(tmpdir(), "morrow-ui-state-"));
+    const port = await reserveLoopbackPort();
+    runtime = await GatewayRuntime.connect(connectorConfig(directory, port));
+    runtime.setApprovalBaseUrl("http://127.0.0.1:4317");
+    expect(() => runtime!.setApprovalPresence({ origin: "http://127.0.0.1:9999", key: "q".repeat(43) }))
+      .toThrow("approval key must belong to the approval service");
   }, CASE_TIMEOUT_MS);
 
   // WI-3.5: the review link label names the change with the catalog's curated plain

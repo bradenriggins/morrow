@@ -64,6 +64,108 @@ function claudeDesktopLauncherPath({
   throw new TypeError("This computer is not supported");
 }
 
+// A Store (MSIX) install of Claude Desktop keeps its per-user files in a package folder named
+// Claude_<publisher id>. Windows redirects Claude's own %APPDATA%\Claude there, so Claude and its
+// extensions see the documented path while every other program sees the package folder.
+// Sources: anthropics/claude-code issues 25579 and 26073, read 22 September 2026.
+const CLAUDE_MSIX_PACKAGE_FOLDER = /^Claude_[a-z0-9]{13}$/;
+const LAUNCHER_SUFFIX = Object.freeze(["Claude Extensions", "local.mcpb.morrow.morrow", "server", "launch.cjs"]);
+
+/**
+ * Every place the Morrow extension launcher can be on this computer. `declared` is the path Claude
+ * and the launcher itself see; `physical` is where Morrow reads the same file from outside Claude.
+ */
+function claudeDesktopLauncherLocations({
+  platform = process.platform,
+  homeDirectory = os.homedir(),
+  appDataDirectory = process.env.APPDATA,
+  localAppDataDirectory = process.env.LOCALAPPDATA,
+  packageFolders = [],
+} = {}) {
+  const declared = claudeDesktopLauncherPath({ platform, homeDirectory, appDataDirectory });
+  const locations = [{ declared, physical: declared }];
+  if (platform !== "win32" || typeof localAppDataDirectory !== "string" || !path.win32.isAbsolute(localAppDataDirectory)) return locations;
+  for (const folder of packageFolders) {
+    if (!CLAUDE_MSIX_PACKAGE_FOLDER.test(folder)) continue;
+    locations.push({
+      declared,
+      physical: path.win32.join(localAppDataDirectory, "Packages", folder, "LocalCache", "Roaming", "Claude", ...LAUNCHER_SUFFIX),
+    });
+  }
+  return locations;
+}
+
+async function claudeMsixPackageFolders(localAppDataDirectory, readdir = fs.readdir) {
+  if (typeof localAppDataDirectory !== "string" || !path.win32.isAbsolute(localAppDataDirectory)) return [];
+  try {
+    const names = await readdir(path.win32.join(localAppDataDirectory, "Packages"));
+    return names.map(String).filter((name) => CLAUDE_MSIX_PACKAGE_FOLDER.test(name)).sort();
+  } catch {
+    return [];
+  }
+}
+
+async function pathExists(candidate) {
+  try { await fs.lstat(candidate); return true; } catch { return false; }
+}
+
+/** The launcher location that exists on this computer, or null when Claude has not installed it. */
+async function resolveClaudeDesktopLauncher({
+  platform = process.platform,
+  homeDirectory = os.homedir(),
+  appDataDirectory = process.env.APPDATA,
+  localAppDataDirectory = process.env.LOCALAPPDATA,
+  readdir = fs.readdir,
+  exists = pathExists,
+} = {}) {
+  const packageFolders = platform === "win32" ? await claudeMsixPackageFolders(localAppDataDirectory, readdir) : [];
+  const locations = claudeDesktopLauncherLocations({ platform, homeDirectory, appDataDirectory, localAppDataDirectory, packageFolders });
+  for (const location of locations) {
+    if (await exists(location.physical)) return location;
+  }
+  return null;
+}
+
+/**
+ * Whether Claude Desktop is installed. macOS: Anthropic's bundle in /Applications or
+ * ~/Applications, or anywhere Spotlight finds its bundle identifier. Windows: the installer copy
+ * under %LOCALAPPDATA%\AnthropicClaude or Program Files, or the Store package folder.
+ */
+async function detectClaudeDesktop({
+  platform = process.platform,
+  homeDirectory = os.homedir(),
+  localAppDataDirectory = process.env.LOCALAPPDATA,
+  programFilesDirectory = process.env.ProgramFiles,
+  exists = pathExists,
+  readdir = fs.readdir,
+  readBundleIdentifier = async () => null,
+  findByBundleIdentifier = async () => [],
+} = {}) {
+  if (platform === "darwin") {
+    const candidates = ["/Applications/Claude.app", path.posix.join(homeDirectory, "Applications", "Claude.app")];
+    for (const candidate of candidates) {
+      if (await exists(candidate) && await readBundleIdentifier(candidate).catch(() => null) === CLAUDE_BUNDLE_ID) return true;
+    }
+    const found = await findByBundleIdentifier(CLAUDE_BUNDLE_ID).catch(() => []);
+    for (const candidate of Array.isArray(found) ? found.slice(0, 8) : []) {
+      if (typeof candidate === "string" && candidate.endsWith(".app")
+        && await readBundleIdentifier(candidate).catch(() => null) === CLAUDE_BUNDLE_ID) return true;
+    }
+    return false;
+  }
+  if (platform === "win32") {
+    const executables = [
+      typeof localAppDataDirectory === "string" && path.win32.isAbsolute(localAppDataDirectory)
+        ? path.win32.join(localAppDataDirectory, "AnthropicClaude", "claude.exe") : null,
+      typeof programFilesDirectory === "string" && path.win32.isAbsolute(programFilesDirectory)
+        ? path.win32.join(programFilesDirectory, "Claude", "Claude.exe") : null,
+    ].filter(Boolean);
+    for (const candidate of executables) if (await exists(candidate)) return true;
+    return (await claudeMsixPackageFolders(localAppDataDirectory, readdir)).length > 0;
+  }
+  return false;
+}
+
 function canonicalInputPath(value, platform = process.platform) {
   if (typeof value !== "string" || /[\0\r\n]/.test(value)) throw new TypeError("Morrow setup path is invalid");
   const pathApi = platform === "win32" ? path.win32 : path.posix;
@@ -759,15 +861,22 @@ async function inspectClaudeDesktopConnection(setup, options = {}) {
     const metadata = await readClaudeDesktopSetup(setup);
     if (!metadata || metadata.launcherSha256 !== receipt.launcherSha256
       || !await activeClaudeDesktopSetup(metadata, options)) return unavailable;
-    const installedPath = await realPath(receipt.launcherPath, "file");
     const platform = options.platform || process.platform;
     if (metadata.platform !== platform) return unavailable;
-    const expectedPath = options.managedLauncherPath || claudeDesktopLauncherPath({
-      platform,
-      homeDirectory: options.homeDirectory,
-      appDataDirectory: options.appDataDirectory,
-    });
-    if (installedPath !== await realPath(expectedPath, "file") || metadata.managedLauncherPath !== expectedPath) return unavailable;
+    const location = options.managedLauncherPath
+      ? { declared: options.managedLauncherPath, physical: options.managedLauncherPath }
+      : await resolveClaudeDesktopLauncher({
+        platform,
+        homeDirectory: options.homeDirectory,
+        appDataDirectory: options.appDataDirectory,
+        localAppDataDirectory: options.localAppDataDirectory,
+      });
+    if (!location || metadata.managedLauncherPath !== location.declared) return unavailable;
+    const installedPath = await realPath(location.physical, "file");
+    // A launcher inside a Store (MSIX) Claude reports the declared path Claude shows it, which
+    // does not exist for any other program.
+    const reportedPath = await realPath(receipt.launcherPath, "file").catch(() => null);
+    if (reportedPath !== installedPath && !sameCanonicalPath(receipt.launcherPath, location.declared, platform)) return unavailable;
     if ((await boundedDigest(installedPath, FILE_LIMITS.launcher)).sha256 !== receipt.launcherSha256) return unavailable;
     const running = await recordedProcessesRunning(receipt, options);
     const verifyProcess = options.verifyClaudeProcessProof || verifyClaudeProcessProof;
@@ -779,7 +888,10 @@ async function inspectClaudeDesktopConnection(setup, options = {}) {
 }
 
 module.exports = {
+  claudeDesktopLauncherLocations,
   claudeDesktopLauncherPath,
+  detectClaudeDesktop,
+  resolveClaudeDesktopLauncher,
   inspectClaudeDesktopConnection,
   isCurrentClaudeDesktopSetup,
   parseUnixProcessStartTimes,

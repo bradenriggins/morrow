@@ -25,12 +25,12 @@ const connection = (fields = {}) => ({
 });
 const anchor = (fields = {}) => ({ siteAnchorId: "canvas:site", provider: "canvas", origin: COURSE_ORIGIN, principalId: "teacher@example.edu", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
 const binding = (fields = {}) => ({ sourceBindingId: "canvas:course-1", provider: "canvas", courseName: "Anatomy", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
-const editPermission = (sourceBindingId, expiresAt, enabledCategories = ["canvas_page_content"]) => ({
-  schema: "morrow.bridge.edit-permission.v1", sourceBindingId, revision: 1, scopeDigest: "d".repeat(64), catalogDigest: "c".repeat(64), expiresAt, enabledCategories,
+const editPermission = (sourceBindingId, enabledCategories = ["canvas_page_content"]) => ({
+  schema: "morrow.bridge.edit-permission.v1", sourceBindingId, revision: 1, scopeDigest: "d".repeat(64), catalogDigest: "c".repeat(64), enabledCategories,
 });
 
 async function openPopup({ status, handlers = {}, ...rest } = {}) {
-  return await loadExtensionPage("popup/popup.html", { handlers: { morrow_status: () => status(), morrow_detect_course_platform: () => ({ provider: "canvas" }), ...handlers }, ...rest });
+  return await loadExtensionPage("popup/popup.html", { handlers: { morrow_status: () => status(), morrow_detect_course_platform: () => ({ provider: "canvas" }), morrow_edit_policy_status: () => ({ bindings: [] }), ...handlers }, ...rest });
 }
 
 /** Everything the popup shows a person, read from the rendered page. */
@@ -316,6 +316,23 @@ test("choosing courses opens Plan and Edit settings and asks Chrome for nothing"
   assert.equal(page.optionsPageOpens, 2);
 });
 
+// "Check or switch course" connects the course open in the active tab, then opens course selection,
+// where the course to work in is chosen, the same as Connect this course.
+test("Check or switch course connects the active tab's site, then opens course selection", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
+    tabs: [{ id: 12, url: `${COURSE_ORIGIN}/courses/2` }],
+    handlers: {
+      morrow_connect_course_prepare: () => ({ id: "intent-2", origins: [`${COURSE_ORIGIN}/*`] }),
+      morrow_connect_course_complete: () => ({ siteAnchorId: "canvas:site" }),
+    },
+  });
+  assert.equal(page.text("#canvas-action"), "Check or switch course");
+  await page.click("#canvas-action");
+  assert.deepEqual(page.messages("morrow_connect_course_complete"), [{ type: "morrow_connect_course_complete", intentId: "intent-2" }]);
+  assert.equal(page.optionsPageOpens, 1);
+});
+
 test("a failed action keeps its message until the next action, because a background read is not its answer", async () => {
   const tabs = [];
   const page = await openPopup({
@@ -417,10 +434,28 @@ test("the setup guide opens from the popup, and says so when it cannot", async (
 });
 
 // WI-1.4: morrow_status carries no editPermission per binding, so the popup reads
+// morrow_edit_policy_status once it is connected, the same command the settings page uses. The
+// service worker accepts that read and the Plan return from the popup's own page
+// (scripts/test/extension-lifecycle-authority.test.mjs, "the popup reads Edit status"), so these
+// handlers answer as it does.
+test("the popup reads Edit status with no other field, and names a refused read instead of hiding it", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
+    handlers: { morrow_edit_policy_status: () => ({ ok: false, code: "edit_policy_sender_refused", error: "edit_policy_sender_refused" }) },
+  });
+  assert.deepEqual(page.messages("morrow_edit_policy_status"), [{ type: "morrow_edit_policy_status" }]);
+  assert.equal(page.hidden("#error"), false);
+  assert.equal(page.text("#error"), problemText("edit_policy_sender_refused"));
+  assert.equal(page.hidden("#courses"), true);
+  assert.equal(page.hidden("#edit-access-banner"), true);
+  // The connection itself was read, so the rest of the popup still shows it.
+  assert.equal(page.text("#status-value"), "Connected");
+});
+
+// WI-1.4: morrow_status carries no editPermission per binding, so the popup reads
 // morrow_edit_policy_status once it is connected, the same command the settings page uses.
 test("the popup's banner offers to ask first in all courses, and the result is announced", async () => {
-  const expiresAt = Date.now() + 60 * 60 * 1_000;
-  let permission = editPermission("canvas:course-1", expiresAt);
+  let permission = editPermission("canvas:course-1");
   const revoked = [];
   const page = await openPopup({
     status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
@@ -447,12 +482,11 @@ test("the popup's banner offers to ask first in all courses, and the result is a
 // WI-5.8: the popup as home. Up to 5 connected courses with their own D7 state, then "All courses",
 // which opens the same Plan and Edit settings page Options does.
 test("the popup lists up to 5 connected courses with their own state, then All courses", async () => {
-  const expiresAt = Date.now() + 60 * 60 * 1_000;
   const bindings = Array.from({ length: 7 }, (_, index) => ({
     sourceBindingId: `canvas:course-${index}`,
     courseName: `Course ${index}`,
     provider: "canvas",
-    ...(index === 0 ? { editPermission: { enabledCategories: ["canvas_page_content"], expiresAt } } : {}),
+    ...(index === 0 ? { editPermission: { enabledCategories: ["canvas_page_content"] } } : {}),
   }));
   const page = await openPopup({
     status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
@@ -462,7 +496,7 @@ test("the popup lists up to 5 connected courses with their own state, then All c
   const rows = page.queryAll("#courses-list .course-row-name").map((node) => node.textContent);
   assert.deepEqual(rows, ["Course 0", "Course 1", "Course 2", "Course 3", "Course 4"]);
   const states = page.queryAll("#courses-list .course-row-state").map((node) => node.textContent);
-  assert.equal(states[0], `Edit until ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(expiresAt)}. 1 kind of edit.`);
+  assert.equal(states[0], "Edit. 1 kind of edit.");
   assert.equal(states[1], "Plan. Asks first.");
   assert.equal(page.hidden("#all-courses"), false);
 
@@ -514,6 +548,14 @@ test("a review tab already open is made active instead of opening a second one",
   await page.click("#reviews-list button");
   assert.deepEqual(page.tabsUpdated, [{ tabId: 7, properties: { active: true } }]);
   assert.deepEqual(page.tabsCreated, []);
+});
+
+test("a disconnected popup lists no review, even one the Bridge still reports", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: false, reviews: [{ url: "http://127.0.0.1:44210/operations/op-1", label: "Update due date in Anatomy" }] }),
+  });
+  assert.equal(page.hidden("#reviews-waiting"), true);
+  assert.equal(page.query("#reviews-list").children.length, 0);
 });
 
 test("no reviews waiting keeps the section out of the page entirely", async () => {

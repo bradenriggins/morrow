@@ -4,8 +4,8 @@ This file indexes the privacy layer for agents. It does not
 re-implement it. The v1 boundary lives under `privacy/`: the engine
 is `privacy/core.py` (the learner-privacy engine, including the
 AES-256-GCM-encrypted learner vault), the boundary is
-`privacy/boundary.py` (the source privacy boundary; 69/69 selftests,
-verified `python3 privacy/source_privacy_selftest.py`), and
+`privacy/boundary.py` (the source privacy boundary; 78/78 selftests
+as of 2026-09-22, `python3 privacy/source_privacy_selftest.py`), and
 the policy is `privacy/FERPA_POLICY.md`. The wired choke point is
 `dispatch/executor.py` in `dispatch_entry`'s success path, delegating
 to `privacy/executor_wire.py:project_learner_result`. Read the
@@ -22,8 +22,9 @@ results that touch learner data (users, enrollments, submissions,
 gradebook, grades, analytics, AI conversations/experiences) before
 they become agent-visible or journaled:
 
-- Names, emails, login ids, SIS ids, contextual numeric ids, and
-  identity URLs are replaced by stable course-local labels
+- Names, emails, login ids, SIS ids, contextual numeric ids, and any
+  URL path segment or query value equal to a learner's Canvas id are
+  replaced by stable course-local labels
   (`Student A1`, `Student A2`, ...), issued by the encrypted vault
   in `privacy/core.py`. The same student maps to the same label
   across runs and processes, so journal rows stay correlatable
@@ -39,9 +40,22 @@ they become agent-visible or journaled:
   learner data and is never de-identified, so principal
   confirmation keeps working.
 - Anything the boundary cannot verify fails closed: the op is
-  refused rather than surfacing raw learner PII. A consent file
-  carrying a stub reason fails closed too; removing the file puts
-  de-id back on.
+  refused rather than surfacing raw learner PII.
+- Morrow cannot intercept what the educator types to Muse: names the
+  educator types reach the Muse model. Morrow keeps every other
+  student identifier from the LMS out.
+
+## Working by name
+
+The educator names a student; the agent runs `morrow students find
+--course C "<name as typed>"` (`learners/find.py`), confirms any
+ambiguous or close-spelling match with the educator (never picks),
+and writes by label. The executor resolves the label to the real
+Canvas id at the LMS boundary, after the mode gate, only for the
+course the write targets, and relabels everything the agent or the
+journal sees. In that conversation, the named student shows as
+"<name as typed> (Student A3)" (`privacy/name_echo.py`). Full flow:
+SKILL.md "Working by name"; policy: `privacy/FERPA_POLICY.md`.
 
 ## Honest limitations
 
@@ -51,54 +65,50 @@ they become agent-visible or journaled:
   re-identifiable by the data holder.
 - Nicknames: aliases derive from roster fields only. A nickname the
   roster never mentions survives redaction in free text.
+- Unseen learners: free text (a group name, a collaboration title) is
+  redacted for learners the receipt carries or the vault already
+  labeled for that course. A name Morrow has never seen in that course
+  stays raw until a roster read labels it.
 
 ## When de-id applies
 
-Any operation whose path touches learner-bearing routes:
-`/users/`, `/enrollments`, `/submissions`, `/gradebook`, `/grades`,
-`/analytics`, `/ai_conversations`, `/ai_experiences`
-(`/users/self` excepted). These rows carry the `[LEARNER-DATA]` flag
-in the catalog and are refused (`LearnerDataGated`) when the projection
-vault is not ready; through the browser lane they are admitted and their
-receipts are projected.
+Any operation whose response carries people: the `[LEARNER-DATA]`
+catalog rows plus the structural rule in
+`dispatch/admission_policy.json` `learner_data` (`/users/`,
+`/enrollments`, `/submissions`, `/gradebook`, `/grades`, `/analytics`,
+overrides, date details, revisions, and more; `/users/self`
+excepted).
 
 ## Current enforcement (do not work around it)
 
-The synchronous executor projects learner receipts through the
-boundary; it does not refuse them. Refusal (`LearnerDataGated` in
-`dispatch/admission.py`) happens only when the projection vault is
-not ready, on the raw lane, which has no projection point. Through
-the browser lane, learner-data entries are admitted and their
-receipts are projected in `dispatch_entry`'s success path before
-anything is agent-visible or journaled.
+People-bearing operations dispatch only on the Chromium lane with the
+encrypted learner vault (the optional `cryptography` package). There
+the executor projects every receipt in `dispatch_entry`'s success path
+before anything is agent-visible or journaled. Everywhere else (the
+raw HTTPS lane, or no `cryptography`) they are refused
+(`LearnerDataGated` in `dispatch/admission.py`), and an
+educator-signed `--allow-unproven` cannot override that (it is an
+absolute check, alongside never-dispatch, unsupported, and
+evidence-hold). Only `live-proven` rows dispatch.
 
 Practical consequences for agents:
-- Do not dispatch learner-data operations through the synchronous
-  executor. The gate will refuse them; an educator-signed
-  `--allow-unproven` cannot override the learner-data refusal (it is
-  an absolute check, alongside never-dispatch, unsupported, and
-  evidence-hold).
-- Never paste learner names, emails, logins, or SIS ids into chat,
-  logs, journal rows, or receipts. The journal carries shapes,
-  statuses, lengths, digests, and IDs only. A learner name appearing
-  in any agent-visible surface is a privacy defect: stop and report
-  it.
+- Never paste learner names, emails, logins, or SIS ids from the LMS
+  into chat, logs, journal rows, or receipts. The only names you use
+  are the ones the educator typed (shown as "<name> (Student A3)").
+  A name the educator did not type appearing in any agent-visible
+  surface is a privacy defect: stop and report it.
 - Never mint a persistent API token from a session, and never exceed
   the educator's own account permissions.
 
-## Opt-out override rule
+## Educator reveal rule
 
 **Owned by the FERPA policy (`privacy/FERPA_POLICY.md`).**
-The standing rule is: de-id applies by default to all
-learner-bearing results, and the only override in the tree is an
-explicit educator request: create the `<tree-state-dir>/educator_pii_reveal`
-consent file (a regular file, mode 0600) carrying the documented
-instructional purpose (minimum 12 characters). The reason is
-journaled verbatim with the op and stamped on the returned receipt.
-The legacy `MORROW_REVEAL_STUDENT_PII_REASON` environment variable is
-ignored: the environment is not a consent channel. Consult
-`privacy/FERPA_POLICY.md` for the operational opt-out rule; do not
-invent one.
+De-id applies by default to all learner-bearing results. The only
+reveal is a sealed educator record (`dispatch.admission.mint_pii_reveal`):
+the educator's verbatim request, the educator-chat channel, ONE
+course, at most 30 minutes, journaled. A file, an environment
+variable, or a setting reveals nothing. Consult
+`privacy/FERPA_POLICY.md`; do not invent another rule.
 
 ## Related reading
 
@@ -106,5 +116,8 @@ invent one.
   advice)
 - `privacy/boundary.py` (the boundary contract; docstring first)
 - `privacy/core.py` (the engine and the encrypted vault)
-- `dispatch/admission.py` (`LearnerDataGated`; the refusal side of
-  the gate)
+- `dispatch/admission.py` (`LearnerDataGated`, the refusal side of
+  the gate; `mint_pii_reveal` / `check_pii_reveal`, the educator
+  reveal)
+- `learners/find.py` (`morrow students find`) and
+  `privacy/name_echo.py` (working by name)

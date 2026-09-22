@@ -7,13 +7,13 @@ enforcement gate. Both must agree before anything dispatches.
 
 ## The catalog in one minute
 
-`proof-battery/OPERATION_CATALOG.md` holds 456 rows: 436 Canvas rows
-(C-1 through C-436) plus 20 Item Bank quiz-api rows (IB-1 through
+`proof-battery/OPERATION_CATALOG.md` holds 457 rows: 437 Canvas rows
+(C-1 through C-437) plus 20 Item Bank quiz-api rows (IB-1 through
 IB-20). Each row names a tool, an HTTP method, a path template, a
 read/write class, a mechanism, a proof status, and evidence notes.
-Current status counts (Canvas rows): live-proven 194, pending 210,
+Current status counts (Canvas rows): live-proven 195, pending 210,
 failed 12, unsupported 11, excluded 8, evidence-hold 1. Item Bank rows:
-live-proven 13, pending 2, failed 1, evidence-hold 4.
+live-proven 14, pending 2, failed 0, evidence-hold 4.
 
 Statuses mean:
 - `live-proven`: a disposable live battery proved the operation through
@@ -45,9 +45,11 @@ The gate checks the catalog row BEFORE anything else
    method and path exactly. A proven name paired with arbitrary CLI
    arguments raises `CatalogNotProven`. You cannot smuggle a new request
    shape behind a proven name.
-3. The row status must be `live-proven`, or you must pass
-   `--allow-unproven` with an educator-signed approval record carrying
-   `allow_unproven: true` (sealed by `sign_approval`).
+3. The row status must be `live-proven`. The one exception: a row
+   marked `pending` (never tried live) runs with `--allow-unproven` plus
+   an educator-signed approval record carrying `allow_unproven: true`
+   (sealed by `sign_approval`). Rows marked `failed`, `unsupported`, or
+   `excluded` are refused with or without it.
 
 Then the absolute refusals run, and `--allow-unproven` cannot touch
 them: `never_dispatch` rows (blueprint, CSP, SIS, conversations,
@@ -133,8 +135,9 @@ readback and cleanup:
 
 Not v1 claims at all: Moodle (proven in a sandbox, not packaged),
 Blackboard (no implementation exists), learner-data operations
-(refused by the admission gate as learner-data until the tokenization
-boundary is proven), the form relay (retired and excluded), classic
+(dispatched de-identified only on the Chromium lane with the encrypted
+vault, refused elsewhere; the by-name flow is fixture-proven, not yet
+live-proven), the form relay (retired and excluded), classic
 question banks (never tested), and the remainder of the 457-row
 for-muse catalog.
 

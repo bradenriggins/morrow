@@ -23,7 +23,9 @@ const METHODS = new Set([
   "installer:reveal-claude-extension",
   "installer:repair",
   "installer:restore-bridge",
-  "installer:remove-data"
+  "installer:remove-data",
+  "installer:check-assistant-connection",
+  "installer:move-to-applications"
 ]);
 
 function invoke(method, args) {

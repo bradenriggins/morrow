@@ -10,7 +10,6 @@ Conventions (from the Workstream C evidence contract):
   - AmbiguousCourseWriteRefused carries query and candidates_public.
   - ModeSettingsTamper carries setting_name when the problem is a
     settings value.
-  - ModeGrantExpired / ModeGrantRevoked carry grant_id.
 
 Stdlib only.
 """
@@ -38,17 +37,6 @@ class ModeSelfGrantRefused(ModeError):
     confirmation: request_edit_grant with a missing or invalid
     educator confirmation, or switch_mode to "edit". Edit mode is
     educator-granted only; the agent must never promote itself."""
-
-
-class ModeGrantExpired(ModeError):
-    """A timed edit grant lapsed before the write was attempted.
-    Carries grant_id and course_id."""
-
-
-class ModeGrantRevoked(ModeError):
-    """The edit grant was revoked (switch to plan, supersede, or
-    explicit revoke) before the write was attempted. Carries grant_id
-    and course_id."""
 
 
 class AmbiguousCourseWriteRefused(ModeError):

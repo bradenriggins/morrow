@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { runInNewContext } from "node:vm";
 import type { JsonObject } from "@morrow/contracts";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
+import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 
 const operationId = "op:platform-copy-1234";
 const encodedId = encodeURIComponent(operationId);
@@ -56,9 +57,11 @@ async function reviewPage(baseUrl: string, id = operationId): Promise<{ body: st
   };
 }
 
-async function submitApproval(baseUrl: string, nonce: string, cookie: string, id = operationId): Promise<Response> {
+/** A person's approval: the page's form, signed by Morrow Bridge after the click. */
+async function submitApproval(server: LoopbackApprovalServer, baseUrl: string, nonce: string, cookie: string, id = operationId): Promise<Response> {
   const encoded = encodeURIComponent(id);
-  return fetch(`${baseUrl}/operations/${encoded}/approve`, {
+  const approveUrl = `${baseUrl}/operations/${encoded}/approve`;
+  return fetch(approveUrl, {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
@@ -67,7 +70,7 @@ async function submitApproval(baseUrl: string, nonce: string, cookie: string, id
       origin: baseUrl,
       referer: `${baseUrl}/operations/${encoded}`,
     },
-    body: new URLSearchParams({ nonce }),
+    body: new URLSearchParams({ nonce, presence: bridgeSignedPresence(server, approveUrl, nonce) }),
     redirect: "manual",
   });
 }
@@ -117,7 +120,7 @@ function trackedApprovalServer(approvals: { count: number }): LoopbackApprovalSe
  * removal); `grant` stands in for `rememberKind`, called only after approval succeeds.
  */
 function rememberApprovalServer(
-  offer: { categoryId: string; label: string; until: number } | null,
+  offer: { categoryId: string; label: string; joinsTimedGrant?: true } | null,
   grant: () => Promise<"saved" | "failed">,
   base: JsonObject = moodleSnapshot("awaiting_approval"),
 ): LoopbackApprovalServer {
@@ -202,7 +205,7 @@ describe("approval page copy", () => {
       const second = await reviewPage(baseUrl);
       expect(first.nonce).not.toBe(second.nonce);
       expect(first.cookie.split("=", 1)[0]).not.toBe(second.cookie.split("=", 1)[0]);
-      await expect(submitApproval(baseUrl, first.nonce, first.cookie)).resolves.toMatchObject({ status: 303 });
+      await expect(submitApproval(server, baseUrl, first.nonce, first.cookie)).resolves.toMatchObject({ status: 303 });
       expect(approvals.count).toBe(1);
     } finally {
       await server.close();
@@ -216,9 +219,9 @@ describe("approval page copy", () => {
       const baseUrl = await server.start();
       const first = await reviewPage(baseUrl);
       const second = await reviewPage(baseUrl);
-      await expect(submitApproval(baseUrl, first.nonce, second.cookie)).resolves.toMatchObject({ status: 409 });
+      await expect(submitApproval(server, baseUrl, first.nonce, second.cookie)).resolves.toMatchObject({ status: 409 });
       expect(approvals.count).toBe(0);
-      await expect(submitApproval(baseUrl, second.nonce, second.cookie)).resolves.toMatchObject({ status: 303 });
+      await expect(submitApproval(server, baseUrl, second.nonce, second.cookie)).resolves.toMatchObject({ status: 303 });
       expect(approvals.count).toBe(1);
     } finally {
       await server.close();
@@ -233,7 +236,7 @@ describe("approval page copy", () => {
       const first = await reviewPage(baseUrl, operationId);
       const others = [];
       for (let index = 0; index < 128; index += 1) others.push(await reviewPage(baseUrl, `${operationId}-other-${index}`));
-      await expect(submitApproval(baseUrl, first.nonce, first.cookie, operationId)).resolves.toMatchObject({ status: 303 });
+      await expect(submitApproval(server, baseUrl, first.nonce, first.cookie, operationId)).resolves.toMatchObject({ status: 303 });
       expect(approved).toEqual([operationId]);
       expect(others.at(-2)?.nonce).not.toBe("");
       expect(others.at(-1)?.nonce).toBe("");
@@ -262,18 +265,7 @@ describe("approval page copy", () => {
       const baseUrl = await server.start();
       const { nonce, cookie } = await reviewPage(baseUrl);
       expect(nonce).not.toBe("");
-      const refused = await fetch(`${baseUrl}/operations/${encodedId}/approve`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          accept: "text/html",
-          cookie,
-          origin: baseUrl,
-          referer: `${baseUrl}/operations/${encodedId}`,
-        },
-        body: new URLSearchParams({ nonce }),
-        redirect: "manual",
-      });
+      const refused = await submitApproval(server, baseUrl, nonce, cookie);
       expect(refused.status).toBe(409);
       const page = await refused.text();
       expect(page).toContain("<h1>Result unconfirmed</h1>");
@@ -550,15 +542,14 @@ describe("approval page copy", () => {
 });
 
 describe("WI-4.4: the review page's second button", () => {
-  it("offers 'do not ask again' with the bundle label and the clock time, in the same form as approve", async () => {
-    const until = Date.now() + 4 * 60 * 60_000;
-    const clock = new Date(until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-    const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles", until }, async () => "saved");
+  it("offers 'do not ask again' with the bundle label and no end time, in the same form as approve", async () => {
+    const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles" }, async () => "saved");
     try {
       const baseUrl = await server.start();
       const { body } = await reviewPage(baseUrl);
       expect(body).toContain(`<form method="post" action="/operations/${encodedId}/approve">`);
-      expect(body).toContain(`<button name="remember" value="1" class="approve secondary" type="submit">Apply this change, and do not ask again for text and titles in this course until ${clock}</button>`);
+      expect(body).toContain('<button name="remember" value="1" class="approve secondary" type="submit">Apply this change, and do not ask again for text and titles in this course</button>');
+      expect(body).not.toMatch(/ until \d| [AP]M</);
       // The remember button is inside the same <form> as the primary approve button, not a
       // second form, so one submit sends both the approval and the remembered choice.
       const form = /<form method="post" action="\/operations\/[^"]+\/approve">.*?<\/form>/s.exec(body)?.[0] ?? "";
@@ -590,10 +581,8 @@ describe("WI-4.4: the review page's second button", () => {
   });
 
   it("remembers the kind after approval and shows the saved sentence, without delaying the change", async () => {
-    const until = Date.now() + 4 * 60 * 60_000;
-    const clock = new Date(until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
     let grantCalled = false;
-    const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles", until }, async () => {
+    const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles" }, async () => {
       grantCalled = true;
       return "saved";
     });
@@ -603,28 +592,47 @@ describe("WI-4.4: the review page's second button", () => {
       const approve = await fetch(`${baseUrl}/operations/${encodedId}/approve`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded", accept: "text/html", cookie, origin: baseUrl, referer: `${baseUrl}/operations/${encodedId}` },
-        body: new URLSearchParams({ nonce, remember: "1" }),
+        body: new URLSearchParams({ nonce, remember: "1", presence: bridgeSignedPresence(server, `${baseUrl}/operations/${encodedId}/approve`, nonce) }),
         redirect: "manual",
       });
       // Approve first: the redirect that starts the change does not wait on the grant.
       expect(approve.status).toBe(303);
       const html = await pollForText(`${baseUrl}/operations/${encodedId}`, "does not ask again");
       expect(grantCalled).toBe(true);
-      expect(html).toContain(`Morrow does not ask again for text and titles in this course until ${clock}.`);
+      expect(html).toContain("Morrow does not ask again for text and titles in this course until you return the course to Plan in Morrow Bridge.");
     } finally {
       await server.close();
     }
   });
 
-  it("runs the change even when the remembered grant fails, and says so", async () => {
-    const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles", until: Date.now() + 4 * 60 * 60_000 }, async () => "failed");
+  it("says the bundle ends with a grant saved with an end time before Edit stopped being timed", async () => {
+    const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles", joinsTimedGrant: true }, async () => "saved");
     try {
       const baseUrl = await server.start();
       const { nonce, cookie } = await reviewPage(baseUrl);
       const approve = await fetch(`${baseUrl}/operations/${encodedId}/approve`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded", accept: "text/html", cookie, origin: baseUrl, referer: `${baseUrl}/operations/${encodedId}` },
-        body: new URLSearchParams({ nonce, remember: "1" }),
+        body: new URLSearchParams({ nonce, remember: "1", presence: bridgeSignedPresence(server, `${baseUrl}/operations/${encodedId}/approve`, nonce) }),
+        redirect: "manual",
+      });
+      expect(approve.status).toBe(303);
+      const html = await pollForText(`${baseUrl}/operations/${encodedId}`, "does not ask again");
+      expect(html).toContain("Morrow does not ask again for text and titles in this course until the Edit access this course already had ends.");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("runs the change even when the remembered grant fails, and says so", async () => {
+    const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles" }, async () => "failed");
+    try {
+      const baseUrl = await server.start();
+      const { nonce, cookie } = await reviewPage(baseUrl);
+      const approve = await fetch(`${baseUrl}/operations/${encodedId}/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", accept: "text/html", cookie, origin: baseUrl, referer: `${baseUrl}/operations/${encodedId}` },
+        body: new URLSearchParams({ nonce, remember: "1", presence: bridgeSignedPresence(server, `${baseUrl}/operations/${encodedId}/approve`, nonce) }),
         redirect: "manual",
       });
       expect(approve.status).toBe(303);
@@ -637,7 +645,7 @@ describe("WI-4.4: the review page's second button", () => {
 
   it("refuses remember=1 with a wrong nonce the same way an ordinary approval is refused", async () => {
     let grantCalled = false;
-    const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles", until: Date.now() + 4 * 60 * 60_000 }, async () => {
+    const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles" }, async () => {
       grantCalled = true;
       return "saved";
     });

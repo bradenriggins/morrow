@@ -22,7 +22,10 @@ export function createFullMorrowServer(runtime: MorrowRuntime, context: MorrowSe
   // The batch store and window scheduler travel with the server so morrow_activity
   // can answer which groups run and which assistant holds each window.
   const server = createMorrowServer(runtime.gateway, () => runtime.health(), context, runtime);
-  registerOperationTools(server, runtime.gateway);
+  registerOperationTools(server, runtime.gateway, {
+    batchApprovalStatus: (batchId) => runtime.batchApprovalStatus(batchId),
+    recentChangesUrl: () => runtime.recentChangesUrl(),
+  });
   registerBatchTools(server, runtime);
   registerQuizCheckTool(server, runtime.gateway);
   registerPageCorrectionTool(server, runtime.gateway);

@@ -63,7 +63,7 @@
         <p id="course-bulk-count"></p>
         <div class="action-buttons">
           <button id="course-bulk-plan" class="secondary" type="button">Plan. Ask first.</button>
-          <button id="course-bulk-routine" type="button">Edit. Routine edits for 4 hours.</button>
+          <button id="course-bulk-routine" type="button">Edit. Routine edits.</button>
         </div>
       </div>
     </section>
@@ -88,7 +88,7 @@
       <p id="edit-stage-hint" class="stage-hint">Select courses, then choose Edit to review the available actions.</p>
       <fieldset id="category-fieldset" class="categories" disabled hidden>
         <legend>Edit actions</legend>
-        <p class="field-help">Only checked Edit actions can be applied. Review-only actions stay in Plan because Morrow cannot prove the required course scope or dependency evidence.</p>
+        <p class="field-help">Morrow can apply only the actions you check. Everything else waits for your review.</p>
         <div id="routine-switch" class="routine-switch" hidden>
           <label class="mode-option routine-toggle" for="routine-edits">
             <input id="routine-edits" type="checkbox">
@@ -103,10 +103,6 @@
               <input id="action-filter" type="search" autocomplete="off">
             </label>
           </div>
-          <label class="duration-field" for="edit-duration">
-            <span>Edit access ends after</span>
-            <select id="edit-duration"></select>
-          </label>
           <div id="action-checked-only-field">
             <label class="checked-only-field" for="action-checked-only">
               <input id="action-checked-only" type="checkbox">
@@ -151,34 +147,39 @@
           <input id="open-platform-when-needed" type="checkbox">
           <span>Open Canvas or Moodle when Morrow needs it.</span>
         </label>
-        <p class="field-help">Morrow Bridge opens the site in a background tab. It uses the sign-in that Chrome already has.</p>
+        <p class="field-help">Morrow Bridge opens it in a background tab with the sign-in Chrome already has.</p>
       </div>
 
       <div class="permissions-group">
         <h3 id="file-storage-title">Course file access</h3>
-        <p class="field-help">Turn this on when Morrow needs to review a course file, transfer reviewed material, or send the image for a reviewed Hot Spot quiz question.</p>
+        <p class="field-help">Needed only to review course files, transfer reviewed material, or upload the image for a Hot Spot question you approved.</p>
         <div class="file-storage-card">
           <div>
             <p id="file-storage-status" class="file-storage-status">Checking Chrome permission…</p>
-            <p class="field-help">Chrome grants this permission across HTTPS sites because Canvas can store course files on different domains. During one reviewed upload, Morrow observes only that Canvas-issued upload response until it gets a Canvas confirmation. It does not block or change requests. Morrow reads or transfers only files it confirms belong to selected Canvas courses. The same permission covers the image bytes for a Hot Spot question you approved, sent once to the upload address Canvas's own response names for that upload.</p>
           </div>
           <div class="file-storage-actions">
             <button id="enable-file-storage" type="button">Enable course file access</button>
             <button id="revoke-file-storage" class="secondary danger-action" type="button" hidden>Remove HTTPS file access</button>
           </div>
         </div>
+        <details class="more-info">
+          <summary>What this permission allows</summary>
+          <p class="field-help">Chrome grants this permission across HTTPS sites because Canvas can store course files on different domains. During one reviewed upload, Morrow observes only that Canvas-issued upload response until it gets a Canvas confirmation. It does not block or change requests. Morrow reads or transfers only files it confirms belong to selected Canvas courses. The same permission covers the image bytes for a Hot Spot question you approved, sent once to the upload address Canvas's own response names for that upload.</p>
+        </details>
       </div>
 
       <div class="permissions-group">
-        <h3 id="limits-title">Access rules</h3>
-        <ul class="access-rules-list">
-          <li>Plan keeps changes ready for your review.</li>
-          <li>Edit applies only to the selected courses and checked actions.</li>
-          <li>Return a course to Plan to remove saved Edit access immediately.</li>
-          <li>Edit access saved here ends after the duration you choose. The default is one hour. Edit access requested in a Morrow conversation ends after 30 minutes.</li>
-          <li>Some actions cannot be checked after they are saved. Morrow marks them here and reports the saved result as unconfirmed.</li>
-          <li>If a course needs sign-in again, open its site in Chrome and reconnect it from the Morrow popup.</li>
-        </ul>
+        <details class="more-info access-rules">
+          <summary><h3 id="limits-title">How Plan and Edit access work</h3></summary>
+          <ul class="access-rules-list">
+            <li>Plan keeps changes ready for your review.</li>
+            <li>Edit applies only to the selected courses and checked actions.</li>
+            <li>Return a course to Plan to remove saved Edit access immediately.</li>
+            <li>Edit access stays on until you return the course to Plan. This includes Edit access you allow in a Morrow conversation.</li>
+            <li>Some actions cannot be checked after they are saved. Morrow marks them here and reports the saved result as unconfirmed.</li>
+            <li>If a course needs sign-in again, select Open Canvas or Open Moodle on its row, and sign in if asked.</li>
+          </ul>
+        </details>
       </div>
     </section>
   </main>

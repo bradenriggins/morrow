@@ -1,6 +1,6 @@
 # Morrow for Muse: Canvas connector (skill bundle)
 
-You are operating the Morrow for Muse connector, v0.3.0. It lets an educator
+You are operating the Morrow for Muse connector, v0.4.0. It lets an educator
 work their Canvas courses through their Muse agent. The educator signs in
 once through the Canvas Login Helper; every Canvas operation then runs
 through the educator's own browser-owned session. No password, token, or
@@ -29,8 +29,9 @@ It checks python3 (>= 3.11; 3.10 refused, security EOL Oct 2026), locates Chromi
 (`transport/egress.py`: authenticated proxy, bare proxy, or direct),
 creates the effective `MORROW_HOME` state layout, creates
 `helper/profile/` on first install (an existing profile is never wiped,
-reset, or repackaged), ensures exactly one keepalive cron entry for this
-tree (migrating stale entries from other trees), runs the secrets
+reset, or repackaged), sets up keepalive supervision for this tree
+(exactly one keepalive cron entry when the machine has cron; otherwise
+a supervised background loop, see step 2 below), runs the secrets
 deny-list gate before launching anything, re-runs all 23 selftest suites,
 then launches the helper when `CANVAS_BASE` is set and prints the
 sign-in notice. The notice repeats on every install until onboarding
@@ -83,8 +84,11 @@ preemptively and never on every run: a healthy session needs no page.
    `helper/env`, pins the profile dir and the tree's CDP port, and
    launches the server on 127.0.0.1:8901 with Chromium on
    127.0.0.1:19223 (ports configurable per tree via `LOGIN_HELPER_PORT`
-   / `LOGIN_HELPER_CDP_PORT`). The same script runs from cron every 5
-   minutes and keeps it up.
+   / `LOGIN_HELPER_CDP_PORT`). The same script runs every 5 minutes and
+   keeps it up: from cron when the machine has cron, otherwise from a
+   supervised background loop (`helper/supervisor.py`; the Muse VM has
+   no cron daemon). After a reboot on a machine without cron, run
+   `bin/morrow start` (any `morrow` command also restarts the loop).
    The connector's Chromium IS the helper's Chromium: one profile
    (`helper/profile/`), one browser, one CDP port. Never launch a second
    one; a launcher that finds 19223 live attaches to it.
@@ -95,8 +99,24 @@ preemptively and never on every run: a healthy session needs no page.
    SSO can re-authenticate, and cookies can be evicted. Treat the
    session as durable-but-expirable, and re-sign-in as a normal
    recovery step. You never see their credentials.
-4. Verify with a readback through the executor (below). Confirm the
-   principal is the educator before doing anything else.
+4. Pin the signed-in account:
+   `PYTHONDONTWRITEBYTECODE=1 python3 reauth/state_machine.py pin --first-signin`.
+   It verifies the helper session is live, reads GET
+   /api/v1/users/self, and pins that principal (id and name) in
+   `~/.morrow/browser_lane.json`. Tell the educator the name it printed
+   and confirm it is them before doing anything else. keepalive also
+   runs this on its first healthy tick. The pin never changes silently:
+   a different account signing in later is refused until the educator
+   disconnects and signs in fresh. The Chromium lane enforces it: before
+   every write, and on the first read of each session, it reads GET
+   /api/v1/users/self and compares it with the pin. A different account
+   stops the call (nothing is sent), pauses writes, and the educator
+   signs back in as the pinned account, then you run
+   `reauth/state_machine.py resume`. With no pin yet, reads run and
+   writes are refused until the account is pinned. To disconnect, tell the educator
+   what will be removed, get their yes in chat, then run
+   `bin/morrow disconnect --yes` (without a terminal, a run without
+   `--yes` changes nothing and says so).
 
 ## Reading /status: the fields and what they mean
 
@@ -165,11 +185,17 @@ run stops loudly instead of writing through a half-dead session:
    The educator is notified with the true paused-op count.
 4. **Verified resume.** The educator signs in again through the login
    helper's own browser tab (never the agent, never credentials to the
-   agent). The agent verifies the helper `/status` shows a live session
-   and pins the live principal id against the stored one, then runs
-   `reauth/state_machine.py resume --principal-id <id>`. Quarantined ops
-   move to `awaiting_approval` and the halt lifts. On principal mismatch
-   the halt stays and the situation escalates; nothing resumes.
+   agent). The agent runs `reauth/state_machine.py resume`: it reads
+   the live account itself (helper `/status` live, then GET
+   /api/v1/users/self) and requires it to match the account pinned at
+   first sign-in. Quarantined ops move to `awaiting_approval` and the
+   halt lifts. On mismatch the halt stays and the situation escalates;
+   nothing resumes. With no pinned account (an install from before
+   pinning), resume refuses and names the recovery: the educator
+   confirms in their own words that the signed-in account is theirs,
+   then `state_machine.py pin --confirm-account "<their words>"`, then
+   `resume` again. A pin record that is unreadable or loosely
+   permissioned also refuses; it is never read as "no pin".
 5. **Per-op re-approval.** Each quarantined op needs the educator's
    explicit approval (`reauth/state_machine.py approve --op-id <id>
    --authorization "<educator's verbatim approval words>"`; the
@@ -210,50 +236,133 @@ unrecognized files on the next install/upgrade.)
 `proof-battery/OPERATION_CATALOG.md`.)
 
 `catalog` takes `--name`, `--method`, `--path` (path template),
-`--class read|write|plan`, `--params` (JSON), `--backend chromium`, and
-`--canvas-base` (or the `CANVAS_BASE` env var). Every dispatch is governed
+`--class read|write|plan`, `--params` (JSON), `--body` (a JSON object:
+the write's request body, which the post-write readback compares
+against; values may reference params as `"params.<name>"`),
+`--backend chromium`, and `--canvas-base` (or the `CANVAS_BASE` env
+var). The CLI always runs the shipped `pack/pack.json`; there is no
+pack override. A write result's `outcome` is `verified` (a readback
+confirmed it) or `unverified` (Canvas said success and nothing
+confirmed it): relay `unverified` to the educator as unconfirmed, never
+as done. Every dispatch is governed
 and journaled to `~/.morrow/trees/<tree-id>/journal/ops.jsonl` (per-tree;
 the legacy `~/.morrow/journal/ops.jsonl` is read for historical idempotency
 only).
 
-Writes need three things or they are refused:
+Writes in plan mode (the default) need the educator's approval of the
+exact write. Two typed commands do the whole ceremony; you never build
+a frozen plan, an approval record, or a course resolution by hand:
 
-1. A frozen plan file (`--plan`), digest-bound to the exact action.
-2. An educator-signed approval record (`--approval`), digest-bound to the
-   exact action, unexpired, category-scoped, and unused. Mint it with
-   `dispatch/admission.py` (see its `mint_approval` / `sign_approval`
-   helpers). The ceremony rule is simple: the educator approves the exact
-   action, in their own words, before it runs; a tampered or replayed
-   approval is refused. Before asking, show the educator the FULL
-   payload with `dispatch/approval_display.py`
-   (`render_approval_display`: op, target, full params, undo
-   availability, identity schedule): approving an op name without seeing
-   the exact request body is not informed consent.
-3. No write halt: if `~/.morrow/write_halt` exists, all writes refuse.
+1. `plan-write` prepares the write and sends nothing. It reads the
+   course from Canvas (the course name the educator will see comes from
+   Canvas, not from you), builds the frozen plan and the approval bound
+   to the exact request (method, path, query, and body), and prints
+   `approval_display`: the op, the course (id and Canvas name), the
+   exact body that will be sent, the params, expiry, and whether the
+   change can be undone.
+2. Show the educator `approval_display` exactly as printed (it is
+   produced by `dispatch/approval_display.py`) and ask them to approve
+   it. Change nothing between showing it and sending it: a changed
+   request, params, or course is refused.
+3. When the educator approves, in any words ("Yes" is enough), run
+   `approve-write` with their reply verbatim. It signs that reply, then
+   sends the write through every gate and prints the result. An
+   approval is single use and expires (at most 24 hours; plan-write
+   sets 1 hour). If the educator declines or changes anything, run
+   `plan-write` again with the new request. A prepared write that is
+   never approved is deleted when it expires, and every purge deletes
+   prepared writes and approval records.
+
+A write that names a student uses the label from `students find`
+(`Student A3`, or the echoed `Jane Doe (Student A3)` with
+`--conversation-id` so the typed name can be checked). The approval is
+bound to that student, not to the label text: if the course's labels
+are issued again before the educator approves, `approve-write`
+refuses and sends nothing; run `students find` and `plan-write` again.
+
+Worked example: the educator asks to rename the Week 1 page of course
+89585 to "Week 1 Overview".
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py plan-write \
+  --name canvas_update_create_page_courses --method PUT \
+  --path '/api/v1/courses/{course_id}/pages/{url_or_id}' \
+  --params '{"course_id": "89585", "url_or_id": "week-1"}' \
+  --body '{"wiki_page": {"title": "Week 1 Overview"}}' \
+  --backend chromium --canvas-base "$CANVAS_BASE" \
+  --user-id "$MORROW_USER_ID" --conversation-id "$MORROW_CONVERSATION_ID"
+```
+
+It prints one JSON object: `op_id`, `course` (`id`, `name`, `term`),
+`approval_display`, `expires_at`, and `message`. You show
+`approval_display` (it names the course as Canvas does, for example
+"Biology 101", and the body `{"wiki_page": {"title": "Week 1
+Overview"}}`). The educator replies "Yes, do it". You run:
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py approve-write \
+  --op-id <op_id from plan-write> --authorization "Yes, do it" \
+  --backend chromium --canvas-base "$CANVAS_BASE" \
+  --user-id "$MORROW_USER_ID" --conversation-id "$MORROW_CONVERSATION_ID"
+```
+
+The result's `outcome` is `verified` or `unverified` (relay
+`unverified` as unconfirmed, never as done). The course resolution is
+the course the educator saw named in the display; Canvas's name for it
+is checked again right before the write.
+
+In edit mode, writes do not ask: run the `catalog` command directly
+with `--course-resolution '{"course_id": "89585", "confidence": 1.0,
+"user_confirmed": true}'` when you took the course id from the
+educator (lower `confidence` below 0.9 without their confirmation is
+refused as ambiguous, never guessed). `plan-write` and `approve-write`
+also work in edit mode.
+
+Every write is refused while `~/.morrow/write_halt` exists.
+
+The lower-level path (`catalog --plan <file> --approval <file>`, built
+with `dispatch/admission.py` `mint_approval` / `sign_approval`) stays
+for proof drivers and scripts; use the two commands above instead.
 
 Only operations marked `live-proven` in
-`proof-battery/OPERATION_CATALOG.md` dispatch. The one exception is an
-educator-signed `--allow-unproven` override for edge cases, signed by the
-educator as part of the approval.
+`proof-battery/OPERATION_CATALOG.md` dispatch, with one exception, the
+`--allow-unproven` exception: a catalog row marked `pending` (never
+tried live) dispatches only when the caller passes `--allow-unproven`
+AND the approval is an educator-signed v2 approval carrying
+`allow_unproven: true`, bound to that exact operation and its
+parameters, single use. The educator must sign it; the agent cannot.
+It reaches `pending` rows only: rows marked `failed`, `unsupported`,
+`excluded`, or `evidence-hold`, unknown operations, never-dispatch
+routes, and learner-data rows are refused with or without it. It does
+not skip write approval, the frozen plan, or any other gate.
 
 Entry manifests: `execute --entry <manifest.json> --params '{...}'`
 dispatches a manifest entry the same way. `undo` runs an entry's undo
-block as a new, separately journaled operation.
+block as a new, separately journaled operation. An undo is its own
+write: in plan mode it needs its own educator approval, minted for
+`dispatch.executor.undo_approval_subject(entry, params, of_op_id)`
+(bound to the undo action and the object it targets). The undo target
+comes ONLY from the journaled receipt of `--of-op-id`: that op must be
+a completed write of the same entry with the same params, and a
+`--result` that disagrees with its journaled receipt is refused
+(`UndoTargetMismatch`). The approval display shows the exact undo
+method, path, and target. The
+forward write's approval never admits its undo, and a DELETE undo asks
+for deletion confirmation in edit mode when `confirm_destructive_writes`
+is on. `--dry-run` journals nothing, in either mode.
 
 ## Governance (not optional)
 
 - Frozen plans: a write's plan digest must match the action exactly.
 - Admission: `dispatch/admission.py` enforces the live-proven catalog.
   Only operations marked `live-proven` in
-  `proof-battery/OPERATION_CATALOG.md` dispatch. The only override is an
-  educator-signed `--allow-unproven` flag for edge cases, signed by the
-  educator as part of the approval. Learner-data operations are refused
-  (`LearnerDataGated`) when the projection vault is not ready; through
-  the browser lane they are admitted and their receipts are projected
-  through the de-identification boundary before anything is
-  agent-visible or journaled (the de-identification boundary is proven:
-  de-identification 30/30, boundary invoke 69/69;
-  `--allow-unproven` cannot override a learner-data refusal).
+  `proof-battery/OPERATION_CATALOG.md` dispatch; the only exception is
+  the educator-signed `--allow-unproven` override for `pending` rows
+  described above. Learner-data operations (any operation whose
+  response carries people; see SCOPE.md) dispatch only on the Chromium
+  lane with the encrypted learner vault, where every receipt is
+  de-identified (see "Privacy" below); anywhere else they are refused
+  (`LearnerDataGated`), and `--allow-unproven` cannot override that.
 - Journaling: a dispatch journals more than one record. Reads journal a
   `wal="claimed"` record before provider work, then a completion record;
   writes journal an fsynced `wal="pending"` claim, then a `wal="complete"`
@@ -291,16 +400,42 @@ edit mode, they do not. Reads are unrestricted, with no approval, in
 both modes.
 
 - `default_mode` (plan | edit, default plan): the educator's saved
-  mode. Setting it to edit IS the standing edit grant: journaled,
-  educator-confirmed, and stated plainly as such. There is no separate
+  mode. Setting it to edit IS the standing edit grant: journaled, and
+  stated plainly as such in the command's result. There is no separate
   grant standing between the educator and edit mode.
-- Layered overrides, most recent explicit action wins: a standing edit
-  grant ("use edit mode", sets `default_mode` to edit, no time limit),
-  then a per-conversation override ("use edit mode for
-  this conversation", never persisted), then the persisted default.
-  Standing grants are persisted tamper-sealed mode grants (they survive
-  a restart); only per-conversation overrides are in-memory, failing
-  safe toward plan mode on restart. Resolve with
+- Edit mode is ONE blanket grant and it is NOT timed: it stays on
+  until the educator turns it off. Never offer, promise, or imply a
+  time limit. An old install's saved timed grant is not honored; it
+  lapses to plan mode.
+- Turning edit off means plan everywhere: `default_mode` goes back to
+  plan and every grant and per-conversation override is cleared
+  (`morrow mode set plan`, which runs
+  `modes.state.switch_mode(user_id, "plan")`). It applies at once, with
+  no confirmation round trip.
+- You decide what the educator means; no Morrow code reads the
+  educator's words. When the educator asks, in any words, to turn edit
+  mode on or off, to check the mode, to change a setting, or to stop
+  (or start) being asked before deletions, call the matching command
+  below. If you are not sure what they want, ask them; never guess, and
+  never turn edit mode on from an unclear, negated, or questioning
+  request. Relay the command's `message`: it states the true resulting
+  mode, read back after the change.
+- Changing the saved default ends every per-conversation override:
+  `morrow mode set edit` (or `plan`) without `--this-conversation`
+  takes effect in every conversation at once, including one that had
+  its own mode. A per-conversation override ("use plan mode for this
+  conversation", "use edit mode for this conversation") set after that
+  applies in its conversation only; everywhere else the saved default
+  applies. Both are tamper-sealed in the settings file, journaled, and
+  seen by every later dispatch process. An edit override also ends
+  when edit mode is turned off anywhere, when the conversation ends
+  (`settings.store.end_conversation`), or as soon as Morrow sees a
+  different conversation id for the educator (any mode command or
+  write gate). An override stored before the newest default change
+  (an older install could leave one) has ended; `mode status` says so.
+  An unreadable or tampered override store resolves to plan, and a
+  write with no conversation id is plan while any plan override exists
+  (the status says why). Resolve with
   `modes.state.current_mode(user_id, conversation_id)` (the single
   authoritative resolver; `settings.store.effective_mode` delegates to
   it); Agent A's contract `settings.store.get_setting(user_id, key)`
@@ -310,27 +445,55 @@ both modes.
   and edit differ ONLY in whether writes surface approval. Reads never
   need approval in either mode, and edit never surfaces per-write
   approval, including for destructive writes. `confirm_destructive_writes`
-  is now an opt-in guardrail (default off, matching the model; the
-  educator can turn it on with "ask me to confirm deletions"). The two
-  stale tests still asserting the old default-on behavior
-  (modes/test_modes_integration.py::test_destructive_write_needs_confirmation,
-  settings/test_settings.py::test_destructive_confirmation_helper) belong
-  to the lane that flipped the default; they need updating there, not
-  here.
-- The agent can never grant itself edit mode, start an edit session,
-  or change a consequential setting: consequential changes require
-  educator_confirmed=True (SettingsTamperRefused otherwise), echoed in
-  plain language before applying.
+  is an opt-in guardrail (default off, matching the model; the
+  educator can turn it on: `morrow settings set
+  confirm_destructive_writes true`).
+- You change the mode or a setting only because the educator asked
+  for it. The command takes effect when you call it (there is no
+  second confirmation call); relay its `message`, which says what the
+  change means. If the educator's request is unclear, ask them before
+  calling anything.
 - Every change is journaled to `~/.morrow/settings/<user_id>.changes.jsonl`
   with old value, new value, and educator identity (hash-chained,
   tamper-evident). Settings live under `~/.morrow/settings/`, never in
   the tree, and survive restarts and reinstalls.
-- Conversational control: "use edit mode", "make edit mode my default",
-  "switch to plan mode", "use plan mode for this conversation", "set my
-  edit sessions to 60 minutes", "stop asking me to confirm deletions",
-  "show me my settings", "what mode am I in", "be more concise". Parsed
-  by `settings/commands.py`; consequential utterances return
-  needs_confirmation=True and the agent echoes before applying.
+- Commands (the CLI prints one JSON object with `ok`, `status`, `mode`,
+  and `message`; the Python API in `settings/commands.py` returns the
+  same dict). `--user-id` defaults to `MORROW_USER_ID` and
+  `--conversation-id` to `MORROW_CONVERSATION_ID`:
+  - `morrow mode status --user-id U --conversation-id C`: the mode in
+    force and where it comes from.
+  - `morrow mode set plan --user-id U --conversation-id C`: edit off,
+    plan everywhere.
+  - `morrow mode set plan --this-conversation ...`: plan for this
+    conversation only.
+  - `morrow mode set edit ...` (add `--this-conversation` for this
+    conversation only): edit mode takes effect at once. The result says
+    that writes now apply without asking until edit mode is turned off;
+    relay it.
+  - `morrow settings show|get KEY|set KEY VALUE`: booleans are `true`
+    or `false`. A set takes effect at once and is journaled. "Stop
+    asking me to confirm deletions" is `settings set
+    confirm_destructive_writes false`; "always confirm deletions" is
+    `... true`.
+  - If a result has `settings_untrusted: true`, the settings file failed
+    its integrity check: tell the educator they are in plan mode and
+    relay the repair steps in `message`.
+- Failed-students question ("who failed last week's quiz", "which
+  students scored under 70%"): run `morrow query --course C --quiz
+  last-week|this-week`, with at most one of `--below-percent N`,
+  `--below-points N`, or `--letter-f` when the educator named a
+  threshold. You choose the arguments from what the educator said; if
+  they mean a quiz that is not last week's or this week's, ask which
+  quiz first. Names in the result are de-identified (a student the
+  educator named in this conversation shows by that name next to the
+  label).
+- Every dispatch must carry the educator's identity for the mode gate:
+  pass `--user-id` and `--conversation-id` to `dispatch/executor.py`
+  (or set `MORROW_USER_ID` and `MORROW_CONVERSATION_ID`). Without a
+  user id the write gate is plan (every write needs approval). Without
+  a conversation id, per-conversation edit overrides cannot apply and
+  any plan override makes the write plan.
 - Other knobs, all user-settable: `verbosity` (concise | balanced |
   detailed, default balanced), `write_approval_style` (per_write |
   batched, default per_write), `failure_verbosity` (concise | detailed,
@@ -347,18 +510,21 @@ both modes.
 
 v1 ships the Canvas Chromium lane, dispatching only catalog rows marked
 `live-proven` in `proof-battery/OPERATION_CATALOG.md`: 457 rows total
-(437 Canvas C- rows + 20 Item Bank IB- rows), 210 marked live-proven as
-of 2026-09-22 (plus 10 of the 11 New Quiz sequence steps). The catalog row is the unit of truth: a row that is not
+(437 Canvas C- rows + 20 Item Bank IB- rows), 209 marked live-proven as
+of 2026-09-22 (195 Canvas, 14 Item Bank; the 10 live-proven New Quiz
+sequence steps of 11 run on those rows). The catalog row is the unit of truth: a row that is not
 marked live-proven does not dispatch. Absolutely refused on every
 tenant, with no override flag: never-dispatch routes (the standing
 exclusions: announcements, messages to people, support tickets,
 subaccount-affecting operations), catalog-unsupported rows, failed
 rows, evidence-hold rows (including New Quiz create, C-286), and
-learner-data rows on the raw lane (no projection point there).
-Learner-data reads through the browser lane are admitted and projected
-through the de-identification boundary (see Privacy below), not refused.
-Item Bank IB- rows are marked in the catalog but cannot dispatch through
-the governed executor yet. Out for v1: Moodle, Blackboard (an
+learner-data rows on any lane that cannot de-identify them (the raw
+HTTPS lane, or no `cryptography`); on the Chromium lane with the
+encrypted vault, live-proven learner-data rows dispatch de-identified
+(see "Privacy" below; fixture-proven, not yet live-proven end to end).
+Item Bank IB- rows marked live-proven
+dispatch through the executor's Item Banks SDK lane (see SCOPE.md for
+which ones). Out for v1: Moodle, Blackboard (an
 honestly-disclosed roadmap item, not a ship criterion), the retired form
 relay, and every row not marked live-proven. Full declaration:
 `SCOPE.md`. Do not imply capabilities beyond it.
@@ -367,22 +533,22 @@ relay, and every row not marked live-proven. Full declaration:
 
 - `install.sh`: the idempotent installer (Chromium locate, egress probe,
   `~/.morrow` layout, `helper/profile/` creation without ever wiping it,
-  keepalive cron, helper launch, one-time onboarding notice, all 8
+  keepalive supervision (cron, or the background loop without cron),
+  helper launch, one-time onboarding notice, all 23
   selftests, the secrets gate).
 - `transport/`: the Chromium lane (`local_chromium.py`, `chromium_session.py`,
   `egress.py`, `proxy_forwarder.py`) and its selftests.
 - `dispatch/`: the governed executor, the admission gate, the policy, selftests.
-- `settings/`: the conversational settings system (`store.py`,
-  `commands.py`, `test_settings.py`, `README.md`): modes, edit sessions,
-  per-conversation overrides, and every behavioral knob, all
-  educator-settable in plain language.
+- `settings/`: the settings system (`store.py`, the typed commands in
+  `commands.py`, `test_settings.py`, `README.md`): modes,
+  per-conversation overrides, and every behavioral knob. The educator
+  asks in plain language; the agent calls the typed command.
 - `helper/`: the Canvas Login Helper server, UI, and keepalive, plus
   `live_behavior_check.py` (the manual live proof: session persistence
   across restarts, single-Chromium, dead-session redirect, and the
   plugin-attachment proof).
 - `content/`: educator-facing consent, setup, and revocation pages.
 - `proof-battery/OPERATION_CATALOG.md`: the op catalog with proof statuses.
-- `defects/DEFECTS.md`: the adversarial defect log.
 - `pack/`: `pack.json` (chromium lane pinned) and `deny-list.txt`.
 - `scripts/verify-no-secrets.sh`: the packaging secrets gate. Run it before
   any distribution step; it must pass.
@@ -445,66 +611,119 @@ beyond the examples above:
 
 For the educator, in plain English: whenever the connector reads
 student data (rosters, enrollments, submissions, grades, analytics),
-what the agent sees and what gets written to the journal never
-includes student names, emails, logins, or ID numbers. Each student
-appears as a stable label (like `Student A1`) that is the same every
-time you look, so you can still follow one student's work across
-reads, but the name behind it stays on your machine only. The key
-that makes the labels lives at
-`~/.morrow/morrow_source_vault.json.key` on your VM and is never part
-of any download or update.
+what comes back from Canvas is de-identified before the agent or the
+journal sees it: names, emails, logins, SIS ids, and Canvas user ids
+(including the ones inside links) become a stable label like
+`Student A1`. The label is the same every time, so you can follow one
+student's work across reads. You can still work with a student BY
+NAME: when you name a student ("extend Jane Doe's due date by two
+days"), the agent looks that name up and, for the rest of this
+conversation, shows that student as "Jane Doe (Student A3)". A name
+reaches the agent from Canvas only as the name you typed, but the
+lookup itself tells the agent something: when `students find` returns
+a label, it confirms that a student with that name is enrolled. The
+agent could run a lookup with a name you never typed (a guess), and
+nothing technical stops that; every lookup is journaled (course,
+conversation, outcome, and a keyed digest of the name, never the name
+itself), so a guess leaves a trail you can review. The key that makes the
+labels lives at `~/.morrow/morrow_source_vault.json.key` on your VM
+and is never part of any download or update.
 
-For the agent: de-identification applies automatically to every
-learner-data read in the browser lane. Every receipt is projected
-through the source privacy boundary (`privacy/boundary.py`,
-`SourceMcpPrivacyBoundary`) before it becomes agent-visible or
-journaled. The wired choke point is `dispatch/executor.py` in
-`dispatch_entry`'s success path, delegating to
-`privacy/executor_wire.py:project_learner_result`. The boundary:
+What de-identification does and does not cover (say this plainly if
+the educator asks): Morrow cannot intercept what the educator types to
+Muse, so names the educator types reach the Muse model, because the
+educator typed them. Morrow keeps every other student identifier in
+LMS records (every name the educator did not type, every email, login,
+SIS id, and Canvas id) out of what the model and the journal see. Two
+exceptions, below under Honest limitations: a name lookup confirms
+enrollment, and course content (a page body, an announcement, a
+discussion post) reaches the model as written.
+
+For the agent: people-bearing catalog rows (the `[LEARNER-DATA]` rows
+and every route whose response carries people) dispatch only on the
+Chromium lane with the encrypted learner vault (the optional
+`cryptography` package). There every receipt is projected through the
+source privacy boundary (`privacy/boundary.py`) in `dispatch_entry`'s
+success path, delegating to
+`privacy/executor_wire.py:project_learner_result`, before it becomes
+agent-visible or journaled. Anywhere else (the raw HTTPS lane, or no
+`cryptography`) they are refused (`LearnerDataGated`). Only
+`live-proven` rows dispatch, as always. The boundary:
 
 - Harvests the receipt's learner records into a roster, then replaces
-  names, emails, login ids, SIS ids, contextual numeric ids, and
-  identity URLs with stable course-local labels (`Student A1`,
-  `Student A2`, ...). Write-direction calls resolve a label back to
-  the real identity through a one-time `learner_<uuid>` token before
-  provider dispatch.
+  names, emails, login ids, SIS ids, contextual numeric ids, and any
+  URL path segment or query value equal to a learner's Canvas id with
+  stable course-local labels (`Student A1`, `Student A2`, ...). Labels
+  are issued in a keyed order inside the course, so a label number
+  says nothing about the student.
+- Keeps an id array's meaning: an override's `student_ids` reads back
+  as the students' labels.
 - Persists labels in a file-backed AES-GCM vault at
   `~/.morrow/morrow_source_vault.json` (0600, with the 32-byte key in
   the sibling `.key` file), so labels stay stable across processes
-  and restarts for a course scope. Accumulated vault identities also
-  seed later-page redaction: a learner registered on page 1 still
-  projects to her label when named in page 2's free text.
-- Decodes bare base64 blobs in ordinary text fields, masks roster
-  identities inside, and re-encodes, so identifiers cannot hide in
-  blobs. A named author the roster cannot resolve (an educator on a
-  submission comment, someone not enrolled) projects to the generic
-  `Staff` label instead of leaking the name or refusing the read.
-  Spec-typed LTI identity fields (`lis_person_name_full` and family)
-  are redacted even for people absent from the roster.
-- Projects, never refuses, in the synchronous executor:
-  learner-data entries are refused (`LearnerDataGated`) only when
-  the projection vault is not ready, on the raw lane, which has no
-  projection point.
+  and restarts for a course scope.
+- Replaces a person record under an editor key (`edited_by`,
+  `last_edited_by`) with that person's label when the vault knows them
+  in that course, else with "a Canvas user Morrow has not labeled". A
+  named author the roster cannot resolve (a teacher on a submission
+  comment) projects to `Staff`.
 
-You do not need to ask for it and must not work
-around it. The ONLY override is explicit and educator-driven: the
-educator creates the `<tree-state-dir>/educator_pii_reveal` consent
-file (a regular file, mode 0600, not a symlink) carrying a documented
-instructional purpose (at least 12 characters, for example "grading
-review with the course TA before posting final grades"). The reason
-is journaled verbatim with the op
-(`revealed_by: "educator-consent-file"`); a stub reason, a wrong mode,
-or a nonregular file fails closed. The legacy
-`MORROW_REVEAL_STUDENT_PII_REASON` environment variable is ignored:
-the environment is not a consent channel. Never create the consent
-file yourself to bypass de-identification. Never call
-`vault.lookup()` or `Deidentifier.lookup()` from an agent path; those
-are educator-initiated reversal tools only. Deletion is the
-educator's, and it is complete: `python3 -c "from privacy import
-executor_wire; print(executor_wire.purge_tenant('<tenant base>'))"`
-drops one tenant's vault records (issued labels for that tenant stop
-resolving; other tenants untouched), and `purge_all()` additionally
-deletes the vault file and `.key`. Every purge/wipe path also purges
+### Working by name (the flow you run)
+
+The educator names students; you never guess which one they mean.
+
+1. The educator names a student. Run
+   `morrow students find --course C "<the name exactly as the educator
+   typed it>"` (pass `--conversation-id`, or set
+   `MORROW_CONVERSATION_ID`; add `--canvas-base` or `CANVAS_BASE`).
+   It reads the course roster through the login helper and prints one
+   JSON object.
+2. `status: resolved`: one student matched. Use `student` (the
+   label) or `shown_as` ("Jane Doe (Student A3)") wherever a write
+   needs that student. From now on in this conversation, outputs show
+   that student as `shown_as`.
+3. `status: confirm`: more than one student could match, or the name
+   was only a close spelling. `candidates` lists each one as a label
+   with its section, enrollment state, and last activity date. Ask the
+   educator which student they mean, using those details. Never pick
+   one yourself. Then run the same command again with
+   `--choose "Student A5"`; a label that was not offered is refused.
+4. `status: not_found`: no student matched. Tell the educator, and ask
+   them to check the spelling or say whether to include inactive or
+   concluded enrollments (`--include-inactive`, `--include-concluded`).
+5. Write by label: put the label (or the `shown_as` form) where the
+   operation takes a student, as a path parameter (`--params
+   '{"user_id": "Student A3", ...}'`) or in the body (`--body
+   '{"assignment_override": {"student_ids": ["Student A3"], ...}}'`).
+   After the mode gate, the executor turns the label into the
+   student's real Canvas id at the LMS boundary, only for the course
+   the write targets. A label that course never issued is refused
+   (`LearnerLabelUnresolved`), and so is a `shown_as` form whose name
+   does not match what the educator typed in this conversation. Labels
+   belong to one course: run `students find` again for another course.
+   The journal and everything you see keep the label, never the id.
+6. Relay the result using the names as shown (`shown_as` for students
+   the educator named, labels for everyone else). Never try to learn
+   or state the real name behind a label the educator did not name.
+
+Names the educator did not type are never shown to you. The only other
+way to see real names is an educator reveal: a sealed record
+(`dispatch.admission.mint_pii_reveal(tenant, course_id,
+"<educator's verbatim words>", channel="educator-chat")`), for ONE
+course, lasting at most 30 minutes, journaled with the educator's
+words, passed to the executor with `--pii-reveal <file>`. Mint it only
+when the educator asks, in their own words, to see real student names
+for that course; never on your own initiative and never for a driver
+channel. A file, an environment variable, or a setting reveals nothing
+(the old consent file is retired). Never call
+`vault.lookup()` or `Deidentifier.lookup()` from an agent path.
+
+Deletion is the educator's, and it is complete: `python3 -c "from
+privacy import executor_wire; print(executor_wire.purge_tenant('<tenant
+base>'))"` drops one tenant's vault records and name-echo records
+(issued labels for that tenant stop resolving; other tenants
+untouched), and `purge_all()` additionally deletes the vault file,
+its `.key`, and the name-echo file. Every purge/wipe path also purges
 the browser transient state: `~/.morrow/browser-pending/` envelopes
 (they hold raw provider payloads) and `~/.morrow/browser-briefs/`
 (nothing learner-bearing survives them). The Chromium profile's
@@ -531,6 +750,17 @@ Honest limitations (not defects, but know them):
 - Nicknames: aliases derive from roster fields only, so a nickname
   the roster never mentions (for example "Bobby" for rostered
   "Robert J. Smith") survives redaction in free text.
+- Course content is not de-identified: a page body, announcement,
+  discussion post, or file that names a student ("Congrats to Jane
+  Doe") reaches the model as written, even when Morrow has labeled that
+  student elsewhere. Only people records in LMS responses (rosters,
+  submissions, authors, editors) are projected.
+- A name lookup confirms enrollment: when `students find` returns a
+  label for a name, it confirms that a student with that name is
+  enrolled in the course, even if the educator never typed that name
+  (an agent guess). Nothing technical prevents a guess; every lookup
+  is journaled (course, conversation, outcome, and a keyed digest of
+  the name, never the name), so guesses can be reviewed afterwards.
 
 ## Never
 

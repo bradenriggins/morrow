@@ -10,10 +10,8 @@ const root = new URL("../../", import.meta.url);
 const settingsHtml = readFileSync(new URL("connector/extension/settings/settings.html", root), "utf8");
 const manifest = JSON.parse(readFileSync(new URL("connector/extension/manifest.json", root), "utf8"));
 
-const ONE_HOUR_MS = 60 * 60 * 1_000;
 const CATALOG_DIGEST = "c".repeat(64);
 const COURSE_FILE_ACCESS_KEY = "courseFileStorageAccessEnabled";
-const EDIT_DURATIONS = [{ value: 15 * 60 * 1_000, label: "15 minutes" }, { value: ONE_HOUR_MS, label: "1 hour" }, { value: 4 * ONE_HOUR_MS, label: "4 hours" }];
 
 const CANVAS_COURSE = Object.freeze({ sourceBindingId: "canvas:course-1", provider: "canvas", origin: "https://canvas.example.edu", courseId: "1", courseName: "Anatomy", runtimeVerified: true, editPolicyRevision: 0 });
 const SECOND_CANVAS_COURSE = Object.freeze({ ...CANVAS_COURSE, sourceBindingId: "canvas:course-2", courseId: "2", courseName: "Physiology" });
@@ -22,7 +20,7 @@ const UNCHECKED_ACTION = Object.freeze({ id: "action:canvas:canvas_add_course_to
 const REVIEW_ONLY_ACTION = Object.freeze({ id: "action:canvas:canvas_update_quiz_item", group: "Canvas actions", label: "Update New Quiz item", description: "Change one New Quiz question.", availability: "review", destructive: false, reviewReason: "New Quizzes matches the parts of a question by id, so this change needs the delete-then-add contract." });
 
 function statusFixture(bindings) {
-  return { bindings, editDurations: EDIT_DURATIONS, catalogDigest: CATALOG_DIGEST, siteAnchors: [] };
+  return { bindings, catalogDigest: CATALOG_DIGEST, siteAnchors: [] };
 }
 
 function optionsFixture(sourceBindingId, options) {
@@ -81,7 +79,7 @@ async function loadSettings({ status, options = () => null, filePermission = fal
         if (message.type === "morrow_edit_policy_status") return { ok: true, result: status() };
         if (message.type === "morrow_edit_policy_options") return { ok: true, result: options(message.sourceBindingId) };
         if (message.type === "morrow_edit_policy_save") {
-          return { ok: true, result: { editPermission: { enabledCategories: message.enabledCategories, expiresAt: Date.now() + message.expiresInMs, revision: 1, scopeDigest: "d".repeat(64) } } };
+          return { ok: true, result: { editPermission: { enabledCategories: message.enabledCategories, revision: 1, scopeDigest: "d".repeat(64) } } };
         }
         return { ok: false, error: `The test harness received no ${message.type} request.` };
       },
@@ -234,11 +232,10 @@ test("an action published for review only carries its reason and no Edit control
   assert.ok(listed.includes(`value="${CHECKED_ACTION.id}"`));
 });
 
-test("Edit access defaults to one hour and saves the duration it shows", async () => {
+// Edit is not timed: the page sends no length, and the saved access stays on until Plan.
+test("Edit access saves the checked actions with no length", async () => {
   const page = await openEditStage([CHECKED_ACTION]);
-  assert.equal(page.node("#edit-duration").innerHTML,
-    '<option value="900000">15 minutes</option><option value="3600000">1 hour</option><option value="14400000">4 hours</option>');
-  assert.equal(page.node("#edit-duration").value, String(ONE_HOUR_MS));
+  assert.doesNotMatch(settingsHtml, /edit-duration|ends after/);
 
   selectAction(page, CHECKED_ACTION.id);
   page.node("#save-edit").dispatch("click");
@@ -247,7 +244,6 @@ test("Edit access defaults to one hour and saves the duration it shows", async (
     type: "morrow_edit_policy_save",
     sourceBindingId: CANVAS_COURSE.sourceBindingId,
     enabledCategories: [CHECKED_ACTION.id],
-    expiresInMs: ONE_HOUR_MS,
   }]);
 });
 

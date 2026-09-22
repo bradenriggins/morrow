@@ -83,6 +83,7 @@ function needsBridge(current) {
 // region never announces a later step than the one on screen.
 export function statusSummary(current) {
   if (!current) return "Checking setup";
+  if (current.appLocation === "move_required") return "Move Morrow to Applications";
   if (current.lifecycle === "repair_required" || current.runtime?.status === "repair_required") return "Morrow needs repair";
   if (pendingAssistant(current) && !configuredAssistant(current)) return "Finish setting up Claude Desktop";
   if (configuredAssistant(current) && current.runtime?.status !== "ready") return "Morrow is getting ready";
@@ -90,6 +91,7 @@ export function statusSummary(current) {
   if (current.bridge?.manualChromeReloadRequired === true) return "Reload Morrow Bridge in Chrome";
   if (current.bridge?.updateAvailable === true) return "Update Morrow Bridge";
   if (configuredAssistant(current) && needsBridge(current)) return "Set up Morrow Bridge in Chrome";
+  if (previewCompleted(current) && restartAssistant(current)) return `Quit and reopen ${restartAssistant(current).title}`;
   if (previewCompleted(current)) return "First read complete";
   if (previewReady(current)) return "First read is ready";
   if (verifiedCourse(current)) return "Selected course is ready";
@@ -114,7 +116,10 @@ export function progress(current) {
   const paired = bridge.paired === true;
   const firstPreviewReady = previewReady(current);
   const firstPreviewCompleted = previewCompleted(current);
-  const active = repairRequired ? -1 : !assistant ? 0 : reloadRequired || updateAvailable || !paired ? 1 : firstPreviewCompleted ? -1 : 2;
+  // After the first read, the panel asks for a quit and reopen until the assistant connects, so the
+  // rail points back at the Assistant step for that time.
+  const restart = firstPreviewCompleted && !repairRequired ? restartAssistant(current) : null;
+  const active = repairRequired ? -1 : !assistant ? 0 : reloadRequired || updateAvailable || !paired ? 1 : restart ? 0 : firstPreviewCompleted ? -1 : 2;
   const bridgeDetail = blocked
     ? "Not available yet"
     : reloadRequired
@@ -138,10 +143,16 @@ export function progress(current) {
         ? `${course}; first read not started`
         : "Open Canvas or Moodle in Chrome";
   return [
-    { label: "Assistant", detail: repairRequired ? "Waiting for repair" : assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? "Finish approval in Claude Desktop" : "Choose an installed assistant", status: repairRequired ? "pending" : assistant ? "done" : "current" },
+    { label: "Assistant", detail: repairRequired ? "Waiting for repair" : restart && active === 0 ? `Quit and reopen ${restart.title}` : assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? "Finish approval in Claude Desktop" : "Choose an installed assistant", status: repairRequired ? "pending" : restart && active === 0 ? "current" : assistant ? "done" : "current" },
     { label: "Morrow Bridge", detail: bridgeDetail, status: blocked ? "blocked" : active === 1 ? "current" : paired ? "done" : "pending" },
     { label: "Course", detail: courseDetail, status: firstPreviewCompleted ? "done" : active === 2 ? "current" : "pending" },
   ].map((step, index) => ({ ...step, current: index === active && step.status !== "done" }));
+}
+
+/** What an assistant card says when this computer does not have that assistant. */
+function notFoundDetail(assistant) {
+  if (assistant?.id === "claude-desktop") return "Claude Desktop is not installed on this computer. Get it from claude.ai/download, then select Check status.";
+  return "Not found on this computer.";
 }
 
 function assistantCards(current, chosenAssistantId) {
@@ -152,7 +163,7 @@ function assistantCards(current, chosenAssistantId) {
     const available = assistant.detected === true && assistant.supported !== false;
     const configured = assistant.configured === true;
     const pending = assistant.pending === true;
-    const detail = configured ? "Morrow is set up here." : pending ? "Finish approval in Claude Desktop." : available ? assistant.id === "claude-desktop" ? "Ready to set up. You approve it in Claude Desktop." : "Ready to set up." : assistant.detected === true ? "Not available in this Morrow version." : "Not found on this computer.";
+    const detail = configured ? "Morrow is set up here." : pending ? "Finish approval in Claude Desktop." : available ? assistant.id === "claude-desktop" ? "Ready to set up. You approve it in Claude Desktop." : "Ready to set up." : assistant.detected === true ? "Not available in this Morrow version." : notFoundDetail(assistant);
     return `<button class="assistant-card" type="button" data-action="choose-assistant" data-assistant-id="${escapeHtml(assistant.id)}" aria-pressed="${selected}"${available ? "" : " disabled"}>
       <span class="assistant-title">${escapeHtml(assistant.title)}</span>
       ${configured ? '<span class="assistant-badge">Ready</span>' : ""}
@@ -190,7 +201,7 @@ function materialsRow(current, { optionalDisclosure = false } = {}) {
   const detail = current?.workspaceSelected === true
     ? `Morrow works with the course materials in this folder.${rebind}`
     : `Morrow made this folder for course materials. Choose a different folder to work somewhere else.${rebind}`;
-  return `<div class="materials-row"><div><h3>Materials folder</h3><p>${escapeHtml(folder)}</p><p>${detail}</p></div><button class="secondary-button" type="button" data-action="choose-workspace">${settled ? "Change folder" : "Choose folder"}</button></div>`;
+  return `<div class="materials-row"><div><h3>Materials folder</h3><p class="path-text">${escapeHtml(folder)}</p><p>${detail}</p></div><button class="secondary-button" type="button" data-action="choose-workspace">${settled ? "Change folder" : "Choose folder"}</button></div>`;
 }
 
 /** What one assistant row says about that assistant, in the words it can prove. */
@@ -259,7 +270,39 @@ function homeStatusLines() {
   return `<ul class="home-status">${HOME_STATUS_ROWS.map((row) => `<li class="home-status-row"><span class="home-status-label">${escapeHtml(row.label)}</span><span class="home-status-word">${escapeHtml(row.word)}</span><button class="secondary-button" type="button" data-action="${row.action}">${row.actionLabel}</button></li>`).join("")}</ul>`;
 }
 
-function actionPanel(current, { chosenAssistantId = null } = {}) {
+/**
+ * Whether the action panel is asking the person to load the unpacked Bridge
+ * folder in Chrome. The renderer times this step so it can point at the exact
+ * folder when Chrome has not loaded it after a while.
+ */
+export function awaitingBridgeFolder(current) {
+  return Boolean(current) && current.appLocation !== "move_required" && current.assistantsNeedRepoint !== true
+    && current.lifecycle !== "repair_required" && current.runtime?.status === "ready"
+    && configuredAssistant(current) !== null && !deliveryBlocked(current)
+    && current.bridge?.manualChromeReloadRequired !== true && current.bridge?.updateAvailable !== true
+    && needsBridge(current) && current.bridge?.folderReady === true && current.bridge?.delivery === "developer_temporary";
+}
+
+/**
+ * The exact Bridge folder, a Copy button, and the way to reach it from Chrome's
+ * folder picker, which does not show this hidden folder by default.
+ */
+function bridgeFolderBlock(current, { platform = null, bridgeWaitExpired = false } = {}) {
+  const folder = current?.bridge?.folderPath;
+  if (typeof folder !== "string" || folder.length === 0) return "";
+  const reach = platform === "win32"
+    ? "In the folder picker Chrome opens, paste this path into the address bar at the top of the folder picker, press Enter, then select <strong>Select Folder</strong>."
+    : platform === "darwin"
+      ? "In the folder picker Chrome opens, press <strong>Command+Shift+G</strong>, paste this path, press Return, then select <strong>Select</strong>."
+      : "In the folder picker Chrome opens, go to this path.";
+  const late = bridgeWaitExpired
+    ? '<div class="blocked-box"><strong>Chrome has not loaded Morrow Bridge yet</strong><p>Check that you chose this exact folder in <strong>Load unpacked</strong>, not a folder inside it or a copy of it.</p></div>'
+    : "";
+  return `${late}<div class="materials-row"><div><h3>Bridge folder</h3><p class="path-text">${escapeHtml(folder)}</p><p>${reach}</p></div><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="${escapeHtml(folder)}" aria-label="Copy the Bridge folder path">Copy path</button></div>`;
+}
+
+function actionPanel(current, { chosenAssistantId = null, platform = null, bridgeWaitExpired = false } = {}) {
+  if (current.appLocation === "move_required") return movePanel();
   const bridge = current.bridge || {};
   const assistant = configuredAssistant(current);
   const selected = assistantFor(current);
@@ -271,6 +314,7 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
       body: '<div class="blocked-box"><strong>Setup needs repair</strong><p>Repair checks the files inside Morrow and restores what it can. It replaces the Morrow Bridge folder from the copy Morrow ships when the folder on this computer does not match it, and it writes your assistant setting again. It leaves a newer assistant setting alone, and it changes nothing in your course.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
     };
   }
+  if (current.assistantsNeedRepoint === true) return repointPanel();
   const pending = pendingAssistant(current);
   // A second assistant waiting for approval must not take the steps of the
   // assistant that is already set up away, so this is the panel only while no
@@ -330,7 +374,7 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
     return {
       title: "Add Morrow Bridge.",
       copy: "Use this temporary Chrome method until Morrow Bridge is available in the Chrome Web Store.",
-      body: '<ol class="instructions"><li>Select <strong>Show Bridge folder</strong>. Morrow opens the folder named <strong>Bridge</strong> and selects its manifest.json file.</li><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>.</li><li>On that page, turn on <strong>Developer mode</strong>.</li><li>Select <strong>Load unpacked</strong>, then select that <strong>Bridge</strong> folder.</li><li>Open <strong>Morrow Bridge</strong> in Chrome and select <strong>Connect Morrow</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="reveal-bridge-folder">Show Bridge folder</button><button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button><button class="secondary-button" type="button" data-action="repair">Repair Morrow</button></div>',
+      body: bridgeFolderBlock(current, { platform, bridgeWaitExpired }) + '<ol class="instructions"><li>Select <strong>Show Bridge folder</strong>. Morrow opens the folder named <strong>Bridge</strong> and selects its manifest.json file.</li><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>.</li><li>On that page, turn on <strong>Developer mode</strong>.</li><li>Select <strong>Load unpacked</strong>, then select that <strong>Bridge</strong> folder.</li><li>Open <strong>Morrow Bridge</strong> in Chrome and select <strong>Connect Morrow</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="reveal-bridge-folder">Show Bridge folder</button><button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button><button class="secondary-button" type="button" data-action="repair">Repair Morrow</button></div>',
     };
   }
   if (needsBridge(current) && bridge.delivery === "available") {
@@ -345,22 +389,23 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
     return {
       title: "Connect Morrow Bridge.",
       copy: `${title} is configured. Open Morrow Bridge in Chrome to complete the connection you start.`,
-      body: '<ol class="instructions"><li>Open <strong>Morrow Bridge</strong> in Chrome.</li><li>Select <strong>Connect Morrow</strong>.</li><li>On the Morrow page that opens, select <strong>Allow connection</strong> only if you started it.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
+      body: '<ol class="instructions"><li>Open <strong>Morrow Bridge</strong> in Chrome.</li><li>Select <strong>Connect Morrow</strong>.</li><li>On the Morrow page that opens, select <strong>Allow connection</strong> only if you started it.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
     };
   }
   if (!verifiedCourse(current)) {
     return {
       title: "Open your course in Chrome.",
       copy: "Morrow Bridge identifies Canvas or Moodle after you open a signed-in course.",
-      body: '<ol class="instructions"><li>Open a Canvas or Moodle course you can access in <strong>Chrome</strong> and sign in.</li><li>Open <strong>Morrow Bridge</strong>. It identifies the platform and shows <strong>Connect Canvas</strong> or <strong>Connect Moodle</strong>.</li><li>Select that button and allow access to the exact platform address Chrome shows.</li><li>Open <strong>Plan and Edit settings</strong>, choose a course, then select <strong>Connect selected courses in Plan</strong>.</li></ol>',
+      body: '<ol class="instructions"><li>Open a Canvas or Moodle course you can access in <strong>Chrome</strong> and sign in.</li><li>Open <strong>Morrow Bridge</strong>. It identifies the platform and shows <strong>Connect this course</strong>.</li><li>Select that button and allow access to the exact platform address Chrome shows.</li><li>In Morrow Bridge, select <strong>Open Plan and Edit settings</strong>. Under <strong>Your courses</strong>, select <strong>Connect</strong> next to each course Morrow may use. Each course starts in Plan.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
     };
   }
   const course = bridge.firstPreviewCourseName || bridge.selectedCourseName || "your selected course";
+  if (previewCompleted(current) && restartAssistant(current)) return restartPanel(restartAssistant(current), current);
   if (previewCompleted(current)) {
     return {
       title: "Your course is connected.",
-      copy: `Morrow read ${course} successfully. Continue in ${assistant.title} and ask what you want to do, for example:`,
-      body: `${homeStatusLines()}<div class="prompt">Find images with no alternative text in this course.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Find images with no alternative text in this course.">Copy</button></div></div><div class="prompt">Move the due date of the first assignment one week later.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Move the due date of the first assignment one week later.">Copy</button></div></div><div class="prompt">Summarize the modules in this course and flag anything that needs review.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Summarize the modules in this course and flag anything that needs review.">Copy</button></div></div>`,
+      copy: `Morrow read ${course} successfully. Continue in ${assistant.title} and ask what you want to do.`,
+      body: `${homeStatusLines()}<h3>Try asking</h3><div class="prompt">Find images with no alternative text in this course.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Find images with no alternative text in this course.">Copy</button></div></div><div class="prompt">Move the due date of the first assignment one week later.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Move the due date of the first assignment one week later.">Copy</button></div></div><div class="prompt">Summarize the modules in this course and flag anything that needs review.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Summarize the modules in this course and flag anything that needs review.">Copy</button></div></div>`,
     };
   }
   if (previewReady(current)) {
@@ -377,14 +422,57 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
   };
 }
 
+/**
+ * The configured assistant whose own Morrow session has not connected yet. An
+ * assistant reads its settings when it starts, so it must be quit and opened
+ * again before it can use Morrow. Claude Desktop is configured only once its
+ * session connected, so it never needs this step.
+ */
+function restartAssistant(current) {
+  const assistant = configuredAssistant(current);
+  return assistant && assistant.id !== "claude-desktop" && assistant.connected !== true ? assistant : null;
+}
+
+function restartPanel(assistant, current) {
+  const title = escapeHtml(assistant.title);
+  // The runtime sees that an assistant session connected, not which assistant it is, so a check
+  // after any one reopens counts for every assistant set up.
+  const configured = configuredAssistants(current);
+  const which = configured.length > 1
+    ? `<div class="info-box"><strong>Reopen each assistant</strong><p>Morrow can tell that an assistant opened Morrow, but it cannot tell which one. Quit and reopen each assistant you set up: ${assistantTitles(configured)}.</p></div>`
+    : "";
+  return {
+    title: "Quit and reopen your assistant.",
+    copy: `${assistant.title} reads its settings only when it starts. It cannot use Morrow until you open it again.`,
+    body: `${which}<ol class="instructions"><li>Quit <strong>${title}</strong> completely. Closing its window is not enough.</li><li>Open <strong>${title}</strong> again and start a new chat.</li><li>Return here and select <strong>Check ${title}</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
+  };
+}
+
+function movePanel() {
+  return {
+    title: "Move Morrow to Applications.",
+    copy: "Morrow is running from the disk image or a download folder. An assistant set up from here would lose Morrow when that place goes away.",
+    body: '<div class="info-box"><strong>Morrow moves itself</strong><p>Morrow moves to your Applications folder and opens again from there. Then continue setup.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="move-to-applications">Move to Applications</button></div>',
+  };
+}
+
+function repointPanel() {
+  return {
+    title: "Update your assistant settings.",
+    copy: "Your assistant still starts Morrow from the place Morrow was before it moved.",
+    body: '<div class="info-box"><strong>Repair writes the new place</strong><p>Repair changes only Morrow&#39;s own entry in each assistant&#39;s settings file and leaves the rest of that file as it is.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
+  };
+}
+
 const UNINSTALL_STEPS = Object.freeze({
-  move_to_trash: "To remove the Morrow application, quit Morrow and move it to the Trash.",
-  windows_settings_apps: "To remove the Morrow application, quit Morrow, then open Settings, select Apps, select Morrow, and select Uninstall.",
-  unknown: "To remove the Morrow application, quit Morrow and remove it the way this computer removes an application."
+  move_to_trash: "To remove the Morrow application, first select Remove Morrow's data so your assistants stop starting Morrow. Then quit Morrow and move it to the Trash.",
+  windows_settings_apps: "To remove the Morrow application, first select Remove Morrow's data so your assistants stop starting Morrow. Then quit Morrow, open Settings, select Apps, select Morrow, and select Uninstall.",
+  unknown: "To remove the Morrow application, first select Remove Morrow's data so your assistants stop starting Morrow. Then quit Morrow and remove it the way this computer removes an application."
 });
 
 const KEPT_REASONS = Object.freeze({
-  assistant_configuration: "Your assistant's own settings file. Morrow leaves it as it is.",
+  assistant_configuration: "Your assistant's own settings file. Remove Morrow's data takes only Morrow's own entry out of it and leaves the rest.",
+  assistant_backup: "Copies of your assistant settings from before Morrow changed them. Morrow keeps these copies so you can put a settings file back.",
   outside_morrow_data: "Outside the folders Morrow keeps its own files in. Morrow leaves it as it is."
 });
 
@@ -436,7 +524,7 @@ export function retentionView(current) {
       kept.length ? `<div><h3>Morrow does not remove these</h3>${retentionRows(kept)}</div>` : "",
       retentionRemoval(retention.removal),
       `<p>${escapeHtml(UNINSTALL_STEPS[retention.uninstall] || UNINSTALL_STEPS.unknown)}</p>`,
-      '<p>Chrome loaded Morrow Bridge from the Bridge folder above. To remove it, open the Chrome <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>, then remove <strong>Morrow Bridge</strong>.</p>',
+      `<p>${current?.bridge?.delivery === "developer_temporary" ? "Chrome loaded Morrow Bridge from the Bridge folder above. " : ""}To remove Morrow Bridge from Chrome, open the Chrome <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>, then remove <strong>Morrow Bridge</strong>.</p>`,
       removable.length ? '<div class="inline-actions"><button class="secondary-button danger-button" type="button" data-action="remove-data">Remove Morrow&#39;s data</button></div>' : ""
     ].join("")
   };
@@ -492,7 +580,9 @@ export function supportView(current) {
   const supportRow = `<li><span class="support-label">Support</span><button class="quiet-button" type="button" data-action="open-support">${escapeHtml(SUPPORT_ADDRESS)}</button></li>`;
   return {
     title: "Where to get help",
-    copy: "Morrow opens its support page. Select Support to open it, and name the version below when you write.",
+    copy: version
+      ? "Morrow opens its support page. Select Support to open it, and name the version below when you write."
+      : "Morrow opens its support page. Select Support to open it.",
     body: `<ul class="support-list">${rows.map((row) => `<li><span class="support-label">${escapeHtml(row.label)}</span><span class="${row.path ? "support-path" : "support-value"}">${escapeHtml(row.value)}</span></li>`).join("")}${supportRow}</ul>`
   };
 }

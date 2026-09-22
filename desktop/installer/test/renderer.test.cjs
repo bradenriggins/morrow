@@ -22,7 +22,7 @@ const SELECTORS = [
   "#blackboard-base-url-error", "#blackboard-application-key-error", "#blackboard-application-secret-error",
   "#blackboard-courses", "#blackboard-courses-copy", "#blackboard-course-list",
   "#retention-panel", "#retention-summary", "#retention-title", "#retention-copy", "#retention-body",
-  "#removal-status", "#support"
+  "#removal-status", "#copy-status", "#support"
 ];
 
 // The inline message index.html ties to each Blackboard field.
@@ -257,7 +257,7 @@ function failed(state, error) {
 
 const BASE = {
   lifecycle: "assistant_ready",
-  assistants: [{ id: "codex", title: "ChatGPT", tier: "primary", supported: true, detected: true, configured: true, selected: true }],
+  assistants: [{ id: "codex", title: "ChatGPT", tier: "primary", supported: true, detected: true, configured: true, connected: true, selected: true }],
   selectedAssistantId: "codex",
   workspaceSelected: true,
   runtimeStatus: "ready",
@@ -926,7 +926,8 @@ test("the repair panel starts the in-app repair and then shows the state repair 
   let current = state({ lifecycle: "repair_required", runtimeStatus: "repair_required", assistants: [], selectedAssistantId: null });
   const dom = await load("repair", async (method) => {
     methods.push(method);
-    if (method === "installer:repair") current = state();
+    // The state repair reaches here offers no primary action, so focus has to land on its heading.
+    if (method === "installer:repair") current = state({ bridgeDelivery: "unavailable" });
     return ok(current);
   });
 
@@ -938,8 +939,9 @@ test("the repair panel starts the in-app repair and then shows the state repair 
   await dom.element("#action-body").dispatch("click", { target: repair });
   await settle();
   assert.deepEqual(methods, ["installer:get-state", "installer:repair"]);
-  assert.equal(dom.element("#action-title").textContent, "Connect Morrow Bridge.");
-  assert.equal(dom.element("#header-status").textContent, "Assistant is ready");
+  assert.equal(dom.element("#action-title").textContent, "Morrow Bridge is not available yet.");
+  assert.equal(dom.element("#header-status").textContent, "Morrow Bridge is not available yet");
+  assert.equal(dom.element("#action-body").querySelector(".primary-button"), null);
   assert.equal(dom.element("#problem").innerHTML, "", "a repair that finished reports no problem");
   assert.equal(dom.document.activeElement, dom.element("#action-title"), "a completed step with no primary action focuses its new heading");
 });
@@ -990,6 +992,10 @@ test("copying an example request sends its exact text through the clipboard chan
     method: "installer:copy-to-clipboard",
     payload: { text: "Move the due date of the first assignment one week later." }
   });
+  const labels = dom.element("#action-body").querySelectorAll("[data-action]")
+    .filter((element) => element.dataset.action === "copy-example-prompt").map((element) => element.textContent);
+  assert.deepEqual(labels.filter((label) => label === "Copied").length, 1);
+  assert.equal(dom.element("#copy-status").textContent, "Copied to the clipboard.");
 });
 
 test("the nav switches between Home and Settings, and Manage on Home reaches Settings (D8, D9)", async () => {
@@ -1261,4 +1267,44 @@ test("the data-retention panel names every path and shows the removal Morrow rep
   // claiming an empty list.
   const empty = await load("retention-empty", async () => ok(state()));
   assert.equal(empty.element("#retention-panel").hidden, true);
+});
+
+test("Check the assistant and Move to Applications each reach their own channel with no input", async () => {
+  const calls = [];
+  const waiting = state({
+    bridgePaired: true,
+    runtimeVerifiedCourseCount: 1,
+    selectedCourseName: "BIOL 101",
+    firstPreview: { available: true, completed: true }
+  });
+  waiting.assistants = waiting.assistants.map((assistant) => ({ ...assistant, connected: false }));
+  const dom = await load("restart-assistant", async (method, payload) => {
+    calls.push({ method, payload });
+    return ok(waiting);
+  });
+  assert.equal(dom.element("#action-title").textContent, "Quit and reopen your assistant.");
+  const check = dom.element("#action-body").querySelectorAll("[data-action]")
+    .find((element) => element.dataset.action === "check-assistant-connection");
+  await dom.element("#action-body").dispatch("click", { target: check });
+  await settle();
+  assert.deepEqual(calls.at(-1), { method: "installer:check-assistant-connection", payload: undefined });
+
+  const misplaced = state({ lifecycle: "move_required", appLocation: "move_required" });
+  const moving = await load("move-app", async (method, payload) => {
+    calls.push({ method, payload });
+    return ok(misplaced);
+  });
+  const move = moving.element("#action-body").querySelectorAll("[data-action]")
+    .find((element) => element.dataset.action === "move-to-applications");
+  await moving.element("#action-body").dispatch("click", { target: move });
+  await settle();
+  assert.deepEqual(calls.at(-1), { method: "installer:move-to-applications", payload: undefined });
+});
+
+test("a copy of Morrow that does not update itself says where newer versions come from", async () => {
+  const current = state({ updates: { schema: "morrow.desktop-update.v1", status: "unavailable", reason: "updates_disabled", currentVersion: "1.0.4" } });
+  const dom = await load("updates-unavailable", async () => ok(current));
+  assert.equal(dom.element("#updates-panel").hidden, false);
+  assert.equal(dom.element("#updates-copy").textContent, "This copy of Morrow does not update itself. Get newer versions from meetmorrow.app/download.");
+  assert.equal(dom.element("#updates-actions").querySelectorAll("[data-action]").length, 0);
 });

@@ -15,6 +15,10 @@ privacy/.selftest-work/ (or MORROW_SELFTEST_SCRATCH during the audit
 wave), never /tmp and never the educator's real
 ~/.morrow files.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import base64
 import json
 import os
@@ -454,15 +458,16 @@ def test_no_tmp_paths_used():
 
 
 # ---------------------------------------------------------------------------
-# Reveal consent gate (W3-P1-44, fail-closed default)
+# Reveal gate (W3-P1-44, round-4 privacy audit H2; fail-closed default)
 #
-# The bare MORROW_REVEAL_STUDENT_PII_REASON environment variable is
-# ignored: an agent that can set its own environment could otherwise
-# consent to its own PII reveal. Consent comes only from the educator's
-# hand-created consent file <tree-state-dir>/educator_pii_reveal, which
-# must be a regular file with mode 0600 carrying a documented
-# instructional purpose of at least 12 characters. Malformed consent
-# fails closed. The journal attribution is "educator-consent-file".
+# Neither the environment nor a file is a consent channel: an agent can
+# set its own environment and write its own files. The legacy
+# MORROW_REVEAL_STUDENT_PII_REASON variable and the old
+# <tree-state-dir>/educator_pii_reveal consent file both reveal nothing.
+# Real names need a sealed educator reveal record
+# (dispatch/admission.mint_pii_reveal): the educator's verbatim words,
+# the educator-chat channel, one course, a short expiry. The journal
+# attribution is "educator-sealed-record".
 # ---------------------------------------------------------------------------
 
 def _isolated_tree_state(name="reveal"):
@@ -482,9 +487,10 @@ def _restore_tree_state(old):
         os.environ["MORROW_TREE_STATE_DIR"] = old
 
 
-def _write_consent(reason_bytes, mode=0o600):
+def _write_legacy_consent(reason_bytes, mode=0o600):
+    """The retired consent file, written the way an agent could."""
     from privacy import executor_wire as _wire
-    path = _wire.consent_path()
+    path = os.path.join(_wire._tree_state_dir(), "educator_pii_reveal")
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         os.write(fd, reason_bytes)
@@ -494,8 +500,17 @@ def _write_consent(reason_bytes, mode=0o600):
     return path
 
 
+REVEAL_WORDS = "please show me the real names for course 1 for grading"
+
+
+def _sealed_reveal(course_id="1", channel="educator-chat"):
+    from dispatch import admission as _adm
+    _adm._journal_reveal = lambda record: None  # hermetic: no journal
+    return _adm.mint_pii_reveal(TENANT, course_id, REVEAL_WORDS, channel)
+
+
 def test_reveal_unset_means_deidentify():
-    # No consent file and no env var: nothing revealed.
+    # No reveal record and no env var: nothing revealed.
     old = _isolated_tree_state("unset")
     try:
         assert bb._pii_reveal_audit() is None
@@ -511,50 +526,48 @@ def test_reveal_env_var_ignored():
     old = _isolated_tree_state("env")
     try:
         assert bb._pii_reveal_audit() is None, \
-            "bare env var must be ignored without a consent file"
+            "bare env var must be ignored"
     finally:
         _restore_tree_state(old)
         os.environ.pop("MORROW_REVEAL_STUDENT_PII_REASON", None)
 
 
-def test_reveal_stub_reason_refused():
-    old = _isolated_tree_state("stub")
+def test_reveal_consent_file_is_not_a_channel():
+    # Round-4 H2: the retired consent file (valid mode, documented
+    # reason, or a stub, or world-readable) reveals nothing.
+    old = _isolated_tree_state("file")
     try:
-        _write_consent(b"test")
+        for body, mode in ((b"grading review with the course TA", 0o600),
+                           (b"test", 0o600),
+                           (b"a documented instructional purpose", 0o644)):
+            _write_legacy_consent(body, mode)
+            assert bb._pii_reveal_audit() is None, (body, mode)
+    finally:
+        _restore_tree_state(old)
+
+
+def test_reveal_sealed_record_audited_and_course_scoped():
+    from privacy import executor_wire as _wire
+    rec = _sealed_reveal("1")
+    audit = _wire.pii_reveal_audit(RuntimeError, rec, TENANT, "1")
+    assert audit["revealed_by"] == "educator-sealed-record", audit
+    assert audit["authorization"] == REVEAL_WORDS
+    assert audit["course_id"] == "1"
+    # Another course stays de-identified.
+    assert _wire.pii_reveal_audit(RuntimeError, rec, TENANT, "2") is None
+
+
+def test_reveal_driver_channel_and_tamper_refused():
+    from privacy import executor_wire as _wire
+    for bad in (_sealed_reveal("1", channel="driver"),
+                dict(_sealed_reveal("1"), course_id="2")):
         try:
-            bb._pii_reveal_audit()
-        except Exception as exc:
-            assert "documented instructional purpose" in str(exc), str(exc)
+            _wire.pii_reveal_audit(RuntimeError, bad, TENANT,
+                                   bad["course_id"])
+        except RuntimeError as exc:
+            assert "PII reveal refused" in str(exc), str(exc)
         else:
-            raise AssertionError("stub reveal reason must fail closed")
-    finally:
-        _restore_tree_state(old)
-
-
-def test_reveal_wrong_mode_refused():
-    old = _isolated_tree_state("mode")
-    try:
-        _write_consent(b"a documented instructional purpose here", mode=0o644)
-        try:
-            bb._pii_reveal_audit()
-        except Exception as exc:
-            assert "0600" in str(exc), str(exc)
-        else:
-            raise AssertionError("world-readable consent must fail closed")
-    finally:
-        _restore_tree_state(old)
-
-
-def test_reveal_documented_reason_audited():
-    reason = "grading review with the course TA before posting finals"
-    old = _isolated_tree_state("audited")
-    try:
-        _write_consent(reason.encode())
-        audit = bb._pii_reveal_audit()
-    finally:
-        _restore_tree_state(old)
-    assert audit["reason"] == reason
-    assert audit["revealed_by"] == "educator-consent-file"
+            raise AssertionError("a bad reveal record must fail closed")
 
 
 def _isolated_source_vault(name="test"):
@@ -598,7 +611,7 @@ def test_projection_wire_applies_scrub():
     entry = {"name": "t_users", "request": {"url":
              "https://school.instructure.com/api/v1/courses/1/users"}}
     assert adm.touches_learner_data(entry), "fixture must be learner-data"
-    old_ts = _isolated_tree_state("wire")  # no consent file may leak in
+    old_ts = _isolated_tree_state("wire")
     old = _isolated_source_vault("wire")
     try:
         result = {"receipt": [
@@ -630,24 +643,41 @@ def test_projection_wire_applies_scrub():
 
 
 def test_projection_wire_reveal_skips_deidentify():
-    # W3-P1-44: only a valid consent file skips deidentification; the
-    # bare env var no longer does. Attribution is "educator-consent-file".
+    # Round-4 H2: only a sealed educator reveal for THIS course skips
+    # de-identification; attribution is "educator-sealed-record".
     entry = {"name": "t_users", "request": {"url":
              "https://school.instructure.com/api/v1/courses/1/users"}}
-    reason = "accommodation review with disability services staff"
     old = _isolated_source_vault("reveal")
     old_ts = _isolated_tree_state("reveal")
     try:
-        _write_consent(reason.encode())
+        _write_legacy_consent(b"accommodation review with staff")
         result = {"receipt": [{"id": 1, "name": "Jane Doe"}],
                   "truncated": False, "bytes_received": 1}
-        out = bb._project_learner_result(entry, result, TENANT)
+        if not _have_crypto():
+            # Final muse audit H1: a revealed read journals only its
+            # de-identified projection, which needs the vault; without
+            # 'cryptography' the reveal refuses loudly rather than
+            # leaving nothing safe to journal.
+            try:
+                bb._project_learner_result(
+                    entry, result, TENANT,
+                    lane_context={"pii_reveal": _sealed_reveal("1")})
+            except Exception as exc:
+                assert "cryptography" in str(exc), str(exc)[:200]
+                return
+            raise AssertionError(
+                "expected a loud refusal of a reveal without cryptography")
+        out = bb._project_learner_result(
+            entry, result, TENANT,
+            lane_context={"pii_reveal": _sealed_reveal("1")})
     finally:
         _restore_source_vault(old)
         _restore_tree_state(old_ts)
     assert out["receipt"] == [{"id": 1, "name": "Jane Doe"}]
-    assert out["pii_reveal"]["reason"] == reason
-    assert out["pii_reveal"]["revealed_by"] == "educator-consent-file"
+    assert "Jane" not in json.dumps(out["journal_receipt"]), \
+        "the journal view of a revealed read must be de-identified"
+    assert out["pii_reveal"]["authorization"] == REVEAL_WORDS
+    assert out["pii_reveal"]["revealed_by"] == "educator-sealed-record"
 
 
 def test_projection_wire_ignores_non_learner_entries():

@@ -23,6 +23,10 @@ transport; no provider touched):
      (CatalogNotProven): a proven name cannot be paired with arbitrary
      CLI arguments.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import json
 import os
 import shutil
@@ -35,6 +39,20 @@ for _p in (REPO, os.path.join(REPO, "dispatch"), os.path.join(REPO, "transport")
         sys.path.insert(0, _p)
 
 from dispatch import executor as ex  # noqa: E402
+
+# Selftest harness: the approvals here are minted on the driver
+# channel, so dispatch runs with require_educator_channel=False (the
+# production default is True).
+def _driver_channel(fn):
+    def call(*a, **k):
+        k.setdefault("require_educator_channel", False)
+        return fn(*a, **k)
+    return call
+
+
+ex.dispatch_entry = _driver_channel(ex.dispatch_entry)
+ex.dispatch_catalog_op = _driver_channel(ex.dispatch_catalog_op)
+ex.dispatch_undo = _driver_channel(ex.dispatch_undo)
 from dispatch.admission import (  # noqa: E402
     mint_approval, sign_approval, load_policy,
     NeverDispatch, EvidenceHold, ApprovalMismatch)

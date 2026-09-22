@@ -182,7 +182,7 @@ A Blackboard read replaces steps 3 to 5: the Blackboard child checks the integra
 1. The AI client calls one generated write tool with an exact `source_binding_id`.
 2. Morrow freezes the public tool, provider route, arguments, target set, profile, account, principal, connection generation, catalog digest, risk, expiry, and readback comparator.
 3. Morrow records the plan durably and returns an operation ID, plan digest, and local approval URL.
-4. A person opens that URL. The page reads the durable plan directly and can approve once or cancel. MCP exposes no approval tool.
+4. A person opens that URL in Chrome. The page reads the durable plan directly and can approve once or cancel. Morrow Bridge signs the approval after the person's click; the page refuses an approval without that signature. MCP exposes no approval tool.
 5. `morrow_operation_dispatch` recomputes current authority and refuses stale approval, binding, profile, catalog, account, principal, or target state.
 6. The effect broker reserves one durable effect receipt before provider dispatch.
 7. The dispatching child consumes that receipt once and sends one provider request.
@@ -215,7 +215,7 @@ Batch state is durable in SQLite. Arguments and manifests use authenticated encr
 
 ## Trust boundaries
 
-- **AI client:** may choose and call tools. MCP exposes no approval tool. A separate local page records approval, but it cannot prove human presence against local HTTP or browser automation.
+- **AI client:** may choose and call tools. MCP exposes no approval tool. A separate local page records approval only with Morrow Bridge's signature over the form, which the Bridge adds for a trusted click in the review tab. Local HTTP requests cannot approve. It does not prove human presence against browser automation that drives Chrome input.
 - **Morrow MCP:** may plan and reserve effects; has no platform credential.
 - **Approval page:** may approve only one exact, unexpired durable plan on loopback.
 - **Extension:** may use only paired commands, admitted operations, current bindings, and unused receipts.

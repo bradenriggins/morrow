@@ -54,7 +54,11 @@
 #   6. helper/profile creation (0700, first run only). An existing
 #      profile is NEVER wiped, reset, or repackaged: it holds the
 #      educator's authenticated Canvas session.
-#   7. Keepalive cron install (serialized across concurrent installers
+#   7. Keepalive supervision (helper/supervisor.py detects what the
+#      machine has). No cron: a supervised background loop runs
+#      keepalive.sh every 5 minutes (bin/morrow start, or the first
+#      morrow command after a reboot, restarts it). With cron: the
+#      keepalive cron install (serialized across concurrent installers
 #      with a lock file; the entry shell-quotes the tree path so trees
 #      under paths with spaces work; deduped by marker comment; stale
 #      entries from a previous tree are migrated, loudly; orphaned
@@ -115,7 +119,8 @@ UPGRADE_BACKUP=""
 _CREATED=""
 
 _track_created() {
-  # $1 = ledger entry ("dir:<path>", "file:<path>", or "cron").
+  # $1 = ledger entry ("dir:<path>", "file:<path>", "cron", or
+  # "supervisor").
   _CREATED="$1
 ${_CREATED}"
 }
@@ -212,6 +217,14 @@ _rollback_fresh_install() {
 "
             fi ;;
         esac ;;
+      supervisor)
+        if python3 "${TREE}/helper/supervisor.py" uninstall >/dev/null 2>&1; then
+          _rb_removed="${_rb_removed}keepalive background loop for this tree
+"
+        else
+          _rb_failed="${_rb_failed}keepalive background loop for this tree
+"
+        fi ;;
       cron)
         if _rollback_cron_entry; then
           _rb_removed="${_rb_removed}keepalive cron entry for this tree
@@ -315,7 +328,7 @@ for _tool in curl ss pgrep flock; do
     || fail "prereq" "${_tool} not found on PATH"
 done
 unset _tool
-# W4-P2-23: floor is 3.11, not 3.10. Python 3.10 reached security
+# W4-P2-23: floor is 3.11, not 3.10. Python 3.10 reaches security
 # end-of-life in October 2026 (PEP 619); a security-sensitive package
 # fails closed on an EOL interpreter rather than warning. The tree
 # has no 3.10-only need (match statements and stdlib use are 3.11+
@@ -323,7 +336,7 @@ unset _tool
 PY_VER="$(python3 --version 2>&1)"
 PY_OK="$(python3 -c 'import sys; print("yes" if sys.version_info >= (3, 11) else "no")')"
 [ "${PY_OK}" = "yes" ] \
-  || fail "python3" "python3 >= 3.11 required (found: ${PY_VER}). Python 3.10 reached security end-of-life in October 2026 (PEP 619) and no longer receives security fixes; install Python 3.11 or newer and rerun."
+  || fail "python3" "python3 >= 3.11 required (found: ${PY_VER}). Python 3.10 reaches security end-of-life in October 2026 (PEP 619) and will stop receiving security fixes; install Python 3.11 or newer and rerun."
 note "ok: ${PY_VER}"
 
 # -- 2. integrity + upgrade -----------------------------------------------
@@ -430,6 +443,10 @@ def _is_allowed_extra(rel):
     # *.log directly under helper/: runtime logs.
     if rel.startswith("helper/") and "/" not in rel[7:] \
             and rel.endswith(".log"):
+        return True
+    # The keepalive background loop's state (no cron on this machine).
+    if rel in ("helper/keepalive-supervisor.json",
+               "helper/keepalive-supervisor.json.lock"):
         return True
     # Test scratch: .selftest-* anywhere, .selftest-work/ dirs.
     parts = rel.split("/")
@@ -661,9 +678,8 @@ if [ ! -f "${TREE_ENV_FILE}" ]; then
 # CANVAS_BASE=https://myschool.instructure.com
 # There is no default tenant; the login helper refuses to start without one.
 #
-# Tree-scoped: profile and ports come from this tree's location unless you
-# pin them here:
-# LOGIN_HELPER_PROFILE_DIR=/path/to/profile   (default: <tree>/helper/profile)
+# Tree-scoped: the helper profile is always <tree>/helper/profile
+# (keepalive pins it). The ports can be pinned here:
 # LOGIN_HELPER_PORT=8901                      (default 8901)
 # LOGIN_HELPER_CDP_PORT=19223                 (default 19223)
 # The legacy global ~/.morrow/env is honored for CANVAS_BASE only.
@@ -736,11 +752,18 @@ else
   note "created helper/profile (0700). Your Canvas session will live here after the one-time sign-in."
 fi
 
-# -- 7. keepalive cron ------------------------------------------------------
-step "7/10 keepalive cron"
+# -- 7. keepalive supervision -----------------------------------------------
+# Round-4 M5: supervision does not depend on cron. helper/supervisor.py
+# detects what this machine has: cron (crontab installed and a cron
+# daemon running) gets the per-tree cron entry below; no cron gets a
+# supervised background loop that runs keepalive.sh every 5 minutes,
+# restarted by `bin/morrow start` and by the first morrow command
+# after a reboot.
+step "7/10 keepalive supervision"
+_SUPERVISION="$(python3 "${TREE}/helper/supervisor.py" detect 2>/dev/null || printf 'loop')"
 if [ "${MORROW_CRON:-1}" = "0" ]; then
-  note "MORROW_CRON=0: skipping cron install (you arrange your own scheduler)"
-elif command -v crontab >/dev/null 2>&1; then
+  note "MORROW_CRON=0: skipping keepalive supervision (you arrange your own scheduler)"
+elif [ "${_SUPERVISION}" = "cron" ]; then
   # W4-P1-7: serialize the crontab read-modify-write across concurrent
   # installers with a lock file under MORROW_HOME. Two installers
   # racing used to silently drop one tree's supervision entry; the loser
@@ -872,7 +895,9 @@ _DEAD_EOF
       _cron_new="$(printf '%s\n%s\n' "${CRON_MARKER}" \
         "${_canonical}")"
     fi
-    printf '%s' "${_cron_new}" | crontab - \
+    # The command substitution above strips the trailing newline, and
+    # cron's crontab refuses a file whose last line has none.
+    printf '%s\n' "${_cron_new}" | crontab - \
       || { flock -u 8; exec 8>&-; fail "cron" "could not install the keepalive cron entry"; }
     _track_created "cron"
     # W4-P1-12: per-tree coexistence; no migration, just installation.
@@ -883,9 +908,19 @@ _DEAD_EOF
   exec 8>&-
   unset _cron_lock _cron_now _cron_base _cron_new _other _mine _mine_first _mine_n _line _canonical
 else
-  note "WARNING: crontab not found; the helper will not self-heal."
-  note "Arrange your own scheduler for ${TREE}/helper/keepalive.sh"
+  # No cron on this machine: the supervised background loop. Its first
+  # keepalive run comes one interval after start (step 10 launches the
+  # helper now).
+  if _loop_out="$(python3 "${TREE}/helper/supervisor.py" install-loop 2>&1)"; then
+    _track_created "supervisor"
+    note "no cron on this machine: keepalive runs as a supervised background loop every 5 minutes (${_loop_out})"
+    note "after a reboot, run 'bin/morrow start' (the first morrow command also restarts it)"
+  else
+    fail "supervision" "could not start the keepalive background loop: ${_loop_out}"
+  fi
+  unset _loop_out
 fi
+unset _SUPERVISION
 
 # -- 8. secrets gate (BEFORE any runtime logs exist) --------------------------
 step "8/10 secrets gate"
@@ -924,11 +959,32 @@ failures/test_error_translation.py
 learners/test_resolve_student.py
 query/selftest_query.py
 catalog/a11y/runner_selftest.py"
+# Round-4 H2: the suites run in a scratch home with every live state
+# path removed. The educator's MORROW_HOME (even ~/.morrow), tree
+# state dir, vault, signing key, identity, and helper profile never
+# reach a selftest, and never make one refuse to run.
+SELFTEST_UNSET="MORROW_HOME MORROW_TREE_STATE_DIR MORROW_SOURCE_VAULT_PATH MORROW_APPROVAL_SIGNING_KEY MORROW_USER_ID MORROW_CONVERSATION_ID MORROW_HELPER_ENV_FILE MORROW_PRIVACY_MAP MORROW_PRIVACY_SALT MORROW_SELFTEST_HOME LOGIN_HELPER_PROFILE_DIR LOGIN_HELPER_PORT LOGIN_HELPER_CDP_PORT"
+mkdir -p "${TREE}/.selftest-work"
+selftest_env() {
+  # Runs "$@" with the live state variables removed and HOME pointed at
+  # a fresh scratch dir under the tree's .selftest-work/.
+  _st_home="$(mktemp -d "${TREE}/.selftest-work/install-home.XXXXXX")" \
+    || return 1
+  _st_args=""
+  for _v in ${SELFTEST_UNSET}; do
+    _st_args="${_st_args} -u ${_v}"
+  done
+  # shellcheck disable=SC2086
+  env ${_st_args} HOME="${_st_home}" PYTHONDONTWRITEBYTECODE=1 "$@"
+  # The scratch home lives under .selftest-work/, which is removed as a
+  # whole after the suites (and by rollback on failure).
+  return $?
+}
 PASS=0
 TOTAL=0
 for suite in ${SUITES}; do
   TOTAL=$((TOTAL + 1))
-  if (cd "${TREE}" && python3 "${suite}" >/dev/null 2>&1); then
+  if (cd "${TREE}" && selftest_env python3 "${suite}" >/dev/null 2>&1); then
     PASS=$((PASS + 1))
   else
     fail "selftest" "${suite} failed; run 'python3 ${suite}' from ${TREE} for details"
@@ -965,7 +1021,7 @@ if [ -z "${CANVAS_BASE:-}" ] && [ -f "${LEGACY_ENV_FILE}" ]; then
 fi
 if [ -z "${CANVAS_BASE:-}" ]; then
   note "CANVAS_BASE is not set yet: skipping the helper launch."
-  note "Set it in ${ENV_FILE}, then rerun this installer (or wait for the keepalive cron). The one-time sign-in comes after."
+  note "Set it in ${ENV_FILE}, then rerun this installer (or wait for the next keepalive run). The one-time sign-in comes after."
 else
   if [ -n "${_SHELL_CANVAS_BASE}" ] \
     && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?CANVAS_BASE=' "${ENV_FILE}" 2>/dev/null; then

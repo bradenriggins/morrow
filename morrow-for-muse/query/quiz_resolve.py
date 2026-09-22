@@ -333,7 +333,11 @@ def _resolve_week(reader, course_id, which, now_utc):
 
     if len(candidates) == 1:
         _eff, _t, _i, _f, quiz, assignment = candidates[0]
-        return quiz, assignment, {"new_quizzes_skipped": nq_skipped}
+        # The window the quiz was resolved in travels with it, so the
+        # report states that window and never recomputes another.
+        return quiz, assignment, {"new_quizzes_skipped": nq_skipped,
+                                  "window_start": start,
+                                  "window_end": end}
     if len(candidates) == 0:
         # "Nearest" means closest by due date to the requested week,
         # not the earliest quizzes in the course: a December window

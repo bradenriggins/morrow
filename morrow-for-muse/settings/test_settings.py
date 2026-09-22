@@ -7,11 +7,12 @@ Edit: they do not. Reads are unrestricted in both modes.
 
 Covers: schema validation (bad values refused), defaults, persistence
 across a simulated restart (fresh interpreter process), tamper refusal
-(consequential sets, edit sessions, and conversation overrides without
-educator confirmation), effective-mode resolution (session, then
-override, then persisted default), the conversational parser cases,
-audit journaling with old/new/educator (including session and override
-records), user_id sanitization, fail-closed corrupt files, and the
+(consequential sets and conversation overrides without educator
+confirmation), effective-mode resolution (override, then persisted
+default), edit mode not being timed (legacy timed grants lapse to
+plan), turning edit off landing in plan mode everywhere, the typed
+mode and settings commands (no free text decides anything), audit journaling with old/new/educator
+(including override and edit-off records), user_id sanitization, fail-closed corrupt files, and the
 Agent A contract (get_setting(user_id, key) exact signature).
 
 Test scratch lives under .selftest-work/ next to this test (tree
@@ -20,6 +21,10 @@ convention: never /tmp). MORROW_HOME is redirected there so the real
 
 Stdlib only. Run: python3 settings/test_settings.py
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import inspect
 import json
 import os
@@ -55,11 +60,9 @@ class SettingsTest(unittest.TestCase):
                                              "approval-signing.key")
         self.user = "educator-test-%d" % os.getpid()
         self.conv = "conv-%d" % os.getpid()
-        # Session-scoped state: conversation overrides are process-global
-        # in-memory; timed sessions are modes grants (persisted, sealed).
+        # Conversation overrides and grants are persisted and sealed.
         # Reset both so each test starts clean.
-        with store._SESSION_LOCK:
-            store._CONVERSATION_MODES.clear()
+        store.clear_conversation_overrides(self.user)
         import modes.state as _mode_state
         _mode_state.revoke_edit_grant(self.user, reason="test reset")
 
@@ -100,15 +103,11 @@ class SettingsTest(unittest.TestCase):
         sig = inspect.signature(store.get_setting)
         self.assertEqual(list(sig.parameters), ["user_id", "key"])
         self.assertEqual(store.get_setting(self.user, "default_mode"), "plan")
-        self.assertEqual(
-            store.get_setting(self.user, "edit_grant_duration_min"), 30)
 
     # -- defaults ------------------------------------------------------------
 
     def test_defaults_for_new_user(self):
         self.assertEqual(store.get_setting(self.user, "default_mode"), "plan")
-        self.assertEqual(
-            store.get_setting(self.user, "edit_grant_duration_min"), 30)
         self.assertEqual(store.get_setting(self.user, "verbosity"), "balanced")
         self.assertEqual(
             store.get_setting(self.user, "confirm_destructive_writes"), False)
@@ -145,10 +144,6 @@ class SettingsTest(unittest.TestCase):
         bad = [
             ("default_mode", "turbo"),
             ("default_mode", 1),
-            ("edit_grant_duration_min", 4),
-            ("edit_grant_duration_min", 481),
-            ("edit_grant_duration_min", "30"),
-            ("edit_grant_duration_min", True),  # bool is not int
             ("verbosity", "verbose"),
             ("verbosity", "BALANCED"),
             ("confirm_destructive_writes", "yes"),
@@ -164,21 +159,39 @@ class SettingsTest(unittest.TestCase):
                 store.set_setting(self.user, key, value,
                                   educator_confirmed=True)
 
-    def test_boundary_values_accepted(self):
-        store.set_setting(self.user, "edit_grant_duration_min", 5,
-                          educator_confirmed=True)
-        self.assertEqual(
-            store.get_setting(self.user, "edit_grant_duration_min"), 5)
-        store.set_setting(self.user, "edit_grant_duration_min", 480,
-                          educator_confirmed=True)
-        self.assertEqual(
-            store.get_setting(self.user, "edit_grant_duration_min"), 480)
+    def test_edit_mode_is_not_timed(self):
+        # Edit is one blanket grant that stays on until the educator
+        # turns it off: there is no session length to set and no timed
+        # session API to call.
+        self.assertNotIn("edit_grant_duration_min", store.SETTINGS_SCHEMA)
+        with self.assertRaises(store.SettingsUnknownKey):
+            store.set_setting(self.user, "edit_grant_duration_min", 60,
+                              educator_confirmed=True)
+        for name in ("start_edit_session", "end_edit_session",
+                     "edit_session_active", "edit_session_remaining",
+                     "EDIT_GRANT_DURATION_MIN", "EDIT_GRANT_DURATION_MAX"):
+            self.assertFalse(hasattr(store, name), msg=name)
+
+    def test_legacy_stored_duration_setting_is_ignored(self):
+        # An older install sealed edit_grant_duration_min into the
+        # settings file. It must not break reads or reappear as a knob.
+        store.set_setting(self.user, "verbosity", "concise",
+                          educator_confirmed=False)
+        path = store._settings_path(self.user)
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        doc.pop("sig", None)
+        doc["settings"]["edit_grant_duration_min"] = 60
+        store._write_doc_atomic(path, doc)
+        self.assertEqual(store.get_setting(self.user, "verbosity"),
+                         "concise")
+        self.assertNotIn("edit_grant_duration_min",
+                         store.list_settings(self.user))
 
     # -- tamper refusal ----------------------------------------------------------
 
     def test_consequential_requires_educator_confirmation(self):
         for key, value in [("default_mode", "edit"),
-                           ("edit_grant_duration_min", 60),
                            ("confirm_destructive_writes", False),
                            ("write_approval_style", "batched")]:
             with self.assertRaises(store.SettingsTamperRefused,
@@ -206,13 +219,6 @@ class SettingsTest(unittest.TestCase):
                           educator_confirmed=False)
         self.assertEqual(store.get_setting(self.user, "failure_verbosity"),
                          "concise")
-
-    def test_edit_session_requires_educator_confirmation(self):
-        with self.assertRaises(store.SettingsTamperRefused):
-            store.start_edit_session(self.user, self.conv,
-                                     educator_confirmed=False)
-        self.assertFalse(store.edit_session_active(self.user, self.conv))
-        self.assertEqual(store.effective_mode(self.user, self.conv), "plan")
 
     def test_conversation_mode_requires_educator_confirmation(self):
         with self.assertRaises(store.SettingsTamperRefused):
@@ -242,55 +248,78 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(store.effective_mode(self.user, "other-conv"),
                          "plan")
 
-    def test_edit_session_wins_while_active(self):
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=30)
-        self.assertTrue(store.edit_session_active(self.user, self.conv))
-        self.assertEqual(store.effective_mode(self.user, self.conv), "edit")
-        self.assertGreater(store.edit_session_remaining(self.user, self.conv),
-                           0)
+    def _conversation_grant(self):
+        import modes.state as mode_state
+        return mode_state.request_edit_grant(
+            self.user, scope_type="conversation",
+            conversation_id=self.conv,
+            educator_confirmation={
+                "by": "educator", "channel": "educator-chat",
+                "authorization": "yes, use edit mode for this conversation"})
+
+    def _legacy_timed_grant(self, expires_at):
+        """Plant a timed grant the way an older install persisted it."""
+        import modes.state as mode_state
+        state = mode_state._load_state(self.user)
+        state["revision"] = int(state.get("revision", 0)) + 1
+        state["grants"].append({
+            "grant_id": "legacy-timed-%d" % state["revision"],
+            "revision": state["revision"],
+            "scope_type": "timed",
+            "conversation_id": None,
+            "educator_identity": {"by": "educator", "channel": "driver",
+                                  "authorization": "edit for 60 minutes "
+                                                   "please, thanks"},
+            "source_utterance": "edit for 60 minutes please, thanks",
+            "granted_at": store.utc_now_iso(),
+            "expires_at": expires_at,
+            "duration_min": 60,
+            "revoked": False, "revoked_at": None, "revoke_reason": None,
+        })
+        state.pop("sig", None)
+        mode_state._save_state(self.user, state)
 
     def test_most_recent_action_wins(self):
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=30)
+        self._conversation_grant()
         self.assertEqual(store.effective_mode(self.user, self.conv), "edit")
         # A later explicit plan override for the conversation wins.
         store.set_conversation_mode(self.user, self.conv, "plan",
                                     educator_confirmed=True)
         self.assertEqual(store.effective_mode(self.user, self.conv), "plan")
 
-    def test_expired_session_falls_back(self):
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=5)
-        self.assertTrue(store.edit_session_active(self.user, self.conv))
-        # Sessions are modes timed grants (sealed files); force expiry by
-        # moving the modes clock past the grant's expiry.
-        import modes.state as mode_state
-        real_utcnow = mode_state._utcnow
-        mode_state._utcnow = lambda: real_utcnow() + timedelta(minutes=6)
-        try:
-            self.assertFalse(store.edit_session_active(self.user, self.conv))
-            self.assertEqual(store.effective_mode(self.user, self.conv),
-                             "plan")
-        finally:
-            mode_state._utcnow = real_utcnow
-
-    def test_end_edit_session_returns_to_default(self):
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=30)
-        self.assertTrue(store.end_edit_session(self.user, self.conv))
-        self.assertFalse(store.edit_session_active(self.user, self.conv))
+    def test_legacy_timed_grant_lapses_to_plan(self):
+        # A still-unexpired timed grant from an older install must not
+        # keep edit on, and must never become a standing grant.
+        future = (store.utc_now() + timedelta(hours=2)).isoformat()
+        self._legacy_timed_grant(future)
         self.assertEqual(store.effective_mode(self.user, self.conv), "plan")
-        self.assertFalse(store.end_edit_session(self.user, self.conv))
+        self.assertEqual(store.effective_mode(self.user), "plan")
+        self.assertEqual(store.get_setting(self.user, "default_mode"),
+                         "plan")
+
+    def test_end_edit_mode_turns_edit_off_everywhere(self):
+        from modes import state as mode_state
+        store.set_setting(self.user, "default_mode", "edit",
+                          educator_confirmed=True)
+        self._conversation_grant()
+        store.set_conversation_mode(self.user, "other-conv", "edit",
+                                    educator_confirmed=True)
+        result = mode_state.switch_mode(self.user, "plan",
+                                        conversation_id=self.conv)
+        self.assertEqual(result["mode"], "plan")
+        self.assertTrue(result["default_mode_changed"])
+        self.assertEqual(store.get_setting(self.user, "default_mode"),
+                         "plan")
+        for conv in (self.conv, "other-conv", None):
+            self.assertEqual(store.effective_mode(self.user, conv), "plan",
+                             msg=conv)
 
     def test_end_conversation_clears_scoped_state(self):
         store.set_conversation_mode(self.user, self.conv, "edit",
                                     educator_confirmed=True)
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=30)
+        self._conversation_grant()
         store.end_conversation(self.user, self.conv)
         self.assertIsNone(store.get_conversation_mode(self.user, self.conv))
-        self.assertFalse(store.edit_session_active(self.user, self.conv))
         self.assertEqual(store.effective_mode(self.user, self.conv), "plan")
 
     def test_destructive_confirmation_helper(self):
@@ -304,30 +333,27 @@ class SettingsTest(unittest.TestCase):
     def test_persistence_across_simulated_restart(self):
         """A fresh interpreter process sees persisted changes.
 
-        Timed edit sessions ARE modes grants: sealed and persisted, so
-        a restart inside the granted window keeps the session live
-        (expiry still bounds it). Per-conversation overrides stay
-        in-memory and do NOT survive a restart.
+        The standing edit default is persisted and survives a restart
+        with no expiry. A per-conversation plan override is persisted
+        too: every dispatch is a new process, so an in-memory override
+        never reached the write gate.
         """
-        store.set_setting(self.user, "edit_grant_duration_min", 60,
+        store.set_setting(self.user, "default_mode", "edit",
                           educator_confirmed=True, educator="braden")
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=60)
-        store.set_conversation_mode(self.user, self.conv, "edit",
+        store.set_conversation_mode(self.user, self.conv, "plan",
                                     educator_confirmed=True)
+        self.assertEqual(store.effective_mode(self.user, self.conv), "plan")
         snippet = (
             "import sys; sys.path.insert(0, %r);"
             "from settings import store as s;"
-            "assert s.get_setting(%r, 'edit_grant_duration_min') == 60;"
-            "assert s.get_setting(%r, 'default_mode') == 'plan';"
-            "assert s.verify_audit(%r) == 3;"
-            "assert s.effective_mode(%r, %r) == 'edit';"  # grant persists
-            "assert s.edit_session_active(%r, %r);"
-            "assert s.get_conversation_mode(%r, %r) is None;"  # override gone
+            "assert s.get_setting(%r, 'default_mode') == 'edit';"
+            "assert s.verify_audit(%r) == 2;"
+            "assert s.effective_mode(%r, %r) == 'plan';"  # override kept
+            "assert s.get_conversation_mode(%r, %r) == 'plan';"
+            "assert s.effective_mode(%r, 'other-conv') == 'edit';"
             "print('restart-ok')"
-            % (_TREE, self.user, self.user, self.user,
-               self.user, self.conv, self.user, self.conv,
-               self.user, self.conv))
+            % (_TREE, self.user, self.user,
+               self.user, self.conv, self.user, self.conv, self.user))
         proc = subprocess.run([sys.executable, "-c", snippet],
                               capture_output=True, text=True,
                               env=dict(os.environ),
@@ -361,22 +387,31 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(rec["old_value"], "plan")
         self.assertEqual(rec["new_value"], "edit")
 
-    def test_session_and_override_are_journaled(self):
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 educator="braden", duration_min=30)
+    def test_override_and_end_edit_are_journaled(self):
+        from modes import state as mode_state
+        store.set_setting(self.user, "default_mode", "edit",
+                          educator_confirmed=True, educator="braden")
         store.set_conversation_mode(self.user, self.conv, "plan",
                                     educator_confirmed=True,
                                     educator="braden")
+        mode_state.switch_mode(self.user, "plan", conversation_id=self.conv,
+                               educator="braden")
         records = store.read_audit(self.user)
-        self.assertEqual(len(records), 2)
-        self.assertEqual(records[0]["kind"], "settings.edit_session")
-        self.assertEqual(records[0]["old_value"], "plan")
-        self.assertEqual(records[0]["new_value"], "edit")
-        self.assertIn("expires_at", records[0])
+        self.assertEqual(len(records), 4)
         self.assertEqual(records[1]["kind"], "settings.conversation_mode")
         self.assertEqual(records[1]["new_value"], "plan")
         self.assertEqual(records[1]["educator"], "braden")
-        self.assertEqual(store.verify_audit(self.user), 2)
+        self.assertEqual(records[1]["conversation_id"], self.conv)
+        self.assertEqual(records[2]["kind"],
+                         "settings.conversation_overrides_cleared")
+        self.assertIn(self.conv, records[2]["old_value"])
+        self.assertEqual(records[2]["educator"], "braden")
+        self.assertEqual(records[3]["kind"], "settings.change")
+        self.assertEqual(records[3]["key"], "default_mode")
+        self.assertEqual(records[3]["old_value"], "edit")
+        self.assertEqual(records[3]["new_value"], "plan")
+        self.assertEqual(records[3]["educator"], "braden")
+        self.assertEqual(store.verify_audit(self.user), 4)
 
     def test_educator_defaults_to_user_id(self):
         store.set_setting(self.user, "read_confirmations", True,
@@ -417,7 +452,7 @@ class SettingsTest(unittest.TestCase):
     # -- safety ---------------------------------------------------------------------------
 
     def test_user_id_traversal_rejected(self):
-        for bad in ["../evil", "..\\evil", "/abs", "", "a" * 65,
+        for bad in ["../evil", "..\\evil", "/abs", "", "a" * 161,
                     "semi;colon", "sp ace"]:
             with self.assertRaises(store.SettingsError, msg=bad):
                 store.get_setting(bad, "default_mode")
@@ -435,11 +470,11 @@ class SettingsTest(unittest.TestCase):
     def test_invalid_stored_value_fails_closed(self):
         path = store._settings_path(self.user)
         doc = {"version": 1, "change_count": 0,
-               "settings": {"edit_grant_duration_min": 9999}}
+               "settings": {"verbosity": "garbage"}}
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
         with self.assertRaises(store.SettingsCorrupt):
-            store.get_setting(self.user, "edit_grant_duration_min")
+            store.get_setting(self.user, "verbosity")
 
     def test_settings_file_is_private(self):
         store.set_setting(self.user, "verbosity", "concise",
@@ -449,26 +484,18 @@ class SettingsTest(unittest.TestCase):
         amode = os.stat(store._audit_path(self.user)).st_mode & 0o777
         self.assertEqual(amode, 0o600)
 
-    def test_no_em_dashes_in_spoken_text(self):
-        samples = []
-        for utterance in ["use edit mode", "make edit mode my default",
-                          "switch to plan mode",
-                          "use plan mode for this conversation",
-                          "use edit mode for this conversation",
-                          "set my edit sessions to 60 minutes",
-                          "set my edit sessions to 500 minutes",
-                          "stop asking me to confirm deletions",
-                          "show me my settings", "what mode am I in",
-                          "be more concise", "end edit mode",
-                          "blah blah nothing"]:
-            _, reply = commands.parse_command(utterance, user_id=self.user,
-                                              conversation_id=self.conv)
-            samples.append(reply)
-        for s in samples:
-            self.assertNotIn("\u2014", s, msg=s)
+    def test_no_em_dashes_in_schema_descriptions(self):
+        for key, entry in store.SETTINGS_SCHEMA.items():
+            self.assertNotIn("\u2014", entry["description"], msg=key)
 
 
-class ParserTest(unittest.TestCase):
+class CommandTest(unittest.TestCase):
+    """The typed mode and settings commands (settings/commands.py).
+
+    The agent decides what the educator means and calls these; no free
+    text reaches them. Tests assert the resulting state and the truth of
+    the message, never a phrasing of the educator's request."""
+
     def setUp(self):
         self.work = os.path.join(_HERE, ".selftest-work")
         self.home = os.path.join(self.work, "parser-home")
@@ -484,11 +511,7 @@ class ParserTest(unittest.TestCase):
                                              "approval-signing.key")
         self.user = "parser-user"
         self.conv = "parser-conv"
-        # Session-scoped state: conversation overrides are process-global
-        # in-memory; timed sessions are modes grants (persisted, sealed).
-        # Reset both so each test starts clean.
-        with store._SESSION_LOCK:
-            store._CONVERSATION_MODES.clear()
+        store.clear_conversation_overrides(self.user)
         import modes.state as _mode_state
         _mode_state.revoke_edit_grant(self.user, reason="test reset")
 
@@ -512,146 +535,271 @@ class ParserTest(unittest.TestCase):
                 except OSError:
                     pass
 
-    def _parse(self, text):
-        return commands.parse_command(text, user_id=self.user,
-                                      conversation_id=self.conv)
+    def _enter_edit_everywhere(self):
+        from modes import state as mode_state
+        store.set_setting(self.user, "default_mode", "edit",
+                          educator_confirmed=True)
+        mode_state.request_edit_grant(
+            self.user, scope_type="conversation", conversation_id=self.conv,
+            educator_confirmation={
+                "by": "educator", "channel": "educator-chat",
+                "authorization": "yes, use edit mode for this conversation"})
+        store.set_conversation_mode(self.user, "other-conv", "edit",
+                                    educator_confirmed=True)
 
-    def test_use_edit_mode_starts_session(self):
-        # Braden's model: "use edit mode" is a standing grant, no time
-        # handcuffs. It sets default_mode="edit", not a timed session.
-        op, reply = self._parse("use edit mode")
-        self.assertEqual(op["action"], "set")
-        self.assertEqual(op["key"], "default_mode")
-        self.assertEqual(op["value"], "edit")
-        self.assertTrue(op["needs_confirmation"])
+    def test_parser_is_gone(self):
+        # No free text decides a mode or a setting.
+        for name in ("parse_command", "apply_command", "is_confirmation",
+                     "is_cancellation", "_mode_intent"):
+            self.assertFalse(hasattr(commands, name), msg=name)
+        for name, fn in inspect.getmembers(commands, inspect.isfunction):
+            if fn.__module__ != commands.__name__:
+                continue
+            params = inspect.signature(fn).parameters
+            self.assertNotIn("text", params, msg=name)
+            self.assertNotIn("utterance", params, msg=name)
 
-    def test_make_edit_mode_my_default_is_standing_grant(self):
-        op, reply = self._parse("make edit mode my default")
-        self.assertEqual(op["action"], "set")
-        self.assertEqual(op["key"], "default_mode")
-        self.assertEqual(op["value"], "edit")
-        self.assertTrue(op["needs_confirmation"])
-        self.assertIn("standing edit grant", reply)
+    def test_no_command_forces_a_confirmation_round_trip(self):
+        # The agent acts on what the educator said; no command holds a
+        # change back for a second "confirmed" call.
+        for name in ("mode_set", "setting_set"):
+            params = inspect.signature(getattr(commands, name)).parameters
+            self.assertNotIn("educator_confirmed", params, msg=name)
+        with self.assertRaises(SystemExit):
+            commands.main(["mode", "set", "edit", "--user-id", self.user,
+                           "--educator-confirmed"])
 
-    def test_switch_to_plan_mode(self):
-        op, reply = self._parse("switch to plan mode")
-        self.assertEqual(op["action"], "set")
-        self.assertEqual(op["key"], "default_mode")
-        self.assertEqual(op["value"], "plan")
-        self.assertTrue(op["needs_confirmation"])
-
-    def test_use_plan_mode_for_this_conversation(self):
-        op, reply = self._parse("use plan mode for this conversation")
-        self.assertEqual(op["action"], "conversation")
-        self.assertEqual(op["key"], "conversation_mode")
-        self.assertEqual(op["value"], "plan")
-        self.assertTrue(op["needs_confirmation"])
-        self.assertIn("this conversation only", reply)
-
-    def test_use_edit_mode_for_this_conversation(self):
-        op, reply = self._parse("use edit mode for this conversation")
-        self.assertEqual(op["action"], "conversation")
-        self.assertEqual(op["value"], "edit")
-        self.assertTrue(op["needs_confirmation"])
-
-    def test_edit_sessions_duration(self):
-        op, reply = self._parse("set my edit sessions to 60 minutes")
-        self.assertEqual(op["action"], "set")
-        self.assertEqual(op["key"], "edit_grant_duration_min")
-        self.assertEqual(op["value"], 60)
-        self.assertTrue(op["needs_confirmation"])
-        self.assertIn("60 minutes", reply)
-
-    def test_edit_sessions_duration_out_of_range(self):
-        op, reply = self._parse("set my edit sessions to 500 minutes")
-        self.assertEqual(op["action"], "invalid")
-        self.assertIn("5 and 480", reply)
-
-    def test_stop_confirming_deletions(self):
-        op, reply = self._parse("stop asking me to confirm deletions")
-        self.assertEqual(op["action"], "set")
-        self.assertEqual(op["key"], "confirm_destructive_writes")
-        self.assertEqual(op["value"], False)
-        self.assertTrue(op["needs_confirmation"])
-        self.assertIn("Turning off deletion confirmations", reply)
-
-    def test_always_confirm_deletions(self):
-        op, _ = self._parse("always confirm deletions")
-        self.assertEqual(op["key"], "confirm_destructive_writes")
-        self.assertEqual(op["value"], True)
-        self.assertTrue(op["needs_confirmation"])
-
-    def test_show_settings(self):
-        op, reply = self._parse("show me my settings")
-        self.assertEqual(op["action"], "show")
-        self.assertFalse(op["needs_confirmation"])
-        self.assertIn("Default mode", reply)
-
-    def test_what_mode_am_i_in(self):
-        op, reply = self._parse("what mode am I in")
-        self.assertEqual(op["action"], "status")
-        self.assertFalse(op["needs_confirmation"])
-        self.assertIn("plan mode", reply)
-
-    def test_what_mode_am_i_in_during_session(self):
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=30)
-        op, reply = self._parse("what mode am I in")
-        self.assertIn("edit mode", reply)
-        self.assertIn("timed edit session", reply)
-
-    def test_be_more_concise(self):
-        op, reply = self._parse("be more concise")
-        self.assertEqual(op["action"], "set")
-        self.assertEqual(op["key"], "verbosity")
-        self.assertEqual(op["value"], "concise")
-        self.assertFalse(op["needs_confirmation"])
-
-    def test_end_edit_mode(self):
-        op, reply = self._parse("end edit mode")
-        self.assertEqual(op["action"], "end_session")
-        self.assertFalse(op["needs_confirmation"])
-
-    def test_unknown_utterance(self):
-        op, reply = self._parse("tell me a joke about quizzes")
-        self.assertEqual(op["action"], "unknown")
-        self.assertIn("use edit mode", reply)
-
-    def test_confirmation_recognition(self):
-        for yes in ["yes", "Yes", "yeah", "confirm", "do it", "go ahead",
-                    "sounds good", "make it so"]:
-            self.assertTrue(commands.is_confirmation(yes), msg=yes)
-        for no in ["no", "cancel", "never mind", "stop", "not yet"]:
-            self.assertFalse(commands.is_confirmation(no), msg=no)
-            self.assertTrue(commands.is_cancellation(no), msg=no)
-
-    def test_end_to_end_session_flow(self):
-        # Educator asks, agent echoes, educator confirms, agent sets standing grant.
-        # Braden's model: "use edit mode" is a standing grant (default_mode="edit"),
-        # not a timed session. No time handcuffs.
-        op, echo = self._parse("use edit mode")
-        self.assertTrue(op["needs_confirmation"])
-        self.assertTrue(commands.is_confirmation("yes"))
-        self.assertEqual(op["action"], "set")
-        self.assertEqual(op["key"], "default_mode")
-        self.assertEqual(op["value"], "edit")
-        result = store.set_setting(
-            self.user, "default_mode", "edit",
-            educator_confirmed=True, educator=self.user)
-        self.assertEqual(store.effective_mode(self.user, self.conv), "edit")
-        rec = store.read_audit(self.user)[0]
-        self.assertEqual(rec["kind"], "settings.change")
-        self.assertEqual(rec["key"], "default_mode")
-        self.assertEqual(rec["old_value"], "plan")
-        self.assertEqual(rec["new_value"], "edit")
-
-    def test_end_to_end_default_grant_flow(self):
-        op, echo = self._parse("make edit mode my default")
-        self.assertTrue(op["needs_confirmation"])
-        self.assertTrue(commands.is_confirmation("yes"))
-        store.set_setting(self.user, op["key"], op["value"],
-                          educator_confirmed=True, educator=self.user)
+    def test_edit_default_takes_effect_and_says_what_it_means(self):
+        out = commands.mode_set(self.user, "edit", self.conv)
+        self.assertEqual((out["status"], out["mode"]), ("done", "edit"))
+        self.assertIn("apply without asking", out["message"])
+        self.assertIn("no time limit", out["message"])
         self.assertEqual(store.get_setting(self.user, "default_mode"), "edit")
+        self.assertIn("edit mode", out["message"])
+        self.assertIn("until you turn it off", out["message"])
+        rec = store.read_audit(self.user)[-1]
+        self.assertEqual((rec["kind"], rec["key"], rec["old_value"],
+                          rec["new_value"]),
+                         ("settings.change", "default_mode", "plan", "edit"))
+
+    def test_plan_everywhere_actually_puts_educator_in_plan(self):
+        from dispatch.admission import check_mode_authority
+        from modes import errors as mode_errors
+        entry = {"name": "canvas_create_page", "effects": "write",
+                 "provider": "canvas",
+                 "request": {"method": "POST", "url": "{canvas_base}"
+                             "/api/v1/courses/{course_id}/pages"}}
+        self._enter_edit_everywhere()
+        self.assertEqual(store.effective_mode(self.user, self.conv), "edit")
+        out = commands.mode_set(self.user, "plan", self.conv)
+        self.assertEqual((out["status"], out["mode"]), ("done", "plan"))
+        self.assertEqual(store.get_setting(self.user, "default_mode"), "plan")
+        for conv in (self.conv, "other-conv", None):
+            self.assertEqual(store.effective_mode(self.user, conv), "plan",
+                             msg=conv)
+        with self.assertRaises(mode_errors.PlanModeWriteWithoutApproval):
+            check_mode_authority(entry, {"course_id": "1"}, None,
+                                 {"user_id": self.user,
+                                  "conversation_id": self.conv})
+        self.assertIn("plan mode", out["message"])
+        self.assertIn("ask for your approval", out["message"])
+        self.assertNotIn("—", out["message"])
+
+    def test_plan_reports_the_true_mode(self):
+        from modes import state as mode_state
+        self._enter_edit_everywhere()
+        real = commands.effective_mode
+        commands.effective_mode = lambda *a, **k: "edit"
+        try:
+            out = commands.mode_set(self.user, "plan", self.conv)
+        finally:
+            commands.effective_mode = real
+        self.assertEqual(out["status"], "error")
+        self.assertIn("still in edit mode", out["message"])
+        self.assertNotIn("You are in plan mode", out["message"])
+        del mode_state
+
+    def test_plan_for_this_conversation_applies_at_once(self):
+        store.set_setting(self.user, "default_mode", "edit",
+                          educator_confirmed=True)
+        out = commands.mode_set(self.user, "plan", self.conv,
+                                this_conversation=True)
+        self.assertEqual((out["status"], out["mode"]), ("done", "plan"))
+        self.assertEqual(store.get_conversation_mode(self.user, self.conv),
+                         "plan")
+        self.assertIn("plan override for this conversation", out["message"])
+        self.assertEqual(store.effective_mode(self.user, "another"), "edit")
+
+    def test_edit_for_this_conversation_takes_effect_and_stays_scoped(self):
+        out = commands.mode_set(self.user, "edit", self.conv,
+                                this_conversation=True)
+        self.assertEqual((out["status"], out["mode"]), ("done", "edit"))
+        self.assertIn("apply without asking", out["message"])
+        self.assertEqual(store.get_setting(self.user, "default_mode"), "plan")
+        self.assertIn("edit override for this conversation", out["message"])
+
+    def test_this_conversation_requires_an_id(self):
+        out = commands.mode_set(self.user, "edit", None,
+                                this_conversation=True)
+        self.assertEqual(out["status"], "error")
+        self.assertEqual(out["mode"], "plan")
+
+    def test_bad_mode_changes_nothing(self):
+        out = commands.mode_set(self.user, "turbo", self.conv)
+        self.assertEqual((out["status"], out["mode"]), ("error", "plan"))
+        self.assertEqual(store.read_audit(self.user), [])
+
+    def test_status_names_the_source(self):
+        out = commands.mode_status(self.user, self.conv)
+        self.assertEqual(out["mode"], "plan")
+        self.assertIn("plan mode", out["message"])
+        store.set_setting(self.user, "default_mode", "edit",
+                          educator_confirmed=True)
+        out = commands.mode_status(self.user, self.conv)
+        self.assertEqual((out["mode"], out["default_mode"]), ("edit", "edit"))
+        self.assertIn("your saved default", out["message"])
+        self.assertIn("until you turn it off", out["message"])
+        self.assertNotIn(" left", out["message"])
+
+    def test_destructive_note_is_true_for_a_new_educator(self):
+        # The default is off, and a new educator never turned it off.
+        out = commands.mode_set(self.user, "edit", self.conv)
+        self.assertNotIn("You have turned off", out["message"])
+        self.assertIn("that is the default", out["message"])
+        store.set_setting(self.user, "confirm_destructive_writes", True,
+                          educator_confirmed=True)
+        out = commands.mode_set(self.user, "edit", self.conv)
+        self.assertIn("will still ask you first", out["message"])
+        store.set_setting(self.user, "confirm_destructive_writes", False,
+                          educator_confirmed=True)
+        out = commands.mode_set(self.user, "edit", self.conv)
+        self.assertIn("you turned them off", out["message"])
+
+    def test_deletion_confirmations_setting(self):
+        out = commands.setting_set(self.user, "confirm_destructive_writes",
+                                   True)
+        self.assertEqual(out["status"], "done")
+        self.assertTrue(store.destructive_confirmation_required(self.user))
+        out = commands.setting_set(self.user, "confirm_destructive_writes",
+                                   False)
+        self.assertFalse(store.destructive_confirmation_required(self.user))
+        self.assertIn("Deletion confirmations is now off", out["message"])
+        # Turning deletion confirmations off never touches the mode.
+        self.assertEqual(store.get_setting(self.user, "default_mode"), "plan")
+
+    def test_every_setting_applies_in_one_call_and_is_journaled(self):
+        values = {
+            "verbosity": "concise", "confirm_destructive_writes": True,
+            "write_approval_style": "batched", "failure_verbosity": "concise",
+            "proactivity": "suggestive", "read_confirmations": True,
+            "work_summary": "brief", "auto_cleanup_test_objects": False,
+            "default_course_id": "12345", "timezone": "America/Denver",
+            "confirm_bulk_actions": False,
+        }
+        self.assertEqual(set(values) | {"default_mode"},
+                         set(store.SETTINGS_SCHEMA))
+        for key, value in values.items():
+            out = commands.setting_set(self.user, key, value)
+            self.assertEqual(out["status"], "done", msg=key)
+            self.assertEqual(store.get_setting(self.user, key), value,
+                             msg=key)
+            rec = store.read_audit(self.user)[-1]
+            self.assertEqual((rec["key"], rec["new_value"]), (key, value))
+        self.assertEqual(store.verify_audit(self.user), len(values))
+
+    def test_invalid_setting_values_change_nothing(self):
+        for key, value in (("timezone", "Mars/Olympus"),
+                           ("default_course_id", "12 345"),
+                           ("verbosity", "loud"),
+                           ("confirm_bulk_actions", "yes")):
+            out = commands.setting_set(self.user, key, value)
+            self.assertEqual(out["status"], "error", msg=key)
+        out = commands.setting_set(self.user, "no_such_key", 1)
+        self.assertEqual(out["status"], "error")
+        self.assertEqual(store.read_audit(self.user), [])
+
+    def test_default_mode_setting_routes_through_mode_set(self):
+        out = commands.setting_set(self.user, "default_mode", "edit")
+        self.assertEqual((out["status"], out["mode"]), ("done", "edit"))
+        out = commands.setting_set(self.user, "default_mode", "plan")
+        self.assertEqual((out["status"], out["mode"]), ("done", "plan"))
+
+    def test_settings_show_uses_friendly_labels(self):
+        out = commands.settings_show(self.user, self.conv)
+        self.assertIn("Default course: none set", out["message"])
+        self.assertIn("Timezone: none set", out["message"])
+        self.assertIn("Work summary detail: full", out["message"])
+        self.assertNotIn("default_course_id", out["message"])
+        self.assertEqual(out["settings"]["default_mode"], "plan")
+
+    def test_setting_get(self):
+        store.set_setting(self.user, "default_course_id", "999",
+                          educator_confirmed=True)
+        out = commands.setting_get(self.user, "default_course_id")
+        self.assertEqual(out["value"], "999")
+        self.assertIn("999", out["message"])
+
+    def test_turn_off_after_tamper_reports_truthfully(self):
+        store.set_setting(self.user, "default_mode", "edit",
+                          educator_confirmed=True)
+        path = store._settings_path(self.user)
+        with open(path) as fh:
+            doc = json.load(fh)
+        doc["settings"]["verbosity"] = "detailed"
+        with open(path, "w") as fh:
+            json.dump(doc, fh)
+        out = commands.mode_set(self.user, "plan", self.conv)
+        self.assertEqual((out["status"], out["mode"]), ("done", "plan"))
+        self.assertTrue(out["settings_untrusted"])
+        self.assertIn("plan mode", out["message"])
+        self.assertIn("restore", out["message"])
+        status = commands.mode_status(self.user, self.conv)
+        self.assertEqual(status["mode"], "plan")
+        self.assertTrue(status["settings_untrusted"])
+
+    def test_no_em_dashes_in_any_message(self):
+        outs = [commands.mode_status(self.user, self.conv),
+                commands.mode_set(self.user, "edit", self.conv),
+                commands.mode_set(self.user, "edit", self.conv,
+                                  this_conversation=True),
+                commands.mode_set(self.user, "plan", self.conv,
+                                  this_conversation=True),
+                commands.mode_set(self.user, "plan", self.conv),
+                commands.settings_show(self.user, self.conv),
+                commands.setting_set(self.user, "confirm_bulk_actions",
+                                     False),
+                commands.setting_get(self.user, "timezone")]
+        for out in outs:
+            self.assertNotIn("—", out["message"])
+
+    def test_cli_mode_and_settings(self):
+        env = dict(os.environ)
+        env["MORROW_HOME"] = self.home
+        env.pop("MORROW_USER_ID", None)
+        script = os.path.join(_TREE, "bin", "morrow")
+
+        def run(*argv):
+            proc = subprocess.run([sys.executable, script] + list(argv),
+                                  capture_output=True, text=True, env=env,
+                                  timeout=120)
+            return proc.returncode, json.loads(proc.stdout.strip()
+                                               .splitlines()[-1])
+
+        code, out = run("mode", "set", "edit", "--user-id", self.user)
+        self.assertEqual((code, out["status"], out["mode"]),
+                         (0, "done", "edit"))
+        code, out = run("mode", "status", "--user-id", self.user)
+        self.assertEqual(out["mode"], "edit")
+        code, out = run("settings", "set", "confirm_destructive_writes",
+                        "true", "--user-id", self.user)
+        self.assertEqual((code, out["value"]), (0, True))
+        code, out = run("settings", "set", "confirm_destructive_writes",
+                        "yes please", "--user-id", self.user)
+        self.assertEqual((code, out["status"]), (1, "error"))
+        code, out = run("mode", "set", "plan", "--user-id", self.user)
+        self.assertEqual((code, out["mode"]), (0, "plan"))
+        code, out = run("mode", "status")
+        self.assertEqual(code, 2)
 
 
 class Lane4HardeningTest(unittest.TestCase):
@@ -673,8 +821,7 @@ class Lane4HardeningTest(unittest.TestCase):
                                              "approval-signing.key")
         self.user = "lane4-user-%d" % os.getpid()
         self.conv = "lane4-conv-%d" % os.getpid()
-        with store._SESSION_LOCK:
-            store._CONVERSATION_MODES.clear()
+        store.clear_conversation_overrides(self.user)
         import modes.state as _mode_state
         _mode_state.revoke_edit_grant(self.user, reason="test reset")
 
@@ -697,10 +844,6 @@ class Lane4HardeningTest(unittest.TestCase):
                     os.rmdir(os.path.join(root, name))
                 except OSError:
                     pass
-
-    def _parse(self, text):
-        return commands.parse_command(text, user_id=self.user,
-                                      conversation_id=self.conv)
 
     def _raw_doc(self):
         with open(store._settings_path(self.user), "r",
@@ -765,96 +908,6 @@ class Lane4HardeningTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0,
                          msg="stderr: %s" % proc.stderr)
         self.assertIn("seal-restart-ok", proc.stdout)
-
-    # -- parser gaps --------------------------------------------------------
-
-    def test_conversation_override_verb_variants(self):
-        for utterance, mode in [
-                ("switch to edit mode for this conversation", "edit"),
-                ("change to plan mode for this conversation", "plan"),
-                ("for this conversation, use edit mode", "edit"),
-                ("for this chat, use plan mode", "plan"),
-                ("use edit mode for this chat", "edit")]:
-            op, reply = self._parse(utterance)
-            self.assertEqual(op["action"], "conversation", msg=utterance)
-            self.assertEqual(op["value"], mode, msg=utterance)
-            self.assertTrue(op["needs_confirmation"], msg=utterance)
-
-    def test_conversation_override_never_becomes_standing_grant(self):
-        # The over-granting defect: a conversation-scoped ask must never
-        # parse as a persisted default_mode change.
-        op, _ = self._parse("switch to edit mode for this conversation")
-        self.assertNotEqual(op["key"], "default_mode")
-
-    def test_turn_on_off_verbs(self):
-        cases = [("turn on edit mode", "edit"),
-                 ("enable edit mode", "edit"),
-                 ("activate edit mode", "edit"),
-                 ("turn off edit mode", "plan"),
-                 ("disable edit mode", "plan"),
-                 ("deactivate edit mode", "plan"),
-                 ("turn on plan mode", "plan"),
-                 ("disable plan mode", "edit")]
-        for utterance, mode in cases:
-            op, reply = self._parse(utterance)
-            self.assertEqual(op["action"], "set", msg=utterance)
-            self.assertEqual(op["key"], "default_mode", msg=utterance)
-            self.assertEqual(op["value"], mode, msg=utterance)
-            self.assertTrue(op["needs_confirmation"], msg=utterance)
-
-    def test_what_is_default_mode(self):
-        op, reply = self._parse("what is my default mode")
-        self.assertEqual(op["action"], "status")
-        self.assertIn("plan", reply)
-        store.set_setting(self.user, "default_mode", "edit",
-                          educator_confirmed=True)
-        _, reply = self._parse("what is my default mode")
-        self.assertIn("edit", reply)
-
-    def test_confirmation_broadening(self):
-        for yes in ["yes please", "yes, go ahead and do it", "ok thanks",
-                    "absolutely", "definitely", "sure thing"]:
-            self.assertTrue(commands.is_confirmation(yes), msg=yes)
-        for not_yes in ["yesterday I changed my mind", "yepper"]:
-            self.assertFalse(commands.is_confirmation(not_yes),
-                             msg=not_yes)
-        # Hedge cues defer, never confirm: fail safe toward reprompt.
-        for hedge in ["okay, but first a question", "yes, but make it brief",
-                      "sure, hold on a second", "yes, wait"]:
-            self.assertFalse(commands.is_confirmation(hedge), msg=hedge)
-            self.assertFalse(commands.is_cancellation(hedge), msg=hedge)
-        for no in ["nah", "not now", "no, don't do that"]:
-            self.assertTrue(commands.is_cancellation(no), msg=no)
-            self.assertFalse(commands.is_confirmation(no), msg=no)
-
-    def test_parser_confirmation_matches_schema(self):
-        utterances = {
-            "default_mode": "make edit mode my default",
-            "edit_grant_duration_min": "set my edit sessions to 60 minutes",
-            "verbosity": "be more concise",
-            "confirm_destructive_writes":
-                "stop asking me to confirm deletions",
-            "write_approval_style": "use batched approvals",
-            "failure_verbosity": "keep failure reports short",
-            "proactivity": "suggest follow-ups",
-            "read_confirmations": "narrate what you are about to read",
-            "work_summary": "keep work summaries brief",
-            "auto_cleanup_test_objects": "clean up test objects when done",
-            "default_course_id": "my default course is 12345",
-            "timezone": "my timezone is Eastern",
-            "confirm_bulk_actions": "ask me before bulk actions",
-        }
-        self.assertEqual(set(utterances), set(store.SETTINGS_SCHEMA),
-                         "every schema key needs a parser utterance here")
-        for key, utterance in utterances.items():
-            op, _ = self._parse(utterance)
-            self.assertEqual(op["action"], "set",
-                             msg="utterance=%r" % utterance)
-            self.assertEqual(op["key"], key, msg="utterance=%r" % utterance)
-            self.assertEqual(
-                op["needs_confirmation"],
-                bool(store.SETTINGS_SCHEMA[key]["consequential"]),
-                msg="utterance=%r key=%r" % (utterance, key))
 
     # -- new settings: validation --------------------------------------------
 
@@ -934,85 +987,6 @@ class Lane4HardeningTest(unittest.TestCase):
         self.assertEqual(rec["new_value"], "12345")
         self.assertEqual(rec["educator"], "braden")
         self.assertEqual(store.verify_audit(self.user), 1)
-
-    # -- new settings: parser ---------------------------------------------------
-
-    def test_default_course_parser(self):
-        op, reply = self._parse("my default course is 12345")
-        self.assertEqual((op["action"], op["key"], op["value"]),
-                         ("set", "default_course_id", "12345"))
-        self.assertTrue(op["needs_confirmation"])
-        self.assertIn("12345", reply)
-        op, _ = self._parse("clear my default course")
-        self.assertEqual(op["value"], "")
-        op, reply = self._parse("what is my default course")
-        self.assertEqual(op["action"], "status")
-        self.assertIn("no default course", reply)
-        store.set_setting(self.user, "default_course_id", "999",
-                          educator_confirmed=True)
-        _, reply = self._parse("what is my default course")
-        self.assertIn("999", reply)
-
-    def test_timezone_parser(self):
-        cases = [("my timezone is Eastern", "America/New_York"),
-                 ("my timezone is pacific", "America/Los_Angeles"),
-                 ("set timezone to america/denver", "America/Denver"),
-                 ("set timezone to America/Chicago", "America/Chicago"),
-                 ("timezone: UTC", "UTC")]
-        for utterance, zone in cases:
-            op, reply = self._parse(utterance)
-            self.assertEqual(op["action"], "set", msg=utterance)
-            self.assertEqual(op["key"], "timezone", msg=utterance)
-            self.assertEqual(op["value"], zone, msg=utterance)
-            self.assertFalse(op["needs_confirmation"], msg=utterance)
-            self.assertIn(zone, reply, msg=utterance)
-
-    def test_timezone_invalid(self):
-        op, reply = self._parse("my timezone is Mars/Olympus")
-        self.assertEqual(op["action"], "invalid")
-        self.assertEqual(op["key"], "timezone")
-
-    def test_timezone_question_reports_current(self):
-        _, reply = self._parse("what timezone am I in")
-        self.assertIn("don't have a timezone set", reply)
-        store.set_setting(self.user, "timezone", "America/Denver",
-                          educator_confirmed=False)
-        _, reply = self._parse("what timezone am I in")
-        self.assertIn("America/Denver", reply)
-
-    def test_bulk_actions_parser(self):
-        op, reply = self._parse("ask me before bulk actions")
-        self.assertEqual((op["action"], op["key"], op["value"]),
-                         ("set", "confirm_bulk_actions", True))
-        self.assertTrue(op["needs_confirmation"])
-        op, reply = self._parse("don't ask before bulk actions")
-        self.assertEqual(op["value"], False)
-        self.assertTrue(op["needs_confirmation"])
-        self.assertIn("Say 'yes' to confirm", reply)
-
-    def test_work_summary_parser(self):
-        op, _ = self._parse("keep work summaries brief")
-        self.assertEqual((op["key"], op["value"]),
-                         ("work_summary", "brief"))
-        self.assertFalse(op["needs_confirmation"])
-        op, _ = self._parse("give me full work summaries")
-        self.assertEqual(op["value"], "full")
-
-    def test_auto_cleanup_parser(self):
-        op, _ = self._parse("clean up test objects when done")
-        self.assertEqual((op["key"], op["value"]),
-                         ("auto_cleanup_test_objects", True))
-        op, _ = self._parse("keep test objects")
-        self.assertEqual(op["value"], False)
-        op, _ = self._parse("delete proof objects after checks")
-        self.assertEqual(op["value"], True)
-
-    def test_show_sentence_uses_friendly_labels(self):
-        _, reply = self._parse("show me my settings")
-        self.assertIn("Default course: none set", reply)
-        self.assertIn("Timezone: none set", reply)
-        self.assertIn("Work summary detail: full", reply)
-        self.assertNotIn("default_course_id", reply)
 
     # -- journal hardening -------------------------------------------------------
 
@@ -1117,30 +1091,6 @@ class Lane4HardeningTest(unittest.TestCase):
         with open(path, "r", encoding="utf-8") as fh:
             journal = fh.read()
         self.assertEqual(journal.count("rec_hash"), 1)
-
-    # -- spoken text ------------------------------------------------------------------
-
-    def test_no_em_dashes_in_new_spoken_text(self):
-        utterances = [
-            "switch to edit mode for this conversation",
-            "turn on edit mode", "turn off edit mode",
-            "what is my default mode",
-            "ask me before bulk actions", "don't ask before bulk actions",
-            "my default course is 12345", "clear my default course",
-            "what is my default course", "my timezone is Eastern",
-            "set timezone to America/Denver", "my timezone is Mars/Olympus",
-            "what timezone am I in",
-            "clean up test objects when done", "keep test objects",
-            "keep work summaries brief", "give me full work summaries",
-            "help", "what can I change",
-        ]
-        store.set_setting(self.user, "default_course_id", "12345",
-                          educator_confirmed=True)
-        store.set_setting(self.user, "timezone", "America/Denver",
-                          educator_confirmed=False)
-        for utterance in utterances:
-            _, reply = self._parse(utterance)
-            self.assertNotIn("\u2014", reply, msg=utterance)
 
 
 if __name__ == "__main__":

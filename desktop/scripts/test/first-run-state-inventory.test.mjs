@@ -83,7 +83,7 @@ function installer(overrides = {}) {
 
 const ASSISTANT_READY = Object.freeze({
   lifecycle: "assistant_ready",
-  assistants: [{ ...CHATGPT, detected: true, configured: true, selected: true }],
+  assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }],
   selectedAssistantId: "codex",
   bridgeFolderReady: true,
 });
@@ -107,6 +107,13 @@ const INSTALLER_STATES = new Map([
   ["preview-ready", installer({ ...COURSE_READY, firstPreview: { available: true } })],
   ["preview-preparing", installer({ ...COURSE_READY })],
   ["preview-completed", installer({ ...COURSE_READY, firstPreview: { available: true, completed: true } })],
+  ["move-required", installer({ lifecycle: "move_required", appLocation: "move_required", assistants: [{ ...CHATGPT, detected: true }] })],
+  ["assistant-repoint", installer({ assistantsNeedRepoint: true, assistants: [{ ...CHATGPT, detected: true, selected: true }], selectedAssistantId: "codex" })],
+  ["assistant-restart", installer({
+    ...COURSE_READY,
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: false, selected: true }],
+    firstPreview: { available: true, completed: true },
+  })],
 ]);
 
 // The two states the renderer owns rather than the action panel: the first read, and a read that failed.
@@ -243,7 +250,7 @@ const GUIDE_STATES = new Map([
 ]);
 const GUIDE_SECTION = "5. Morrow Bridge setup guide";
 const GUIDE_SOURCE_NEEDLES = new Map([
-  ["site-saved-not-verified", "Open the saved ${platform"],
+  ["site-saved-not-verified", "or open the saved ${platform"],
 ]);
 
 test("the inventory carries what every setup guide state renders", () => {

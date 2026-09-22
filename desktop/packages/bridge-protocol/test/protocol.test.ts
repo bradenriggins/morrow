@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import {
-  BRIDGE_EDIT_DURATIONS_MS,
   BRIDGE_PROTOCOL_VERSION,
   BRIDGE_SCHEMAS,
   MAX_BRIDGE_MESSAGE_BYTES,
@@ -22,7 +21,6 @@ import {
 } from "../src/index.js";
 // The five "do not ask again" durations (D3) are kept by hand in this package and in the
 // extension's own settings list. A test below proves the two lists still agree.
-import { SETTINGS_EDIT_DURATIONS } from "../../../connector/extension/src/edit-policy.js";
 
 const digest = "a".repeat(64);
 const assignmentOperationKey = "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment";
@@ -773,29 +771,65 @@ describe("bridge protocol", () => {
       .toThrow("loopback operations or batches address");
   });
 
-  it("accepts an editPolicySet merge with a chosen duration (WI-4.1)", () => {
+  it("accepts an untimed editPolicySet grant and merge (WI-4.1)", () => {
     const selection = { sourceBindingId: "canvas-101", expectedPolicyRevision: 3, enabledCategories: ["canvas_edit_page_content"] };
-    expect(normalizeBridgeEditPolicySet({ mode: "edit", selections: [selection], merge: true, expiresInMs: 4 * 60 * 60 * 1_000 }))
-      .toEqual({ mode: "edit", selections: [selection], merge: true, expiresInMs: 4 * 60 * 60 * 1_000 });
+    expect(normalizeBridgeEditPolicySet({ mode: "edit", selections: [selection], merge: true }))
+      .toEqual({ mode: "edit", selections: [selection], merge: true });
     expect(normalizeBridgeEditPolicySet({ mode: "edit", selections: [selection] }))
       .toEqual({ mode: "edit", selections: [selection] });
   });
 
-  it("refuses an editPolicySet duration outside the five fixed Edit durations", () => {
+  it("refuses any editPolicySet duration, because Edit stays on until the person turns it off", () => {
     const selection = { sourceBindingId: "canvas-101", expectedPolicyRevision: 3, enabledCategories: ["canvas_edit_page_content"] };
-    expect(() => normalizeBridgeEditPolicySet({ mode: "edit", selections: [selection], expiresInMs: 90 * 60 * 1_000 }))
-      .toThrow("expiresInMs must be one of the fixed Edit durations");
-    expect(() => normalizeBridgeEditPolicySet({ mode: "edit", selections: [selection], expiresInMs: "4h" }))
-      .toThrow("expiresInMs must be one of the fixed Edit durations");
+    for (const expiresInMs of [4 * 60 * 60 * 1_000, 90 * 60 * 1_000, "4h"]) {
+      expect(() => normalizeBridgeEditPolicySet({ mode: "edit", selections: [selection], merge: true, expiresInMs }))
+        .toThrow("unsupported fields");
+    }
+  });
+
+  it("carries the approval key for Morrow Bridge only for the review origin it names", () => {
+    const presence = { origin: "http://127.0.0.1:44300", key: "k".repeat(43) };
+    expect(normalizeBridgeUiState({ reviews: [], presence })).toEqual({ reviews: [], presence });
+    for (const bad of [
+      { ...presence, origin: "http://127.0.0.1" },
+      { ...presence, origin: "https://127.0.0.1:44300" },
+      { ...presence, origin: "http://localhost:44300" },
+      { ...presence, origin: "http://127.0.0.1:44300/operations" },
+      { ...presence, key: "short" },
+      { ...presence, key: "k".repeat(42) + "=" },
+      { ...presence, extra: true },
+    ]) {
+      expect(() => normalizeBridgeUiState({ reviews: [], presence: bad })).toThrow("uiState.presence");
+    }
+  });
+
+  it("carries the label-to-name map for a review only in an exact, bounded shape", () => {
+    const entry = { path: "/operations/op:learner-1234", names: { "Student A1": "Jane Doe", "Student A12": "Ana Rivera" } };
+    expect(normalizeBridgeUiState({ reviews: [], learnerNames: [entry] })).toEqual({ reviews: [], learnerNames: [entry] });
+    expect(normalizeBridgeUiState({ reviews: [], learnerNames: [] })).toEqual({ reviews: [] });
+    for (const bad of [
+      [{ ...entry, extra: true }],
+      [{ ...entry, path: "/recent" }],
+      [{ ...entry, path: "/operations/op%3Alearner-1234" }],
+      [{ ...entry, path: "http://127.0.0.1:44300/operations/op:learner-1234" }],
+      [{ ...entry, names: {} }],
+      [{ ...entry, names: { "Student B1": "Jane Doe" } }],
+      [{ ...entry, names: { "Student A0": "Jane Doe" } }],
+      [{ ...entry, names: { "Student A1": "" } }],
+      [{ ...entry, names: { "Student A1": "x".repeat(121) } }],
+      [{ ...entry, names: { "Student A1": 7 } }],
+      [{ ...entry, names: Object.fromEntries(Array.from({ length: 301 }, (_, index) => [`Student A${index + 1}`, "Jane Doe"])) }],
+      [entry, entry],
+      Array.from({ length: 21 }, (_, index) => ({ ...entry, path: `/operations/op:learner-${1000 + index}` })),
+      entry,
+    ]) {
+      expect(() => normalizeBridgeUiState({ reviews: [], learnerNames: bad }), JSON.stringify(bad).slice(0, 80)).toThrow("uiState.learnerNames");
+    }
   });
 
   it("refuses an editPolicySet merge with mode Plan", () => {
     const planSelection = { sourceBindingId: "canvas-101", expectedPolicyRevision: 3 };
     expect(() => normalizeBridgeEditPolicySet({ mode: "plan", selections: [planSelection], merge: true }))
       .toThrow("merge is invalid for Plan");
-  });
-
-  it("keeps BRIDGE_EDIT_DURATIONS_MS equal to SETTINGS_EDIT_DURATIONS in the extension", () => {
-    expect(BRIDGE_EDIT_DURATIONS_MS).toEqual(SETTINGS_EDIT_DURATIONS.map((duration) => duration.value));
   });
 });

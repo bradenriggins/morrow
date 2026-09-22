@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { STRUCTURAL_EDIT_FIELDS, categoriesForBinding, changedFields, createEditPermission } from "../../connector/extension/src/edit-policy.js";
+import * as editPolicy from "../../connector/extension/src/edit-policy.js";
+import { STRUCTURAL_EDIT_FIELDS, categoriesForBinding, changedFields, createEditPermission, validEditPermission } from "../../connector/extension/src/edit-policy.js";
 import { STRUCTURAL_EDIT_FIELDS as bridgeStructuralEditFields, matchesBridgeEditPermission } from "../../packages/bridge-protocol/dist/index.js";
 
 const root = new URL("../../", import.meta.url);
@@ -164,4 +165,30 @@ test("a granted Moodle enrolment authorizes its own write, whose only argument n
     toolName: "moodle_enrol_participant",
     arguments: args,
   }), true);
+});
+
+// Edit is not timed: it stays on until the educator returns the course to Plan. A grant saved
+// before this rule kept its own end time, and it lapses to Plan at that time; it never becomes a
+// grant with no end.
+test("new Edit access has no end time and stays valid until it is removed", async () => {
+  const enabledCategories = ["action:moodle:moodle_update_book_chapter"];
+  const permission = await createEditPermission({ binding, catalogDigest: CATALOG_DIGEST, revision: 1, enabledCategories, operations: moodleOperations });
+  assert.equal(Object.hasOwn(permission, "expiresAt"), false);
+  assert.deepEqual(await validEditPermission({ permission, binding, catalogDigest: CATALOG_DIGEST, operations: moodleOperations }), permission);
+  for (const name of ["SETTINGS_EDIT_DURATIONS", "CONVERSATIONAL_EDIT_DURATION_MS", "validEditDuration"]) {
+    assert.equal(Object.hasOwn(editPolicy, name), false, `${name} still offers a timed Edit grant`);
+  }
+});
+
+test("a saved grant that still carries an end time is honored until then, then lapses to Plan", async () => {
+  const enabledCategories = ["action:moodle:moodle_update_book_chapter"];
+  const expiresAt = Date.now() + 60_000;
+  const legacy = await createEditPermission({ binding, catalogDigest: CATALOG_DIGEST, revision: 1, enabledCategories, operations: moodleOperations, expiresAt });
+  assert.equal(legacy.expiresAt, expiresAt);
+  assert.deepEqual(await validEditPermission({ permission: legacy, binding, catalogDigest: CATALOG_DIGEST, operations: moodleOperations }), legacy);
+  const lapsed = { ...legacy, expiresAt: Date.now() - 1 };
+  assert.equal(await validEditPermission({ permission: lapsed, binding, catalogDigest: CATALOG_DIGEST, operations: moodleOperations }), null);
+  const extended = { ...legacy };
+  delete extended.expiresAt;
+  assert.equal(await validEditPermission({ permission: extended, binding, catalogDigest: CATALOG_DIGEST, operations: moodleOperations }), null, "removing the end time must not validate as a grant with no end");
 });

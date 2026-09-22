@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Unit tests for the modes/ package (Workstream A, revised model).
 
-Covers: blanket grant flow, self-promotion refusal, expiry, revocation
-on switch-to-plan, standing default via settings, ambiguous-course
+Covers: blanket grant flow, self-promotion refusal, legacy timed grants
+lapsing to plan, switch-to-plan turning edit off everywhere, standing default via settings, ambiguous-course
 refusal, high-confidence course write admitted in edit mode without
 approval, conversation grants, supersede, tamper-evidence, the
 settings fallback, and the dispatch/admission.py check_mode_authority
@@ -77,7 +77,8 @@ def fake_settings():
     def get_setting(user_id, key):
         return store.get((user_id, key))
 
-    def set_setting(user_id, key, value):
+    def set_setting(user_id, key, value, educator_confirmed=False,
+                    educator=None):
         store[(user_id, key)] = value
 
     mod = types.ModuleType("settings.store")
@@ -87,8 +88,8 @@ def fake_settings():
     pkg.__path__ = []
     # Save the real modules so teardown restores them: merely popping
     # would make the next "from settings.store import ..." re-import a
-    # FRESH copy of the real store.py, splitting its process-global
-    # _CONVERSATION_MODES in two for any later test in this process.
+    # FRESH copy of the real store.py, splitting its module state (and
+    # exception classes) in two for any later test in this process.
     saved = {}
     for name in ("settings", "settings.store"):
         if name in sys.modules:
@@ -140,20 +141,32 @@ def _write_entry():
             "provider": "canvas"}
 
 
-def _backdate_expiry(user_id, grant_id, minutes_ago=5):
-    """Move a grant's expires_at into the past and re-seal the file."""
+def _plant_legacy_timed_grant(user_id, expires_in_min=60):
+    """Persist a timed grant the way an older install wrote it."""
     from dispatch.admission import _seal_record
-    path = mode_state._grants_path(user_id)
-    with open(path, "r", encoding="utf-8") as f:
-        state = json.load(f)
-    past = (datetime.now(timezone.utc)
-            - timedelta(minutes=minutes_ago)).isoformat()
-    for g in state["grants"]:
-        if g.get("grant_id") == grant_id:
-            g["expires_at"] = past
+    state = mode_state._load_state(user_id)
+    state["revision"] = int(state.get("revision", 0)) + 1
+    now = datetime.now(timezone.utc)
+    grant = {
+        "grant_id": "legacy-%d" % state["revision"],
+        "revision": state["revision"],
+        "scope_type": "timed",
+        "conversation_id": None,
+        "educator_identity": {"by": "educator", "channel": "driver",
+                              "authorization": "edit for an hour please"},
+        "source_utterance": "edit for an hour please",
+        "granted_at": now.isoformat(),
+        "expires_at": (now + timedelta(minutes=expires_in_min)).isoformat(),
+        "duration_min": 60,
+        "revoked": False, "revoked_at": None, "revoke_reason": None,
+    }
+    state["grants"].append(grant)
     state.pop("sig", None)
+    path = mode_state._grants_path(user_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(_seal_record(state), f, indent=2, sort_keys=True)
+    return grant
 
 
 def _journal_events():
@@ -182,10 +195,11 @@ def test_blanket_grant_flow(no_settings):
     uid = _uid("blanket")
     assert mode_state.current_mode(uid) == "plan"
     grant = mode_state.request_edit_grant(
-        uid, scope_type="timed", duration_min=30,
-        educator_confirmation=_confirmation("use edit mode for my biology course"))
+        uid, educator_confirmation=_confirmation(
+            "use edit mode for my biology course"))
     assert grant["grant_id"]
-    assert grant["scope_type"] == "timed"
+    assert grant["scope_type"] == "conversation"
+    assert grant["expires_at"] is None
     assert grant["revoked"] is False
     assert grant["educator_identity"]["by"] == "educator"
     assert "courses" not in grant and "categories" not in grant
@@ -208,9 +222,11 @@ def test_self_promotion_refused_non_educator(no_settings):
     with pytest.raises(mode_errors.ModeSelfGrantRefused):
         mode_state.request_edit_grant(
             uid, educator_confirmation=_confirmation(by="agent"))
+    # Round-4 M1: an empty citation is refused; any non-empty verbatim
+    # reply ("yes") is a valid educator citation.
     with pytest.raises(mode_errors.ModeSelfGrantRefused):
         mode_state.request_edit_grant(
-            uid, educator_confirmation=_confirmation("yes"))
+            uid, educator_confirmation=_confirmation("   "))
     assert mode_state.current_mode(uid) == "plan"
 
 
@@ -224,10 +240,11 @@ def test_switch_to_edit_is_self_promotion(no_settings):
 
 def test_invalid_scope_type_and_user_id(no_settings):
     uid = _uid("bad-scope")
-    with pytest.raises(ValueError):
-        mode_state.request_edit_grant(
-            uid, scope_type="standing",
-            educator_confirmation=_confirmation())
+    for scope in ("standing", "timed"):
+        with pytest.raises(ValueError):
+            mode_state.request_edit_grant(
+                uid, scope_type=scope,
+                educator_confirmation=_confirmation())
     with pytest.raises(ValueError):
         mode_state.request_edit_grant(
             "../../evil", educator_confirmation=_confirmation())
@@ -239,50 +256,53 @@ def test_invalid_scope_type_and_user_id(no_settings):
 # Expiry and revocation
 # ---------------------------------------------------------------------------
 
-def test_expiry_refuses(no_settings):
-    uid = _uid("expiry")
-    grant = mode_state.request_edit_grant(
-        uid, scope_type="timed", duration_min=30,
-        educator_confirmation=_confirmation("use edit mode please"))
-    assert mode_state.current_mode(uid) == "edit"
-    _backdate_expiry(uid, grant["grant_id"])
+def test_edit_mode_is_not_timed(no_settings):
+    for name in ("edit_session_remaining", "DEFAULT_GRANT_DURATION_MIN",
+                 "MAX_GRANT_DURATION_MIN"):
+        assert not hasattr(mode_state, name), name
+    assert "duration_min" not in __import__("inspect").signature(
+        mode_state.request_edit_grant).parameters
+
+
+def test_legacy_timed_grant_lapses_to_plan(no_settings):
+    # A timed grant persisted by an older install, still inside its
+    # window, must not hold edit on: it lapses to plan, where a write
+    # asks for approval (never a refusal, never a standing grant).
+    uid = _uid("legacy-timed")
+    _plant_legacy_timed_grant(uid)
     assert mode_state.current_mode(uid) == "plan"
     decision, code = mode_state.check_write_authority(uid, course_id="1")
-    assert (decision, code) == ("refuse", "grant_expired")
-    with pytest.raises(mode_errors.ModeGrantExpired) as excinfo:
+    assert (decision, code) == ("defer", "plan_mode_approval_required")
+    with pytest.raises(mode_errors.PlanModeWriteWithoutApproval):
         admission.check_mode_authority(
             _write_entry(), {"course_id": "1"}, None, {"user_id": uid})
-    assert excinfo.value.grant_id == grant["grant_id"]
 
 
-def test_expiry_journaled_once(no_settings):
-    uid = _uid("expiry-journal")
-    grant = mode_state.request_edit_grant(
-        uid, educator_confirmation=_confirmation("use edit mode please"))
-    _backdate_expiry(uid, grant["grant_id"])
-    mode_state.check_write_authority(uid)
-    mode_state.check_write_authority(uid)
-    expiries = [e for e in _journal_events()
-                if e["event"] == "mode.grant_expired"
-                and e.get("grant_id") == grant["grant_id"]]
-    assert len(expiries) == 1
-    assert expiries[0]["educator_identity"]["by"] == "educator"
+def test_legacy_timed_grant_does_not_become_standing(fake_settings):
+    uid = _uid("legacy-timed-standing")
+    fake_settings[(uid, "default_mode")] = "plan"
+    _plant_legacy_timed_grant(uid)
+    assert mode_state.current_mode(uid) == "plan"
+    assert fake_settings[(uid, "default_mode")] == "plan"
 
 
-def test_revocation_on_switch_to_plan(no_settings):
+def test_revocation_on_switch_to_plan_asks_for_approval(no_settings):
+    # After a grant ends, a write is a normal plan-mode write: it asks
+    # for approval (and a signed approval can land). It is never
+    # refused as grant_revoked.
     uid = _uid("switch-plan")
-    grant = mode_state.request_edit_grant(
+    mode_state.request_edit_grant(
         uid, educator_confirmation=_confirmation("use edit mode please"))
     assert mode_state.current_mode(uid) == "edit"
     result = mode_state.switch_mode(uid, "plan")
     assert result["revoked_grants"] == 1
+    assert result["mode"] == "plan"
     assert mode_state.current_mode(uid) == "plan"
     decision, code = mode_state.check_write_authority(uid, course_id="1")
-    assert (decision, code) == ("refuse", "grant_revoked")
-    with pytest.raises(mode_errors.ModeGrantRevoked) as excinfo:
+    assert (decision, code) == ("defer", "plan_mode_approval_required")
+    with pytest.raises(mode_errors.PlanModeWriteWithoutApproval):
         admission.check_mode_authority(
             _write_entry(), {"course_id": "1"}, None, {"user_id": uid})
-    assert excinfo.value.grant_id == grant["grant_id"]
 
 
 def test_revoke_is_idempotent(no_settings):
@@ -346,26 +366,23 @@ def test_standing_default_plan(fake_settings):
     assert (decision, code) == ("defer", "plan_mode_approval_required")
 
 
-def test_switch_to_plan_revokes_grants_not_default(fake_settings):
-    # Corrected contract: switch_mode("plan") revokes live grants and
-    # clears conversation state, but does NOT rewrite the educator's
-    # standing default_mode setting (that change needs its own
-    # educator-confirmed settings ceremony).
+def test_switch_to_plan_turns_edit_off_including_default(fake_settings):
+    # "Switch to plan" must leave the educator in plan mode: it revokes
+    # live grants AND turns the standing edit default off. Leaving the
+    # default on edit while reporting plan was the defect.
     uid = _uid("switch-default")
     fake_settings[(uid, "default_mode")] = "edit"
-    grant = mode_state.request_edit_grant(
+    mode_state.request_edit_grant(
         uid, educator_confirmation=_confirmation("use edit mode please"))
     assert mode_state.current_mode(uid) == "edit"
     result = mode_state.switch_mode(uid, "plan")
     assert result["mode"] == "plan"
     assert result["revoked_grants"] == 1
-    assert fake_settings[(uid, "default_mode")] == "edit"
-    # A timed grant was revoked; the standing default still yields edit
-    # mode (that is the educator's saved preference, unchanged).
-    assert mode_state.current_mode(uid) == "edit"
-    assert mode_state._live_grant(uid, conversation_id=None) is None
+    assert result["default_mode_changed"] is True
+    assert fake_settings[(uid, "default_mode")] == "plan"
+    assert mode_state.current_mode(uid) == "plan"
     decision, code = mode_state.check_write_authority(uid)
-    assert (decision, code) == ("allow", "ok")
+    assert (decision, code) == ("defer", "plan_mode_approval_required")
 
 
 def test_invalid_default_mode_is_tamper(fake_settings):
@@ -376,20 +393,11 @@ def test_invalid_default_mode_is_tamper(fake_settings):
     assert excinfo.value.setting_name == "default_mode"
 
 
-def test_settings_duration_default(fake_settings):
-    uid = _uid("duration-setting")
-    fake_settings[(uid, "edit_grant_duration_min")] = 45
-    grant = mode_state.request_edit_grant(
-        uid, educator_confirmation=_confirmation("use edit mode please"))
-    assert grant["duration_min"] == 45
-
-
 def test_no_settings_falls_back_safely(no_settings):
     uid = _uid("no-settings")
     assert mode_state.current_mode(uid) == "plan"
-    grant = mode_state.request_edit_grant(
+    mode_state.request_edit_grant(
         uid, educator_confirmation=_confirmation("use edit mode please"))
-    assert grant["duration_min"] == 30
     result = mode_state.switch_mode(uid, "plan")
     assert result["mode"] == "plan"
 

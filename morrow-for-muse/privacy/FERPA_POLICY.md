@@ -42,28 +42,68 @@ For each learner-data read the connector:
    builds): they carry no identity proof in this vault and are never
    projected.
 5. Redacts the receipt through the exact-scope roster. Names,
-   emails, login ids, SIS ids, contextual numeric ids, and identity
-   URLs become stable course-local labels (`Student A1`,
-   `Student A2`, ...). Labels persist in the educator-local source
-   vault file, so the same student maps to the same label across
-   runs and across processes, and journals stay correlatable without
-   ever naming the student.
+   emails, login ids, SIS ids, contextual numeric ids, and any URL
+   path segment or query value equal to a rostered learner's Canvas
+   id (`/users/<id>`, `/grades/<id>`, `/submissions/<id>`,
+   `?student_id=<id>`, whatever the route is called) become stable
+   course-local labels (`Student A1`, `Student A2`, ...). A person-id
+   array (`student_ids`) becomes the learners' labels. Labels persist
+   in the educator-local source vault file, so the same student maps
+   to the same label across runs and across processes, and journals
+   stay correlatable without ever naming the student. New labels in
+   one batch are issued in a keyed-hash order inside the course, so a
+   label number carries no alphabetical or roster rank.
 
 Anything the boundary cannot verify fails closed: the op is refused
 rather than surfacing raw learner PII.
 
-## Two halves of one boundary (ported doctrine)
+## Working by name
 
-This layer is pseudonymization on EGRESS. It is one half of the
-boundary doctrine this connector borrows from the production
-Meridian JS privacy boundary. The other half is PII
-detection/spoof-gating on INGRESS: blocking raw student PII before
-it reaches a model, rejecting fake "sanitized" stamps and forged
-tokens, and refusing to spawn on unsafe payloads. The two halves
-are complements, not duplicates: ingress keeps student PII out of
-prompts and agent inputs, egress keeps it out of outputs, journals,
-and receipts. An operation that defeats one half should still be
-caught by the other.
+The educator can work with a student by name, and the data stays
+de-identified everywhere else:
+
+1. The educator names a student. The agent runs the typed tool
+   `morrow students find --course C "<name as typed>"`
+   (`learners/find.py`). It reads the course roster through the login
+   helper and answers with labels only: one label for an exact or
+   unambiguous match; every candidate, with non-identifying details
+   the educator can confirm (section name, enrollment state, last
+   activity date), for an ambiguous match or a close spelling. A
+   close spelling is never picked automatically. No other student's
+   name, and no email, login, SIS id, or Canvas id, is ever in the
+   answer, and a no-match answer does not repeat the query.
+2. Name echo. A student the educator named, once resolved, is
+   recorded as educator-introduced for that conversation
+   (`privacy/name_echo.py`: encrypted under a key derived from the
+   vault key, never plaintext, journaled as label and conversation
+   only). In that conversation, outputs show that label as
+   "<name as the educator typed it> (Student A3)". The model already
+   has that name, because the educator typed it. Other conversations
+   and other courses see the bare label. The record ends when the
+   conversation ends (`settings.store.end_conversation`), after 24
+   hours at most, and with every vault purge.
+3. Writes by label. The agent puts the label (or the echoed form)
+   where a write takes a student. After the mode gate, the executor
+   resolves the label to the real Canvas id at the LMS boundary, only
+   in the vault scope of the course the write targets: a label that
+   course never issued is refused, and an echoed name that does not
+   match the educator's record in this conversation is refused.
+   Canvas receives the real id; the journal, the result, and any
+   error keep the label.
+
+## What Morrow can and cannot protect (egress only)
+
+This layer is pseudonymization on EGRESS: it controls what comes
+back from the LMS before the model or the journal sees it. The
+doctrine it borrows from the production Meridian JS privacy boundary
+has a second half, PII detection on INGRESS (blocking raw student
+PII in what a person types before it reaches a model). Morrow for
+Muse has no ingress half: Morrow cannot intercept the educator's
+messages to Muse. Names the educator types reach the Muse model,
+because the educator typed them. Morrow keeps every other student
+identifier from the LMS (every name the educator did not type, every
+email, login id, SIS id, and Canvas id) out of what the model and the
+journal see.
 
 The single most important lesson from the ingress layer's production
 history (audits 2026-05-11 through 2026-05-28) is STRONG-context
@@ -108,7 +148,8 @@ educator-operated Muse connector (single educator, their own VM,
 their own Canvas session; there is no separate staging tenant):
 
 1. Synthetic verification. Run the privacy selftests
-   (`python3 privacy/source_privacy_selftest.py`: currently 69/69)
+   (`python3 privacy/source_privacy_selftest.py`: 78/78 as of
+   2026-09-22)
    and confirm the boundary fails closed on the hostile battery
    before any real course data flows through it.
 2. De-identified review. Before acting on a de-identified
@@ -118,10 +159,9 @@ their own Canvas session; there is no separate staging tenant):
    every op, and the review is against the journal plus the
    projected receipt.
 3. Real-course use. Learner-data operations run de-identified by
-   default. The explicit PII override (the `educator_pii_reveal`
-   consent file, see below) exists for documented instructional
-   purposes only; each use is journaled with the stated reason, and
-   a stub reason fails closed.
+   default. The educator reveal (a sealed record for one course, see
+   below) exists for documented instructional purposes only; each
+   reveal is journaled with the educator's own words.
 4. No enterprise rollout. This connector is a per-educator tool.
    Institutional rollout (shared VMs, other staff, production
    student systems) requires the institution's own FERPA/privacy
@@ -148,27 +188,35 @@ institutional signoffs above have been performed or claimed here.
   the pending envelope (a 0600 file) only so internal machinery
   (deferred verify, undo) can resolve result references, and the
   envelope is deleted when the op completes.
-- Never de-tokenizes for the agent. Vault label resolution exists
-  for the educator's explicit, out-of-band audit only; no agent
-  output path calls it.
+- Never de-tokenizes for the agent. The executor resolves a label to
+  a real Canvas id only at the LMS boundary of a write (so Canvas
+  receives the id), for the course the write targets; the resolved
+  id is relabeled in every journal record, result, and error before
+  anyone sees it. No agent output path returns a real identity.
 
-## Default-on, explicit override
+## Default-on, educator reveal
 
 De-identification is ON by default for every learner-data read. The
-only way to see raw student PII is an explicit educator override:
-create the consent file `<tree-state-dir>/educator_pii_reveal` (a
-regular file, mode 0600, not a symlink) carrying the documented
-instructional purpose (minimum 12 characters, for example
-"grading review with the course TA before posting final grades").
-The reason is journaled verbatim with the op (`pii_reveal` on the
-journal record, `revealed_by: "educator-consent-file"`) and stamped
-on the returned receipt. A stub reason, a wrong mode, or a
-nonregular file fails closed: the op is refused until the consent
-file is removed (de-id back on) or given a real documented purpose.
-The legacy environment variable `MORROW_REVEAL_STUDENT_PII_REASON`
-is ignored: the environment is not a consent channel. The desktop
-boundary has no such override; this one is a deliberate,
-audited local extension for the educator's own VM.
+only way to see real names from an LMS read is an educator reveal: a
+record sealed with the machine-held HMAC key
+(`dispatch/admission.mint_pii_reveal`) carrying the educator's
+verbatim request (any non-empty request), the `educator-chat`
+channel, ONE course on ONE tenant, and an expiry of at most 30
+minutes. It is passed to the executor (`--pii-reveal <file>`), checked
+at projection time (a tampered, expired, over-long, or driver-channel
+record fails closed; a record for another course leaves that read
+de-identified), and journaled twice: when it is minted
+(`privacy.pii_reveal_issued`, with the educator's words) and on every
+op it reveals (`pii_reveal` on the journal record, `revealed_by:
+"educator-sealed-record"`). Honest trust statement, same as write
+approvals: the record is minted in the agent's process, so a
+fabricated `educator-chat` citation is a detectable lie in the
+journal, not a prevented one. Nothing else reveals names: the old
+`<tree-state-dir>` consent file is retired (an agent can write a
+file), and the environment variable
+`MORROW_REVEAL_STUDENT_PII_REASON` is ignored (an agent can set its
+own environment). The desktop boundary has no reveal at all; this one
+is a deliberate, audited, short-lived local extension.
 
 ## Retention and deletion
 
@@ -208,7 +256,10 @@ state, never the wired vault. Do not document or present them as
 shipped deletion commands; the shipped deletion procedure is deleting
 the wired vault file above.
 
-- There is no automatic expiry. The educator owns deletion.
+- Labels have no automatic expiry; the educator owns deletion. The
+  name-echo records (`<vault>.echo`) expire with their conversation
+  and after 24 hours at most, and every purge path above removes them
+  too (per tenant, per course, or the whole file).
 
 - Shipped CLI entry points (W4-P2-10): `python3 -m privacy.executor_wire
   purge --tenant <base>` (per-tenant), `python3 -m privacy.executor_wire
@@ -220,11 +271,23 @@ the wired vault file above.
 
 ## Known limitations (honest scope)
 
-- Learner-data detection is URL-substring based
-  (`dispatch/admission_policy.json`, `learner_data` section). A
-  learner-bearing response from a URL outside those substrings is
-  not routed through the boundary. Additions to the substring list
-  go through admission-policy review.
+- Learner-data detection is URL based (`dispatch/admission_policy.json`,
+  `learner_data` section): whole path segments that name a people
+  resource (`url_segments`, `url_segment_suffixes`), then the
+  `url_substrings` net, plus the catalog `[LEARNER-DATA]` flag.
+  `dispatch/test_learner_classification.py` fails when a live-proven
+  row whose path names a people resource is not classified. Course
+  content (pages, quizzes, assignments, modules) is deliberately not
+  classified, because projecting it would rewrite names inside content
+  an educator may save back. The consequence: a page body can carry a
+  person's name unprojected. Person fields on content (a page's
+  `last_edited_by`, any `created_by`/`updated_by`/`editor`) are replaced
+  field by field: a learner the vault already labeled in that course
+  gets their label, anyone else becomes "a Canvas user Morrow has not
+  labeled". Course search (`smartsearch`) is learner data: result text
+  naming a learner the receipt or the vault knows for that course is
+  labeled, but a learner Morrow has never seen in that course stays raw
+  in result text. Additions go through admission-policy review.
 - Small cohorts: labels are stable across ops and restarts, so in a
   cohort of 1-3 anyone who knows the roster can re-identify students
   by elimination (matching scores or distinctive work to known
@@ -234,22 +297,35 @@ the wired vault file above.
   roster never mentions (for example "Bobby" for rostered "Robert J.
   Smith") survives redaction in free text.
 - The roster is receipt-derived: the boundary redacts the
-  identities the receipt carries. A learner the receipt never
-  mentions (no record, no id, no name) cannot be redacted from
-  free text.
+  identities the receipt carries (any key naming a person or a people
+  collection, and every id under a person-id key such as
+  `student_ids` or `participating_user_ids`), plus every learner the
+  encrypted vault already labeled for the same course. A learner the
+  receipt never mentions and the vault has never seen (no record, no
+  id, no name) cannot be redacted from free text. Concretely: a
+  collaboration title or description naming its own owner is
+  redacted, and a group name is redacted for any learner a roster
+  read of that course labeled before; a group name that names a
+  learner Morrow has not yet seen in that course stays raw until a
+  roster read labels them. An ad hoc override title (an override
+  that lists student ids) is always replaced by its student count
+  ("1 student"), because its students may appear nowhere else.
 - Bare numeric ids in arbitrary prose or CSV text are not always
-  recognized. Contextual forms are redacted: `user_id=912345`,
-  `/users/912345`, whole-string ids, structured identity fields,
-  and numeric identity values. `/grades/912345` is not one of the
-  boundary's contextual id URL patterns.
+  recognized. Contextual forms are redacted: `user_id=912345`, any
+  URL path segment or query value equal to a rostered learner id
+  (except the segment right after `/courses/` or `/accounts/`, which
+  is the course or account by Canvas URL grammar), whole-string ids,
+  structured identity fields, and numeric identity values.
 - Secret-shaped text (API keys, tokens, launch parameters) fails
   closed instead of being partially projected: the op is refused
   rather than leaking a redacted fragment.
 - Opaque blobs (base64 segments that decode to non-printable
   bytes) are refused rather than passed through.
-- The write-direction label resolver replaces only the first
-  learner label in a single ordinary string (mirroring the
-  desktop behavior).
+- The executor's write-direction resolver
+  (`executor_wire.resolve_learner_labels`) resolves only whole values
+  (a string that is exactly a label or the echoed "<name> (label)"
+  form). A label inside free text (an override title) is written as
+  the label, never as the name.
 - Initial-last names ("M. Jackson") are not redacted: the alias
   set covers full-name, given-name, and reversed ("Jackson,
   Mary") forms only. A production ingress layer would block on
@@ -267,10 +343,16 @@ the wired vault file above.
 - The educator's own profile (`/users/self`) is explicitly not
   learner data and is never de-identified, so principal
   confirmation keeps working.
-- The synchronous executor path refuses learner-data operations
-  outright (`LearnerDataGated`) instead of projecting them; only
-  the governed browser-lane completion path surfaces de-identified
-  learner data.
+- Learner-data operations dispatch only where a projection point
+  exists: the Chromium lane with the encrypted vault. The raw HTTPS
+  lane, and any lane without the `cryptography` package, refuses them
+  (`LearnerDataGated`). Undo of a learner-bearing manifest entry is
+  still refused on every lane.
+- Two students with the same display name in one course: a roster
+  read whose records carry no SIS id or other identity field names
+  both by the same alias, and the boundary refuses that read rather
+  than guessing; `students find` still labels them separately (it
+  labels from the vault, not by rendering text).
 - Platform TLS inspection (W4-P1-4): on VMs where
   `/etc/ssl/certs/hatch-egress-ca.pem` exists (or
   `MORROW_EGRESS_CA_PEM` points at a PEM), the platform egress proxy

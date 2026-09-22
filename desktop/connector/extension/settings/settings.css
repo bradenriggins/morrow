@@ -2,12 +2,17 @@ body { min-width: 320px; }
 select { font: inherit; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; font-size: 0.8125rem; line-height: 1.4; }
 .shell { width: min(1080px, calc(100% - 32px)); margin: 0 auto; padding: var(--space-7) 0; }
-.page-header { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; align-items: start; gap: var(--space-6); margin-bottom: var(--space-6); }
+.page-header { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; align-items: center; gap: var(--space-2) var(--space-6); margin-bottom: var(--space-6); }
+/* The lede runs under the title and the Private Chat button both, so it is not squeezed between them. */
+.page-header > div { display: contents; }
+.page-header h1 { grid-column: 2; grid-row: 1; }
+.page-header .lede { grid-column: 2 / -1; grid-row: 2; }
+.private-chat-open { grid-column: 3; grid-row: 1; }
 .page-header .brand-wordmark { width: auto; }
 .page-header .brand-mark { flex-basis: 44px; width: 44px; height: 44px; }
 .page-header h1, h2, p { margin-top: 0; }
-.page-header h1 { margin-bottom: var(--space-1); font-size: 2rem; line-height: 1.3; letter-spacing: -.02em; }
-.lede { max-width: 670px; margin-bottom: 0; color: var(--text-secondary); font-size: 1rem; line-height: 1.45; }
+.page-header h1 { margin-bottom: 0; font-size: 2rem; line-height: 1.3; letter-spacing: -.02em; }
+.lede { margin-bottom: 0; color: var(--text-secondary); font-size: 1rem; line-height: 1.45; }
 .private-chat-open { width: auto; min-height: 44px; white-space: nowrap; }
 .panel { margin-top: var(--space-5); padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); box-shadow: 0 1px 2px rgb(23 25 35 / .03); }
 .section-heading { display: flex; align-items: start; justify-content: space-between; gap: var(--space-5); }
@@ -33,10 +38,7 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
 .categories[disabled] .category-option small { color: var(--text-subtle); }
 .categories legend { padding: 0; font-size: 0.875rem; font-weight: 700; line-height: 1.45; }
 .field-help { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
-.edit-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, .42fr); gap: var(--space-3); margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-sunken); }
-.duration-field { display: block; color: var(--text-secondary); font-size: 0.8125rem; font-weight: 600; line-height: 1.4; }
-.duration-field span { display: block; margin-bottom: var(--space-1); }
-.duration-field select { width: 100%; min-height: 44px; padding: var(--space-2) var(--space-3); border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--surface); color: var(--text); }
+.edit-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-sunken); }
 .category-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin-top: var(--space-4); }
 .category-option { display: flex; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-sunken); cursor: pointer; }
 .category-option:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
@@ -47,7 +49,7 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
 .category-option.field-selection { cursor: default; border-style: dashed; }
 .action-flags { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
 .action-flag { display: inline-block; padding: var(--space-1) var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); color: var(--text-secondary); font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
-#action-checked-only-field { grid-column: 1 / -1; }
+#action-checked-only-field { align-self: end; }
 .checked-only-field { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; color: var(--text-secondary); font-size: 0.8125rem; font-weight: 600; line-height: 1.4; cursor: pointer; }
 .checked-only-field input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); border-color: var(--control-border); flex: 0 0 auto; }
 .save-confirmation { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); margin-top: var(--space-4); padding: var(--space-4); border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border)); border-radius: var(--radius-card); background: var(--surface-sunken); }
@@ -89,7 +91,7 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
 /* WI-5.3: a list-section heading ("Needs attention · 2"). */
 .listhead { margin-top: var(--space-3); padding: var(--space-2) var(--space-1) 0; color: var(--text-subtle); font-size: 0.8125rem; font-weight: 700; line-height: 1.4; letter-spacing: .04em; text-transform: uppercase; }
 .listhead:first-child { margin-top: 0; }
-.course-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); min-height: 44px; padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.course-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); min-height: 44px; padding: var(--space-2) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
 .course-row.in-select-mode:not(.is-static):hover { cursor: pointer; }
 .course-row.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent); }
 .course-row:focus-within { border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 16%, transparent); }
@@ -113,10 +115,12 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
 .course-level-control { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .course-level-control button { display: inline-flex; align-items: center; width: auto; min-height: 44px; padding: var(--space-2) var(--space-4); font-size: 0.8125rem; }
 .course-level-control button[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); color: var(--accent); }
-.course-detail-top .duration-field { flex: 0 1 220px; min-width: 0; }
 .course-detail .field-help { margin-top: var(--space-3); }
 .course-detail-links { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
 .course-detail-links button { width: auto; }
+.course-disconnect-confirm { margin-top: var(--space-4); padding: var(--space-3) var(--space-4); border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border)); border-radius: var(--radius-control); }
+.course-disconnect-confirm p { margin: 0 0 var(--space-3); }
+.permission-actions > div:first-child, .course-bulk-bar > p, .save-confirmation > div:first-child, .file-storage-card > div:first-child { flex: 1 1 280px; }
 .permission-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); margin-top: var(--space-4); padding: var(--space-4) 0 0; border-top: 1px solid var(--border); }
 .actions-title { margin-bottom: 0; font-size: 0.875rem; font-weight: 700; line-height: 1.45; }
 .action-buttons { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: end; gap: var(--space-3); }
@@ -128,11 +132,20 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
 .edit-access-banner button { width: auto; flex: 0 0 auto; white-space: nowrap; }
 .notice, .error { margin: 0 0 var(--space-5); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-sunken); color: var(--text-secondary); font-size: 0.875rem; line-height: 1.45; overflow-wrap: anywhere; }
 .error { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, var(--surface)); color: var(--danger); }
+/* Supporting detail a person opens when they want it. The summary reads as a quiet link. */
+.more-info { margin-top: var(--space-2); }
+.more-info > summary { display: flex; align-items: center; min-height: 44px; color: var(--accent); font-size: 0.8125rem; font-weight: 600; line-height: 1.4; }
+.more-info > summary:hover { color: var(--accent-hover); }
+.more-info > .field-help { margin: 0 0 var(--space-2); }
+.more-info.access-rules { margin-top: 0; }
+.permissions-group:has(> .access-rules) { margin-top: var(--space-2); }
+.more-info.access-rules > summary { color: var(--text); }
+.more-info.access-rules > summary h3 { margin: 0; }
 .browser-permissions-panel h3 { margin: 0 0 var(--space-1); font-size: 0.9375rem; line-height: 1.4; }
 .permissions-group { margin-top: var(--space-5); }
 .permissions-group:first-of-type { margin-top: var(--space-4); }
 .permissions-group .file-storage-card { margin-top: var(--space-3); }
-.access-rules-list { margin: var(--space-2) 0 0; padding-left: var(--space-5); color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.4; }
+.access-rules-list { margin: 0 0 var(--space-2); padding-left: var(--space-5); color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.4; }
 .access-rules-list li + li { margin-top: var(--space-1); }
 .private-chat-visible { overflow: hidden; }
 .private-chat-scrim { position: fixed; inset: 0; z-index: 40; background: rgb(15 18 28 / .35); backdrop-filter: blur(2px); }
@@ -154,27 +167,30 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
 .private-chat-message-user { margin-left: auto; background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
 .private-chat-message strong { display: block; margin-bottom: var(--space-1); font-size: 0.8125rem; line-height: 1.4; color: var(--text-secondary); }
 .private-chat-message p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.private-chat-name { font-weight: 600; text-decoration: underline dotted; text-underline-offset: 0.2em; cursor: help; }
 .private-chat-status, .private-chat-limit { margin: 0; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.4; }
 .private-chat-limit { padding-top: var(--space-4); border-top: 1px solid var(--border); color: var(--text-subtle); }
 .private-chat-drawer button:disabled, .private-chat-drawer select:disabled, .private-chat-drawer textarea:disabled { cursor: not-allowed; opacity: .58; }
 @media (max-width: 700px) {
   .shell { width: min(100% - 24px, 1080px); padding-top: var(--space-5); }
-  .page-header { grid-template-columns: 1fr; gap: var(--space-4); }
-  .private-chat-open { justify-self: start; }
+  .page-header { grid-template-columns: 1fr; gap: var(--space-2); }
+  .page-header h1, .page-header .lede, .private-chat-open { grid-column: 1; grid-row: auto; }
+  .private-chat-open { justify-self: start; margin-top: var(--space-2); }
   .panel { padding: var(--space-4); border-radius: var(--radius-card); }
   .section-heading, .permission-actions, .course-bulk-bar, .file-storage-card, .save-confirmation { align-items: stretch; flex-direction: column; gap: var(--space-3); }
   .selection-summary { max-width: none; text-align: left; }
   .mode-choice, .edit-controls, .category-list { grid-template-columns: 1fr; }
   .course-tools { flex-direction: column; align-items: stretch; }
-  .platform-field, .term-field { flex-basis: auto; }
+  .search-field, .platform-field, .term-field { flex-basis: auto; }
   #course-select-mode { width: 100%; }
   .course-row { grid-template-columns: auto minmax(0, 1fr); }
   .course-row:not(:has(.course-select)) { grid-template-columns: minmax(0, 1fr); }
   .course-row-state, .course-row-action { grid-column: 1 / -1; margin-top: var(--space-2); text-align: left; }
+  .course-row-state { justify-self: start; }
+  .permission-actions > div:first-child, .course-bulk-bar > p, .save-confirmation > div:first-child, .file-storage-card > div:first-child { flex: 0 1 auto; }
   .action-buttons { justify-content: stretch; }
   .action-buttons button, .file-storage-actions button { width: 100%; }
   .course-detail-top { flex-direction: column; align-items: stretch; }
-  .course-detail-top .duration-field { flex-basis: auto; }
   .course-level-control button, .course-detail-links button { width: 100%; }
   .private-chat-drawer { padding: var(--space-5) var(--space-4); }
   .private-chat-fields { grid-template-columns: 1fr; }
@@ -193,7 +209,7 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
 @media (max-width: 700px) { .category-options { grid-template-columns: 1fr; } }
 
 /* WI-5.5: the Customize view. "Review-only options. Not in the picker." gets one disclosure line. */
-.review-only-line { min-width: 0; margin-bottom: var(--space-3); padding: 0; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-sunken); }
+.review-only-line { grid-column: 1 / -1; order: 1; min-width: 0; margin-bottom: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-sunken); }
 .review-only-line summary { min-height: 44px; padding: var(--space-3); color: var(--text-secondary); cursor: pointer; font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
 .review-only-line[open] summary { border-bottom: 1px solid var(--border); }
 .review-only-line ul { display: grid; gap: var(--space-2); margin: 0; padding: var(--space-3) var(--space-4); list-style: none; }
@@ -202,7 +218,7 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
 .review-only-line span { display: block; margin-top: 2px; color: var(--text-subtle); font-size: 0.8125rem; line-height: 1.4; }
 /* Level 1: one area. */
 .customize-area { min-width: 0; margin-bottom: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-sunken); }
-.customize-area:last-child { margin-bottom: 0; }
+.customize-area:last-child, .category-list > .customize-area { margin-bottom: 0; }
 .customize-area-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); }
 .customize-area-head input, .customize-kind-head input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); border-color: var(--control-border); flex: 0 0 auto; }
 .customize-area-toggle, .customize-kind-toggle { display: flex; flex: 1 1 auto; align-items: center; justify-content: space-between; gap: var(--space-3); min-width: 0; min-height: 44px; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }

@@ -44,6 +44,10 @@ Covers the Phase 0 Worker A deliverable offline, with a mocked CDP layer
 
 No network, no Chromium, no session. Fakes only.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import io
 import json
 import os
@@ -57,7 +61,16 @@ for _p in (REPO, os.path.join(REPO, "dispatch"), os.path.join(REPO, "transport")
         sys.path.insert(0, _p)
 
 from dispatch import executor as ex  # noqa: E402
+# The fixtures use literal ids and synthetic paths that are not catalog
+# path templates; the live-proven catalog gate is covered by
+# dispatch/test_direct_lane_hardening.py and is a no-op here.
+ex.live_proven_gate = lambda *a, **k: None  # noqa: E731
 import chromium_session as cs  # noqa: E402
+# The signed-in account check (final muse audit M3) reads users/self
+# before writes; these fakes script every provider call, so it is a
+# no-op here. It is covered by transport/test_principal_check.py.
+cs.ChromiumSession._verify_principal = lambda *a, **k: None  # noqa: E731
+
 import local_chromium as lc  # noqa: E402
 
 PASS = []

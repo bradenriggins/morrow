@@ -8,3 +8,7 @@ __pycache__/
 *.pyo
 .DS_Store
 Thumbs.db
+# Test scratch (selftests recreate it at run time) and carve output.
+.selftest-work/
+.test-state/
+/dist/

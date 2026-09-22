@@ -36,9 +36,10 @@ const STORED_ANCHORS_SOURCE = sliceIncluding("function storedAnchors(value) {", 
 const MESSAGE_CODE_SOURCE = sliceIncluding("function messageCode(error) {", "\n}\n");
 const HANDLER_SOURCE = sliceBefore("function awaitTabLoad(tabId, timeoutMs) {", "\nasync function disconnectConnector()");
 const ROUTER_SOURCE = sliceBefore("chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {", "\nchrome.permissions.onAdded.addListener");
+const POPUP_SENDER_SOURCE = sliceIncluding("function popupSender(sender) {", 'const POPUP_EDIT_POLICY_MESSAGES = new Set(["morrow_edit_policy_status", "morrow_edit_policy_revoke"]);');
 const ANCHOR_FOR_BINDING_SOURCE = sliceIncluding("function anchorForBinding(binding, anchors) {", "\n}\n");
 const SAVE_EDIT_POLICY_SOURCE = sliceIncluding(
-  "async function saveEditPolicy(sourceBindingId, enabledCategories, expiresInMs, authorityGeneration = state.courseDataAuthorityGeneration) {",
+  "async function saveEditPolicy(sourceBindingId, enabledCategories, authorityGeneration = state.courseDataAuthorityGeneration) {",
   "\n}\n",
 );
 
@@ -85,7 +86,6 @@ function harness({ anchors = [], bindings = [], matchResult = true, matchResults
     // saveEditPolicy's other dependencies: none of them is WI-1.2's concern, so each is the
     // smallest stand-in that lets the real saveEditPolicy body run end to end.
     "const state = { courseDataAuthorityGeneration: 0, operations: new Map() };",
-    "function validEditDuration() { return true; }",
     "async function requireCourseDataAuthority() {}",
     "async function catalog() { return { catalogDigest: 'digest-1' }; }",
     "function queueStorageMutation(work) { return work(); }",
@@ -96,6 +96,7 @@ function harness({ anchors = [], bindings = [], matchResult = true, matchResults
     "const OPEN_PLATFORM_LOAD_TIMEOUT_MS = 40;", // WORKER_SOURCE pins the real 20_000ms budget; this test uses a short one.
     STORED_ANCHORS_SOURCE,
     MESSAGE_CODE_SOURCE,
+    POPUP_SENDER_SOURCE,
     ANCHOR_FOR_BINDING_SOURCE,
     HANDLER_SOURCE,
     SAVE_EDIT_POLICY_SOURCE,
@@ -126,7 +127,7 @@ function harness({ anchors = [], bindings = [], matchResult = true, matchResults
     "  calls,",
     "  dispatch: (message, sender = {}) => new Promise((resolve) => { routerListener(message, sender, resolve); }),",
     "  bindingForCommand: (command, operation) => bindingForCommand(command, operation),",
-    "  saveEditPolicy: (sourceBindingId, enabledCategories, expiresInMs) => saveEditPolicy(sourceBindingId, enabledCategories, expiresInMs),",
+    "  saveEditPolicy: (sourceBindingId, enabledCategories) => saveEditPolicy(sourceBindingId, enabledCategories),",
     "};",
     "})();",
   ].join("\n");
@@ -337,7 +338,7 @@ test("saveEditPolicy retries once through openPlatform on a stale binding, then 
     openPlatformWhenNeeded: true,
     matchResults: [false, true, true],
   });
-  const result = await harness1.saveEditPolicy(BINDING.sourceBindingId, ["grades"], 60 * 60 * 1_000);
+  const result = await harness1.saveEditPolicy(BINDING.sourceBindingId, ["grades"]);
   assert.equal(result.editPermission.sourceBindingId, BINDING.sourceBindingId);
   assert.equal(harness1.calls.tabsCreated.length, 1, "openPlatform opens exactly one tab");
   assert.deepEqual(harness1.calls.tabsCreated[0], { url: "https://school.instructure.com/courses/42", active: false });
@@ -353,7 +354,7 @@ test("saveEditPolicy still throws edit_policy_binding_stale when the retry does 
     matchResults: [false, false, false],
   });
   await assert.rejects(
-    harness1.saveEditPolicy(BINDING.sourceBindingId, ["grades"], 60 * 60 * 1_000),
+    harness1.saveEditPolicy(BINDING.sourceBindingId, ["grades"]),
     /edit_policy_binding_stale/,
   );
   assert.equal(harness1.calls.tabsCreated.length, 1, "the retry was still tried once");
@@ -368,10 +369,30 @@ test("saveEditPolicy opens no tab when openPlatformWhenNeeded is off, and still 
     matchResults: [false],
   });
   await assert.rejects(
-    harness1.saveEditPolicy(BINDING.sourceBindingId, ["grades"], 60 * 60 * 1_000),
+    harness1.saveEditPolicy(BINDING.sourceBindingId, ["grades"]),
     /edit_policy_binding_stale/,
   );
   assert.equal(harness1.calls.tabsCreated.length, 0, "the setting being off opens no tab");
   assert.equal(harness1.calls.siteAnchorMatches.length, 1, "no retry check: there is nothing to retry");
   assert.equal(harness1.calls.createEditPermission.length, 0);
+});
+
+// A write refused because the course's site tab is closed names the control the popup really shows
+// for that course: Open Canvas or Open Moodle. There is no Connect Canvas button.
+test("a closed course site names Open Canvas or Open Moodle, the popup's own control", () => {
+  const script = [
+    "globalThis.__morrowLostSite = (() => {",
+    sliceIncluding("const MORROW_REFUSAL_TOKEN = ", "\n}\n"),
+    sliceIncluding("function lostCourseSiteProblem(binding, operation) {", "\n}\n"),
+    "return lostCourseSiteProblem;",
+    "})();",
+  ].join("\n");
+  runInThisContext(script, { filename: "service-worker-lost-site-region.js" });
+  const lostCourseSiteProblem = globalThis.__morrowLostSite;
+  delete globalThis.__morrowLostSite;
+  for (const [provider, platform] of [["canvas", "Canvas"], ["moodle", "Moodle"]]) {
+    const refusal = lostCourseSiteProblem({ provider, origin: `https://${provider}.example.edu`, courseName: "Anatomy" }, { provider });
+    assert.equal(refusal.code, "canvas_binding_required");
+    assert.equal(refusal.message, `Morrow sent nothing: the ${platform} site tab for Anatomy is not open and signed in. Select Open ${platform} in the Morrow Bridge popup, or open https://${provider}.example.edu in Chrome yourself, and sign in if asked.`);
+  }
 });

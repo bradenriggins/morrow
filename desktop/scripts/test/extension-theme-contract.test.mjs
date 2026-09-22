@@ -202,7 +202,7 @@ const RADIUS_TOKENS = {
   "--radius-panel": "18px",
   "--radius-pill": "999px",
 };
-const SCALE_TOKENS = { ...TYPE_TOKENS, ...SPACE_TOKENS, ...RADIUS_TOKENS, "--measure": "68ch" };
+const SCALE_TOKENS = { ...TYPE_TOKENS, ...SPACE_TOKENS, ...RADIUS_TOKENS };
 
 test("theme.css defines the type, space, and radius scale with its exact values", () => {
   const wrong = Object.entries(SCALE_TOKENS)
@@ -345,6 +345,57 @@ test("no type token in theme.css is smaller than the 13 px floor", () => {
       return Number.isFinite(rem) && rem * ROOT_PX < 13;
     });
   assert.deepEqual(small, [], "a type token below the 13px floor is not legible");
+});
+
+/**
+ * Reading text fills the width of the box it sits in, aligned with the heading and controls beside
+ * it. Only a surface's shell or a side element bounds a line, never a paragraph, a list item, or
+ * help text on its own: a per-text cap left supporting text wrapping early in wide panels and made
+ * every section taller than it needed to be.
+ */
+const WIDTH_CAP_ALLOWED = new Set([
+  "html", "body", // the popup's fixed 360 px frame
+  ".selection-summary", // a side note beside the Course access heading
+  ".private-chat-message", // a chat bubble
+]);
+
+function topLevelRules(source) {
+  const rules = [];
+  let depth = 0;
+  let start = 0;
+  let selector = "";
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] === "{") {
+      if (depth === 0) { selector = source.slice(start, index).replace(/\/\*[\s\S]*?\*\//g, "").trim(); start = index + 1; }
+      depth += 1;
+    } else if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) { rules.push({ selector, body: source.slice(start, index) }); start = index + 1; }
+    }
+  }
+  return rules;
+}
+
+test("no stylesheet caps the line length of reading text below its container", () => {
+  const problems = [];
+  for (const path of [THEME_PATH, ...COMPONENT_STYLESHEETS]) {
+    const source = read(path);
+    if (/--measure\b/.test(source)) problems.push(`${path} still defines or reads --measure`);
+    if (/max-inline-size\s*:/.test(source)) problems.push(`${path} caps an inline size with max-inline-size`);
+    for (const { selector, body } of topLevelRules(source)) {
+      if (selector.startsWith("@")) continue;
+      for (const [, value] of body.matchAll(/(?:^|[;{\s])max-width\s*:\s*([^;}]+)/g)) {
+        if (/^(?:100%|none)$/.test(value.trim())) continue;
+        const allowed = selector.split(",").every((part) => WIDTH_CAP_ALLOWED.has(part.trim()));
+        if (!allowed) problems.push(`${path}: ${selector} { max-width: ${value.trim()} }`);
+      }
+      // `pretty` and `balance` even out a short paragraph by shortening its lines. Only a heading may.
+      if (/text-wrap\s*:\s*(?:pretty|balance)/.test(body) && !selector.split(",").every((part) => /^(?:\.[\w-]+\s+)?h[1-6]$/.test(part.trim()))) {
+        problems.push(`${path}: ${selector} evens out its lines with text-wrap`);
+      }
+    }
+  }
+  assert.deepEqual(problems, [], "reading text must fill its container; bound the surface shell instead");
 });
 
 test("every type token in theme.css uses weight 400, 600, or 700", () => {

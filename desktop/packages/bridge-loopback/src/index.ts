@@ -533,7 +533,7 @@ export class LoopbackBridgeServer {
     const title = pending ? "Connect Morrow to Chrome" : request.status === "approved" ? "Chrome connection approved" : "Connection cancelled";
     const content = pending
       ? `<p>Allow Morrow in your assistant to work with Canvas and Moodle through this Chrome extension.</p><p>Your learning-platform password and sign-in details stay in Chrome. You choose which Canvas or Moodle address to connect next.</p><div class="notice">Only continue if you started this from Morrow Bridge. Connecting does not approve changes to your courses.</div><details><summary>About this connection</summary><p class="details-help">This connection stays on your computer. You can disconnect in Morrow Bridge at any time.</p><p class="details-help">Extension ID: ${extension}</p></details><form class="actions" method="post" action="${BRIDGE_PATH}/pair/${request.pairingId}/decision"><button name="decision" value="approve">Allow connection</button><button class="secondary" name="decision" value="deny">Cancel connection</button></form>`
-      : `<p>${request.status === "approved" ? "Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge identifies the platform and shows Connect Canvas or Connect Moodle." : "Morrow did not connect through this request. You can start again from Morrow Bridge when you are ready."}</p>`;
+      : `<p>${request.status === "approved" ? "Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge identifies the platform and shows Connect this course." : "Morrow did not connect through this request. You can start again from Morrow Bridge when you are ready."}</p>`;
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Morrow</title>${brandHead}</head><body><main class="wrap pairing">${brandHeader}<article class="card"><section class="outcome"><h1>${title}</h1>${content}</section></article><p class="foot">This page opens only on your computer.</p></main></body></html>`;
   }
 
@@ -1069,6 +1069,8 @@ export class LoopbackBridgeServer {
         operationId: `edit-options:${randomUUID()}`,
         ...(invocation.signal ? { signal: invocation.signal } : {}),
       });
+      // A cancel that lands during this read ends the write before it was sent; say so.
+      if (!detailResponse.ok && detailResponse.problem?.code === "request_cancelled_before_dispatch") return detailResponse;
       if (!detailResponse.ok || !detailResponse.result) {
         throw new BridgeUnavailableError("Morrow could not read the current Edit permission for this course. Create a fresh plan from the current binding.");
       }

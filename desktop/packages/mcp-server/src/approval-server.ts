@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 import { dirname, resolve } from "node:path";
@@ -133,7 +133,26 @@ export class BoundedHttpServerLifecycle {
 export interface RememberOffer {
   readonly categoryId: string;
   readonly label: string;
-  readonly until: number;
+  readonly joinsTimedGrant?: true;
+}
+
+/**
+ * The key Morrow Bridge uses to sign one approval click. It leaves this process only toward the
+ * Bridge, over the paired connection, and never appears in a page, header, or URL: a program that
+ * reads the review page over HTTP gets the nonce but not the key, so it cannot approve.
+ */
+export interface ReviewApprovalPresence {
+  readonly origin: string;
+  readonly key: string;
+}
+
+const REVIEW_APPROVAL_PROOF_CONTEXT = "morrow.review-approval.v1";
+
+/** The value Morrow Bridge adds to the approval form after a real click in the review tab. */
+export function reviewApprovalProof(key: string, approvePath: string, nonce: string): string {
+  return createHmac("sha256", Buffer.from(key, "base64url"))
+    .update(`${REVIEW_APPROVAL_PROOF_CONTEXT}\n${approvePath}\n${nonce}`)
+    .digest("base64url");
 }
 
 export interface ApprovalOperationController {
@@ -144,6 +163,17 @@ export interface ApprovalOperationController {
   runApprovedOperation(operationId: string, signal: AbortSignal): Promise<unknown>;
   cancelOperation(operationId: string): JsonObject;
   setApprovalBaseUrl(baseUrl: string): void;
+  /** Hands the approval key to the runtime, which sends it only to the paired Morrow Bridge. */
+  setApprovalPresence?(presence: ReviewApprovalPresence): void;
+  /** A review page with an approve button opened: send the key to Morrow Bridge again. */
+  announceApprovalPresence?(): void;
+  /**
+   * Who each learner label on the review at `reviewPath` is, or null when the review names no
+   * one or has ended. The runtime sends it only to the paired Morrow Bridge, which shows the names
+   * in the review tab. This server never puts a name in a page or a JSON answer, because any
+   * local program can read those.
+   */
+  setReviewLearnerNames?(reviewPath: string, names: Readonly<Record<string, string>> | null): void;
   batchApprovalGet?(batchId: string): JsonObject;
   batchApprovalStatus?(batchId: string): JsonObject;
   approveBatch?(batchId: string): JsonObject;
@@ -980,6 +1010,24 @@ async function reviewContexts(
   return contexts;
 }
 
+/**
+ * Who each learner label in the reviewed operations is, from Morrow's own learner vault. A label
+ * two operations name differently is left out, so the Bridge never shows a guess.
+ */
+function reviewLearnerNames(contexts: ReadonlyMap<string, ApprovalReviewContext> | undefined): Record<string, string> | null {
+  const names = new Map<string, string | null>();
+  for (const context of contexts?.values() ?? []) {
+    for (const [label, name] of Object.entries(context.learnerNames ?? {})) {
+      if (!/^Student A[1-9][0-9]*$/u.test(label) || typeof name !== "string" || !name.trim()) continue;
+      names.set(label, names.has(label) && names.get(label) !== name ? null : name);
+    }
+  }
+  const known = [...names].filter((entry): entry is [string, string] => typeof entry[1] === "string");
+  return known.length ? Object.fromEntries(known) : null;
+}
+
+const ENDED_REVIEW_STATES = new Set(["cancelled", "closed_by_person", "expired", "unavailable"]);
+
 function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boolean, contexts?: ReadonlyMap<string, ApprovalReviewContext>, rememberText?: string, recentEntry?: string | null): string {
   let state = reviewState(target, snapshot);
   if (active && state === "approved") state = "running";
@@ -1149,16 +1197,13 @@ function html(
       // cannot be applied and checking the connection would not help.
       ? '<p class="warning">Canvas does not have the item this change names. It may have been renamed, moved, or removed since this change was prepared.</p><p>Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review. This page has not changed anything.</p>'
       : '<p class="warning">Morrow could not identify the course or a selected item in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
-    : `<p>${batch ? `Morrow will apply all ${plans.length} changes and check each result in Canvas. Searching does not change what you approve.` : addingQuestion ? "Morrow will add this question and check it in Canvas." : "Morrow applies these changes and checks them in Canvas."}</p><p class="keep-open">${keepOpenInstruction(platform)}</p>`).replaceAll("Canvas", platform);
+    : `<p>${batch ? `Morrow will apply all ${plans.length} changes and check each result in Canvas. Searching does not change what you approve.` : addingQuestion ? "Morrow will add this question and check it in Canvas." : "Morrow applies these changes and checks them in Canvas."}</p><p class="keep-open">${keepOpenInstruction(platform)}</p><p class="presence-note">Approve here in Chrome with Morrow Bridge connected. A request from another program cannot approve.</p>`).replaceAll("Canvas", platform);
   // WI-4.4 (D2b, D3): only a single, rememberable change offers "do not ask again", never a
   // batch or a removal (`rememberOffer` already returns null for both). It rides in the same
   // form as the primary approve button, behind its own submit value, so one POST both approves
   // the change and asks the runtime to remember the bundle.
-  const rememberClock = rememberOffer
-    ? new Date(rememberOffer.until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
-    : "";
   const rememberButton = !batch && !missingNames && rememberOffer
-    ? `<button name="remember" value="1" class="approve secondary" type="submit">${approveLabel}, and do not ask again for ${escapeHtml(rememberOffer.label.toLocaleLowerCase())} in this course until ${escapeHtml(rememberClock)}</button>`
+    ? `<button name="remember" value="1" class="approve secondary" type="submit">${approveLabel}, and do not ask again for ${escapeHtml(rememberOffer.label.toLocaleLowerCase())} in this course</button>`
     : "";
   const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="approve${destructive ? " danger" : ""}" type="submit">${approveLabel}</button>${rememberButton}</form>`;
   return pageShell(title, `<header class="hero${destructive ? " danger" : ""}"><h1>${escapeHtml(title)}</h1>${requestedByLine(snapshot, plans)}${batchSummary}${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${reviewContent}<footer class="decision"><div class="next-step">${next}</div><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="cancel" type="submit">Cancel</button></form></div><details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></footer>`);
@@ -1217,6 +1262,10 @@ function recentChangesContent(controller: ApprovalOperationController): string {
   return `<header class="hero"><h1>Recent changes</h1><p>Changes Morrow finished, most recent first.</p></header><section class="section recent-section">${list}</section>`;
 }
 
+function presenceRequiredPage(reviewPath: string): string {
+  return pageShell("Approve this change in Chrome", `<section class="outcome"><h1>Approve this change in Chrome</h1><p>Morrow did not approve anything. Morrow accepts an approval only from a click on the review page in Chrome with Morrow Bridge connected, not from a program that sends the form itself.</p><p><a href="${escapeHtml(reviewPath)}">Open the review again</a>, check that Morrow Bridge is connected, and select the button there.</p></section>`);
+}
+
 function recentChangesRefusal(title: string, detail: string): string {
   return pageShell(title, `<section class="outcome"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(detail)}</p></section>`);
 }
@@ -1240,9 +1289,9 @@ function approvalCookieName(nonce: string): string {
   return `morrow_approval_${nonce}`;
 }
 
-async function readFormNonce(request: IncomingMessage): Promise<{ nonce: string | null; remember: boolean }> {
+async function readFormNonce(request: IncomingMessage): Promise<{ nonce: string | null; remember: boolean; presence: string | null }> {
   if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/x-www-form-urlencoded")) {
-    return { nonce: null, remember: false };
+    return { nonce: null, remember: false, presence: null };
   }
   const chunks: Buffer[] = [];
   let bytes = 0;
@@ -1253,7 +1302,7 @@ async function readFormNonce(request: IncomingMessage): Promise<{ nonce: string 
     chunks.push(buffer);
   }
   const form = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
-  return { nonce: form.get("nonce"), remember: form.get("remember") === "1" };
+  return { nonce: form.get("nonce"), remember: form.get("remember") === "1", presence: form.get("presence") };
 }
 
 export class LoopbackApprovalServer {
@@ -1268,9 +1317,12 @@ export class LoopbackApprovalServer {
   // WI-6.4: `/recent` names no operation, so it needs its own gate. `recentEntries` holds each
   // one-time code, minted for the `morrow_recent_changes` tool, until it is exchanged once for a
   // `recentSessions` token, which the cookie then carries for its own 900-second lifetime.
-  private readonly recentEntries = new Map<string, number>();
+  // A result page's link is tied to its operation (`targetKey`) and reused on every reload and
+  // poll until it is spent, so page traffic cannot push out the code the tool handed out.
+  private readonly recentEntries = new Map<string, { expiresAt: number; targetKey: string | null }>();
   private readonly recentSessions = new Map<string, number>();
   private readonly stopping = new AbortController();
+  private readonly presenceKey = randomBytes(32).toString("base64url");
   private port: number | null = null;
   private approvalAdmissionOpen = true;
   private approvalPosts = 0;
@@ -1289,6 +1341,12 @@ export class LoopbackApprovalServer {
 
   get baseUrl(): string | null {
     return this.port === null ? null : `http://${LOOPBACK_HOST}:${this.port}`;
+  }
+
+  /** The key this server hands to Morrow Bridge, for an in-process caller. Null before start. */
+  get approvalPresence(): ReviewApprovalPresence | null {
+    const origin = this.baseUrl;
+    return origin ? { origin, key: this.presenceKey } : null;
   }
 
   /**
@@ -1346,17 +1404,23 @@ export class LoopbackApprovalServer {
    * `${baseUrl}/recent?entry=<code>`. Public because the tool calls it directly, the way it reads
    * `baseUrl` directly; `/recent` itself only ever consumes a code, never issues one.
    */
-  issueRecentChangesEntry(): string {
+  issueRecentChangesEntry(targetKey: string | null = null): string {
     const now = Date.now();
-    for (const [code, expiresAt] of this.recentEntries) if (expiresAt <= now) this.recentEntries.delete(code);
+    for (const [code, entry] of this.recentEntries) if (entry.expiresAt <= now) this.recentEntries.delete(code);
+    if (targetKey !== null) {
+      for (const [code, entry] of this.recentEntries) if (entry.targetKey === targetKey) return code;
+    }
     while (this.recentEntries.size >= MAX_RECENT_ENTRIES) {
-      const oldest = this.recentEntries.keys().next().value;
+      // A result page can mint its link again on the next load; a code the tool handed out
+      // cannot be handed out again, so a page's code goes first.
+      const oldest = [...this.recentEntries].find(([, entry]) => entry.targetKey !== null)?.[0]
+        ?? this.recentEntries.keys().next().value;
       if (oldest === undefined) break;
       this.recentEntries.delete(oldest);
     }
     let code: string;
     do code = randomBytes(32).toString("base64url"); while (this.recentEntries.has(code));
-    this.recentEntries.set(code, now + RECENT_ENTRY_TTL_MS);
+    this.recentEntries.set(code, { expiresAt: now + RECENT_ENTRY_TTL_MS, targetKey });
     return code;
   }
 
@@ -1379,7 +1443,7 @@ export class LoopbackApprovalServer {
    * WI-4.4: runs after `approveOperation` already succeeded and the change's own work has
    * started, never awaited by the request that approved it ("Approve first. A failed grant must
    * not stop the change."). `rememberOffer` is read again here, not carried from the
-   * page load that showed the button: the bundle and its end time are decoration on top of an
+   * page load that showed the button: the bundle is decoration on top of an
    * approval the person already made, so reading them fresh is no less correct than the page's
    * own copy, and never risks approving on stale data.
    */
@@ -1388,8 +1452,9 @@ export class LoopbackApprovalServer {
     try {
       const offer = await this.controller.rememberOffer?.(operationId);
       if (offer && (await this.controller.rememberKind?.(operationId)) === "saved") {
-        const clock = new Date(offer.until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-        text = `Morrow does not ask again for ${offer.label.toLocaleLowerCase()} in this course until ${clock}.`;
+        text = offer.joinsTimedGrant
+          ? `Morrow does not ask again for ${offer.label.toLocaleLowerCase()} in this course until the Edit access this course already had ends.`
+          : `Morrow does not ask again for ${offer.label.toLocaleLowerCase()} in this course until you return the course to Plan in Morrow Bridge.`;
       }
     } catch { /* the sentence already defaults to the failure case */ }
     if (this.rememberResults.size >= MAX_APPROVAL_NONCES && !this.rememberResults.has(operationId)) {
@@ -1399,7 +1464,14 @@ export class LoopbackApprovalServer {
     this.rememberResults.set(operationId, text);
   }
 
-  async start(): Promise<string> {
+  /** Hands the review's label-to-name map to the runtime for Morrow Bridge. A failure changes nothing here. */
+  private shareLearnerNames(target: ApprovalTarget, contexts: ReadonlyMap<string, ApprovalReviewContext> | undefined): void {
+    try {
+      this.controller.setReviewLearnerNames?.(`/${target.kind}/${target.id}`, reviewLearnerNames(contexts));
+    } catch { /* the page still shows every learner by label */ }
+  }
+
+    async start(): Promise<string> {
     if (this.baseUrl) return this.baseUrl;
     await new Promise<void>((resolve, reject) => {
       this.server.once("error", reject);
@@ -1414,6 +1486,7 @@ export class LoopbackApprovalServer {
     const baseUrl = this.baseUrl;
     if (!baseUrl) throw new Error("approval server has no loopback URL");
     this.controller.setApprovalBaseUrl(baseUrl);
+    this.controller.setApprovalPresence?.({ origin: baseUrl, key: this.presenceKey });
     return baseUrl;
   }
 
@@ -1438,7 +1511,7 @@ export class LoopbackApprovalServer {
       if (method === "GET" && url.pathname === "/recent") {
         const entry = url.searchParams.get("entry");
         if (entry) {
-          const expiresAt = this.recentEntries.get(entry);
+          const expiresAt = this.recentEntries.get(entry)?.expiresAt;
           this.recentEntries.delete(entry);
           if (!expiresAt || expiresAt <= Date.now()) {
             sendHtml(response, 409, recentChangesRefusal(
@@ -1491,7 +1564,8 @@ export class LoopbackApprovalServer {
           const contexts = verifiedNow
             ? await reviewContexts(this.controller, operations, signal)
             : undefined;
-          const recentEntry = verifiedNow ? this.issueRecentChangesEntry() : null;
+          const recentEntry = verifiedNow ? this.issueRecentChangesEntry(`${target.kind}:${target.id}`) : null;
+          if (verifiedNow) this.shareLearnerNames(target, contexts);
           sendJson(response, 200, { html: statusContent(target, snapshot, active, contexts, this.rememberText(target), recentEntry), active, states });
           return;
         }
@@ -1507,8 +1581,14 @@ export class LoopbackApprovalServer {
         const rememberOffer = target.kind === "operations" && state === "awaiting_approval" && this.controller.rememberOffer
           ? await this.controller.rememberOffer(target.id).catch(() => null)
           : null;
-        const recentEntry = state === "verified" ? this.issueRecentChangesEntry() : null;
+        const recentEntry = state === "verified" ? this.issueRecentChangesEntry(`${target.kind}:${target.id}`) : null;
         const body = html(target, snapshot, () => (nonce = this.issueNonce(nonceKey, canApprove)), contexts, active, rememberOffer, this.rememberText(target), recentEntry);
+        this.shareLearnerNames(target, ENDED_REVIEW_STATES.has(state) ? undefined : contexts);
+        if (nonce && canApprove && state === "awaiting_approval") {
+          try {
+            this.controller.announceApprovalPresence?.();
+          } catch { /* the page still loads; the Bridge asks the person to reload when it has no key */ }
+        }
         sendHtml(
           response,
           200,
@@ -1530,7 +1610,7 @@ export class LoopbackApprovalServer {
         const baseUrl = this.baseUrl;
         const originValid = requestOrigin === baseUrl;
         const refererValid = requestReferer === `${baseUrl}/${target.kind}/${encodeURIComponent(target.id)}`;
-        const { nonce: formNonce, remember } = await readFormNonce(request);
+        const { nonce: formNonce, remember, presence } = await readFormNonce(request);
         signal.throwIfAborted();
         const expected = formNonce ? this.nonces.get(formNonce) : undefined;
         const cookieNonce = formNonce && expected ? cookieValue(request, approvalCookieName(formNonce)) : null;
@@ -1545,6 +1625,16 @@ export class LoopbackApprovalServer {
         ) {
           if (formNonce && expected?.expiresAt && expected.expiresAt <= Date.now()) this.nonces.delete(formNonce);
           throw new Error("approval nonce is missing, expired, or invalid");
+        }
+        // The nonce and cookie prove only that the caller read the page, which any local HTTP
+        // client can do. Approval also needs Morrow Bridge's signature over this exact form, which
+        // it adds only after a real click in the review tab. A refusal keeps the nonce, so the
+        // person can still approve in Chrome.
+        if (target.action === "approve" && !exactSecret(presence, reviewApprovalProof(this.presenceKey, url.pathname, formNonce!))) {
+          if (String(request.headers.accept || "").includes("text/html")) {
+            sendHtml(response, 403, presenceRequiredPage(`/${target.kind}/${encodeURIComponent(target.id)}`));
+          } else sendJson(response, 403, { schema: "morrow.problem.v1", code: "approval_presence_required" });
+          return;
         }
         this.revokeTargetNonces(nonceKey);
         if (this.stopping.signal.aborted || (target.action === "approve" && target.kind === "batches" && !this.controller.runApprovedBatch)) {

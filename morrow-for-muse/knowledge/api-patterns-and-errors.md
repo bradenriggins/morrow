@@ -69,7 +69,8 @@ not the list length.
 ## Pre-dispatch guardrails (shipped in the executor)
 
 These run before any provider call, live-proven through the Chromium
-lane on course 89585 (D-009/D-010/D-011, `defects/DEFECTS.md`):
+lane on course 89585 (defects D-009/D-010/D-011; the defect log is
+operator history and is not part of this tree):
 
 - **Post-write readback**: after a create/update on assignment-group,
   discussion, assignment, module, quiz, or page surfaces, the executor
@@ -204,7 +205,8 @@ news, which is exactly why they keep biting.
   served tool bundle (NQS-7).
 - **Learner-bearing routes** (`/users/`, `/enrollments`,
   `/submissions`, `/gradebook`, `/grades`, `/analytics`,
-  `/ai_conversations`, `/ai_experiences`) are refused by the
-  admission gate as learner-data (`LearnerDataGated`) until the
-  tokenization boundary is proven. The admission gate refuses them on
-  every tenant; there is no bypass. `/users/self` is the exception.
+  `/ai_conversations`, `/ai_experiences`) are learner data: they
+  dispatch only on the Chromium lane with the encrypted learner vault,
+  where every receipt is de-identified, and are refused
+  (`LearnerDataGated`) everywhere else, on every tenant; there is no
+  bypass. `/users/self` is the exception.

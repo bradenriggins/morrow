@@ -26,7 +26,7 @@
           <h1 id="setup-title">Set up Morrow on this computer</h1>
           <p class="intro-copy">Choose your assistant. Morrow then shows one next action at a time until your first Canvas or Moodle course is connected.</p>
           <p id="windows-note" class="managed-device-note" data-platform="win32" hidden>On Windows, Morrow installs for your user account and does not ask for administrator approval. If managed-device policy blocks it, ask your IT team to deploy Morrow.</p>
-          <p id="macos-note" class="managed-device-note" data-platform="darwin" hidden>On a Mac, Morrow sets up inside your user account and does not ask for an administrator password. If managed-device policy blocks it, ask your IT team to deploy Morrow.</p>
+          <p id="macos-note" class="managed-device-note" data-platform="darwin" hidden>On a Mac, Morrow sets up inside your user account. Moving Morrow to Applications can ask for an administrator password when your account cannot change that folder. If you do not have that password, or managed-device policy blocks Morrow, ask your IT team to deploy Morrow.</p>
         </section>
 
         <nav class="progress-panel" aria-label="Setup steps">
@@ -61,7 +61,7 @@
         <details id="blackboard-panel" class="blackboard-panel" hidden>
           <summary id="blackboard-summary" class="blackboard-summary">
             <h2>Connect a Blackboard Learn site (optional)</h2>
-            <span class="blackboard-summary-detail">Most people do not need this. Canvas and Moodle connect through the steps above. Open this only if a Blackboard administrator gave you an application key for Morrow.</span>
+            <span class="blackboard-summary-detail">Only needed if a Blackboard administrator gave you an application key for Morrow. Canvas and Moodle do not use this.</span>
           </summary>
           <div class="blackboard-body">
             <p id="blackboard-copy" class="blackboard-status" role="status" aria-live="polite" aria-atomic="true"></p>
@@ -107,6 +107,7 @@
           <div id="retention-body" class="retention-body"></div>
         </details>
         <p id="removal-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+        <p id="copy-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
 
         <footer id="support" class="support" hidden></footer>
       </div>

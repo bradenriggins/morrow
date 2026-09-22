@@ -15,6 +15,17 @@ Subcommands:
   doctor    read-only health check: helper status, tree sanity
   version   read-only: print the tree version and command inventory
   failure   read-only: look up one failure-catalog entry by id or fragment
+  mode      show or set Plan/Edit mode (settings/commands.py mode ...)
+  settings  show, get, or set a setting (settings/commands.py settings ...)
+  students  find: resolve the name the educator typed to the student's
+            course label (learners/find.py; read-only)
+  disconnect  end the Canvas connection: stop the helper, remove keepalive,
+            delete the sign-in (scripts/uninstall.sh --disconnect)
+  start     keep the helper supervised: with no cron on this machine,
+            start the keepalive background loop (helper/supervisor.py)
+
+After a reboot on a machine without cron, the first morrow command
+restarts the keepalive loop (only when install.sh chose the loop).
 
 Stdlib only.
 """
@@ -39,7 +50,7 @@ _COMMANDS = {
     "plan": ("catalog/a11y/runner.py",
              "accessibility repair planning (validates, never writes)"),
     "query": ("query/chain.py",
-              "natural-language learner query chain, e.g. failed students"),
+              "failed-students query (typed: --course, --quiz, one threshold)"),
 }
 
 # audit/plan need their runner subcommand prepended.
@@ -61,6 +72,18 @@ def _print_help():
     lines.append("  %-10s %s" % ("doctor", "read-only health check"))
     lines.append("  %-10s %s" % ("version", "read-only: version and command inventory"))
     lines.append("  %-10s %s" % ("failure", "read-only: failure-catalog lookup"))
+    lines.append("  %-10s %s" % ("mode", "show or set Plan/Edit mode "
+                                  "(status | set plan|edit)"))
+    lines.append("  %-10s %s" % ("settings", "show, get, or set a setting "
+                                  "(show | get KEY | set KEY VALUE)"))
+    lines.append("  %-10s %s" % ("students", "find --course C \"<name>\": "
+                                  "the educator's student as a course "
+                                  "label (read-only)"))
+    lines.append("  %-10s %s" % ("start", "keep the helper supervised "
+                                  "(keepalive loop when there is no cron)"))
+    lines.append("  %-10s %s" % ("disconnect", "end the Canvas connection "
+                                  "(stop helper, remove keepalive, delete "
+                                  "the sign-in); --yes to skip the prompt"))
     lines.append("")
     lines.append("Each command passes its arguments through to the underlying")
     lines.append("entry point; run `morrow <command> --help` for details.")
@@ -89,7 +112,9 @@ def _version():
             version = fh.read().strip() or "unknown"
     except OSError:
         pass
-    commands = sorted(list(_COMMANDS) + ["doctor", "version", "failure"])
+    commands = sorted(list(_COMMANDS) + ["doctor", "version", "failure",
+                                         "mode", "settings", "students",
+                                         "disconnect", "start"])
     lines = [
         "morrow %s" % version,
         "tree: %s" % DEPLOY_DIR,
@@ -237,6 +262,38 @@ def _doctor(json_mode=False):
     return 0 if ok else 1
 
 
+def _start():
+    """Keep this tree's helper supervised. With cron, install.sh's
+    per-tree cron entry does it; without cron, start the keepalive
+    background loop (a no-op when it already runs)."""
+    from helper import supervisor as _sup
+    method = _sup.detect()
+    if method == "cron":
+        print(json.dumps({"method": "cron", "started": False,
+                          "message": "cron runs this tree's keepalive "
+                                     "every 5 minutes (install.sh "
+                                     "installed the entry)"}))
+        return 0
+    out = _sup.ensure(DEPLOY_DIR)
+    out["message"] = ("the keepalive background loop %s (pid %s); it runs "
+                      "helper/keepalive.sh every 5 minutes"
+                      % ("started" if out.get("started") else
+                         "is already running", out.get("pid")))
+    print(json.dumps(out))
+    return 0
+
+
+def _resume_supervision():
+    """After a reboot without cron, the first morrow command restarts
+    the keepalive loop, but only when install.sh chose the loop for
+    this tree. Never blocks or fails a command."""
+    try:
+        from helper import supervisor as _sup
+        _sup.ensure_if_installed(DEPLOY_DIR)
+    except Exception:
+        pass
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("-h", "--help", "help"):
@@ -244,6 +301,13 @@ def main(argv=None):
         return 0
     name = argv[0]
     rest = argv[1:]
+    if name == "start":
+        if rest:
+            print("usage: morrow start", file=sys.stderr)
+            return 2
+        return _start()
+    if name != "disconnect":
+        _resume_supervision()
     if name == "doctor":
         if rest and rest != ["--json"]:
             print("usage: morrow doctor [--json]", file=sys.stderr)
@@ -256,6 +320,28 @@ def main(argv=None):
         return _version()
     if name == "failure":
         return _failure(rest)
+    if name in ("mode", "settings"):
+        from settings import commands as _settings_commands
+        return _settings_commands.main([name] + rest)
+    if name == "students":
+        if not rest or rest[0] != "find":
+            print("usage: morrow students find --course C [--choose LABEL] "
+                  "\"<name as the educator typed it>\"", file=sys.stderr)
+            return 2
+        from learners import find as _find
+        return _find.main(rest[1:])
+    if name == "disconnect":
+        if rest not in ([], ["--yes"]):
+            print("usage: morrow disconnect [--yes]", file=sys.stderr)
+            return 2
+        script = os.path.join(DEPLOY_DIR, "scripts", "uninstall.sh")
+        try:
+            return subprocess.run(["bash", script, "--disconnect"]
+                                  + rest).returncode
+        except OSError as exc:
+            print("morrow: cannot launch %s: %s" % (script, exc),
+                  file=sys.stderr)
+            return 127
     if name not in _COMMANDS:
         print("morrow: unknown command %r" % name, file=sys.stderr)
         _print_help()

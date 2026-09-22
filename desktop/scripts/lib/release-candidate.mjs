@@ -31,6 +31,7 @@ export const BROWSER_HARNESS_RECEIPT_PATH = "output/browser-harness/receipt.json
 export const BROWSER_HARNESS_IDS = Object.freeze([
   "canvas_connector_browser",
   "bridge_maintenance_cft",
+  "installer_renderer_layout",
   "canvas_file_optional_permission",
   "desktop_windows_smoke",
 ]);
@@ -43,6 +44,7 @@ export const BROWSER_HARNESS_IDS = Object.freeze([
 export const REQUIRED_BROWSER_HARNESS_PASSES = Object.freeze([
   "canvas_connector_browser",
   "bridge_maintenance_cft",
+  "installer_renderer_layout",
   "canvas_file_optional_permission",
 ]);
 /** A harness that ran keeps its log; a harness that did not run keeps a reason. */

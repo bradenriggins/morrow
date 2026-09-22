@@ -4,7 +4,8 @@ name: ci
 # each product suite runs only when its directory changed. The `check` job
 # aggregates both suites and keeps the required status-check name stable,
 # so branch protection keeps working when a change touches one product only
-# (the other suite skips, and `check` still reports).
+# (the other suite skips, and `check` still reports). A workflow change runs
+# both suites.
 
 on:
   pull_request:
@@ -22,14 +23,16 @@ jobs:
       muse: ${{ steps.filter.outputs.muse }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad
         id: filter
         with:
           filters: |
             desktop:
               - 'desktop/**'
+              - '.github/**'
             muse:
               - 'morrow-for-muse/**'
+              - '.github/**'
 
   check-desktop:
     needs: changes
@@ -53,10 +56,9 @@ jobs:
       - name: Install Playwright's Chromium
         run: pnpm exec playwright install --with-deps chromium
       - run: pnpm check
+      # pnpm check already runs the desktop installer suites (pnpm test ends with pnpm test:desktop).
       - name: Browser integration harnesses
         run: xvfb-run -a node scripts/run-browser-harnesses.mjs
-      - name: Desktop installer suites
-        run: pnpm test:desktop
 
   check-muse:
     needs: changes
@@ -68,32 +70,52 @@ jobs:
         working-directory: morrow-for-muse
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
       - name: Install test dependencies
         run: pip install pytest
       - name: Install dev dependencies (hash-locked)
         run: pip install -r requirements-dev.txt
+      - name: Install optional dependencies (hash-locked; the learner-privacy tests need cryptography)
+        run: |
+          pip install -r requirements-optional.txt
+          python -c "import cryptography"
       - name: Muse test suite
         run: python -m pytest -q
 
   check:
-    needs: [check-desktop, check-muse]
+    needs: [changes, check-desktop, check-muse]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate product suites
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          DESKTOP_CHANGED: ${{ needs.changes.outputs.desktop }}
+          DESKTOP: ${{ needs.check-desktop.result }}
+          MUSE_CHANGED: ${{ needs.changes.outputs.muse }}
+          MUSE: ${{ needs.check-muse.result }}
         run: |
+          # A skipped suite passes only when change detection succeeded and
+          # said that product did not change.
+          if [ "$CHANGES" != "success" ]; then
+            echo "Change detection did not succeed: $CHANGES"
+            exit 1
+          fi
           fail=0
-          for r in "${{ needs.check-desktop.result }}" "${{ needs.check-muse.result }}"; do
-            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
-              echo "suite result: $r"
+          for pair in "desktop:$DESKTOP_CHANGED:$DESKTOP" "muse:$MUSE_CHANGED:$MUSE"; do
+            IFS=: read -r name changed result <<< "$pair"
+            if [ "$changed" = "true" ] && [ "$result" != "success" ]; then
+              echo "$name suite result: $result"
               fail=1
+            elif [ "$changed" != "true" ] && [ "$result" != "skipped" ]; then
+              echo "$name suite ran without a detected change: $result"
+              [ "$result" = "success" ] || fail=1
             fi
           done
           if [ "$fail" = "1" ]; then
-            echo "A product suite failed."
+            echo "A product suite did not pass."
             exit 1
           fi
-          echo "All required suites passed (skipped suites did not change)."
+          echo "Every changed product's suite passed."

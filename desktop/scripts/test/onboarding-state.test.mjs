@@ -43,7 +43,6 @@ const textOf = (state, id) => state.checks.find((check) => check.id === id).text
 test("setup guide prioritizes a live pairing approval over an unpaired state", () => {
   const state = setupGuideState({ pairing: true, paired: false, connected: false, bindings: [], siteAnchors: [] });
   assert.equal(state.title, "Allow connection");
-  assert.equal(state.showAssistantGuide, false);
   assert.equal(textOf(state, "assistant"), "An assistant approval is waiting on the Morrow page that opened");
   assert.equal(textOf(state, "connection"), "Morrow Bridge connects after you allow this connection");
 });
@@ -51,7 +50,6 @@ test("setup guide prioritizes a live pairing approval over an unpaired state", (
 test("setup guide directs an unpaired Bridge to the graphical Morrow app", () => {
   const state = setupGuideState({ pairing: false, paired: false, connecting: false, connected: false, bindings: [], siteAnchors: [] });
   assert.equal(state.title, "Open Morrow");
-  assert.equal(state.showAssistantGuide, true);
   assert.match(state.detail, /choose your assistant/i);
   assert.match(state.detail, /select Connect Morrow/i);
 });
@@ -66,6 +64,24 @@ test("setup guide distinguishes a closed assistant, signed-out course, Plan sele
   const ready = setupGuideState(READY_STATUS);
   assert.equal(ready.ready, true);
   assert.equal(ready.title, "Plan your first change");
+});
+
+// Each next step names a control the popup or Plan and Edit settings really shows: Connect this
+// course, Open Canvas or Open Moodle, and Connect on a course row. There is no Find courses button
+// and no Connect selected courses.
+test("setup guide steps name only controls that exist", () => {
+  const connected = { paired: true, connected: true, runtimeHealthy: true };
+  const closed = setupGuideState({ ...connected, bindings: [], siteAnchors: [{ provider: "canvas", runtimeVerified: false }] });
+  assert.equal(closed.detail, "Select Open Canvas in the Morrow Bridge popup, or open the saved Canvas course in Chrome yourself, and sign in if Canvas asks.");
+  const none = setupGuideState({ ...connected, bindings: [], siteAnchors: [] });
+  assert.equal(none.detail, "Open a Canvas or Moodle course in Chrome and sign in. The Morrow Bridge popup then shows Connect this course. Select it and allow Chrome access to the exact address shown.");
+  const plan = setupGuideState({ ...connected, bindings: [], siteAnchors: [{ runtimeVerified: true }] });
+  assert.equal(plan.detail, "Open Plan and Edit settings. The courses on your signed-in site are listed under Not connected. Select Connect on a course. It connects in Plan.");
+  const html = readFileSync(new URL("../../connector/extension/onboarding/onboarding.html", import.meta.url), "utf8");
+  for (const text of [closed.detail, none.detail, plan.detail, html]) {
+    assert.doesNotMatch(text, /Connect Canvas|Connect Moodle|Find available courses|Connect selected courses|matching platform button/);
+  }
+  assert.match(html, /shows <b>Connect this course<\/b>/);
 });
 
 // The five checks are the completion goal: an assistant approved this connection, Morrow matches
@@ -185,7 +201,6 @@ test("a status the guide could not read states that, instead of keeping the last
   assert.equal(unread.ready, false);
   assert.equal(unread.readyCourses, 0);
   assert.equal(unread.canOpenSettings, false);
-  assert.equal(unread.showAssistantGuide, false);
   for (const line of [unread.heading, unread.summary, unread.title, unread.detail, ...unread.checks.map((check) => check.text)]) {
     assert.doesNotMatch(line, /\bis ready\b|\bare ready\b|Ready to use|completed/, line);
   }
@@ -323,7 +338,7 @@ test("the setup guide answers a failed status read with an unknown checklist, th
     "#next-title": stubElement("Open Morrow"),
     "#next-detail": stubElement("Open Morrow, choose your assistant, then return to Morrow Bridge."),
     "#open-settings": stubElement("Open Plan and Edit settings", true),
-    "#guide-assistant": stubElement(),
+    "#data-disclosure": stubElement(),
     "#quick-open-settings": stubElement("Open Plan and Edit settings"),
     "#error": stubElement("", true),
   };

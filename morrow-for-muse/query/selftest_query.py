@@ -2,7 +2,7 @@
 """Self-tests for the failed-students query chain (query/).
 
 Run: python3 query/selftest_query.py
-Covers: intent parsing, week-window/date semantics, quiz resolution
+Covers: typed argument checks, week-window/date semantics, quiz resolution
 (zero/one/multiple matches, undated, unpublished), threshold math
 (points, percent, grading standards, excused, missing, pass_fail,
 not_graded), pagination merging, and translator routing. No live
@@ -13,6 +13,10 @@ Exit code 0 = all pass.
 """
 
 from __future__ import annotations
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 
 import os
 import sys
@@ -22,7 +26,6 @@ _TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _TREE_ROOT not in sys.path:
     sys.path.insert(0, _TREE_ROOT)
 
-from query import intent as I
 from query import quiz_resolve as Q
 from query import thresholds as T
 from query import chain as C
@@ -47,32 +50,24 @@ def check(name, cond, detail=""):
           ((" -- " + detail) if detail and not cond else ""))
 
 
-# ---------------------------------------------------------------- intent
-def t_intent():
-    p = I.parse("show me all the students that failed last week's quiz")
-    check("intent/canonical", p["action"] == "failed_students"
-          and p["quiz_ref"]["kind"] == "last_week"
-          and p["threshold"] is None)
-    p = I.parse("Which students failed the quiz below 70%?")
-    check("intent/pct-threshold",
-          p["threshold"] == {"kind": "percent", "value": 70.0})
-    p = I.parse("list learners who scored under 40 points on last week's quiz")
-    check("intent/points-threshold",
-          p["threshold"] == {"kind": "points", "value": 40.0}
-          and p["quiz_ref"]["kind"] == "last_week")
-    p = I.parse("who got an F on last week's quiz")
-    check("intent/letter-f", p["threshold"] == {"kind": "letter_f"})
-    p = I.parse("show me students that didn't pass \"Mid-Term Exam\"")
-    check("intent/quoted-title",
-          p["quiz_ref"]["kind"] == "named_title"
-          and p["quiz_ref"]["title"] == "Mid-Term Exam")
-    for bad in ("what is the weather", "create a quiz",
-                "show me the gradebook", ""):
+# ------------------------------------------------------------- arguments
+def t_arguments():
+    ref, th = C._checked_arguments("last_week", None, None, False)
+    check("args/default", ref == {"kind": "last_week"} and th is None)
+    _, th = C._checked_arguments("last_week", 70, None, False)
+    check("args/percent", th == {"kind": "percent", "value": 70.0})
+    _, th = C._checked_arguments("this_week", None, 40, False)
+    check("args/points", th == {"kind": "points", "value": 40.0})
+    _, th = C._checked_arguments("last_week", None, None, True)
+    check("args/letter-f", th == {"kind": "letter_f"})
+    for bad in (("yesterday", None, None, False),
+                ("last_week", 70, 40, False),
+                ("last_week", 150, None, False)):
         try:
-            I.parse(bad)
-            check("intent/rejects-%r" % bad[:20], False, "parsed, want raise")
-        except I.IntentNotRecognized:
-            check("intent/rejects-%r" % bad[:20], True)
+            C._checked_arguments(*bad)
+            check("args/rejects-%r" % (bad,), False, "accepted")
+        except C.QueryArgumentsInvalid:
+            check("args/rejects-%r" % (bad,), True)
 
 
 # ---------------------------------------------------------------- dates
@@ -437,8 +432,9 @@ def t_translator():
           50.0)]))
     check("tr/ambiguous", te.mode_id == "quiz-resolution-ambiguous"
           and "Quiz A" in te.agent_message, te.mode_id)
-    te = TR.translate("op", I.IntentNotRecognized("blah"))
-    check("tr/intent", te.mode_id == "query-intent-unrecognized", te.mode_id)
+    te = TR.translate("op", C.QueryArgumentsInvalid("blah"))
+    check("tr/arguments", te.mode_id == "query-arguments-invalid",
+          te.mode_id)
     te = TR.translate("op", T.ThresholdUndefined("no points"))
     check("tr/threshold", te.mode_id == "query-threshold-undefined",
           te.mode_id)
@@ -457,41 +453,24 @@ def t_translator():
           te.mode_id)
     # ChainFailure is raisable and carries the translation.
     try:
-        C.run_query("what is the weather", "89585", reader=FakeReader([], []),
+        C.run_query("89585", "yesterday", reader=FakeReader([], []),
                     tenant_base=_TEST_TENANT)
         check("tr/chainfailure-raisable", False, "no raise")
     except C.ChainFailure as e:
         check("tr/chainfailure-raisable", True)
         check("tr/chainfailure-mode",
-              e.translated.mode_id == "query-intent-unrecognized",
+              e.translated.mode_id == "query-arguments-invalid",
               e.translated.mode_id)
         check("tr/chainfailure-message",
-              "did not match the failed-students phrasing"
-              in e.translated.agent_message)
+              "arguments were not valid" in e.translated.agent_message)
     try:
-        C.run_query("show me all the students that failed last week's quiz",
-                    "89585", reader=FakeReader([], []), now_utc=NOW,
+        C.run_query("89585", "last_week", reader=FakeReader([], []), now_utc=NOW,
                     tenant_base=_TEST_TENANT)
         check("tr/chainfailure-no-match", False, "no raise")
     except C.ChainFailure as e:
         check("tr/chainfailure-no-match",
               e.translated.mode_id == "quiz-resolution-no-match",
               e.translated.mode_id)
-    # A "yesterday's quiz" reference parses but does not resolve: the
-    # chain must raise ChainFailure with the unsupported-reference
-    # mode, never a raw UnsupportedQuizRef.
-    try:
-        C.run_query("show me the students that failed yesterday's quiz",
-                    "89585", reader=FakeReader([], []), now_utc=NOW,
-                    tenant_base=_TEST_TENANT)
-        check("tr/chainfailure-yesterday", False, "no raise")
-    except C.ChainFailure as e:
-        check("tr/chainfailure-yesterday",
-              e.translated.mode_id == "quiz-reference-unsupported",
-              e.translated.mode_id)
-    except Exception as e:  # noqa: BLE001 - must not leak raw
-        check("tr/chainfailure-yesterday", False,
-              "raw %s escaped" % type(e).__name__)
     # A reader-side LiveReadError must arrive as a translated
     # ChainFailure (query-live-read-failed), never a raw traceback.
     class _BoomReader(FakeReader):
@@ -499,8 +478,7 @@ def t_translator():
             raise L.LiveReadError("helper Chromium is not alive")
 
     try:
-        C.run_query("show me all the students that failed last week's quiz",
-                    "89585", reader=_BoomReader([], []), now_utc=NOW,
+        C.run_query("89585", "last_week", reader=_BoomReader([], []), now_utc=NOW,
                     tenant_base=_TEST_TENANT)
         check("tr/chainfailure-read-error", False, "no raise")
     except C.ChainFailure as e:
@@ -518,8 +496,8 @@ def t_translator():
     import subprocess as _sp
     _proc = _sp.run(
         [sys.executable, os.path.join(_TREE_ROOT, "query", "chain.py"),
-         "show me all the students that failed last week's quiz",
-         "--course", "89585", "--tenant", _TEST_TENANT],
+         "--course", "89585", "--quiz", "last-week",
+         "--tenant", _TEST_TENANT],
         cwd=_TREE_ROOT, capture_output=True, text=True, timeout=120)
     check("tr/cli-exit-2", _proc.returncode == 2,
           "exit %s: %s" % (_proc.returncode, _proc.stderr[-200:]))
@@ -552,8 +530,7 @@ def t_end_to_end():
         [_quiz(1, "Pop Quiz #1", aid=11)],
         [_assign(11, "2026-09-16T05:00:00Z")])
     res = C.run_query(
-        "show me all the students that failed last week's quiz",
-        "89585", reader=r, now_utc=NOW, synthetic_rows=_SYNTH,
+        "89585", "last_week", reader=r, now_utc=NOW, synthetic_rows=_SYNTH,
         tenant_base=_TEST_TENANT)
     txt = res.text
     check("e2e/synthetic-banner", txt.startswith("*** SYNTHETIC"),
@@ -571,7 +548,7 @@ def t_end_to_end():
 
 
 def main():
-    t_intent()
+    t_arguments()
     t_dates()
     t_resolve()
     t_thresholds()

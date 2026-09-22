@@ -59,27 +59,27 @@ const COPY = {
   course_tab_missing: {
     title: "No signed-in course tab is open here",
     detail: "Morrow connects the signed-in Canvas or Moodle course that is open in front of you, and this Chrome window has none.",
-    action: "Open the signed-in Canvas or Moodle course that Morrow should use. Morrow Bridge will identify the platform and show Connect Canvas or Connect Moodle.",
+    action: "Open the signed-in Canvas or Moodle course that Morrow should use. The Morrow Bridge popup then shows Connect this course.",
   },
   course_site_access_required: {
     title: "Chrome has not given Morrow access to this Canvas or Moodle address",
     detail: "Morrow reads and changes only the Canvas or Moodle addresses you allow in Chrome, and this one is not allowed yet.",
-    action: "Select Connect Canvas or Connect Moodle, whichever Morrow Bridge shows, then choose Allow in Chrome.",
+    action: "Select Connect this course in the Morrow Bridge popup, then choose Allow in Chrome.",
   },
   course_sign_in_required: {
     title: "This tab is not a signed-in course",
     detail: "Morrow could not find a signed-in Canvas or Moodle course in this tab.",
-    action: "Open a Canvas or Moodle course and sign in. Morrow Bridge will identify the platform and show the matching Connect button.",
+    action: "Open a Canvas or Moodle course and sign in. The Morrow Bridge popup then shows Connect this course.",
   },
   course_permission_denied: {
     title: "Chrome did not give Morrow access to this Canvas or Moodle address",
     detail: "The Chrome access request was answered with no, so nothing is connected.",
-    action: "Select the Connect Canvas or Connect Moodle button again, then choose Allow in Chrome.",
+    action: "Select Connect this course again, then choose Allow in Chrome.",
   },
   course_permission_prompt_missing: {
     title: "Chrome did not show its access request",
     detail: "Chrome never displayed the access request, so Morrow received no answer.",
-    action: "Close this popup and open it again on the signed-in course. Then select the Connect Canvas or Connect Moodle button it shows.",
+    action: "Close this popup and open it again on the signed-in course. Then select Connect this course.",
   },
   blackboard_browser_unsupported: {
     title: "Morrow does not connect Blackboard through Chrome",
@@ -121,12 +121,12 @@ const COPY = {
   edit_policy_binding_missing: {
     title: "This course is no longer connected",
     detail: "The course this action names is not one of the courses connected in this Chrome session.",
-    action: "Refresh this page, then reconnect Canvas or Moodle from the Morrow Bridge popup.",
+    action: "Refresh this page. If the course is still missing, open it in Canvas or Moodle and select Connect this course in the Morrow Bridge popup.",
   },
   edit_policy_binding_stale: {
     title: "This course connection needs a signed-in tab again",
     detail: "Edit access is saved only for a Canvas or Moodle connection Morrow can reach now, and this one is closed or signed out.",
-    action: "Reconnect Canvas or Moodle from the Morrow Bridge popup, then try again.",
+    action: "Select Open Canvas or Open Moodle for this course, sign in if asked, then try again.",
   },
   edit_policy_revision_stale: {
     title: "This course access changed before Morrow could save it",
@@ -135,8 +135,8 @@ const COPY = {
   },
   edit_policy_category_unavailable: {
     title: "One selected change type is not available for every selected course",
-    detail: "Canvas and Moodle offer different change types, so a mixed selection cannot share one Edit access.",
-    action: "Select courses on one platform, then try again.",
+    detail: "Morrow can save only a change type that each selected course offers, and at least one of these courses does not offer this one.",
+    action: "Clear that change type, or select only the courses that offer it, then try again.",
   },
   edit_policy_categories_invalid: {
     title: "No change type is selected",
@@ -144,13 +144,13 @@ const COPY = {
     action: "Select at least one available change type before saving.",
   },
   edit_policy_expiration_invalid: {
-    title: "That Edit access length is not one Morrow offers",
-    detail: "Edit access ends by itself, so it is saved only with one of the listed lengths.",
-    action: "Choose one of the listed lengths, then save again.",
+    title: "This saved Edit access has an end time Morrow cannot use",
+    detail: "The course kept Edit access from an earlier version of Morrow Bridge, and its saved end time is not valid, so Morrow does not use it.",
+    action: "Return the course to Plan in Plan and Edit settings, then choose Edit again.",
   },
   edit_policy_sender_refused: {
-    title: "This permission action was not started from Plan and Edit settings",
-    detail: "Morrow accepts a permission change only from its own settings page, so nothing changed.",
+    title: "Morrow did not accept this permission request from this page",
+    detail: "Morrow saves Edit access only from Plan and Edit settings, and reads it or returns a course to Plan only from there or the Morrow Bridge popup, so nothing changed.",
     action: "Open Plan and Edit settings from the Morrow popup, then make the change there.",
   },
   course_discovery_sender_refused: {
@@ -160,18 +160,18 @@ const COPY = {
   },
   course_discovery_anchor_missing: {
     title: "No connected learning platform is selected",
-    detail: "Morrow lists available courses from one signed-in Canvas or Moodle connection, and none is selected here.",
-    action: "Choose the current signed-in Canvas or Moodle connection, then find available courses again.",
+    detail: "Morrow lists available courses from a signed-in Canvas or Moodle site, and this site is no longer connected.",
+    action: "Open a course on that site, select Connect this course in the Morrow Bridge popup, then select Refresh connected courses.",
   },
   course_discovery_anchor_stale: {
     title: "This learning platform needs a signed-in tab again",
     detail: "Morrow reads available courses through a signed-in tab from that site, and it is closed or signed out.",
-    action: "Open one course from this site in Chrome and sign in, then find available courses again.",
+    action: "Open one course from this site in Chrome and sign in, then select Refresh connected courses.",
   },
   course_discovery_failed: {
     title: "Morrow could not read the available courses",
     detail: "Canvas or Moodle did not return a list Morrow could read.",
-    action: "Keep one signed-in course tab open, then try again.",
+    action: "Keep one signed-in course tab open, then select Refresh connected courses.",
   },
   course_discovery_more_failed: {
     title: "Morrow could not load more available courses",
@@ -181,37 +181,37 @@ const COPY = {
   course_discovery_receipt_missing: {
     title: "This list of available courses is no longer available",
     detail: "Morrow connects courses only from a list it read in this session, and that list is gone.",
-    action: "Find courses again, then connect the courses you want.",
+    action: "Select Refresh connected courses, then select Connect on the course again.",
   },
   course_discovery_receipt_stale: {
     title: "This list of available courses has expired",
     detail: "Morrow connects courses only from a current list, so an expired one is not used.",
-    action: "Find courses again before connecting courses.",
+    action: "Select Connect on the course again. Morrow reads the list again first.",
   },
   course_discovery_complete: {
     title: "Every available course from this platform is already listed",
     detail: "There is no further page to load from this platform.",
-    action: "Select the courses you want from the list, then connect them.",
+    action: "Select Connect on each course you want from the list.",
   },
   course_selection_invalid: {
-    title: "No available course is selected",
-    detail: "Morrow connects the exact courses you select, so it cannot connect an empty selection.",
-    action: "Select one or more available courses, then connect them.",
+    title: "That course is not in the current list of available courses",
+    detail: "Morrow connects only a course from the list it read, and the list changed after this page showed it, so nothing was connected.",
+    action: "Select Refresh connected courses, then select Connect on the course in the new list.",
   },
   course_selection_unavailable: {
     title: "One selected course is no longer available from this site",
     detail: "The course list changed after it was read, so Morrow did not connect the selection.",
-    action: "Find courses again, then select from the new list.",
+    action: "Select Refresh connected courses to read the list again, then connect a course the site still offers.",
   },
   course_selection_target_refused: {
     title: "Morrow could not confirm every selected course",
     detail: "Morrow connects a course only after Canvas or Moodle returns that exact course, and one did not match.",
-    action: "Find courses again and select the courses the site returns.",
+    action: "Select Refresh connected courses, then select Connect on the course the site returns.",
   },
   binding_limit_reached: {
     title: "Morrow has reached its 500-course limit",
     detail: "This Chrome session already holds the largest number of connected courses Morrow keeps, so it did not connect another.",
-    action: "Work with the courses already connected, or select Disconnect Morrow in the Morrow popup and connect only the courses you need.",
+    action: "Open a course you no longer need in Plan and Edit settings and select Disconnect, then connect this course again.",
   },
   course_file_access_change_failed: {
     title: "Morrow could not turn on course file access",
@@ -228,7 +228,7 @@ const COPY = {
   canvas_binding_required: {
     title: "The Canvas or Moodle tab is not open and signed in",
     detail: "Morrow sent nothing. The signed-in Canvas or Moodle tab for this course is closed, signed out, or showing another page.",
-    action: "Open the course in Canvas or Moodle and sign in. Morrow Bridge will identify the platform and show the matching Connect button.",
+    action: "Open the course in Canvas or Moodle and sign in, then ask your assistant again. If the course is closed, select Open Canvas or Open Moodle in the Morrow Bridge popup.",
   },
   course_binding_mismatch: {
     title: "That request names a course you have not selected",

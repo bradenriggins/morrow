@@ -210,7 +210,6 @@ test("checking the same Canvas account rotates its session and migrates selected
     type: "morrow_edit_policy_save",
     sourceBindingId: binding.sourceBindingId,
     enabledCategories: [category.id],
-    expiresInMs: 60 * 60 * 1_000,
   }, settingsSender);
   assert.equal(savedPolicy.ok, true);
   await value.sessionArea.set({ courseDiscoveries: { "discovery:old-session": discovery } });

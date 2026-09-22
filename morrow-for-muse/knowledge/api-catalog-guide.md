@@ -47,24 +47,25 @@ Only Catalog B dispatches.
 
 ## Catalog B: the for-muse dispatch catalog (dispatchable)
 
-`proof-battery/OPERATION_CATALOG.md` holds **456 rows** that ARE
+`proof-battery/OPERATION_CATALOG.md` holds **457 rows** that ARE
 dispatchable through `dispatch/executor.py --backend chromium`:
-436 Canvas rows (C-1 through C-436) and 20 Item Bank rows (IB-1
+437 Canvas rows (C-1 through C-437) and 20 Item Bank rows (IB-1
 through IB-20). Each row names a tool, method, path template,
 read/write class, mechanism, proof status, and evidence notes. Only
-rows marked `live-proven` dispatch without an educator-signed
-`--allow-unproven` override, and the admission policy
+rows marked `live-proven` dispatch; a row marked `pending` also runs
+with an educator-signed `--allow-unproven` override, and rows marked
+`failed`, `unsupported`, or `excluded` never run. The admission policy
 (`dispatch/admission_policy.json`) can hold even a live-proven row
 when the integrated product pipeline has no live runs yet (the
 `canvas_create_new_quiz` case: provider path proven, product pipeline
 not, so the policy holds it on evidence-hold).
 
-Status counts, Canvas rows: live-proven 194, pending 210, failed 12,
+Status counts, Canvas rows: live-proven 195, pending 210, failed 12,
 unsupported 11, excluded 8, evidence-hold 1. Item Bank rows:
-live-proven 13, pending 2, failed 1, evidence-hold 4.
+live-proven 14, pending 2, failed 0, evidence-hold 4.
 
-Of the live-proven rows, 114 are reads and 93 are writes (109 of the
-reads are Canvas rows, 5 are Item Bank bank-level reads).
+Of the 209 live-proven rows, 115 are reads and 94 are writes (110 of
+the reads are Canvas rows, 5 are Item Bank bank-level reads).
 
 ## Coverage by area (what is actually live-proven)
 

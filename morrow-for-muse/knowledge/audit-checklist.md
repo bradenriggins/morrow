@@ -126,9 +126,9 @@ full lifecycle on 89585 only.
 - Never dispatch a write without the educator-signed approval
   bound to that exact action. The three requirements (frozen plan,
   signed approval, no write halt) are all mandatory.
-- Never mint or sign an approval yourself, and never create the
-  `educator_pii_reveal` consent file yourself to bypass
-  de-identification.
+- Never mint or sign an approval yourself, and never mint an
+  educator PII reveal (`mint_pii_reveal`) the educator did not ask
+  for in their own words.
 - Never send anything externally on the educator's behalf without
   their explicit word: no announcements (permanently excluded as a standing
   product exclusion), no conversation messages (the `/conversations` rows are

@@ -102,6 +102,8 @@ async function startedMorrow(options = {}) {
     repair: answer("repair", setupState),
     restorePreviousBridge: answer("restorePreviousBridge", setupState),
     removeData: answer("removeData", undefined),
+    checkAssistantConnection: answer("checkAssistantConnection", true),
+    moveToApplications: answer("moveToApplications", false),
     acquireRestartLease: answer("acquireRestartLease", { status: "uncertain" }),
     releaseRestartLease: answer("releaseRestartLease", undefined),
     commitRestartLease: answer("commitRestartLease", undefined),
@@ -288,7 +290,17 @@ async function completePayload(root, options = {}) {
   await fs.writeFile(path.join(app, "installer", "process-lifetime.cjs"), "module.exports = {};\n");
   // Writing an assistant's configuration restricts the file to this account on
   // win32 before checking its digest, through the real client-config module.
-  await fs.writeFile(path.join(app, "packages", "client-config", "dist", "index.js"), "export function restrictToCurrentAccount() {}\n");
+  await fs.writeFile(path.join(app, "packages", "client-config", "dist", "index.js"), [
+    "export function restrictToCurrentAccount() {}",
+    "export function withoutMorrowCodexTable(content, name, options = {}) {",
+    "  if (!content.includes('[mcp_servers.morrow]')) return null;",
+    "  if (options.requireMorrowEntry && !content.includes('MORROW_UPSTREAMS_FILE')) {",
+    "    throw Object.assign(new Error('not written by Morrow'), { code: 'config_entry_not_morrow' });",
+    "  }",
+    "  return content.slice(0, content.indexOf('[mcp_servers.morrow]'));",
+    "}",
+    ""
+  ].join("\n"));
 
   const gatewayFiles = [
     ["package.json", JSON.stringify({ name: "@morrow-lms/gateway", version: "1.0.0-rc.0", type: "module" })],
@@ -426,7 +438,9 @@ test("every action that takes no input refuses one, and performs its step only w
     ["installer:open-claude-desktop", "openClaudeDesktop", null],
     ["installer:repair", "repair", null],
     ["installer:restore-bridge", "restorePreviousBridge", null],
-    ["installer:remove-data", "removeData", null]
+    ["installer:remove-data", "removeData", null],
+    ["installer:check-assistant-connection", "checkAssistantConnection", null],
+    ["installer:move-to-applications", "moveToApplications", null]
   ];
   for (const [channel, method, updateMethod] of inputFree) {
     const handler = started.handlers.get(channel);
@@ -614,8 +628,16 @@ test("an assistant settings file edited by something else is left exactly as it 
   await fs.writeFile(target, own);
   const ownDigest = sha256(own);
 
-  // Removing Morrow from the assistant, after something else rewrote the file.
+  // Removing Morrow from the assistant, after something else replaced Morrow's own entry.
   await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: ownDigest } } });
+  installer.clientConfigModule = async () => ({
+    withoutMorrowCodexTable(content, name, options = {}) {
+      if (options.requireMorrowEntry && !content.includes("MORROW_UPSTREAMS_FILE")) {
+        throw Object.assign(new Error("not written by Morrow"), { code: "config_entry_not_morrow" });
+      }
+      return "";
+    }
+  });
   const edited = '[mcp_servers.morrow]\ncommand = "node"\nargs = ["--inspect"]\n';
   await fs.writeFile(target, edited);
   await assert.rejects(() => installer.removeAssistant("codex"), (error) => {

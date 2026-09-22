@@ -2,15 +2,10 @@ import { canvasAdmissionIsBound, canvasOperationAdmission, canvasReadbackAssessm
 
 export const EDIT_PERMISSION_SCHEMA = "morrow.bridge.edit-permission.v1";
 export const EDIT_POLICY_SELECTION_LIMIT = 500;
-export const CONVERSATIONAL_EDIT_DURATION_MS = 30 * 60 * 1_000;
-export const MAX_EDIT_DURATION_MS = 24 * 60 * 60 * 1_000;
-export const SETTINGS_EDIT_DURATIONS = Object.freeze([
-  Object.freeze({ value: 30 * 60 * 1_000, label: "30 minutes" }),
-  Object.freeze({ value: 60 * 60 * 1_000, label: "1 hour" }),
-  Object.freeze({ value: 4 * 60 * 60 * 1_000, label: "4 hours" }),
-  Object.freeze({ value: 8 * 60 * 60 * 1_000, label: "8 hours" }),
-  Object.freeze({ value: MAX_EDIT_DURATION_MS, label: "24 hours" }),
-]);
+// Edit is not timed: a grant stays on until the educator returns the course to Plan. A grant saved
+// while Edit was timed keeps its own end time in its scope, so it still validates until that time
+// and then lapses to Plan. No grant of that kind was ever longer than this.
+const LEGACY_MAX_EDIT_DURATION_MS = 24 * 60 * 60 * 1_000;
 
 // This list and the one in packages/bridge-protocol/src/index.ts must hold the same names. The
 // gateway imports the bridge-protocol set, so a name present here and missing there becomes a
@@ -1030,16 +1025,12 @@ function scope(binding, catalogDigest, revision, enabledCategories, rules, expir
   };
 }
 
-export function validEditDuration(value) {
-  return Number.isSafeInteger(value) && SETTINGS_EDIT_DURATIONS.some((entry) => entry.value === value);
-}
-
 export async function createEditPermission({ binding, catalogDigest, revision, enabledCategories, operations, expiresAt }) {
   if (!binding?.sourceBindingId || !binding.provider || !binding.origin || !binding.principalFingerprint || !Number.isSafeInteger(binding.sessionGeneration) || binding.sessionGeneration < 1) {
     throw new Error("edit_policy_binding_invalid");
   }
   if (!/^[0-9a-f]{64}$/.test(catalogDigest || "") || !Number.isSafeInteger(revision) || revision < 1) throw new Error("edit_policy_scope_invalid");
-  if (expiresAt !== undefined && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now() || expiresAt > Date.now() + MAX_EDIT_DURATION_MS)) throw new Error("edit_policy_expiration_invalid");
+  if (expiresAt !== undefined && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now() || expiresAt > Date.now() + LEGACY_MAX_EDIT_DURATION_MS)) throw new Error("edit_policy_expiration_invalid");
   const { selected, specs } = selectedCategories(enabledCategories, binding, operations);
   const rules = mergeRules(specs.flatMap((spec) => spec.rules.map((rule) => exactRule(rule, operations))));
   const scopeDigest = await digest(scope(binding, catalogDigest, revision, selected, rules, expiresAt));

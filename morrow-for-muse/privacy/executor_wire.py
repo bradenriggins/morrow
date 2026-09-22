@@ -19,7 +19,6 @@ session_generation).
 import hashlib
 import os
 import re
-import stat
 import sys
 import urllib.parse
 from datetime import datetime, timezone
@@ -36,15 +35,13 @@ from dispatch import admission as _admission
 from privacy import boundary as _boundary
 from privacy import core as _privacy_core
 
-# W3-P1-44: reveal consent provenance. A bare environment variable is NOT
-# consent: the educator's reveal decision is honored only when they have
-# created the consent file <tree-state-dir>/educator_pii_reveal by hand.
-# The file existing is the consent act; its content is the documented
-# instructional purpose. MORROW_REVEAL_STUDENT_PII_REASON is ignored: an
-# agent that can set its own environment could otherwise consent to its
-# own PII reveal.
-CONSENT_BASENAME = "educator_pii_reveal"
-CONSENT_REASON_MIN_LEN = 12
+# Round-4 privacy audit H2: a file is not a consent channel (an agent
+# can write a file). Real names from an LMS read are shown only under a
+# sealed educator reveal record (dispatch/admission.mint_pii_reveal):
+# the educator's verbatim words, the educator-chat channel, one course,
+# a short expiry, journaled. It reaches the projection through
+# lane_context["pii_reveal"]; there is no environment or file switch.
+REVEALED_BY = "educator-sealed-record"
 SOURCE_VAULT_ENV_VAR = "MORROW_SOURCE_VAULT_PATH"
 SOURCE_VAULT_BASENAME = "morrow_source_vault.json"
 _COURSE_ID_RE = re.compile(r"/courses/(\d+)", re.IGNORECASE)
@@ -57,12 +54,34 @@ _ROSTER_IDENTITY_FIELDS = frozenset({
     "email", "login_id", "sis_user_id", "sis_login_id",
     "sortable_name", "short_name",
 })
-_ROSTER_USER_KEYS = frozenset({"user", "student", "author"})
+# Structural person-key rule: a key naming a person or a people
+# collection ("students", "participants", "context_user") marks its value
+# as person records; a key naming a person's id or ids ("student_ids",
+# "participating_user_ids", "author_id") marks its scalars as person ids.
+_PERSON_NOUNS = ("user", "student", "author", "participant", "member",
+                 "learner", "observer", "observee", "recipient", "submitter",
+                 "collaborator", "assessor", "attendee", "enrollee",
+                 "person")
+_PERSON_NOUN_RE = "(?:%s)" % "|".join(_PERSON_NOUNS)
+_PERSON_RECORD_KEY_RE = re.compile(
+    r"^(?:[a-z0-9]+_)?(?:%s)s?$|^people$" % _PERSON_NOUN_RE)
+_PERSON_ID_KEY_RE = re.compile(
+    r"^(?:[a-z0-9]+_)*%s_?ids?$" % _PERSON_NOUN_RE)
+# Leading words that make a person-noun key a setting, not a person.
+_PERSON_KEY_SETTING_PREFIX = re.compile(
+    r"^(?:allow|hide|show|filter|can|is|has|max|min|num|only|visible)_")
+_ROSTER_PERSON_NAME_KEYS = ("user_name", "student_name", "author_name",
+                            "display_name")
 _ROSTER_NAME_KEYS = ("name", "fullname", "display_name", "sortable_name",
                      "short_name")
 _ROSTER_PASSTHROUGH_KEYS = ("email", "login_id", "sis_user_id", "sis_login_id",
                             "sortable_name", "short_name", "display_name",
                             "pronouns")
+# Routes whose top-level items ARE people (the user-collection reads and
+# a single user under them), so even a bare {"id", "name"} is a person.
+_USER_COLLECTION_RE = re.compile(
+    r"/(?:users|students|search_users|recent_students|gradeable_students|"
+    r"potential_collaborators)(?:/\d+)?/?$", re.IGNORECASE)
 
 
 def _source_vault_path():
@@ -103,17 +122,195 @@ def _exact_origin(tenant_base, error_cls):
     return "%s://%s" % (parts.scheme, host)
 
 
-def _harvest_roster(receipt):
+def _is_user_collection(entry):
+    try:
+        urls = _admission.extract_urls(entry)
+    except Exception:
+        urls = []
+    for url in urls:
+        path = urllib.parse.urlsplit(str(url or "")).path
+        if "/users/self" in path:
+            continue
+        if _USER_COLLECTION_RE.search(path):
+            return True
+    return False
+
+
+def person_key_kind(key):
+    """"record" for a key naming a person or people collection, "ids" for
+    a key naming a person's id or ids, else None."""
+    k = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", str(key or "")).lower()
+    if _PERSON_KEY_SETTING_PREFIX.match(k) or k.startswith("sis_"):
+        return None
+    if _PERSON_ID_KEY_RE.match(k):
+        return "ids"
+    if _PERSON_RECORD_KEY_RE.match(k):
+        return "record"
+    return None
+
+
+_ADHOC_TITLE_RE = re.compile(r"^\s*\d+\s+students?\s*$", re.IGNORECASE)
+
+
+def _neutralize_adhoc_override_titles(node):
+    """Copy of node where an ad hoc override's title is its student count.
+
+    An override that lists student ids is an ad hoc (per-student)
+    override, and its title is free text that commonly names the
+    students. Its students may not appear anywhere else in the receipt,
+    so the name cannot be learned and redacted: the title is replaced by
+    the neutral count Canvas itself uses ("1 student", "3 students").
+    """
+    if isinstance(node, list):
+        return [_neutralize_adhoc_override_titles(v) for v in node]
+    if not isinstance(node, dict):
+        return node
+    out = {k: _neutralize_adhoc_override_titles(v) for k, v in node.items()}
+    ids = out.get("student_ids")
+    title = out.get("title")
+    if isinstance(ids, list) and isinstance(title, str) \
+            and not _ADHOC_TITLE_RE.match(title):
+        out["title"] = "%d student%s" % (len(ids), "" if len(ids) == 1
+                                          else "s")
+    return out
+
+
+# Fields on course content (a page's last_edited_by, a record's
+# created_by) that hold the person who edited it. The content itself is
+# not learner data (it is course material an educator may save back),
+# so only these person fields are replaced.
+_EDITOR_KEY_RE = re.compile(
+    r"^(?:last_)?(?:edited|created|updated|modified|deleted)_by$|"
+    r"^(?:last_)?(?:editor|modifier)$")
+UNLABELED_PERSON = "a Canvas user Morrow has not labeled"
+
+
+def _editor_slots(node, out):
+    """(container, key) for every person record under an editor key."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if _EDITOR_KEY_RE.match(str(key).lower()) and \
+                    isinstance(value, dict) and value:
+                out.append((node, key))
+            else:
+                _editor_slots(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            _editor_slots(value, out)
+    return out
+
+
+def _vault_labels_for(entry, tenant_base, lane_context):
+    """{learner id: label} for learners the vault already labeled in this
+    entry's course scope, or {} when there is no vault to ask."""
+    if _privacy_core.AESGCM is None:
+        return {}
+    course_id = _entry_course_id(entry)
+    path = _source_vault_path()
+    if not course_id or not os.path.exists(path):
+        return {}
+    try:
+        origin = _exact_origin(tenant_base, ValueError)
+    except ValueError:
+        return {}
+    scope = learner_scope(origin, course_id, entry.get("provider"),
+                          (lane_context or {}).get("principal"))
+    try:
+        vault = _privacy_core.LearnerVault(path)
+        known = vault.identities_for_scope(scope)
+        labels = vault.tokenize_many(scope, known) if known else []
+    except Exception:
+        return {}
+    return {str(identity["id"]): label
+            for identity, label in zip(known, labels)}
+
+
+def learner_scope(tenant_base, course_id, provider=None, principal=None):
+    """The exact vault scope the boundary labels one course's learners
+    under. Every labeler and resolver must use this one shape, or a
+    label issued by one path would not resolve on another."""
+    origin = _exact_origin(tenant_base, ValueError)
+    provider = provider or "canvas"
+    return {"canvasOrigin": origin,
+            "account": "%s:%s:%s" % (provider, provider, origin),
+            "course": str(course_id),
+            "principal": principal or "local-educator",
+            "profile": "source:%s" % provider}
+
+
+def _label_editor_records(entry, result, tenant_base, lane_context,
+                          error_cls, reveal=None):
+    """Replace person records under editor keys.
+
+    A learner the vault already labeled in this course becomes
+    {"learnerToken": <their label>}; anyone else becomes
+    {"person": UNLABELED_PERSON}. Nothing else in the receipt changes.
+    Runs on non-learner reads, and on learner reads before the boundary
+    (round-4 audit L2: a teacher editor carrying an html_url made a
+    whole page-revision read fail closed). A sealed educator reveal for
+    this course leaves them raw."""
+    receipt = result.get("receipt") if isinstance(result, dict) else None
+    if not _editor_slots(receipt, []):
+        return result
+    if reveal is not None:
+        return result
+    import copy
+    receipt = copy.deepcopy(receipt)
+    labels = _vault_labels_for(entry, tenant_base, lane_context)
+    for container, key in _editor_slots(receipt, []):
+        label = labels.get(str(container[key].get("id")))
+        container[key] = {"learnerToken": label} if label else \
+            {"person": UNLABELED_PERSON}
+    out = dict(result)
+    out["receipt"] = receipt
+    return out
+
+
+def _harvest_roster(receipt, items_are_people=False):
     """Recursively harvest learner records from a receipt.
 
     A dict counts as a learner record when it carries a user_id, or when
-    it sits under a user-ish key (user/student/author) or carries one of
-    the identity fields and has an id. Records with an id but no name get
-    a synthesized "Learner <id>" name: the id itself is still PII and
-    must tokenize, and the synthesized name can never leak real PII.
+    it sits under a person key (person_key_kind "record": students,
+    participants, members, ...) or carries one of the identity fields and
+    has an id. Every scalar under a person-id key (student_ids, user_ids,
+    author_id, ...) is a learner id too. Records with an id but no name
+    get a synthesized "Learner <id>" name: the id itself is still PII and
+    must tokenize, and the synthesized name can never leak real PII. A
+    later record with a real name for the same id replaces the
+    synthesized one, so free-text mentions of that name are redacted.
     """
     found = []
-    seen = set()
+    by_id = {}
+    synthesized = set()
+
+    def add(lid, raw_id, name, node=None):
+        if lid in by_id:
+            entry = by_id[lid]
+            if name and lid in synthesized:
+                entry["name"] = name
+                synthesized.discard(lid)
+            else:
+                return
+        else:
+            entry = {"id": raw_id, "name": name or "Learner %s" % lid}
+            if not name:
+                synthesized.add(lid)
+            by_id[lid] = entry
+            found.append(entry)
+        for key in _ROSTER_PASSTHROUGH_KEYS:
+            value = (node or {}).get(key)
+            if isinstance(value, str) and value.strip() != "" \
+                    and key not in entry:
+                entry[key] = value
+
+    def add_ids(value):
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            if isinstance(item, bool) or not isinstance(item, (int, str)):
+                continue
+            if str(item).strip() == "":
+                continue
+            add(str(item), item, None)
 
     def learner_id_of(node, in_user_key):
         uid = node.get("user_id")
@@ -128,29 +325,29 @@ def _harvest_roster(receipt):
     def visit(node, in_user_key=False):
         if isinstance(node, dict):
             lid = learner_id_of(node, in_user_key)
-            if lid is not None and lid not in seen:
-                entry = {"id": node.get("user_id", node.get("id"))}
+            if lid is not None:
                 name = None
-                for key in _ROSTER_NAME_KEYS:
+                # A record keyed by user_id names its person in user_name
+                # and the like; its own "name" may be the object's name.
+                keys = (_ROSTER_PERSON_NAME_KEYS + _ROSTER_NAME_KEYS) \
+                    if "user_id" in node else _ROSTER_NAME_KEYS
+                for key in keys:
                     value = node.get(key)
                     if isinstance(value, str) and value.strip() != "":
                         name = value
                         break
-                entry["name"] = name if name else "Learner %s" % lid
-                for key in _ROSTER_PASSTHROUGH_KEYS:
-                    value = node.get(key)
-                    if isinstance(value, str) and value.strip() != "" \
-                            and key not in entry:
-                        entry[key] = value
-                seen.add(lid)
-                found.append(entry)
+                add(lid, node.get("user_id", node.get("id")), name, node)
             for key, value in node.items():
-                visit(value, str(key).lower() in _ROSTER_USER_KEYS)
+                kind = person_key_kind(key)
+                if kind == "ids":
+                    add_ids(value)
+                    continue
+                visit(value, kind == "record")
         elif isinstance(node, list):
             for value in node:
                 visit(value, in_user_key)
 
-    visit(receipt)
+    visit(receipt, items_are_people)
     return found
 
 
@@ -162,56 +359,34 @@ def _lane_generation(lane_state, provider="canvas"):
         return 0
 
 
-def pii_reveal_audit(error_cls):
-    """The explicit educator override for learner-data de-identification.
+def pii_reveal_audit(error_cls, reveal=None, tenant_base=None,
+                     course_id=None):
+    """The educator's sealed reveal for this course read, or None.
 
-    W3-P1-44: the environment is not a consent channel. Reveal is
-    honored only when the educator has created the consent file
-    <tree-state-dir>/educator_pii_reveal: a regular file, mode 0600,
-    carrying a documented instructional purpose of at least 12
-    characters. The tree state dir honors MORROW_TREE_STATE_DIR, else
-    ~/.morrow/trees/<this-tree-slug> (same slug algorithm as
-    dispatch/executor; this module must not import dispatch.executor, so
-    the resolution is duplicated here).
-
-    Returns None when de-identification applies (no consent file), or an
-    audit dict {"revealed_by": "educator-consent-file", "reason": ...,
-    "at": ...} when the consent file validates. A malformed consent
-    file (not a regular file, wrong mode, stub reason) fails closed: the
-    op is refused rather than run half-consented.
+    Returns None (de-identification applies) when no reveal record was
+    supplied, or when a valid record names a different course or
+    tenant. Returns an audit dict {"revealed_by":
+    "educator-sealed-record", "reveal_id", "course_id", "channel",
+    "authorization", "expires_at", "at"} when a valid educator-chat
+    reveal names this course. A record that is tampered, expired, from
+    the driver channel, or longer than the maximum fails closed: the op
+    is refused rather than run half-consented.
     """
-    path = os.path.join(_tree_state_dir(), CONSENT_BASENAME)
-    try:
-        st = os.lstat(path)
-    except OSError:
+    if reveal is None:
         return None
-    if not stat.S_ISREG(st.st_mode):
-        raise error_cls(
-            "PII reveal refused: %s exists but is not a regular file; "
-            "remove it, or replace it with a regular 0600 file carrying "
-            "a documented instructional purpose, to change reveal "
-            "behavior" % path)
-    mode = stat.S_IMODE(st.st_mode)
-    if mode != 0o600:
-        raise error_cls(
-            "PII reveal refused: %s has mode %o, expected 0600; the "
-            "consent file must be readable only by the educator "
-            "(chmod 600 %s)" % (path, mode, path))
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            reason = f.read().strip()
-    except OSError as exc:
-        raise error_cls(
-            "PII reveal refused: cannot read the consent file %s (%s)"
-            % (path, exc))
-    if len(reason) < CONSENT_REASON_MIN_LEN:
-        raise error_cls(
-            "PII reveal refused: %s documents a reason of %d characters; "
-            "revealing student PII needs a documented instructional "
-            "purpose of at least %d characters"
-            % (path, len(reason), CONSENT_REASON_MIN_LEN))
-    return {"revealed_by": "educator-consent-file",
-            "reason": reason,
+        applies = _admission.check_pii_reveal(reveal, tenant_base,
+                                              course_id)
+    except _admission.AdmissionRefused as exc:
+        raise error_cls("PII reveal refused: %s" % exc)
+    if not applies:
+        return None
+    return {"revealed_by": REVEALED_BY,
+            "reveal_id": reveal.get("reveal_id"),
+            "course_id": str(course_id),
+            "channel": reveal.get("channel"),
+            "authorization": reveal.get("authorization"),
+            "expires_at": reveal.get("expires_at"),
             "at": datetime.now(timezone.utc).isoformat()}
 
 
@@ -241,9 +416,12 @@ def _legacy_tree_slug(tree_root):
     return slug or "tree"
 
 
-def consent_path():
-    """Canonical path of the educator PII-reveal consent file."""
-    return os.path.join(_tree_state_dir(), CONSENT_BASENAME)
+def without_pii_reveal(lane_context):
+    """lane_context with any educator reveal removed: the view every
+    journal record is projected with."""
+    out = dict(lane_context or {})
+    out.pop("pii_reveal", None)
+    return out
 
 
 def project_learner_result(entry, result, tenant_base, lane_context=None,
@@ -264,32 +442,49 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
     exact tenant origin, or a roster the boundary rejects (ambiguous
     identities) refuses the op rather than surfacing raw learner PII.
 
-    Explicit educator override (W3-P1-44): the educator's hand-created
-    consent file <tree-state-dir>/educator_pii_reveal (regular file, mode
-    0600, documented instructional purpose of at least 12 characters)
-    skips projection; the consent is journaled as revealed_by
-    "educator-consent-file" with the documented reason. A bare
-    MORROW_REVEAL_STUDENT_PII_REASON environment variable is ignored: an
-    agent that can set its own environment could otherwise consent to its
-    own PII reveal. A malformed consent file fails closed. Returns
+    Educator reveal (round-4 audit H2): lane_context["pii_reveal"] may
+    carry a sealed educator reveal record (dispatch/admission
+    mint_pii_reveal). A valid one for THIS course skips projection and
+    is journaled as revealed_by "educator-sealed-record" with the
+    educator's verbatim words; a record for another course leaves the
+    read de-identified; an invalid record fails closed. Nothing else (no
+    file, no environment variable) reveals names. Returns
     (projected_result, reveal_audit_or_None).
     """
-    if not _admission.touches_learner_data(entry):
-        return result, None
-    reveal = pii_reveal_audit(error_cls)
-    if reveal is not None:
-        revealed = dict(result)
-        revealed["pii_reveal"] = reveal
-        return revealed, reveal
-    provider = entry.get("provider") or "canvas"
+    lane_context = lane_context or {}
     course_id = _entry_course_id(entry)
+    reveal = pii_reveal_audit(error_cls, lane_context.get("pii_reveal"),
+                              tenant_base, course_id)
+    if reveal is not None:
+        # Final muse audit H1: the journal is sealed and append-only, so
+        # purge can never take a name back out of it. Project twice:
+        # the revealed result for the agent, and the de-identified
+        # projection (exactly what an unrevealed read yields) as
+        # "journal_receipt", which is all the journal ever records.
+        deidentified, _none = project_learner_result(
+            entry, result, tenant_base,
+            lane_context=without_pii_reveal(lane_context),
+            error_cls=error_cls)
+        if _admission.touches_learner_data(entry):
+            revealed = dict(result)
+        else:
+            revealed = _label_editor_records(entry, result, tenant_base,
+                                             lane_context, error_cls,
+                                             reveal=reveal)
+            revealed = dict(revealed)
+        revealed["pii_reveal"] = reveal
+        revealed["journal_receipt"] = deidentified.get("receipt")
+        return revealed, reveal
+    if not _admission.touches_learner_data(entry):
+        return _label_editor_records(entry, result, tenant_base,
+                                     lane_context, error_cls), None
+    provider = entry.get("provider") or "canvas"
     if not course_id:
         raise error_cls(
             "entry %r touches learner data but carries no course id in its "
             "URLs; no exact-scope privacy binding can be built, refusing "
             "rather than surfacing raw learner PII" % entry.get("name"))
     origin = _exact_origin(tenant_base, error_cls)
-    lane_context = lane_context or {}
     principal = lane_context.get("principal") or "local-educator"
     lane_state = lane_context.get("lane_state")
     binding_id = "exec-%s-%s" % (provider, course_id)
@@ -323,8 +518,12 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
             "catalogDigest": catalog_digest,
         }
 
-    receipt = result.get("receipt")
-    roster_entries = _harvest_roster(receipt)
+    result = _label_editor_records(entry, result, tenant_base, lane_context,
+                                   error_cls)
+    receipt = _neutralize_adhoc_override_titles(result.get("receipt"))
+    # On a user-collection route the items are people, so even a bare
+    # {"id", "name"} joins the roster and is labeled.
+    roster_entries = _harvest_roster(receipt, _is_user_collection(entry))
     vault_path = _source_vault_path()
     if _privacy_core.AESGCM is None:
         # Fail closed AND actionable, before the boundary's invoke()
@@ -380,6 +579,319 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
 
 
 # ---------------------------------------------------------------------------
+# Working by name (round-4 privacy audit H3). The educator types a name;
+# `morrow students find` resolves it to a course label and records the
+# name as educator-introduced for that conversation (privacy/name_echo).
+# Outputs echo that name next to the label in that conversation only;
+# writes carry labels, and the executor turns them into real ids at the
+# LMS boundary (resolve_learner_labels), then back into labels in
+# everything the agent or the journal sees (relabel_learner_ids).
+# ---------------------------------------------------------------------------
+
+_LABEL_TEXT_RE = re.compile(r"(?<![A-Za-z0-9(])(Student A[1-9][0-9]*)(?![0-9])")
+_LABEL_VALUE_RE = re.compile(r"^Student A[1-9][0-9]*$")
+_ECHO_VALUE_RE = re.compile(r"^(.+?) \((Student A[1-9][0-9]*)\)$")
+
+
+def _walk_strings(value, fn, key=""):
+    if isinstance(value, str):
+        return fn(value, key)
+    if isinstance(value, list):
+        return [_walk_strings(v, fn, key) for v in value]
+    if isinstance(value, dict):
+        return {k: _walk_strings(v, fn, k) for k, v in value.items()}
+    return value
+
+
+def issue_labels(tenant_base, course_id, identities, provider=None):
+    """Course labels for roster identities, straight from the vault.
+
+    identities: [{"id", "name", "email", "loginId", "sisUserId"}]. Every
+    identity is sealed into the vault under learner_scope, so later
+    reads project the same student (and any of these identifiers in free
+    text) to the same label. Returns the labels in input order. Raises
+    when the vault cannot be used (no 'cryptography'): no label, no
+    answer. Unlike a projected read this never renders text, so two
+    students who share a display name still get their own labels."""
+    if _privacy_core.AESGCM is None:
+        raise RuntimeError(
+            "course labels need the encrypted learner vault, which needs "
+            "the 'cryptography' package (requirements-optional.txt)")
+    scope = learner_scope(tenant_base, course_id, provider)
+    vault = _privacy_core.LearnerVault(_source_vault_path())
+    try:
+        return vault.tokenize_many(scope, identities)
+    finally:
+        vault.close()
+
+
+def apply_name_echo(value, tenant_base, course_id, conversation_id):
+    """Show each educator-introduced label as "<typed name> (label)".
+
+    Only labels the educator introduced by name in THIS conversation
+    and course (privacy/name_echo) change; every other label stays a
+    bare label. Returns a new value; the input is not mutated."""
+    if not conversation_id or not course_id:
+        return value
+    from privacy import name_echo as _echo
+    known = _echo.introductions(tenant_base, course_id, conversation_id)
+    if not known:
+        return value
+
+    def echo(text, _key):
+        return _LABEL_TEXT_RE.sub(
+            lambda m: "%s (%s)" % (known[m.group(1)], m.group(1))
+            if m.group(1) in known else m.group(1), text)
+    return _walk_strings(value, echo)
+
+
+def _same_typed_name(left, right):
+    return " ".join(str(left).split()).casefold() == \
+        " ".join(str(right).split()).casefold()
+
+
+# Learner-id positions (final muse audit L3). A label is a learner
+# reference only where a learner id belongs: a value under a person-id
+# key ("student_ids", "user_id", "assignment_override[student_ids][]"),
+# the "id" of a person record ("user": {"id": ...}), or a path parameter
+# that follows a person route word ("/users/{id}"). Free text whose
+# whole value happens to be a label (a page titled "Student A1") is
+# text, and relabeling never touches an object's own id or an
+# html_url segment that is not a person route.
+_KEY_SEGMENT_RE = re.compile(r"[A-Za-z0-9_]+")
+_PERSON_ROUTE_WORD = r"(?:%ss?|people)" % _PERSON_NOUN_RE
+_PERSON_ROUTE_SLOT_RE = re.compile(
+    r"/%s/\{([A-Za-z0-9_]+)\}" % _PERSON_ROUTE_WORD, re.IGNORECASE)
+
+
+def _key_segment(key):
+    parts = _KEY_SEGMENT_RE.findall(str(key or ""))
+    return parts[-1] if parts else ""
+
+
+def is_learner_id_key(key, parent_key=None):
+    """True when a value under key (inside parent_key) is a learner id."""
+    segment = _key_segment(key)
+    if person_key_kind(segment) == "ids":
+        return True
+    return segment == "id" and parent_key is not None and \
+        person_key_kind(_key_segment(parent_key)) == "record"
+
+
+def learner_route_param_keys(entry):
+    """Path parameter names that sit after a person route word in any of
+    the entry's request URLs ("/users/{id}" gives "id")."""
+    keys = set()
+
+    def scan(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "url" and isinstance(v, str):
+                    keys.update(_PERSON_ROUTE_SLOT_RE.findall(v))
+                else:
+                    scan(v)
+        elif isinstance(node, list):
+            for v in node:
+                scan(v)
+    scan(entry or {})
+    return frozenset(keys)
+
+
+def _map_learner_positions(value, fn, extra_keys=frozenset(), key="",
+                           parent=None, in_position=False):
+    """Apply fn(text) to every string in a learner-id position."""
+    if isinstance(value, str):
+        return fn(value) if in_position else value
+    if isinstance(value, list):
+        return [_map_learner_positions(v, fn, extra_keys, key, parent,
+                                       in_position) for v in value]
+    if isinstance(value, dict):
+        return {k: _map_learner_positions(
+            v, fn, extra_keys, k, key,
+            is_learner_id_key(k, key) or k in extra_keys)
+            for k, v in value.items()}
+    return value
+
+
+def _lookup_learner_refs(value, tenant_base, course_id, conversation_id,
+                         error_cls, provider, extra_keys):
+    """{reference text: (label, identity, token)} for every label or
+    echoed label in a learner-id position of value."""
+    refs = []
+
+    def collect(text):
+        if _LABEL_VALUE_RE.match(text) or _ECHO_VALUE_RE.match(text):
+            refs.append(text)
+        return text
+    _map_learner_positions(value, collect, extra_keys)
+    if not refs:
+        return {}
+    if _privacy_core.AESGCM is None:
+        raise error_cls(
+            "this write names a student by label, and turning a label "
+            "into the student's LMS id needs the encrypted learner vault "
+            "(the optional 'cryptography' package). Nothing was sent.")
+    try:
+        scope = learner_scope(tenant_base, course_id, provider)
+    except ValueError:
+        raise error_cls("this write names a student by label, but the "
+                        "tenant base is not an exact origin. Nothing was "
+                        "sent.")
+    path = _source_vault_path()
+    if not os.path.exists(path):
+        raise error_cls(
+            "no student labels have been issued on this machine yet; run "
+            "`morrow students find` for course %s first. Nothing was sent."
+            % course_id)
+    from privacy import name_echo as _echo
+    introduced = None
+    vault = _privacy_core.LearnerVault(path)
+    found = {}
+    try:
+        for text in refs:
+            if text in found:
+                continue
+            echo = _ECHO_VALUE_RE.match(text)
+            label = echo.group(2) if echo else text
+            if echo:
+                if introduced is None:
+                    introduced = _echo.introductions(
+                        tenant_base, course_id, conversation_id)
+                if not _same_typed_name(introduced.get(label, "\x00"),
+                                        echo.group(1)):
+                    raise error_cls(
+                        "%s is not the student the educator named in this "
+                        "conversation for course %s; run `morrow students "
+                        "find` again for this course. Nothing was sent."
+                        % (label, course_id))
+            try:
+                identity, token = vault.resolve_with_token(scope, label)
+            except _privacy_core.PrivacyError:
+                raise error_cls(
+                    "%s was never issued in course %s (labels belong to one "
+                    "course); run `morrow students find` for this course "
+                    "and use the label it returns. Nothing was sent."
+                    % (label, course_id))
+            found[text] = (label, identity, token)
+    finally:
+        vault.close()
+    return found
+
+
+def resolve_learner_labels(value, tenant_base, course_id, conversation_id,
+                           error_cls=Exception, provider=None,
+                           extra_keys=frozenset(), tokens_out=None):
+    """Replace learner labels with real LMS ids for ONE course's write.
+
+    A string in a learner-id position (is_learner_id_key, or a key in
+    extra_keys such as a person route's path parameter) that is exactly
+    a label ("Student A3") or the echoed form ("Jane Doe (Student A3)")
+    is a learner reference; it becomes the learner's real id (an int
+    when numeric). The label must have been issued in THIS course's
+    vault scope, so a label from another course is refused; an echoed
+    name must match what the educator typed in this conversation, so a
+    stale or cross-course echo is refused. Free text is never rewritten.
+    Returns (resolved_value, {str(real_id): label}) so the caller can
+    relabel everything the agent or the journal sees afterwards. When
+    tokens_out is a dict it receives {label: vault token}.
+    """
+    found = _lookup_learner_refs(value, tenant_base, course_id,
+                                 conversation_id, error_cls, provider,
+                                 extra_keys)
+    if not found:
+        return value, {}
+    mapping = {}
+    by_text = {}
+    for text, (label, identity, token) in found.items():
+        raw = identity["id"]
+        by_text[text] = int(raw) if raw.isdigit() else raw
+        mapping[str(raw)] = label
+        if tokens_out is not None:
+            tokens_out[label] = token
+    return _map_learner_positions(
+        value, lambda text: by_text.get(text, text), extra_keys), mapping
+
+
+def bind_learner_labels(value, tenant_base, course_id, conversation_id,
+                        error_cls=Exception, provider=None,
+                        extra_keys=frozenset()):
+    """What a Plan-mode write stores for the educator's approval.
+
+    Every learner reference in a learner-id position is checked exactly
+    as resolve_learner_labels checks it, then stored as the bare label
+    (the typed name of an echoed label stays in the encrypted name-echo
+    store only). Returns (value_with_bare_labels, {label: vault token});
+    the tokens bind the approval to the students, not to the label
+    text, and never reveal a real id."""
+    found = _lookup_learner_refs(value, tenant_base, course_id,
+                                 conversation_id, error_cls, provider,
+                                 extra_keys)
+    if not found:
+        return value, {}
+    bare = {text: label for text, (label, _i, _t) in found.items()}
+    tokens = {label: token for label, _i, token in found.values()}
+    return _map_learner_positions(
+        value, lambda text: bare.get(text, text), extra_keys), tokens
+
+
+# Bookkeeping fields that are never learner references (op ids, claim
+# tokens, digests, seals, timestamps): relabeling must never touch them.
+_RELABEL_SKIP_KEYS = frozenset({
+    "op_id", "of_op_id", "event_id", "claim_token", "claim_token_hash",
+    "correlation_id", "rec_hmac", "sig", "ts", "reveal_id", "grant_id"})
+
+
+def relabel_learner_ids(value, mapping):
+    """Put labels back wherever a resolved real id stands for a learner.
+
+    mapping is resolve_learner_labels' {str(real_id): label}. A value in
+    a learner-id position (is_learner_id_key) equal to a resolved id
+    becomes the label. In other text, an occurrence is relabeled only
+    right after a person word ("user 98765", "/users/98765",
+    "student_ids": [98765]); inside a URL the label is percent-encoded
+    so the URL stays intact. An object's own id or an html_url segment
+    that happens to equal a student's id is left alone."""
+    if not mapping:
+        return value
+    ids = sorted(mapping, key=len, reverse=True)
+    pattern = re.compile(
+        r"(?<![0-9A-Za-z])(%s(?:_ids?)?(?:\[\])?[\"']?"
+        r"(?:\s*(?:[:=/#]|%%2[Ff])\s*\[?\s*|\s+))(%s)(?![0-9A-Za-z])"
+        % (_PERSON_ROUTE_WORD, "|".join(re.escape(i) for i in ids)),
+        re.IGNORECASE)
+
+    def text_fn(text):
+        spans = [(m.start(), m.end()) for m in
+                 _privacy_core._URL_TOKEN_RE.finditer(text)]
+
+        def sub(match):
+            label = mapping[match.group(2)]
+            inside = any(a <= match.start(2) < b for a, b in spans)
+            return match.group(1) + (urllib.parse.quote(label, safe="")
+                                     if inside else label)
+        return pattern.sub(sub, text)
+
+    def walk(node, key="", parent=None):
+        if key in _RELABEL_SKIP_KEYS or str(key).endswith("_digest"):
+            return node
+        position = is_learner_id_key(key, parent)
+        if isinstance(node, str):
+            if position and node in mapping:
+                return mapping[node]
+            return text_fn(node)
+        if isinstance(node, bool):
+            return node
+        if isinstance(node, int) and position and str(node) in mapping:
+            return mapping[str(node)]
+        if isinstance(node, list):
+            return [walk(v, key, parent) for v in node]
+        if isinstance(node, dict):
+            return {k: walk(v, k, key) for k, v in node.items()}
+        return node
+    return walk(value)
+
+
+# ---------------------------------------------------------------------------
 # W4-P2-10 / W4-P0-4 / W4-P0-5: retention commands for the SHIPPED lane.
 #
 # The legacy purge/wipe CLIs (privacy/pseudonym.py, privacy/learner_vault.py)
@@ -396,6 +908,14 @@ def _purge_transient_state():
     at module top, so importing it here at module top would cycle."""
     from transport import browser_backend as _bb
     return _bb.purge_transient_state()
+
+
+def _purge_write_ceremony_files(tenant_base=None, course_id=None):
+    """Final muse audit M2: prepared writes (pending_writes/) and signed
+    approval records (approvals/<op>.json) name students by label and
+    carry the educator's words, so every purge removes them too."""
+    from dispatch import executor as _ex
+    return _ex.purge_write_ceremony_files(tenant_base, course_id)
 
 
 def purge_tenant(tenant_base, error_cls=Exception):
@@ -419,11 +939,15 @@ def purge_tenant(tenant_base, error_cls=Exception):
     origin = _exact_origin(tenant_base, error_cls)
     vault = _privacy_core.LearnerVault(_source_vault_path())
     records = vault.purge_tenant(origin)
+    from privacy import name_echo as _echo
+    _echo.purge(origin)
     pending, briefs, inflight_skipped = _purge_transient_state()
-    return {"tenant": origin, "vault_records_purged": records,
-            "pending_envelopes_removed": pending,
-            "briefs_removed": briefs,
-            "inflight_envelopes_skipped": inflight_skipped}
+    report = {"tenant": origin, "vault_records_purged": records,
+              "pending_envelopes_removed": pending,
+              "briefs_removed": briefs,
+              "inflight_envelopes_skipped": inflight_skipped}
+    report.update(_purge_write_ceremony_files(origin))
+    return report
 
 
 def purge_course(tenant_base, course_id, error_cls=Exception):
@@ -433,12 +957,16 @@ def purge_course(tenant_base, course_id, error_cls=Exception):
     origin = _exact_origin(tenant_base, error_cls)
     vault = _privacy_core.LearnerVault(_source_vault_path())
     records = vault.purge_course(origin, course_id)
+    from privacy import name_echo as _echo
+    _echo.purge(origin, course_id)
     pending, briefs, inflight_skipped = _purge_transient_state()
-    return {"tenant": origin, "course_id": str(course_id),
-            "vault_records_purged": records,
-            "pending_envelopes_removed": pending,
-            "briefs_removed": briefs,
-            "inflight_envelopes_skipped": inflight_skipped}
+    report = {"tenant": origin, "course_id": str(course_id),
+              "vault_records_purged": records,
+              "pending_envelopes_removed": pending,
+              "briefs_removed": briefs,
+              "inflight_envelopes_skipped": inflight_skipped}
+    report.update(_purge_write_ceremony_files(origin, course_id))
+    return report
 
 
 def purge_all(full_profile=False, error_cls=Exception):
@@ -456,6 +984,8 @@ def purge_all(full_profile=False, error_cls=Exception):
     """
     from transport import browser_backend as _bb
     report = {"vault_removed": False, "vault_key_removed": False}
+    from privacy import name_echo as _echo
+    report["name_echo_removed"] = _echo.remove_all()
     vault_path = _source_vault_path()
     for label, path in (("vault_removed", vault_path),
                         ("vault_key_removed", vault_path + ".key")):
@@ -464,6 +994,7 @@ def purge_all(full_profile=False, error_cls=Exception):
             report[label] = True
         except OSError:
             pass
+    report.update(_purge_write_ceremony_files())
     pending, briefs, inflight_skipped = _bb.purge_transient_state()
     report["pending_envelopes_removed"] = pending
     report["briefs_removed"] = briefs

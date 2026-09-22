@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DomUtils, parseDocument } from "htmlparser2";
 import sanitizeHtml from "sanitize-html";
 import {
-  BRIDGE_EDIT_DURATIONS_MS,
+  MAX_BRIDGE_UI_LEARNER_NAME_REVIEWS,
   MAX_BRIDGE_UI_REVIEWS,
   STRUCTURAL_EDIT_FIELDS,
   normalizeBridgeBindings,
@@ -19,6 +19,8 @@ import {
   type BridgePrivateAttachment,
   type BridgePrivateConversation,
   type BridgeUiReview,
+  type BridgeUiApprovalPresence,
+  type BridgeUiLearnerNames,
   type BridgeUiState,
 } from "@morrow/bridge-protocol";
 import {
@@ -109,6 +111,7 @@ import { readExactTrustFile, readExactTrustJson } from "./exact-trust-file.js";
 
 export const MAX_PUBLICATION_POLICY_BYTES = 8 * 1024 * 1024;
 export const MAX_MCP_RUNTIME_MANIFEST_BYTES = 1024 * 1024;
+const REVIEW_LEARNER_NAMES_LIFETIME_MS = 15 * 60_000;
 
 const NEW_QUIZ_ACCOMMODATION_TOOLS = new Set([
   "canvas_set_course_level_accommodations",
@@ -440,7 +443,7 @@ const LEARNER_PRIVACY_REFUSAL_TEXT = "Morrow did not return this result because 
 /** The fixed person-facing sentence for a privacy-boundary refusal. */
 export function privacyProblemText(code: string): string {
   if (code === "privacy_browser_binding_unverified") {
-    return "Reconnect this course in Morrow Bridge. Its signed-in Canvas tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection.";
+    return "Open this course in Chrome and sign in, then select Connect this course in Morrow Bridge. Its signed-in Canvas tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection.";
   }
   // The connection is working and carries another course, so this names what is
   // true instead of pointing at the privacy boundary.
@@ -762,14 +765,9 @@ const BROWSER_EDIT_ACCESS_REACH = new Set<string>(["course", "beyond"]);
 export interface RememberOfferResult {
   readonly categoryId: string;
   readonly label: string;
-  readonly until: number;
+  /** The course already holds an Edit grant saved with an end time; the bundle ends with it. */
+  readonly joinsTimedGrant?: true;
 }
-
-// D3: the review page's "do not ask again" grant, and the new grant a merge creates when no
-// permission is active yet, both last 4 hours. Read from BRIDGE_EDIT_DURATIONS_MS (not a bare
-// literal) so a rememberKind grant can only ever ask for one of the five fixed Edit durations F5
-// requires.
-const REMEMBER_KIND_DURATION_MS = BRIDGE_EDIT_DURATIONS_MS.find((ms) => ms === 4 * 60 * 60 * 1_000)!;
 
 export interface RememberableEditCategory {
   readonly id: string;
@@ -2010,6 +2008,13 @@ export class GatewayRuntime {
   private readonly mcpRuntime: McpRuntimeHealth | undefined;
   private readonly artifacts: ArtifactGenerationRegistry;
   private approvalBaseUrl: string | null = null;
+  private approvalPresence: BridgeUiApprovalPresence | null = null;
+  /**
+   * Who each learner label on an open review is, keyed by review path, for Morrow Bridge only.
+   * An entry ends with its review: when the change is cancelled, or 15 minutes after the review
+   * page last showed it, the same lifetime as the page's approval cookie.
+   */
+  private readonly bridgeReviewLearnerNames = new Map<string, { readonly entry: BridgeUiLearnerNames; readonly expiresAt: number }>();
   /**
    * The requesting assistant for the tool call running on this async stack. One
    * runtime serves every connected assistant, so the identity travels with the
@@ -2466,7 +2471,7 @@ export class GatewayRuntime {
   ): Promise<ApprovalReviewContext> {
     try {
       const operation = this.effects.get(operationId);
-      return resolveApprovalReviewContext({
+      const context = await resolveApprovalReviewContext({
         operation,
         tools: this.catalog.tools,
         ...(cache ? { cache } : {}),
@@ -2474,11 +2479,45 @@ export class GatewayRuntime {
           await this.callSourceOwned(publicName, args, { signal }),
         ),
       });
+      const learnerNames = await this.reviewLearnerNames(operation, context).catch(() => null);
+      return learnerNames ? { ...context, learnerNames } : context;
     } catch {
       // A review that could not be resolved names nothing, and a page that names
       // nothing approves nothing.
       return { targets: [], unnamed: true };
     }
+  }
+
+  /**
+   * The student behind each learner label a reviewed change names, read from the
+   * learner vault in the change's current course scope. The review server hands
+   * it on only to Morrow Bridge, which shows it in the educator's review tab; the
+   * server itself shows labels only. A label that does not resolve leaves the
+   * whole change without names, so the Bridge never shows a partial guess.
+   */
+  private async reviewLearnerNames(
+    operation: EffectOperationRecord,
+    context: ApprovalReviewContext,
+  ): Promise<Record<string, string> | null> {
+    const labels = [...new Set(JSON.stringify([operation.plan, context]).match(/\bStudent A[1-9][0-9]*\b/gu) ?? [])];
+    const mapping = this.toolByPublicName.get(operation.publicToolName);
+    if (!labels.length || !operation.sourceBindingId || !mapping || !isCanvasConnector(mapping)) return null;
+    const args = isJsonObject(operation.plan.arguments) ? operation.plan.arguments : {};
+    const request = { ...args, _morrow: { source_binding_id: operation.sourceBindingId } };
+    const binding = await this.verifiedBrowserBindingBySource(mapping, request);
+    const courseId = this.requestCourseId(args) ?? this.exactString(binding.courseId, 160);
+    if (!courseId || binding.courseId !== courseId) return null;
+    const scope = binding.provider === "moodle"
+      ? this.moodleBindingScope(binding, operation.sourceBindingId, courseId)
+      : this.canvasBindingScope(binding, operation.sourceBindingId, courseId);
+    if (!scope) return null;
+    const names: Record<string, string> = {};
+    for (const label of labels) {
+      const name = this.learnerVault.resolve(scope, label).name;
+      if (!name) return null;
+      names[label] = name;
+    }
+    return names;
   }
 
   operationsRecent(input: RecentOperationsInput = {}): JsonObject {
@@ -2530,6 +2569,55 @@ export class GatewayRuntime {
       throw new TypeError("approval service must use the loopback address");
     }
     this.approvalBaseUrl = parsed.origin;
+  }
+
+  /**
+   * The key Morrow Bridge uses to sign a person's approval click. It travels only inside
+   * `morrow_browser_ui_state` to the paired Bridge, never in a tool result or review URL.
+   */
+  setApprovalPresence(presence: BridgeUiApprovalPresence): void {
+    if (!this.approvalBaseUrl || presence.origin !== this.approvalBaseUrl) {
+      throw new TypeError("approval key must belong to the approval service");
+    }
+    this.approvalPresence = normalizeBridgeUiState({ reviews: [], presence }).presence ?? null;
+  }
+
+  /** A review page opened: send the approval key to Morrow Bridge again, with the current reviews. */
+  announceApprovalPresence(): void {
+    this.pushBrowserUiState();
+  }
+
+  /**
+   * Keeps who each learner label on one review is and sends it to the paired Morrow Bridge, the
+   * only place it goes. Null forgets the review. A path or map the Bridge would refuse is dropped.
+   */
+  setReviewLearnerNames(reviewPath: string, names: Readonly<Record<string, string>> | null): void {
+    if (!names) {
+      if (this.bridgeReviewLearnerNames.delete(reviewPath)) this.pushBrowserUiState();
+      return;
+    }
+    let entry: BridgeUiLearnerNames | undefined;
+    try {
+      entry = normalizeBridgeUiState({ reviews: [], learnerNames: [{ path: reviewPath, names }] }).learnerNames?.[0];
+    } catch {
+      return;
+    }
+    if (!entry) return;
+    this.bridgeReviewLearnerNames.delete(reviewPath);
+    this.bridgeReviewLearnerNames.set(reviewPath, { entry, expiresAt: Date.now() + REVIEW_LEARNER_NAMES_LIFETIME_MS });
+    for (const path of this.bridgeReviewLearnerNames.keys()) {
+      if (this.bridgeReviewLearnerNames.size <= MAX_BRIDGE_UI_LEARNER_NAME_REVIEWS) break;
+      this.bridgeReviewLearnerNames.delete(path);
+    }
+    this.pushBrowserUiState();
+  }
+
+  private currentReviewLearnerNames(): readonly BridgeUiLearnerNames[] {
+    const now = Date.now();
+    for (const [path, { expiresAt }] of this.bridgeReviewLearnerNames) {
+      if (expiresAt <= now) this.bridgeReviewLearnerNames.delete(path);
+    }
+    return [...this.bridgeReviewLearnerNames.values()].map(({ entry }) => entry);
   }
 
   approveOperation(operationId: string): JsonObject {
@@ -3477,7 +3565,12 @@ export class GatewayRuntime {
     if (!mapping || !isCanvasConnector(mapping)) return;
     const waiting = record.state === "awaiting_approval";
     const known = this.browserReviewWaiting.has(record.operationId);
-    if (waiting === known) return;
+    const ended = (record.state === "cancelled" || record.state === "closed_by_person")
+      && this.bridgeReviewLearnerNames.delete(`/operations/${record.operationId}`);
+    if (waiting === known) {
+      if (ended) this.pushBrowserUiState();
+      return;
+    }
     if (waiting) this.browserReviewWaiting.add(record.operationId);
     else this.browserReviewWaiting.delete(record.operationId);
     this.pushBrowserUiState();
@@ -3492,7 +3585,13 @@ export class GatewayRuntime {
       const source = this.editAccessBindingsTool();
       const upstream = source ? this.upstreams.get(source.upstreamId) : undefined;
       if (!source || !upstream) return;
-      const command: BridgeUiState = normalizeBridgeUiState({ reviews: this.currentBrowserReviews() });
+      const presence = this.approvalPresence && this.approvalPresence.origin === this.approvalBaseUrl ? this.approvalPresence : null;
+      const learnerNames = this.currentReviewLearnerNames();
+      const command: BridgeUiState = normalizeBridgeUiState({
+        reviews: this.currentBrowserReviews(),
+        ...(presence ? { presence } : {}),
+        ...(learnerNames.length ? { learnerNames } : {}),
+      });
       Promise.resolve(upstream.callTool("morrow_browser_ui_state", command as unknown as JsonObject, { safeToRetry: false }))
         .catch(() => {});
     } catch {
@@ -3693,7 +3792,7 @@ export class GatewayRuntime {
 
   async applyBrowserEditAccess(
     prepared: BrowserEditAccessPrepared,
-    options: { readonly merge?: true; readonly expiresInMs?: number } = {},
+    options: { readonly merge?: true } = {},
   ): Promise<BrowserEditAccessResult> {
     const refreshed = await this.prepareBrowserEditAccess(prepared.mode, prepared.selections.map((selection) => ({
       sourceBindingId: selection.sourceBindingId,
@@ -3707,10 +3806,9 @@ export class GatewayRuntime {
     if (!source || !upstream) throw new Error("The current browser connection is unavailable.");
     const command = {
       mode: prepared.mode,
-      // `merge` and `expiresInMs` are for rememberKind's own grant only (WI-4.3): every other
-      // caller of this method omits them, and the Bridge still replaces the category list then (F6).
+      // `merge` is for rememberKind's own grant only (WI-4.3): every other caller of this method
+      // omits it, and the Bridge still replaces the category list then (F6).
       ...(prepared.mode === "edit" && options.merge ? { merge: true as const } : {}),
-      ...(prepared.mode === "edit" && options.expiresInMs !== undefined ? { expiresInMs: options.expiresInMs } : {}),
       selections: prepared.selections.map((selection) => ({
         sourceBindingId: selection.sourceBindingId,
         expectedPolicyRevision: selection.expectedPolicyRevision,
@@ -3741,7 +3839,7 @@ export class GatewayRuntime {
 
   /**
    * WI-4.3 (D2b, D3): whether the review page may offer "do not ask again" for the exact change
-   * one operation record already made, and if so which bundle and until when. Never called for an
+   * one operation record already made, and if so which bundle. Never called for an
    * MCP tool: only `rememberKind`, called only from the review page (approval-server.ts), reads
    * this. A failure anywhere here is an absent offer, never a thrown error, because an offer is
    * decoration on a review the person can already approve without it.
@@ -3810,14 +3908,12 @@ export class GatewayRuntime {
       const category = matches[0]!;
       const option = liveOptions.find((candidate) => candidate.id === category.id)!;
       const label = typeof option.label === "string" && option.label ? option.label : category.id;
-      // Step 5: the present end time if a permission is active, else now plus 4 hours (D3). A
-      // merge (WI-4.2) never moves the end time later, so the offer states the time the grant
-      // will actually carry.
+      // Step 5: Edit is not timed. A grant stays until the person returns the course to Plan. Only
+      // a grant saved before that rule carries an end time, and a merge keeps it, so the offer
+      // says when the bundle joins such a grant.
       const permission = isJsonObject(binding.editPermission) ? binding.editPermission : null;
-      const activeExpiresAt = permission && typeof permission.expiresAt === "number" && permission.expiresAt > Date.now()
-        ? permission.expiresAt
-        : null;
-      return { categoryId: category.id, label, until: activeExpiresAt ?? Date.now() + REMEMBER_KIND_DURATION_MS };
+      const joinsTimedGrant = Boolean(permission && typeof permission.expiresAt === "number" && permission.expiresAt > Date.now());
+      return { categoryId: category.id, label, ...(joinsTimedGrant ? { joinsTimedGrant: true as const } : {}) };
     } catch {
       return null;
     }
@@ -3825,7 +3921,7 @@ export class GatewayRuntime {
 
   /**
    * WI-4.3: grants the bundle `rememberOffer` offered for this operation, merged into any active
-   * grant for the same course, for 4 hours (D3). Called only from the review page, after
+   * grant for the same course, with no end time. Called only from the review page, after
    * `approveOperation` already succeeded (approval-server.ts, WI-4.4): a failed or refused grant
    * here must never fail or undo that approval, so every path returns `"failed"` rather than
    * throwing. No MCP tool exposes this method; the server instruction "Never enable or broaden
@@ -3842,7 +3938,7 @@ export class GatewayRuntime {
       const prepared = await this.prepareBrowserEditAccess("edit", [
         { sourceBindingId, enabledCategories: [offer.categoryId] },
       ]);
-      const result = await this.applyBrowserEditAccess(prepared, { merge: true, expiresInMs: REMEMBER_KIND_DURATION_MS });
+      const result = await this.applyBrowserEditAccess(prepared, { merge: true });
       return result.outcome === "received" ? "saved" : "failed";
     } catch {
       return "failed";
@@ -3853,23 +3949,94 @@ export class GatewayRuntime {
     const source = this.editAccessBindingsTool();
     const upstream = source ? this.upstreams.get(source.upstreamId) : undefined;
     if (!source || !upstream) throw new Error("The current browser connection is unavailable or ambiguous.");
-    const raw = await upstream.callTool("morrow_private_chat_exchange", input, { safeToRetry: false, signal });
-    const result = isJsonObject(raw) && isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
-    if (!result || result.schema !== "morrow.private-chat.exchange.v1") throw new Error("The Private Chat relay returned an invalid result.");
-    if (result.status === "closed" && Object.keys(result).every((key) => ["schema", "status"].includes(key))) return result;
-    if (result.status !== "message"
-      || Object.keys(result).some((key) => !["schema", "status", "sessionId", "sourceBindingId", "courseId", "protectedText"].includes(key))
-      || result.sessionId !== input.sessionId
-      || typeof result.sourceBindingId !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(result.sourceBindingId)
-      || typeof result.courseId !== "string" || !/^[1-9][0-9]{0,18}$/.test(result.courseId)
-      || typeof result.protectedText !== "string" || !result.protectedText.trim() || result.protectedText.length > 100_000) {
-      throw new Error("The Private Chat relay returned an invalid protected message.");
+    let request = input;
+    // The Bridge asks once per message for the labels of the students it names,
+    // then answers the labels exchange with the protected message.
+    for (let round = 0; round < 2; round += 1) {
+      const raw = await upstream.callTool("morrow_private_chat_exchange", request, { safeToRetry: false, signal });
+      const result = isJsonObject(raw) && isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
+      if (!result || result.schema !== "morrow.private-chat.exchange.v1") throw new Error("The Private Chat relay returned an invalid result.");
+      if (result.status === "closed" && Object.keys(result).every((key) => ["schema", "status"].includes(key))) return result;
+      if (result.status === "labels_required" && round === 0) {
+        const learnerIds = result.learnerIds;
+        if (Object.keys(result).some((key) => !["schema", "status", "sessionId", "sourceBindingId", "courseId", "learnerIds"].includes(key))
+          || result.sessionId !== input.sessionId
+          || typeof result.sourceBindingId !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(result.sourceBindingId)
+          || typeof result.courseId !== "string" || !/^[1-9][0-9]{0,18}$/.test(result.courseId)
+          || !Array.isArray(learnerIds) || learnerIds.length < 1 || learnerIds.length > 500
+          || learnerIds.some((id) => typeof id !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(id))
+          || new Set(learnerIds).size !== learnerIds.length) {
+          throw new Error("The Private Chat relay returned an invalid label request.");
+        }
+        if (input.action === "reply_and_listen"
+          && (result.sourceBindingId !== input.sourceBindingId || result.courseId !== input.courseId)) {
+          throw new Error("The Private Chat course changed during the exchange.");
+        }
+        request = {
+          schema: "morrow.private-chat.exchange.v1",
+          action: "labels",
+          sessionId: input.sessionId as string,
+          assistantName: input.assistantName as string,
+          sourceBindingId: result.sourceBindingId,
+          courseId: result.courseId,
+          labelsById: await this.privateChatLearnerLabels(result.sourceBindingId, result.courseId, learnerIds as string[], signal),
+        };
+        continue;
+      }
+      if (result.status !== "message"
+        || Object.keys(result).some((key) => !["schema", "status", "sessionId", "sourceBindingId", "courseId", "protectedText"].includes(key))
+        || result.sessionId !== input.sessionId
+        || typeof result.sourceBindingId !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(result.sourceBindingId)
+        || typeof result.courseId !== "string" || !/^[1-9][0-9]{0,18}$/.test(result.courseId)
+        || typeof result.protectedText !== "string" || !result.protectedText.trim() || result.protectedText.length > 100_000) {
+        throw new Error("The Private Chat relay returned an invalid protected message.");
+      }
+      if ((input.action === "reply_and_listen" || request.action === "labels")
+        && (result.sourceBindingId !== request.sourceBindingId || result.courseId !== request.courseId)) {
+        throw new Error("The Private Chat course changed during the exchange.");
+      }
+      return result;
     }
-    if (input.action === "reply_and_listen"
-      && (result.sourceBindingId !== input.sourceBindingId || result.courseId !== input.courseId)) {
-      throw new Error("The Private Chat course changed during the exchange.");
-    }
-    return result;
+    throw new Error("The Private Chat relay asked for course labels more than once.");
+  }
+
+  /**
+   * The labels the learner vault holds for these students in the exact course
+   * scope every tool result uses, so Private Chat and tool results give one
+   * student one label. The whole roster is published first, in roster order, so
+   * a label never depends on which surface asked first.
+   */
+  private async privateChatLearnerLabels(
+    sourceBindingId: string,
+    courseId: string,
+    learnerIds: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<Record<string, string>> {
+    const source = this.editAccessBindingsTool();
+    const rosterTool = (name: string): CatalogTool | undefined => this.catalog.tools.find((candidate) => (
+      candidate.upstreamId === source?.upstreamId && candidate.upstreamName === name
+      && candidate.annotations?.readOnlyHint === true && isCanvasConnector(candidate)
+    ));
+    const canvas = rosterTool("canvas_list_users_in_course_users");
+    const moodle = rosterTool("moodle_get_course_participant_roster");
+    const mapping = canvas ?? moodle;
+    if (!source || !mapping) throw new Error("The course roster is unavailable for Private Chat.");
+    const request = { course_id: courseId, _morrow: { source_binding_id: sourceBindingId } };
+    const binding = await this.verifiedBrowserBinding(mapping, request, { signal });
+    const context = binding.provider === "moodle" && moodle
+      ? await this.moodleLearnerContextForBinding(moodle, sourceBindingId, courseId, binding, { signal })
+      : binding.provider === "canvas" && canvas
+        ? await this.canvasLearnerContextForBinding(canvas, sourceBindingId, courseId, binding, { signal })
+        : null;
+    if (!context) throw new Error("The course roster is unavailable for Private Chat.");
+    const identities = context.learnerRoster.identities(context.learnerScope);
+    const { labels } = this.learnerVault.prepareTextReferences(context.learnerScope, identities);
+    const byId = new Map(identities.map((identity, index) => [identity.id, labels[index]!]));
+    return Object.fromEntries(learnerIds.map((id) => {
+      const label = byId.get(id);
+      if (!label) throw new Error("A student in this Private Chat message is not on the current course roster.");
+      return [id, label];
+    }));
   }
 
   private async resolveCurrentEditAuthorization(

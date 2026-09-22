@@ -49,8 +49,7 @@ def _run_no_tenant(monkeypatch, **kw):
     monkeypatch.setattr(C._live_read, "LiveReader", _BoomReader)
     monkeypatch.setattr(C._live_read, "TENANT_BASE", "")
     with pytest.raises(ChainFailure) as ei:
-        C.run_query("show me all the students that failed last week's quiz",
-                    "89585", tenant_base=None, **kw)
+        C.run_query("89585", "last_week", tenant_base=None, **kw)
     return ei.value
 
 
@@ -70,8 +69,8 @@ def _run_failing_health(monkeypatch, message):
     monkeypatch.setattr(C._live_read, "TENANT_BASE",
                         "https://school.example.edu")
     with pytest.raises(ChainFailure) as ei:
-        C.run_query("show me all the students that failed last week's quiz",
-                    "89585", tenant_base="https://school.example.edu")
+        C.run_query("89585", "last_week",
+                    tenant_base="https://school.example.edu")
     return ei.value
 
 
@@ -103,7 +102,7 @@ def test_main_exits_two_with_mode_line(monkeypatch, capsys):
         raise failure
 
     monkeypatch.setattr(C, "run_query", boom)
-    rc = C.main(["show me all the students that failed last week's quiz",
+    rc = C.main(["--quiz", "last-week",
                  "--course", "89585", "--tenant",
                  "https://school.example.edu"])
     assert rc == 2

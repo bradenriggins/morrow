@@ -11,6 +11,10 @@ For each route: missing token -> 403 {"error":"forbidden"}, wrong token ->
 proxy is the only cross-process CDP path (no TCP CDP listener exists), so
 its token gate is the security boundary.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import json
 import os
 import sys

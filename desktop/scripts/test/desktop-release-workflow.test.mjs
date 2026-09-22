@@ -12,8 +12,10 @@ const releasePath = ".github/workflows/desktop-release.yml";
 const upgradePath = "scripts/test/desktop-windows-upgrade.ps1";
 const boundedRunnerPath = "installer/test/run-bounded-tests.cjs";
 const macSmokePath = "scripts/test/desktop-mac-smoke.mjs";
-const inventory = readFileSync(join(root, inventoryPath), "utf8");
-const release = readFileSync(join(root, releasePath), "utf8");
+// Workflow paths are relative to the repository root, one level above the desktop product.
+const repositoryRoot = join(root, "..");
+const inventory = readFileSync(join(repositoryRoot, inventoryPath), "utf8");
+const release = readFileSync(join(repositoryRoot, releasePath), "utf8");
 const upgrade = readFileSync(join(root, upgradePath), "utf8");
 const boundedRunner = readFileSync(join(root, boundedRunnerPath), "utf8");
 const macSmoke = readFileSync(join(root, macSmokePath), "utf8");
@@ -120,7 +122,7 @@ test("the hard-coded Windows assistant identity names the inventory workflow tha
   const comment = /((?:^\/\/.*\n)+)const CODEX_WINDOWS_APPX_IDENTITY = /m.exec(detection);
   assert.ok(comment, "installer/shared/windows-appx-detection.cjs must explain where the identity came from");
   assert.ok(comment[1].includes(inventoryPath), `the identity comment must cite ${inventoryPath} as its reproducible source`);
-  assert.ok(existsSync(join(root, inventoryPath)), `${inventoryPath} must exist for that citation to hold`);
+  assert.ok(existsSync(join(repositoryRoot, inventoryPath)), `${inventoryPath} must exist for that citation to hold`);
 });
 
 test("the release workflow is dispatch-only and builds both desktop platforms", () => {
@@ -140,6 +142,15 @@ test("the release workflow is dispatch-only and builds both desktop platforms", 
   assert.equal((release.match(/^\s+if: success\(\)$/gm) || []).length, 2,
     "only complete successful platform evidence may use the normal artifact names");
   assert.equal((release.match(/^\s+if-no-files-found: error$/gm) || []).length, 2);
+});
+
+test("each release job runs in the desktop product directory and uploads from it", () => {
+  for (const [id, job] of jobs(release)) {
+    assert.match(job, /^ {4}defaults:\n {6}run:\n {8}working-directory: desktop$/m, `${id} must run its commands in desktop/`);
+    assert.match(job, /^ {10}cache-dependency-path: desktop\/pnpm-lock\.yaml$/m, `${id} must key the pnpm cache on the desktop lockfile`);
+    // upload-artifact paths are relative to the checkout, not to working-directory.
+    for (const [, path] of job.matchAll(/^ {10}path: (.+)$/gm)) assert.match(path, /^desktop\//, `${id} uploads ${path} from outside desktop/`);
+  }
 });
 
 test("the Windows job runs bounded tests and packages through one retained release graph", () => {
@@ -346,5 +357,24 @@ test("the macOS job mounts and tests the same disk image it uploads", () => {
   assert.match(job, /--source "\$GITHUB_SHA" --run-id "\$MORROW_MAC_RUN_ID"/);
   const uploaded = /^\s+path: (.+)$/m.exec(job);
   assert.ok(uploaded, "the macOS job must upload a directory");
-  assert.ok(job.includes(`artifactRoot="$PWD/${uploaded[1].trim()}"`), "the uploaded directory must be the one the job writes its receipts into");
+  // The upload path is relative to the checkout; $PWD is the job's working directory, desktop/.
+  assert.match(job, /^ {8}working-directory: desktop$/m);
+  const uploadedFromDesktop = uploaded[1].trim().replace(/^desktop\//, "");
+  assert.notEqual(uploadedFromDesktop, uploaded[1].trim(), "the upload path must name the desktop working directory");
+  assert.ok(job.includes(`artifactRoot="$PWD/${uploadedFromDesktop}"`), "the uploaded directory must be the one the job writes its receipts into");
+});
+
+test("each release job preflights the signed release configuration and reports it", () => {
+  for (const [id, target] of [["windows-installer", "win32-x64"], ["macos-installer", "darwin-arm64"]]) {
+    const job = jobs(release).get(id);
+    const step = new RegExp(`- name: Preflight the signed release configuration\\n(?: {8}.*\\n)*? {8}run: node installer/signed-release-preflight\\.cjs --target ${target} --summary`);
+    assert.match(job, step, `${id} must preflight the signed configuration for ${target}`);
+    const commands = [...job.matchAll(/^\s+run: (?!\|)(.+)$/gm)].map((match) => match[1].trim());
+    assert.ok(commands.indexOf(`node installer/signed-release-preflight.cjs --target ${target} --summary`) > commands.indexOf("pnpm --dir installer --ignore-workspace install --frozen-lockfile"));
+    for (const name of target.startsWith("darwin")
+      ? ["CSC_LINK", "CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID", "GH_TOKEN"]
+      : ["WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD", "GH_TOKEN"]) {
+      assert.match(job, new RegExp(`^ {10}${name}: \\$\\{\\{ secrets\\.MORROW_${name} \\}\\}$`, "m"), `${id} preflight reads ${name}`);
+    }
+  }
 });

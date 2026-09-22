@@ -1,17 +1,19 @@
 #!/bin/bash
 # Keep-alive for the Morrow Canvas login helper (helper/server.py).
-# Ensures exactly one healthy helper instance runs. Safe to run every few
-# minutes from cron; also self-heals after VM restarts (supervision
-# resumes at the next five-minute cron tick, so expect up to five minutes
-# of downtime after a reboot before the helper is back).
+# Ensures exactly one healthy helper instance runs. Runs every five
+# minutes, supervised by cron where the machine has it, otherwise by the
+# background loop in helper/supervisor.py (install.sh picks; the Muse VM
+# has no cron daemon). Self-heals after VM restarts: with cron,
+# supervision resumes at the next five-minute tick; without cron, run
+# `bin/morrow start` (the first morrow command also restarts the loop).
 #
-# Install: add to crontab (crontab -e):
+# Install: install.sh sets up supervision. By hand with cron:
 #   */5 * * * * /path/to/tree/helper/keepalive.sh
 #
-# Uninstall: removing this cron entry is MANDATORY. If it survives, it
-# will relaunch the helper within five minutes, resurrecting an
-# "uninstalled" connector. Use scripts/uninstall.sh, which verifies the
-# entry is gone.
+# Uninstall: removing the supervision (cron entry or loop) is MANDATORY.
+# If it survives, it will relaunch the helper within five minutes,
+# resurrecting an "uninstalled" connector. Use scripts/uninstall.sh,
+# which stops the loop and verifies the cron entry is gone.
 #
 # Configuration is TREE-SCOPED (W2-P1-27): ${HELPER_DIR}/env (this tree's
 # own env file) is sourced with setdefault semantics (the real environment
@@ -113,6 +115,11 @@ _source_tree_env() {
 
 TREE_ENV_FILE="${HELPER_DIR}/env"
 _source_tree_env "${TREE_ENV_FILE}"
+if [ -n "${LOGIN_HELPER_PROFILE_DIR:-}" ] \
+    && [ "${LOGIN_HELPER_PROFILE_DIR}" != "${HELPER_DIR}/profile" ]; then
+  printf 'keepalive: WARNING: ignoring LOGIN_HELPER_PROFILE_DIR=%s; this tree'"'"'s helper profile is always %s\n' \
+    "${LOGIN_HELPER_PROFILE_DIR}" "${HELPER_DIR}/profile" >&2
+fi
 
 # Legacy global env: CANVAS_BASE only. MORROW_LEGACY_ENV is the test seam
 # (selftests point it at scratch); production reads <MORROW_HOME>/env
@@ -662,6 +669,23 @@ pipe_holder_pid_for_profile() {
 
 # --- /status verdict -------------------------------------------------------
 # Evaluates the current status_body and exits. Never returns.
+# Principal pinning: the first signed-in session pins the educator's
+# Canvas account (reauth/state_machine.py pin --first-signin), so a later
+# re-sign-in can resume paused work only for that same account. Runs
+# only while nothing is pinned yet. The pin command itself refuses
+# during a re-auth write halt: it never pins whoever signed back in.
+pin_first_signin() {
+  [ -f "${MORROW_HOME_DIR}/browser_lane.json" ] && return 0
+  local out
+  if out="$(PYTHONDONTWRITEBYTECODE=1 python3 \
+        "${TREE_ROOT}/reauth/state_machine.py" pin --first-signin 2>&1)"; then
+    log "${out}"
+  else
+    log "principal not pinned yet: ${out}"
+  fi
+  return 0
+}
+
 # W2-P2-6: Chromium memory policy. Runs only on a healthy helper
 # (logged_in=true). helper/memory_watch.py is a read-only probe: it
 # exits 3 when the Chromium tree's RSS exceeds CHROMIUM_MAX_RSS_MB (or
@@ -762,6 +786,7 @@ evaluate_status() {
     circuit_note_healthy
     # W4-P2-3: near-expiry session warning, every healthy tick.
     warn_on_session_horizon "${status_body}"
+    pin_first_signin
     # W2-P2-6: memory policy runs on healthy ticks only. It may recycle
     # the browser (recover_helper, loud log); on return evaluate the
     # fresh status instead of exiting on the pre-restart verdict.

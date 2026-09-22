@@ -4,6 +4,7 @@ import test from "node:test";
 import { PROBLEM_CODES, problemCopy, problemText } from "../../connector/extension/src/bridge-problem-copy.js";
 import { CURATED_CATEGORY_SPECS } from "../../connector/extension/src/edit-policy.js";
 import {
+  activeEditBindings,
   canChooseCourses,
   connectedCourseRows,
   controlState,
@@ -105,40 +106,51 @@ test("each failure the popup can receive names its own state, and only an unname
 test("pendingReviews keeps only well-formed entries, and reviewButtonLabel names the change", () => {
   assert.deepEqual(pendingReviews(null), []);
   assert.deepEqual(pendingReviews({}), []);
-  assert.deepEqual(pendingReviews({ reviews: [] }), []);
+  assert.deepEqual(pendingReviews({ connected: true, reviews: [] }), []);
   const good = { url: "http://127.0.0.1:9/operations/op-1", label: "Update due date in Anatomy" };
-  assert.deepEqual(pendingReviews({ reviews: [good, { url: 4, label: "bad url type" }, { label: "no url" }, null] }), [good]);
+  assert.deepEqual(pendingReviews({ connected: true, reviews: [good, { url: 4, label: "bad url type" }, { label: "no url" }, null] }), [good]);
+  // A review belongs to the Morrow connection that sent it, so none shows once Morrow is not connected.
+  assert.deepEqual(pendingReviews({ connected: false, paired: false, reviews: [good] }), []);
   assert.equal(reviewButtonLabel(good), "Review: Update due date in Anatomy");
 });
 
-// WI-5.8: the popup's own course list keeps D7's exact wording ("Plan. Asks first.", "Edit until
-// <clock>. Routine edits.", and so on), the same text the Courses and access page shows, from
-// nothing but morrow_edit_policy_status's own bindings array.
+// WI-5.8: the popup's own course list keeps D7's exact wording ("Plan. Asks first.", "Edit.
+// Routine edits.", and so on), the same text the Courses and access page shows, from nothing but
+// morrow_edit_policy_status's own bindings array. Edit is not timed, so no state names an end time.
 test("courseStateText keeps D7's own wording, from the edit permission alone", () => {
   const canvasRoutineIds = CURATED_CATEGORY_SPECS.filter((spec) => spec.provider === "canvas" && spec.routine === true).map((spec) => spec.id);
   assert.ok(canvasRoutineIds.length > 1, "the catalog fixture needs more than one routine Canvas id for this test to mean anything");
-  const future = Date.now() + 60 * 60 * 1_000;
 
   assert.equal(courseStateText({ provider: "canvas" }), "Plan. Asks first.", "no permission at all");
-  assert.equal(courseStateText({ provider: "canvas", editPermission: { enabledCategories: [], expiresAt: future } }), "Plan. Asks first.", "an empty selection");
+  assert.equal(courseStateText({ provider: "canvas", editPermission: { enabledCategories: [] } }), "Plan. Asks first.", "an empty selection");
   assert.equal(
     courseStateText({ provider: "canvas", editPermission: { enabledCategories: canvasRoutineIds, expiresAt: Date.now() - 1 } }),
     "Plan. Asks first.",
-    "an expired grant",
+    "a grant saved while Edit was timed, after its end time",
+  );
+  assert.equal(courseStateText({ provider: "canvas", editPermission: { enabledCategories: [canvasRoutineIds[0]] } }), "Edit. 1 kind of edit.");
+  assert.equal(courseStateText({ provider: "canvas", editPermission: { enabledCategories: canvasRoutineIds } }), "Edit. Routine edits.");
+  assert.equal(
+    courseStateText({ provider: "canvas", editPermission: { enabledCategories: canvasRoutineIds, expiresAt: Date.now() + 60_000 } }),
+    "Edit. Routine edits.",
+    "a grant saved while Edit was timed reads as Edit, with no promised end time",
   );
   assert.equal(
-    courseStateText({ provider: "canvas", editPermission: { enabledCategories: [canvasRoutineIds[0]], expiresAt: future } }),
-    `Edit until ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(future)}. 1 kind of edit.`,
-  );
-  assert.equal(
-    courseStateText({ provider: "canvas", editPermission: { enabledCategories: canvasRoutineIds, expiresAt: future } }),
-    `Edit until ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(future)}. Routine edits.`,
-  );
-  assert.equal(
-    courseStateText({ provider: "canvas", editPermission: { enabledCategories: [...canvasRoutineIds, "canvas_page_content"], expiresAt: future } }),
-    `Edit until ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(future)}. Custom.`,
+    courseStateText({ provider: "canvas", editPermission: { enabledCategories: [...canvasRoutineIds, "canvas_page_content"] } }),
+    "Edit. Custom.",
     "more than the routine set, so it is Custom even though it carries every routine id",
   );
+});
+
+test("activeEditBindings counts every live Edit grant, with or without a saved end time", () => {
+  const categories = ["canvas_page_content"];
+  assert.deepEqual(activeEditBindings([
+    { sourceBindingId: "untimed", editPermission: { enabledCategories: categories } },
+    { sourceBindingId: "legacy", editPermission: { enabledCategories: categories, expiresAt: Date.now() + 60_000 } },
+    { sourceBindingId: "lapsed", editPermission: { enabledCategories: categories, expiresAt: Date.now() - 1 } },
+    { sourceBindingId: "empty", editPermission: { enabledCategories: [] } },
+    { sourceBindingId: "plan" },
+  ]).map((binding) => binding.sourceBindingId), ["untimed", "legacy"]);
 });
 
 // WI-5.8: "up to 5, then All courses". A binding with no name or id is dropped rather than shown

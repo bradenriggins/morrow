@@ -13,6 +13,10 @@ exclusions, so there is no executor-side provision path left to test):
   2. provision CLI with no --course-id -> exit 2, fail-closed report.
   3. The CLI parser carries no default course.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import io
 import json
 import os
@@ -109,7 +113,7 @@ finally:
 #    chain's region infix is gone with it); the executor's PROVISION step
 #    uses provision.quiz_api_base verbatim.
 check("quiz-api host uses the provision derivation",
-      prov.quiz_api_base("chcp") == "https://chcp.quiz-api.instructure.com")
+      prov.quiz_api_base("example") == "https://example.quiz-api.instructure.com")
 try:
     prov.quiz_api_base("")
     check("quiz-api host rejects an empty tenant", False, "no exception")
@@ -167,7 +171,7 @@ check("PUT on New Quiz path raises NewQuizRefused",
                "PUT", _put_url, {}))
 check("PUT on quiz-API draw path raises NewQuizRefused",
       _refused(ex.guard_new_quiz_request, {"name": "draw"},
-               "PUT", "https://chcp.quiz-api-iad-prod.instructure.com/api/quizzes/b1/quiz_entries/e1", {}))
+               "PUT", "https://example.quiz-api-iad-prod.instructure.com/api/quizzes/b1/quiz_entries/e1", {}))
 try:
     ex.guard_new_quiz_request({"name": "canvas_update_quiz_item"}, "PATCH", _put_url, {})
     check("PATCH on New Quiz path passes the guard", True)
@@ -300,8 +304,8 @@ except ex.WriteFieldMismatch as _exc:
     check("settings readback mismatch raises WriteFieldMismatch",
           "quiz_settings" in str(_exc), str(_exc)[:120])
 _r = _settings_readback({"id": 4045374, "title": "T"})
-check("settings readback skips when the provider does not echo quiz_settings",
-      _r["status"] == "pass" and "quiz_settings" not in _r["detail"], _r)
+check("settings readback is unverified when the provider does not echo quiz_settings",
+      _r["status"] == "unverified" and "quiz_settings" in _r["detail"], _r)
 _item_url = _settings_url + "/items/11028169"
 _r = _settings_readback({"id": 11028169, "title": "I"},
                         body={"item": {"title": "I"}}, url=_item_url)
@@ -512,14 +516,19 @@ check("https->https redirect is still followed",
        and r.full_url == "https://provider.example/v1/y")(
           _redir("https://provider.example/v1/x",
                  "https://provider.example/v1/y")))
+check("cross-host redirect is refused (the lane stays on the LMS host)",
+      _refuses("https://provider.example/v1/x", "https://other.example/v1/y"))
+check("same-host redirect to another port is refused",
+      _refuses("https://provider.example/v1/x",
+               "https://provider.example:8443/v1/y"))
 _r = _redir_handler.redirect_request(
-    _urlreq.Request("https://provider.example/v1/x",
+    _urlreq.Request("http://provider.example/v1/x",
                     headers={"Authorization": "Bearer FAKE",
                              "Proxy-Authorization": "Basic RkFLRQ=="}),
-    None, 302, "Found", _fake_headers, "https://other.example/v1/y")
-check("cross-host redirect strips Authorization",
+    None, 302, "Found", _fake_headers, "https://provider.example/v1/y")
+check("scheme-change redirect strips Authorization",
       _r.get_header("Authorization") is None)
-check("cross-host redirect strips Proxy-Authorization",
+check("scheme-change redirect strips Proxy-Authorization",
       _r.get_header("Proxy-Authorization") is None)
 _r = _redir_handler.redirect_request(
     _urlreq.Request("https://provider.example/v1/x",
