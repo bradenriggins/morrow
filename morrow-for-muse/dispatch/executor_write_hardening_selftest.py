@@ -75,6 +75,11 @@ cs._lane_state_base = lambda: BASE  # noqa: E731
 # covered by dispatch/test_direct_lane_hardening.py; here it is a no-op
 # so the write-hardening gates are exercised in isolation.
 ex.live_proven_gate = lambda *a, **k: None  # noqa: E731
+# The signed-in account check (final muse audit M3) reads users/self
+# before writes; these fakes script every provider call, so it is a
+# no-op here. It is covered by transport/test_principal_check.py.
+cs.ChromiumSession._verify_principal = lambda *a, **k: None  # noqa: E731
+
 
 # Speed up: no real backoff sleeps in retry tests.
 _ex_backoff = ex._backoff_sleep

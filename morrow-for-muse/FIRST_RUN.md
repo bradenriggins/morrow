@@ -107,7 +107,7 @@ every setup state above has a classified mode with a regression test.
 
 ## Regression coverage
 
-- `failures/test_error_translation.py`: every catalog mode (now 84)
+- `failures/test_error_translation.py`: every catalog mode (now 86)
   has a fixture; `setup-tenant-not-configured` and `helper-down`
   fixtures use evidence the producers actually emit.
 - `failures/selftest_smoke.py` and `failures/selftest_wiring.py`:

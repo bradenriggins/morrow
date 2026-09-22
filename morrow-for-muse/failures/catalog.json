@@ -605,6 +605,44 @@
       "placeholders": []
     },
     {
+      "id": "canvas-account-mismatch",
+      "title": "A different Canvas account is signed in to the helper",
+      "surface": "session",
+      "severity_hint": "high",
+      "root_cause": "Verified mechanism: before every write, and once per session for reads, the Chromium lane reads GET /api/v1/users/self and compares it with the account pinned at first sign-in (reauth/state_machine.py pin). Someone signed in to the helper browser as another account (a shared machine, a second educator, a student), so the lane refused and imposed the re-auth write halt.",
+      "is_not": "This is not an expired session and not a permission error on one course. The other account's identity is never shown.",
+      "agent_message": "What was attempted: I tried {operation} through the login helper. What the evidence showed: the helper browser is signed in to a different Canvas account than the one this connector is pinned to. What this means: nothing was sent, and writes are paused so nothing can go out under the wrong account. What happens next: please sign out in the helper page and sign back in with your own account; I will then confirm it is your pinned account and resume. If you want to use a different account from now on, I can disconnect this connector first so you can sign in fresh.",
+      "auto_action": "Keep the write halt. After the educator signs back in, run reauth/state_machine.py resume, which verifies the live account against the pin; to change accounts, run bin/morrow disconnect with the educator's yes, then sign in and pin again.",
+      "escalate_when": "Always: only the educator can sign back in as their own account or choose to disconnect.",
+      "signature": {
+        "error_class": "PrincipalMismatch"
+      },
+      "signature_notes": "evidence: transport/chromium_session.py ChromiumSession._verify_principal raises PrincipalMismatch when GET /api/v1/users/self differs from reauth/state_machine.pinned_principal() (final muse audit M3).",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation"
+      ]
+    },
+    {
+      "id": "canvas-account-not-pinned",
+      "title": "No Canvas account is pinned, so a write cannot prove who it runs as",
+      "surface": "session",
+      "severity_hint": "medium",
+      "root_cause": "Verified mechanism: writes on the Chromium lane require the account pinned at first sign-in (reauth/state_machine.py pin --first-signin). No pin exists yet, or the pin record cannot be trusted (loose permissions, corrupt), so the write was refused before anything was sent.",
+      "is_not": "This is not a dead session and not a mismatch: there is no trusted pin to compare against.",
+      "agent_message": "What was attempted: I tried {operation} through the login helper. What the evidence showed: this connector has no trusted record of which Canvas account is yours. What this means: nothing was sent; I will not write until the signed-in account is confirmed as yours. What happens next: I will read the signed-in account's name and ask you to confirm it is you, then record it and retry.",
+      "auto_action": "Run reauth/state_machine.py pin --first-signin, show the educator the printed name and get their confirmation; when the pin record is damaged, disconnect (with the educator's yes) and sign in fresh.",
+      "escalate_when": "Always: the educator must confirm the account is theirs.",
+      "signature": {
+        "error_class": "PrincipalNotPinned"
+      },
+      "signature_notes": "evidence: transport/chromium_session.py ChromiumSession._verify_principal raises PrincipalNotPinned for a write with no pin, or for any call when pinned_principal() raises PrincipalPinError (final muse audit M3).",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation"
+      ]
+    },
+    {
       "id": "chromium-dead-masquerade",
       "title": "Dead Chromium masquerades as signed-out (server up, browser dead)",
       "surface": "helper",
