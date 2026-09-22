@@ -208,22 +208,82 @@ def ensure_if_installed(tree, interval=INTERVAL_SECONDS, first_delay=None):
     return ensure(tree, interval=interval, first_delay=first_delay)
 
 
+def _group_alive(pgid):
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _reap(pid):
+    try:
+        os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        pass
+
+
+def _signal_loop(pid, pgid, sig):
+    if pgid is not None:
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            pass
+    else:
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            pass
+
+
+def _loop_gone(pid, pgid):
+    _reap(pid)
+    return not (_group_alive(pgid) if pgid is not None else _is_alive(pid))
+
+
+def _is_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def stop(tree, forget=False):
-    """Stop this tree's loop (exact PID, verified to be ours). With
-    forget=True the loop is also no longer installed."""
+    """Stop this tree's loop (exact PID, verified to be ours) and every
+    process in its session: a keepalive run in progress would otherwise
+    finish after stop and relaunch the helper. The loop starts its own
+    session (ensure), so its process group id is its PID; the group
+    gets SIGTERM, then SIGKILL after five seconds, and stop waits until
+    the group is gone. With forget=True the loop is also no longer
+    installed."""
     tree = os.path.realpath(tree)
     with _Lock(tree):
         doc = _read_state(tree)
         pid = doc.get("pid")
         stopped = False
         if _is_our_loop(pid, tree):
-            os.kill(pid, signal.SIGTERM)
+            try:
+                pgid = os.getpgid(pid)
+            except ProcessLookupError:
+                pgid = None
+            if pgid != pid or pgid == os.getpgrp():
+                pgid = None  # never signal a group the loop does not lead
+            _signal_loop(pid, pgid, signal.SIGTERM)
             for _ in range(50):
-                if not _is_our_loop(pid, tree):
+                if _loop_gone(pid, pgid):
                     break
                 time.sleep(0.1)
-            if _is_our_loop(pid, tree):
-                os.kill(pid, signal.SIGKILL)
+            if not _loop_gone(pid, pgid):
+                _signal_loop(pid, pgid, signal.SIGKILL)
+                for _ in range(50):
+                    if _loop_gone(pid, pgid):
+                        break
+                    time.sleep(0.1)
             stopped = True
         doc["pid"] = None
         if forget:

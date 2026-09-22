@@ -589,10 +589,10 @@
       "title": "Helper server not running",
       "surface": "helper",
       "severity_hint": "low",
-      "root_cause": "Verified: the helper is supervised by a cron tick every 5 minutes; on this VM no crontab entry was present after a restart, so a dead helper after reboot is the expected state until keepalive runs.",
+      "root_cause": "Verified: the helper is supervised every 5 minutes, by a cron entry where the machine has cron, or by the keepalive background loop (helper/supervisor.py) where it does not (the Muse VM has no cron daemon). After a restart the helper stays down until that supervision runs keepalive; on a machine without cron the background loop starts again only with `bin/morrow start` or the next morrow command.",
       "is_not": "This is not session death; there is no browser to check yet.",
-      "agent_message": "What was attempted: I tried to reach the login helper and it is not running. What the evidence showed: a connection refusal on its local port, and supervision on this machine is cron-based, so after a restart the helper stays down until the supervisor's next tick. What this means: nothing about your Canvas session; the local service just is not up. What happens next: I am starting it through the keepalive supervisor and then checking the session health; if it comes up logged in, we continue where we left off.",
-      "auto_action": "Run helper/keepalive.sh to relaunch, then re-probe /status and session health.",
+      "agent_message": "What was attempted: I tried to reach the login helper and it is not running. What the evidence showed: a connection refusal on its local port. After a restart the helper stays down until its supervision (a cron entry, or the keepalive background loop on a machine without cron) runs again. What this means: nothing about your Canvas session; the local service just is not up. What happens next: I am starting it through the keepalive supervisor and then checking the session health; if it comes up logged in, we continue where we left off.",
+      "auto_action": "Run helper/keepalive.sh to relaunch, then run bin/morrow start so supervision keeps it up (it starts the keepalive background loop on a machine without cron and is a no-op with cron), then re-probe /status and session health.",
       "escalate_when": "Escalate if the helper fails to come up after keepalive recovery (log the real failure from server.log), since a human may need to re-sign in.",
       "signature": {
         "error_class": "ExecutorError",
