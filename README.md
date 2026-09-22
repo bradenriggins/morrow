@@ -13,7 +13,7 @@ This is a monorepo. Each product lives in its own directory, ships on its own ve
 | Product | Directory | What it is |
 |---|---|---|
 | Morrow Desktop | `desktop/` | The desktop app plus Morrow Bridge, the Manifest V3 Chrome extension. Download for Mac or Windows, connect ChatGPT, Claude, or Gemini, and work with the courses your account can open. Start at [`desktop/README.md`](desktop/README.md). |
-| Morrow for Muse | `morrow-for-muse/` | The VM-native connector for Muse. The educator signs into Canvas or Moodle once on their Muse VM; every lane after that is pure API. Includes Morrow Direct, our open manifest standard for direct LMS REST with zero MCP. Start at [`morrow-for-muse/SKILL.md`](morrow-for-muse/SKILL.md). |
+| Morrow for Muse | `morrow-for-muse/` | The VM-native connector for Muse. The educator signs into Canvas once on their Muse VM; every lane after that is pure API. Version 1 supports Canvas only. Includes Morrow Direct, our open manifest standard for direct LMS REST with zero MCP. Start at [`morrow-for-muse/SKILL.md`](morrow-for-muse/SKILL.md). |
 
 ## How Morrow works, in every product
 

@@ -14,7 +14,7 @@ Start: [`desktop/README.md`](../desktop/README.md). Current limits: [`desktop/LI
 
 ## Morrow for Muse (`morrow-for-muse/`)
 
-The VM-native connector for Muse. The educator signs into Canvas or Moodle once on their Muse VM; every lane after that is pure API, with no laptop dependency.
+The VM-native connector for Muse. The educator signs into Canvas once on their Muse VM; every lane after that is pure API, with no laptop dependency. Version 1 supports Canvas only; Moodle is not in this release (see `morrow-for-muse/SCOPE.md`).
 
 - Plan and Edit modes: reads never need approval, Plan asks before writes, Edit is one blanket grant to make changes without asking each time.
 - Morrow Direct: our open manifest standard for direct LMS REST, zero MCP. It lives inside Morrow for Muse until a second consumer exists.
