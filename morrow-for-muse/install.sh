@@ -925,11 +925,32 @@ failures/test_error_translation.py
 learners/test_resolve_student.py
 query/selftest_query.py
 catalog/a11y/runner_selftest.py"
+# Round-4 H2: the suites run in a scratch home with every live state
+# path removed. The educator's MORROW_HOME (even ~/.morrow), tree
+# state dir, vault, signing key, identity, and helper profile never
+# reach a selftest, and never make one refuse to run.
+SELFTEST_UNSET="MORROW_HOME MORROW_TREE_STATE_DIR MORROW_SOURCE_VAULT_PATH MORROW_APPROVAL_SIGNING_KEY MORROW_USER_ID MORROW_CONVERSATION_ID MORROW_HELPER_ENV_FILE MORROW_PRIVACY_MAP MORROW_PRIVACY_SALT MORROW_SELFTEST_HOME LOGIN_HELPER_PROFILE_DIR LOGIN_HELPER_PORT LOGIN_HELPER_CDP_PORT"
+mkdir -p "${TREE}/.selftest-work"
+selftest_env() {
+  # Runs "$@" with the live state variables removed and HOME pointed at
+  # a fresh scratch dir under the tree's .selftest-work/.
+  _st_home="$(mktemp -d "${TREE}/.selftest-work/install-home.XXXXXX")" \
+    || return 1
+  _st_args=""
+  for _v in ${SELFTEST_UNSET}; do
+    _st_args="${_st_args} -u ${_v}"
+  done
+  # shellcheck disable=SC2086
+  env ${_st_args} HOME="${_st_home}" PYTHONDONTWRITEBYTECODE=1 "$@"
+  _st_rc=$?
+  rm -rf "${_st_home}"
+  return ${_st_rc}
+}
 PASS=0
 TOTAL=0
 for suite in ${SUITES}; do
   TOTAL=$((TOTAL + 1))
-  if (cd "${TREE}" && python3 "${suite}" >/dev/null 2>&1); then
+  if (cd "${TREE}" && selftest_env python3 "${suite}" >/dev/null 2>&1); then
     PASS=$((PASS + 1))
   else
     fail "selftest" "${suite} failed; run 'python3 ${suite}' from ${TREE} for details"
