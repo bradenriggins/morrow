@@ -662,6 +662,23 @@ pipe_holder_pid_for_profile() {
 
 # --- /status verdict -------------------------------------------------------
 # Evaluates the current status_body and exits. Never returns.
+# Principal pinning: the first signed-in session pins the educator's
+# Canvas account (reauth/state_machine.py pin --first-signin), so a later
+# re-sign-in can resume paused work only for that same account. Runs
+# only while nothing is pinned yet. The pin command itself refuses
+# during a re-auth write halt: it never pins whoever signed back in.
+pin_first_signin() {
+  [ -f "${MORROW_HOME_DIR}/browser_lane.json" ] && return 0
+  local out
+  if out="$(PYTHONDONTWRITEBYTECODE=1 python3 \
+        "${TREE_ROOT}/reauth/state_machine.py" pin --first-signin 2>&1)"; then
+    log "${out}"
+  else
+    log "principal not pinned yet: ${out}"
+  fi
+  return 0
+}
+
 # W2-P2-6: Chromium memory policy. Runs only on a healthy helper
 # (logged_in=true). helper/memory_watch.py is a read-only probe: it
 # exits 3 when the Chromium tree's RSS exceeds CHROMIUM_MAX_RSS_MB (or
@@ -762,6 +779,7 @@ evaluate_status() {
     circuit_note_healthy
     # W4-P2-3: near-expiry session warning, every healthy tick.
     warn_on_session_horizon "${status_body}"
+    pin_first_signin
     # W2-P2-6: memory policy runs on healthy ticks only. It may recycle
     # the browser (recover_helper, loud log); on return evaluate the
     # fresh status instead of exiting on the pre-restart verdict.

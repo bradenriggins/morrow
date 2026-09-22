@@ -1006,7 +1006,7 @@
           }
         ]
       },
-      "signature_notes": "evidence: \"admission_policy.json learner-data URL substrings plus the catalog [LEARNER-DATA] flag; projection choke in dispatch/executor.py\"; gate: \"LearnerDataGated\"; signal: \"touches_learner_data=True with the privacy vault not ready\"",
+      "signature_notes": "evidence: \"admission_policy.json learner-data URL segments and substrings plus the catalog [LEARNER-DATA] flag; projection choke in dispatch/executor.py\"; gate: \"LearnerDataGated\"; signal: \"touches_learner_data=True with the privacy vault not ready\"",
       "severity_hint_inventory": "user-action",
       "placeholders": [
         "operation"
@@ -1373,35 +1373,6 @@
       ]
     },
     {
-      "id": "edit_grant_expired",
-      "title": "Write attempted under an expired timed edit grant (ModeGrantExpired)",
-      "surface": "modes/admission-gate",
-      "severity_hint": "medium",
-      "root_cause": "Enforced freshness rule: timed edit grants carry an expiry, and the admission gate checks the grant at write time. A lapsed grant is refused; it cannot be revived or extended by the agent.",
-      "is_not": "This is not a revoked grant and not a session problem; the grant was valid once and simply ran out.",
-      "agent_message": "What was attempted: I tried to {operation} under edit grant {grant_id}, but the grant has expired. What the evidence showed: an expired-grant refusal (reference {correlation_id}); the grant lapsed before the write ran, and nothing was written. What this means: the edit permission timed out, which is the grant doing its job; an expired grant cannot be renewed by the agent. What happens next: issue a fresh edit grant, or set a standing default so future sessions start in edit mode without a per-session grant.",
-      "auto_action": "Refuse the write; keep the expired grant visible as read-only history; never extend or renew a grant without the educator.",
-      "escalate_when": "Surface the first time a requested write hits an expired grant; the educator issues the fresh grant or sets the standing default.",
-      "signature": {
-        "__any_of": [
-          {
-            "error_class": "ModeGrantExpired"
-          },
-          {
-            "mode_grant_expired": {
-              "truthy": true
-            }
-          }
-        ]
-      },
-      "signature_notes": "exception: \"ModeGrantExpired\" (modes/ admission gate); optional grant_id attr merged as evidence.",
-      "placeholders": [
-        "operation",
-        "correlation_id",
-        "grant_id"
-      ]
-    },
-    {
       "id": "plan_mode_write_without_approval",
       "title": "Write attempted in plan mode without an educator-approved validated plan (PlanModeWriteWithoutApproval)",
       "surface": "modes/admission-gate",
@@ -1460,35 +1431,6 @@
       ]
     },
     {
-      "id": "edit_grant_revoked",
-      "title": "Write attempted after the edit grant was revoked (ModeGrantRevoked)",
-      "surface": "modes/admission-gate",
-      "severity_hint": "medium",
-      "root_cause": "Enforced revocation rule: the educator can revoke edit mode at any time (for example, by switching back to plan mode mid-flow). Writes attempted after revocation are refused at the gate; the revoked grant cannot be reactivated by the agent.",
-      "is_not": "This is not an expired grant and not a session problem; the grant was deliberately taken back.",
-      "agent_message": "What was attempted: I tried to {operation}, but edit mode had been revoked before the write ran. What the evidence showed: a revoked-grant refusal (reference {correlation_id}); grant {grant_id} is no longer active, for example because you switched back to plan mode mid-flow. Nothing was written. What this means: the edit permission was deliberately taken back, and I will not write without it. What happens next: grant edit mode again if you want this write to go, or tell me to continue in plan mode and I will prepare the change for your approval instead.",
-      "auto_action": "Refuse the write; drop back to plan-mode behavior; never reactivate a revoked grant.",
-      "escalate_when": "Surface with the plan-mode alternative the first time; the educator decides whether to re-grant.",
-      "signature": {
-        "__any_of": [
-          {
-            "error_class": "ModeGrantRevoked"
-          },
-          {
-            "mode_grant_revoked": {
-              "truthy": true
-            }
-          }
-        ]
-      },
-      "signature_notes": "exception: \"ModeGrantRevoked\" (modes/ admission gate); optional grant_id attr merged as evidence.",
-      "placeholders": [
-        "operation",
-        "correlation_id",
-        "grant_id"
-      ]
-    },
-    {
       "id": "ambiguous_course_write_refused",
       "title": "Write refused: course resolution was ambiguous and unconfirmed (AmbiguousCourseWriteRefused)",
       "surface": "modes/admission-gate",
@@ -1541,6 +1483,118 @@
         ]
       },
       "signature_notes": "exception: \"DestructiveConfirmationRequired\" (modes/ admission gate); the translator merges entry_name and course_id attrs as evidence.",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
+      "id": "course_resolution_required",
+      "title": "Write refused: no confirmed course for this write (CourseResolutionRequired)",
+      "surface": "modes/admission-gate",
+      "severity_hint": "medium",
+      "root_cause": "Enforced no-guess rule: a write that targets a course must say how that course was resolved (which course, how confident, whether the educator confirmed it). A write with no resolution, or with a resolution naming a different course than the write targets, is refused before anything is sent.",
+      "is_not": "This is not a provider problem and not a permission problem; the course may exist, but the agent has not shown which course it means.",
+      "agent_message": "What was attempted: I tried to {operation}, but I had not confirmed which course it is for. What the evidence showed: a course-confirmation refusal (reference {correlation_id}); the write carried no confirmed course, or named a different course than the one it targets. Nothing was written. What this means: I will not guess which course you meant; aiming a write at the wrong course would be silent damage. What happens next: tell me exactly which course this is for (name and term, or the course id), and I will run the write against the confirmed course.",
+      "auto_action": "Refuse the write; resolve the course with the educator conversationally, then re-dispatch with the confirmed course.",
+      "escalate_when": "Always: the educator names the course; the agent never picks it for them.",
+      "signature": {
+        "__any_of": [
+          {
+            "error_class": "CourseResolutionRequired"
+          },
+          {
+            "course_resolution_required": {
+              "truthy": true
+            }
+          }
+        ]
+      },
+      "signature_notes": "exception: \"CourseResolutionRequired\" (dispatch/executor.py, mode-gated course writes).",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
+      "id": "effect_class_mismatch",
+      "title": "Operation refused: it declares itself a read but would change data (EffectClassMismatch)",
+      "surface": "dispatch/executor",
+      "severity_hint": "high",
+      "root_cause": "Enforced integrity rule: the effect class comes from the operation's own requests. An operation that declares \"read\" (or \"plan\") but contains a PUT, POST, PATCH, or DELETE is refused, so a write can never skip write approval by claiming to be a read.",
+      "is_not": "This is not a Canvas error and not a session problem; the operation definition contradicts itself.",
+      "agent_message": "What was attempted: I tried to {operation}, but the operation is labeled as a read while it contains a request that would change data. What the evidence showed: an effect-class refusal (reference {correlation_id}); the dispatcher derives the real effect from the requests themselves, and they include a write. Nothing was sent. What this means: running it as a read would skip the approval every write needs, so it is refused. What happens next: I will not run this operation as defined. If you want the change it makes, I will prepare it as a write, and it will follow your current mode (plan mode asks for your approval first).",
+      "auto_action": "Refuse; never re-dispatch the same definition; offer the equivalent write through the normal write path.",
+      "escalate_when": "Report to engineering: an operation definition that contradicts its own requests is a defect.",
+      "signature": {
+        "__any_of": [
+          {
+            "error_class": "EffectClassMismatch"
+          },
+          {
+            "effect_class_mismatch": {
+              "truthy": true
+            }
+          }
+        ]
+      },
+      "signature_notes": "exception: \"EffectClassMismatch\" (dispatch/executor.py W4-P0-10, read-only block checks).",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
+      "id": "write_field_mismatch",
+      "title": "Canvas stored something different from what was sent (WriteFieldMismatch)",
+      "surface": "canvas",
+      "severity_hint": "high",
+      "root_cause": "Verified mechanism (D-009): Canvas can answer a write with success while storing different values. The executor reads the object back after every write and compares each requested field; a mismatch is recorded as a failed write with the fields named.",
+      "is_not": "This is not an uncertain write: the readback proved the stored values differ. It is not a success either.",
+      "agent_message": "What was attempted: I tried to {operation}. What the evidence showed: Canvas answered with success, but when I read the object back, some fields did not match what I sent (reference {correlation_id}); the journal names each mismatched field and the object's address. What this means: the change did not land as intended, so I am treating it as failed, not done. What happens next: I will show you what Canvas actually stored next to what was requested, and you decide whether I correct it, remove the object, or leave it as it is.",
+      "auto_action": "Record as a failed write; never report success; present requested vs stored fields and the object address for cleanup or correction.",
+      "escalate_when": "Always surface to the educator with the mismatched fields; they choose correct, remove, or keep.",
+      "signature": {
+        "__any_of": [
+          {
+            "error_class": "WriteFieldMismatch"
+          },
+          {
+            "write_field_mismatch": {
+              "truthy": true
+            }
+          }
+        ]
+      },
+      "signature_notes": "exception: \"WriteFieldMismatch\" (dispatch/executor.py post-write readback, a VerificationFailed subclass).",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
+      "id": "write_unverified",
+      "title": "Write sent, but no readback could confirm it (outcome: unverified)",
+      "surface": "canvas",
+      "severity_hint": "medium",
+      "root_cause": "Verified mechanism: after a write, the executor reads the object back to confirm it. When there is no readback route for the object, or Canvas does not echo the fields that were sent, the result is reported as \"unverified\": Canvas said success, and nothing independent confirmed it.",
+      "is_not": "This is not a failure and not a confirmed success. It is never reported as done-and-verified.",
+      "agent_message": "What was attempted: I tried to {operation}, and Canvas answered with success. What the evidence showed: I could not confirm the change with an independent readback (reference {correlation_id}); either Canvas offers no way to read this object back, or it does not return the fields I set. What this means: the change most likely landed, but I have not proven it, so I am not calling it verified. What happens next: please check it once in Canvas, or tell me how you would like to confirm it; I will not repeat the write, because a repeat could apply it twice.",
+      "auto_action": "Report as unverified, never as verified; do not re-dispatch; offer a manual check in Canvas.",
+      "escalate_when": "Surface every unverified write to the educator in the work summary.",
+      "signature": {
+        "__any_of": [
+          {
+            "write_outcome": "unverified"
+          },
+          {
+            "write_unverified": {
+              "truthy": true
+            }
+          }
+        ]
+      },
+      "signature_notes": "dict evidence: the executor result's \"outcome\": \"unverified\" relayed as {\"write_outcome\": \"unverified\"}.",
       "placeholders": [
         "operation",
         "correlation_id"

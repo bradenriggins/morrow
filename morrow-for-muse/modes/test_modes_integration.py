@@ -12,14 +12,15 @@ Covers:
   - settings.effective_mode == modes.current_mode in every scenario
   - plan-mode write without approval -> PlanModeWriteWithoutApproval,
     translated to plan_mode_write_without_approval
-  - expired / revoked grants refuse with the right translated modes
+  - an ended grant (revoked, or a legacy timed grant) is plain plan
+    mode: the write asks for approval and a signed approval lands
   - ambiguous course refused; confirmed ambiguous course admitted
   - destructive gate: on (refuse), confirmed (admit), setting off (admit)
   - tampered grant file fails closed
   - conversation isolation: bound grants do not leak across
     conversations; end_conversation revokes them
   - most-recent-wins between override and grant
-  - switch_mode("plan") revokes grants but keeps the standing default
+  - switch_mode("plan") turns edit off everywhere, standing default too
 
 MORROW_HOME is redirected to scratch under .selftest-work/ so the real
 ~/.morrow is never touched. Stdlib only.
@@ -132,8 +133,8 @@ class IntegrationCase(unittest.TestCase):
         with self.assertRaises(mode_errors.ModeSelfGrantRefused):
             mode_state.switch_mode(self.user, "edit")
         with self.assertRaises(SettingsTamperRefused):
-            settings.start_edit_session(self.user, self.conv,
-                                        educator_confirmed=False)
+            settings.set_conversation_mode(self.user, self.conv, "edit",
+                                           educator_confirmed=False)
         with self.assertRaises(SettingsTamperRefused):
             settings.set_setting(self.user, "default_mode", "edit",
                                  educator_confirmed=False)
@@ -149,10 +150,9 @@ class IntegrationCase(unittest.TestCase):
         self.assertIsNone(record, "no approval record in edit mode")
         self.assertEqual(self._agree(), "edit")
 
-    def test_settings_session_admits_write_without_approval(self):
-        settings.start_edit_session(self.user, self.conv,
-                                    educator_confirmed=True, duration_min=30,
-                                    utterance="yes, use edit mode for a bit")
+    def test_settings_conversation_override_admits_write(self):
+        settings.set_conversation_mode(self.user, self.conv, "edit",
+                                       educator_confirmed=True)
         audit, record = check_mode_authority(
             _write_entry(), {"course_id": "89585"}, None, self._ctx())
         self.assertEqual(audit["mode"], "edit")
@@ -190,35 +190,43 @@ class IntegrationCase(unittest.TestCase):
             check_mode_authority(_write_entry(), {"course_id": "89585"},
                                  None, None)
 
-    # -- expired / revoked ----------------------------------------------
+    # -- ended grants are plan mode ---------------------------------------
 
-    def test_expired_grant_refuses(self):
-        self._grant(duration_min=5)
-        real_utcnow = mode_state._utcnow
-        mode_state._utcnow = lambda: real_utcnow() + timedelta(minutes=6)
-        try:
-            with self.assertRaises(mode_errors.ModeGrantExpired):
-                check_mode_authority(_write_entry(), {"course_id": "89585"},
-                                     None, self._ctx())
-            try:
-                check_mode_authority(_write_entry(), {"course_id": "89585"},
-                                     None, self._ctx())
-            except mode_errors.ModeGrantExpired as exc:
-                tr = translate("create a wiki page", exc)
-                self.assertEqual("edit_grant_expired", tr.mode_id)
-        finally:
-            mode_state._utcnow = real_utcnow
+    def _signed_approval(self, entry, params):
+        from dispatch import admission as adm
+        rec = adm.mint_approval(entry, params)
+        return adm.sign_approval(
+            rec, "yes, create that page in Biology exactly as shown",
+            channel="educator-chat")
 
-    def test_revoked_grant_refuses(self):
-        grant = self._grant()
+    def test_revoked_grant_asks_for_approval_and_approval_lands(self):
+        self._grant()
         mode_state.revoke_edit_grant(self.user, reason="test revoke")
-        with self.assertRaises(mode_errors.ModeGrantRevoked) as cm:
-            check_mode_authority(_write_entry(), {"course_id": "89585"},
-                                 None, self._ctx())
-        self.assertEqual(cm.exception.grant_id, grant["grant_id"])
-        tr = translate("create a wiki page", cm.exception)
-        self.assertEqual("edit_grant_revoked", tr.mode_id)
         self.assertEqual(self._agree(), "plan")
+        entry, params = _write_entry(), {"course_id": "89585"}
+        with self.assertRaises(mode_errors.PlanModeWriteWithoutApproval):
+            check_mode_authority(entry, params, None, self._ctx())
+        audit, record = check_mode_authority(
+            entry, params, self._signed_approval(entry, params), self._ctx())
+        self.assertIsNotNone(record, "the signed approval must land")
+        self.assertEqual(record["by"], "educator")
+
+    def test_legacy_timed_grant_asks_for_approval_and_approval_lands(self):
+        grant = self._grant()
+        st = mode_state._load_state(self.user)
+        for gg in st["grants"]:
+            if gg["grant_id"] == grant["grant_id"]:
+                gg["scope_type"] = "timed"
+                gg["duration_min"] = 60
+                gg["expires_at"] = "2999-01-01T00:00:00+00:00"
+        mode_state._save_state(self.user, st)
+        self.assertEqual(self._agree(), "plan")
+        entry, params = _write_entry(), {"course_id": "89585"}
+        with self.assertRaises(mode_errors.PlanModeWriteWithoutApproval):
+            check_mode_authority(entry, params, None, self._ctx())
+        _audit, record = check_mode_authority(
+            entry, params, self._signed_approval(entry, params), self._ctx())
+        self.assertIsNotNone(record)
 
     # -- ambiguous course ------------------------------------------------
 
@@ -317,8 +325,7 @@ class IntegrationCase(unittest.TestCase):
     # -- conversation isolation --------------------------------------------
 
     def test_conversation_bound_grant_does_not_leak(self):
-        self._grant(scope_type="timed", duration_min=30,
-                    conversation_id=self.conv)
+        self._grant(conversation_id=self.conv)
         self.assertEqual(self._agree(), "edit")
         # Another conversation sees plan mode: the grant is bound.
         self.assertEqual(self._agree(conversation_id="other-conv"), "plan")
@@ -328,24 +335,24 @@ class IntegrationCase(unittest.TestCase):
                          ("defer", "plan_mode_approval_required"))
 
     def test_end_conversation_revokes_bound_grants(self):
-        self._grant(scope_type="timed", duration_min=30,
-                    conversation_id=self.conv)
+        self._grant(conversation_id=self.conv)
         settings.set_conversation_mode(self.user, self.conv, "plan",
                                        educator_confirmed=True)
         settings.end_conversation(self.user, self.conv)
         self.assertIsNone(settings.get_conversation_mode(self.user,
                                                          self.conv))
-        self.assertFalse(settings.edit_session_active(self.user, self.conv))
+        self.assertIsNone(mode_state._live_grant(
+            self.user, conversation_id=self.conv))
         self.assertEqual(self._agree(), "plan")
 
     def test_most_recent_action_wins(self):
-        self._grant(duration_min=30)
+        self._grant()
         self.assertEqual(self._agree(), "edit")
         settings.set_conversation_mode(self.user, self.conv, "plan",
                                        educator_confirmed=True)
         self.assertEqual(self._agree(), "plan")
         # And back: a newer grant beats the older override.
-        self._grant(duration_min=30)
+        self._grant()
         self.assertEqual(self._agree(), "edit")
 
     # -- admission honors the same resolver (no grant-alone path) ------
@@ -357,7 +364,7 @@ class IntegrationCase(unittest.TestCase):
     # most-recent-wins decision as the resolver.
 
     def test_admission_newer_plan_override_defeats_live_grant(self):
-        self._grant(duration_min=30, conversation_id=self.conv)
+        self._grant(conversation_id=self.conv)
         self.assertEqual(self._agree(), "edit")
         settings.set_conversation_mode(self.user, self.conv, "plan",
                                        educator_confirmed=True)
@@ -372,7 +379,7 @@ class IntegrationCase(unittest.TestCase):
         settings.set_conversation_mode(self.user, self.conv, "plan",
                                        educator_confirmed=True)
         self.assertEqual(self._agree(), "plan")
-        grant = self._grant(duration_min=30, conversation_id=self.conv)
+        grant = self._grant(conversation_id=self.conv)
         self.assertEqual(self._agree(), "edit")
         decision, code, auth = mode_state.authorize_write(
             self.user, conversation_id=self.conv)
@@ -390,26 +397,9 @@ class IntegrationCase(unittest.TestCase):
         self.assertIsNone(auth["grant_id"])
         self.assertEqual(auth["conversation_id"], self.conv)
 
-    def test_admission_expired_grant_still_refuses_without_override(self):
-        grant = self._grant(duration_min=30, conversation_id=self.conv)
-        st = mode_state._load_state(self.user)
-        for gg in st["grants"]:
-            if gg["grant_id"] == grant["grant_id"]:
-                gg["expires_at"] = "2000-01-01T00:00:00+00:00"
-        mode_state._save_state(self.user, st)
-        decision, code, _auth = mode_state.authorize_write(
-            self.user, conversation_id=self.conv)
-        self.assertEqual((decision, code), ("refuse", "grant_expired"))
-
-    def test_admission_newer_plan_override_supersedes_stale_expiry(self):
-        grant = self._grant(duration_min=30, conversation_id=self.conv)
-        st = mode_state._load_state(self.user)
-        for gg in st["grants"]:
-            if gg["grant_id"] == grant["grant_id"]:
-                gg["expires_at"] = "2000-01-01T00:00:00+00:00"
-        mode_state._save_state(self.user, st)
-        settings.set_conversation_mode(self.user, self.conv, "plan",
-                                       educator_confirmed=True)
+    def test_admission_revoked_grant_defers_to_approval(self):
+        grant = self._grant(conversation_id=self.conv)
+        mode_state.revoke_edit_grant(self.user, grant_id=grant["grant_id"])
         decision, code, _auth = mode_state.authorize_write(
             self.user, conversation_id=self.conv)
         self.assertEqual((decision, code),
@@ -422,8 +412,11 @@ class IntegrationCase(unittest.TestCase):
         entry = _write_entry()
         session = ex.SessionStore(
             {"canvas": {"base": "https://example.instructure.com"}})
+        ctx = dict(mode_ctx)
+        ctx.setdefault("course_resolution", {
+            "course_id": "89585", "confidence": 1.0, "user_confirmed": True})
         return ex.dispatch_entry(entry, {"course_id": "89585"}, session, {},
-                                 plan=plan, dry_run=True, mode_ctx=mode_ctx,
+                                 plan=plan, dry_run=True, mode_ctx=ctx,
                                  require_educator_channel=False)
 
     def test_executor_edit_write_needs_no_frozen_plan(self):
@@ -454,20 +447,26 @@ class IntegrationCase(unittest.TestCase):
 
     # -- switch_mode ---------------------------------------------------------
 
-    def test_switch_to_plan_revokes_grants_keeps_default(self):
+    def test_switch_to_plan_turns_edit_off_everywhere(self):
         settings.set_setting(self.user, "default_mode", "edit",
                              educator_confirmed=True)
         self._grant()
+        settings.set_conversation_mode(self.user, "other-conv", "edit",
+                                       educator_confirmed=True)
         self.assertEqual(self._agree(), "edit")
         result = mode_state.switch_mode(self.user, "plan",
                                         conversation_id=self.conv)
         self.assertEqual(result["mode"], "plan")
         self.assertEqual(result["revoked_grants"], 1)
-        # The standing default is untouched: switch is a session action,
-        # not a settings change.
+        self.assertTrue(result["default_mode_changed"])
         self.assertEqual(settings.get_setting(self.user, "default_mode"),
-                         "edit")
-        self.assertEqual(self._agree(), "edit")
+                         "plan")
+        self.assertEqual(self._agree(), "plan")
+        self.assertEqual(self._agree(conversation_id="other-conv"), "plan")
+        self.assertEqual(self._agree(conversation_id=None), "plan")
+        with self.assertRaises(mode_errors.PlanModeWriteWithoutApproval):
+            check_mode_authority(_write_entry(), {"course_id": "89585"},
+                                 None, self._ctx())
 
     def test_conversation_override_beats_standing_default(self):
         settings.set_setting(self.user, "default_mode", "edit",

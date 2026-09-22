@@ -186,12 +186,17 @@ while IFS= read -r -d '' f; do
   done
   # Tenant rule: extract case-insensitively (P1-25: an uppercase
   # https://EVIL.INSTRUCTURE.COM/ used to evade the lowercase-only
-  # extraction), compare lowercased against the allow list.
+  # extraction), compare lowercased against the allow list. A host
+  # template ("%s.quiz-api.instructure.com",
+  # "{tenant}.quiz-api.instructure.com") names no tenant: its leading
+  # placeholder is captured with the host and the match is skipped.
+  # A real hostname can never start with %, }, or a dot.
   while IFS= read -r host; do
     [ -z "${host}" ] && continue
+    case "${host}" in %*|\}*|.*) continue ;; esac
     host_lc="$(printf '%s' "${host}" | tr 'A-Z' 'a-z')"
     is_allowed_host "${host_lc}" || report "${rel} (non-example tenant host: ${host})"
-  done < <(grep -Eioh '[A-Za-z0-9.-]+\.instructure\.com' "${f}" 2>/dev/null | sort -u)
+  done < <(grep -Eioh '(%[a-z]|[}])?[A-Za-z0-9.-]+\.instructure\.com' "${f}" 2>/dev/null | sort -u)
 done < <(find "${TREE}" -mindepth 1 -print0)
 
 if [ "${violations}" -gt 0 ]; then

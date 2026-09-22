@@ -148,7 +148,7 @@ def write_entry(name="canvas_create_page", method="POST",
 # 1. Policy loads and has the expected shape.
 def t_policy_shape():
     p = load_policy()
-    assert p["version"] == "1.2.0", "policy version"
+    assert p["version"] == "1.3.0", "policy version"
     assert len(p["never_dispatch"]["tool_names"]) == 8, "8 never-dispatch tools"
     assert "canvas_item_bank_get_item" in p["unsupported"]["tool_names"]
     assert "tenant_restricted" not in p, "no tenant allowlists anywhere"

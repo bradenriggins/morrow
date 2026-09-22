@@ -872,7 +872,9 @@ _DEAD_EOF
       _cron_new="$(printf '%s\n%s\n' "${CRON_MARKER}" \
         "${_canonical}")"
     fi
-    printf '%s' "${_cron_new}" | crontab - \
+    # The command substitution above strips the trailing newline, and
+    # cron's crontab refuses a file whose last line has none.
+    printf '%s\n' "${_cron_new}" | crontab - \
       || { flock -u 8; exec 8>&-; fail "cron" "could not install the keepalive cron entry"; }
     _track_created "cron"
     # W4-P1-12: per-tree coexistence; no migration, just installation.

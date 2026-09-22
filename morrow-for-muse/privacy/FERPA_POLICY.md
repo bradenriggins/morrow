@@ -220,11 +220,17 @@ the wired vault file above.
 
 ## Known limitations (honest scope)
 
-- Learner-data detection is URL-substring based
-  (`dispatch/admission_policy.json`, `learner_data` section). A
-  learner-bearing response from a URL outside those substrings is
-  not routed through the boundary. Additions to the substring list
-  go through admission-policy review.
+- Learner-data detection is URL based (`dispatch/admission_policy.json`,
+  `learner_data` section): whole path segments that name a people
+  resource (`url_segments`, `url_segment_suffixes`), then the
+  `url_substrings` net, plus the catalog `[LEARNER-DATA]` flag.
+  `dispatch/test_learner_classification.py` fails when a live-proven
+  row whose path names a people resource is not classified. Course
+  content (pages, quizzes, assignments, modules) is deliberately not
+  classified, because projecting it would rewrite names inside content
+  an educator may save back. The consequence: a page body, or the
+  `last_edited_by` field of a page read, can carry a person's name
+  unprojected. Additions go through admission-policy review.
 - Small cohorts: labels are stable across ops and restarts, so in a
   cohort of 1-3 anyone who knows the roster can re-identify students
   by elimination (matching scores or distinctive work to known

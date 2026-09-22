@@ -95,8 +95,15 @@ preemptively and never on every run: a healthy session needs no page.
    SSO can re-authenticate, and cookies can be evicted. Treat the
    session as durable-but-expirable, and re-sign-in as a normal
    recovery step. You never see their credentials.
-4. Verify with a readback through the executor (below). Confirm the
-   principal is the educator before doing anything else.
+4. Pin the signed-in account:
+   `PYTHONDONTWRITEBYTECODE=1 python3 reauth/state_machine.py pin --first-signin`.
+   It verifies the helper session is live, reads GET
+   /api/v1/users/self, and pins that principal (id and name) in
+   `~/.morrow/browser_lane.json`. Tell the educator the name it printed
+   and confirm it is them before doing anything else. keepalive also
+   runs this on its first healthy tick. The pin never changes silently:
+   a different account signing in later is refused until the educator
+   disconnects (`bin/morrow disconnect`) and signs in fresh.
 
 ## Reading /status: the fields and what they mean
 
@@ -165,11 +172,17 @@ run stops loudly instead of writing through a half-dead session:
    The educator is notified with the true paused-op count.
 4. **Verified resume.** The educator signs in again through the login
    helper's own browser tab (never the agent, never credentials to the
-   agent). The agent verifies the helper `/status` shows a live session
-   and pins the live principal id against the stored one, then runs
-   `reauth/state_machine.py resume --principal-id <id>`. Quarantined ops
-   move to `awaiting_approval` and the halt lifts. On principal mismatch
-   the halt stays and the situation escalates; nothing resumes.
+   agent). The agent runs `reauth/state_machine.py resume`: it reads
+   the live account itself (helper `/status` live, then GET
+   /api/v1/users/self) and requires it to match the account pinned at
+   first sign-in. Quarantined ops move to `awaiting_approval` and the
+   halt lifts. On mismatch the halt stays and the situation escalates;
+   nothing resumes. With no pinned account (an install from before
+   pinning), resume refuses and names the recovery: the educator
+   confirms in their own words that the signed-in account is theirs,
+   then `state_machine.py pin --confirm-account "<their words>"`, then
+   `resume` again. A pin record that is unreadable or loosely
+   permissioned also refuses; it is never read as "no pin".
 5. **Per-op re-approval.** Each quarantined op needs the educator's
    explicit approval (`reauth/state_machine.py approve --op-id <id>
    --authorization "<educator's verbatim approval words>"`; the
@@ -210,8 +223,15 @@ unrecognized files on the next install/upgrade.)
 `proof-battery/OPERATION_CATALOG.md`.)
 
 `catalog` takes `--name`, `--method`, `--path` (path template),
-`--class read|write|plan`, `--params` (JSON), `--backend chromium`, and
-`--canvas-base` (or the `CANVAS_BASE` env var). Every dispatch is governed
+`--class read|write|plan`, `--params` (JSON), `--body` (a JSON object:
+the write's request body, which the post-write readback compares
+against; values may reference params as `"params.<name>"`),
+`--backend chromium`, and `--canvas-base` (or the `CANVAS_BASE` env
+var). The CLI always runs the shipped `pack/pack.json`; there is no
+pack override. A write result's `outcome` is `verified` (a readback
+confirmed it) or `unverified` (Canvas said success and nothing
+confirmed it): relay `unverified` to the educator as unconfirmed, never
+as done. Every dispatch is governed
 and journaled to `~/.morrow/trees/<tree-id>/journal/ops.jsonl` (per-tree;
 the legacy `~/.morrow/journal/ops.jsonl` is read for historical idempotency
 only).
@@ -247,13 +267,13 @@ block as a new, separately journaled operation.
   Only operations marked `live-proven` in
   `proof-battery/OPERATION_CATALOG.md` dispatch. The only override is an
   educator-signed `--allow-unproven` flag for edge cases, signed by the
-  educator as part of the approval. Learner-data operations are refused
-  (`LearnerDataGated`) when the projection vault is not ready; through
-  the browser lane they are admitted and their receipts are projected
-  through the de-identification boundary before anything is
-  agent-visible or journaled (the de-identification boundary is proven:
-  de-identification 30/30, boundary invoke 69/69;
-  `--allow-unproven` cannot override a learner-data refusal).
+  educator as part of the approval. Learner-data operations (any
+  operation whose response carries people; see SCOPE.md) are refused
+  (`LearnerDataGated`) by `executor.py catalog` on every lane, and
+  `--allow-unproven` cannot override that. Manifest entries
+  (`execute --entry`) on the Chromium lane are admitted and their
+  receipts projected through the de-identification boundary instead,
+  but v1 ships no manifest entries.
 - Journaling: a dispatch journals more than one record. Reads journal a
   `wal="claimed"` record before provider work, then a completion record;
   writes journal an fsynced `wal="pending"` claim, then a `wal="complete"`
@@ -294,13 +314,20 @@ both modes.
   mode. Setting it to edit IS the standing edit grant: journaled,
   educator-confirmed, and stated plainly as such. There is no separate
   grant standing between the educator and edit mode.
-- Layered overrides, most recent explicit action wins: a standing edit
-  grant ("use edit mode", sets `default_mode` to edit, no time limit),
-  then a per-conversation override ("use edit mode for
-  this conversation", never persisted), then the persisted default.
-  Standing grants are persisted tamper-sealed mode grants (they survive
-  a restart); only per-conversation overrides are in-memory, failing
-  safe toward plan mode on restart. Resolve with
+- Edit mode is ONE blanket grant and it is NOT timed: it stays on
+  until the educator turns it off. Never offer, promise, or imply a
+  time limit. An old install's saved timed grant is not honored; it
+  lapses to plan mode.
+- Turning edit off ("turn off edit mode", "stop edit mode", "use plan
+  mode", "back to plan mode") means plan everywhere: `default_mode`
+  goes back to plan and every grant and per-conversation override is
+  cleared (`modes.state.switch_mode(user_id, "plan")`). It applies at
+  once, with no confirmation round trip.
+- Most recent explicit action wins between a per-conversation override
+  ("use edit mode for this conversation", never persisted) and the
+  persisted default. The default is tamper-sealed and survives a
+  restart; per-conversation overrides are in-memory, failing safe
+  toward plan mode on restart. Resolve with
   `modes.state.current_mode(user_id, conversation_id)` (the single
   authoritative resolver; `settings.store.effective_mode` delegates to
   it); Agent A's contract `settings.store.get_setting(user_id, key)`
@@ -310,27 +337,25 @@ both modes.
   and edit differ ONLY in whether writes surface approval. Reads never
   need approval in either mode, and edit never surfaces per-write
   approval, including for destructive writes. `confirm_destructive_writes`
-  is now an opt-in guardrail (default off, matching the model; the
-  educator can turn it on with "ask me to confirm deletions"). The two
-  stale tests still asserting the old default-on behavior
-  (modes/test_modes_integration.py::test_destructive_write_needs_confirmation,
-  settings/test_settings.py::test_destructive_confirmation_helper) belong
-  to the lane that flipped the default; they need updating there, not
-  here.
-- The agent can never grant itself edit mode, start an edit session,
-  or change a consequential setting: consequential changes require
+  is an opt-in guardrail (default off, matching the model; the
+  educator can turn it on with "always confirm deletions").
+- The agent can never grant itself edit mode or change a
+  consequential setting: consequential changes require
   educator_confirmed=True (SettingsTamperRefused otherwise), echoed in
   plain language before applying.
 - Every change is journaled to `~/.morrow/settings/<user_id>.changes.jsonl`
   with old value, new value, and educator identity (hash-chained,
   tamper-evident). Settings live under `~/.morrow/settings/`, never in
   the tree, and survive restarts and reinstalls.
-- Conversational control: "use edit mode", "make edit mode my default",
-  "switch to plan mode", "use plan mode for this conversation", "set my
-  edit sessions to 60 minutes", "stop asking me to confirm deletions",
-  "show me my settings", "what mode am I in", "be more concise". Parsed
-  by `settings/commands.py`; consequential utterances return
-  needs_confirmation=True and the agent echoes before applying.
+- Conversational control: "use edit mode", "turn off edit mode",
+  "use plan mode for this conversation", "stop asking me to confirm
+  deletions", "show me my settings", "what mode am I in", "be more
+  concise". Parse with `settings.commands.parse_command`; consequential
+  utterances return needs_confirmation=True and the agent echoes before
+  applying. Carry out an op with `settings.commands.apply_command(op,
+  user_id, conversation_id, educator_confirmed=<educator said yes>)`
+  and speak the sentence it returns: it is built from the mode actually
+  in force after the change.
 - Other knobs, all user-settable: `verbosity` (concise | balanced |
   detailed, default balanced), `write_approval_style` (per_write |
   batched, default per_write), `failure_verbosity` (concise | detailed,
@@ -354,11 +379,10 @@ tenant, with no override flag: never-dispatch routes (the standing
 exclusions: announcements, messages to people, support tickets,
 subaccount-affecting operations), catalog-unsupported rows, failed
 rows, evidence-hold rows (including New Quiz create, C-286), and
-learner-data rows on the raw lane (no projection point there).
-Learner-data reads through the browser lane are admitted and projected
-through the de-identification boundary (see Privacy below), not refused.
-Item Bank IB- rows are marked in the catalog but cannot dispatch through
-the governed executor yet. Out for v1: Moodle, Blackboard (an
+learner-data rows (people-bearing responses; `executor.py catalog`
+refuses them on every lane). Item Bank IB- rows marked live-proven
+dispatch through the executor's Item Banks SDK lane (see SCOPE.md for
+which ones). Out for v1: Moodle, Blackboard (an
 honestly-disclosed roadmap item, not a ship criterion), the retired form
 relay, and every row not marked live-proven. Full declaration:
 `SCOPE.md`. Do not imply capabilities beyond it.
@@ -367,13 +391,13 @@ relay, and every row not marked live-proven. Full declaration:
 
 - `install.sh`: the idempotent installer (Chromium locate, egress probe,
   `~/.morrow` layout, `helper/profile/` creation without ever wiping it,
-  keepalive cron, helper launch, one-time onboarding notice, all 8
+  keepalive cron, helper launch, one-time onboarding notice, all 23
   selftests, the secrets gate).
 - `transport/`: the Chromium lane (`local_chromium.py`, `chromium_session.py`,
   `egress.py`, `proxy_forwarder.py`) and its selftests.
 - `dispatch/`: the governed executor, the admission gate, the policy, selftests.
 - `settings/`: the conversational settings system (`store.py`,
-  `commands.py`, `test_settings.py`, `README.md`): modes, edit sessions,
+  `commands.py`, `test_settings.py`, `README.md`): modes,
   per-conversation overrides, and every behavioral knob, all
   educator-settable in plain language.
 - `helper/`: the Canvas Login Helper server, UI, and keepalive, plus
@@ -382,7 +406,6 @@ relay, and every row not marked live-proven. Full declaration:
   plugin-attachment proof).
 - `content/`: educator-facing consent, setup, and revocation pages.
 - `proof-battery/OPERATION_CATALOG.md`: the op catalog with proof statuses.
-- `defects/DEFECTS.md`: the adversarial defect log.
 - `pack/`: `pack.json` (chromium lane pinned) and `deny-list.txt`.
 - `scripts/verify-no-secrets.sh`: the packaging secrets gate. Run it before
   any distribution step; it must pass.
@@ -454,8 +477,10 @@ that makes the labels lives at
 `~/.morrow/morrow_source_vault.json.key` on your VM and is never part
 of any download or update.
 
-For the agent: de-identification applies automatically to every
-learner-data read in the browser lane. Every receipt is projected
+For the agent: in v1, `executor.py catalog` refuses learner-data rows
+outright, so you get no student data through it. Where learner data
+is dispatched (manifest entries on the Chromium lane), de-identification
+applies automatically to every learner-data read. Every receipt is projected
 through the source privacy boundary (`privacy/boundary.py`,
 `SourceMcpPrivacyBoundary`) before it becomes agent-visible or
 journaled. The wired choke point is `dispatch/executor.py` in
@@ -481,10 +506,9 @@ journaled. The wired choke point is `dispatch/executor.py` in
   `Staff` label instead of leaking the name or refusing the read.
   Spec-typed LTI identity fields (`lis_person_name_full` and family)
   are redacted even for people absent from the roster.
-- Projects, never refuses, in the synchronous executor:
-  learner-data entries are refused (`LearnerDataGated`) only when
-  the projection vault is not ready, on the raw lane, which has no
-  projection point.
+- On the entry path it projects rather than refuses: learner-data
+  entries are refused (`LearnerDataGated`) there only on the raw lane,
+  which has no projection point.
 
 You do not need to ask for it and must not work
 around it. The ONLY override is explicit and educator-driven: the

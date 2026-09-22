@@ -7,8 +7,17 @@
 # envelopes, briefs), and the learner source vault. Then verifies every
 # removal.
 #
-# Usage: ./scripts/uninstall.sh [--yes]
+# Usage: ./scripts/uninstall.sh [--yes] [--disconnect]
 # Without --yes it prints what it will do and asks for confirmation.
+#
+# --disconnect (what `bin/morrow disconnect` runs): end the Canvas
+# connection and keep the install. Stops the same processes and removes
+# the same cron entries (so keepalive cannot relaunch the signed-in
+# helper), then deletes only the session material: the helper browser
+# profile, the pinned account (browser_lane.json), the rig session
+# record, and the browser transient state. The tree, settings, audit
+# journal, and learner vault stay. Reconnect by rerunning install.sh
+# and signing in again.
 #
 # Safety: this script NEVER uses pkill, killall, or pgrep -f. Every
 # process it stops is identified by exact PID: the PID holding the port
@@ -49,7 +58,17 @@ else
 fi
 
 CONFIRM=1
-[ "${1:-}" = "--yes" ] && CONFIRM=0
+MODE=uninstall
+for _a in "$@"; do
+  case "${_a}" in
+    --yes) CONFIRM=0 ;;
+    --disconnect) MODE=disconnect ;;
+    *) printf 'usage: %s [--yes] [--disconnect]\n' "$0" >&2; exit 2 ;;
+  esac
+done
+unset _a
+# Session material a disconnect removes (the educator's records stay).
+DISCONNECT_PATHS="${PROFILE_DIR} ${MORROW_HOME}/browser_lane.json ${MORROW_HOME}/browser_lane.json.lock ${MORROW_HOME}/session.json ${MORROW_HOME}/session.json.prev ${MORROW_HOME}/principal_pin.json ${MORROW_HOME}/browser-pending ${MORROW_HOME}/browser-briefs"
 
 die() { printf 'UNINSTALL FAIL: %s\n' "$1" >&2; exit 1; }
 note() { printf '%s\n' "$1"; }
@@ -204,6 +223,15 @@ stop_port_holder() {
   note "${_label}: stopped; port ${_port} is free"
 }
 
+if [ "${MODE}" = "disconnect" ]; then
+note "Morrow for Muse disconnect. This will:"
+note "  1. stop the helper (port ${HELPER_PORT}) and its Chromium, if running"
+note "  2. remove the keepalive cron entries (otherwise keepalive relaunches the signed-in helper within 5 minutes)"
+note "  3. delete the Canvas session material:"
+for _p in ${DISCONNECT_PATHS}; do note "          ${_p}"; done
+note "  It keeps this install, your settings, the audit journal, and the learner vault."
+note ""
+else
 note "Morrow for Muse uninstall. This will:"
 note "  1. stop the helper (port ${HELPER_PORT}), Chromium (CDP port from helper config), and the proxy forwarder, if running"
 note "  2. remove the keepalive cron entries (REQUIRED: a surviving entry resurrects the helper every 5 minutes)"
@@ -224,6 +252,7 @@ note "files are gone, their open file descriptors still readable via"
 note "/proc/<pid>/fd keep the old bytes alive in that process until it"
 note "exits."
 note ""
+fi
 if [ "${CONFIRM}" = "1" ]; then
   printf 'Type "yes" to continue: '
   read -r _ans
@@ -374,6 +403,50 @@ _CRON_EOF
   note "WARNING: if you skip this step on a future manual uninstall, the keepalive WILL resurrect the helper every 5 minutes."
 fi
 unset _l _cmd _tok _t _v _mine _cron_new _after _leftover
+
+if [ "${MODE}" = "disconnect" ]; then
+  note "--- 3. deleting the Canvas session material"
+  for _p in ${DISCONNECT_PATHS}; do
+    case "${_p}" in
+      ""|"/"|"${HOME}"|"${HOME}/."|"${MORROW_HOME}"|"${TREE}") die "refusing to delete unsafe path: ${_p}" ;;
+    esac
+  done
+  _DISC_FAILED=0
+  for _p in ${DISCONNECT_PATHS}; do
+    if [ -e "${_p}" ] || [ -L "${_p}" ]; then
+      if rm -rf "${_p}" 2>/dev/null; then
+        note "deleted: ${_p}"
+      else
+        printf 'FAILED to delete: %s\n' "${_p}" >&2
+        _DISC_FAILED=1
+      fi
+    fi
+  done
+  [ "${_DISC_FAILED}" = "0" ] || die "one or more session paths could not be deleted; see above"
+  note "--- 4. verifying"
+  for _p in ${DISCONNECT_PATHS}; do
+    if [ -e "${_p}" ] || [ -L "${_p}" ]; then
+      printf 'STILL PRESENT: %s\n' "${_p}" >&2
+      _DISC_FAILED=1
+    fi
+  done
+  for _port in "${HELPER_PORT}" "${_CDP_PORT:-19223}"; do
+    [ -n "$(pid_holding_port "${_port}")" ] \
+      && { printf 'PORT STILL HELD: %s\n' "${_port}" >&2; _DISC_FAILED=1; }
+  done
+  _after="$(crontab -l 2>/dev/null || true)"
+  while IFS= read -r _l || [ -n "${_l}" ]; do
+    _is_removal_target "${_l}" && { printf 'CRON ENTRY STILL PRESENT: %s\n' "${_l}" >&2; _DISC_FAILED=1; }
+  done <<_CRON_EOF
+${_after}
+_CRON_EOF
+  [ "${_DISC_FAILED}" = "0" ] || die "disconnect verification failed (see above)"
+  note ""
+  note "Disconnected. The helper is stopped, keepalive will not restart it, and the"
+  note "Canvas sign-in on this machine is deleted. Morrow can no longer reach Canvas."
+  note "To reconnect: run 'bash install.sh' from ${TREE}, then sign in on the helper page."
+  exit 0
+fi
 
 # -- 3. delete the paths ---------------------------------------------------
 step_n=3

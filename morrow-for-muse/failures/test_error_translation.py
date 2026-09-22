@@ -2,7 +2,7 @@
 """Full test suite for the Morrow error translation layer.
 
 Covers failures/translator.py + failures/catalog.py + failures/catalog.json:
-  1. per-mode tests: every one of the 79 catalog modes gets a synthetic
+  1. per-mode tests: every one of the 81 catalog modes gets a synthetic
      raw error; asserts the right mode_id, the four message anchors, all
      placeholders filled, no em dashes, no shrug language, and the
      escalate flag matching the catalog.
@@ -199,17 +199,6 @@ class ModeSelfGrantRefused(Exception):
     mode without an educator-issued grant."""
 
 
-class ModeGrantExpired(Exception):
-    """modes/ admission gate: write attempted under a lapsed timed edit
-    grant. Optional scalar attr: grant_id."""
-
-
-class ModeGrantRevoked(Exception):
-    """modes/ admission gate: write attempted after the edit grant was
-    revoked (e.g. the educator switched back to plan mode mid-flow).
-    Optional scalar attr: grant_id."""
-
-
 class PlanModeWriteWithoutApproval(Exception):
     """modes/ admission gate: write attempted in plan mode with no
     educator-approved validated plan on file. Optional scalar attr:
@@ -228,6 +217,21 @@ class ModeSettingsTamper(Exception):
     educator confirmation. Carries setting_name."""
 
 
+class CourseResolutionRequired(Exception):
+    """dispatch/executor.py: a mode-gated course write carried no course
+    resolution, or one naming a different course."""
+
+
+class EffectClassMismatch(Exception):
+    """dispatch/executor.py: an entry's declared effect class
+    contradicts the class derived from its own blocks."""
+
+
+class WriteFieldMismatch(Exception):
+    """dispatch/executor.py: the post-write readback proved Canvas
+    stored different fields than requested."""
+
+
 class DestructiveConfirmationRequired(Exception):
     """modes/ admission gate: destructive write in edit mode while
     confirm_destructive_writes is on, without a recorded educator yes
@@ -241,10 +245,6 @@ MODE_EVIDENCE_NOTES = (
     "- ModeSelfGrantRefused -> edit_self_grant_refused. Exception, or "
     '{"error": "ModeSelfGrantRefused"} (CLI funnel shape), or '
     '{"mode_self_grant_refused": True}.\n'
-    "- ModeGrantExpired -> edit_grant_expired. Exception, funnel shape, or "
-    '{"mode_grant_expired": True}.\n'
-    "- ModeGrantRevoked -> edit_grant_revoked. Exception, funnel shape, or "
-    '{"mode_grant_revoked": True}.\n'
     "- PlanModeWriteWithoutApproval -> plan_mode_write_without_approval. "
     "Exception, funnel shape, or "
     '{"plan_mode_write_without_approval": True}.\n'
@@ -547,10 +547,6 @@ MODE_CASES = {
     # (see MODE_EVIDENCE_NOTES); the per-mode test proves each matches.
     "edit_self_grant_refused":
         lambda: ModeSelfGrantRefused("agent tried to self-promote"),
-    "edit_grant_expired":
-        lambda: ModeGrantExpired("grant grant-7 lapsed"),
-    "edit_grant_revoked":
-        lambda: ModeGrantRevoked("grant grant-7 revoked mid-flow"),
     "plan_mode_write_without_approval":
         lambda: PlanModeWriteWithoutApproval(
             "write attempted in plan mode, no approved plan"),
@@ -565,6 +561,15 @@ MODE_CASES = {
     "canvas-422-unprocessable":
         lambda: {"http_status": 422,
                  "body_text": '{"error_code":"unprocessable_content"}'},
+    "course_resolution_required":
+        lambda: CourseResolutionRequired("write to course 1 has no course "
+                                         "resolution"),
+    "effect_class_mismatch":
+        lambda: EffectClassMismatch("entry declares read but has a PUT"),
+    "write_field_mismatch":
+        lambda: WriteFieldMismatch("readback title differs"),
+    "write_unverified":
+        lambda: {"write_outcome": "unverified"},
     "unknown": lambda: {"some": "weird", "unmatched": 1},
 }
 
@@ -575,8 +580,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_79_modes(self):
-        self.assertEqual(79, len(CATALOG.entries))
+    def test_catalog_has_81_modes(self):
+        self.assertEqual(81, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):
@@ -719,16 +724,6 @@ class ModeSystemMappingTests(unittest.TestCase):
                 {"error": "ModeSelfGrantRefused"},
                 {"mode_self_grant_refused": True},
             ],
-            "edit_grant_expired": [
-                ModeGrantExpired("lapsed"),
-                {"error": "ModeGrantExpired"},
-                {"mode_grant_expired": True},
-            ],
-            "edit_grant_revoked": [
-                ModeGrantRevoked("revoked mid-flow"),
-                {"error": "ModeGrantRevoked"},
-                {"mode_grant_revoked": True},
-            ],
             "plan_mode_write_without_approval": [
                 PlanModeWriteWithoutApproval("plan write"),
                 {"error": "PlanModeWriteWithoutApproval"},
@@ -766,20 +761,16 @@ class ModeSystemMappingTests(unittest.TestCase):
                                      % (mode_id, tr.mode_id))
                     assert_message_quality(self, tr, entry)
 
-    def test_revoked_and_expired_are_distinct(self):
-        expired = translate("op", ModeGrantExpired("lapsed"))
-        revoked = translate("op", ModeGrantRevoked("revoked"))
-        self.assertEqual("edit_grant_expired", expired.mode_id)
-        self.assertEqual("edit_grant_revoked", revoked.mode_id)
+    def test_edit_is_not_timed_so_no_grant_ended_refusals(self):
+        # Edit mode has no expiry, and an ended grant is plain plan mode
+        # (the write asks for approval), so neither refusal can occur.
+        for mode_id in ("edit_grant_expired", "edit_grant_revoked"):
+            self.assertIsNone(CATALOG.get(mode_id), mode_id)
+        from modes import errors as mode_errors
+        for name in ("ModeGrantExpired", "ModeGrantRevoked"):
+            self.assertFalse(hasattr(mode_errors, name), name)
 
     def test_exception_attrs_fill_placeholders(self):
-        exc = ModeGrantExpired("lapsed")
-        exc.grant_id = "grant-7"
-        tr = translate("publish quiz", exc)
-        self.assertEqual("edit_grant_expired", tr.mode_id)
-        self.assertNotIn("(unknown grant)", tr.agent_message)
-        self.assertIn("grant-7", tr.agent_message)
-
         tr = translate("publish quiz", _ambiguous_course_case())
         self.assertEqual("ambiguous_course_write_refused", tr.mode_id)
         self.assertIn("Bio 101", tr.agent_message)

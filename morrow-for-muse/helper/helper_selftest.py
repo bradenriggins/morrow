@@ -228,7 +228,7 @@ def main():
     dangling = os.path.join(lock_profile, "SingletonLock")
     os.symlink("/nonexistent-morrow-selftest-target", dangling)
     lenv = dict(os.environ)
-    lenv["CANVAS_BASE"] = "https://example.instructure.com"
+    lenv["CANVAS_BASE"] = "https://school.instructure.com"
     lenv.pop("LOGIN_HELPER_PRODUCTION", None)
     lenv.pop("LOGIN_HELPER_ALLOW_TEST_ON_LIVE_PROFILE", None)
     lenv["CHROMIUM_BIN"] = fake_chromium
@@ -282,16 +282,16 @@ def main():
         # custom domains now require the explicit CONFIRMED opt-in; the
         # port-preservation assertion runs under that opt-in.)
         os.environ["CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED"] = \
-            "tenant.example.com"
+            "lms.tenant-college.edu"
         try:
             check("tenant base with an explicit port keeps the port "
                   "(custom domain confirmed)",
-                  norm("https://tenant.example.com:8443/a/b")
-                  == "https://tenant.example.com:8443/")
+                  norm("https://lms.tenant-college.edu:8443/a/b")
+                  == "https://lms.tenant-college.edu:8443/")
         finally:
             os.environ.pop("CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", None)
         try:
-            norm("https://tenant.example.com:8443/a/b")
+            norm("https://lms.tenant-college.edu:8443/a/b")
             unconfirmed_accepted = True
         except ValueError:
             unconfirmed_accepted = False
@@ -1122,7 +1122,7 @@ def main():
         tls_env["PYTHONDONTWRITEBYTECODE"] = "1"
         tls_env["HOME"] = os.path.join(tls_dir, "home")
         os.makedirs(tls_env["HOME"], exist_ok=True)
-        tls_env["CANVAS_BASE"] = "https://example.instructure.com"
+        tls_env["CANVAS_BASE"] = "https://school.instructure.com"
         tls_env["HELPER_AUTH_TOKEN"] = probe_token
         tls_env["LOGIN_HELPER_PORT"] = "18973"
         tls_env["LOGIN_HELPER_CDP_PORT"] = "19373"

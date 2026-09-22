@@ -582,8 +582,12 @@ def fetch_course_candidates(fetcher, tenant_base, course_id, *, per_page=100):
 def resolve_in_course(fetcher, tenant_base, course_id, query, *,
                       section_id=None, include_inactive=False,
                       include_concluded=False, include_test_student=False,
-                      label_for=None):
+                      label_for=None, make_label_for=None):
     """Full pipeline: fetch, filter, match. Returns Resolution.
+
+    make_label_for(tenant_base, course_id, candidates) -> label_for,
+    when given, builds the labeler from the fetched roster (so labels
+    come from the same course-scoped vault the executor projects with).
 
     Raises StudentAmbiguous / StudentNotFound (funnel via
     failures/translator.py), ValueError (bad tenant base), or
@@ -597,6 +601,8 @@ def resolve_in_course(fetcher, tenant_base, course_id, query, *,
         include_states |= CONCLUDED_STATES
     candidates, fetch_ev = fetch_course_candidates(
         fetcher, tenant_base, course_id)
+    if make_label_for is not None:
+        label_for = make_label_for(tenant_base, course_id, candidates)
     kept, excluded = filter_candidates(
         candidates, section_id=section_id, include_states=include_states,
         include_test_student=include_test_student)
@@ -759,14 +765,51 @@ def helper_fetch_factory(canvas_base, timeout=60):
     return fetch
 
 
+def vault_label_for(tenant_base, course_id, candidates):
+    """label_for(user_id) -> the course-scoped "Student A<n>" label.
+
+    Labels come from the privacy boundary (privacy/executor_wire.py),
+    the same vault and course binding the executor projects learner
+    receipts with, so a label printed here names the same student
+    everywhere. Raises when no label can be issued (for example, the
+    optional vault dependency is missing): the caller fails closed.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo = os.path.dirname(here)
+    if repo not in sys.path:
+        sys.path.insert(0, repo)
+    from privacy import executor_wire
+    roster = [{"id": c["user_id"], "name": c.get("name") or "",
+               "sortable_name": c.get("sortable_name") or "",
+               "short_name": c.get("short_name") or ""}
+              for c in candidates]
+    entry = {"name": "resolve_student_roster", "provider": "canvas",
+             "request": {"method": "GET", "url": "%s/api/v1/courses/%s/users"
+                         % (tenant_base.rstrip("/"), course_id)}}
+    projected, reveal = executor_wire.project_learner_result(
+        entry, {"receipt": roster, "truncated": False, "bytes_received": 0},
+        tenant_base, error_cls=RuntimeError)
+    if reveal is not None:
+        raise RuntimeError("the educator PII-reveal consent is active; this "
+                           "probe prints labels only")
+    labels = {}
+    for raw, out in zip(roster, projected.get("receipt") or []):
+        label = out.get("id") if isinstance(out, dict) else None
+        if not isinstance(label, str) or str(raw["id"]) in label:
+            raise RuntimeError("the privacy boundary returned no label")
+        labels[raw["id"]] = label
+    return lambda uid: labels[int(uid)]
+
+
 # ---------------------------------------------------------------------------
 # CLI (read-only resolution probe)
 # ---------------------------------------------------------------------------
 
 def _cli():
     parser = argparse.ArgumentParser(
-        description="Resolve an instructor's student query to a Canvas "
-                    "user_id (read-only, via the login helper browser).")
+        description="Resolve an instructor's student query to the "
+                    "student's course-scoped label (read-only, via the "
+                    "login helper browser; raw ids and names never print).")
     parser.add_argument("--tenant-base", required=True,
                         help="Canvas origin, e.g. https://x.instructure.com")
     parser.add_argument("--course-id", required=True)
@@ -785,6 +828,14 @@ def _cli():
         except ValueError:
             section_id = args.section_id
 
+    # The output is agent-visible: students appear only as course-scoped
+    # labels from the privacy boundary. No label, no answer.
+    labels = {}
+
+    def make_label_for(tenant_base, course_id, candidates):
+        labels["fn"] = vault_label_for(tenant_base, course_id, candidates)
+        return labels["fn"]
+
     fetch = helper_fetch_factory(args.tenant_base)
     try:
         resolution = resolve_in_course(
@@ -792,7 +843,8 @@ def _cli():
             section_id=section_id,
             include_inactive=args.include_inactive,
             include_concluded=args.include_concluded,
-            include_test_student=args.include_test_student)
+            include_test_student=args.include_test_student,
+            make_label_for=make_label_for)
     except StudentResolutionError as exc:
         print(json.dumps({
             "resolved": False,
@@ -801,13 +853,26 @@ def _cli():
             "evidence": exc.resolution_evidence,
         }, indent=1))
         return 1
+    except Exception as exc:
+        if "fn" in labels:
+            raise
+        print(json.dumps({
+            "resolved": False,
+            "error_class": "StudentLabelUnavailable",
+            "message": "no course-scoped student label could be issued "
+                       "(%s); refusing to print raw student identity"
+                       % type(exc).__name__,
+        }, indent=1))
+        return 2
     finally:
         fetch.close()
+    evidence = {k: v for k, v in resolution.evidence.items()
+                if k not in ("user_id", "query")}
     print(json.dumps({
         "resolved": True,
-        "user_id": resolution.user_id,
+        "student": labels["fn"](resolution.user_id),
         "match_kind": resolution.match_kind,
-        "evidence": resolution.evidence,
+        "evidence": evidence,
     }, indent=1))
     return 0
 

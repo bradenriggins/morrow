@@ -18,30 +18,34 @@ Model (per Braden's correction):
     ambiguous course resolution must be confirmed conversationally,
     never guessed silently (enforced by the ambiguous-course refusal).
 
-Grant = {grant_id, educator identity (bound), granted_at, expires_at,
-revoked flag, scope_type, source utterance citation}. scope_type is:
-  - "timed": an explicit duration request like "edit for 30 minutes";
-    expires after duration_min (explicit, else the
-    edit_grant_duration_min setting, else 30 minutes). Bare
-    "use edit mode" is NOT timed; it sets default_mode="edit"
-    (standing, no expiry).
-  - "conversation": "use edit mode for this conversation"; no time
-    expiry, lives until revoked (the session owner revokes on session
-    end, e.g. via switch_mode to plan).
-  - "standing": not a grant record at all; the educator set
-    default_mode to "edit" in settings. Persistent until changed.
+Edit mode is NOT timed. It stays on until the educator turns it off;
+nothing about it expires on a clock.
 
-Effective mode resolution: a live timed/conversation grant -> "edit";
-else the educator's standing default_mode == "edit" -> "edit"
-(standing); else "plan". Effective mode is "edit" ONLY through one of
-those two educator-controlled paths.
+Grant = {grant_id, educator identity (bound), granted_at, revoked flag,
+scope_type, conversation binding, source utterance citation}. The one
+grantable scope_type is "conversation" ("use edit mode for this
+conversation"): no expiry, it lives until revoked (switch_mode to plan,
+or the conversation ending). Standing edit mode ("use edit mode") is
+not a grant record at all: the educator set default_mode to "edit" in
+settings, and it stays on until they turn it off.
+
+Older installs persisted "timed" grants. Those are never live: they
+lapse to plan (a write asks for approval). They are neither honored
+nor converted into a standing grant.
+
+Effective mode resolution: a live conversation grant (or a
+per-conversation override) -> "edit"; else the educator's standing
+default_mode == "edit" -> "edit"; else "plan". Effective mode is "edit"
+ONLY through one of those educator-controlled paths.
 
 The agent MUST NEVER enable or broaden edit mode itself:
   - request_edit_grant without a valid educator-issued confirmation
     raises ModeSelfGrantRefused.
   - switch_mode accepts only "plan"; switching to "edit" raises
     ModeSelfGrantRefused (the educator flips default_mode in settings
-    themselves for standing edit mode).
+    themselves for standing edit mode). switch_mode("plan") turns edit
+    off everywhere: grants, per-conversation overrides, and the
+    standing default.
 
 Educator principal binding: this tree represents the educator principal
 as by == "educator" plus the verbatim authorization citation (the
@@ -68,10 +72,8 @@ identity binding.
 Settings contract (owned by Agent B, settings/store.py):
   - get_setting(user_id, key) -> value or None when unset.
   - set_setting(user_id, key, value) persists the value.
-  Keys used here: "default_mode" ("plan" | "edit") and
-  "edit_grant_duration_min" (int minutes). Until settings/store.py
-  exists, the import falls back to safe defaults (default_mode "plan",
-  duration 30 min).
+  Key used here: "default_mode" ("plan" | "edit"). Without
+  settings/store.py the import falls back to default_mode "plan".
 
 Stdlib only.
 """
@@ -85,7 +87,7 @@ import re
 import sys
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 _TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _TREE_ROOT not in sys.path:
@@ -107,7 +109,6 @@ __all__ = [
     "journal_write_admitted",
     "journal_write_refused",
     "CONFIDENCE_THRESHOLD",
-    "DEFAULT_GRANT_DURATION_MIN",
 ]
 
 # Grant file layout version.
@@ -115,20 +116,14 @@ GRANT_FILE_VERSION = 1
 # Course-resolution confidence below this (without explicit user
 # confirmation) refuses the write as ambiguous.
 CONFIDENCE_THRESHOLD = 0.9
-# Fallback grant length when no duration is given and settings are
-# unavailable.
-DEFAULT_GRANT_DURATION_MIN = 30
-# Absolute upper bound for timed grants on the direct API. Every
-# educator-facing path (the edit_grant_duration_min setting validator
-# and settings.start_edit_session) constrains durations to 5-480
-# minutes, so 8 hours is the effective cap an educator can reach.
-MAX_GRANT_DURATION_MIN = 24 * 60
 # The authorization citation must be non-trivial, mirroring the
 # approval record's APPROVAL_AUTH_MIN_LEN.
 AUTH_MIN_LEN = 20
 # Grantable scope types. "standing" is deliberately absent: standing
 # edit mode is the educator's default_mode setting, never a grant.
-_SCOPE_TYPES = ("timed", "conversation")
+# "timed" is absent too: edit mode is not timed, and legacy timed
+# grants on disk are never live (see _is_live).
+_SCOPE_TYPES = ("conversation",)
 # Filesystem-safe user ids (mirrors the desktop sourceBindingId shape).
 _USER_ID_RE = re.compile(r"^[A-Za-z0-9_.:@-]{1,160}$")
 
@@ -149,26 +144,6 @@ def _settings_fns():
     except Exception:
         return None, None
     return get_setting, set_setting
-
-
-def _default_duration_min(user_id):
-    """Grant length in minutes: explicit settings value, else 30."""
-    get_setting, _ = _settings_fns()
-    if get_setting is None:
-        return DEFAULT_GRANT_DURATION_MIN
-    try:
-        value = get_setting(user_id, "edit_grant_duration_min")
-    except Exception:
-        return DEFAULT_GRANT_DURATION_MIN
-    if value is None:
-        return DEFAULT_GRANT_DURATION_MIN
-    try:
-        minutes = int(value)
-    except (TypeError, ValueError):
-        return DEFAULT_GRANT_DURATION_MIN
-    if minutes <= 0:
-        return DEFAULT_GRANT_DURATION_MIN
-    return min(minutes, MAX_GRANT_DURATION_MIN)
 
 
 def _standing_edit_default(user_id):
@@ -335,29 +310,20 @@ def _locked(user_id):
 # Grant liveness
 # ---------------------------------------------------------------------------
 
-def _grant_expired(grant, now=None):
-    """True when a timed grant's expires_at has passed.
-
-    Conversation grants carry expires_at None: no time expiry, they
-    live until revoked.
-    """
-    expires_at = grant.get("expires_at")
-    if expires_at is None:
-        return False
-    return _parse_time(expires_at) <= (now or _utcnow())
-
-
 def _is_live(grant, now=None):
-    return not grant.get("revoked") and not _grant_expired(grant, now)
+    # Only conversation grants can be live. A "timed" grant written by
+    # an older install lapses to plan here, whatever its expires_at
+    # says: honoring it would keep edit on by a clock, and promoting it
+    # would turn a bounded grant into a permanent one.
+    return (grant.get("scope_type") in _SCOPE_TYPES
+            and not grant.get("revoked"))
 
 
 def _grant_in_conversation(grant, conversation_id):
     """True when the grant applies to the queried conversation.
 
-    A grant bound to a conversation_id (timed sessions started for a
-    conversation, and conversation-scope grants) applies only inside
-    that conversation. Unbound grants (user-global timed grants, and
-    legacy unbound conversation grants) apply everywhere.
+    A grant bound to a conversation_id applies only inside that
+    conversation. Unbound grants apply everywhere.
     """
     bound = grant.get("conversation_id")
     if bound is None:
@@ -379,37 +345,6 @@ def _live_grant(user_id, now=None, conversation_id=None):
     return live[-1] if live else None
 
 
-def _latest_grant(user_id, conversation_id=None):
-    """The newest grant applying to this conversation regardless of
-    state, or None."""
-    state = _load_state(user_id)
-    grants = [g for g in state["grants"]
-              if isinstance(g, dict)
-              and _grant_in_conversation(g, conversation_id)]
-    grants.sort(key=lambda g: g.get("revision", 0))
-    return grants[-1] if grants else None
-
-
-def _note_expiry(user_id, grant):
-    """Journal a timed grant's expiry exactly once (first observation)."""
-    if grant.get("expiry_journaled"):
-        return
-    with _locked(user_id):
-        state = _load_state(user_id)
-        for g in state["grants"]:
-            if (isinstance(g, dict)
-                    and g.get("grant_id") == grant.get("grant_id")
-                    and not g.get("expiry_journaled")):
-                g["expiry_journaled"] = True
-        _save_state(user_id, state)
-    journal_event("mode.grant_expired", {
-        "user_id": user_id,
-        "grant_id": grant.get("grant_id"),
-        "grant_revision": grant.get("revision"),
-        "scope_type": grant.get("scope_type"),
-        "educator_identity": grant.get("educator_identity"),
-        "expired_at": grant.get("expires_at"),
-    })
 
 
 # ---------------------------------------------------------------------------
@@ -448,18 +383,6 @@ def _require_educator_confirmation(educator_confirmation):
     }
 
 
-def _validate_duration(minutes):
-    try:
-        minutes = int(minutes)
-    except (TypeError, ValueError):
-        raise ValueError(
-            "duration_min must be a positive number of minutes; got %r"
-            % (minutes,))
-    if minutes <= 0:
-        raise ValueError("duration_min must be positive; got %r" % (minutes,))
-    return min(minutes, MAX_GRANT_DURATION_MIN)
-
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -492,7 +415,7 @@ def _conversation_override(user_id, conversation_id):
 def _newest_authority(user_id, conversation_id, now):
     """Most-recent-wins authority among the educator's explicit
     actions for this conversation: the settings conversation override
-    vs the live timed/conversation grant.
+    vs the live conversation grant.
 
     Returns (winner_kind, winner_mode, grant, override_mode):
       - winner_kind "override": the override is newer (or the only
@@ -545,8 +468,7 @@ def current_mode(user_id, conversation_id=None):
     THE authoritative resolver (settings.effective_mode delegates
     here). Most-recent-wins among the educator's explicit actions:
       1. a settings conversation override for this conversation,
-      2. a live timed grant,
-      3. a live conversation grant applying to this conversation,
+      2. a live conversation grant applying to this conversation,
     then the educator's standing default_mode setting ("edit" only
     when the educator set it), else "plan".
 
@@ -564,36 +486,15 @@ def current_mode(user_id, conversation_id=None):
     return "plan"
 
 
-def edit_session_remaining(user_id, conversation_id=None):
-    """Seconds until the live timed grant covering this conversation
-    expires, or None when no timed grant covers it. (Conversation-scope
-    grants have no expiry; use current_mode for those.)"""
-    _validate_user_id(user_id)
-    now = _utcnow()
-    grant = _live_grant(user_id, now, conversation_id)
-    if grant is None or grant.get("scope_type") != "timed":
-        return None
-    try:
-        expires = _parse_time(grant.get("expires_at"))
-    except ModeSettingsTamper:
-        return None
-    return max(0.0, (expires - now).total_seconds())
-
-
-def request_edit_grant(user_id, scope_type="timed", duration_min=None,
+def request_edit_grant(user_id, scope_type="conversation",
                        educator_confirmation=None, conversation_id=None):
     """Create an educator-granted edit-mode grant for user_id.
 
-    scope_type: "timed" (an explicit duration request like
-    "edit for 30 minutes"; bare "use edit mode" is NOT timed, it sets
-    default_mode="edit") or
-    "conversation" ("use edit mode for this conversation"; no time
-    expiry, lives until revoked). duration_min applies to timed grants;
-    when omitted it comes from the edit_grant_duration_min setting
-    (default 30 minutes; every educator-facing path constrains the
-    duration to 5-480 minutes, 8 hours max). conversation_id binds a
-    conversation grant to one conversation; timed grants are
-    user-global.
+    scope_type: "conversation" ("use edit mode for this conversation")
+    is the only grantable scope. It has no expiry and lives until
+    revoked. conversation_id binds the grant to one conversation; an
+    unbound grant applies everywhere. Bare "use edit mode" is not a
+    grant: it sets default_mode="edit" in settings.
 
     educator_confirmation is required: {"by": "educator",
     "authorization": "<verbatim educator utterance, >= 20 chars>",
@@ -607,19 +508,11 @@ def request_edit_grant(user_id, scope_type="timed", duration_min=None,
     _validate_user_id(user_id)
     if scope_type not in _SCOPE_TYPES:
         raise ValueError(
-            "scope_type must be 'timed' or 'conversation' (standing edit "
-            "mode comes from the educator's default_mode setting, not a "
-            "grant); got %r" % (scope_type,))
+            "scope_type must be 'conversation' (edit mode is not timed, "
+            "and standing edit mode comes from the educator's "
+            "default_mode setting, not a grant); got %r" % (scope_type,))
     educator = _require_educator_confirmation(educator_confirmation)
     now = _utcnow()
-    if scope_type == "conversation":
-        expires_at = None
-        minutes = None
-    else:
-        minutes = _validate_duration(
-            duration_min if duration_min is not None
-            else _default_duration_min(user_id))
-        expires_at = _iso(now + timedelta(minutes=minutes))
     grant_id = uuid.uuid4().hex
     if conversation_id is not None:
         conversation_id = str(conversation_id)
@@ -641,8 +534,7 @@ def request_edit_grant(user_id, scope_type="timed", duration_min=None,
             "educator_identity": educator,
             "source_utterance": educator["authorization"],
             "granted_at": _iso(now),
-            "expires_at": expires_at,
-            "duration_min": minutes,
+            "expires_at": None,
             "revoked": False,
             "revoked_at": None,
             "revoke_reason": None,
@@ -659,7 +551,6 @@ def request_edit_grant(user_id, scope_type="timed", duration_min=None,
             "conversation_id": conversation_id,
             "educator_identity": educator,
             "granted_at": grant["granted_at"],
-            "expires_at": expires_at,
             "source_utterance": educator["authorization"],
         })
         for old in superseded:
@@ -694,7 +585,7 @@ def revoke_edit_grant(user_id, reason="revoked", grant_id=None,
 
     Filters combine: grant_id names one grant; conversation_id keeps
     only grants bound to that conversation; scope_type keeps only
-    grants of that scope ("timed" or "conversation"); unbound_only
+    grants of that scope; unbound_only
     keeps only grants with no conversation binding. With no filters,
     every live grant is revoked. Idempotent: revoking when nothing is
     live returns 0 and journals nothing. Returns the number revoked.
@@ -737,17 +628,21 @@ def revoke_edit_grant(user_id, reason="revoked", grant_id=None,
     return len(revoked)
 
 
-def switch_mode(user_id, mode, conversation_id=None):
-    """Switch the user's mode. Only "plan" is accepted.
+def switch_mode(user_id, mode, conversation_id=None, educator=None):
+    """Switch the user to plan mode. Only "plan" is accepted.
 
-    Switching to plan revokes every live grant immediately and clears
-    any conversation-scoped state. It does NOT change the stored
-    default_mode setting: "make plan mode my default" is a separate
-    settings ceremony with its own educator confirmation. Switching to
-    "edit" raises ModeSelfGrantRefused: the agent cannot promote
-    itself to edit mode; edit mode needs an educator grant
-    (request_edit_grant) or the educator's own standing default in
-    settings.
+    Plan means plan everywhere: every live grant is revoked, every
+    per-conversation override for the user is cleared, and a standing
+    default_mode of "edit" is set back to "plan" (journaled in the
+    settings audit). Turning edit off is the safe direction, so it
+    needs no confirmation round trip. Switching to "edit" raises
+    ModeSelfGrantRefused: the agent cannot promote itself to edit
+    mode.
+
+    Returns {"mode": <effective mode after the switch>,
+    "revoked_grants": n, "overrides_cleared": n,
+    "default_mode_changed": bool}. "mode" is re-resolved, never
+    assumed, so a caller reports what is actually in force.
     """
     _validate_user_id(user_id)
     if mode != "plan":
@@ -758,21 +653,28 @@ def switch_mode(user_id, mode, conversation_id=None):
             "default_mode in settings)")
     count = revoke_edit_grant(user_id, reason="switch_mode:plan")
     try:
-        from settings.store import end_conversation as _end_conversation
+        from settings.store import (
+            clear_conversation_overrides as _clear_overrides)
     except Exception:
-        _end_conversation = None
-    if _end_conversation is not None and conversation_id:
-        try:
-            _end_conversation(user_id, conversation_id)
-        except Exception:
-            pass
+        _clear_overrides = None
+    cleared = _clear_overrides(user_id) if _clear_overrides else 0
+    default_changed = False
+    if _standing_edit_default(user_id):
+        _, set_setting = _settings_fns()
+        set_setting(user_id, "default_mode", "plan",
+                    educator_confirmed=True, educator=educator)
+        default_changed = True
     journal_event("mode.switched_to_plan", {
         "user_id": user_id,
         "revoked_grants": count,
+        "overrides_cleared": cleared,
+        "default_mode_changed": default_changed,
         "conversation_id": conversation_id,
-        "by": "agent",
     })
-    return {"revoked_grants": count, "mode": "plan"}
+    return {"mode": current_mode(user_id, conversation_id),
+            "revoked_grants": count,
+            "overrides_cleared": cleared,
+            "default_mode_changed": default_changed}
 
 
 def _resolution_signals(resolution):
@@ -793,14 +695,14 @@ def authorize_write(user_id, course_id=None, resolution=None,
     Returns (decision, reason_code, auth_ctx):
       ("allow", "ok", ctx)   edit mode (live grant or standing) and the
                              course target is unambiguous.
-      ("refuse", "grant_expired", ctx)   the latest grant lapsed.
-      ("refuse", "grant_revoked", ctx)   the latest grant was revoked.
       ("refuse", "ambiguous_course", ctx) resolution confidence below
                              0.9 without user confirmation: never write
                              on a guessed course.
       ("defer", "plan_mode_approval_required", None) plan mode: the
                              caller must run the frozen-plan +
-                             educator-signed v2 approval path.
+                             educator-signed v2 approval path. A
+                             grant that ended (revoked, or a legacy
+                             timed grant) is simply plan mode here.
 
     conversation_id scopes conversation grants: a grant bound to a
     different conversation does not authorize writes here.
@@ -855,31 +757,6 @@ def authorize_write(user_id, course_id=None, resolution=None,
             "conversation_id": None,
         }
     else:
-        # Plan path: no edit authority, or a newer "plan" override
-        # defeated any older grant. A newer plan override supersedes a
-        # stale grant's expiry/revocation: the educator explicitly chose
-        # the plan path, so the stale refusal does not apply.
-        latest = _latest_grant(user_id, conversation_id)
-        superseded = (winner_kind == "override"
-                      and winner_mode == "plan")
-        if latest is not None and latest.get("revoked") and not superseded:
-            return ("refuse", "grant_revoked", {
-                "grant_id": latest.get("grant_id"),
-                "grant_revision": latest.get("revision"),
-                "scope_type": latest.get("scope_type"),
-                "educator_identity": latest.get("educator_identity"),
-                "conversation_id": latest.get("conversation_id"),
-            })
-        if (latest is not None and _grant_expired(latest, now)
-                and not superseded):
-            _note_expiry(user_id, latest)
-            return ("refuse", "grant_expired", {
-                "grant_id": latest.get("grant_id"),
-                "grant_revision": latest.get("revision"),
-                "scope_type": latest.get("scope_type"),
-                "educator_identity": latest.get("educator_identity"),
-                "conversation_id": latest.get("conversation_id"),
-            })
         return ("defer", "plan_mode_approval_required", None)
     if resolution is not None:
         confidence, user_confirmed = _resolution_signals(resolution)

@@ -63,8 +63,6 @@ _WRITE_NOT_ATTEMPTED_NAMES = frozenset({"WriteNotAttempted"})
 # scopes exist, so there are no scope-disambiguation flags.
 _MODE_EXCEPTION_FLAGS = {
     "ModeSelfGrantRefused": "mode_self_grant_refused",
-    "ModeGrantExpired": "mode_grant_expired",
-    "ModeGrantRevoked": "mode_grant_revoked",
     "PlanModeWriteWithoutApproval": "plan_mode_write_without_approval",
     "AmbiguousCourseWriteRefused": "ambiguous_course_write_refused",
     "ModeSettingsTamper": "mode_settings_tamper",
