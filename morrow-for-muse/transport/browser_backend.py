@@ -2260,6 +2260,8 @@ _CANONICAL_VERIFICATION = {
     "failed": "failed",
     "applied_or_unknown": "applied_or_unknown",
     "unconfirmed": "unconfirmed",
+    # A verify block whose values may be the LMS's own normalization.
+    "unverified": "unconfirmed",
     "closed_by_person": "closed_by_person",
 }
 

@@ -5536,9 +5536,26 @@ def run_verify(entry: dict, session: SessionStore, pack: dict, config: dict,
     _assert_read_only_block(entry, verify, "verify")
     method, url, headers, body_bytes = build_request(
         entry, verify, params, session, pack, config, transients, result_payload)
-    status, resp_headers, raw, attempts = session.raw_request(
-        method, url, headers, body_bytes, is_write=False, max_bytes=max_bytes)
-    result = apply_result_block(entry, raw, resp_headers)
+    # A verify GET that cannot complete after the write succeeded proves
+    # nothing either way: the effect is unconfirmed, like a failed
+    # write readback GET, never a failed write.
+    try:
+        status, resp_headers, raw, attempts = session.raw_request(
+            method, url, headers, body_bytes, is_write=False,
+            max_bytes=max_bytes)
+        result = apply_result_block(entry, raw, resp_headers)
+    except ProviderHttpError as exc:
+        raise UncertainWrite(
+            "declared verify GET %s failed HTTP %s; the write effect is "
+            "unconfirmed, not a proven mismatch" % (url, exc.status))
+    except UncertainWrite:
+        raise
+    except ExecutorError as exc:
+        if _is_session_dead(exc) or _is_stale_command(exc):
+            raise
+        raise UncertainWrite(
+            "declared verify GET %s failed (%s); the write effect is "
+            "unconfirmed, not a proven mismatch" % (url, type(exc).__name__))
     return _assert_verify_expect(entry, verify, result["payload"], params,
                                  result_payload, transients)
 
@@ -5552,6 +5569,7 @@ def _assert_verify_expect(entry: dict, verify: dict, payload, params: dict,
     """
     response_path = verify.get("response_path")
     failures = []
+    unconfirmed = []
     for field, ref in (verify.get("expect") or {}).items():
         # actual always comes from the verify readback payload; expected
         # comes from the reference (params, the write's result, a
@@ -5570,11 +5588,21 @@ def _assert_verify_expect(entry: dict, verify: dict, payload, params: dict,
             failures.append("%s: %s" % (field, exc))
             continue
         expected = resolve_ref(ref, params, result_payload, transients)
-        if str(actual) != str(expected):
+        # The same field verdict as the write readback, on every lane.
+        verdict = _write_field_verdict(expected, actual)
+        if verdict == "mismatch":
             failures.append("%s: expected %r, read back %r" % (field, expected, actual))
+        elif verdict == "uncertain":
+            unconfirmed.append("%s: expected %r, read back %r (may be the "
+                               "LMS's own normalization)"
+                               % (field, expected, actual))
     if failures:
         raise VerificationFailed(
             "verify block assertions failed for %r: %s" % (entry.get("name"), "; ".join(failures)))
+    if unconfirmed:
+        return {"status": "unverified",
+                "detail": "verify block could not confirm: %s"
+                          % "; ".join(unconfirmed)}
     return {"status": "pass", "detail": "all %d expect assertions held" % len(verify.get("expect") or {})}
 
 
@@ -7889,7 +7917,8 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                                       max_bytes=entry_max_bytes)
                 # A declared verify block with at least one expect
                 # assertion is itself a provider readback that held.
-                declared_proves = bool((entry["verify"] or {}).get("expect"))
+                declared_proves = bool((entry["verify"] or {}).get("expect")) \
+                    and declared.get("status") == "pass"
                 verification = {
                     "status": ("pass" if readback.get("status") == "pass"
                                or declared_proves else "unverified"),

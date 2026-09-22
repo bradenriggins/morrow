@@ -219,3 +219,94 @@ def test_failed_readback_get_is_uncertain_not_failed():
 ])
 def test_field_verdict_table(want, got, verdict):
     assert ex._write_field_verdict(want, got) == verdict
+
+
+# ----------------------------------------------------------------------
+# H3 (third-pass re-audit): the declared verify block.
+#   - A verify GET that fails (HTTP 503) after a 2xx write fell into the
+#     failure path: "journaled as failed" with a message the failure
+#     catalog could not classify. It must be uncertain, like the
+#     readback GET.
+#   - _assert_verify_expect compared str(actual) != str(expected):
+#     10 vs "10.0" failed, True vs "true" failed. It must use the same
+#     field verdict as the readback, on both lanes.
+# ----------------------------------------------------------------------
+
+VERIFY_URL = BASE + "/api/v1/courses/7/assignments/42?verify=1"
+
+
+def _verified_entry():
+    entry = _assignment_entry()
+    entry["verify"] = {"method": "GET",
+                       "url": "{canvas_base}/api/v1/courses/{course_id}/"
+                              "assignments/{result.id}?verify=1",
+                       "expect": {"name": "result.name"}}
+    return entry
+
+
+def test_declared_verify_http_error_is_uncertain_not_failed():
+    def handler(m, u, b):
+        if m == "POST":
+            return 200, {}, b'{"id": 42, "name": "A"}'
+        if u == VERIFY_URL:
+            return 503, {}, b'{"errors": ["unavailable"]}'
+        return 200, {}, b'{"id": 42, "name": "A"}'
+
+    with pytest.raises(ex.UncertainWrite) as info:
+        _write_dispatch(_verified_entry(), {"course_id": "7"},
+                        _course_then(handler))
+    exc = info.value
+    assert not isinstance(exc, ex.VerificationFailed)
+    assert "journaled as failed" not in str(exc)
+    rec = ex.find_journal_op("11111111-1111-4111-8111-111111111111")
+    assert rec.get("uncertain") is True
+    assert rec.get("verification") == "uncertain", rec.get("verification")
+    from failures.funnel import agent_error_payload
+    payload = agent_error_payload("catalog canvas_create_assignment", exc)
+    assert payload["mode_id"] == "write-readback-unconfirmed", payload
+
+
+@pytest.mark.parametrize("expected,actual", [
+    (10, "10.0"), ("10", 10.0), (True, "true"), (1, True),
+    ("2026-10-01T23:59:00-05:00", "2026-10-02T04:59:00Z"),
+    ("<p>Hi", "<p>Hi</p>"),
+])
+def test_verify_expect_uses_the_field_verdict(expected, actual):
+    verify = {"expect": {"v": "params.v"}}
+    out = ex._assert_verify_expect({"name": "t"}, verify, {"v": actual},
+                                   {"v": expected}, {}, {})
+    assert out["status"] == "pass", out
+
+
+@pytest.mark.parametrize("expected,actual", [
+    ("Unit 1 ", "Unit 1"), ("2026-10-01T23:59:00", "2026-10-02T04:59:00Z"),
+])
+def test_verify_expect_possible_normalization_is_unverified(expected,
+                                                             actual):
+    verify = {"expect": {"v": "params.v"}}
+    out = ex._assert_verify_expect({"name": "t"}, verify, {"v": actual},
+                                   {"v": expected}, {}, {})
+    assert out["status"] == "unverified", out
+
+
+@pytest.mark.parametrize("expected,actual", [
+    (10, 5), (True, "banana"), ("Unit 1", "Unit 2"),
+    ("2026-10-01", "2027-01-01T05:59:00Z"),
+])
+def test_verify_expect_proven_difference_fails(expected, actual):
+    verify = {"expect": {"v": "params.v"}}
+    with pytest.raises(ex.VerificationFailed):
+        ex._assert_verify_expect({"name": "t"}, verify, {"v": actual},
+                                 {"v": expected}, {}, {})
+
+
+def test_unconfirmed_declared_verify_does_not_prove_the_write():
+    def handler(m, u, b):
+        if m == "POST":
+            return 200, {}, b'{"id": 42, "name": "A "}'
+        return 200, {}, b'{"id": 42, "name": "A "}'
+    entry = _verified_entry()
+    entry["verify"]["expect"] = {"name": "params.want"}
+    out, _ = _write_dispatch(entry, {"course_id": "7", "want": "A"},
+                             _course_then(handler))
+    assert out["outcome"] == "unverified", out
