@@ -1,0 +1,4 @@
+24c04681-e8ef-47d7-a866-2af956417437 | 0 | No HTTP request issued. The browser automation process crashed on both navigation attempts to the file:// form-host page (browser_process_failed) before the page loaded. Session check passed (user id 28206). No request reached the Canvas assignment endpoint. No GET substituted, web UI not used.
+
+RESULTS_JSON
+[{"op_id": "24c04681-e8ef-47d7-a866-2af956417437", "status": 0, "body": "No HTTP request issued. The browser automation process crashed on both navigation attempts to the file:// form-host page (browser_process_failed) before the page loaded. Session check passed (user id 28206). No request reached the Canvas assignment endpoint. No GET substituted, web UI not used."}]

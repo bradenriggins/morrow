@@ -1,0 +1,147 @@
+# Morrow for Muse: packaging deny-list.
+#
+# Anything matching the [paths] section must NEVER appear in the carved
+# distribution tree. The carve script enforces a PINNED copy of this file
+# (kept next to the carve script, outside the tree) and fails loudly if
+# the tree's copy differs from the pinned one, so weakening this file in
+# the tree can never weaken the carve gate. scripts/verify-no-secrets.sh
+# enforces every section against any tree it is pointed at (default: the
+# tree it ships in); install.sh runs it as the last install step.
+#
+# Matching rules for [paths]:
+#   * Patterns match the tree-relative path with '/' separators.
+#   * A pattern ending in '/' is a directory: the directory itself and
+#     everything under it is denied.
+#   * Otherwise the pattern is a shell glob ('*' spans directories).
+#   * Matching is CASE-INSENSITIVE: the path and the pattern are both
+#     lowercased before matching, so COOKIES-JOURNAL and cookies match
+#     the Cookies* pattern.
+#   * Before matching, the path is Unicode-normalized (NFKC), invisible
+#     characters (zero-width spaces, soft hyphens, BOM) are stripped, and
+#     common confusable lookalikes (Cyrillic/Greek homoglyphs of ASCII
+#     letters) are folded to ASCII. A homoglyph variant of a denied name
+#     (e.g. a Cyrillic-A "Cookies") is caught, not evaded.
+#   * The gate never scans itself: pack/deny-list.txt and
+#     scripts/verify-no-secrets.sh are skipped by every check.
+#
+# Matching rules for [content]:
+#   * One extended regular expression per line, checked against every text
+#     file in the tree. Binary files are skipped.
+#   * Files in [content_exempt] skip the [content] check AND the tenant
+#     rule: they are proof-evidence files carrying the PROOF-EVIDENCE
+#     banner, quoting sanitized example output. Never add an exemption
+#     without that banner.
+#   * The gate never scans itself: pack/deny-list.txt and
+#     scripts/verify-no-secrets.sh are skipped by the [content] check.
+#
+# TENANT RULE (enforced by verify-no-secrets.sh, not a plain pattern):
+# the only instructure.com hostnames allowed in the tree are the ones in
+# [tenant_allow]. Hostnames are extracted case-insensitively and compared
+# in lowercase, so https://EVIL.INSTRUCTURE.COM/ cannot evade the rule.
+# Any other *.instructure.com hostname is an account-specific default and
+# fails the gate, unless the file is in [content_exempt].
+
+[paths]
+# The educator's live session. Created on their machine at first run;
+# never part of the download; never wiped, reset, or repackaged.
+helper/profile/
+helper/profile
+# Runtime residue: logs, pid files, crash dumps.
+*.log
+*.pid
+logs/
+*.dmp
+# Bytecode and test scratch: build residue, not part of the download.
+__pycache__/
+.selftest-work/
+# Browser/session material that must never ship.
+# Chromium session stores, at ANY depth, ANY case, including common
+# variants: Cookies, Cookies-journal, Cookies.bak, cookies,
+# COOKIES-JOURNAL, Login Data, LoginData, History, Web Data,
+# *.sqlite, *.sqlite3, *.db. (P0-3: directory rule denies at any depth;
+# P1-25/P2-18/P2-19: case-insensitive + homoglyph-folded matching and
+# the variant list below.)
+.chrome-proof-profile/
+Cookies*
+Login Data*
+LoginData*
+History*
+Web Data*
+*.sqlite
+*.sqlite3
+*.db
+# Credential-shaped files, at ANY depth, ANY case: .env, .env.production,
+# *.pem, *.key, credentials*, *secret* (my_secrets.txt), *token*.
+.env*
+*.pem
+*.key
+credentials*
+*secret*
+*token*
+# Student de-identification material: the educator's HMAC salt, the
+# pseudonym audit map, and the source-vault label map live only in
+# ~/.morrow/ on their VM. If any ever lands in a tree, the gate must
+# fail.
+privacy_salt*
+privacy_map*
+morrow_source_vault*
+
+[content]
+# Live session cookie material: assignments, not mere mentions.
+# Both the =-assignment form (URL/query) and the JSON object-literal
+# form ({"canvas_session": "..."}) are denied: the JSON form evaded the
+# =-only patterns before.
+canvas_session=[A-Za-z0-9%._~+-]{16,}
+"canvas_session"\s*:\s*"[^"]{16,}"
+'canvas_session'\s*:\s*'[^']{16,}'
+remember_user_token=[^;"' ]{16,}
+"remember_user_token"\s*:\s*"[^"]{16,}"
+'remember_user_token'\s*:\s*'[^']{16,}'
+# CSRF token material: the runtime capture lane reads this from the live
+# page context and writes it to ~/.morrow/session.json (outside any tree).
+# A literal assignment here is a leak: the same value grants write access.
+_csrf_token\s*=\s*[^;"' ]{16,}|"_csrf_token"\s*:\s*"[^"]{16,}"
+_legacy_normandy_session
+pseudonym_credentials
+# Private key material.
+-----BEGIN (RSA )?PRIVATE KEY-----
+-----BEGIN OPENSSH PRIVATE KEY-----
+# SPKI pin literals: pins are derived from the environment at launch,
+# never written into the tree.
+--ignore-certificate-errors-spki-list=[^ "']{20,}
+# Authorization header with a literal credential value (not a placeholder
+# name, handle, or redacted marker): a real token in this position is
+# shipped auth material.
+"Authorization"\s*:\s*"[A-Za-z0-9_\-.~+/=]{20,}
+'Authorization'\s*:\s*'[A-Za-z0-9_\-.~+/=]{20,}
+# Proxy credentials: the egress probe redacts them; a literal userinfo
+# in a URL is a leak. Format placeholders (%s) are not credentials.
+https?://[^/ '"@%]+:[^/ '"@%]+@
+
+[content_exempt]
+# Proof evidence: sanitized example output under the PROOF-EVIDENCE banner.
+defects/DEFECTS.md
+proof-battery/OPERATION_CATALOG.md
+
+[tenant_allow]
+# Placeholder and example hosts used by tests and docs. Nothing here is a
+# real educator's tenant.
+# developerdocs.instructure.com is Instructure's PUBLIC developer
+# documentation site (API reference links in knowledge/), not a tenant.
+developerdocs.instructure.com
+example.instructure.com
+example.quiz-api.instructure.com
+example.quiz-api-iad-prod.instructure.com
+x.instructure.com
+x.quiz-api-1.instructure.com
+# canvas.instructure.com: named only as a REJECTED placeholder in the
+# install.sh tenant probe and the helper UI tenant box (P1-26/P2-3); never
+# a configured default.
+canvas.instructure.com
+# tenant.instructure.com: a fake tenant hostname used in test fixtures and
+# in comments explaining the sibling-host (tenant.instructure.com.evil.com)
+# guard in helper/server.py; never a real tenant.
+tenant.instructure.com
+myschool.instructure.com
+school.instructure.com
+someothertenant.instructure.com

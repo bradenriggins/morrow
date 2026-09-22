@@ -1,0 +1,1 @@
+[{"fields":{"assignment[name]":"Weasel Batch Proof RENAMED"},"method":"PUT","op_id":"op-rename","path":"/api/v1/courses/89585/assignments/4045368"},{"method":"DELETE","op_id":"op-delete","path":"/api/v1/courses/89585/assignments/4045368"},{"method":"GET","op_id":"op-verify-gone","path":"/api/v1/courses/89585/assignments/4045368"}]

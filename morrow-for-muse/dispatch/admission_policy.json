@@ -1,0 +1,99 @@
+{
+ "admitted_on_proof": {
+  "canvas_create_new_quiz": "2026-09-22 lane-7 battery: disposable quiz create through the integrated product path (build_request + page-context POST) with readback title match and full cleanup, terminal GET 404; admitted on ALL tenants per the parity law"
+ },
+ "evidence_holds": {
+  "note": "Operations that are not yet live-proven through Morrow for Muse. Refused on EVERY tenant until a disposable, isolated, fully cleaned-up live battery proves the complete path. When one is proven it is admitted on ALL tenants. There are no tenant allowlists: no tenant is ever gated, restricted, or treated differently from any other.",
+  "reasons": {
+   "canvas_delete_conclude_course": "destructive whole-course operation, never live-proven through the admission gate; held until a disposable live battery proves the complete path",
+   "canvas_item_bank_attach_bank_entry_to_quiz": "Item Bank credential path rewritten 2026-09-21 (provision/launch_driver.py exists and is integrated into dispatch/executor.py); no live battery has proven the path",
+   "canvas_item_bank_attach_bank_to_quiz": "Item Bank credential path rewritten 2026-09-21 (provision/launch_driver.py exists and is integrated into dispatch/executor.py); no live battery has proven the path",
+   "canvas_item_bank_delete_quiz_bank_entry": "Item Bank credential path rewritten 2026-09-21 (provision/launch_driver.py exists and is integrated into dispatch/executor.py); no live battery has proven the path",
+   "canvas_item_bank_list_quiz_draws": "Item Bank credential path rewritten 2026-09-21 (provision/launch_driver.py exists and is integrated into dispatch/executor.py); no live battery has proven the path"
+  },
+  "tool_names": [
+   "canvas_delete_conclude_course",
+   "canvas_item_bank_attach_bank_entry_to_quiz",
+   "canvas_item_bank_attach_bank_to_quiz",
+   "canvas_item_bank_delete_quiz_bank_entry",
+   "canvas_item_bank_list_quiz_draws"
+  ]
+ },
+ "learner_data": {
+  "note": "Operations touching learner PII are refused until the learner vault/tokenization boundary lands. users/self is the educator's own profile and is not learner data. Substrings were extended in the wave-3 hardening to cover every learner-bearing path the lane-8 gap scan found (students, search_users, recent_students, bulk_user_tags, gradeable_students, moderated_students, provisional_grades, custom_gradebook_columns, rubric_assessments, peer_reviews, bulk_user_progress, outcome_results, anonymous submissions, collaborations, conferences, audits, what-if grades, test-student reads, content-share users, submission summaries).",
+  "url_exceptions": [
+   "/users/self"
+  ],
+  "url_substrings": [
+   "/users",
+   "/enrollments",
+   "/submissions",
+   "/submission",
+   "/anonymous_submissions",
+   "/gradebook",
+   "/grades",
+   "/analytics",
+   "/ai_conversations",
+   "/ai_experiences",
+   "/students",
+   "/recent_students",
+   "/gradeable_students",
+   "/moderated_students",
+   "/student_view_student",
+   "/search_users",
+   "/bulk_user_tags",
+   "/bulk_user_progress",
+   "/provisional_grades",
+   "/custom_gradebook",
+   "/rubric_assessments",
+   "/peer_reviews",
+   "/outcome_results",
+   "/collaborations",
+   "/conferences",
+   "/content_share_users",
+   "/what_if_grades",
+   "/audit"
+  ]
+ },
+ "never_dispatch": {
+  "note": "These operations are never dispatchable through the installed product, for any caller, even with educator approval. They are the standing exclusions (proof directive 2026-09-20) and the catalog's excluded set.",
+  "tool_names": [
+   "canvas_begin_migration_to_push_to_associated_courses",
+   "canvas_set_or_remove_restrictions_on_blueprint_course_object",
+   "canvas_update_associated_courses",
+   "canvas_enable_disable_or_clear_explicit_csp_setting_courses",
+   "canvas_remove_feature_flag_courses",
+   "canvas_set_feature_flag_courses",
+   "canvas_disable_assignments_currently_enabled_for_grade_export_to_sis",
+   "canvas_send_message_to_unsubmitted_or_submitted_users_for_quiz"
+  ],
+  "url_substrings": [
+   "/conversations",
+   "/blueprint_templates",
+   "/features/flags",
+   "/csp_settings",
+   "/api/sis/",
+   "/submission_users/message"
+  ]
+ },
+ "source": "proof-battery/OPERATION_CATALOG.md plus the standing proof-directive exclusions. Parity law 2026-09-21: no tenant allowlists anywhere; nothing is gated by tenant.",
+ "tenant_restricted_removed": {
+  "note": "Retired 2026-09-21 per parity law: NOTHING is tenant-restricted. All tenants are allowed for everything the gate admits. The former tenant_restricted set was: canvas_delete_conclude_course, canvas_create_new_quiz, and four Item Bank operations. CORRECTION 2026-09-21: the earlier note claiming canvas_create_new_quiz was live-proven on 2026-09-21 via New Quiz 4045374 was false; no such battery ran (4045374 exists only as a selftest fixture). The verified New Quiz write proof remains the 2026-09-20 Mac-rig battery (quiz 4045369), which does not prove the integrated product path. canvas_create_new_quiz is therefore on evidence hold, refused on every tenant until a disposable live battery proves the integrated path, then admitted on all tenants."
+ },
+ "unsupported": {
+  "catalog_rows_without_tool_names": [
+   "NQS-7 quiz whole-archive (PATCH status=archived)",
+   "mod_forum_add_discussion AJAX variant",
+   "mod_forum_get_forum_discussions AJAX variant",
+   "mod_forum_get_forums_by_courses AJAX variant",
+   "core_course_get_contents AJAX variant",
+   "mod_forum_delete_discussion AJAX variant"
+  ],
+  "note": "Catalog-unsupported operations: no working provider route exists. Refused rather than dispatched to fail. Catalog rows without a tool name (quiz whole-archive, Moodle AJAX variants) are documented here; they cannot appear as entry names.",
+  "tool_names": [
+   "canvas_item_bank_get_item"
+  ]
+ },
+ "updated": "2026-09-22",
+ "version": "1.2.0"
+}

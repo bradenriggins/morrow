@@ -1,0 +1,19 @@
+{
+  "attempts": 1,
+  "bytes_received": 145,
+  "entry_name": "proof_create_assignment",
+  "op_id": "46a67f23-f7ba-4c07-8357-59193b528363",
+  "receipt": {
+    "course_id": 89585,
+    "id": 4045370,
+    "name": "Morrow Product Proof (temp)",
+    "published": false,
+    "secure_params": "REDACTED",
+    "workflow_state": "unpublished"
+  },
+  "truncated": false,
+  "verification": {
+    "detail": "read effect; no verify block run",
+    "status": "skipped"
+  }
+}

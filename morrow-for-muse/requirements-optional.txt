@@ -1,0 +1,71 @@
+# Optional dependencies for Morrow for Muse (exact pins, tested 2026-09-21).
+#
+# Nothing here is required to install or run the connector: install.sh
+# and every selftest pass without these packages. They unlock degraded
+# capabilities that fail loudly with a remediation message when missing.
+#
+#   cryptography: the encrypted learner vault (privacy/core.py). Without
+#   it, vault seal/open raise PrivacyError telling the educator to
+#   install this file; identity normalization, roster, and redaction
+#   work without it.
+#
+# Hash-pinned (W4-P2-19): --require-hashes means pip verifies every
+# downloaded artifact against one of the hashes below before
+# installing. A compromised mirror or MITM cannot substitute a
+# tampered wheel for the package that guards the encrypted learner
+# vault. The pin floor is >= 50.0.1 (W4-P2-20): older releases carry
+# CVE-2026-69247, CVE-2026-69248, and CVE-2026-69249.
+#
+# Full closure, not just the direct pin: with --require-hashes pip
+# refuses to install ANY package that lacks a listed hash, including
+# transitive dependencies. So the closure is pinned too:
+#   - cryptography==50.0.1 (requires cffi on CPython)
+#   - cffi==2.1.1 (requires pycparser on CPython)
+#   - pycparser==3.0 (pure Python, no deps)
+#
+# Coverage per package:
+#   - cryptography: the sdist plus every wheel 50.0.1 ships on PyPI
+#     (manylinux2014 x86_64/aarch64, musllinux x86_64/aarch64,
+#     macosx_11_0 arm64, win_amd64; cp311-abi3 covers Python 3.11+).
+#   - cffi: wheels for cp311/cp312/cp313/cp314 on manylinux2014
+#     x86_64, macosx_11_0 arm64, win_amd64 (plus cp312
+#     manylinux2014 aarch64), plus the sdist as the fallback for
+#     every other platform (musl, Intel macOS, win32, other
+#     interpreters: cffi builds from C, no Rust needed).
+#   - pycparser: the universal py3 wheel plus the sdist.
+# Regenerating hashes when the pin is raised: download the new
+# version's artifacts and run `pip hash` on each, e.g.
+#   pip download --no-deps --only-binary :all: \
+#       --platform manylinux2014_x86_64 -d /path/to/dl "cryptography==X.Y.Z"
+#   pip hash /path/to/dl/*
+# (repeat --platform for each platform above; the sdist needs no
+# build: `pip hash` reads the file directly). Replace the version and
+# every --hash line below, then re-run the carve smoke so the dist is
+# validated against the new pin (W4-P2-21).
+--require-hashes
+cryptography==50.0.1 \
+    --hash=sha256:5dd9bda1c12b4162f6ff568eeb5e0ff956c28d14406e875cfe8a63a2d414ff20 \
+    --hash=sha256:b8f852c65863251b9e3a1b8c150ce21e59b522dbb6a7d4bc80e680d38388e986 \
+    --hash=sha256:53e279950892dc102c6b4e52af03ae5ea92fac572a1ddab78ca73a997f62b69f \
+    --hash=sha256:ff838d62ec1bfce4f9ba7fa16f4a7b554cd8d0c299e6be37502161a660c84eef \
+    --hash=sha256:be224a65493ec5b74a158ff22a5522ce4a5ca1e543c647a3a4730d4a09e5f959 \
+    --hash=sha256:9ebcdd5519be9b652a46f507817a74591774fc3d6923ac364e4dfa64e36b291b \
+    --hash=sha256:aed8db4f6d71c51efb89530e12d9464e7bf2923d46c3205dc794a2a93f8c0648
+cffi==2.1.1 \
+    --hash=sha256:dd31f52ea1086513bb9df30f8fcee9b8918323ae067a3d5b78bc826a000712be \
+    --hash=sha256:398aff33cee2767e3e781d2554c54bd0dff386bb437581e0d8011fde1a942ec1 \
+    --hash=sha256:34e261f78cb6ceaaa36f42f2613f4380d94d9c759a9c73c769ee6e0247364632 \
+    --hash=sha256:42f6930c31dc7f50732c9ae793c2786c7b6b044195967bbdde40bb9be81c4cc0 \
+    --hash=sha256:f81b3b8f3d4e343550fa4baa0e479bba9f2d29ce9c2e9b51d1ce1718d7442fcf \
+    --hash=sha256:68e62fe11f30d5ca8289242866f0a5291402d8529ca2178ab8afc5c9694ae890 \
+    --hash=sha256:c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf \
+    --hash=sha256:f53e442b08449d42821fa4a4fba000095af9f62742a500f978a9f557ec44339a \
+    --hash=sha256:19ee6127ee34de7d83ce3d371ebc5ed91addbdcc39f9ab15ce4eb35a4e534971 \
+    --hash=sha256:a931079504ecc49efed7744c476a5c343a92fabf66dec2db95edb1b2fdc770e2 \
+    --hash=sha256:1aa5645c30469b09530c4ebca77ebf8f17618293c58f8549cb1a543a50236e7d \
+    --hash=sha256:661c298b4821edebead0c91edd2b00374d67ad7c5a1f7a91d4442633b79d6a72 \
+    --hash=sha256:b0431303acaea1089ad4b3e9ce4e6518193def1118d4073ca848635ee4ea2e96 \
+    --hash=sha256:3222ba5d678f80a030e6afbcc33dc1ae5cb45facabb61cee2c7016b8432fde48
+pycparser==3.0 \
+    --hash=sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992 \
+    --hash=sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29

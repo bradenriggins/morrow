@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-20T20:52:26.350010+00:00",
+  "authorization": "Braden's explicit directive 2026-09-20 'Yes, start the executor work' authorizing the live product proof scope (temporary unpublished assignment in course 89585, verified then deleted), plus the Morrow PM 2026-09-20 tasking: the bundled file:// form-host failed in the managed browser (browser-process crash, op 24c04681), so prove the connector-bundled ephemeral localhost form-host fallback through the actual two-phase product dispatch/complete.",
+  "by": "educator",
+  "category": "canvas.proof_assignment",
+  "expires_at": "2026-09-20T21:52:26.350010+00:00",
+  "note": "Set by=\"educator\" via sign_approval() only on the educator's explicit authorization of this exact action.",
+  "op": "proof_create_assignment",
+  "op_digest": "a8a0f0d52ed2cba1ca712ff871fcce1450b43a2c2452fe3ca470232509b8cd84",
+  "params_digest": "4bc851ec7c987518e20c3a2a32aab6366d4b2377a1176b3f56aa653d3475085e",
+  "version": 2
+}

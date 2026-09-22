@@ -1,0 +1,19 @@
+{
+  "base": "https://chcp.instructure.com",
+  "batch_id": "batch-d6962587-undo",
+  "brief_file": "/home/hatch/.morrow/browser-briefs/d6962587-6943-4f27-9265-c6ba741cda3a-request.txt",
+  "defer_verify": false,
+  "entry_name": "proof_create_assignment",
+  "kind": "undo",
+  "op_id": "d6962587-6943-4f27-9265-c6ba741cda3a",
+  "ops": [
+    "d6962587-6943-4f27-9265-c6ba741cda3a"
+  ],
+  "phase": "request",
+  "principal": {
+    "id": 28206,
+    "name": "Braden Riggins"
+  },
+  "status": "awaiting_browser_task",
+  "undo_of": "46a67f23-f7ba-4c07-8357-59193b528363"
+}

@@ -1,0 +1,233 @@
+{
+ "auth": {
+  "alternates": [
+   "canvas_pat"
+  ],
+  "slot": "canvas_session"
+ },
+ "description": "Checks saved New Quiz question counts, points, the documented QuestionItem shapes and scoring references, item relationships, and repeated question content, including the questions the quiz takes from an Item Bank draw or bank entry for banks named in bank_ids (banks not named are reported unchecked, never silently skipped). Optionally compares three quizzes in the same course. Does not change Canvas, judge teaching quality, or prove student access. Reports incomplete reads explicitly. Item bank reads use a captured Item Bank credential: the managed browser opens the Item Banks LTI tool placement, Canvas's own client runs, and Authorization plus AuthType: Signature are captured from its first GET /api/banks request. The credential is captured, never minted server side; there is no server-side fallback. FAIL-CLOSED RULE: when the placement cannot be resolved, the capture times out, or any binding check fails, the bank steps must be skipped with reason item_bank_capture_unavailable. The bank steps are also skipped (no provisioning attempted) when bank_ids and drawn_item_refs are both empty.",
+ "effects": "read",
+ "lti_provisioning": {
+  "flavor": "item-bank-launch-capture",
+  "implementation": "~/workspace/morrow-for-muse-deploy/provision/provision.py",
+  "chain": [
+   "Resolve the Item Banks LTI tool placement for the course from the Canvas tabs response (exactly one tool match required); the launch URL is /courses/{course_id}/external_tools/{tool_id}.",
+   "Open an inactive temporary tab at the launch URL in the managed browser and let Canvas's own Item Banks client run.",
+   "Capture Authorization plus AuthType: Signature from Canvas's own first GET /api/banks request (must occur within 45 s of launch). The credential is captured, never minted server side; there is no server-side fallback.",
+   "Validate the capture: token 51-8192 chars; nonce is UUIDv4; binding to tab, frame, api origin, context UUID, course id, external tool id, launch URL, tenant, and time window; credential max age 10 minutes.",
+   "The credential lives in memory only, is handed out for exactly one operation, then the temporary tab is closed and the credential material is cleared. Course identity uses the Canvas course UUID, not only the numeric id. Calls go to https://{tenant}.quiz-api.instructure.com/api/banks/... with the raw token in Authorization plus AuthType: Signature; the stale quiz/v1 item-bank route is never used."
+  ],
+  "fail_closed_on": [
+   "no managed-browser session (login redirect observed; principal rechecked)",
+   "Item Banks placement unresolved (zero or multiple tool matches)",
+   "no launch driver wired (capture transport not connected)",
+   "capture timeout: no GET /api/banks headers within 45 s of launch",
+   "binding mismatch on any binding field",
+   "credential expired (older than 10 minutes) or presented for a second operation"
+  ],
+  "fail_closed_rule": "When any fail-closed condition holds, the bank steps are skipped and the entry reports the banks unchecked with reason item_bank_capture_unavailable; the quiz steps still run. There is no ServicesJwt fallback and no server-side mint.",
+  "proven_on": "desktop Morrow source evidence 2026-09-21 (captured, never minted); Morrow-for-Muse live battery pending",
+  "retry_policy": "single capture attempt per launch with a 45 s window; capture timeout fails closed (the launch is not blindly retried); expired or consumed credentials are never re-presented"
+ },
+ "manifest": "morrow.manifest.v0",
+ "multi_step": [
+  {
+   "headers": {
+    "Accept": "application/json"
+   },
+   "method": "GET",
+   "name": "read_course",
+   "note": "Confirms the selected course before any quiz reads.",
+   "url": "{canvas_base}/api/v1/courses/{course_id}"
+  },
+  {
+   "headers": {
+    "Accept": "application/json"
+   },
+   "method": "GET",
+   "name": "read_quiz",
+   "note": "Reads the New Quiz detail (title, settings, scoring). Repeated for each compare_quiz_ids entry.",
+   "url": "{canvas_base}/api/quiz/v1/courses/{course_id}/quizzes/{quiz_id}"
+  },
+  {
+   "headers": {
+    "Accept": "application/json"
+   },
+   "method": "GET",
+   "name": "list_quiz_items",
+   "note": "Lists the quiz's saved items. Rows that draw from an item bank name their bank; pass those bank IDs in bank_ids (and drawn item references in drawn_item_refs) to check the drawn questions. An unread source is reported, never truncated silently.",
+   "url": "{canvas_base}/api/quiz/v1/courses/{course_id}/quizzes/{quiz_id}/items"
+  },
+  {
+   "args": {
+    "course_id": "params.course_id",
+    "expected_banks": null
+   },
+   "capture": {
+    "quiz_api_host": "quiz_api_host",
+    "banks_build_token": "credential"
+   },
+   "method": "PROVISION",
+   "name": "provision_lti_tool_token",
+   "note": "Captures the Item Bank credential via frame-bound launch/capture (provision.py with a managed-browser launch driver): temp tab at the Item Banks LTI placement, capture Authorization plus AuthType: Signature from Canvas's own first GET /api/banks, bind to nonce/tab/frame/launch URL/tenant/time window, single-operation use, then close and clear. The executor binds the single-use credential handle plus the tenant quiz-api host (https://{tenant}.quiz-api.instructure.com) to transients for the steps below. On any fail-closed condition provision.py exits non-zero and the entry reports incomplete with reason item_bank_capture_unavailable; the executor must not proceed to the quiz-api steps.",
+   "skip_when": "params.bank_ids is empty AND params.drawn_item_refs is empty",
+   "via": "~/workspace/morrow-for-muse-deploy/provision/provision.py"
+  },
+  {
+   "headers": {
+    "Accept": "application/json",
+    "AuthType": "Signature",
+    "Authorization": {
+     "transient": "banks_build_token"
+    }
+   },
+   "method": "GET",
+   "name": "read_bank",
+   "note": "Reads one drawn bank's record with the provisioned quiz-api credential. The credential goes in Authorization as the raw token with no scheme prefix, and the scheme word travels in the separate AuthType: Signature header (live-observed 2026-09-20; placing Signature inside Authorization returns 401). Repeated with bank_id bound to each bank_ids entry.",
+   "url": "{quiz_api_host}/api/banks/{bank_id}"
+  },
+  {
+   "headers": {
+    "Accept": "application/json",
+    "AuthType": "Signature",
+    "Authorization": {
+     "transient": "banks_build_token"
+    }
+   },
+   "method": "GET",
+   "name": "list_bank_entries",
+   "note": "Lists one drawn bank's entries page by page within the handler's page budget. Repeated with bank_id bound to each bank_ids entry.",
+   "url": "{quiz_api_host}/api/banks/{bank_id}/bank_entries"
+  },
+  {
+   "headers": {
+    "Accept": "application/json",
+    "AuthType": "Signature",
+    "Authorization": {
+     "transient": "banks_build_token"
+    }
+   },
+   "method": "GET",
+   "name": "get_bank_item",
+   "note": "Reads one drawn bank item to verify the quiz's drawn question against the bank. Repeated with bank_id and item_id bound to each drawn_item_refs entry.",
+   "url": "{quiz_api_host}/api/banks/{bank_id}/items/{item_id}"
+  }
+ ],
+ "name": "morrow_check_new_quiz",
+ "params": {
+  "additionalProperties": false,
+  "properties": {
+   "bank_id": {
+    "description": "Iteration binding for the per-bank steps: the handler sets this to each bank_ids entry when repeating the bank steps. Callers supply bank_ids, not this field.",
+    "pattern": "^[1-9][0-9]{0,18}$",
+    "type": "string"
+   },
+   "bank_ids": {
+    "default": [],
+    "description": "Item bank IDs this quiz draws from, observed from the quiz's item list or a prior item bank fan-out read via the Item Banks SDK lane. The bank steps run once per entry with bank_id bound to that entry.",
+    "items": {
+     "pattern": "^[1-9][0-9]{0,18}$",
+     "type": "string"
+    },
+    "maxItems": 200,
+    "type": "array"
+   },
+   "compare_quiz_ids": {
+    "default": [],
+    "description": "Up to three other New Quizzes in this course to check for repeated question content.",
+    "items": {
+     "pattern": "^[1-9][0-9]{0,18}$",
+     "type": "string"
+    },
+    "maxItems": 3,
+    "type": "array"
+   },
+   "course_id": {
+    "pattern": "^[1-9][0-9]{0,18}$",
+    "type": "string"
+   },
+   "drawn_item_refs": {
+    "default": [],
+    "description": "Drawn-question references (bank ID plus bank item ID) observed in the quiz's items. The item step runs once per entry with bank_id and item_id bound to that entry.",
+    "items": {
+     "additionalProperties": false,
+     "properties": {
+      "bank_id": {
+       "pattern": "^[1-9][0-9]{0,18}$",
+       "type": "string"
+      },
+      "item_id": {
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$",
+       "type": "string"
+      }
+     },
+     "required": [
+      "bank_id",
+      "item_id"
+     ],
+     "type": "object"
+    },
+    "maxItems": 1000,
+    "type": "array"
+   },
+   "expected_question_count": {
+    "maximum": 10000,
+    "minimum": 0,
+    "type": "integer"
+   },
+   "expected_question_points": {
+    "description": "Expected sum of question points, not the assignment's gradebook points.",
+    "minimum": 0,
+    "type": "number"
+   },
+   "item_id": {
+    "description": "Iteration binding for the per-item step: the handler sets this to each drawn_item_refs entry's item_id when repeating the item step. Callers supply drawn_item_refs, not this field.",
+    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$",
+    "type": "string"
+   },
+   "quiz_id": {
+    "description": "The Canvas assignment ID of the New Quiz to check.",
+    "pattern": "^[1-9][0-9]{0,18}$",
+    "type": "string"
+   },
+   "source_binding_id": {
+    "maxLength": 200,
+    "minLength": 1,
+    "type": "string"
+   }
+  },
+  "required": [
+   "source_binding_id",
+   "course_id",
+   "quiz_id"
+  ],
+  "type": "object"
+ },
+ "provider": "canvas",
+ "rate": {
+  "hint": "gentle",
+  "retry_on": [
+   429,
+   403
+  ]
+ },
+ "result": {
+  "max_bytes": 262144,
+  "receipt": [
+   "quiz_id",
+   "quiz",
+   "question_count",
+   "points_total",
+   "findings",
+   "incomplete"
+  ],
+  "redact": [
+   "Authorization",
+   "service_jwt",
+   "item_bank_credential"
+  ],
+  "truncate": "tail"
+ },
+ "title": "Check a New Quiz",
+ "version": "0.2.5"
+}

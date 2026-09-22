@@ -1,0 +1,16 @@
+{
+  "attempts": 1,
+  "bytes_received": 72,
+  "entry_name": "proof_read_course",
+  "op_id": "e4927f95-54ef-441f-b92f-16b37babe0ca",
+  "receipt": {
+    "course_code": "BIOL 101",
+    "id": 89585,
+    "name": "BIOL 101: General Biology"
+  },
+  "truncated": false,
+  "verification": {
+    "detail": "read effect; no verify block run",
+    "status": "skipped"
+  }
+}

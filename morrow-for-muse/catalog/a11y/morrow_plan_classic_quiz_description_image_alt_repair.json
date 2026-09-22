@@ -1,0 +1,135 @@
+{
+  "auth": {
+    "alternates": [
+      "canvas_pat"
+    ],
+    "slot": "canvas_session"
+  },
+  "description": "Plan one alternative-text repair for a missing-alt image in an existing Canvas Classic Quiz description. Requires fresh audit evidence for the exact course and quiz. Preserves the saved Classic Quiz description and settings except for one selected image alt attribute. No Canvas write occurs during planning and this does not support quiz questions, answers, assessment banks, or accessibility conformance.",
+  "effects": "plan",
+  "evidence_status": "live-unverified",
+  "executor_wiring": "validated: catalog/a11y/runner.py plan mode loads this manifest, but the target kind has no live-proven read so the runner refuses with a named reason instead of guessing. dispatch/executor.py carries no a11y branches per the F-17 carve.",
+  "honesty": {
+    "interpretation": "This planner changes one image alt attribute only. It does not prove accessibility conformance.",
+    "no_write_during_planning": true
+  },
+  "manifest": "morrow.manifest.v0",
+  "multi_step": [
+    {
+      "method": "GET",
+      "name": "fresh_read_target",
+      "note": "Fresh-read the exact target (course, quiz/bank, and question/item as the kind requires). The read must return the complete saved body; an incomplete read refuses the plan.",
+      "url": "{provider_read_route_for_target}"
+    },
+    {
+      "method": "VALIDATE",
+      "name": "validate_repair_plan",
+      "note": "Validate the plan against the fresh audit evidence. Refusals: stale_body: the target changed since the signal; run the audit again; image_position_shifted: the image is no longer at this index; image_source_mismatch: the image at this index is not the signaled image; ambiguous_image: the same image is used more than once; decorative_needs_empty_alt / alt_text_required: alt_text/decorative inconsistency; protected_quiz: New Quiz 506477 is never touched. Planner-specific guards: The guarded write sends only quiz[description], verifies the full protected Quiz state, and reruns the selected image-alt check.",
+      "url": "local://catalog/a11y/a11y_repair.validate_repair_plan"
+    },
+    {
+      "method": "APPROVE",
+      "name": "require_authorization",
+      "note": "Requires human approval or a selected valid Edit authority. No Canvas write occurs during planning.",
+      "url": "local://dispatch/approval"
+    },
+    {
+      "method": "DISPATCH",
+      "name": "guarded_single_dispatch",
+      "note": "One dispatch of the reviewed single-alt update with exact readback of the saved target.",
+      "url": "{guarded_write_route_for_kind}"
+    },
+    {
+      "method": "RE-AUDIT",
+      "name": "re_audit_same_target",
+      "note": "Run morrow_audit_course_item again on the same course and target. Report which observed fields, digests, and source signals changed. Stop on stale, incomplete, held, or unverified evidence; do not retry a write automatically.",
+      "url": "local://catalog/a11y/morrow_audit_course_item"
+    }
+  ],
+  "name": "morrow_plan_classic_quiz_description_image_alt_repair",
+  "params": {
+    "additionalProperties": false,
+    "properties": {
+      "alt_text": {
+        "description": "Alternative text a person can read, or empty when marking decorative.",
+        "maxLength": 500,
+        "type": "string"
+      },
+      "course_id": {
+        "description": "Exact Canvas course id.",
+        "pattern": "^[1-9][0-9]{0,18}$",
+        "type": "string"
+      },
+      "decorative": {
+        "default": false,
+        "description": "True marks the image decorative with empty alternative text.",
+        "type": "boolean"
+      },
+      "expected_body_sha256": {
+        "description": "Digest of the exact saved body this repair was planned against.",
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "image_index": {
+        "description": "Position of the image in the saved field, counting every image from 1.",
+        "maximum": 2147483648,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "image_src_sha256": {
+        "description": "Digest of the selected image's src attribute from the fresh audit.",
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "quiz_id": {
+        "description": "Canvas quiz id (Classic Quiz id, or the Canvas assignment id of a New Quiz).",
+        "pattern": "^[1-9][0-9]{0,18}$",
+        "type": "string"
+      },
+      "source_binding_id": {
+        "description": "Connection binding the educator's session.",
+        "maxLength": 160,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "source_binding_id",
+      "course_id",
+      "quiz_id",
+      "expected_body_sha256",
+      "image_index",
+      "image_src_sha256",
+      "alt_text"
+    ],
+    "type": "object"
+  },
+  "planner_notes": [
+    "The guarded write sends only quiz[description], verifies the full protected Quiz state, and reruns the selected image-alt check."
+  ],
+  "port_source": "~/workspace/origin-morrow/packages/mcp-server/src/page-correction.ts and item-bank-repair.ts",
+  "provider": "canvas",
+  "rate": {
+    "hint": "gentle",
+    "retry_on": [
+      429,
+      403
+    ]
+  },
+  "result": {
+    "max_bytes": 1048576,
+    "receipt": [
+      "course_id",
+      "planner",
+      "target_id",
+      "image_index",
+      "expected_body_sha256",
+      "planned_at",
+      "unread"
+    ],
+    "redact": [],
+    "truncate": "tail"
+  },
+  "title": "Review a Canvas Classic Quiz description image alternative-text repair",
+  "version": "0.1.0"
+}

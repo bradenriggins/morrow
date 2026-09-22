@@ -1,0 +1,12 @@
+{
+  "entry_name": "proof_create_assignment",
+  "op_id": "d6962587-6943-4f27-9265-c6ba741cda3a",
+  "receipt": {
+    "course_id": 89585,
+    "id": 4045370,
+    "name": "Morrow Product Proof (temp)",
+    "secure_params": "REDACTED",
+    "workflow_state": "deleted"
+  },
+  "undo_of": "46a67f23-f7ba-4c07-8357-59193b528363"
+}
