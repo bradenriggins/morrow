@@ -391,6 +391,12 @@ test("the setup page declares a Content-Security-Policy that admits only the fil
   }
   assert.equal(referenced.length >= 4, true, "the page references fewer files than it ships");
   for (const reference of referenced) {
+    // The policy's img-src admits `data:` outright, so a self-contained image
+    // URI is not a same-origin file reference and is never a broken path.
+    if (reference.startsWith("data:")) {
+      assert.match(reference, /^data:image\//, `${reference} is a data URI the img-src data: allowance does not cover`);
+      continue;
+    }
     assert.doesNotMatch(reference, /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\//, `${reference} is not same-origin`);
     assert.equal(fs.existsSync(path.resolve(installerRoot, "renderer", reference)), true, `${reference} is missing`);
   }
