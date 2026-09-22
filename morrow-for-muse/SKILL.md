@@ -269,7 +269,16 @@ a frozen plan, an approval record, or a course resolution by hand:
    sends the write through every gate and prints the result. An
    approval is single use and expires (at most 24 hours; plan-write
    sets 1 hour). If the educator declines or changes anything, run
-   `plan-write` again with the new request.
+   `plan-write` again with the new request. A prepared write that is
+   never approved is deleted when it expires, and every purge deletes
+   prepared writes and approval records.
+
+A write that names a student uses the label from `students find`
+(`Student A3`, or the echoed `Jane Doe (Student A3)` with
+`--conversation-id` so the typed name can be checked). The approval is
+bound to that student, not to the label text: if the course's labels
+are issued again before the educator approves, `approve-write`
+refuses and sends nothing; run `students find` and `plan-write` again.
 
 Worked example: the educator asks to rename the Week 1 page of course
 89585 to "Week 1 Overview".
