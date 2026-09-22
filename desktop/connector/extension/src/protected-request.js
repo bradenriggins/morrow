@@ -185,8 +185,8 @@ function sourceRange(view, start, end) {
 }
 
 function sentenceStart(text, index) {
-  return /(?:^|[.!?\n…]["”’)\]]?)\s*["“‘(\[]?\s*$/u.test(text.slice(Math.max(0, index - 12), index)) && !/\S/u.test(text.slice(0, index))
-    || /[.!?\n…]["”’)\]]?\s*["“‘(\[]?\s*$/u.test(text.slice(Math.max(0, index - 12), index));
+  const before = text.slice(0, index).replace(/[ \t"“‘(\[]+$/u, "");
+  return !before || /[.!?\n…]["”’)\]]?$/u.test(before);
 }
 
 function capitalizedWords(text) {

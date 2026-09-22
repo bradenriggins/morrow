@@ -216,6 +216,7 @@ test("local protection reports name-like words it could not match instead of pas
   assert.deepEqual(typo.unmatchedNames, ["Chenn"]);
   const sentenceStart = protectCourse("Will you check Jane Doe? Grant needs one too.", ["Jane Doe"]);
   assert.deepEqual(sentenceStart.unmatchedNames, ["Will", "Grant"]);
+  assert.deepEqual(protectCourse("\"Will you check Jane Doe?\"\nGrant asked.", ["Jane Doe"]).unmatchedNames, ["Will", "Grant"]);
   const plain = protectCourse("On Monday, check Jane Doe in Canvas. The Module 2 quiz is late.", ["Jane Doe"]);
   assert.deepEqual(plain.unmatchedNames, []);
 });
