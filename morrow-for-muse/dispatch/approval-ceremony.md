@@ -69,20 +69,24 @@ signed record. Nothing in this tree de-tokenizes.
    course ID, course name, term when known) into the record's
    `target` block, under the tamper seal. The record is unsigned
    (`by=None`).
-2. **Cite.** The agent tells the educator exactly what the op will
-   do (op name, category, **tenant, course ID, and course name**,
-   expiry) and asks them to name the learners it touches, in their
-   own words. For a course write the citation MUST name the tenant,
-   the course ID, and the course name: the educator is shown the
-   human-readable target they are signing for, and dispatch later
-   refuses when the provider's course name/term disagrees with it
-   (W4-P0-11). The educator's reply is the citation. If params
+2. **Show.** The agent shows the educator the approval display
+   (`dispatch/approval_display.py`; `executor.py plan-write` prints
+   it): op name, category, **tenant, course ID, and course name**
+   (read from Canvas), expiry, and the exact request that will be
+   sent (method, path, query, and body). The display, not the
+   educator's reply, carries the target: dispatch later refuses when
+   the provider's course name/term disagrees with the one shown
+   (W4-P0-11), and when the request differs from the one shown. If
+   params carry learner tokens, the agent also asks the educator to
+   name the learners it touches, in their own words. If params
    contain no tokens, there is no identity schedule and the ceremony
    is a plain action approval.
-3. **Authorize.** The educator replies with explicit authorization
-   for this exact action (their own words: a message, a spoken
-   confirmation transcribed verbatim). Standing instructions,
+3. **Authorize.** The educator replies approving this exact action
+   (their own words, any non-empty reply: "Yes" is enough; a spoken
+   confirmation is transcribed verbatim). Standing instructions,
    driver defaults, and inferred intent are not authorization.
+   `executor.py approve-write --op-id <id> --authorization "<reply>"`
+   signs the reply and sends the write in one call.
 4. **Sign.** The agent calls `sign_approval(record, authorization,
    channel=..., resolved_identities=[{token, displayed_as}, ...])`
    with the educator's verbatim reply and the relayed identity
