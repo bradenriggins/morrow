@@ -171,7 +171,11 @@ const state = {
   actionCheckedOnly: false,
   actionFilter: "",
   categories: [],
-  discovery: null,
+  // One list of available courses per signed-in site, keyed by siteAnchorId.
+  discoveries: new Map(),
+  // Sites whose list could not be read. A background refresh does not retry them; Refresh
+  // connected courses does.
+  discoveryFailed: new Set(),
   fileStorageAccess: { browserPermission: false, enabled: false, optedIn: false, checking: true },
   fileStorageBusy: false,
   // WI-5.3: the course-list toolbar. `q` matches name and code; `platform` and `term` are exact
@@ -445,27 +449,29 @@ function restoreCourseFocus(focus) {
   courseList.querySelector(focus.selector)?.focus();
 }
 
-function discoveryExpired() {
-  return !state.discovery || state.discovery.requiresRefresh === true || !Number.isFinite(state.discovery.expiresAt) || Date.now() >= state.discovery.expiresAt;
+/** A list's receipt is good for a few minutes. Its rows stay shown after that; Connect and "Load
+ * more" read the list again first. */
+function discoveryExpired(discovery) {
+  return !discovery || discovery.requiresRefresh === true || !Number.isFinite(discovery.expiresAt) || Date.now() >= discovery.expiresAt;
 }
 
 function discoveryItems() {
-  if (!state.discovery || discoveryExpired() || !Array.isArray(state.discovery.courses)) return [];
-  return state.discovery.courses.map((course) => ({
+  return [...state.discoveries.values()].flatMap((discovery) => (Array.isArray(discovery.courses) ? discovery.courses : []).map((course) => ({
     available: true,
+    siteAnchorId: discovery.siteAnchorId,
     courseId: nativeCourseId(course?.id),
     courseName: typeof course?.name === "string" && course.name ? course.name : `Course ${nativeCourseId(course?.id)}`,
-    provider: state.discovery.provider,
-    origin: state.discovery.origin,
-    siteUrl: state.discovery.siteUrl,
-    principalId: state.discovery.principalId,
+    provider: discovery.provider,
+    origin: discovery.origin,
+    siteUrl: discovery.siteUrl,
+    principalId: discovery.principalId,
     // WI-5.1: passed through so a not-yet-connected row can show the same code, term, and role
     // line a connected row shows from courseMeta.
     code: typeof course?.code === "string" ? course.code : "",
     term: typeof course?.term === "string" ? course.term : "",
     role: typeof course?.role === "string" ? course.role : "",
     favorite: course?.favorite === true
-  })).filter((course) => course.courseId);
+  }))).filter((course) => course.courseId);
 }
 
 function courseMetaKey(origin, courseId) {
@@ -1034,7 +1040,7 @@ function renderCustomize() {
       ? "No individual action matches this search."
       : state.actionCheckedOnly
         ? "The selected courses have no action Morrow can check after it is saved."
-        : "The selected courses have no common actions. Select courses from one platform to continue."}</p>`;
+        : "These courses share no Edit action. Select fewer courses, then choose Edit."}</p>`;
     return;
   }
   categoryList.innerHTML = renderReviewOnlyLine() + areas.map((areaId) => renderArea(areaId, filtering, available)).join("");
@@ -1276,7 +1282,7 @@ function renderCourseList(focus = focusedCourseControl()) {
   courseShowMoreRow.hidden = matches.length <= limited.length;
   courseShowMoreButton.textContent = `Show more (${plural(matches.length - limited.length, "more course")})`;
 
-  const showDiscoveryMore = Boolean(state.discovery) && !discoveryExpired() && state.discovery.complete === false;
+  const showDiscoveryMore = [...state.discoveries.values()].some((discovery) => discovery.complete === false);
   discoveryMoreRow.hidden = !showDiscoveryMore;
   discoveryMoreButton.disabled = state.busy;
 
@@ -1378,7 +1384,7 @@ function renderSelection() {
       : state.mode === "plan"
         ? `${plural(selected.length, "course")} selected. Plan keeps changes ready for your review.`
         : !availableCategories.size
-          ? `${plural(selected.length, "course")} selected. Choose courses from one platform to set Edit.`
+          ? `${plural(selected.length, "course")} selected. These courses share no Edit action.`
           : !categoriesSelected
             ? `${plural(selected.length, "course")} selected. Choose at least one change before you save Edit.`
             : renderSummaryBar(selected, [...state.selectedCategories]);
@@ -1414,7 +1420,7 @@ function renderSelection() {
     : state.mode === "plan"
     ? "To remove any saved Edit access, return the selected courses to Plan."
     : !availableCategories.size
-      ? "The selected courses use different platforms. Choose courses from one platform before you save Edit."
+      ? "These courses share no Edit action. Select fewer courses, then choose Edit."
       : !categoriesSelected
         ? "Choose at least one action. Unchecked actions stay in Plan for your review."
         : "Morrow can apply only the checked actions in these courses until you return them to Plan. Save again if available actions change.";
@@ -1623,8 +1629,9 @@ async function refresh() {
       modeEdit.checked = false;
       showNotice(`${plural(expiredSelected.length, "selected course")} returned to Plan. ${expiredSelected.length === 1 ? "Its" : "Their"} earlier Edit access had an end time, and that time has passed.`);
     }
-    if (state.discovery && !anchors().some((anchor) => anchor.siteAnchorId === state.discovery.siteAnchorId)) {
-      state.discovery = null;
+    const verifiedSites = new Set(anchors().map((anchor) => anchor.siteAnchorId));
+    for (const siteAnchorId of state.discoveries.keys()) {
+      if (!verifiedSites.has(siteAnchorId)) state.discoveries.delete(siteAnchorId);
     }
     rebuildCategories();
     reconcileSelectedCategories();
@@ -1967,91 +1974,127 @@ function normalizeDiscovery(result, siteAnchorId, prior = null) {
   return { ...result, courses };
 }
 
-async function startDiscovery(anchor) {
-  if (!anchor || state.busy) return;
-  setBusy(true);
-  clearError();
-  clearNotice();
+/** Reads one site's first page of available courses. Resolves true when the list was read. */
+async function readDiscovery(anchor) {
   try {
     const discovery = normalizeDiscovery(await request("morrow_course_discovery_start", { siteAnchorId: anchor.siteAnchorId }), anchor.siteAnchorId);
-    state.discovery = discovery;
-    if (discoveryExpired()) throw new Error("course_discovery_receipt_stale");
+    if (discoveryExpired(discovery)) throw new Error("course_discovery_receipt_stale");
+    state.discoveries.set(anchor.siteAnchorId, discovery);
+    state.discoveryFailed.delete(anchor.siteAnchorId);
+    return true;
   } catch (cause) {
-    state.discovery = null;
+    state.discoveries.delete(anchor.siteAnchorId);
+    state.discoveryFailed.add(anchor.siteAnchorId);
     showError(cause);
-  } finally {
-    setBusy(false);
+    return false;
   }
 }
 
-const autoDiscoveredSiteAnchorIds = new Set();
+function discoveryAnchor(siteAnchorId) {
+  return anchors().find((anchor) => anchor.siteAnchorId === siteAnchorId) || null;
+}
 
 /**
- * WI-5.2: replaces the removed manual "Find courses" button. Runs discovery once for each
- * signed-in site, one site per call, so it never interrupts a course list the person is already
- * looking at. refresh() calls this after every read (page open, Refresh, and any status or storage
- * change), so a second signed-in site is discovered on the next such read. WI-5.3 shows the result
- * inline, under "Not connected", in the one merged course list.
+ * WI-5.2: replaces the removed manual "Find courses" button. Reads the list of available courses
+ * for every signed-in site that has none, one site after another, so it never interrupts a course
+ * list the person is already looking at. refresh() calls this after every read (page open, Refresh,
+ * and any status or storage change). A site whose list failed waits for Refresh connected courses.
+ * WI-5.3 shows the result inline, under "Not connected", in the one merged course list.
  */
 async function autoStartDiscovery() {
   if (state.busy) return;
-  const anchor = anchors().find((candidate) => !autoDiscoveredSiteAnchorIds.has(candidate.siteAnchorId));
-  if (!anchor) return;
-  autoDiscoveredSiteAnchorIds.add(anchor.siteAnchorId);
-  await startDiscovery(anchor);
-}
-
-/** WI-5.3: the "Not connected" part of the list shows a discovered site's first page (up to
- * DISCOVERY_PAGE_LIMIT). This reads the next page from the same site into the same merged list. */
-async function loadMoreCourses() {
-  const discovery = state.discovery;
-  if (!discovery || state.busy || discovery.complete) return;
-  if (discoveryExpired()) {
-    showError("course_discovery_receipt_stale");
-    render();
-    return;
-  }
+  const pending = anchors().filter((anchor) => !state.discoveries.has(anchor.siteAnchorId) && !state.discoveryFailed.has(anchor.siteAnchorId));
+  if (!pending.length) return;
   setBusy(true);
   clearError();
   clearNotice();
   try {
-    state.discovery = normalizeDiscovery(await request("morrow_course_discovery_more", {
-      siteAnchorId: discovery.siteAnchorId,
-      discoveryReceiptId: discovery.discoveryReceiptId
-    }), discovery.siteAnchorId, discovery);
-  } catch (cause) {
-    const code = String(cause?.message || cause);
-    if (code === "course_discovery_receipt_missing" || code === "course_discovery_receipt_stale") state.discovery = { ...discovery, requiresRefresh: true };
-    showError(code === "course_discovery_failed" ? "course_discovery_more_failed" : cause);
+    for (const anchor of pending) await readDiscovery(anchor);
   } finally {
     setBusy(false);
   }
 }
 
-/** WI-5.3: a "Not connected" row's own "Connect" button, one course at a time. */
+/** WI-5.3: the "Not connected" part of the list shows each site's first page (up to
+ * DISCOVERY_PAGE_LIMIT). This reads the next page for every site that has one. A list whose
+ * receipt expired is read again from its first page instead. */
+async function loadMoreCourses() {
+  const incomplete = [...state.discoveries.values()].filter((discovery) => discovery.complete === false);
+  if (!incomplete.length || state.busy) return;
+  setBusy(true);
+  clearError();
+  clearNotice();
+  let restarted = false;
+  try {
+    for (const discovery of incomplete) {
+      const anchor = discoveryAnchor(discovery.siteAnchorId);
+      if (!anchor) continue;
+      if (discoveryExpired(discovery)) {
+        restarted = await readDiscovery(anchor) || restarted;
+        continue;
+      }
+      try {
+        state.discoveries.set(discovery.siteAnchorId, normalizeDiscovery(await request("morrow_course_discovery_more", {
+          siteAnchorId: discovery.siteAnchorId,
+          discoveryReceiptId: discovery.discoveryReceiptId
+        }), discovery.siteAnchorId, discovery));
+      } catch (cause) {
+        const code = String(cause?.message || cause);
+        if (code === "course_discovery_receipt_missing" || code === "course_discovery_receipt_stale") {
+          restarted = await readDiscovery(anchor) || restarted;
+          continue;
+        }
+        showError(code === "course_discovery_failed" ? "course_discovery_more_failed" : cause);
+      }
+    }
+    if (restarted && error.hidden) showNotice("Morrow read the list of available courses again from its first page. Select Load more available courses to continue.");
+  } finally {
+    setBusy(false);
+  }
+}
+
+/** The site's list, read again first when its receipt is no longer current. Null when the site is
+ * not signed in or no longer offers the course. */
+async function currentDiscoveryFor(course, { reread = false } = {}) {
+  const anchor = discoveryAnchor(course.siteAnchorId);
+  if (!anchor) throw new Error("course_discovery_anchor_stale");
+  if (reread || discoveryExpired(state.discoveries.get(anchor.siteAnchorId))) {
+    if (!await readDiscovery(anchor)) return null;
+  }
+  const discovery = state.discoveries.get(anchor.siteAnchorId);
+  const offered = (discovery?.courses || []).some((candidate) => nativeCourseId(candidate?.id) === course.courseId);
+  if (!offered) throw new Error("course_selection_unavailable");
+  return discovery;
+}
+
+/** WI-5.3: a "Not connected" row's own "Connect" button, one course at a time. A list that is no
+ * longer current is read again, and the connection tried once more from the new list. */
 async function connectCourse(course) {
   if (state.busy) return;
-  if (!state.discovery || discoveryExpired() || state.discovery.origin !== course.origin) {
-    showError("course_discovery_receipt_stale");
-    render();
-    return;
-  }
-  const { siteAnchorId, discoveryReceiptId } = state.discovery;
   setBusy(true);
   clearError();
   clearNotice();
   try {
-    const result = await request("morrow_course_selection_save", { siteAnchorId, discoveryReceiptId, courseIds: [course.courseId] });
-    const connected = new Set((result?.bindings || []).map((binding) => nativeCourseId(binding?.courseId)).filter(Boolean));
-    if (result?.siteAnchorId !== siteAnchorId || !connected.has(course.courseId)) {
-      throw new Error("course_selection_target_refused");
+    let connectedResult = null;
+    for (const reread of [false, true]) {
+      const discovery = await currentDiscoveryFor(course, { reread });
+      if (!discovery) return;
+      const { siteAnchorId, discoveryReceiptId } = discovery;
+      try {
+        const result = await request("morrow_course_selection_save", { siteAnchorId, discoveryReceiptId, courseIds: [course.courseId] });
+        const connected = new Set((result?.bindings || []).map((binding) => nativeCourseId(binding?.courseId)).filter(Boolean));
+        if (result?.siteAnchorId !== siteAnchorId || !connected.has(course.courseId)) {
+          throw new Error("course_selection_target_refused");
+        }
+        connectedResult = result;
+        break;
+      } catch (cause) {
+        const code = String(cause?.message || cause);
+        if (reread || (code !== "course_discovery_receipt_missing" && code !== "course_discovery_receipt_stale")) throw cause;
+      }
     }
-    showNotice(`${course.courseName} is connected in Plan. Morrow asks before each change.`);
+    if (connectedResult) showNotice(`${course.courseName} is connected in Plan. Morrow asks before each change.`);
   } catch (cause) {
-    const code = String(cause?.message || cause);
-    if (code === "course_discovery_receipt_missing" || code === "course_discovery_receipt_stale") {
-      state.discovery = { ...state.discovery, requiresRefresh: true };
-    }
     showError(cause);
   } finally {
     setBusy(false);
@@ -2312,7 +2355,13 @@ courseList.addEventListener("change", (event) => {
   void refreshSelectedOptions();
 });
 
-refreshButton.addEventListener("click", () => void refresh());
+// Refresh connected courses also reads every site's list of available courses again, including a
+// list that could not be read before.
+refreshButton.addEventListener("click", () => {
+  state.discoveries.clear();
+  state.discoveryFailed.clear();
+  void refresh();
+});
 returnPlanButton.addEventListener("click", () => void returnToPlan(selectedBindings()));
 askFirstAllCoursesButton.addEventListener("click", () => void returnToPlan(activeEditBindings(), { doneMessage: "Done. Morrow asks first in all courses." }));
 saveEditButton.addEventListener("click", () => void saveEditAccess());

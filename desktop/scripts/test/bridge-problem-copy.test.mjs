@@ -97,6 +97,13 @@ test("every explained code names what happened, why, and one next action", () =>
   }
 });
 
+// Every next step a code names is a control that exists. The course list has no "Find courses"
+// button, no course checkboxes, and a mixed Canvas and Moodle selection is allowed.
+test("no code names a control or a cause the Morrow Bridge pages do not have", () => {
+  const retired = /Find (?:available )?courses|find available courses|Select one or more|Select the courses you want|different platforms|Reconnect Canvas or Moodle from|Connect Canvas|Connect Moodle|Connect selected courses/i;
+  for (const code of PROBLEM_CODES) assert.doesNotMatch(problemText(code), retired, code);
+});
+
 test("each code reads as its own state rather than one repeated sentence", () => {
   const titles = PROBLEM_CODES.map((code) => problemCopy(code).title);
   assert.equal(new Set(titles).size, titles.length, "two codes share one title, so one of them names no state of its own");

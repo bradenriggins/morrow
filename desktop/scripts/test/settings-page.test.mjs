@@ -458,6 +458,21 @@ test("the bulk bar's Plan shortcut returns every selected course to Plan", async
   assert.deepEqual(revoked.sort(), [ANATOMY.sourceBindingId, PHYSIOLOGY.sourceBindingId].sort());
 });
 
+// Canvas and Moodle courses can be selected together, so a selection with no Edit action in common
+// is named for what it is, not blamed on the platforms.
+test("courses that share no Edit action say so, and name the step that helps", async () => {
+  const page = await openSettings({
+    status: () => statusFixture([ANATOMY, PHYSIOLOGY]),
+    options: (sourceBindingId) => optionsFixture(sourceBindingId, sourceBindingId === ANATOMY.sourceBindingId ? [CHECKED_ACTION] : [ROUTINE_BUNDLE_B]),
+  });
+  await selectCourse(page, ANATOMY.sourceBindingId);
+  await selectCourse(page, PHYSIOLOGY.sourceBindingId);
+  await page.click("#mode-edit");
+  assert.equal(page.text("#selection-summary"), "2 courses selected. These courses share no Edit action.");
+  assert.equal(page.text("#action-help"), "These courses share no Edit action. Select fewer courses, then choose Edit.");
+  assert.doesNotMatch(page.text("#mode-panel"), /platform/i);
+});
+
 test("Edit actions stay closed until a course is selected and Edit is chosen", async () => {
   const page = await openSettings({
     status: () => statusFixture([ANATOMY]),
@@ -1327,6 +1342,127 @@ test("an empty discovery result leaves the connected course list showing", async
   await page.flush();
   assert.equal(page.queryAll("[data-connect-row]").length, 0);
   assert.equal(page.queryAll(".course-row-name").map((el) => el.textContent).includes("Anatomy"), true);
+});
+
+function discoverySite(siteAnchorId, provider = "canvas") {
+  return {
+    siteAnchorId, provider, origin: provider === "moodle" ? "https://moodle.example.edu" : "https://canvas.example.edu",
+    principalId: "teacher@example.edu", sessionGeneration: 1, runtimeVerified: true,
+  };
+}
+
+function discoveryResult(site, receiptId, courses, fields = {}) {
+  return { ...site, discoveryReceiptId: receiptId, expiresAt: Date.now() + 60_000, courses, pageNumber: 1, complete: true, courseCount: courses.length, ...fields };
+}
+
+// Each signed-in site keeps its own list of available courses, so a second site never replaces
+// the first, and Connect on a row uses that row's own site and list.
+test("every signed-in site lists its own available courses, and Connect uses that row's own site", async () => {
+  const canvas = discoverySite("canvas-site-a");
+  const moodle = discoverySite("moodle-site-b", "moodle");
+  const saved = [];
+  const page = await openSettings({
+    status: () => statusFixture([], { siteAnchors: [canvas, moodle] }),
+    handlers: {
+      morrow_course_discovery_start: ({ siteAnchorId }) => siteAnchorId === canvas.siteAnchorId
+        ? discoveryResult(canvas, "discovery-canvas", [{ id: "7", name: "Anatomy" }])
+        : discoveryResult(moodle, "discovery-moodle", [{ id: "8", name: "Chemistry" }]),
+      morrow_course_selection_save: ({ siteAnchorId, discoveryReceiptId, courseIds }) => {
+        saved.push({ siteAnchorId, discoveryReceiptId, courseIds });
+        return { siteAnchorId, bindings: courseIds.map((courseId) => ({ courseId })) };
+      },
+    },
+  });
+  await page.waitFor(() => page.queryAll("[data-connect-row]").length === 2, "both sites' available courses never showed together");
+  assert.deepEqual(page.queryAll('.course-row[data-row-kind="available"] .course-row-name').map((el) => el.textContent), ["Anatomy", "Chemistry"]);
+  await page.click('[data-connect-row="https://moodle.example.edu|8"]');
+  await page.waitFor(() => saved.length === 1, "Connect never reached the Moodle site");
+  assert.deepEqual(saved[0], { siteAnchorId: moodle.siteAnchorId, discoveryReceiptId: "discovery-moodle", courseIds: ["8"] });
+});
+
+// A list of available courses is good for a few minutes only. The rows stay, and Connect reads
+// the list again first, so a person never has to find the courses again by hand.
+test("Connect on a list that expired reads that site's list again, then connects from the new list", async () => {
+  const site = discoverySite("canvas-site-expiring");
+  let reads = 0;
+  const saved = [];
+  const page = await openSettings({
+    status: () => statusFixture([], { siteAnchors: [site] }),
+    handlers: {
+      morrow_course_discovery_start: () => {
+        reads += 1;
+        return discoveryResult(site, `discovery-${reads}`, [{ id: "7", name: "Anatomy" }], reads === 1 ? { expiresAt: Date.now() + 40 } : {});
+      },
+      morrow_course_selection_save: ({ siteAnchorId, discoveryReceiptId, courseIds }) => {
+        saved.push(discoveryReceiptId);
+        return { siteAnchorId, bindings: courseIds.map((courseId) => ({ courseId })) };
+      },
+    },
+  });
+  await page.waitFor(() => page.queryAll("[data-connect-row]").length === 1, "the available course never showed");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await page.click('[data-connect-row="https://canvas.example.edu|7"]');
+  await page.waitFor(() => saved.length === 1, "Connect never ran after the list expired");
+  assert.equal(reads, 2);
+  assert.deepEqual(saved, ["discovery-2"]);
+  assert.equal(page.hidden("#error"), true);
+  assert.equal(page.text("#notice"), "Anatomy is connected in Plan. Morrow asks before each change.");
+});
+
+test("Connect that the Bridge answers with an old or missing list reads the list again and tries once more", async () => {
+  for (const code of ["course_discovery_receipt_stale", "course_discovery_receipt_missing"]) {
+    const site = discoverySite(`canvas-site-${code}`);
+    let reads = 0;
+    const saved = [];
+    const page = await openSettings({
+      status: () => statusFixture([], { siteAnchors: [site] }),
+      handlers: {
+        morrow_course_discovery_start: () => {
+          reads += 1;
+          return discoveryResult(site, `discovery-${reads}`, [{ id: "7", name: "Anatomy" }]);
+        },
+        morrow_course_selection_save: ({ siteAnchorId, discoveryReceiptId, courseIds }) => {
+          saved.push(discoveryReceiptId);
+          if (saved.length === 1) return { ok: false, code, error: code };
+          return { siteAnchorId, bindings: courseIds.map((courseId) => ({ courseId })) };
+        },
+      },
+    });
+    await page.waitFor(() => page.queryAll("[data-connect-row]").length === 1, "the available course never showed");
+    await page.click('[data-connect-row="https://canvas.example.edu|7"]');
+    await page.waitFor(() => saved.length === 2, `Connect was not tried again after ${code}`);
+    assert.deepEqual(saved, ["discovery-1", "discovery-2"], code);
+    await page.waitFor(() => page.text("#notice") !== "", "the connection was never reported");
+    assert.equal(page.hidden("#error"), true, code);
+  }
+});
+
+// A failed read is not tried again on every background refresh. Refresh connected courses reads
+// every site's list again, the one next step the failure copy names.
+test("a failed list of available courses is read again when the person selects Refresh connected courses", async () => {
+  const site = discoverySite("canvas-site-failing");
+  let reads = 0;
+  const page = await openSettings({
+    status: () => statusFixture([], { siteAnchors: [site] }),
+    handlers: {
+      morrow_course_discovery_start: () => {
+        reads += 1;
+        if (reads === 1) return { ok: false, code: "course_discovery_failed", error: "course_discovery_failed" };
+        return discoveryResult(site, "discovery-after-refresh", [{ id: "7", name: "Anatomy" }]);
+      },
+    },
+  });
+  await page.waitFor(() => !page.hidden("#error"), "the failed read was not reported");
+  assert.equal(page.text("#error"), problemText("course_discovery_failed"));
+  assert.match(page.text("#error"), /Refresh connected courses/);
+  page.listeners.message[0]({ type: "morrow_bridge_status_changed" });
+  await page.flush();
+  assert.equal(reads, 1, "a background refresh must not retry a failed read on its own");
+
+  await page.click("#refresh");
+  await page.waitFor(() => page.queryAll("[data-connect-row]").length === 1, "Refresh connected courses never read the list again");
+  assert.equal(reads, 2);
+  assert.equal(page.hidden("#error"), true);
 });
 
 // WI-1.2 (D1a): the checkbox reads the stored setting service-worker.js's openPlatform reads
