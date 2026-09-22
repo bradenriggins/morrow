@@ -1,0 +1,136 @@
+import { describe, expect, it } from "vitest";
+import type { JsonObject } from "@morrow/contracts";
+import { LoopbackApprovalServer, type ApprovalOperationController } from "../src/approval-server.js";
+
+/**
+ * A controller whose `operationReviewContext` throws if it is ever called. `/recent` names an
+ * item from the plan arguments already on the operation record (F28), never a fresh platform
+ * read, so a test that would fail on a live read proves the page never asks for one.
+ */
+function recentController(
+  operations: readonly JsonObject[],
+  connectionNames: Readonly<Record<string, string>> = {},
+): ApprovalOperationController {
+  return {
+    operationGet: () => { throw new Error("recent changes must not read a single operation"); },
+    operationList: () => ({ schema: "morrow.operations.list.v1", returned: operations.length, operations: [...operations] }),
+    operationReviewContext: async () => { throw new Error("recent changes must not make a live platform read"); },
+    approveOperation: () => { throw new Error("recent changes never approves anything"); },
+    runApprovedOperation: async () => { throw new Error("recent changes never runs anything"); },
+    cancelOperation: () => { throw new Error("recent changes never cancels anything"); },
+    setApprovalBaseUrl: () => undefined,
+    connectionName: (sourceBindingId) => (sourceBindingId ? connectionNames[sourceBindingId] : undefined),
+  };
+}
+
+function finishedOperation(overrides: JsonObject = {}): JsonObject {
+  return {
+    schema: "morrow.operation.v1",
+    operationId: "op:recent-1234",
+    state: "verified",
+    sourceBindingId: "binding-1",
+    createdAt: "2026-09-20T14:00:00.000Z",
+    updatedAt: "2026-09-20T14:05:00.000Z",
+    terminalAt: "2026-09-20T14:05:00.000Z",
+    plan: {
+      tool: "moodle_update_page",
+      arguments: { course_id: 2, content_id: 91, content: "Publish the Week 2 overview." },
+    },
+    ...overrides,
+  };
+}
+
+describe("GET /recent", () => {
+  it("shows no page without an entry code or a session cookie", async () => {
+    const server = new LoopbackApprovalServer(recentController([finishedOperation()]));
+    try {
+      const baseUrl = await server.start();
+      const response = await fetch(`${baseUrl}/recent`, { headers: { accept: "text/html" } });
+      const body = await response.text();
+      expect(response.status).toBe(403);
+      expect(body).not.toContain("op:recent-1234");
+      expect(body).not.toContain("recent-list");
+      expect(body).toContain("Ask your assistant");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("exchanges a one-time entry code for a session, and refuses the same code a second time", async () => {
+    const server = new LoopbackApprovalServer(recentController([finishedOperation()]));
+    try {
+      const baseUrl = await server.start();
+      const code = server.issueRecentChangesEntry();
+
+      const exchanged = await fetch(`${baseUrl}/recent?entry=${encodeURIComponent(code)}`, { redirect: "manual" });
+      expect(exchanged.status).toBe(303);
+      expect(exchanged.headers.get("location")).toBe("/recent");
+      const setCookie = exchanged.headers.get("set-cookie");
+      expect(setCookie).toContain("HttpOnly");
+      expect(setCookie).toContain("SameSite=Strict");
+      const cookie = setCookie?.split(";", 1)[0];
+      expect(cookie).toBeTruthy();
+
+      const page = await fetch(`${baseUrl}/recent`, { headers: { cookie: cookie!, accept: "text/html" } });
+      expect(page.status).toBe(200);
+      const body = await page.text();
+      expect(body).toContain("Recent changes");
+      expect(body).toContain("op:recent-1234");
+
+      const reused = await fetch(`${baseUrl}/recent?entry=${encodeURIComponent(code)}`, { redirect: "manual" });
+      expect(reused.status).toBe(409);
+      const reusedBody = await reused.text();
+      expect(reusedBody).toContain("already opened");
+
+      const unknown = await fetch(`${baseUrl}/recent?entry=not-a-real-code`, { redirect: "manual" });
+      expect(unknown.status).toBe(409);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("shows the plain label, course name, item reference, and status link without decoding a tokenized value", async () => {
+    const operation = finishedOperation({
+      plan: {
+        tool: "moodle_update_page",
+        arguments: { course_id: 2, content_id: "[content:7]", content: "Publish the Week 2 overview." },
+      },
+    });
+    const server = new LoopbackApprovalServer(recentController([operation], { "binding-1": "Biology 101" }));
+    try {
+      const baseUrl = await server.start();
+      const code = server.issueRecentChangesEntry();
+      const exchanged = await fetch(`${baseUrl}/recent?entry=${encodeURIComponent(code)}`, { redirect: "manual" });
+      const cookie = exchanged.headers.get("set-cookie")!.split(";", 1)[0];
+      const page = await fetch(`${baseUrl}/recent`, { headers: { cookie } });
+      const body = await page.text();
+      expect(body).toContain("Edit Page");
+      expect(body).toContain("Biology 101");
+      // The record's own tokenized identifier is shown exactly as the plan carries it, never
+      // resolved against a live read (`operationReviewContext` above throws if that happens).
+      expect(body).toContain("[content:7]");
+      expect(body).toContain(`/operations/${encodeURIComponent("op:recent-1234")}`);
+      expect(body).toContain("Reverse change op:recent-1234.");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps only operations that reached a final state, newest first, up to 50", async () => {
+    const pending = finishedOperation({ operationId: "op:still-open", state: "awaiting_approval", terminalAt: null });
+    const done = finishedOperation({ operationId: "op:recent-1234" });
+    const server = new LoopbackApprovalServer(recentController([pending, done]));
+    try {
+      const baseUrl = await server.start();
+      const code = server.issueRecentChangesEntry();
+      const exchanged = await fetch(`${baseUrl}/recent?entry=${encodeURIComponent(code)}`, { redirect: "manual" });
+      const cookie = exchanged.headers.get("set-cookie")!.split(";", 1)[0];
+      const page = await fetch(`${baseUrl}/recent`, { headers: { cookie } });
+      const body = await page.text();
+      expect(body).toContain("op:recent-1234");
+      expect(body).not.toContain("op:still-open");
+    } finally {
+      await server.close();
+    }
+  });
+});

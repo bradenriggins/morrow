@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { installerState } from "../shared/contract.cjs";
-import { actionView, blackboardSetupOffered, escapeHtml, progress, removalAnnouncement, retentionView, setupUnavailableView, statusSummary, supportView } from "../shared/setup-view.mjs";
+import { actionView, blackboardSetupOffered, escapeHtml, progress, removalAnnouncement, retentionView, setupManagementView, setupUnavailableView, statusSummary, supportView } from "../shared/setup-view.mjs";
 
 const CHATGPT = Object.freeze({ id: "codex", title: "ChatGPT", tier: "primary", supported: true, needsWorkspace: true });
 const CLAUDE_DESKTOP = Object.freeze({ id: "claude-desktop", title: "Claude Desktop", tier: "primary", supported: true, needsWorkspace: true });
@@ -88,9 +88,10 @@ test("the local runtime is not ready yet", () => {
   const current = state({ ...READY_ASSISTANT, runtimeStatus: "uncertain" });
   const view = actionView(current, { chosenAssistantId: "codex" });
   assert.equal(view.title, "Morrow is getting ready.");
-  // The panel offers no step from this state. What it does offer is the setup
-  // a person can change in every state after setup, and nothing else.
-  assert.deepEqual(actions(view.body), ["choose-workspace", "remove-assistant"]);
+  // The panel offers no step from this state, and no setup management: that
+  // moved to the Settings view, reachable regardless (D8).
+  assert.deepEqual(actions(view.body), []);
+  assert.ok(setupManagementView(current), "Settings still offers the setup to change");
 });
 
 test("the Blackboard connection is offered only after an assistant is set up and the runtime is ready", () => {
@@ -127,7 +128,7 @@ test("Chrome must reload a staged Bridge update", () => {
   assert.match(view.body, /data-action="check-bridge"/);
   assert.match(view.body, /data-action="restore-bridge"/);
   assert.match(view.body, />Restore previous Bridge<\/button>/);
-  assert.deepEqual(actions(view.body), ["check-bridge", "restore-bridge", "choose-workspace", "remove-assistant"]);
+  assert.deepEqual(actions(view.body), ["check-bridge", "restore-bridge"]);
   // Numbered instructions name the Chrome menu path. Morrow opens no browser page.
   assert.match(view.body, /<ol class="instructions">/);
   assert.match(view.body, /<strong>Manage Extensions<\/strong>/);
@@ -143,7 +144,7 @@ test("a ready installation exposes its sealed Bridge update", () => {
   const view = actionView(current, { chosenAssistantId: "codex" });
   assert.equal(view.title, "Update Morrow Bridge.");
   assert.match(view.copy, /does not change your course/);
-  assert.deepEqual(actions(view.body), ["check-bridge", "choose-workspace", "remove-assistant"]);
+  assert.deepEqual(actions(view.body), ["check-bridge"]);
   assert.match(view.body, />Update Bridge<\/button>/);
   assert.equal(statusSummary(current), "Update Morrow Bridge");
   assert.equal(step(current, "Morrow Bridge").status, "current");
@@ -154,7 +155,7 @@ test("Bridge delivery is unavailable", () => {
   const current = state({ ...READY_ASSISTANT, lifecycle: "bridge_delivery_unavailable", bridgeDelivery: "unavailable" });
   const view = actionView(current, { chosenAssistantId: "codex" });
   assert.equal(view.title, "Morrow Bridge is not available yet.");
-  assert.deepEqual(actions(view.body), ["choose-workspace", "remove-assistant"], "no Chrome step is offered from a blocked delivery");
+  assert.deepEqual(actions(view.body), [], "no Chrome step is offered from a blocked delivery");
   assert.equal(statusSummary(current), "Morrow Bridge is not available yet");
   assert.equal(step(current, "Morrow Bridge").status, "blocked");
   assert.equal(step(current, "Morrow Bridge").detail, "Not available yet");
@@ -345,10 +346,11 @@ test("the data-retention section reports one removal exactly as the receipt supp
 
 const MATERIALS = "/Home/Documents/Fall biology";
 
-test("the materials folder is named, and can be changed, in every state after setup", () => {
+test("the materials folder is named, and can be changed, on Settings in every state after setup", () => {
   // Every state a person reaches once an assistant is set up. Each one names
   // the exact folder and offers the change, so the folder is never a choice
-  // that can only be made on the first screen.
+  // that can only be made on the first screen. This moved to Settings (D8):
+  // Home shows status and example requests only.
   const cases = [
     ["assistant is configured", READY_ASSISTANT],
     ["Chrome has the Bridge loaded", { ...READY_ASSISTANT, bridgeLoadedInChrome: true }],
@@ -358,10 +360,15 @@ test("the materials folder is named, and can be changed, in every state after se
   ];
   for (const [name, fields] of cases) {
     const current = state({ ...fields, materialsFolder: MATERIALS });
+    const settings = setupManagementView(current);
+    assert.equal(settings.title, "Setup you can change", name);
+    assert.ok(settings.body.includes(escapeHtml(MATERIALS)), `${name}: the folder is named`);
+    assert.match(settings.body, /data-action="choose-workspace">Change folder<\/button>/, name);
+    assert.match(settings.body, /Changing it writes the new folder into ChatGPT\./, name);
+    // Home carries none of this: status and example requests only (D8).
     const view = actionView(current, { chosenAssistantId: "codex" });
-    assert.ok(view.body.includes(escapeHtml(MATERIALS)), `${name}: the folder is named`);
-    assert.match(view.body, /data-action="choose-workspace">Change folder<\/button>/, name);
-    assert.match(view.body, /Changing it writes the new folder into ChatGPT\./, name);
+    assert.equal(view.body.includes(escapeHtml(MATERIALS)), false, `${name}: Home does not name the folder`);
+    assert.equal(view.body.includes("choose-workspace"), false, `${name}: Home offers no folder change`);
   }
 });
 
@@ -379,14 +386,18 @@ test("the folder row before setup asks for a folder and never claims a change it
 });
 
 test("the repair state offers the repair alone, with no setup to change", () => {
-  const view = actionView(state({
+  const current = state({
     lifecycle: "repair_required",
     runtimeStatus: "repair_required",
     assistants: [{ ...CHATGPT, detected: true, configured: true, selected: true }],
     materialsFolder: MATERIALS
-  }), { chosenAssistantId: null });
+  });
+  const view = actionView(current, { chosenAssistantId: null });
   assert.deepEqual(actions(view.body), ["repair", "check-setup-state"]);
   assert.equal(view.body.includes(MATERIALS), false, "the folder cannot be changed from a state Morrow cannot read");
+  // Settings shows nothing to change either, so a repaired computer cannot
+  // reach the folder or assistant list through either view.
+  assert.equal(setupManagementView(current), null);
 });
 
 const TWO_ASSISTANTS = Object.freeze({
@@ -410,18 +421,23 @@ test("two configured assistants are both shown as set up, and the panel keeps th
   assert.equal(view.title, "Your selected course is connected.");
   assert.equal(step(current, "Assistant").status, "done");
   assert.equal(step(current, "Assistant").detail, "ChatGPT, Claude Desktop");
-  assert.match(view.body, /<h3>ChatGPT<\/h3><p>Morrow is set up in this assistant\.<\/p>/);
-  assert.match(view.body, /<h3>Claude Desktop<\/h3><p>Morrow is set up in this assistant\.<\/p>/);
-  assert.deepEqual(actions(view.body), ["choose-workspace", "remove-assistant", "remove-assistant"]);
-  assert.match(view.body, /data-assistant-id="codex" aria-label="Remove Morrow from ChatGPT"/);
-  assert.match(view.body, /data-assistant-id="claude-desktop" aria-label="Remove Morrow from Claude Desktop"/);
+  // Home carries neither assistant row now: that moved to Settings (D8).
+  assert.equal(view.body.includes("<h3>ChatGPT</h3>"), false);
+  assert.equal(view.body.includes("remove-assistant"), false);
+
+  const settings = setupManagementView(current);
+  assert.match(settings.body, /<h3>ChatGPT<\/h3><p>Morrow is set up in this assistant\.<\/p>/);
+  assert.match(settings.body, /<h3>Claude Desktop<\/h3><p>Morrow is set up in this assistant\.<\/p>/);
+  assert.deepEqual(actions(settings.body), ["choose-workspace", "remove-assistant", "remove-assistant"]);
+  assert.match(settings.body, /data-assistant-id="codex" aria-label="Remove Morrow from ChatGPT"/);
+  assert.match(settings.body, /data-assistant-id="claude-desktop" aria-label="Remove Morrow from Claude Desktop"/);
   // Both assistants are written the new folder, and Claude Desktop needs the
   // approval again that only a person can give.
-  assert.match(view.body, /Changing it writes the new folder into ChatGPT and Claude Desktop\. Claude Desktop then asks you to approve Morrow again\./);
+  assert.match(settings.body, /Changing it writes the new folder into ChatGPT and Claude Desktop\. Claude Desktop then asks you to approve Morrow again\./);
 });
 
 test("the folder row names every assistant the change writes to, in one sentence", () => {
-  const view = actionView(state({
+  const settings = setupManagementView(state({
     ...CONNECTED_COURSE,
     assistants: [
       { ...CHATGPT, detected: true, configured: true, selected: true },
@@ -429,8 +445,8 @@ test("the folder row names every assistant the change writes to, in one sentence
       { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, needsWorkspace: true, detected: true, configured: true }
     ],
     materialsFolder: MATERIALS
-  }), { chosenAssistantId: "codex" });
-  assert.match(view.body, /Changing it writes the new folder into ChatGPT, Claude Desktop and Claude Code\./);
+  }));
+  assert.match(settings.body, /Changing it writes the new folder into ChatGPT, Claude Desktop and Claude Code\./);
 });
 
 test("a second assistant waiting for approval keeps the first assistant's steps", () => {
@@ -452,16 +468,19 @@ test("a second assistant waiting for approval keeps the first assistant's steps"
   assert.equal(statusSummary(current), "First read is ready");
   assert.equal(step(current, "Assistant").status, "done");
   assert.equal(step(current, "Assistant").detail, "ChatGPT");
-  // The approval that is still waiting stays reachable, in the row it belongs to.
-  assert.match(view.body, /<h3>Claude Desktop<\/h3><p>Waiting for your approval in Claude Desktop\.<\/p>/);
-  assert.deepEqual(actions(view.body), ["run-first-read", "choose-workspace", "remove-assistant", "open-claude-desktop", "reveal-claude-extension", "check-claude-desktop", "remove-assistant"]);
+  assert.deepEqual(actions(view.body), ["run-first-read"]);
+  // The approval that is still waiting stays reachable, in the row it belongs
+  // to, on Settings now.
+  const settings = setupManagementView(current);
+  assert.match(settings.body, /<h3>Claude Desktop<\/h3><p>Waiting for your approval in Claude Desktop\.<\/p>/);
+  assert.deepEqual(actions(settings.body), ["choose-workspace", "remove-assistant", "open-claude-desktop", "reveal-claude-extension", "check-claude-desktop", "remove-assistant"]);
 });
 
 test("removing Claude Desktop names the step that is left inside Claude Desktop", () => {
-  const view = actionView(state(TWO_ASSISTANTS), { chosenAssistantId: "claude-desktop" });
-  assert.match(view.body, /Remove takes away the Morrow extension Morrow made for Claude Desktop\. If Claude Desktop has it installed, remove Morrow there as well, under Settings, Extensions\./);
+  const settings = setupManagementView(state(TWO_ASSISTANTS));
+  assert.match(settings.body, /Remove takes away the Morrow extension Morrow made for Claude Desktop\. If Claude Desktop has it installed, remove Morrow there as well, under Settings, Extensions\./);
   // Only Claude Desktop keeps its own copy, so only its row says so.
-  assert.equal(view.body.match(/Remove takes away the Morrow extension/g).length, 1);
+  assert.equal(settings.body.match(/Remove takes away the Morrow extension/g).length, 1);
 });
 
 test("an assistant on this computer that is not set up can be set up after setup", () => {
@@ -474,11 +493,44 @@ test("an assistant on this computer that is not set up can be set up after setup
     ],
     materialsFolder: MATERIALS
   });
-  const view = actionView(current, { chosenAssistantId: "codex" });
-  assert.match(view.body, /data-action="install-assistant" data-assistant-id="claude-desktop">Set up Claude Desktop<\/button>/);
-  assert.match(view.body, /<h3>Claude Desktop<\/h3><p>Not set up yet\.<\/p>/);
+  const settings = setupManagementView(current);
+  assert.match(settings.body, /data-action="install-assistant" data-assistant-id="claude-desktop">Set up Claude Desktop<\/button>/);
+  assert.match(settings.body, /<h3>Claude Desktop<\/h3><p>Not set up yet\.<\/p>/);
   // An assistant that is not on this computer is not offered as a choice.
-  assert.equal(view.body.includes("Claude Code"), false);
+  assert.equal(settings.body.includes("Claude Code"), false);
+});
+
+test("the completed course connection shows the three status lines, then three example requests, each with its own Copy button", () => {
+  const current = state({ ...CONNECTED_COURSE, firstPreview: { available: true, completed: true } });
+  const view = actionView(current, { chosenAssistantId: "codex" });
+  assert.equal(view.title, "Your course is connected.");
+
+  // The status lines (D8) come first: one row per area, one state word, one action.
+  const rows = [...view.body.matchAll(/<li class="home-status-row"><span class="home-status-label">(.*?)<\/span><span class="home-status-word">(.*?)<\/span><button class="secondary-button" type="button" data-action="(.*?)">(.*?)<\/button><\/li>/g)]
+    .map(([, label, word, action, actionLabel]) => ({ label, word, action, actionLabel }));
+  assert.deepEqual(rows, [
+    { label: "Assistant", word: "Ready", action: "open-settings", actionLabel: "Manage" },
+    { label: "Morrow Bridge", word: "Connected", action: "check-bridge", actionLabel: "Check Bridge" },
+    { label: "Courses", word: "Connected", action: "run-first-read", actionLabel: "Check connection" },
+  ]);
+  assert.ok(view.body.indexOf("home-status") < view.body.indexOf('<div class="prompt">'), "the status lines come before the example requests");
+
+  const prompts = [
+    "Find images with no alternative text in this course.",
+    "Move the due date of the first assignment one week later.",
+    "Summarize the modules in this course and flag anything that needs review."
+  ];
+  for (const prompt of prompts) {
+    assert.ok(view.body.includes(`<div class="prompt">${prompt}`), `the body names the request: ${prompt}`);
+    assert.match(
+      view.body,
+      new RegExp(`data-action="copy-example-prompt" data-prompt="${prompt.replace(/[.]/g, "\\.")}">Copy</button>`),
+      `each request gets its own Copy button: ${prompt}`
+    );
+  }
+  assert.deepEqual(actions(view.body), ["open-settings", "check-bridge", "run-first-read", "copy-example-prompt", "copy-example-prompt", "copy-example-prompt"]);
+  // Setup management moved to Settings: Home carries none of it.
+  assert.equal(view.body.includes("choose-workspace"), false);
 });
 
 // A title states what Morrow does, needs, or has done, so it carries a verb: a
@@ -572,9 +624,12 @@ test("the support surface names this Morrow, the folders it uses, and where to w
   assert.ok(view.body.includes(escapeHtml(MATERIALS)), "the support surface names the materials folder");
   assert.ok(view.body.includes("/Morrow/State"), "the support surface names the folder Morrow keeps its setup record in");
   assert.ok(view.body.includes("https://meetmorrow.app/support"));
-  // Morrow opens no web page, so the address is text a person reads, not a link
-  // that would do nothing.
+  // Chrome sandboxing denies in-window navigation, so the support address is a
+  // control that asks the main process to open it (D5), not an <a> that would
+  // do nothing.
   assert.equal(view.body.includes("<a "), false);
+  assert.match(view.body, /<button class="quiet-button" type="button" data-action="open-support">https:\/\/meetmorrow\.app\/support<\/button>/);
+  assert.match(view.copy, /Morrow opens two pages only: its Chrome Web Store listing and its support page\./);
 
   // A state Morrow could not read names no version and no folder, and still
   // says where to write.
@@ -582,6 +637,7 @@ test("the support surface names this Morrow, the folders it uses, and where to w
   assert.equal(unknown.body.includes("Morrow version"), false);
   assert.equal(unknown.body.includes("Materials folder"), false);
   assert.ok(unknown.body.includes("https://meetmorrow.app/support"));
+  assert.match(unknown.body, /data-action="open-support"/);
 });
 
 test("a data removal is announced in the words the panel shows", () => {

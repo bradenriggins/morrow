@@ -12,8 +12,10 @@ const test = require("node:test");
 const { installerState } = require("../shared/contract.cjs");
 
 const SELECTORS = [
-  "#setup", "#refresh", "#header-status", ".intro", "#windows-note", "#macos-note", "#progress-list", "#loading",
+  "#setup", "#refresh", "#header-status", "#nav-home", "#nav-settings", "#home-view", "#settings-view",
+  ".intro", "#windows-note", "#macos-note", "#progress-list", "#loading",
   "#action-content", "#action-title", "#action-copy", "#action-body", "#problem",
+  "#setup-management-panel", "#setup-management-title", "#setup-management-body",
   "#updates-panel", "#updates-title", "#updates-copy", "#updates-actions", "#blackboard-panel", "#blackboard-summary", "#blackboard-copy",
   "#blackboard-admin-note", "#blackboard-tenant", "#blackboard-saved-note", "#blackboard-replace-note",
   "#blackboard-form", "#blackboard-base-url", "#blackboard-application-key", "#blackboard-application-secret", "#blackboard-submit",
@@ -70,6 +72,7 @@ class ShimElement {
     this.children = [];
     this.parentElement = null;
     this.hidden = false;
+    this.style = {};
     this.open = false;
     this.value = "";
     this.textContent = "";
@@ -209,7 +212,7 @@ function setupDocument() {
   for (const selector of SELECTORS) {
     const inputs = Object.values(BLACKBOARD_FIELD_SELECTORS);
     const summaries = new Set(["#blackboard-summary", "#retention-summary"]);
-    const headings = new Set(["#action-title", "#updates-title"]);
+    const headings = new Set(["#action-title", "#setup-management-title", "#updates-title"]);
     const tag = selector.endsWith("-form") ? "form" : inputs.includes(selector) ? "input" : summaries.has(selector) ? "summary" : headings.has(selector) ? "h2" : "div";
     const attributes = selector.startsWith("#") ? { id: selector.slice(1) } : { class: selector.slice(1) };
     if (Object.hasOwn(PLATFORM_NOTES, selector)) attributes["data-platform"] = PLATFORM_NOTES[selector];
@@ -958,6 +961,116 @@ test("a staged Bridge update can restore the previous Bridge without repairing a
 
   assert.deepEqual(methods, ["installer:get-state", "installer:restore-bridge"]);
   assert.equal(dom.element("#action-title").textContent, "Update Morrow Bridge.");
+});
+
+test("copying an example request sends its exact text through the clipboard channel", async () => {
+  const calls = [];
+  const current = state({
+    bridgePaired: true,
+    runtimeVerifiedCourseCount: 1,
+    selectedCourseName: "BIOL 101",
+    firstPreview: { available: true, completed: true }
+  });
+  const dom = await load("copy-example", async (method, payload) => {
+    calls.push({ method, payload });
+    return ok(current);
+  });
+
+  assert.equal(dom.element("#action-title").textContent, "Your course is connected.");
+  const copyButtons = dom.element("#action-body").querySelectorAll("[data-action]")
+    .filter((element) => element.dataset.action === "copy-example-prompt");
+  assert.equal(copyButtons.length, 3);
+
+  const second = copyButtons[1];
+  assert.equal(second.dataset.prompt, "Move the due date of the first assignment one week later.");
+  await dom.element("#action-body").dispatch("click", { target: second });
+  await settle();
+
+  assert.deepEqual(calls.at(-1), {
+    method: "installer:copy-to-clipboard",
+    payload: { text: "Move the due date of the first assignment one week later." }
+  });
+});
+
+test("the nav switches between Home and Settings, and Manage on Home reaches Settings (D8, D9)", async () => {
+  const current = state({
+    bridgePaired: true,
+    runtimeVerifiedCourseCount: 1,
+    selectedCourseName: "BIOL 101",
+    firstPreview: { available: true, completed: true }
+  });
+  const dom = await load("nav-switch", async () => ok(current));
+
+  // Home is the default view. Setup you can change, Updates and the
+  // Blackboard connection live on Settings, not beside the action panel.
+  // The active view also gets inline display:contents, so its own children
+  // keep their place in `.setup`'s CSS grid instead of the wrapper div
+  // taking a single grid cell of its own.
+  assert.equal(dom.element("#home-view").hidden, false);
+  assert.equal(dom.element("#home-view").style.display, "contents");
+  assert.equal(dom.element("#settings-view").hidden, true);
+  assert.equal(dom.element("#nav-home").getAttribute("aria-current"), "page");
+  assert.equal(dom.element("#nav-settings").getAttribute("aria-current"), "false");
+
+  await dom.element("#nav-settings").dispatch("click");
+  assert.equal(dom.element("#home-view").hidden, true);
+  assert.equal(dom.element("#settings-view").hidden, false);
+  assert.equal(dom.element("#settings-view").style.display, "contents");
+  assert.equal(dom.element("#nav-home").getAttribute("aria-current"), "false");
+  assert.equal(dom.element("#nav-settings").getAttribute("aria-current"), "page");
+  assert.equal(dom.element("#setup-management-panel").hidden, false);
+  assert.match(dom.element("#setup-management-title").textContent, /Setup you can change/);
+  assert.match(dom.element("#setup-management-body").innerHTML, /Choose folder/);
+
+  await dom.element("#nav-home").dispatch("click");
+  assert.equal(dom.element("#home-view").hidden, false);
+  assert.equal(dom.element("#settings-view").hidden, true);
+
+  // Manage, on the Assistant status line, reaches Settings the same way.
+  const manage = dom.element("#action-body").querySelectorAll("[data-action]").find((entry) => entry.dataset.action === "open-settings");
+  assert.ok(manage, "Home offers a Manage control for the Assistant status line");
+  await dom.element("#action-body").dispatch("click", { target: manage });
+  assert.equal(dom.element("#settings-view").hidden, false);
+  assert.equal(dom.element("#home-view").hidden, true);
+});
+
+test("Home shows the three status lines once the first read is complete, and no setup to change", async () => {
+  const current = state({
+    bridgePaired: true,
+    runtimeVerifiedCourseCount: 1,
+    selectedCourseName: "BIOL 101",
+    firstPreview: { available: true, completed: true }
+  });
+  const dom = await load("home-status", async () => ok(current));
+
+  const actionButtons = dom.element("#action-body").querySelectorAll("[data-action]").map((entry) => entry.dataset.action);
+  assert.deepEqual(
+    actionButtons,
+    ["open-settings", "check-bridge", "run-first-read", "copy-example-prompt", "copy-example-prompt", "copy-example-prompt"],
+    "the status lines come before the example requests"
+  );
+  assert.match(dom.element("#action-body").innerHTML, /home-status-word">Ready</);
+  assert.match(dom.element("#action-body").innerHTML, /home-status-word">Connected</);
+
+  // The setup a person can change is not on Home; it moved to Settings (D8).
+  assert.equal(dom.element("#action-body").innerHTML.includes("Change folder"), false);
+});
+
+test("selecting Support asks main to open the support page, from a control outside the action panel", async () => {
+  const calls = [];
+  const current = state();
+  const dom = await load("open-support", async (method, payload) => {
+    calls.push({ method, payload });
+    return ok(current);
+  });
+
+  assert.match(dom.element("#support").innerHTML, /<button class="quiet-button" type="button" data-action="open-support">https:\/\/meetmorrow\.app\/support<\/button>/);
+  const support = dom.element("#support").querySelector("[data-action]");
+  assert.equal(support.dataset.action, "open-support");
+  await dom.element("#support").dispatch("click", { target: support });
+  await settle();
+
+  assert.deepEqual(calls.at(-1), { method: "installer:open-support", payload: undefined });
 });
 
 test("a completed step whose old action is gone focuses the new primary action", async () => {

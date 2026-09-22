@@ -224,28 +224,39 @@ function assistantRow(assistant) {
 }
 
 /**
- * The setup a person can change after it is done: the materials folder, every
- * assistant Morrow is set up in, and every other assistant on this computer it
- * can be added to. It is shown in every state after setup, so neither the
- * folder nor the assistant list is reachable only from the first screen.
+ * The setup a person can change once there is a setup to change: the
+ * materials folder, every assistant Morrow is set up in, and every other
+ * assistant on this computer it can be added to. It lives on the Settings
+ * view (D8, D9): Home shows status and example requests only, never the
+ * setup a person can change. Repair is the exception: from that state Morrow
+ * offers the repair and a re-check and nothing else, so Settings shows
+ * nothing to change either.
  */
-function manageSetup(current) {
+export function setupManagementView(current) {
+  if (current?.lifecycle === "repair_required" || current?.runtime?.status === "repair_required") return null;
+  if (!configuredAssistant(current) && !pendingAssistant(current)) return null;
   const assistants = (Array.isArray(current?.assistants) ? current.assistants : [])
     .filter((assistant) => assistant?.configured === true || assistant?.pending === true
       || (assistant?.detected === true && assistant?.supported !== false));
-  return `<h3 class="setup-heading">Setup you can change</h3>${materialsRow(current)}${assistants.map(assistantRow).join("")}`;
+  return { title: "Setup you can change", body: `${materialsRow(current)}${assistants.map(assistantRow).join("")}` };
 }
 
-/**
- * The one step the panel asks for, plus the setup a person can change once
- * there is a setup to change. Repair is the exception: from that state Morrow
- * offers the repair and a re-check and nothing else.
- */
+/** The one step the panel asks for. Setup management moved to Settings (D8). */
 export function actionView(current, options = {}) {
-  const view = actionPanel(current, options);
-  if (current?.lifecycle === "repair_required" || current?.runtime?.status === "repair_required") return view;
-  if (!configuredAssistant(current) && !pendingAssistant(current)) return view;
-  return { ...view, body: `${view.body}${manageSetup(current)}` };
+  return actionPanel(current, options);
+}
+
+// The one status line each row of the Home screen shows once the first read
+// is complete (D8): a fixed label, one state word, and the one action Home
+// offers for it. Deeper management for each area lives on the Settings view.
+const HOME_STATUS_ROWS = Object.freeze([
+  { label: "Assistant", word: "Ready", action: "open-settings", actionLabel: "Manage" },
+  { label: "Morrow Bridge", word: "Connected", action: "check-bridge", actionLabel: "Check Bridge" },
+  { label: "Courses", word: "Connected", action: "run-first-read", actionLabel: "Check connection" },
+]);
+
+function homeStatusLines() {
+  return `<ul class="home-status">${HOME_STATUS_ROWS.map((row) => `<li class="home-status-row"><span class="home-status-label">${escapeHtml(row.label)}</span><span class="home-status-word">${escapeHtml(row.word)}</span><button class="secondary-button" type="button" data-action="${row.action}">${row.actionLabel}</button></li>`).join("")}</ul>`;
 }
 
 function actionPanel(current, { chosenAssistantId = null } = {}) {
@@ -349,7 +360,7 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
     return {
       title: "Your course is connected.",
       copy: `Morrow read ${course} successfully. Continue in ${assistant.title} and ask what you want to do, for example:`,
-      body: '<div class="prompt">Summarize the modules in this course and flag anything that needs review.</div>',
+      body: `${homeStatusLines()}<div class="prompt">Find images with no alternative text in this course.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Find images with no alternative text in this course.">Copy</button></div></div><div class="prompt">Move the due date of the first assignment one week later.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Move the due date of the first assignment one week later.">Copy</button></div></div><div class="prompt">Summarize the modules in this course and flag anything that needs review.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Summarize the modules in this course and flag anything that needs review.">Copy</button></div></div>`,
     };
   }
   if (previewReady(current)) {
@@ -452,15 +463,19 @@ export function problemView(problem) {
   };
 }
 
-// The support address the Morrow application already names for itself, in the
-// Claude Desktop bundle it writes (installer/shared/claude-desktop.cjs:120).
+// The support address Morrow is allowed to open (D5). It matches the fixed
+// external-address allow list in installer/main.cjs, and the address the
+// Claude Desktop bundle already names for itself
+// (installer/shared/claude-desktop.cjs:120).
 const SUPPORT_ADDRESS = "https://meetmorrow.app/support";
 
 /**
  * What a person needs when they ask for help: which Morrow this is, where it
  * keeps its own files, and where to write. Morrow names only what its state
  * carries, so a value it has not read is left out instead of guessed at. The
- * address is text rather than a link because Morrow opens no web page.
+ * support address is a control, not a link, because Chrome sandboxing denies
+ * in-window navigation: selecting it asks the main process to open exactly
+ * this address, the one entry of the allow list Morrow can reach today.
  */
 export function supportView(current) {
   const version = typeof current?.updates?.currentVersion === "string" && current.updates.currentVersion.length > 0
@@ -472,13 +487,13 @@ export function supportView(current) {
   const rows = [
     version ? { label: "Morrow version", value: version, path: false } : null,
     materials ? { label: "Materials folder", value: materials, path: true } : null,
-    stateFolder ? { label: "Setup record and journal", value: stateFolder, path: true } : null,
-    { label: "Support", value: SUPPORT_ADDRESS, path: false }
+    stateFolder ? { label: "Setup record and journal", value: stateFolder, path: true } : null
   ].filter(Boolean);
+  const supportRow = `<li><span class="support-label">Support</span><button class="quiet-button" type="button" data-action="open-support">${escapeHtml(SUPPORT_ADDRESS)}</button></li>`;
   return {
     title: "Where to get help",
-    copy: "Morrow opens no web page. Open the support address in your browser, and name the version below when you write.",
-    body: `<ul class="support-list">${rows.map((row) => `<li><span class="support-label">${escapeHtml(row.label)}</span><span class="${row.path ? "support-path" : "support-value"}">${escapeHtml(row.value)}</span></li>`).join("")}</ul>`
+    copy: "Morrow opens two pages only: its Chrome Web Store listing and its support page. Select Support to open its page, and name the version below when you write.",
+    body: `<ul class="support-list">${rows.map((row) => `<li><span class="support-label">${escapeHtml(row.label)}</span><span class="${row.path ? "support-path" : "support-value"}">${escapeHtml(row.value)}</span></li>`).join("")}${supportRow}</ul>`
   };
 }
 

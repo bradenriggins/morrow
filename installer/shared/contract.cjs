@@ -95,6 +95,14 @@ const PUBLIC_ERRORS = Object.freeze({
     message: "Morrow could not remove that Blackboard connection.",
     recovery: "Check status to see the Blackboard connection Morrow has now, then remove it again."
   },
+  clipboard_write_failed: {
+    message: "Morrow could not copy that text.",
+    recovery: "Select the text yourself and copy it, then try again."
+  },
+  external_open_failed: {
+    message: "Morrow could not open that page.",
+    recovery: "Open the address yourself from Where to get help, then try again."
+  },
   setup_failed: {
     message: "Morrow could not finish this step.",
     recovery: "Check status, then try the step again. If it still fails, close Morrow and reopen it."

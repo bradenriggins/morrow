@@ -1,6 +1,55 @@
 import { problemCode } from "../src/bridge-problem-copy.js";
+import { CURATED_CATEGORY_SPECS } from "../src/edit-policy.js";
 
 const NOT_CHECKED = "Not checked";
+
+// WI-5.8: every curated category id that is routine, grouped by provider. A static table, the same
+// one settings.js keeps (ROUTINE_CATEGORY_IDS_BY_PROVIDER), so the popup's D7 state text needs no
+// extra fetch beyond morrow_edit_policy_status.
+const ROUTINE_CATEGORY_IDS_BY_PROVIDER = CURATED_CATEGORY_SPECS.filter((spec) => spec.routine === true)
+  .reduce((byProvider, spec) => {
+    (byProvider[spec.provider] ||= []).push(spec.id);
+    return byProvider;
+  }, {});
+
+function clockTime(ms) {
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(ms);
+}
+
+/**
+ * D7: one connection's own state text, read only from its editPermission summary. A permission
+ * present in morrow_edit_policy_status's bindings is already fresh (the service worker filters out
+ * an expired or catalog-stale one), so the popup needs no separate staleness check to show it (see
+ * settings.js's isStale for the fuller check the Courses and access page keeps for other reasons).
+ */
+export function courseStateText(binding) {
+  const permission = binding?.editPermission;
+  const ids = Array.isArray(permission?.enabledCategories) ? permission.enabledCategories.filter((id) => typeof id === "string") : [];
+  const expiresAt = Number.isFinite(permission?.expiresAt) ? permission.expiresAt : null;
+  if (!ids.length || (expiresAt !== null && expiresAt <= Date.now())) return "Plan. Asks first.";
+  const until = expiresAt !== null ? `Edit until ${clockTime(expiresAt)}.` : "Edit.";
+  const routineIds = ROUTINE_CATEGORY_IDS_BY_PROVIDER[binding.provider] || [];
+  const isRoutine = routineIds.length > 0 && ids.length === routineIds.length && routineIds.every((id) => ids.includes(id));
+  if (isRoutine) return `${until} Routine edits.`;
+  if (ids.length === 1) return `${until} 1 kind of edit.`;
+  return `${until} Custom.`;
+}
+
+/**
+ * WI-5.8: the popup's own course list, "up to 5, then All courses". `editBindings` is
+ * morrow_edit_policy_status's own bindings array, the one source that carries both the course name
+ * and the live editPermission summary together.
+ */
+export function connectedCourseRows(editBindings, limit = 5) {
+  const eligible = (Array.isArray(editBindings) ? editBindings : [])
+    .filter((binding) => typeof binding?.sourceBindingId === "string" && binding.sourceBindingId && typeof binding.courseName === "string" && binding.courseName);
+  const rows = eligible.map((binding) => ({
+    sourceBindingId: binding.sourceBindingId,
+    name: binding.courseName,
+    state: courseStateText(binding),
+  }));
+  return { shown: rows.slice(0, limit), more: Math.max(0, rows.length - limit) };
+}
 
 function siteAnchors(status) {
   return Array.isArray(status?.siteAnchors) ? status.siteAnchors : [];
@@ -108,6 +157,11 @@ export function statusAnnouncement(status) {
   return `Morrow: ${statusValue(status)}. Course: ${courseValue(status)}.`;
 }
 
+// WI-5.8: one primary action for the present tab, and only one. Its wording never names a
+// platform: the person already knows what course the active tab shows (D1a). popup.js hides this
+// control instead, whenever the saved course's own tab needs reopening (platformClosed) or nothing
+// is detected here, so "Connect this course", "Open Canvas"/"Open Moodle", or no primary action at
+// all are the only three outcomes.
 export function primaryLabel(status, detectedProvider = null) {
   if (!status) return "Try again";
   if (runtimeNeedsReload(status)) return "Open setup guide";
@@ -117,7 +171,7 @@ export function primaryLabel(status, detectedProvider = null) {
   if (canChooseCourses(status)) return "Choose courses";
   if (!status.connected) return "Waiting for your assistant";
   const platform = currentPlatform(status, detectedProvider);
-  return platform ? `Connect ${platform}` : "Open Canvas or Moodle";
+  return platform ? "Connect this course" : "";
 }
 
 function courseTabName(platform) {
@@ -126,13 +180,13 @@ function courseTabName(platform) {
 
 function closedBindingDetail(platform, savedPlatform) {
   if (platform && platform !== savedPlatform) {
-    return `The selected ${savedPlatform || "learning platform"} course is not open. Morrow Bridge detected ${platform}. Select Connect ${platform} to add it, or open the selected course in ${savedPlatform || "its learning platform"}.`;
+    return `The selected ${savedPlatform || "learning platform"} course is not open. Morrow Bridge detected ${platform} in this tab. Select ${savedPlatform ? `Open ${savedPlatform}` : "the platform button Morrow Bridge shows"} to reopen the selected course, or open it yourself in ${savedPlatform || "its learning platform"}.`;
   }
-  return `This selected course is connected, but its ${savedPlatform || "learning platform"} tab is no longer open. Open the course in Chrome, sign in, then select ${savedPlatform ? `Connect ${savedPlatform}` : "the platform button Morrow Bridge shows"}.`;
+  return `This selected course is connected, but its ${savedPlatform || "learning platform"} tab is no longer open. Select ${savedPlatform ? `Open ${savedPlatform}` : "the platform button Morrow Bridge shows"} to reopen it.`;
 }
 
 function staleAnchorDetail(platform) {
-  return `The saved ${platform || "learning platform"} connection is no longer open. Open a ${courseTabName(platform)} in Chrome, sign in, then select ${platform ? `Connect ${platform}` : "the platform button Morrow Bridge shows"}.`;
+  return `The saved ${platform || "learning platform"} connection is no longer open. Select ${platform ? `Open ${platform}` : "the platform button Morrow Bridge shows"} to reopen it.`;
 }
 
 export function detailText(status, detectedProvider = null) {
@@ -161,8 +215,8 @@ export function detailText(status, detectedProvider = null) {
               : anchor
                 ? staleAnchorDetail(platform)
                 : platform
-                  ? `Morrow Bridge detected ${platform}. Select Connect ${platform} to allow access to this signed-in course.`
-                  : "Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge will detect the platform and show Connect Canvas or Connect Moodle.";
+                  ? `Morrow Bridge detected ${platform}. Select Connect this course to allow access to this signed-in course.`
+                  : "Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge will detect the platform and show Connect this course.";
 }
 
 export function controlState(status, { actionInFlight = false, detectedProvider = null } = {}) {

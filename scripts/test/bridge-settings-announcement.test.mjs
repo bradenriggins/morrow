@@ -58,8 +58,8 @@ test("the settings page announces through one polite status region, one alert, a
 });
 
 test("no settings collection or in-place status line is its own live region", () => {
-  for (const id of ["course-list", "category-list", "page-status", "visible-scope", "site-anchor-details",
-    "discovery-progress-text", "file-storage-status", "selection-summary", "edit-stage-hint", "notice", "save-confirmation-detail"]) {
+  for (const id of ["course-list", "category-list",
+    "file-storage-status", "selection-summary", "edit-stage-hint", "notice", "save-confirmation-detail"]) {
     assert.equal("aria-live" in nodeById(id).attributes, false, id);
     assert.equal(nodeById(id).attributes.role, undefined, id);
   }
@@ -81,29 +81,34 @@ test("the settings controls state their own labels in visible text", () => {
   assert.doesNotMatch(settingsHtml, /<span class="brand-wordmark"[^>]*aria-label/);
 });
 
-/** One stub element per id in settings.html, carrying the attributes the page ships. */
+/** One stub element per id in settings.html, carrying the attributes the page ships. Also
+ * indexed by class, because settings.js reads a few fields (the platform and term menus) by their
+ * wrapping label's class rather than by id. */
 function stubDom(html) {
   const nodes = {};
+  const stubFor = (node) => ({
+    attributes: { ...node.attributes },
+    textContent: "",
+    innerHTML: "",
+    value: "",
+    options: [],
+    selectedIndex: 0,
+    hidden: "hidden" in node.attributes,
+    disabled: "disabled" in node.attributes,
+    checked: "checked" in node.attributes,
+    listeners: {},
+    setAttribute(name, text) { this.attributes[name] = text; },
+    removeAttribute(name) { delete this.attributes[name]; },
+    addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); },
+    focus() {},
+    querySelector: () => null,
+  });
   for (const node of elements(html)) {
     const id = node.attributes.id;
-    if (!id) continue;
-    nodes[`#${id}`] = {
-      attributes: { ...node.attributes },
-      textContent: "",
-      innerHTML: "",
-      value: "",
-      options: [],
-      selectedIndex: 0,
-      hidden: "hidden" in node.attributes,
-      disabled: "disabled" in node.attributes,
-      checked: "checked" in node.attributes,
-      listeners: {},
-      setAttribute(name, text) { this.attributes[name] = text; },
-      removeAttribute(name) { delete this.attributes[name]; },
-      addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); },
-      focus() {},
-      querySelector: () => null,
-    };
+    if (id) nodes[`#${id}`] = stubFor(node);
+    for (const className of (node.attributes.class || "").split(/\s+/).filter(Boolean)) {
+      if (!(`.${className}` in nodes)) nodes[`.${className}`] = stubFor(node);
+    }
   }
   return nodes;
 }
@@ -159,23 +164,21 @@ test("the one status region carries the course-list summary and every notice", a
   };
   try {
     await import("../../connector/extension/settings/settings.js");
-    assert.equal(nodes["#announcement"].textContent, "8 connected courses, page 1 of 2.");
-    assert.equal(nodes["#page-status"].textContent, "Showing 1–6 of 8 matching connected courses. Page 1 of 2.");
-
-    nodes["#next-page"].listeners.click[0]();
-    assert.equal(nodes["#announcement"].textContent, "8 connected courses, page 2 of 2.");
+    // WI-5.3 removed pagination (no more "page 1 of 2" or #page-status/#next-page): with 8 courses
+    // (the FEW_COURSES_THRESHOLD), the list renders as one plain count.
+    assert.equal(nodes["#announcement"].textContent, "8 courses.");
 
     nodes["#course-filter"].value = "Course 3";
     nodes["#course-filter"].listeners.input[0]();
-    assert.equal(nodes["#announcement"].textContent, "Search matches 1 connected course.");
+    assert.equal(nodes["#announcement"].textContent, "Search matches 1 course.");
 
     nodes["#course-filter"].value = "Rhetoric";
     nodes["#course-filter"].listeners.input[0]();
-    assert.equal(nodes["#announcement"].textContent, "No connected course matches this search.");
+    assert.equal(nodes["#announcement"].textContent, "No course matches this search or filter.");
 
     nodes["#course-filter"].value = "";
     nodes["#course-filter"].listeners.input[0]();
-    assert.equal(nodes["#announcement"].textContent, "8 connected courses, page 1 of 2.");
+    assert.equal(nodes["#announcement"].textContent, "8 courses.");
 
     nodes["#enable-file-storage"].listeners.click[0]();
     await settle(() => nodes["#file-storage-status"].textContent.startsWith("On."), "course file access never reported on");
@@ -189,7 +192,10 @@ test("the one status region carries the course-list summary and every notice", a
     nodes["#course-filter"].listeners.input[0]();
     assert.match(nodes["#announcement"].textContent, /^Course file access is on\./);
 
-    for (const selector of Object.keys(nodes)) {
+    // Class-keyed stub entries (added so settings.js's .platform-field/.term-field lookups
+    // resolve) alias the same elements the id-keyed entries already cover, so only the id keys
+    // are checked here; checking both would test the same element twice under two selectors.
+    for (const selector of Object.keys(nodes).filter((key) => key.startsWith("#"))) {
       assert.equal("aria-live" in nodes[selector].attributes, ["#announcement", "#private-chat-history"].includes(selector), selector);
     }
   } finally {

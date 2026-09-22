@@ -40,6 +40,12 @@ function stubElement() {
     /** Runs the handlers the page registered, the way a real event does. */
     dispatch(type, event) { for (const handler of this.listeners[type] || []) handler(event); },
     focus() {}, querySelector: () => null,
+    // WI-5.5: syncCustomizeTriStates() walks categoryList.querySelectorAll to update each area's
+    // and kind's "select all" checkbox in place. This stub carries no child element tree (it holds
+    // only the rendered innerHTML string, like querySelector above), so an empty list is the
+    // correct answer here: nothing to sync, and every test in this file reads the rendered markup
+    // through innerHTML directly rather than through a live child node.
+    querySelectorAll: () => [],
   };
 }
 
@@ -137,7 +143,31 @@ function selectCourse(page, sourceBindingId) {
 
 /** Selects one individual action, the way a click on its action checkbox does. */
 function selectAction(page, id) {
-  page.node("#category-list").dispatch("change", { target: new StubInput({ type: "checkbox", checked: true, value: id }) });
+  // WI-5.5's change handler checks target.dataset before target.classList (an area or kind "select
+  // all" box carries a dataset key; a single action checkbox carries neither), so this stub target
+  // needs both, the way a real HTMLInputElement checkbox would.
+  page.node("#category-list").dispatch("change", { target: new StubInput({
+    type: "checkbox", checked: true, value: id, dataset: {}, classList: { contains: (name) => name === "customize-action-input" },
+  }) });
+}
+
+/** Dispatches one disclosure click on #category-list, the way a person's click does. */
+function dispatchToggle(page, attribute, datasetKey, key) {
+  const target = Object.create(globalThis.Element.prototype);
+  target.closest = (selector) => (selector === `[${attribute}]` ? { dataset: { [datasetKey]: key } } : null);
+  page.node("#category-list").dispatch("click", { target });
+}
+
+/**
+ * WI-5.5: opens one Customize area and its "Create and edit" kind, the way clicking each
+ * disclosure button does. Both levels are closed by default, and this file's fixture actions
+ * carry no `area` or `kind`, so they all render under the generated "other" area's "edit" kind
+ * (settings.js's categoryAreaId and categoryKind): a test that reads the rendered action list has
+ * to open both disclosures first, the way a person would.
+ */
+function openArea(page, areaId = "other", kind = "edit") {
+  dispatchToggle(page, "data-area-toggle", "areaToggle", areaId);
+  dispatchToggle(page, "data-kind-toggle", "kindToggle", `${areaId}/${kind}`);
 }
 
 /** Loads the page with one connected course selected, its actions read, and Edit chosen. */
@@ -147,6 +177,7 @@ async function openEditStage(actions) {
     options: (sourceBindingId) => optionsFixture(sourceBindingId, actions),
   });
   selectCourse(page, CANVAS_COURSE.sourceBindingId);
+  openArea(page);
   await settle(() => page.node("#category-list").innerHTML.includes(actions[0].label),
     "the page never listed the individual actions for the selected course");
   page.node("#mode-edit").checked = true;
@@ -184,6 +215,7 @@ test("Plan and Edit reads the individual actions for a course only when that cou
   assert.equal(page.node("#category-list").innerHTML, '<p class="state-message">Select a course to read its available Edit and Review-only actions.</p>');
 
   selectCourse(page, CANVAS_COURSE.sourceBindingId);
+  openArea(page);
   await settle(() => page.sent("morrow_edit_policy_options").length > 0, "the page never read the actions for the selected course");
   assert.deepEqual(page.sent("morrow_edit_policy_options"),
     [{ type: "morrow_edit_policy_options", sourceBindingId: CANVAS_COURSE.sourceBindingId }]);
@@ -193,7 +225,10 @@ test("Plan and Edit reads the individual actions for a course only when that cou
 test("an action published for review only carries its reason and no Edit control", async () => {
   const page = await openEditStage([CHECKED_ACTION, REVIEW_ONLY_ACTION]);
   const listed = page.node("#category-list").innerHTML;
-  assert.match(listed, /<strong>Review only: Update New Quiz item<\/strong>/);
+  // WI-5.5: review-only actions are "Not in the picker". They surface only in the read-only
+  // "N actions always wait for your review" disclosure at the top of the list, never as a
+  // checkbox in an area/kind, so this is the summary line's own <li>, not an Edit-control row.
+  assert.match(listed, /<li><strong>Update New Quiz item<\/strong>/);
   assert.ok(listed.includes(REVIEW_ONLY_ACTION.reviewReason));
   assert.equal(listed.includes(`value="${REVIEW_ONLY_ACTION.id}"`), false);
   assert.ok(listed.includes(`value="${CHECKED_ACTION.id}"`));
@@ -483,7 +518,10 @@ test("the checked-only filter leaves only the actions Morrow can check after the
   page.node("#action-checked-only").dispatch("change");
   assert.ok(listed().includes(CHECKED_ACTION.label));
   assert.equal(listed().includes(UNCHECKED_ACTION.label), false);
-  assert.equal(listed().includes(REVIEW_ONLY_ACTION.label), false);
+  // WI-5.5: review-only actions are never in the picker the checked-only filter narrows. They
+  // stay in their own always-visible "N actions always wait for your review" disclosure, so
+  // toggling the filter does not remove this label; it was never part of the filtered list.
+  assert.ok(listed().includes(REVIEW_ONLY_ACTION.label));
 
   page.node("#action-checked-only").checked = false;
   page.node("#action-checked-only").dispatch("change");

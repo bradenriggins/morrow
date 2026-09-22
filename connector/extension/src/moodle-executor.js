@@ -23,6 +23,11 @@ export async function executeMoodleInPage(input) {
     return exact && Number.isSafeInteger(Number(exact)) && String(Number(exact)) === exact ? exact : "";
   };
   const sectionNumber = (value) => Number.isSafeInteger(value) && value >= 0 ? String(value) : "";
+  const trimmedDiscoveryField = (value, max = 120) => {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim().slice(0, max);
+    return trimmed ? trimmed : undefined;
+  };
   const error = (code, extra = {}) => ({ ok: false, sent: false, error: code, ...extra });
   const executionExpired = () => !Number.isSafeInteger(input?.expiresAt) || Date.now() >= input.expiresAt;
   const definitions = Object.freeze({
@@ -4863,7 +4868,19 @@ export async function executeMoodleInPage(input) {
       const timelineCourses = response.data.courses.slice(0, limit).map((course) => {
         const courseId = id(course?.id);
         const name = String(course?.fullname || course?.displayname || course?.shortname || "").trim().replace(/\s+/g, " ").slice(0, 500);
-        return courseId && name ? { id: courseId, name } : null;
+        if (!courseId || !name) return null;
+        const code = trimmedDiscoveryField(course?.shortname);
+        const term = trimmedDiscoveryField(course?.coursecategory);
+        const favorite = typeof course?.isfavourite === "boolean" ? course.isfavourite : undefined;
+        const published = typeof course?.visible === "boolean" ? course.visible : undefined;
+        return {
+          id: courseId,
+          name,
+          ...(code !== undefined ? { code } : {}),
+          ...(term !== undefined ? { term } : {}),
+          ...(favorite !== undefined ? { favorite } : {}),
+          ...(published !== undefined ? { published } : {}),
+        };
       });
       if (timelineCourses.some((course) => !course)) return error("moodle_courses_invalid", { status: response.status });
       let courses = timelineCourses;

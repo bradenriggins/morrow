@@ -27,6 +27,16 @@ interface BatchStatusCapableRuntime {
   batchApprovalStatus?(batchId: string): JsonObject;
 }
 
+/** A runtime that can also mint a link to the review server's `/recent` page (WI-6.4, F20). The
+ * one-time entry code has to come from the same LoopbackApprovalServer instance that will later
+ * exchange it for a cookie, so GatewayRuntime alone cannot build this link; a server composition
+ * that started a review server reads this the same optional way morrow_operation_wait already
+ * reads BatchStatusCapableRuntime above, so a composition that did not gets a clear "unavailable"
+ * failure instead of a crash. */
+interface RecentChangesCapableRuntime {
+  recentChangesUrl?(): string;
+}
+
 /** The states `morrow_operation_wait` keeps polling through. Any other reported state, known or not,
  * ends the wait: the point of this tool is to sleep through the part of a change that a person must
  * still act on, not to model every state an operation or a batch can reach. */
@@ -282,6 +292,31 @@ export function registerOperationTools(server: McpServer, runtime: GatewayRuntim
         ) as unknown as CallToolResult;
       } catch (error) {
         return failure(operation_id, "create a correction for", error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "morrow_recent_changes",
+    {
+      title: "See recent changes",
+      description: "Give the person a one-time link to Morrow's recent changes page: the last 50 finished operations, each with its plain label, course, item reference, time, state, a link to its own status page, and a ready request to reverse it. The Bridge never links here on its own; this tool and a result page's own \"See recent changes\" link are the only ways to it.",
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    async () => {
+      const capable = runtime as unknown as RecentChangesCapableRuntime;
+      if (typeof capable.recentChangesUrl !== "function") {
+        return failure("recent_changes", "open", new Error("this server has no recent changes page"));
+      }
+      try {
+        const url = capable.recentChangesUrl();
+        return {
+          content: [{ type: "text", text: `Here is the link to Morrow's recent changes: ${url}` }],
+          structuredContent: { schema: "morrow.recent_changes_link.v1", url },
+        };
+      } catch (error) {
+        return failure("recent_changes", "open", error);
       }
     },
   );

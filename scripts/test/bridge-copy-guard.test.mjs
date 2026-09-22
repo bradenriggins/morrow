@@ -124,10 +124,10 @@ test("the popup, settings, and setup guide carry no decorative eyebrow label", (
 test("the settings page states its headings without a label above each one", () => {
   const settings = readFileSync(new URL("connector/extension/settings/settings.html", root), "utf8");
   assert.deepEqual(eyebrowLabels(settings), []);
-  assert.match(settings, /<h1>Plan and Edit settings<\/h1>/);
-  assert.match(settings, /<h2 id="courses-title">Connected courses<\/h2>/);
-  assert.match(settings, /<h3 id="site-discovery-title">Find courses<\/h3>/);
-  assert.match(settings, /<h2 id="file-storage-title">Course file access<\/h2>/);
+  assert.match(settings, /<h1>Courses and access<\/h1>/);
+  assert.match(settings, /<h2 id="courses-title">Your courses<\/h2>/);
+  assert.doesNotMatch(settings, /id="site-discovery-title"/);
+  assert.match(settings, /<h3 id="file-storage-title">Course file access<\/h3>/);
   assert.match(settings, /<h2 id="mode-title">Course access<\/h2>/);
   // The order between choosing courses and choosing access is stated as a constraint the reader
   // can act on, so no "Step 1" or "Step 2" label is needed to carry it.
@@ -145,7 +145,7 @@ test("current setup surfaces use three stages and platform-specific course actio
   const app = readFileSync(new URL("installer/shared/setup-view.mjs", root), "utf8");
   assert.match(app, /\["Assistant", "Morrow Bridge", "Course"\]/);
   const popup = readFileSync(new URL("connector/extension/popup/popup-view.js", root), "utf8");
-  assert.match(popup, /`Connect \$\{platform\}`/);
+  assert.match(popup, /"Connect this course"/);
   assert.match(popup, /"Open Canvas or Moodle"/);
   const popupPage = readFileSync(new URL("connector/extension/popup/popup.html", root), "utf8");
   const help = popupPage.match(/<summary>How to connect<\/summary>\s*<ol>([\s\S]*?)<\/ol>/)?.[1] || "";

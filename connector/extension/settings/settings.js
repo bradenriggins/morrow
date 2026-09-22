@@ -1,4 +1,5 @@
 import { problemCode, problemText } from "../src/bridge-problem-copy.js";
+import { CURATED_CATEGORY_SPECS } from "../src/edit-policy.js";
 
 const modePlan = document.querySelector("#mode-plan");
 const modeEdit = document.querySelector("#mode-edit");
@@ -7,28 +8,29 @@ const categoryList = document.querySelector("#category-list");
 const actionFilter = document.querySelector("#action-filter");
 const actionCheckedOnly = document.querySelector("#action-checked-only");
 const editDuration = document.querySelector("#edit-duration");
+const routineSwitchContainer = document.querySelector("#routine-switch");
+const routineSwitch = document.querySelector("#routine-edits");
+const routineBundleList = document.querySelector("#routine-bundle-list");
+const actionFilterField = document.querySelector("#action-filter-field");
+const actionCheckedOnlyField = document.querySelector("#action-checked-only-field");
 const selectionSummary = document.querySelector("#selection-summary");
 const connectionStatus = document.querySelector("#connection-status");
-const coursesTitle = document.querySelector("#courses-title");
-const siteAnchor = document.querySelector("#site-anchor");
-const siteAnchorDetails = document.querySelector("#site-anchor-details");
-const discoverCoursesButton = document.querySelector("#discover-courses");
 const courseFilter = document.querySelector("#course-filter");
-const selectVisible = document.querySelector("#select-visible");
-const visibleScope = document.querySelector("#visible-scope");
+const coursePlatformFilter = document.querySelector("#course-platform-filter");
+const coursePlatformField = document.querySelector(".platform-field");
+const courseTermFilter = document.querySelector("#course-term-filter");
+const courseTermField = document.querySelector(".term-field");
+const courseSelectModeButton = document.querySelector("#course-select-mode");
+const courseScopeTabs = document.querySelector("#course-scope");
 const courseList = document.querySelector("#course-list");
-const coursePages = document.querySelector("#course-pages");
-const previousPage = document.querySelector("#previous-page");
-const nextPage = document.querySelector("#next-page");
-const pageStatus = document.querySelector("#page-status");
-const discoveryProgress = document.querySelector("#discovery-progress");
-const discoveryProgressText = document.querySelector("#discovery-progress-text");
-const loadMoreCoursesButton = document.querySelector("#load-more-courses");
-const availableActions = document.querySelector("#available-actions");
-const availableSelectionSummary = document.querySelector("#available-selection-summary");
-const connectSelectedButton = document.querySelector("#connect-selected");
-const showConnectedButton = document.querySelector("#show-connected");
-const modePanel = document.querySelector("#mode-panel");
+const courseShowMoreRow = document.querySelector("#course-show-more-row");
+const courseShowMoreButton = document.querySelector("#course-show-more");
+const discoveryMoreRow = document.querySelector("#discovery-more-row");
+const discoveryMoreButton = document.querySelector("#discovery-more");
+const courseBulkBar = document.querySelector("#course-bulk-bar");
+const courseBulkCount = document.querySelector("#course-bulk-count");
+const courseBulkPlanButton = document.querySelector("#course-bulk-plan");
+const courseBulkRoutineButton = document.querySelector("#course-bulk-routine");
 const refreshButton = document.querySelector("#refresh");
 const returnPlanButton = document.querySelector("#return-plan");
 const editAccessBanner = document.querySelector("#edit-access-banner");
@@ -45,6 +47,7 @@ const permissionActions = document.querySelector("#permission-actions");
 const notice = document.querySelector("#notice");
 const error = document.querySelector("#error");
 const announcement = document.querySelector("#announcement");
+const openPlatformWhenNeededCheckbox = document.querySelector("#open-platform-when-needed");
 const fileStorageStatus = document.querySelector("#file-storage-status");
 const enableFileStorageButton = document.querySelector("#enable-file-storage");
 const revokeFileStorageButton = document.querySelector("#revoke-file-storage");
@@ -62,10 +65,27 @@ const privateChatSendButton = document.querySelector("#private-chat-send");
 const privateChatPage = document.querySelector("body");
 const privateChatBackground = document.querySelector("main");
 
-const PAGE_SIZE = 6;
+// WI-5.3: no pagination. The merged course list renders up to this many rows, then "Show more".
+const ROW_LIMIT_STEP = 100;
 const DISCOVERY_PAGE_LIMIT = 100;
+/** WI-5.3: "8 courses or fewer" hides the scope tabs and the platform and term menus. */
+const FEW_COURSES_THRESHOLD = 8;
+const SCOPES = Object.freeze([
+  ["all", "All"],
+  ["connected", "Connected"],
+  ["available", "Not connected"],
+  ["attention", "Needs attention"],
+]);
+/** WI-5.3 row order: needs attention, then connected, then not connected. */
+const SCOPE_RANK = Object.freeze({ attention: 0, connected: 1, available: 2 });
 const DEFAULT_EDIT_DURATION_MS = 60 * 60 * 1_000;
+// D3: the Routine edits switch always starts a grant at 4 hours, independent of the Customize
+// picker's own default above.
+const ROUTINE_EDIT_DURATION_MS = 4 * 60 * 60 * 1_000;
 const COURSE_FILE_STORAGE_ACCESS_KEY = "courseFileStorageAccessEnabled";
+// WI-1.2 (D1a): the same storage key src/service-worker.js reads (openPlatform, :6141). A missing
+// key means on, so the checkbox starts checked before the first storage read settles.
+const OPEN_PLATFORM_WHEN_NEEDED_KEY = "openPlatformWhenNeeded";
 const COURSE_FILE_STORAGE_ORIGINS = ["https://*/*"];
 // Course-reach notes belong only to Edit categories that can send a change.
 // Item Bank writes are held and have no Edit category.
@@ -123,6 +143,31 @@ const FIELD_SELECTION_BUNDLES = Object.freeze({
 });
 const PRIVATE_CHAT_FOCUSABLE_SELECTOR = "button, select, textarea, input, [href], [tabindex]";
 
+// WI-5.5: Level 1 of the Customize view, in the spec's fixed order. "beyond_course" behaves like
+// every other area (closed until opened or matched by search); the spec calls it out only because
+// no level and no preset ever includes it automatically.
+// "other" is last: WI-3.1's own valid-area set (scripts/test/edit-option-facts.test.mjs) allows it,
+// for the options a person still has to place by hand (F WI-3.1). It, not silent loss, is where an
+// option with no area, or one WI-3.1 has not placed yet, lands.
+const AREA_ORDER = Object.freeze(["pages", "assignments", "quizzes", "discussions", "files", "calendar", "people", "accessibility", "beyond_course", "other"]);
+const AREA_LABELS = Object.freeze({
+  pages: "Pages and course content",
+  assignments: "Assignments and grading setup",
+  quizzes: "Quizzes and question banks",
+  discussions: "Discussions and announcements",
+  files: "Files and media",
+  calendar: "Calendar and scheduling",
+  people: "Sections and groups",
+  accessibility: "Accessibility repairs",
+  beyond_course: "Beyond this course",
+  other: "Other actions",
+});
+// WI-5.5: Level 2. Only a generated single action (WI-3.1's operationKind) carries a `kind`; a
+// curated bundle (src/edit-policy.js) never does, and no curated bundle removes content (D2a), so a
+// bundle's kind is its own `destructive` fact.
+const KIND_ORDER = Object.freeze(["edit", "publish", "remove"]);
+const KIND_LABELS = Object.freeze({ edit: "Create and edit", publish: "Publish and organize", remove: "Remove content" });
+
 let privateChatReturnFocus = null;
 
 const state = {
@@ -131,14 +176,34 @@ const state = {
   actionFilter: "",
   categories: [],
   discovery: null,
-  discoverySelected: new Set(),
   fileStorageAccess: { browserPermission: false, enabled: false, optedIn: false, checking: true },
   fileStorageBusy: false,
-  filter: "",
+  // WI-5.3: the course-list toolbar. `q` matches name and code; `platform` and `term` are exact
+  // values or "all"; `scope` is one of the SCOPES ids.
+  filters: { q: "", platform: "all", term: "all", scope: "all" },
+  // WI-5.3: the row cap. "Show more" raises it by ROW_LIMIT_STEP; a filter change resets it.
+  rowLimit: ROW_LIMIT_STEP,
+  // WI-5.3: "Select" shows a checkbox on each connected course and the bulk bar.
+  selectMode: false,
+  // WI-5.4: sourceBindingId values whose detail is open in place under their row.
+  openCourses: new Set(),
+  // WI-5.5: area ids, and "${areaId}/${kind}" keys, currently open in the Customize view.
+  openAreas: new Set(),
+  openKinds: new Set(),
+  // WI-5.1: code, term, role, favorite and published for a course, keyed by "${origin}|${courseId}",
+  // read from chrome.storage.local's Bridge-only courseMeta map. Never sent anywhere.
+  courseMeta: new Map(),
   mode: "plan",
   openPlatformBusy: false,
+  // WI-1.2 (D1a): a missing storage key means on, so this starts true and is corrected once the
+  // stored value is read.
+  openPlatformWhenNeeded: true,
+  openPlatformSettingBusy: false,
+  // WI-4.5 (D2): true while the "Routine edits" switch set the current selection. It turns off by
+  // itself when no routine bundle remains available for the selected courses.
+  routineMode: false,
   openPlatformProgressVisible: false,
-  page: 0,
+  pendingDurationMs: null,
   optionsByBinding: new Map(),
   optionsLoading: false,
   optionsRequestToken: 0,
@@ -151,8 +216,7 @@ const state = {
   selected: new Set(),
   selectedCategories: new Set(),
   status: null,
-  statusReadFailed: false,
-  view: "connected"
+  statusReadFailed: false
 };
 
 function privateChatClients() {
@@ -352,10 +416,10 @@ async function openSavedPlatform(siteAnchorId, sourceBindingId, provider) {
   state.openPlatformBusy = true;
   state.openPlatformProgressVisible = false;
   clearError();
-  renderCourses();
+  renderCourseList();
   const revealTimer = setTimeout(() => {
     state.openPlatformProgressVisible = true;
-    renderCourses();
+    renderCourseList();
   }, 400);
   try {
     const result = await request("morrow_open_platform", sourceBindingId ? { siteAnchorId, sourceBindingId } : { siteAnchorId });
@@ -371,10 +435,6 @@ async function openSavedPlatform(siteAnchorId, sourceBindingId, provider) {
   }
 }
 
-function selectedAnchor() {
-  return anchors().find((anchor) => anchor.siteAnchorId === state.discovery?.siteAnchorId || anchor.siteAnchorId === siteAnchor.value) || null;
-}
-
 function focusedCourseControl() {
   const active = document.activeElement;
   if (!(active instanceof HTMLInputElement)) return null;
@@ -382,23 +442,12 @@ function focusedCourseControl() {
     const bindingId = active.closest("[data-binding-id]")?.dataset.bindingId;
     return bindingId ? { selector: `[data-binding-id=${JSON.stringify(bindingId)}] .course-select` } : null;
   }
-  if (active.classList.contains("available-course-select")) {
-    const courseId = nativeCourseId(active.closest("[data-course-id]")?.dataset.courseId);
-    return courseId ? { selector: `[data-course-id=${JSON.stringify(courseId)}] .available-course-select` } : null;
-  }
   return null;
 }
 
 function restoreCourseFocus(focus) {
   if (!focus) return;
   courseList.querySelector(focus.selector)?.focus();
-}
-
-function anchorLabel(anchor) {
-  const provider = providerName(anchor);
-  const matchingSites = anchors().filter((candidate) => providerName(candidate) === provider);
-  const position = matchingSites.findIndex((candidate) => candidate.siteAnchorId === anchor.siteAnchorId);
-  return matchingSites.length > 1 && position >= 0 ? `${provider} signed-in site ${position + 1}` : `${provider} signed-in site`;
 }
 
 function discoveryExpired() {
@@ -414,12 +463,103 @@ function discoveryItems() {
     provider: state.discovery.provider,
     origin: state.discovery.origin,
     siteUrl: state.discovery.siteUrl,
-    principalId: state.discovery.principalId
+    principalId: state.discovery.principalId,
+    // WI-5.1: passed through so a not-yet-connected row can show the same code, term, and role
+    // line a connected row shows from courseMeta.
+    code: typeof course?.code === "string" ? course.code : "",
+    term: typeof course?.term === "string" ? course.term : "",
+    role: typeof course?.role === "string" ? course.role : "",
+    favorite: course?.favorite === true
   })).filter((course) => course.courseId);
 }
 
-function listItems() {
-  return state.view === "available" ? discoveryItems() : (Array.isArray(state.status?.bindings) ? state.status.bindings : []);
+function courseMetaKey(origin, courseId) {
+  return origin && courseId ? `${origin}|${courseId}` : "";
+}
+
+/**
+ * WI-5.1: code, term, role and favorite for a connected course. `BridgeBinding` carries none of
+ * these; they live only in chrome.storage.local's Bridge-only `courseMeta` map, keyed by
+ * "${origin}|${courseId}" and read into state.courseMeta by refreshCourseMeta().
+ */
+function bindingMeta(binding) {
+  const key = courseMetaKey(binding?.origin, nativeCourseId(binding?.courseId));
+  const entry = key ? state.courseMeta.get(key) : undefined;
+  return entry && typeof entry === "object" ? entry : null;
+}
+
+/** WI-1.1, WI-5.3: a connected course whose site is closed, or one Morrow cannot identify, needs
+ * attention: its row shows an action button, not the D7 state text (siteClosed is declared below;
+ * function declarations are hoisted). */
+function bindingScope(binding) {
+  if (!isEligible(binding) || siteClosed(binding)) return "attention";
+  return "connected";
+}
+
+/** WI-5.3: one merged list, each row a connected course or a discovered course not yet connected. */
+function courseRows() {
+  const bindings = Array.isArray(state.status?.bindings) ? state.status.bindings : [];
+  const boundKeys = new Set(bindings.map((binding) => courseMetaKey(binding.origin, nativeCourseId(binding.courseId))).filter(Boolean));
+  const bindingRows = bindings.map((binding) => {
+    const meta = bindingMeta(binding);
+    return {
+      kind: "binding",
+      binding,
+      rowId: `b:${binding.sourceBindingId}`,
+      name: courseName(binding),
+      code: meta?.code || "",
+      term: meta?.term || "",
+      platform: providerName(binding),
+      role: meta?.role || "",
+      favorite: meta?.favorite === true,
+      scope: bindingScope(binding)
+    };
+  });
+  const availableRows = discoveryItems()
+    .filter((course) => !boundKeys.has(courseMetaKey(course.origin, course.courseId)))
+    .map((course) => ({
+      kind: "available",
+      course,
+      rowId: `a:${courseMetaKey(course.origin, course.courseId)}`,
+      name: course.courseName,
+      code: course.code,
+      term: course.term,
+      platform: providerName(course),
+      role: course.role,
+      favorite: course.favorite === true,
+      scope: "available"
+    }));
+  return [...bindingRows, ...availableRows];
+}
+
+function rowMatchesFilters(row, { skipScope = false } = {}) {
+  const query = state.filters.q.trim().toLocaleLowerCase();
+  if (query && !`${row.name} ${row.code}`.toLocaleLowerCase().includes(query)) return false;
+  if (state.filters.platform !== "all" && row.platform !== state.filters.platform) return false;
+  if (state.filters.term !== "all" && row.term !== state.filters.term) return false;
+  if (!skipScope && state.filters.scope !== "all" && row.scope !== state.filters.scope) return false;
+  return true;
+}
+
+/** WI-5.3: the scope tab counts, each computed with every other filter applied but its own. */
+function scopeCounts(rows) {
+  const base = rows.filter((row) => rowMatchesFilters(row, { skipScope: true }));
+  return {
+    all: base.length,
+    connected: base.filter((row) => row.scope === "connected").length,
+    available: base.filter((row) => row.scope === "available").length,
+    attention: base.filter((row) => row.scope === "attention").length
+  };
+}
+
+/** WI-5.3 order: needs attention, then connected, then not connected; favorites first, then name. */
+function orderedMatches(rows) {
+  return rows.filter((row) => rowMatchesFilters(row))
+    .sort((left, right) => (SCOPE_RANK[left.scope] - SCOPE_RANK[right.scope]) || (Number(right.favorite) - Number(left.favorite)) || left.name.localeCompare(right.name));
+}
+
+function distinctValues(rows, key) {
+  return [...new Set(rows.map((row) => row[key]).filter((value) => typeof value === "string" && value))].sort((left, right) => left.localeCompare(right));
 }
 
 function isEligible(binding) {
@@ -471,23 +611,6 @@ function activeEditBindings() {
   return (Array.isArray(state.status?.bindings) ? state.status.bindings : []).filter(hasActiveEdit);
 }
 
-function matchingItems() {
-  const query = state.filter.trim().toLocaleLowerCase();
-  const items = listItems();
-  if (!query) return items;
-  return items.filter((binding) => [
-    binding.provider, binding.origin, binding.siteUrl, binding.courseId, binding.courseName, binding.principalId
-  ].some((value) => String(value || "").toLocaleLowerCase().includes(query)));
-}
-
-function currentPage() {
-  const matching = matchingItems();
-  const totalPages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
-  state.page = Math.min(state.page, totalPages - 1);
-  const start = state.page * PAGE_SIZE;
-  return { matching, totalPages, start, bindings: matching.slice(start, start + PAGE_SIZE) };
-}
-
 function selectedBindings() {
   const all = Array.isArray(state.status?.bindings) ? state.status.bindings : [];
   return all.filter((binding) => state.selected.has(binding.sourceBindingId) && isEligible(binding));
@@ -520,6 +643,7 @@ function categoriesFor(binding) {
 }
 
 function supportsCategory(binding, id) {
+  if (typeof id === "string" && id.startsWith("family:")) return bindingFamilyCategoryIds(binding, id.slice("family:".length)).length > 0;
   return optionsFor(binding)?.options.some((category) => category?.id === id && category.availability === "edit") === true;
 }
 
@@ -530,6 +654,13 @@ function rebuildCategories() {
     return;
   }
   const details = selected.map(optionsFor);
+  // WI-5.6: Canvas ids and Moodle ids never match, so a mixed selection uses the platform-neutral
+  // families instead of the same-id intersection below, and shows bundles only (single actions need
+  // one platform, because a generated action's own id never carries a family).
+  if (new Set(selected.map((binding) => binding.provider)).size > 1) {
+    state.categories = mixedPlatformCategories(details);
+    return;
+  }
   const shared = new Map(details[0].options.map((option) => [option.id, option]));
   for (const detail of details.slice(1)) {
     const current = new Map(detail.options.map((option) => [option.id, option]));
@@ -548,6 +679,68 @@ function rebuildCategories() {
   state.categories = [...shared.values()].sort((left, right) => left.group.localeCompare(right.group) || left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
 }
 
+/** WI-5.6: the platform-neutral key a curated bundle's own id carries, read from properties every
+ * option already has (never a per-id table, so this cannot drift from src/edit-policy.js's
+ * CURATED_CATEGORY_SPECS). Every routine bundle (D2a) is interchangeable across providers as
+ * "Routine edits". The only other cross-provider-equivalent shape today is a bundle that is
+ * rememberable but not routine: moodle's own "dates" and Canvas's own "canvas_dates" are both that
+ * shape, and no other curated bundle is. A generated single action (categoryIsGenerated) never
+ * carries a family: WI-5.6 says it needs one platform. */
+function categoryFamily(category) {
+  if (categoryIsGenerated(category)) return null;
+  if (category.routine === true) return "routine";
+  if (category.rememberable === true) return "dates";
+  return null;
+}
+
+const CATEGORY_FAMILIES = Object.freeze({
+  routine: Object.freeze({
+    label: "Routine edits",
+    description: "Edit titles, text, order, file names and alternative text that already exist in every selected course. It never creates, publishes, removes, posts, or changes a date, points or a setting.",
+  }),
+  dates: Object.freeze({
+    label: "Change assignment and quiz dates",
+    description: "Change existing due dates and open or close dates in every selected course. Each change is visible to learners as soon as the course platform saves it.",
+  }),
+});
+
+/** WI-5.6: a Canvas id and a Moodle id never match, so the same-id intersection rebuildCategories
+ * otherwise uses would show nothing for a mixed selection. One row stands in for each family below,
+ * available only when every selected connection has its own edit-available option in that family
+ * (so the choice can never grant one connection nothing); resolveEnabledCategoriesFor expands a
+ * family row back to each connection's own ids at save. */
+function mixedPlatformCategories(details) {
+  return Object.entries(CATEGORY_FAMILIES)
+    .filter(([family]) => details.every((detail) => detail.options.some((option) =>
+      option.availability === "edit" && !option.requiresFieldSelection && categoryFamily(option) === family)))
+    .map(([family, { label, description }]) => ({
+      id: `family:${family}`, group: "Actions for every selected course", label, description,
+      availability: "edit", destructive: false, routine: family === "routine", rememberable: true, requiresFieldSelection: false, family,
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+/** WI-5.6: one connection's own ids for a platform-neutral family, from its live options. */
+function bindingFamilyCategoryIds(binding, family) {
+  const detail = optionsFor(binding);
+  if (!detail) return [];
+  return detail.options.filter((option) => option.availability === "edit" && !option.requiresFieldSelection && categoryFamily(option) === family).map((option) => option.id);
+}
+
+/** WI-5.6: at save, a platform-neutral family id (a mixed selection's own choice) expands to each
+ * connection's own ids; a literal id (the single-platform path, unchanged) passes through as is. */
+function resolveEnabledCategoriesFor(binding, enabledCategories) {
+  const resolved = new Set();
+  for (const id of enabledCategories) {
+    if (typeof id === "string" && id.startsWith("family:")) {
+      for (const real of bindingFamilyCategoryIds(binding, id.slice("family:".length))) resolved.add(real);
+    } else {
+      resolved.add(id);
+    }
+  }
+  return [...resolved];
+}
+
 function availableCategoriesForSelection() {
   const selected = selectedBindings();
   if (!selected.length) return new Set();
@@ -561,14 +754,10 @@ function reconcileSelectedCategories() {
   state.selectedCategories = new Set([...state.selectedCategories].filter((id) => available.has(id)));
 }
 
-function categoryLabels(ids) {
-  return ids.map((id) => categoryById(id)?.label || id).join(", ");
-}
-
-/** What the listed actions change outside the selected course, in one sentence each. */
-function courseReachNote(ids) {
-  const notes = [...new Set(ids.map((id) => CATEGORY_COURSE_REACH[id]).filter(Boolean))];
-  return notes.length ? ` ${notes.join(" ")}` : "";
+/** WI-4.5 (D2a): the routine bundles available for every selected course right now. */
+function routineCategoryIds() {
+  const available = availableCategoriesForSelection();
+  return state.categories.filter((category) => category.routine === true && available.has(category.id)).map((category) => category.id);
 }
 
 function labelList(categories) {
@@ -636,10 +825,6 @@ function clearError() {
   error.textContent = "";
 }
 
-function categoryProvider(category) {
-  return typeof category?.group === "string" && category.group ? category.group : "Course actions";
-}
-
 function categoryFlags(category) {
   const flags = [
     ...(category.destructive === true ? ["Removes content"] : []),
@@ -671,39 +856,180 @@ function fieldSelectionText(category) {
     : "Morrow always asks before this change.";
 }
 
-function renderCategoryGroup(group, categories, available, expanded) {
+/** WI-5.5: a generated single action's id always starts with "action:<provider>:" (operationSpec in
+ * src/edit-policy.js); a curated bundle id never does. Only a generated action nests under "All
+ * other actions" (WI-5.5's Level 3 order: bundles first). */
+function categoryIsGenerated(category) {
+  return typeof category?.id === "string" && category.id.startsWith("action:");
+}
+
+/** WI-5.5's Level 2. A generated action's own `kind` (edit, publish or remove) wins when present;
+ * a curated bundle carries none, so its kind is `destructive` alone, since no curated bundle
+ * publishes or removes by itself (D2a: a routine bundle only changes what exists). */
+function categoryKind(category) {
+  if (category.kind === "edit" || category.kind === "publish" || category.kind === "remove") return category.kind;
+  return category.destructive === true ? "remove" : "edit";
+}
+
+/** WI-5.5: the ids a "select all" checkbox can actually add or remove. A requiresFieldSelection
+ * option (F10) never gets a checkbox at any level, so it is never part of a count's denominator. */
+function customizeSelectableIds(categories) {
+  return categories.filter((category) => !category.requiresFieldSelection).map((category) => category.id);
+}
+
+/** WI-5.5: state.categories, filtered by the search field and "Only actions Morrow can check", to
+ * edit-available options only. Shared by the picker and by every count in it, so a filtered-out
+ * action cannot be selected by a "select all" it is hidden from. */
+function customizeCategories() {
+  const query = state.actionFilter.trim().toLocaleLowerCase();
+  return state.categories.filter((category) => category.availability === "edit"
+    && (!state.actionCheckedOnly || category.verification === "checked")
+    && (!query || category.label.toLocaleLowerCase().includes(query)));
+}
+
+/** WI-5.5: the area a category renders under. A category with no area, or one AREA_ORDER does not
+ * name (WI-3.1's own valid-area set still allows "other"), lands in "other" rather than vanishing. */
+function categoryAreaId(category) {
+  return typeof category.area === "string" && AREA_ORDER.includes(category.area) ? category.area : "other";
+}
+
+function customizeAreaItems(areaId) {
+  return customizeCategories().filter((category) => categoryAreaId(category) === areaId);
+}
+
+function customizeKindsForArea(areaId) {
+  const items = customizeAreaItems(areaId);
+  return KIND_ORDER.filter((kind) => items.some((category) => categoryKind(category) === kind));
+}
+
+function renderCustomizeAction(category, available) {
+  const inputId = `customize-action-${category.id}`;
+  const descriptionId = `${inputId}-description`;
+  // F10, WI-3.4: this option's grant would be empty, so it never gets an active checkbox.
+  if (category.requiresFieldSelection) {
+    return `<article class="category-option field-selection" aria-describedby="${escapeHtml(descriptionId)}">
+      <span><strong>${escapeHtml(category.label)}</strong>${categoryFlags(category)}<small id="${escapeHtml(descriptionId)}">${escapeHtml(category.description)} ${escapeHtml(fieldSelectionText(category))}</small></span>
+    </article>`;
+  }
+  const isAvailable = available.has(category.id);
+  const unavailable = isAvailable ? "" : " Not available for every selected course.";
+  return `<label class="category-option" for="${escapeHtml(inputId)}">
+    <input id="${escapeHtml(inputId)}" class="customize-action-input" type="checkbox" value="${escapeHtml(category.id)}" aria-describedby="${escapeHtml(descriptionId)}" ${state.selectedCategories.has(category.id) ? "checked" : ""} ${isAvailable ? "" : "disabled"}>
+    <span><strong>${escapeHtml(category.label)}</strong>${categoryFlags(category)}<small id="${escapeHtml(descriptionId)}">${escapeHtml(category.description)}${escapeHtml(verificationNote(category))}${unavailable}</small></span>
+  </label>`;
+}
+
+/** WI-5.5 Level 3: bundles first (curated ids, always shown), then "All other actions" (the
+ * generated options, closed by default; open when search or "checked only" is filtering). */
+function renderKind(areaId, kind, filtering, available) {
+  const items = customizeAreaItems(areaId).filter((category) => categoryKind(category) === kind);
+  const bundles = items.filter((category) => !categoryIsGenerated(category));
+  const generated = items.filter((category) => categoryIsGenerated(category));
+  const selectableIds = customizeSelectableIds(items);
+  const on = selectableIds.filter((id) => state.selectedCategories.has(id)).length;
+  const key = `${areaId}/${kind}`;
+  const domKey = key.replace("/", "-");
+  const kindOpen = filtering || state.openKinds.has(key);
+  const bundlesHtml = bundles.map((category) => renderCustomizeAction(category, available)).join("");
+  const generatedHtml = generated.length ? `
+      <details class="category-directory customize-more" ${filtering ? "open" : ""}>
+        <summary>All other actions<span>${plural(generated.length, "action")}</span></summary>
+        <div class="category-options">${generated.map((category) => renderCustomizeAction(category, available)).join("")}</div>
+      </details>` : "";
   return `
-    <details class="category-group" aria-label="${escapeHtml(group)} actions" ${expanded || ["Focused Canvas repairs", "Common Moodle actions"].includes(group) ? "open" : ""}>
-      <summary>${escapeHtml(group)}<span>${plural(categories.length, "action")}</span></summary>
-      <div class="category-options">
-        ${categories.map((category) => {
-          const inputId = `category-${category.id}`;
-          const descriptionId = `${inputId}-description`;
-          const isAvailable = available.has(category.id);
-          const reason = category.availability === "review" ? ` ${category.reviewReason || "This action remains in Plan for review."}` : "";
-          if (category.availability === "review") {
-            return `<article class="category-option review-only" aria-describedby="${escapeHtml(descriptionId)}">
-              <span><strong>Review only: ${escapeHtml(category.label)}</strong>${categoryFlags(category)}<small id="${escapeHtml(descriptionId)}">${escapeHtml(category.description)}${escapeHtml(reason)}</small></span>
-            </article>`;
-          }
-          // F10, WI-3.4: this option's grant would be empty, so it never gets an active checkbox.
-          if (category.requiresFieldSelection) {
-            return `<article class="category-option field-selection" aria-describedby="${escapeHtml(descriptionId)}">
-              <span><strong>${escapeHtml(category.label)}</strong>${categoryFlags(category)}<small id="${escapeHtml(descriptionId)}">${escapeHtml(category.description)} ${escapeHtml(fieldSelectionText(category))}</small></span>
-            </article>`;
-          }
-          const unavailable = isAvailable ? "" : " Not available for every selected course.";
-          return `<label class="category-option" for="${escapeHtml(inputId)}">
-            <input id="${escapeHtml(inputId)}" type="checkbox" value="${escapeHtml(category.id)}" aria-describedby="${escapeHtml(descriptionId)}" ${state.selectedCategories.has(category.id) ? "checked" : ""} ${isAvailable ? "" : "disabled"}>
-            <span><strong>${escapeHtml(category.label)}</strong>${categoryFlags(category)}<small id="${escapeHtml(descriptionId)}">${escapeHtml(category.description)}${escapeHtml(verificationNote(category))}${unavailable}</small></span>
-          </label>`;
-        }).join("")}
+    <div class="customize-kind ${kind === "remove" ? "is-remove" : ""}" data-kind="${escapeHtml(key)}">
+      <div class="customize-kind-head">
+        <input type="checkbox" id="kind-select-${escapeHtml(domKey)}" data-kind-select="${escapeHtml(key)}" aria-label="Select all: ${escapeHtml(KIND_LABELS[kind])} in ${escapeHtml(AREA_LABELS[areaId])}">
+        <button type="button" class="customize-kind-toggle" data-kind-toggle="${escapeHtml(key)}" aria-expanded="${kindOpen}" aria-controls="kind-body-${escapeHtml(domKey)}">
+          <span class="customize-kind-title">${escapeHtml(KIND_LABELS[kind])}</span>
+          <span class="customize-kind-count" data-kind-count="${escapeHtml(key)}">${on} of ${selectableIds.length}</span>
+        </button>
       </div>
+      <div class="customize-kind-body" id="kind-body-${escapeHtml(domKey)}">${kindOpen ? `<div class="category-options">${bundlesHtml}</div>${generatedHtml}` : ""}</div>
+    </div>
+  `;
+}
+
+/** WI-5.5 Level 1, D6: the area's own "select all" (data-area-select) never includes the "remove"
+ * kind. Removal gets its own count and its own checkbox, one level down, in the "remove" kind. */
+function renderArea(areaId, filtering, available) {
+  const items = customizeAreaItems(areaId);
+  const kinds = customizeKindsForArea(areaId);
+  const nonRemoveIds = customizeSelectableIds(items.filter((category) => categoryKind(category) !== "remove"));
+  const on = nonRemoveIds.filter((id) => state.selectedCategories.has(id)).length;
+  const removeIds = customizeSelectableIds(items.filter((category) => categoryKind(category) === "remove"));
+  const removeOn = removeIds.filter((id) => state.selectedCategories.has(id)).length;
+  const areaOpen = filtering || state.openAreas.has(areaId);
+  return `
+    <div class="customize-area" data-area="${escapeHtml(areaId)}">
+      <div class="customize-area-head">
+        <input type="checkbox" id="area-select-${escapeHtml(areaId)}" data-area-select="${escapeHtml(areaId)}" aria-label="Select all in ${escapeHtml(AREA_LABELS[areaId])}, except removal">
+        <button type="button" class="customize-area-toggle" data-area-toggle="${escapeHtml(areaId)}" aria-expanded="${areaOpen}" aria-controls="area-body-${escapeHtml(areaId)}">
+          <span class="customize-area-title">${escapeHtml(AREA_LABELS[areaId])}</span>
+        </button>
+        <span class="customize-area-counts">
+          <span class="customize-count" data-area-count="${escapeHtml(areaId)}">${on} of ${nonRemoveIds.length}</span>
+          ${removeIds.length ? `<span class="customize-removal-pill ${removeOn ? "on" : ""}" data-area-removal="${escapeHtml(areaId)}">${removeOn ? `Removal ${removeOn} of ${removeIds.length}` : "Removal off"}</span>` : ""}
+        </span>
+      </div>
+      <div class="customize-area-body" id="area-body-${escapeHtml(areaId)}">${areaOpen ? kinds.map((kind) => renderKind(areaId, kind, filtering, available)).join("") : ""}</div>
+    </div>
+  `;
+}
+
+/** WI-5.5: "Review-only options. Not in the picker." A read-only, always-available disclosure
+ * lists them by name instead. */
+function renderReviewOnlyLine() {
+  const items = state.categories.filter((category) => category.availability === "review");
+  if (!items.length) return "";
+  const sorted = [...items].sort((left, right) => left.label.localeCompare(right.label));
+  return `
+    <details class="review-only-line">
+      <summary>${plural(items.length, "action")} always ${items.length === 1 ? "waits" : "wait"} for your review</summary>
+      <ul>${sorted.map((category) => `<li><strong>${escapeHtml(category.label)}</strong><span>${escapeHtml(category.reviewReason || "")}</span></li>`).join("")}</ul>
     </details>
   `;
 }
 
-function renderCategories() {
+/** WI-5.5: sets every area/kind "select all" checkbox's checked, indeterminate and aria-checked,
+ * and its count text, from state.selectedCategories alone. Called after a full render, and after an
+ * in-place checkbox update, so both paths compute the same tri-state the same way. Touches no
+ * innerHTML: the "no second render on a checkbox change" rule (WI-5.5) depends on that. */
+function syncCustomizeTriStates() {
+  for (const box of categoryList.querySelectorAll("[data-area-select]")) {
+    const areaId = box.dataset.areaSelect;
+    const items = customizeAreaItems(areaId);
+    const nonRemoveIds = customizeSelectableIds(items.filter((category) => categoryKind(category) !== "remove"));
+    const on = nonRemoveIds.filter((id) => state.selectedCategories.has(id)).length;
+    box.checked = nonRemoveIds.length > 0 && on === nonRemoveIds.length;
+    box.indeterminate = on > 0 && on < nonRemoveIds.length;
+    box.setAttribute("aria-checked", box.indeterminate ? "mixed" : String(box.checked));
+    box.disabled = nonRemoveIds.length === 0;
+    const countEl = categoryList.querySelector(`[data-area-count="${areaId}"]`);
+    if (countEl) countEl.textContent = `${on} of ${nonRemoveIds.length}`;
+    const removeIds = customizeSelectableIds(items.filter((category) => categoryKind(category) === "remove"));
+    const removeOn = removeIds.filter((id) => state.selectedCategories.has(id)).length;
+    const pill = categoryList.querySelector(`[data-area-removal="${areaId}"]`);
+    if (pill) {
+      pill.classList.toggle("on", removeOn > 0);
+      pill.textContent = removeOn > 0 ? `Removal ${removeOn} of ${removeIds.length}` : "Removal off";
+    }
+  }
+  for (const box of categoryList.querySelectorAll("[data-kind-select]")) {
+    const key = box.dataset.kindSelect;
+    const [areaId, kind] = key.split("/");
+    const ids = customizeSelectableIds(customizeAreaItems(areaId).filter((category) => categoryKind(category) === kind));
+    const on = ids.filter((id) => state.selectedCategories.has(id)).length;
+    box.checked = ids.length > 0 && on === ids.length;
+    box.indeterminate = on > 0 && on < ids.length;
+    box.setAttribute("aria-checked", box.indeterminate ? "mixed" : String(box.checked));
+    box.disabled = ids.length === 0;
+    const countEl = categoryList.querySelector(`[data-kind-count="${key}"]`);
+    if (countEl) countEl.textContent = `${on} of ${ids.length}`;
+  }
+}
+
+function renderCustomize() {
   const available = availableCategoriesForSelection();
   const hasSelectedCourses = selectedBindings().length > 0;
   if (!hasSelectedCourses) {
@@ -718,34 +1044,20 @@ function renderCategories() {
     categoryList.innerHTML = '<p class="state-message">Reading the current individual actions for the selected courses…</p>';
     return;
   }
-  const query = state.actionFilter.trim().toLocaleLowerCase();
-  const expanded = Boolean(query) || state.actionCheckedOnly;
-  const visibleCategories = state.categories
-    .filter((category) => !state.actionCheckedOnly || category.verification === "checked")
-    .filter((category) => !query || [category.group, category.label, category.description, category.reviewReason]
-      .some((value) => String(value || "").toLocaleLowerCase().includes(query)));
-  if (!visibleCategories.length) {
-    categoryList.innerHTML = `<p class="state-message">${query
+  // WI-5.5: search matches labels, hides areas with no match, and opens areas (and their kinds) with
+  // a match; "Only actions Morrow can check" filters the same way.
+  const filtering = Boolean(state.actionFilter.trim()) || state.actionCheckedOnly;
+  const areas = AREA_ORDER.filter((areaId) => customizeAreaItems(areaId).length > 0);
+  if (!areas.length) {
+    categoryList.innerHTML = `<p class="state-message">${state.actionFilter.trim()
       ? "No individual action matches this search."
       : state.actionCheckedOnly
         ? "The selected courses have no action Morrow can check after it is saved."
         : "The selected courses have no common actions. Select courses from one platform to continue."}</p>`;
     return;
   }
-  const groups = new Map();
-  for (const category of visibleCategories) {
-    const provider = categoryProvider(category);
-    if (!groups.has(provider)) groups.set(provider, []);
-    groups.get(provider).push(category);
-  }
-  const entries = [...groups];
-  const featured = entries.filter(([group]) => ["Focused Canvas repairs", "Common Moodle actions"].includes(group));
-  const additional = entries.filter(([group]) => !["Focused Canvas repairs", "Common Moodle actions"].includes(group));
-  categoryList.innerHTML = featured.map(([group, categories]) => renderCategoryGroup(group, categories, available, expanded)).join("")
-    + (additional.length ? `<details class="category-directory" ${expanded ? "open" : ""}>
-      <summary>Browse ${plural(additional.length, "additional action group")}</summary>
-      <div>${additional.map(([group, categories]) => renderCategoryGroup(group, categories, available, expanded)).join("")}</div>
-    </details>` : "");
+  categoryList.innerHTML = renderReviewOnlyLine() + areas.map((areaId) => renderArea(areaId, filtering, available)).join("");
+  syncCustomizeTriStates();
 }
 
 /** WI-1.1: the course is otherwise usable, but its saved Canvas or Moodle tab is not open. */
@@ -753,157 +1065,233 @@ function siteClosed(binding) {
   return isEligible(binding) && !permissionHasExpired(binding) && !isStale(binding) && binding.runtimeVerified !== true;
 }
 
-function permissionState(binding) {
-  if (!isEligible(binding)) return { label: "Reconnect needed", className: "" };
-  if (permissionHasExpired(binding)) return { label: "Edit expired", className: "stale" };
-  if (isStale(binding)) return { label: "Save again", className: "stale" };
-  if (siteClosed(binding)) return { label: `${providerName(binding)} is closed`, className: "" };
-  const enabled = categoriesFor(binding);
-  if (!enabled.length) return binding?.editPermission ? { label: "Edit active", className: "edit" } : { label: "Plan only", className: "" };
-  return { label: `Edit: ${plural(enabled.length, "type")}`, className: "edit" };
+/** WI-5.1, WI-3.3: every curated category id that is routine, grouped by provider (a static list,
+ * independent of any one course's live options, so the row's D7 text needs no extra fetch). */
+const ROUTINE_CATEGORY_IDS_BY_PROVIDER = CURATED_CATEGORY_SPECS.filter((spec) => spec.routine === true)
+  .reduce((byProvider, spec) => {
+    (byProvider[spec.provider] ||= []).push(spec.id);
+    return byProvider;
+  }, {});
+
+function clockTime(ms) {
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(ms);
 }
 
-function diagnosticDetails(binding) {
-  const details = [];
-  if (binding.siteUrl || binding.origin) details.push(["Learning platform", binding.siteUrl || binding.origin]);
-  if (binding.principalId) details.push(["Signed-in account", binding.principalId]);
-  if (binding.courseId) details.push(["Course ID", binding.courseId]);
-  if (binding.sessionGeneration !== undefined && binding.sessionGeneration !== null) details.push(["Connection", `Session ${binding.sessionGeneration}`]);
-  return details;
-}
-
-function renderDiagnosticDetails(binding) {
-  const details = diagnosticDetails(binding);
-  if (!details.length) return "";
-  return `<details class="course-diagnostics"><summary>Course details</summary><dl>${details.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl></details>`;
-}
-
-function bindingNote(binding, selected) {
-  if (!isEligible(binding)) return "Morrow cannot identify this course. Reconnect it from the Morrow popup before you choose Edit.";
-  if (permissionHasExpired(binding)) return "This temporary Edit access has ended. The course is back in Plan. Ask Morrow for Edit access again if you still need it.";
-  if (isStale(binding)) return "Available actions changed. Edit is paused until you review and save the selected actions again.";
-  if (siteClosed(binding)) return selected ? "This course remains selected, but its site is closed. Morrow Bridge can open it for you." : "Morrow Bridge can open it for you.";
-  const enabled = categoriesFor(binding);
-  if (!enabled.length) return binding?.editPermission
-    ? "Edit access is active. Select this course to read its exact allowed actions."
-    : "Plan is active. Morrow prepares every change for your review.";
+/** D7: the row's own state text. It reads only the saved summary (binding.editPermission), so a
+ * row needs no per-course options fetch to show it. */
+function courseStateText(binding) {
+  const ids = Array.isArray(binding?.editPermission?.enabledCategories) ? binding.editPermission.enabledCategories.filter((id) => typeof id === "string") : [];
+  if (!ids.length || permissionHasExpired(binding) || isStale(binding)) return "Plan. Asks first.";
   const expiresAt = permissionExpiresAt(binding);
-  return `Allowed actions: ${categoryLabels(enabled)}.${courseReachNote(enabled)} ${expiresAt !== null ? `This temporary access ends ${expiryLabel(expiresAt)}.` : "Read the course actions again to confirm the current expiry."} Other changes stay in review.`;
+  const until = expiresAt !== null ? `Edit until ${clockTime(expiresAt)}.` : "Edit.";
+  const routineIds = ROUTINE_CATEGORY_IDS_BY_PROVIDER[binding.provider] || [];
+  const isRoutine = routineIds.length > 0 && ids.length === routineIds.length && routineIds.every((id) => ids.includes(id));
+  if (isRoutine) return `${until} Routine edits.`;
+  if (ids.length === 1) return `${until} 1 kind of edit.`;
+  return `${until} Custom.`;
 }
 
-function renderCourseContext(binding) {
-  const account = binding.principalId || "Signed-in account unavailable";
-  const site = binding.siteUrl || binding.origin || "Learning platform unavailable";
-  return `<dl class="course-context"><div><dt>Account</dt><dd>${escapeHtml(account)}</dd></div><div><dt>Learning platform</dt><dd>${escapeHtml(site)}</dd></div></dl>`;
+/** WI-5.4: "plan" | "routine" | "custom", for the detail's Plan/Edit control and its third "Custom"
+ * chip (shown only for "custom": the saved list is not a level). Reads only the saved summary
+ * (binding.editPermission), the same source courseStateText (D7) reads, so opening a course's
+ * detail needs no options fetch to show its current level. */
+function courseLevel(binding) {
+  const ids = Array.isArray(binding?.editPermission?.enabledCategories) ? binding.editPermission.enabledCategories.filter((id) => typeof id === "string") : [];
+  if (!ids.length || permissionHasExpired(binding) || isStale(binding)) return "plan";
+  const routineIds = ROUTINE_CATEGORY_IDS_BY_PROVIDER[binding.provider] || [];
+  const isRoutine = routineIds.length > 0 && ids.length === routineIds.length && routineIds.every((id) => ids.includes(id));
+  return isRoutine ? "routine" : "custom";
 }
 
-function courseSelectionAccessibleName(binding, { connect = false } = {}) {
+const CURATED_LABEL_BY_ID = new Map(CURATED_CATEGORY_SPECS.map((spec) => [spec.id, spec.label]));
+
+/** WI-5.4: a category's label for the detail's allowed list. `categoryById` needs this course's
+ * live options (only fetched for a selected course); the curated table gives a real label with no
+ * fetch for a routine or "do not ask again" id, which is what the detail shows without one. */
+function categoryLabelFor(id) {
+  return categoryById(id)?.label || CURATED_LABEL_BY_ID.get(id) || id;
+}
+
+function courseDetailDomId(sourceBindingId) {
+  return `course-detail-${String(sourceBindingId).replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
+
+/** WI-5.4 ("Remove" and the Ends menu's own selection): the fixed duration (F5) closest to what
+ * remains until a saved expiresAt, since morrow_edit_policy_save accepts only the five fixed
+ * durations, never an arbitrary remaining time. */
+function closestEditDuration(expiresAt) {
+  const durations = allowedEditDurations();
+  if (!durations.length) return null;
+  const remaining = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - Date.now()) : 0;
+  return durations.reduce((closest, entry) => Math.abs(entry.value - remaining) < Math.abs(closest.value - remaining) ? entry : closest, durations[0]).value;
+}
+
+/** WI-1.1, WI-5.3: the reason a "Needs attention" row needs a button instead of the D7 text. */
+function attentionRowNote(binding) {
+  if (!isEligible(binding)) return "Morrow cannot identify this course. Reconnect it from the Morrow popup.";
+  if (siteClosed(binding)) return `${providerName(binding)} is closed. Morrow Bridge can open it for you.`;
+  return "";
+}
+
+function courseSelectionAccessibleName(binding) {
   const provider = providerName(binding);
   const name = courseName(binding);
   const courseId = nativeCourseId(binding.courseId) || "unavailable";
-  const site = binding.siteUrl || binding.origin || "unavailable site";
-  const account = binding.principalId || "unavailable account";
-  return `Select ${provider} course ${name} (course ID ${courseId}) at ${site} for ${account}${connect ? " to connect" : ""}`;
+  return `Select ${provider} course ${name} (course ID ${courseId})`;
 }
 
-function renderAvailableCourse(course) {
-  const selected = state.discoverySelected.has(course.courseId);
-  return `
-    <article class="course-card ${selected ? "is-selected" : ""}" data-course-id="${escapeHtml(course.courseId)}">
-      <input class="available-course-select" type="checkbox" aria-label="${escapeHtml(courseSelectionAccessibleName(course, { connect: true }))}" ${selected ? "checked" : ""}>
-      <div class="course-content">
-        <div class="course-card-header">
-          <h3 class="course-title"><span class="provider">${escapeHtml(providerName(course))}</span>${escapeHtml(course.courseName)}</h3>
-          <p class="permission-state">Plan on connect</p>
-        </div>
-        ${renderCourseContext(course)}
-        ${renderDiagnosticDetails(course)}
+function rowMetaLine(row) {
+  return [row.code, row.term, row.platform, row.role].filter(Boolean).join(" · ");
+}
+
+/** WI-5.3: a connected row's name, meta line, and either its D7 state text or (for "Needs
+ * attention") an action button; a "Not connected" row's name, meta line, and a "Connect" button. */
+function renderCourseRow(row) {
+  const favorite = row.favorite ? `<span class="course-fav" aria-hidden="true" title="Favorite in ${escapeHtml(row.platform)}">★</span>` : "";
+  const nameHtml = `<div class="course-row-name">${favorite}${escapeHtml(row.name)}</div><div class="course-row-meta">${escapeHtml(rowMetaLine(row))}</div>`;
+  if (row.kind === "available") {
+    return `
+      <div class="course-row is-static" data-row-kind="available">
+        <div class="course-row-body">${nameHtml}</div>
+        <span class="course-row-action"><button class="secondary" type="button" data-connect-row="${escapeHtml(courseMetaKey(row.course.origin, row.course.courseId))}" aria-label="Connect ${escapeHtml(row.platform)} course ${escapeHtml(row.name)}" ${state.busy ? "disabled" : ""}>Connect</button></span>
       </div>
-    </article>
-  `;
-}
-
-function renderBinding(binding) {
-  if (binding.available) return renderAvailableCourse(binding);
-  const eligible = isEligible(binding);
+    `;
+  }
+  const binding = row.binding;
+  if (row.scope === "attention") {
+    const note = attentionRowNote(binding);
+    const closed = siteClosed(binding);
+    return `
+      <div class="course-row is-static" data-row-kind="attention">
+        <div class="course-row-body">${nameHtml}${note ? `<div class="course-row-meta course-row-note">${escapeHtml(note)}</div>` : ""}</div>
+        <span class="course-row-action">${closed
+          ? `<button class="secondary" type="button" data-open-platform="${escapeHtml(binding.sourceBindingId || "")}" ${state.openPlatformBusy ? 'disabled aria-busy="true"' : ""}>${escapeHtml(openPlatformLabel(binding, state.openPlatformProgressVisible))}</button>`
+          : ""}</span>
+      </div>
+    `;
+  }
   const selected = state.selected.has(binding.sourceBindingId);
-  const permission = permissionState(binding);
-  const note = bindingNote(binding, selected);
-  const closed = siteClosed(binding);
+  const onEdit = courseStateText(binding) !== "Plan. Asks first.";
+  const box = state.selectMode
+    ? `<input class="course-select" type="checkbox" aria-label="${escapeHtml(courseSelectionAccessibleName(binding))}" ${selected ? "checked" : ""}>`
+    : "";
+  const isOpen = state.openCourses.has(binding.sourceBindingId);
+  const detailId = courseDetailDomId(binding.sourceBindingId);
   return `
-    <article class="course-card ${selected ? "is-selected" : ""} ${eligible ? "" : "is-unavailable"}" data-binding-id="${escapeHtml(binding.sourceBindingId || "")}">
-      <input class="course-select" type="checkbox" aria-label="${escapeHtml(courseSelectionAccessibleName(binding))}" ${selected ? "checked" : ""} ${eligible ? "" : "disabled"}>
-      <div class="course-content">
-        <div class="course-card-header">
-          <h3 class="course-title"><span class="provider">${escapeHtml(providerName(binding))}</span>${escapeHtml(courseName(binding))}</h3>
-          <p class="permission-state ${permission.className}">${escapeHtml(permission.label)}</p>
-        </div>
-        ${renderCourseContext(binding)}
-        ${renderDiagnosticDetails(binding)}
-        ${note ? `<p class="card-note">${escapeHtml(note)}</p>` : ""}
-        ${closed ? `<button class="secondary card-action" type="button" data-open-platform="${escapeHtml(binding.sourceBindingId || "")}" ${state.openPlatformBusy ? 'disabled aria-busy="true"' : ""}>${escapeHtml(openPlatformLabel(binding, state.openPlatformProgressVisible))}</button>` : ""}
-      </div>
-    </article>
+    <div class="course-row ${state.selectMode ? "in-select-mode" : ""} ${selected ? "is-selected" : ""}" data-binding-id="${escapeHtml(binding.sourceBindingId || "")}" data-row-kind="connected">
+      ${box}
+      <div class="course-row-body"><button type="button" class="course-row-name-button" data-toggle-course="${escapeHtml(binding.sourceBindingId)}" aria-expanded="${isOpen}" aria-controls="${escapeHtml(detailId)}">${nameHtml}</button></div>
+      <span class="course-row-state ${onEdit ? "on" : ""}">${escapeHtml(courseStateText(binding))}</span>
+    </div>
+    ${renderCourseDetail(binding, isOpen)}
   `;
 }
 
-function renderAnchors() {
-  const availableAnchors = anchors();
-  const current = selectedAnchor() || availableAnchors[0] || null;
-  siteAnchor.innerHTML = availableAnchors.map((anchor) => `<option value="${escapeHtml(anchor.siteAnchorId)}">${escapeHtml(anchorLabel(anchor))}</option>`).join("");
-  if (current) siteAnchor.value = current.siteAnchorId;
-  siteAnchor.disabled = state.busy || !availableAnchors.length;
-  discoverCoursesButton.disabled = state.busy || !current;
-  if (state.statusReadFailed) {
-    siteAnchorDetails.textContent = "Connected courses were not checked. Select Refresh connected courses.";
-  } else if (!availableAnchors.length) {
-    siteAnchorDetails.textContent = "No signed-in Canvas or Moodle course is available. Open one course in Chrome, then refresh this page.";
-  } else if (current) {
-    siteAnchorDetails.textContent = "Find courses from this signed-in site. You choose which courses to connect in Plan.";
-  }
+/**
+ * WI-5.4: the course detail, opened in place under a connected row (WI-5.4: "Opens in place under
+ * the row"). Always present in the DOM as a `.morrow-panel` (WI-F.7: a course detail opening is one
+ * of the five named motion places), so the row's aria-controls always names a real element; its
+ * content is built only while open.
+ */
+function renderCourseDetail(binding, isOpen) {
+  const detailId = courseDetailDomId(binding.sourceBindingId);
+  if (!isOpen) return `<div class="course-detail morrow-panel" id="${escapeHtml(detailId)}"></div>`;
+  const level = courseLevel(binding);
+  const ids = level === "plan" ? [] : (Array.isArray(binding?.editPermission?.enabledCategories) ? binding.editPermission.enabledCategories.filter((value) => typeof value === "string") : []);
+  const expiresAt = permissionExpiresAt(binding);
+  const until = level !== "plan" && expiresAt !== null ? clockTime(expiresAt) : null;
+  const lead = level === "routine"
+    ? `Until ${escapeHtml(until)}, Morrow makes the routine edits below without another approval. It always asks before it creates, publishes, removes, posts, or changes a date, points or a setting.`
+    : level === "custom"
+      ? `Morrow makes the changes you selected in Customize until ${escapeHtml(until)}. It asks before every other change.`
+      : "Morrow asks before each change. To skip the review for one kind of edit, choose Edit above, or use “do not ask again” on a review.";
+  const listHtml = ids.length ? `<div class="routine-bundle-list">${ids.map((id) => `
+    <div class="routine-bundle-item">
+      <span>${escapeHtml(categoryLabelFor(id))}</span>
+      <button type="button" class="secondary" data-remove-category="${escapeHtml(id)}" ${state.busy ? "disabled" : ""}>Remove</button>
+    </div>`).join("")}</div>` : "";
+  const currentDurationValue = level !== "plan" ? closestEditDuration(expiresAt) : null;
+  const endsField = level !== "plan" ? `
+    <label class="duration-field" for="course-ends-${escapeHtml(detailId)}">
+      <span>Ends</span>
+      <select id="course-ends-${escapeHtml(detailId)}" data-end-duration ${state.busy ? "disabled" : ""}>
+        ${allowedEditDurations().map((entry) => `<option value="${entry.value}" ${entry.value === currentDurationValue ? "selected" : ""}>${escapeHtml(clockTime(Date.now() + entry.value))} (${escapeHtml(entry.label)})</option>`).join("")}
+      </select>
+    </label>` : "";
+  return `
+    <div class="course-detail morrow-panel is-open" id="${escapeHtml(detailId)}" data-binding-id="${escapeHtml(binding.sourceBindingId)}">
+      <div class="course-detail-top">
+        <div class="course-level-control" role="group" aria-label="Level for ${escapeHtml(courseName(binding))}">
+          <button type="button" data-set-level="plan" aria-pressed="${level === "plan"}" ${state.busy ? "disabled" : ""}>Plan. Morrow asks first.</button>
+          <button type="button" data-set-level="routine" aria-pressed="${level === "routine"}" ${state.busy ? "disabled" : ""}>Edit. Routine edits.</button>
+          ${level === "custom" ? `<button type="button" aria-pressed="true" data-open-customize="1">Custom</button>` : ""}
+        </div>
+        ${endsField}
+      </div>
+      <p class="field-help">${lead}</p>
+      ${listHtml}
+      <div class="course-detail-links">
+        <button type="button" class="secondary" data-open-customize="1">Customize</button>
+        <button type="button" class="secondary danger-action" data-disconnect="1">Disconnect</button>
+      </div>
+    </div>
+  `;
 }
 
-function renderCourses(focus = focusedCourseControl()) {
-  const connected = Array.isArray(state.status?.bindings) ? state.status.bindings : [];
-  const availableView = state.view === "available";
-  const { matching, totalPages, start, bindings: pageBindings } = currentPage();
-  const selectableOnPage = availableView ? pageBindings : pageBindings.filter(isEligible);
-  const selectedOnPage = selectableOnPage.filter((binding) => availableView
-    ? state.discoverySelected.has(binding.courseId)
-    : state.selected.has(binding.sourceBindingId));
-  const selectedTotal = availableView ? state.discoverySelected.size : selectedBindings().length;
-  courseList.setAttribute("aria-busy", String(!state.status || state.busy));
-  coursesTitle.textContent = availableView ? "Choose courses to connect" : "Choose connected courses";
-  modePanel.hidden = availableView;
-  availableActions.hidden = !availableView;
-  const discovery = state.discovery;
-  const showDiscoveryProgress = availableView && Boolean(discovery);
-  discoveryProgress.hidden = !showDiscoveryProgress;
-  loadMoreCoursesButton.hidden = true;
-  if (showDiscoveryProgress) {
-    const count = discovery.courseCount;
-    if (discoveryExpired()) {
-      discoveryProgressText.textContent = "This available-course list has expired. Find available courses again before connecting courses.";
-    } else if (discovery.complete) {
-      discoveryProgressText.textContent = `Page ${discovery.pageNumber} shows the final ${plural(count, "available course")} from this site.`;
-    } else {
-      discoveryProgressText.textContent = `Page ${discovery.pageNumber} shows ${plural(count, "available course")}. More courses are available from this site.`;
-      loadMoreCoursesButton.hidden = false;
-      loadMoreCoursesButton.disabled = state.busy || state.discoverySelected.size > 0;
-      loadMoreCoursesButton.textContent = state.busy
-        ? "Loading more courses…"
-        : state.discoverySelected.size ? "Connect selected courses to continue" : "Load more available courses";
-    }
+function renderCourseToolbar(rows) {
+  const total = rows.length;
+  const showExtras = total > FEW_COURSES_THRESHOLD;
+  const platforms = distinctValues(rows, "platform");
+  const terms = distinctValues(rows, "term");
+  coursePlatformField.hidden = !showExtras || platforms.length <= 1;
+  courseTermField.hidden = !showExtras || terms.length <= 1;
+  courseScopeTabs.hidden = !showExtras;
+  if (!coursePlatformField.hidden) {
+    const current = coursePlatformFilter.value || "all";
+    coursePlatformFilter.innerHTML = `<option value="all">All platforms</option>${platforms.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
+    coursePlatformFilter.value = platforms.includes(current) ? current : "all";
+    state.filters.platform = coursePlatformFilter.value;
   }
+  if (!courseTermField.hidden) {
+    const current = courseTermFilter.value || "all";
+    courseTermFilter.innerHTML = `<option value="all">All terms</option>${terms.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
+    courseTermFilter.value = terms.includes(current) ? current : "all";
+    state.filters.term = courseTermFilter.value;
+  }
+  if (courseScopeTabs.hidden) return;
+  const counts = scopeCounts(rows);
+  courseScopeTabs.innerHTML = SCOPES.map(([id, label]) => `<button type="button" class="secondary" id="course-scope-${id}" data-scope="${id}" aria-pressed="${state.filters.scope === id}">${escapeHtml(label)}<small>${counts[id]}</small></button>`).join("");
+}
+
+function renderCourseBulkBar(rows) {
+  const connectedSelected = rows.filter((row) => row.scope === "connected" && state.selected.has(row.binding.sourceBindingId));
+  const show = state.selectMode && connectedSelected.length > 0;
+  courseBulkBar.hidden = !show;
+  if (!show) return;
+  courseBulkCount.textContent = `${plural(connectedSelected.length, "course")} selected. Canvas and Moodle courses can be selected together.`;
+  courseBulkPlanButton.disabled = state.busy;
+  const routineAvailable = routineCategoryIds().length > 0;
+  courseBulkRoutineButton.disabled = state.busy || !routineAvailable;
+}
+
+function renderCourseList(focus = focusedCourseControl()) {
+  const rows = courseRows();
+  const connectedBindings = Array.isArray(state.status?.bindings) ? state.status.bindings : [];
+  courseList.setAttribute("aria-busy", String(!state.status || state.busy));
+  renderCourseToolbar(rows);
+  courseSelectModeButton.setAttribute("aria-pressed", String(state.selectMode));
+  courseSelectModeButton.textContent = state.selectMode ? "Done" : "Select";
+  courseSelectModeButton.disabled = state.busy || !rows.some((row) => row.scope === "connected");
+
+  const matches = orderedMatches(rows);
+  const limited = matches.slice(0, state.rowLimit);
 
   if (state.statusReadFailed) {
     courseList.innerHTML = '<p class="state-message">Connected courses were not checked. Select Refresh connected courses.</p>';
   } else if (!state.status) {
     // WI-F.10: three skeleton rows while the first read is outstanding, not a sentence.
     courseList.innerHTML = Array.from({ length: 3 }, () => '<div class="course-card-skeleton" aria-hidden="true"></div>').join("");
-  } else if (availableView && discoveryExpired()) {
-    courseList.innerHTML = '<p class="state-message">This available-course list has expired. Find available courses again before you connect courses.</p>';
-  } else if (!availableView && !connected.length) {
+  } else if (!connectedBindings.length && !rows.length) {
     // WI-F.10: one composed empty message, plus the WI-1.1 open-platform action once a site is saved.
     const anchor = savedAnchor();
     courseList.innerHTML = anchor
@@ -912,75 +1300,59 @@ function renderCourses(focus = focusedCourseControl()) {
           <button id="open-platform-empty" type="button" ${state.openPlatformBusy ? 'disabled aria-busy="true"' : ""}>${escapeHtml(openPlatformLabel(anchor, state.openPlatformProgressVisible))}</button>
         </div>`
       : '<p class="state-message">Open a course in Canvas or Moodle. Morrow Bridge finds it.</p>';
-  } else if (!matching.length) {
-    courseList.innerHTML = state.filter.trim()
-      ? `<p class="state-message">No ${availableView ? "available" : "connected"} course matches this search. Clear the search to view every course in this list.</p>`
-      : `<p class="state-message">No ${availableView ? "available" : "connected"} courses were found from this signed-in site.</p>`;
+  } else if (!limited.length) {
+    courseList.innerHTML = state.filters.q.trim() || state.filters.platform !== "all" || state.filters.term !== "all" || state.filters.scope !== "all"
+      ? `<p class="state-message">No course matches this search or filter. Clear it to view every course in this list.</p>`
+      : '<p class="state-message">No course is connected yet.</p>';
   } else {
-    courseList.innerHTML = pageBindings.map(renderBinding).join("");
+    let html = "";
+    let lastScope = null;
+    const headings = { attention: "Needs attention", connected: "Connected", available: "Not connected" };
+    for (const row of limited) {
+      if (row.scope !== lastScope) {
+        lastScope = row.scope;
+        const sectionCount = limited.filter((candidate) => candidate.scope === row.scope).length;
+        html += `<div class="listhead">${escapeHtml(headings[row.scope])} · ${sectionCount}</div>`;
+      }
+      html += renderCourseRow(row);
+    }
+    courseList.innerHTML = html;
   }
 
-  const ready = connected.filter((binding) => isEligible(binding) && binding.runtimeVerified === true);
+  courseShowMoreRow.hidden = matches.length <= limited.length;
+  courseShowMoreButton.textContent = `Show more (${plural(matches.length - limited.length, "more course")})`;
+
+  const showDiscoveryMore = Boolean(state.discovery) && !discoveryExpired() && state.discovery.complete === false;
+  discoveryMoreRow.hidden = !showDiscoveryMore;
+  discoveryMoreButton.disabled = state.busy;
+
+  const ready = connectedBindings.filter((binding) => isEligible(binding) && binding.runtimeVerified === true);
   const max = Number.isInteger(state.status?.bindingLimit) ? state.status.bindingLimit : 500;
   if (state.statusReadFailed) {
     connectionStatus.textContent = "Connected courses were not checked.";
   } else if (!state.status) {
     connectionStatus.textContent = "Checking your connected learning platforms…";
-  } else if (availableView && !discoveryExpired()) {
-    const found = state.discovery?.courseCount || discoveryItems().length;
-    connectionStatus.textContent = state.discovery?.complete
-      ? `Page ${state.discovery.pageNumber} shows the final ${plural(found, "available course")} returned from the selected site. These courses are not connected yet.`
-      : `Page ${state.discovery?.pageNumber} shows ${plural(found, "available course")}. More courses are available from the selected site.`;
-  } else if (!connected.length) {
+  } else if (!connectedBindings.length) {
     connectionStatus.textContent = "No course is connected yet.";
-  } else if (connected.length >= max) {
-    connectionStatus.textContent = `The connector returned ${plural(connected.length, "connected course")}, which is the ${max}-course settings limit. Disconnect a course before adding another.`;
+  } else if (connectedBindings.length >= max) {
+    connectionStatus.textContent = `The connector returned ${plural(connectedBindings.length, "connected course")}, which is the ${max}-course settings limit. Disconnect a course before adding another.`;
   } else {
-    const needsSite = connected.length - ready.length;
+    const needsSite = connectedBindings.length - ready.length;
     connectionStatus.textContent = needsSite
       ? `${plural(ready.length, "connected course")} ${ready.length === 1 ? "is" : "are"} ready to use. ${plural(needsSite, "saved course")} ${needsSite === 1 ? "needs" : "need"} an open course tab or a reconnected site.`
       : `${plural(ready.length, "connected course")} ${ready.length === 1 ? "is" : "are"} ready to use.`;
   }
 
-  visibleScope.textContent = pageBindings.length
-    ? `${plural(selectedOnPage.length, "course")} selected on this page. ${plural(selectedTotal, "course")} selected total.`
-    : "No courses in this view.";
-  selectVisible.disabled = state.busy || !selectableOnPage.length;
-  selectVisible.textContent = selectableOnPage.length && selectedOnPage.length === selectableOnPage.length
-    ? "Clear this page"
-    : availableView ? "Select this page to connect" : "Select this page";
-
-  const showPages = Boolean(state.status && matching.length > PAGE_SIZE);
-  coursePages.hidden = !showPages;
-  previousPage.disabled = state.busy || state.page === 0;
-  nextPage.disabled = state.busy || state.page >= totalPages - 1;
-  pageStatus.textContent = matching.length
-    ? `Showing ${start + 1}–${Math.min(start + PAGE_SIZE, matching.length)} of ${plural(matching.length, `matching ${availableView ? "available" : "connected"} course`)}. Page ${state.page + 1} of ${totalPages}.`
-    : `No matching ${availableView ? "available" : "connected"} courses.`;
-
-  const scope = availableView ? "available course" : "connected course";
-  const emptyList = state.filter.trim()
-    ? `No ${scope} matches this search.`
-    : !availableView
-      ? "No course is connected yet."
-      : discoveryExpired()
-        ? "This available-course list has expired. Find available courses again."
-        : "No available course was found from this signed-in site.";
   // The visible notice owns the status region while it shows, so an action result is not replaced
   // by the list summary that follows it.
   if (notice.hidden) {
-    announce(!state.status ? "" : matching.length
-      ? `${state.filter.trim() ? "Search matches " : ""}${plural(matching.length, scope)}${totalPages > 1 ? `, page ${state.page + 1} of ${totalPages}` : ""}.`
-      : emptyList);
+    const filtered = state.filters.q.trim() || state.filters.platform !== "all" || state.filters.term !== "all" || state.filters.scope !== "all";
+    announce(!state.status ? "" : matches.length
+      ? `${filtered ? "Search matches " : ""}${plural(matches.length, "course")}.`
+      : filtered ? "No course matches this search or filter." : "No course is connected yet.");
   }
 
-  availableSelectionSummary.textContent = discoveryExpired()
-    ? "Find available courses again. The previous course list is no longer valid."
-    : !state.discoverySelected.size
-      ? "Available courses on this page are not connected yet. Select courses to connect them with Plan access only."
-      : `${plural(state.discoverySelected.size, "available course")} selected to connect on this page. This does not grant Edit access.`;
-  connectSelectedButton.disabled = state.busy || discoveryExpired() || !state.discoverySelected.size;
-  connectSelectedButton.textContent = state.discoverySelected.size ? `Connect ${plural(state.discoverySelected.size, "selected course")} in Plan` : "Connect selected courses in Plan";
+  renderCourseBulkBar(rows);
   restoreCourseFocus(focus);
 }
 
@@ -996,13 +1368,54 @@ function selectedEditDuration() {
 
 function renderEditDuration(showEditStage) {
   const durations = allowedEditDurations();
-  const selected = selectedEditDuration();
+  // WI-4.5 (D3): the Routine edits switch asks for one render with a forced duration (4 hours),
+  // then this field goes back to remembering whatever the person last chose.
+  const requested = state.pendingDurationMs;
+  state.pendingDurationMs = null;
+  const selected = requested !== null && durations.some((entry) => entry.value === requested) ? requested : selectedEditDuration();
   const preferred = durations.some((entry) => entry.value === selected)
     ? selected
     : durations.find((entry) => entry.value === DEFAULT_EDIT_DURATION_MS)?.value || durations[0]?.value || null;
   editDuration.innerHTML = durations.map((entry) => `<option value="${entry.value}">${escapeHtml(entry.label)}</option>`).join("");
   if (preferred !== null) editDuration.value = String(preferred);
   editDuration.disabled = state.busy || !showEditStage || !durations.length;
+}
+
+/** WI-4.5 (D2, P2): the switch and its always-visible, never-disclosed list of included bundles. */
+function renderRoutineSwitch(showEditStage) {
+  const ids = routineCategoryIds();
+  const canOffer = showEditStage && ids.length > 0;
+  if (!canOffer && state.routineMode) state.routineMode = false;
+  routineSwitchContainer.hidden = !canOffer;
+  routineSwitch.disabled = state.busy || !canOffer;
+  routineSwitch.checked = state.routineMode;
+  const bundles = state.routineMode
+    ? [...state.selectedCategories].map(categoryById).filter((category) => category && category.routine === true)
+      .sort((left, right) => left.label.localeCompare(right.label))
+    : [];
+  routineBundleList.innerHTML = bundles.map((category) => `
+    <div class="routine-bundle-item">
+      <span>${escapeHtml(category.label)}</span>
+      <button type="button" class="secondary" data-remove-routine="${escapeHtml(category.id)}" ${state.busy ? "disabled" : ""}>Remove</button>
+    </div>
+  `).join("");
+  // WI-4.5: the switch replaces manual Customize browsing while it is engaged, so the two ways to
+  // choose the same underlying selection are never shown at once.
+  categoryList.hidden = state.routineMode;
+  actionFilterField.hidden = state.routineMode;
+  actionCheckedOnlyField.hidden = state.routineMode;
+}
+
+/** WI-5.5: the Customize view's summary bar sentence, "N actions in N areas, no removal (or "K
+ * remove content"), N courses, until <clock time>". Always visible above "Review and save", so it
+ * states the grant in one sentence before a person saves it. */
+function renderSummaryBar(selected, ids) {
+  const categories = ids.map(categoryById).filter(Boolean);
+  const areas = new Set(categories.map((category) => categoryAreaId(category)));
+  const removals = categories.filter((category) => categoryKind(category) === "remove").length;
+  const duration = selectedEditDuration();
+  const until = duration !== null ? clockTime(Date.now() + duration) : "the selected time";
+  return `${plural(categories.length, "action")} in ${plural(areas.size, "area")}, ${removals ? `${plural(removals, "action")} remove content` : "no removal"}, ${plural(selected.length, "course")}, until ${until}`;
 }
 
 function renderSelection() {
@@ -1017,6 +1430,14 @@ function renderSelection() {
   }
   const categoriesSelected = state.selectedCategories.size;
   const availableCategories = availableCategoriesForSelection();
+  const showEditStage = state.mode === "edit" && selected.length > 0 && !needsSite;
+  categoryFieldset.hidden = !showEditStage;
+  categoryFieldset.disabled = state.busy || !showEditStage;
+  // WI-5.5: the summary bar's "until <clock time>" reads #edit-duration's own value, so it must be
+  // set (renderEditDuration also resolves a pending routine-switch duration, D3) before that sentence
+  // is built below.
+  renderEditDuration(showEditStage);
+  renderRoutineSwitch(showEditStage);
   selectionSummary.textContent = state.statusReadFailed
     ? "Course access was not checked. Select Refresh connected courses."
     : !state.status
@@ -1031,11 +1452,7 @@ function renderSelection() {
           ? `${plural(selected.length, "course")} selected. Choose courses from one platform to set Edit.`
           : !categoriesSelected
             ? `${plural(selected.length, "course")} selected. Choose at least one change before you save Edit.`
-            : `${plural(selected.length, "course")} selected. Morrow can make: ${categoryLabels([...state.selectedCategories])}.${courseReachNote([...state.selectedCategories])}`;
-  const showEditStage = state.mode === "edit" && selected.length > 0 && !needsSite;
-  categoryFieldset.hidden = !showEditStage;
-  categoryFieldset.disabled = state.busy || !showEditStage;
-  renderEditDuration(showEditStage);
+            : renderSummaryBar(selected, [...state.selectedCategories]);
   editStageHint.hidden = showEditStage;
   editStageHint.textContent = !selected.length
     ? "Select courses, then choose Edit to review the available actions."
@@ -1060,7 +1477,9 @@ function renderSelection() {
   cancelSaveButton.disabled = state.busy;
   saveEditButton.disabled = state.busy || confirming || !showEditStage || !categoriesSelected || !availableCategories.size || !selectedEditDuration();
   returnPlanButton.textContent = `Return ${plural(selected.length, "selected course")} to Plan`;
-  saveEditButton.textContent = state.saveProgressText || (showEditStage ? `Save Edit access for ${plural(selected.length, "course")}` : "Save Edit access");
+  // WI-5.5: the summary bar's own button. The progress label from saveEditAccess (WI-F.10, "Saving N
+  // of N courses") still takes over once a save runs long enough to need it.
+  saveEditButton.textContent = state.saveProgressText || (showEditStage ? "Review and save" : "Save Edit access");
   actionHelp.textContent = needsSite
     ? "Open each selected course in Canvas or Moodle, then refresh this page before you choose Edit."
     : state.mode === "plan"
@@ -1090,6 +1509,47 @@ function renderFileStorageAccess() {
   enableFileStorageButton.disabled = state.fileStorageBusy || access.checking === true;
   revokeFileStorageButton.hidden = access.browserPermission !== true;
   revokeFileStorageButton.disabled = state.fileStorageBusy || access.checking === true;
+}
+
+/** WI-5.1: reads the Bridge-only courseMeta map service-worker.js writes at discovery and connect. */
+async function refreshCourseMeta() {
+  try {
+    const stored = await chrome.storage.local.get("courseMeta");
+    const raw = stored.courseMeta;
+    state.courseMeta = raw && typeof raw === "object" ? new Map(Object.entries(raw)) : new Map();
+  } catch {
+    state.courseMeta = new Map();
+  }
+}
+
+/** WI-1.2 (D1a): the checkbox that reads and writes openPlatformWhenNeeded directly, with no save step. */
+function renderOpenPlatformSetting() {
+  openPlatformWhenNeededCheckbox.checked = state.openPlatformWhenNeeded;
+  openPlatformWhenNeededCheckbox.disabled = state.openPlatformSettingBusy;
+}
+
+async function refreshOpenPlatformSetting() {
+  try {
+    const stored = await chrome.storage.local.get(OPEN_PLATFORM_WHEN_NEEDED_KEY);
+    state.openPlatformWhenNeeded = stored[OPEN_PLATFORM_WHEN_NEEDED_KEY] !== false;
+  } catch {
+    state.openPlatformWhenNeeded = true;
+  }
+  renderOpenPlatformSetting();
+}
+
+async function setOpenPlatformWhenNeeded(value) {
+  state.openPlatformSettingBusy = true;
+  renderOpenPlatformSetting();
+  try {
+    await chrome.storage.local.set({ [OPEN_PLATFORM_WHEN_NEEDED_KEY]: value });
+    state.openPlatformWhenNeeded = value;
+  } catch {
+    await refreshOpenPlatformSetting();
+  } finally {
+    state.openPlatformSettingBusy = false;
+    renderOpenPlatformSetting();
+  }
 }
 
 async function browserHasCourseFileStoragePermission() {
@@ -1166,12 +1626,12 @@ function renderEditBanner() {
 }
 
 function render(courseFocus = focusedCourseControl()) {
-  renderAnchors();
-  renderCategories();
-  renderCourses(courseFocus);
+  renderCustomize();
+  renderCourseList(courseFocus);
   renderSelection();
   renderEditBanner();
   renderFileStorageAccess();
+  renderOpenPlatformSetting();
   renderPrivateChat();
 }
 
@@ -1213,7 +1673,7 @@ async function refresh() {
   // WI-F.10: renders the loading skeleton for the very first read. A later refresh re-renders the
   // course list it already has, which is a no-op until the new read replaces it. Only the course
   // list is rendered here: the rest of the page has nothing new to say until the read settles.
-  renderCourses();
+  renderCourseList();
   try {
     const result = normalizeStatus(await request("morrow_edit_policy_status"));
     if (generation !== state.readGeneration) return;
@@ -1236,9 +1696,6 @@ async function refresh() {
     }
     if (state.discovery && !anchors().some((anchor) => anchor.siteAnchorId === state.discovery.siteAnchorId)) {
       state.discovery = null;
-      state.discoverySelected.clear();
-      state.view = "connected";
-      state.page = 0;
     }
     rebuildCategories();
     reconcileSelectedCategories();
@@ -1256,8 +1713,11 @@ async function refresh() {
     refreshButton.disabled = state.busy;
     await refreshCourseFileStorageAccess();
     if (generation !== state.readGeneration) return;
+    await refreshCourseMeta();
+    if (generation !== state.readGeneration) return;
     render();
     void refreshSelectedOptions();
+    void autoStartDiscovery();
   }
 }
 
@@ -1337,7 +1797,12 @@ async function saveEditAccess() {
   const enabledCategories = [...state.selectedCategories];
   const expiresInMs = selectedEditDuration();
   if (!bindings.length || !enabledCategories.length || !availableCategoriesForSelection().size || !expiresInMs || state.busy) return;
-  if (enabledCategories.some((id) => !bindings.every((binding) => supportsCategory(binding, id)))) {
+  // WI-5.6: a mixed selection's own choice is a platform-neutral family id; each connection saves
+  // its own ids for it, never the literal list. A single-platform choice is a literal id, and every
+  // selected connection must support every one of them, exactly as before WI-5.6.
+  const isFamilySelection = enabledCategories.some((id) => typeof id === "string" && id.startsWith("family:"));
+  const perBinding = bindings.map((binding) => ({ binding, ids: isFamilySelection ? resolveEnabledCategoriesFor(binding, enabledCategories) : enabledCategories }));
+  if (isFamilySelection ? perBinding.some(({ ids }) => !ids.length) : enabledCategories.some((id) => !bindings.every((binding) => supportsCategory(binding, id)))) {
     showError("edit_policy_category_unavailable");
     return;
   }
@@ -1362,8 +1827,8 @@ async function saveEditAccess() {
     renderSelection();
   }, 400);
   try {
-    for (const binding of bindings) {
-      const result = await request("morrow_edit_policy_save", { sourceBindingId: binding.sourceBindingId, enabledCategories, expiresInMs });
+    for (const { binding, ids } of perBinding) {
+      const result = await request("morrow_edit_policy_save", { sourceBindingId: binding.sourceBindingId, enabledCategories: ids, expiresInMs });
       if (!result?.editPermission || !Array.isArray(result.editPermission.enabledCategories)) {
         throw new Error("edit_policy_save_unconfirmed");
       }
@@ -1387,6 +1852,180 @@ async function saveEditAccess() {
   }
 }
 
+function bindingById(sourceBindingId) {
+  return (state.status?.bindings || []).find((entry) => entry.sourceBindingId === sourceBindingId) || null;
+}
+
+/** WI-5.4: the row's name button (aria-expanded/aria-controls) opens its detail in place. */
+function toggleCourseDetail(sourceBindingId) {
+  if (!sourceBindingId) return;
+  if (state.openCourses.has(sourceBindingId)) state.openCourses.delete(sourceBindingId);
+  else state.openCourses.add(sourceBindingId);
+  renderCourseList();
+  courseList.querySelector(`[data-toggle-course=${JSON.stringify(sourceBindingId)}]`)?.focus();
+}
+
+/**
+ * WI-5.4: fetches this one binding's live options only when its detail's "Edit. Routine edits."
+ * button needs them, independent of state.selected, so opening a row never disturbs what "Select"
+ * mode has already picked for the bulk bar and the Course access panel below.
+ */
+async function ensureBindingOptions(binding) {
+  if (optionsFor(binding)) return true;
+  if (!binding || binding.runtimeVerified !== true) {
+    showError("edit_policy_options_unreadable");
+    return false;
+  }
+  try {
+    const detail = normalizeEditOptions(await request("morrow_edit_policy_options", { sourceBindingId: binding.sourceBindingId }), binding);
+    state.optionsByBinding.set(binding.sourceBindingId, detail);
+    return true;
+  } catch (cause) {
+    showError(cause);
+    return false;
+  }
+}
+
+/** WI-5.4: this binding's own routine bundle ids, from its live options (ensureBindingOptions
+ * fetches them first). WI-5.6's bindingFamilyCategoryIds applies the same filter, scoped to one
+ * binding's own options directly, so opening a course's detail never touches
+ * availableCategoriesForSelection/state.selected (what a bulk selection would grant). */
+function routineCategoryIdsFor(binding) {
+  return bindingFamilyCategoryIds(binding, "routine");
+}
+
+/**
+ * WI-5.4: saves one course's own category list from its detail ("Edit. Routine edits.", "Remove",
+ * or the Ends menu). Unlike saveEditAccess, it never touches state.selected, state.mode or the
+ * confirm step: the detail's own control already decided everything the request needs, and a
+ * routine bundle is never destructive (D2a), so no confirmation step applies here.
+ */
+async function saveCourseCategories(binding, enabledCategories, expiresInMs, successMessage) {
+  if (state.busy) return;
+  setBusy(true);
+  clearError();
+  clearNotice();
+  try {
+    const result = await request("morrow_edit_policy_save", { sourceBindingId: binding.sourceBindingId, enabledCategories, expiresInMs });
+    if (!result?.editPermission || !Array.isArray(result.editPermission.enabledCategories)) {
+      throw new Error("edit_policy_save_unconfirmed");
+    }
+    const expiresAt = Number.isSafeInteger(result.editPermission.expiresAt) ? result.editPermission.expiresAt : null;
+    showNotice(typeof successMessage === "function" ? successMessage(expiresAt) : successMessage);
+  } catch (cause) {
+    showError(cause);
+  } finally {
+    setBusy(false);
+    await refresh();
+  }
+}
+
+/** WI-5.4: the detail's own "Plan. Morrow asks first." button. Reuses returnToPlan exactly as the
+ * bulk bar and "Ask first in all courses" already do, so one course's Plan click and many share one
+ * revoke path. */
+async function setCoursePlan(binding) {
+  if (state.busy || courseLevel(binding) === "plan") return;
+  await returnToPlan([binding], { doneMessage: `${courseName(binding)} is in Plan. Morrow asks first.` });
+}
+
+/** WI-5.4: the detail's own "Edit. Routine edits." button (D2, D3): always the routine set, always
+ * 4 hours, for this one course only. */
+async function setCourseRoutine(binding) {
+  if (state.busy || courseLevel(binding) === "routine") return;
+  clearError();
+  clearNotice();
+  if (!(await ensureBindingOptions(binding))) {
+    render();
+    return;
+  }
+  const ids = routineCategoryIdsFor(binding);
+  if (!ids.length) {
+    showError("edit_policy_category_unavailable");
+    render();
+    return;
+  }
+  await saveCourseCategories(binding, ids, ROUTINE_EDIT_DURATION_MS, (expiresAt) =>
+    `Routine edits are on for ${courseName(binding)} until ${expiresAt !== null ? clockTime(expiresAt) : "the selected time"}.`);
+}
+
+/** WI-5.4: "Remove" saves the list without that category and keeps the end time. The last category
+ * removed leaves nothing to save (morrow_edit_policy_save refuses an empty list), so the course
+ * returns to Plan instead, exactly what an empty allowed list means everywhere else (D7). */
+async function removeCourseCategory(binding, categoryId) {
+  if (state.busy || !categoryId) return;
+  const ids = Array.isArray(binding?.editPermission?.enabledCategories)
+    ? binding.editPermission.enabledCategories.filter((id) => typeof id === "string" && id !== categoryId)
+    : [];
+  if (!ids.length) {
+    await returnToPlan([binding], { doneMessage: `${courseName(binding)} is in Plan. Morrow asks first.` });
+    return;
+  }
+  const expiresInMs = closestEditDuration(permissionExpiresAt(binding)) ?? DEFAULT_EDIT_DURATION_MS;
+  const label = categoryLabelFor(categoryId);
+  await saveCourseCategories(binding, ids, expiresInMs, `Removed. Morrow asks again before it changes ${label.toLowerCase()} in ${courseName(binding)}.`);
+}
+
+/** WI-5.4: the "Ends" menu's own change: the same category list, a new fixed duration (F5). */
+async function changeCourseEnds(binding, expiresInMs) {
+  if (state.busy || !Number.isFinite(expiresInMs)) return;
+  const ids = Array.isArray(binding?.editPermission?.enabledCategories) ? binding.editPermission.enabledCategories.filter((id) => typeof id === "string") : [];
+  if (!ids.length) return;
+  await saveCourseCategories(binding, ids, expiresInMs, (expiresAt) =>
+    `Access in ${courseName(binding)} ends ${expiresAt !== null ? clockTime(expiresAt) : "at the selected time"}.`);
+}
+
+/**
+ * WI-5.4: "Customize" and the "Custom" chip both lead to the existing Course access panel below,
+ * selecting only this course so a Customize visit cannot change any other course's Edit access.
+ * WI-5.5 gives that panel the Customize view's own areas, kinds and actions; until then it keeps
+ * the picker it already has.
+ */
+function openCustomizeFor(binding) {
+  state.selected = new Set([binding.sourceBindingId]);
+  state.mode = "edit";
+  modeEdit.checked = true;
+  modePlan.checked = false;
+  state.pendingSaveConfirmation = false;
+  state.saveConfirmedFor = null;
+  showNotice(`Choose the changes for ${courseName(binding)} in Course access, below.`);
+  render();
+  void refreshSelectedOptions();
+  document.querySelector("#mode-panel")?.scrollIntoView?.();
+  modeEdit.focus?.();
+}
+
+// WI-5.1: code, term, role, favorite and published are optional on a discovered course. Each is
+// read only when it carries the type its producer promises (courseSummary in canvas-content.js,
+// discoveryCourses in service-worker.js); any other type is dropped, not rejected.
+function discoveryOptionalString(value) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim().slice(0, 120);
+  return trimmed ? trimmed : undefined;
+}
+
+function discoveryOptionalBoolean(value) {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function normalizeDiscoveryCourse(course) {
+  const id = nativeCourseId(course?.id);
+  if (!id || typeof course?.name !== "string" || !course.name) return null;
+  const code = discoveryOptionalString(course.code);
+  const term = discoveryOptionalString(course.term);
+  const role = discoveryOptionalString(course.role);
+  const favorite = discoveryOptionalBoolean(course.favorite);
+  const published = discoveryOptionalBoolean(course.published);
+  return {
+    id,
+    name: course.name,
+    ...(code !== undefined ? { code } : {}),
+    ...(term !== undefined ? { term } : {}),
+    ...(role !== undefined ? { role } : {}),
+    ...(favorite !== undefined ? { favorite } : {}),
+    ...(published !== undefined ? { published } : {}),
+  };
+}
+
 function normalizeDiscovery(result, siteAnchorId, prior = null) {
   if (!result || typeof result !== "object" || result.siteAnchorId !== siteAnchorId || typeof result.discoveryReceiptId !== "string" || !result.discoveryReceiptId
     || !Number.isFinite(result.expiresAt) || !Array.isArray(result.courses) || typeof result.complete !== "boolean"
@@ -1395,10 +2034,9 @@ function normalizeDiscovery(result, siteAnchorId, prior = null) {
     throw new Error("course_discovery_failed");
   }
   const courseIds = new Set();
-  const courses = result.courses.filter((course) => {
-    const id = nativeCourseId(course?.id);
-    if (!id || courseIds.has(id) || typeof course?.name !== "string" || !course.name) return false;
-    courseIds.add(id);
+  const courses = result.courses.map(normalizeDiscoveryCourse).filter((course) => {
+    if (!course || courseIds.has(course.id)) return false;
+    courseIds.add(course.id);
     return true;
   });
   if (courses.length !== result.courses.length || courses.length !== result.courseCount) throw new Error("course_discovery_failed");
@@ -1410,13 +2048,12 @@ function normalizeDiscovery(result, siteAnchorId, prior = null) {
       && result.principalId === prior.principalId
       && result.sessionGeneration === prior.sessionGeneration
       && result.expiresAt === prior.expiresAt;
-    if (!sameIdentity || result.pageNumber !== prior.pageNumber + 1 || state.discoverySelected.size) throw new Error("course_discovery_failed");
+    if (!sameIdentity || result.pageNumber !== prior.pageNumber + 1) throw new Error("course_discovery_failed");
   }
   return { ...result, courses };
 }
 
-async function startDiscovery() {
-  const anchor = selectedAnchor();
+async function startDiscovery(anchor) {
   if (!anchor || state.busy) return;
   setBusy(true);
   clearError();
@@ -1424,42 +2061,39 @@ async function startDiscovery() {
   try {
     const discovery = normalizeDiscovery(await request("morrow_course_discovery_start", { siteAnchorId: anchor.siteAnchorId }), anchor.siteAnchorId);
     state.discovery = discovery;
-    state.discoverySelected.clear();
-    state.filter = "";
-    courseFilter.value = "";
-    state.page = 0;
-    state.view = "available";
     if (discoveryExpired()) throw new Error("course_discovery_receipt_stale");
   } catch (cause) {
     state.discovery = null;
-    state.discoverySelected.clear();
-    state.view = "connected";
     showError(cause);
   } finally {
     setBusy(false);
   }
 }
 
-function selectedNativeCourseIds() {
-  const selected = new Set(state.discoverySelected);
-  const values = [];
-  for (const course of state.discovery?.courses || []) {
-    const id = nativeCourseId(course?.id);
-    if (id && selected.delete(id)) values.push(id);
-  }
-  return selected.size ? [] : values;
+const autoDiscoveredSiteAnchorIds = new Set();
+
+/**
+ * WI-5.2: replaces the removed manual "Find courses" button. Runs discovery once for each
+ * signed-in site, one site per call, so it never interrupts a course list the person is already
+ * looking at. refresh() calls this after every read (page open, Refresh, and any status or storage
+ * change), so a second signed-in site is discovered on the next such read. WI-5.3 shows the result
+ * inline, under "Not connected", in the one merged course list.
+ */
+async function autoStartDiscovery() {
+  if (state.busy) return;
+  const anchor = anchors().find((candidate) => !autoDiscoveredSiteAnchorIds.has(candidate.siteAnchorId));
+  if (!anchor) return;
+  autoDiscoveredSiteAnchorIds.add(anchor.siteAnchorId);
+  await startDiscovery(anchor);
 }
 
+/** WI-5.3: the "Not connected" part of the list shows a discovered site's first page (up to
+ * DISCOVERY_PAGE_LIMIT). This reads the next page from the same site into the same merged list. */
 async function loadMoreCourses() {
   const discovery = state.discovery;
   if (!discovery || state.busy || discovery.complete) return;
   if (discoveryExpired()) {
     showError("course_discovery_receipt_stale");
-    render();
-    return;
-  }
-  if (state.discoverySelected.size) {
-    showNotice("Connect or clear selected courses before loading the next page.");
     render();
     return;
   }
@@ -1480,15 +2114,12 @@ async function loadMoreCourses() {
   }
 }
 
-async function connectSelectedCourses() {
-  if (state.busy || discoveryExpired()) {
+/** WI-5.3: a "Not connected" row's own "Connect" button, one course at a time. */
+async function connectCourse(course) {
+  if (state.busy) return;
+  if (!state.discovery || discoveryExpired() || state.discovery.origin !== course.origin) {
     showError("course_discovery_receipt_stale");
     render();
-    return;
-  }
-  const courseIds = selectedNativeCourseIds();
-  if (!courseIds.length) {
-    showError("course_selection_invalid");
     return;
   }
   const { siteAnchorId, discoveryReceiptId } = state.discovery;
@@ -1496,14 +2127,12 @@ async function connectSelectedCourses() {
   clearError();
   clearNotice();
   try {
-    const result = await request("morrow_course_selection_save", { siteAnchorId, discoveryReceiptId, courseIds });
+    const result = await request("morrow_course_selection_save", { siteAnchorId, discoveryReceiptId, courseIds: [course.courseId] });
     const connected = new Set((result?.bindings || []).map((binding) => nativeCourseId(binding?.courseId)).filter(Boolean));
-    if (result?.siteAnchorId !== siteAnchorId || connected.size !== courseIds.length || courseIds.some((id) => !connected.has(String(id)))) {
+    if (result?.siteAnchorId !== siteAnchorId || !connected.has(course.courseId)) {
       throw new Error("course_selection_target_refused");
     }
-    state.discoverySelected.clear();
-    state.page = 0;
-    showNotice(`${plural(courseIds.length, "course")} connected in Plan. Continue through the available-course pages or view connected courses.`);
+    showNotice(`${course.courseName} is connected in Plan. Morrow asks before each change.`);
   } catch (cause) {
     const code = String(cause?.message || cause);
     if (code === "course_discovery_receipt_missing" || code === "course_discovery_receipt_stale") {
@@ -1532,54 +2161,169 @@ modeEdit.addEventListener("change", () => {
   }
 });
 
-categoryList.addEventListener("change", (event) => {
-  const input = event.target;
-  if (!(input instanceof HTMLInputElement) || input.type !== "checkbox") return;
-  if (input.checked) state.selectedCategories.add(input.value);
-  else state.selectedCategories.delete(input.value);
+// WI-4.5 (D2): one switch sets enabledCategories to every routine bundle for the selection, at 4
+// hours (D3). Turning it off clears the selection; it never merges with a manual Customize pick.
+routineSwitch.addEventListener("change", () => {
+  state.routineMode = routineSwitch.checked;
+  if (state.routineMode) {
+    state.selectedCategories = new Set(routineCategoryIds());
+    state.pendingDurationMs = ROUTINE_EDIT_DURATION_MS;
+  } else {
+    state.selectedCategories.clear();
+  }
+  state.pendingSaveConfirmation = false;
+  renderSelection();
+});
+
+// WI-4.5 (P2): "Remove" beside a listed bundle narrows the switch's grant without leaving the
+// always-visible list, the same action a manual checkbox performs.
+routineBundleList.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) return;
+  const button = event.target.closest("[data-remove-routine]");
+  if (!button) return;
+  state.selectedCategories.delete(button.dataset.removeRoutine);
   state.pendingSaveConfirmation = false;
   renderSelection();
 });
 
 actionFilter.addEventListener("input", () => {
   state.actionFilter = actionFilter.value;
-  renderCategories();
+  renderCustomize();
 });
 
 actionCheckedOnly.addEventListener("change", () => {
   state.actionCheckedOnly = actionCheckedOnly.checked;
-  renderCategories();
+  renderCustomize();
+});
+
+// WI-5.5: an area's or a kind's own "select all" toggles every selectable id under it (the area's
+// own checkbox skips the "remove" kind, D6), then both paths sync the same way a leaf action does:
+// in place, with no second render (see syncCustomizeTriStates).
+function setCategorySelected(id, selected) {
+  if (selected) state.selectedCategories.add(id);
+  else state.selectedCategories.delete(id);
+  const input = categoryList.querySelector(`.customize-action-input[value="${id}"]`);
+  if (input) input.checked = selected;
+}
+
+function toggleAreaSelection(areaId, checked) {
+  const available = availableCategoriesForSelection();
+  const ids = customizeSelectableIds(customizeAreaItems(areaId).filter((category) => categoryKind(category) !== "remove" && available.has(category.id)));
+  for (const id of ids) setCategorySelected(id, checked);
+}
+
+function toggleKindSelection(key, checked) {
+  const [areaId, kind] = key.split("/");
+  const available = availableCategoriesForSelection();
+  const ids = customizeSelectableIds(customizeAreaItems(areaId).filter((category) => categoryKind(category) === kind && available.has(category.id)));
+  for (const id of ids) setCategorySelected(id, checked);
+}
+
+// WI-5.5: a checkbox change inside the Customize view updates counts and tri-states in place; it
+// never rebuilds #category-list, because that would move focus and scroll.
+categoryList.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") return;
+  if (target.dataset.areaSelect) toggleAreaSelection(target.dataset.areaSelect, target.checked);
+  else if (target.dataset.kindSelect) toggleKindSelection(target.dataset.kindSelect, target.checked);
+  else if (target.classList.contains("customize-action-input")) setCategorySelected(target.value, target.checked);
+  else return;
+  state.pendingSaveConfirmation = false;
+  syncCustomizeTriStates();
+  renderSelection();
+});
+
+// WI-5.5: an area's or a kind's own disclosure button. A button click, unlike a checkbox change, is
+// free to render the list again: nothing here moves a checkbox's own state.
+categoryList.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) return;
+  const areaToggle = event.target.closest("[data-area-toggle]");
+  if (areaToggle) {
+    const id = areaToggle.dataset.areaToggle;
+    if (state.openAreas.has(id)) state.openAreas.delete(id);
+    else state.openAreas.add(id);
+    renderCustomize();
+    categoryList.querySelector(`[data-area-toggle="${id}"]`)?.focus();
+    return;
+  }
+  const kindToggle = event.target.closest("[data-kind-toggle]");
+  if (kindToggle) {
+    const key = kindToggle.dataset.kindToggle;
+    if (state.openKinds.has(key)) state.openKinds.delete(key);
+    else state.openKinds.add(key);
+    renderCustomize();
+    categoryList.querySelector(`[data-kind-toggle="${key}"]`)?.focus();
+  }
 });
 
 editDuration.addEventListener("change", () => renderSelection());
 
-courseFilter.addEventListener("input", () => {
-  state.filter = courseFilter.value;
-  state.page = 0;
-  renderCourses();
+// WI-5.3: any filter change resets the "Show more" row cap, so a narrower list starts unpaginated.
+function setCourseFilters(patch) {
+  Object.assign(state.filters, patch);
+  state.rowLimit = ROW_LIMIT_STEP;
+  renderCourseList();
   renderSelection();
+}
+
+courseFilter.addEventListener("input", () => setCourseFilters({ q: courseFilter.value }));
+coursePlatformFilter.addEventListener("change", () => setCourseFilters({ platform: coursePlatformFilter.value }));
+courseTermFilter.addEventListener("change", () => setCourseFilters({ term: courseTermFilter.value }));
+
+courseScopeTabs.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) return;
+  const button = event.target.closest("[data-scope]");
+  if (!button) return;
+  setCourseFilters({ scope: button.dataset.scope });
+  document.querySelector(`#course-scope-${state.filters.scope}`)?.focus();
 });
 
-selectVisible.addEventListener("click", () => {
-  const availableView = state.view === "available";
-  const selectable = availableView ? currentPage().bindings : currentPage().bindings.filter(isEligible);
-  const allSelected = selectable.length && selectable.every((binding) => availableView
-    ? state.discoverySelected.has(binding.courseId)
-    : state.selected.has(binding.sourceBindingId));
-  for (const binding of selectable) {
-    if (availableView) {
-      if (allSelected) state.discoverySelected.delete(binding.courseId);
-      else state.discoverySelected.add(binding.courseId);
-    } else if (allSelected) state.selected.delete(binding.sourceBindingId);
-    else state.selected.add(binding.sourceBindingId);
-  }
-  if (!availableView) {
+courseShowMoreButton.addEventListener("click", () => {
+  state.rowLimit += ROW_LIMIT_STEP;
+  renderCourseList();
+});
+
+discoveryMoreButton.addEventListener("click", () => void loadMoreCourses());
+
+// WI-5.3: "Select" shows a checkbox on each connected course and the bulk bar. Turning it on
+// starts a fresh selection; turning it off keeps the selection, so the "Course access" panel
+// below can still carry it into Customize (WI-5.5 replaces that panel with the inline detail).
+courseSelectModeButton.addEventListener("click", () => {
+  state.selectMode = !state.selectMode;
+  if (state.selectMode) {
+    state.selected.clear();
     rebuildCategories();
     reconcileSelectedCategories();
   }
   render();
-  if (!availableView) void refreshSelectedOptions();
 });
+
+courseBulkPlanButton.addEventListener("click", () => void returnToPlan(selectedBindings()));
+
+// WI-5.3, D2a: the bulk bar's Edit shortcut is always the routine set, always 4 hours (D3), the
+// same computation the "Routine edits" switch in the Course access panel below uses.
+async function bulkRoutineEdit() {
+  if (state.busy) return;
+  const bindings = selectedBindings();
+  if (!bindings.length) return;
+  if (bindings.some((binding) => !optionsFor(binding))) await refreshSelectedOptions();
+  const ids = routineCategoryIds();
+  if (!ids.length) {
+    showError("edit_policy_category_unavailable");
+    return;
+  }
+  state.mode = "edit";
+  modeEdit.checked = true;
+  modePlan.checked = false;
+  state.selectedCategories = new Set(ids);
+  state.pendingDurationMs = ROUTINE_EDIT_DURATION_MS;
+  state.pendingSaveConfirmation = false;
+  state.saveConfirmedFor = null;
+  render();
+  await saveEditAccess();
+}
+
+courseBulkRoutineButton.addEventListener("click", () => void bulkRoutineEdit());
 
 courseList.addEventListener("click", (event) => {
   if (!(event.target instanceof Element)) return;
@@ -1595,28 +2339,65 @@ courseList.addEventListener("click", (event) => {
     if (binding?.siteAnchorId) void openSavedPlatform(binding.siteAnchorId, binding.sourceBindingId, binding.provider);
     return;
   }
+  const connectButton = event.target.closest("[data-connect-row]");
+  if (connectButton) {
+    const [origin, courseId] = String(connectButton.dataset.connectRow || "").split("|");
+    const course = discoveryItems().find((candidate) => candidate.origin === origin && candidate.courseId === courseId);
+    // A stale click can race a re-render that already dropped this row (the discovery list
+    // expired, or the course connected through another tab): name it rather than doing nothing.
+    if (course) void connectCourse(course);
+    else { showError("course_selection_invalid"); render(); }
+    return;
+  }
+  // WI-5.4: the row's name button opens or closes its detail.
+  const toggleButton = event.target.closest("[data-toggle-course]");
+  if (toggleButton) {
+    toggleCourseDetail(toggleButton.dataset.toggleCourse);
+    return;
+  }
+  // WI-5.4: the detail's own Plan/Edit control, "Customize", "Remove" and "Disconnect".
+  const levelButton = event.target.closest("[data-set-level]");
+  if (levelButton) {
+    const binding = bindingById(levelButton.closest("[data-binding-id]")?.dataset.bindingId);
+    if (binding) void (levelButton.dataset.setLevel === "plan" ? setCoursePlan(binding) : setCourseRoutine(binding));
+    return;
+  }
+  const customizeButton = event.target.closest("[data-open-customize]");
+  if (customizeButton) {
+    const binding = bindingById(customizeButton.closest("[data-binding-id]")?.dataset.bindingId);
+    if (binding) openCustomizeFor(binding);
+    return;
+  }
+  const removeButton = event.target.closest("[data-remove-category]");
+  if (removeButton) {
+    const binding = bindingById(removeButton.closest("[data-binding-id]")?.dataset.bindingId);
+    if (binding) void removeCourseCategory(binding, removeButton.dataset.removeCategory);
+    return;
+  }
+  const disconnectButton = event.target.closest("[data-disconnect]");
+  if (disconnectButton) {
+    showNotice("Disconnecting a course here is not available yet.");
+    return;
+  }
   if (event.target.closest("input, button, a, summary, details")) return;
-  const card = event.target.closest(".course-card");
-  if (!card || card.classList.contains("is-unavailable")) return;
-  const input = card.querySelector(".available-course-select, .course-select");
+  if (!state.selectMode) return;
+  const row = event.target.closest(".course-row[data-binding-id]");
+  if (!row) return;
+  const input = row.querySelector(".course-select");
   if (input instanceof HTMLInputElement && !input.disabled) input.click();
 });
 
 courseList.addEventListener("change", (event) => {
   const input = event.target;
-  if (!(input instanceof HTMLInputElement)) return;
-  if (input.classList.contains("available-course-select")) {
-    const card = input.closest("[data-course-id]");
-    const id = nativeCourseId(card?.dataset.courseId);
-    if (!id) return;
-    if (input.checked) state.discoverySelected.add(id);
-    else state.discoverySelected.delete(id);
-    render();
+  // WI-5.4: the detail's own "Ends" menu re-saves the same categories with the new duration.
+  if (input instanceof Element && input.localName === "select" && input.hasAttribute("data-end-duration")) {
+    const binding = bindingById(input.closest("[data-binding-id]")?.dataset.bindingId);
+    if (binding) void changeCourseEnds(binding, Number(input.value));
     return;
   }
-  if (!input.classList.contains("course-select")) return;
-  const card = input.closest("[data-binding-id]");
-  const id = card?.dataset.bindingId;
+  if (!(input instanceof HTMLInputElement) || !input.classList.contains("course-select")) return;
+  const row = input.closest("[data-binding-id]");
+  const id = row?.dataset.bindingId;
   if (!id) return;
   if (input.checked) state.selected.add(id);
   else state.selected.delete(id);
@@ -1628,34 +2409,6 @@ courseList.addEventListener("change", (event) => {
 });
 
 refreshButton.addEventListener("click", () => void refresh());
-siteAnchor.addEventListener("change", () => {
-  if (state.view === "available") {
-    state.discovery = null;
-    state.discoverySelected.clear();
-    state.view = "connected";
-    state.page = 0;
-  }
-  render();
-});
-discoverCoursesButton.addEventListener("click", () => void startDiscovery());
-loadMoreCoursesButton.addEventListener("click", () => void loadMoreCourses());
-showConnectedButton.addEventListener("click", () => {
-  state.view = "connected";
-  state.page = 0;
-  state.filter = "";
-  courseFilter.value = "";
-  render();
-});
-connectSelectedButton.addEventListener("click", () => void connectSelectedCourses());
-previousPage.addEventListener("click", () => {
-  state.page = Math.max(0, state.page - 1);
-  renderCourses();
-});
-nextPage.addEventListener("click", () => {
-  const { totalPages } = currentPage();
-  state.page = Math.min(totalPages - 1, state.page + 1);
-  renderCourses();
-});
 returnPlanButton.addEventListener("click", () => void returnToPlan(selectedBindings()));
 askFirstAllCoursesButton.addEventListener("click", () => void returnToPlan(activeEditBindings(), { doneMessage: "Done. Morrow asks first in all courses." }));
 saveEditButton.addEventListener("click", () => void saveEditAccess());
@@ -1672,6 +2425,7 @@ cancelSaveButton.addEventListener("click", () => {
 });
 enableFileStorageButton.addEventListener("click", () => void enableCourseFileStorageAccess());
 revokeFileStorageButton.addEventListener("click", () => void revokeCourseFileStorageAccess());
+openPlatformWhenNeededCheckbox.addEventListener("change", () => void setOpenPlatformWhenNeeded(openPlatformWhenNeededCheckbox.checked));
 privateChatOpenButton.addEventListener("click", openPrivateChat);
 privateChatCloseButton.addEventListener("click", () => void closePrivateChat());
 privateChatScrim.addEventListener("click", () => void closePrivateChat());
@@ -1691,10 +2445,13 @@ chrome.runtime?.onMessage?.addListener((message) => {
   if (["morrow_bridge_status_changed", "morrow_private_chat_changed"].includes(message?.type)) void refresh();
 });
 
-chrome.storage?.onChanged?.addListener((_changes, areaName) => {
-  if (areaName === "local") void refresh();
+chrome.storage?.onChanged?.addListener((changes, areaName) => {
+  if (areaName !== "local") return;
+  if (Object.prototype.hasOwnProperty.call(changes, OPEN_PLATFORM_WHEN_NEEDED_KEY)) void refreshOpenPlatformSetting();
+  void refresh();
 });
 chrome.permissions?.onAdded?.addListener(() => void refreshCourseFileStorageAccess());
 chrome.permissions?.onRemoved?.addListener(() => void refreshCourseFileStorageAccess());
 
+await refreshOpenPlatformSetting();
 await refresh();

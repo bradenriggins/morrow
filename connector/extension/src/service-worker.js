@@ -816,7 +816,7 @@ function httpUrl(path = "") {
 }
 
 async function storage() {
-  return await chrome.storage.local.get(["token", "bindings", "pairing", PAIRING_AUTHORITY_KEY, "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead", "openPlatformWhenNeeded"]);
+  return await chrome.storage.local.get(["token", "bindings", "pairing", PAIRING_AUTHORITY_KEY, "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead", "openPlatformWhenNeeded", "courseMeta"]);
 }
 
 async function courseDataConsentAccepted() {
@@ -2036,10 +2036,14 @@ function bridgePolicySet(command) {
     throw new Error("edit_policy_set_stale");
   }
   const value = command.editPolicySet;
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["mode", "selections"].includes(key))
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["mode", "selections", "merge", "expiresInMs"].includes(key))
     || !["edit", "plan"].includes(value.mode) || !Array.isArray(value.selections) || !value.selections.length || value.selections.length > EDIT_POLICY_SELECTION_LIMIT) {
     throw new Error("edit_policy_set_invalid");
   }
+  // WI-4.1/WI-4.2: checked again here, the same as normalizeBridgeEditPolicySet in
+  // packages/bridge-protocol, because a command reaches this worker straight from the socket.
+  if (value.merge !== undefined && (value.mode !== "edit" || value.merge !== true)) throw new Error("edit_policy_set_invalid");
+  if (value.expiresInMs !== undefined && !validEditDuration(value.expiresInMs)) throw new Error("edit_policy_set_invalid");
   const selections = value.selections.map((selection) => {
     if (!selection || typeof selection !== "object" || Array.isArray(selection)
       || Object.keys(selection).some((key) => !["sourceBindingId", "expectedPolicyRevision", "enabledCategories"].includes(key))
@@ -2063,7 +2067,12 @@ function bridgePolicySet(command) {
     || selections.some((selection, index) => index > 0 && selections[index - 1].sourceBindingId >= selection.sourceBindingId)) {
     throw new Error("edit_policy_set_invalid");
   }
-  return { mode: value.mode, selections };
+  return {
+    mode: value.mode,
+    selections,
+    ...(value.merge === undefined ? {} : { merge: value.merge }),
+    ...(value.expiresInMs === undefined ? {} : { expiresInMs: value.expiresInMs }),
+  };
 }
 
 function bridgePolicyOptionsGet(command) {
@@ -2201,13 +2210,22 @@ async function applyBridgePolicySet(policySet, command) {
         continue;
       }
       try {
+        // WI-4.2 (F7, D3): a merge unions the sent categories into an active grant and keeps its
+        // end time (a merge never moves the end time later). Without an active grant there is
+        // nothing to merge, so it starts a fresh grant at the chosen or the conversational
+        // duration, same as a non-merge grant.
+        const merging = policySet.merge === true && Boolean(permission);
+        const enabledCategories = merging
+          ? [...new Set([...permission.enabledCategories, ...selection.enabledCategories])].sort()
+          : selection.enabledCategories;
+        const expiresAt = merging ? permission.expiresAt : Date.now() + (policySet.expiresInMs ?? CONVERSATIONAL_EDIT_DURATION_MS);
         const editPermission = await createEditPermission({
           binding,
           catalogDigest: api.catalogDigest,
           revision: priorRevision + 1,
-          enabledCategories: selection.enabledCategories,
+          enabledCategories,
           operations: [...state.operations.values()],
-          expiresAt: Date.now() + CONVERSATIONAL_EDIT_DURATION_MS,
+          expiresAt,
         });
         nextPolicies[selection.sourceBindingId] = editPermission;
         nextRevisions[selection.sourceBindingId] = editPermission.revision;
@@ -2227,17 +2245,67 @@ async function applyBridgePolicySet(policySet, command) {
   return result;
 }
 
+const DISCOVERY_COURSE_KEYS = new Set(["id", "name", "code", "term", "role", "favorite", "published"]);
+
+function discoveryOptionalString(value, max = 120) {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new Error("course_discovery_failed");
+  const trimmed = value.trim().slice(0, max);
+  return trimmed ? trimmed : undefined;
+}
+
+function discoveryOptionalBoolean(value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") throw new Error("course_discovery_failed");
+  return value;
+}
+
 function discoveryCourses(value, maximum = DISCOVERY_PAGE_LIMIT) {
   if (!Array.isArray(value) || value.length > maximum) throw new Error("course_discovery_failed");
   const seen = new Set();
   const courses = value.map((course) => {
-    const id = decimalId(course?.id);
-    const name = typeof course?.name === "string" ? course.name.trim().slice(0, 300) : "";
+    if (!course || typeof course !== "object" || Array.isArray(course)
+      || Object.keys(course).some((key) => !DISCOVERY_COURSE_KEYS.has(key))) throw new Error("course_discovery_failed");
+    const id = decimalId(course.id);
+    const name = typeof course.name === "string" ? course.name.trim().slice(0, 300) : "";
     if (!id || !name || seen.has(id)) throw new Error("course_discovery_failed");
     seen.add(id);
-    return { id, name };
+    const code = discoveryOptionalString(course.code);
+    const term = discoveryOptionalString(course.term);
+    const role = discoveryOptionalString(course.role);
+    const favorite = discoveryOptionalBoolean(course.favorite);
+    const published = discoveryOptionalBoolean(course.published);
+    return {
+      id,
+      name,
+      ...(code !== undefined ? { code } : {}),
+      ...(term !== undefined ? { term } : {}),
+      ...(role !== undefined ? { role } : {}),
+      ...(favorite !== undefined ? { favorite } : {}),
+      ...(published !== undefined ? { published } : {}),
+    };
   });
   return courses.sort((left, right) => left.id.length - right.id.length || left.id.localeCompare(right.id, "en-US"));
+}
+
+function storedCourseMeta(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function nextCourseMeta(prior, origin, courses) {
+  const next = { ...storedCourseMeta(prior) };
+  for (const course of courses) {
+    const { id: courseId, name, ...meta } = course;
+    if (!courseId) continue;
+    const key = `${origin}|${courseId}`;
+    next[key] = { ...(next[key] || {}), name, ...meta };
+  }
+  return next;
+}
+
+async function writeCourseMeta(stored, origin, courses, authorityGeneration) {
+  if (!Array.isArray(courses) || !courses.length) return;
+  await setCourseDataBoundFields(chrome.storage.local, { courseMeta: nextCourseMeta(stored.courseMeta, origin, courses) }, stored, authorityGeneration);
 }
 
 function sameAnchorReceipt(receipt, anchor) {
@@ -2365,6 +2433,7 @@ async function startCourseDiscovery(siteAnchorId, authorityGeneration = state.co
     const next = Object.fromEntries(Object.entries(storedDiscoveries(saved.courseDiscoveries)).filter(([, prior]) => prior?.siteAnchorId !== anchor.siteAnchorId));
     next[receipt.discoveryReceiptId] = receipt;
     await setCourseDataBoundFields(discoveryArea(), { courseDiscoveries: next }, saved, authorityGeneration);
+    await writeCourseMeta(stored, anchor.origin, listed.courses, authorityGeneration);
     return publicDiscoveryReceipt(anchor, receipt);
   });
 }
@@ -2420,6 +2489,7 @@ async function continueCourseDiscovery(siteAnchorId, discoveryReceiptId, authori
     };
     const nextDiscoveries = { ...storedDiscoveries(saved.courseDiscoveries), [discoveryReceiptId]: updated };
     await setCourseDataBoundFields(discoveryArea(), { courseDiscoveries: nextDiscoveries }, saved, authorityGeneration);
+    await writeCourseMeta(stored, anchor.origin, listed.courses, authorityGeneration);
     return publicDiscoveryReceipt(anchor, updated);
   });
 }
@@ -2474,7 +2544,8 @@ async function saveCourseSelection(siteAnchorId, discoveryReceiptId, courseIds, 
       delete policies[binding.sourceBindingId];
       added.push(binding);
     }
-    await setCourseDataBoundFields(chrome.storage.local, { bindings, editPolicies: policies }, stored, authorityGeneration);
+    const courseMeta = nextCourseMeta(stored.courseMeta, anchor.origin, checked);
+    await setCourseDataBoundFields(chrome.storage.local, { bindings, editPolicies: policies, courseMeta }, stored, authorityGeneration);
     return { siteAnchorId: anchor.siteAnchorId, bindings: added.map(({ principalId: _principalId, siteAnchorId: _siteAnchorId, ...binding }) => binding) };
   });
   await requireCourseDataAuthority(authorityGeneration);

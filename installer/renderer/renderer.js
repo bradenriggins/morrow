@@ -9,6 +9,7 @@ import {
   progress,
   removalAnnouncement,
   retentionView,
+  setupManagementView,
   setupUnavailableView,
   statusSummary,
   supportView
@@ -18,6 +19,10 @@ const API = globalThis.morrowInstaller;
 const setupMain = document.querySelector("#setup");
 const refreshButton = document.querySelector("#refresh");
 const headerStatus = document.querySelector("#header-status");
+const navHome = document.querySelector("#nav-home");
+const navSettings = document.querySelector("#nav-settings");
+const homeView = document.querySelector("#home-view");
+const settingsView = document.querySelector("#settings-view");
 const setupIntro = document.querySelector(".intro");
 const platformNotes = [document.querySelector("#windows-note"), document.querySelector("#macos-note")];
 const progressList = document.querySelector("#progress-list");
@@ -27,6 +32,9 @@ const actionTitle = document.querySelector("#action-title");
 const actionCopy = document.querySelector("#action-copy");
 const actionBody = document.querySelector("#action-body");
 const problem = document.querySelector("#problem");
+const setupManagementPanel = document.querySelector("#setup-management-panel");
+const setupManagementTitle = document.querySelector("#setup-management-title");
+const setupManagementBody = document.querySelector("#setup-management-body");
 const updatesPanel = document.querySelector("#updates-panel");
 const updatesTitle = document.querySelector("#updates-title");
 const updatesCopy = document.querySelector("#updates-copy");
@@ -72,6 +80,7 @@ const SETTLING_REFRESH_MAX_MS = 5_000;
 const SETTLING_REFRESH_WINDOW_MS = 120_000;
 
 let state = null;
+let activeView = "home";
 let chosenAssistantId = null;
 let busy = false;
 let latestProblem = null;
@@ -114,10 +123,12 @@ function controls() {
     refreshButton,
     blackboardSubmit,
     ...actionBody.querySelectorAll("[data-action]"),
+    ...setupManagementBody.querySelectorAll("[data-action]"),
     ...updatesActions.querySelectorAll("[data-action]"),
     ...blackboardTenantRow.querySelectorAll("[data-action]"),
     ...blackboardCourseList.querySelectorAll("[data-action]"),
-    ...retentionBody.querySelectorAll("[data-action]")
+    ...retentionBody.querySelectorAll("[data-action]"),
+    ...support.querySelectorAll("[data-action]")
   ];
 }
 
@@ -125,6 +136,7 @@ function focusTargets() {
   return [
     ...controls(),
     actionTitle,
+    setupManagementTitle,
     updatesTitle,
     blackboardSummary,
     retentionSummary,
@@ -146,9 +158,10 @@ function restoreFocus(key) {
 }
 
 function rememberUserActionFocus(target) {
-  if (!actionBody.contains(target)) return;
+  if (actionBody.contains(target)) userActionFocusPending = "action";
+  else if (setupManagementBody.contains(target)) userActionFocusPending = "settings";
+  else return;
   heldFocusKey = focusKey(target);
-  userActionFocusPending = true;
 }
 
 function focusActionTransition() {
@@ -161,9 +174,19 @@ function focusActionTransition() {
   return document.activeElement === actionTitle;
 }
 
+// The Settings-view counterpart of focusActionTransition: a control that
+// disappeared after its own action (for example, Remove) hands focus to the
+// setup-management heading instead of leaving it on nothing.
+function focusSettingsTransition() {
+  setupManagementTitle.focus();
+  return document.activeElement === setupManagementTitle;
+}
+
 function applyBusy() {
   setupMain.setAttribute("aria-busy", String(busy));
   refreshButton.disabled = busy;
+  navHome.disabled = busy;
+  navSettings.disabled = busy;
   if (!busy) return;
   for (const control of controls()) control.disabled = true;
 }
@@ -461,6 +484,48 @@ function announceRemoval(current) {
   if (removalStatus.textContent !== announcement) removalStatus.textContent = announcement;
 }
 
+// The setup a person can change, now on the Settings view (D8, D9). Hidden
+// entirely in the one state it never applies to: repair, and before any
+// assistant is configured or waiting for approval.
+function renderSetupManagement(current) {
+  const view = setupManagementView(current);
+  setupManagementPanel.hidden = !view;
+  if (!view) {
+    setupManagementBody.innerHTML = "";
+    return;
+  }
+  setupManagementTitle.textContent = view.title;
+  setupManagementBody.innerHTML = view.body;
+}
+
+// Home carries the setup wizard and, once it is done, status and example
+// requests (D8). Settings carries the setup a person can change, Updates, the
+// Blackboard connection, what stays on this computer, and Support. Switching
+// is local to the renderer: it changes nothing Morrow has read or saved.
+//
+// The hidden view keeps the `hidden` attribute, which styles.css enforces
+// with `display: none !important` (so it always wins over any inline style).
+// The visible view additionally gets inline `display: contents`: `.setup`
+// lays its children out as a CSS grid, so a plain wrapper div around each
+// view would take its own grid cell instead of letting its children keep
+// their own placement. `display: contents` removes the wrapper from that box
+// tree so its children sit in the grid exactly as before.
+function applyActiveView() {
+  const onSettings = activeView === "settings";
+  homeView.hidden = onSettings;
+  homeView.style.display = onSettings ? "" : "contents";
+  settingsView.hidden = !onSettings;
+  settingsView.style.display = onSettings ? "contents" : "";
+  navHome.setAttribute("aria-current", onSettings ? "false" : "page");
+  navSettings.setAttribute("aria-current", onSettings ? "page" : "false");
+}
+
+function setActiveView(next) {
+  if (activeView === next) return;
+  activeView = next;
+  applyActiveView();
+}
+
 function render(current) {
   current = stateWithNewestUpdates(current);
   state = current;
@@ -481,6 +546,7 @@ function render(current) {
     if (advanced && advancedOpen) advanced.open = true;
   }
   if (current) {
+    renderSetupManagement(current);
     renderUpdates(current);
     renderBlackboard(current);
     renderRetention(current);
@@ -488,10 +554,11 @@ function render(current) {
   renderSupport(current, Boolean(view));
   announceRemoval(current);
   setProblem(latestProblem);
+  applyActiveView();
   applyBusy();
   let restored = restoreFocus(restoreKey);
   if (!busy && userActionFocusPending) {
-    if (!restored) restored = focusActionTransition();
+    if (!restored) restored = userActionFocusPending === "settings" ? focusSettingsTransition() : focusActionTransition();
     userActionFocusPending = false;
   }
   heldFocusKey = busy && !restored ? restoreKey : null;
@@ -582,6 +649,10 @@ async function handleAction(event) {
     render(state);
     return;
   }
+  if (action === "open-settings") {
+    setActiveView("settings");
+    return;
+  }
   if (action === "choose-workspace") {
     const next = await invoke("installer:choose-workspace");
     if (next) render(next);
@@ -608,6 +679,20 @@ async function handleAction(event) {
   }
   if (action === "reveal-bridge-folder") {
     const next = await invoke("installer:reveal-bridge-folder");
+    if (next) render(next);
+    else render(state);
+    return;
+  }
+  if (action === "copy-example-prompt") {
+    const text = target.dataset.prompt;
+    if (!text) return;
+    const next = await invoke("installer:copy-to-clipboard", { text });
+    if (next) render(next);
+    else render(state);
+    return;
+  }
+  if (action === "open-support") {
+    const next = await invoke("installer:open-support");
     if (next) render(next);
     else render(state);
     return;
@@ -818,10 +903,14 @@ async function submitBlackboard(event) {
 }
 
 refreshButton.addEventListener("click", () => { void checkNow(); });
+navHome.addEventListener("click", () => setActiveView("home"));
+navSettings.addEventListener("click", () => setActiveView("settings"));
 actionBody.addEventListener("click", (event) => { void handleAction(event); });
+setupManagementBody.addEventListener("click", (event) => { void handleAction(event); });
 updatesActions.addEventListener("click", (event) => { void handleAction(event); });
 blackboardPanel.addEventListener("click", (event) => { void handleAction(event); });
 retentionBody.addEventListener("click", (event) => { void handleAction(event); });
+support.addEventListener("click", (event) => { void handleAction(event); });
 blackboardPanel.addEventListener("toggle", () => { blackboardDisclosureTouched = true; });
 blackboardForm.addEventListener("submit", (event) => { void submitBlackboard(event); });
 // A message a person is already correcting clears as soon as the value is right.

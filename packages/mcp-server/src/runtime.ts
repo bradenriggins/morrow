@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DomUtils, parseDocument } from "htmlparser2";
 import sanitizeHtml from "sanitize-html";
 import {
+  BRIDGE_EDIT_DURATIONS_MS,
   MAX_BRIDGE_UI_REVIEWS,
   STRUCTURAL_EDIT_FIELDS,
   normalizeBridgeBindings,
@@ -14,6 +15,7 @@ import {
   normalizeBridgeUiState,
   type BridgeBinding,
   type BridgeEditOption,
+  type BridgeEditPermissionRule,
   type BridgePrivateAttachment,
   type BridgePrivateConversation,
   type BridgeUiReview,
@@ -756,6 +758,133 @@ export interface BrowserEditAccessResult {
 const BROWSER_EDIT_ACCESS_AREAS = new Set<string>(["pages", "assignments", "quizzes", "discussions", "files", "calendar", "people", "accessibility", "beyond_course", "other"]);
 const BROWSER_EDIT_ACCESS_KINDS = new Set<string>(["edit", "publish", "remove"]);
 const BROWSER_EDIT_ACCESS_REACH = new Set<string>(["course", "beyond"]);
+
+export interface RememberOfferResult {
+  readonly categoryId: string;
+  readonly label: string;
+  readonly until: number;
+}
+
+// D3: the review page's "do not ask again" grant, and the new grant a merge creates when no
+// permission is active yet, both last 4 hours. Read from BRIDGE_EDIT_DURATIONS_MS (not a bare
+// literal) so a rememberKind grant can only ever ask for one of the five fixed Edit durations F5
+// requires.
+const REMEMBER_KIND_DURATION_MS = BRIDGE_EDIT_DURATIONS_MS.find((ms) => ms === 4 * 60 * 60 * 1_000)!;
+
+export interface RememberableEditCategory {
+  readonly id: string;
+  readonly provider: "canvas" | "moodle";
+  readonly rules: readonly BridgeEditPermissionRule[];
+}
+
+/**
+ * WI-4.3: `rememberOffer` has to know which exact operation each "do not ask again" bundle
+ * covers, but a category's rules never cross the Bridge wire: `BridgeEditOption` (what
+ * `browserEditOptions` reads back for a connection) carries no `rules` field, and
+ * `connector/extension/src/edit-policy.js`'s own wire parser refuses any option field it does not
+ * name. So this mirrors, by hand, the `rules` of every `rememberable: true` entry in
+ * `CURATED_CATEGORY_SPECS` there (a generated, non-curated option is never rememberable, so no
+ * other entry needs a place here). `test/remember-kind.test.ts` reads that live export and checks
+ * this table against it, the same hand-sync discipline WI-4.1 used for the five Edit durations
+ * (`edit-policy.js:15`). A category id, its `rememberable` flag, its `learnerVisible` flag and its
+ * `reach` are still read live from the connection's own options in `rememberOffer`, never from
+ * here: this table exists only for the rule shape the wire cannot carry.
+ */
+export const REMEMBERABLE_EDIT_CATEGORIES: readonly RememberableEditCategory[] = [
+  {
+    id: "dates",
+    provider: "moodle",
+    rules: [
+      { operationKey: "moodle.form.course.modedit.assign.write.v1", toolName: "moodle_update_assignment", allowedChangedFields: ["due_date"] },
+      { operationKey: "moodle.form.course.modedit.quiz.write.v1", toolName: "moodle_update_quiz", allowedChangedFields: ["close_at", "open_at"] },
+    ],
+  },
+  {
+    id: "content",
+    provider: "moodle",
+    rules: [
+      { operationKey: "moodle.form.course.modedit.page.write.v1", toolName: "moodle_update_page", allowedChangedFields: ["content", "name"] },
+      { operationKey: "moodle.form.course.modedit.label.write.v1", toolName: "moodle_update_label", allowedChangedFields: ["content"] },
+      { operationKey: "moodle.form.course.modedit.assign.write.v1", toolName: "moodle_update_assignment", allowedChangedFields: ["instructions", "name"] },
+      { operationKey: "moodle.form.course.modedit.quiz.write.v1", toolName: "moodle_update_quiz", allowedChangedFields: ["instructions", "name"] },
+    ],
+  },
+  {
+    id: "canvas_pages_text",
+    provider: "canvas",
+    rules: [
+      { operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses", toolName: "canvas_update_create_page_courses", allowedChangedFields: ["wiki_page_body", "wiki_page_title"] },
+      { operationKey: "PUT /v1/courses/{course_id}/front_page#update_create_front_page_courses", toolName: "canvas_update_create_front_page_courses", allowedChangedFields: ["wiki_page_body", "wiki_page_title"] },
+    ],
+  },
+  {
+    id: "canvas_modules_structure",
+    provider: "canvas",
+    rules: [
+      { operationKey: "PUT /v1/courses/{course_id}/modules/{id}#update_module", toolName: "canvas_update_module", allowedChangedFields: ["module_name", "module_position"] },
+      { operationKey: "PUT /v1/courses/{course_id}/modules/{module_id}/items/{id}#update_module_item", toolName: "canvas_update_module_item", allowedChangedFields: ["module_item_external_url", "module_item_indent", "module_item_module_id", "module_item_new_tab", "module_item_position", "module_item_title"] },
+    ],
+  },
+  {
+    id: "canvas_assignment_text",
+    provider: "canvas",
+    rules: [
+      { operationKey: "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment", toolName: "canvas_edit_assignment", allowedChangedFields: ["assignment_description", "assignment_name"] },
+    ],
+  },
+  {
+    id: "canvas_discussion_text",
+    provider: "canvas",
+    rules: [
+      { operationKey: "PUT /v1/courses/{course_id}/discussion_topics/{topic_id}#update_topic_courses", toolName: "canvas_update_topic_courses", allowedChangedFields: ["message", "title"] },
+    ],
+  },
+  {
+    id: "canvas_classic_quiz_text",
+    provider: "canvas",
+    rules: [
+      { operationKey: "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz", toolName: "canvas_edit_quiz", allowedChangedFields: ["quiz_description", "quiz_title"] },
+    ],
+  },
+  {
+    id: "canvas_files_organize",
+    provider: "canvas",
+    rules: [
+      { operationKey: "PUT /v1/files/{id}#update_file", toolName: "canvas_update_file", allowedChangedFields: ["name", "parent_folder_id"] },
+      { operationKey: "POST /v1/courses/{course_id}/folders#create_folder_courses", toolName: "canvas_create_folder_courses", allowedChangedFields: ["name", "parent_folder_id", "parent_folder_path"] },
+    ],
+  },
+  {
+    id: "canvas_alt_text",
+    provider: "canvas",
+    rules: [
+      { operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses", toolName: "canvas_update_create_page_courses", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "page_image_alt" },
+      { operationKey: "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment", toolName: "canvas_edit_assignment", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "assignment_image_alt" },
+      { operationKey: "PUT /v1/courses/{course_id}/discussion_topics/{topic_id}#update_topic_courses", toolName: "canvas_update_topic_courses", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "discussion_image_alt" },
+      { operationKey: "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz", toolName: "canvas_edit_quiz", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "classic_quiz_description_image_alt" },
+      { operationKey: "PUT /v1/courses/{course_id}/quizzes/{quiz_id}/questions/{id}#update_existing_quiz_question", toolName: "canvas_update_existing_quiz_question", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "classic_quiz_question_image_alt" },
+      { operationKey: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item", toolName: "canvas_update_quiz_item", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "new_quiz_item_image_alt" },
+      { operationKey: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item", toolName: "canvas_update_quiz_item", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "new_quiz_choice_image_alt" },
+      { operationKey: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item", toolName: "canvas_update_quiz_item", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "new_quiz_answer_feedback_image_alt" },
+      { operationKey: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item", toolName: "canvas_update_quiz_item", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "new_quiz_feedback_image_alt" },
+    ],
+  },
+  {
+    id: "canvas_dates",
+    provider: "canvas",
+    rules: [
+      { operationKey: "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment", toolName: "canvas_edit_assignment", allowedChangedFields: ["assignment_due_at", "assignment_lock_at", "assignment_unlock_at"] },
+      { operationKey: "PUT /v1/courses/{course_id}/assignments/bulk_update#bulk_update_assignment_dates", toolName: "canvas_bulk_update_assignment_dates", allowedChangedFields: ["assignment_dates"] },
+      { operationKey: "PUT /v1/courses/{course_id}/assignments/{assignment_id}/date_details#update_learning_object_s_date_information_assignments", toolName: "canvas_update_learning_object_s_date_information_assignments", allowedChangedFields: ["due_at", "lock_at", "unlock_at"] },
+      { operationKey: "PUT /v1/courses/{course_id}/discussion_topics/{discussion_topic_id}/date_details#update_learning_object_s_date_information_discussion_topics", toolName: "canvas_update_learning_object_s_date_information_discussion_topics", allowedChangedFields: ["due_at", "lock_at", "unlock_at"] },
+      { operationKey: "PUT /v1/courses/{course_id}/files/{attachment_id}/date_details#update_learning_object_s_date_information_files", toolName: "canvas_update_learning_object_s_date_information_files", allowedChangedFields: ["due_at", "lock_at", "unlock_at"] },
+      { operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}/date_details#update_learning_object_s_date_information_pages", toolName: "canvas_update_learning_object_s_date_information_pages", allowedChangedFields: ["due_at", "lock_at", "unlock_at"] },
+      { operationKey: "PUT /v1/courses/{course_id}/quizzes/{quiz_id}/date_details#update_learning_object_s_date_information_quizzes", toolName: "canvas_update_learning_object_s_date_information_quizzes", allowedChangedFields: ["due_at", "lock_at", "unlock_at"] },
+      { operationKey: "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz", toolName: "canvas_edit_quiz", allowedChangedFields: ["quiz_due_at", "quiz_lock_at", "quiz_unlock_at"] },
+      { operationKey: "PUT /v1/courses/{course_id}/assignments/{assignment_id}/overrides/{id}#update_assignment_override", toolName: "canvas_update_assignment_override", allowedChangedFields: ["assignment_override_due_at", "assignment_override_lock_at", "assignment_override_unlock_at"] },
+    ],
+  },
+];
 
 function compareAscii(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -3562,7 +3691,10 @@ export class GatewayRuntime {
     return { mode, selections };
   }
 
-  async applyBrowserEditAccess(prepared: BrowserEditAccessPrepared): Promise<BrowserEditAccessResult> {
+  async applyBrowserEditAccess(
+    prepared: BrowserEditAccessPrepared,
+    options: { readonly merge?: true; readonly expiresInMs?: number } = {},
+  ): Promise<BrowserEditAccessResult> {
     const refreshed = await this.prepareBrowserEditAccess(prepared.mode, prepared.selections.map((selection) => ({
       sourceBindingId: selection.sourceBindingId,
       ...(prepared.mode === "edit" ? { enabledCategories: selection.enabledCategories.map((category) => category.id) } : {}),
@@ -3575,6 +3707,10 @@ export class GatewayRuntime {
     if (!source || !upstream) throw new Error("The current browser connection is unavailable.");
     const command = {
       mode: prepared.mode,
+      // `merge` and `expiresInMs` are for rememberKind's own grant only (WI-4.3): every other
+      // caller of this method omits them, and the Bridge still replaces the category list then (F6).
+      ...(prepared.mode === "edit" && options.merge ? { merge: true as const } : {}),
+      ...(prepared.mode === "edit" && options.expiresInMs !== undefined ? { expiresInMs: options.expiresInMs } : {}),
       selections: prepared.selections.map((selection) => ({
         sourceBindingId: selection.sourceBindingId,
         expectedPolicyRevision: selection.expectedPolicyRevision,
@@ -3601,6 +3737,116 @@ export class GatewayRuntime {
     if (raw.resultState === "not_sent") outcome = "not_sent";
     const latest = await this.currentEditAccessBindings(selectedIds).catch(() => ({ bindings: [] as readonly JsonObject[] }));
     return { mode: prepared.mode, command: raw, bindings: latest.bindings, outcome };
+  }
+
+  /**
+   * WI-4.3 (D2b, D3): whether the review page may offer "do not ask again" for the exact change
+   * one operation record already made, and if so which bundle and until when. Never called for an
+   * MCP tool: only `rememberKind`, called only from the review page (approval-server.ts), reads
+   * this. A failure anywhere here is an absent offer, never a thrown error, because an offer is
+   * decoration on a review the person can already approve without it.
+   */
+  async rememberOffer(operationId: string): Promise<RememberOfferResult | null> {
+    try {
+      const record = this.effects.get(operationId);
+      const sourceBindingId = record.sourceBindingId;
+      if (!sourceBindingId) return null;
+      const mapping = this.toolByPublicName.get(record.publicToolName);
+      // A removal, and every non-browser-connector tool (an LMS API route, a private source
+      // tool), is never rememberable: D2a keeps "do not ask again" to edits of things that
+      // already exist, and only a Canvas or Moodle course connection carries an Edit grant at all.
+      if (!mapping || !isCanvasConnector(mapping) || mapping.annotations?.destructiveHint === true) return null;
+      const provider = mapping.capability?.provider;
+      // Blackboard shares the browser-connector route today but has no curated rememberable
+      // bundle (F, D2a): excluded by name, not only by an empty candidate list, so a future
+      // Blackboard bundle added to REMEMBERABLE_EDIT_CATEGORIES without a matching wire fact
+      // still cannot be offered by accident.
+      if (provider !== "canvas" && provider !== "moodle") return null;
+      const operationKey = mappingOperationKey(mapping);
+      if (!operationKey) return null;
+      const requestArguments = isJsonObject(record.plan.arguments) ? record.plan.arguments : {};
+      // Step 2: read the Edit options for this one connection, the same private method the
+      // Edit-mode authorization path uses.
+      const { bindings } = await this.currentEditAccessBindings([sourceBindingId]);
+      const binding = bindings.find((candidate) => candidate.sourceBindingId === sourceBindingId);
+      if (!binding || binding.runtimeVerified !== true || binding.provider !== provider) return null;
+      const catalogDigest = typeof binding.catalogDigest === "string" ? binding.catalogDigest : "";
+      const liveOptions = Array.isArray(binding.editCategories) ? binding.editCategories.filter(isJsonObject) : [];
+      // Step 3 and 4: a rememberable category whose rule matches this exact operation key, tool
+      // and guard, and whose allowedChangedFields holds every changed field of the plan. The rule
+      // match reuses currentEditAuthorization, the same private function the Edit-mode dispatch
+      // path above (currentBrowserEffectAuthority) uses to check a real grant, against a
+      // synthetic one-category permission on the connection's own live binding: it already refuses
+      // a removal's guard shape and an unmatched changed field, and reads request._morrow's guard
+      // fields the way a plan's own arguments actually carry them (bridge-protocol's
+      // matchesBridgeEditPermission instead reads the flat morrow_canvas_content_guard key the
+      // Bridge wire uses once canvas-connector-mcp forwards the command, so it does not apply to a
+      // plan's own gateway-side arguments here). The New Quiz guard check (F9) is
+      // currentEditAuthorization's own first line. A category still needs its own live option to
+      // say it is `rememberable`, available `edit` today, not `learnerVisible`, and not
+      // `reach: "beyond"` (step 4): none of that crosses in the synthetic permission below.
+      const matches = REMEMBERABLE_EDIT_CATEGORIES.filter((category) => {
+        if (category.provider !== provider) return false;
+        const option = liveOptions.find((candidate) => candidate.id === category.id);
+        if (!option || option.availability !== "edit" || option.rememberable !== true
+          || option.learnerVisible === true || option.reach === "beyond") return false;
+        const syntheticBinding: JsonObject = {
+          ...binding,
+          editPermission: {
+            schema: "morrow.bridge.edit-permission.v1",
+            revision: 1,
+            scopeDigest: "0".repeat(64),
+            catalogDigest,
+            sourceBindingId,
+            enabledCategories: [category.id],
+            rules: category.rules,
+          },
+        };
+        return currentEditAuthorization(mapping, requestArguments, syntheticBinding).kind === "edit_scope";
+      });
+      // A batch whose plans do not all map to one category reads as no match, or more than one:
+      // either way, no offer (step 4, last clause).
+      if (matches.length !== 1) return null;
+      const category = matches[0]!;
+      const option = liveOptions.find((candidate) => candidate.id === category.id)!;
+      const label = typeof option.label === "string" && option.label ? option.label : category.id;
+      // Step 5: the present end time if a permission is active, else now plus 4 hours (D3). A
+      // merge (WI-4.2) never moves the end time later, so the offer states the time the grant
+      // will actually carry.
+      const permission = isJsonObject(binding.editPermission) ? binding.editPermission : null;
+      const activeExpiresAt = permission && typeof permission.expiresAt === "number" && permission.expiresAt > Date.now()
+        ? permission.expiresAt
+        : null;
+      return { categoryId: category.id, label, until: activeExpiresAt ?? Date.now() + REMEMBER_KIND_DURATION_MS };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * WI-4.3: grants the bundle `rememberOffer` offered for this operation, merged into any active
+   * grant for the same course, for 4 hours (D3). Called only from the review page, after
+   * `approveOperation` already succeeded (approval-server.ts, WI-4.4): a failed or refused grant
+   * here must never fail or undo that approval, so every path returns `"failed"` rather than
+   * throwing. No MCP tool exposes this method; the server instruction "Never enable or broaden
+   * Edit authority yourself" stays true because only Morrow's own review page, not the assistant,
+   * calls it.
+   */
+  async rememberKind(operationId: string): Promise<"saved" | "failed"> {
+    try {
+      const record = this.effects.get(operationId);
+      const sourceBindingId = record.sourceBindingId;
+      if (!sourceBindingId) return "failed";
+      const offer = await this.rememberOffer(operationId);
+      if (!offer) return "failed";
+      const prepared = await this.prepareBrowserEditAccess("edit", [
+        { sourceBindingId, enabledCategories: [offer.categoryId] },
+      ]);
+      const result = await this.applyBrowserEditAccess(prepared, { merge: true, expiresInMs: REMEMBER_KIND_DURATION_MS });
+      return result.outcome === "received" ? "saved" : "failed";
+    } catch {
+      return "failed";
+    }
   }
 
   async privateChatExchange(input: JsonObject, signal?: AbortSignal): Promise<JsonObject> {
