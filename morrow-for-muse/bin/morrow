@@ -43,7 +43,7 @@ _COMMANDS = {
     "plan": ("catalog/a11y/runner.py",
              "accessibility repair planning (validates, never writes)"),
     "query": ("query/chain.py",
-              "natural-language learner query chain, e.g. failed students"),
+              "failed-students query (typed: --course, --quiz, one threshold)"),
 }
 
 # audit/plan need their runner subcommand prepended.

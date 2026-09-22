@@ -408,6 +408,13 @@ both modes.
   - If a result has `settings_untrusted: true`, the settings file failed
     its integrity check: tell the educator they are in plan mode and
     relay the repair steps in `message`.
+- Failed-students question ("who failed last week's quiz", "which
+  students scored under 70%"): run `morrow query --course C --quiz
+  last-week|this-week`, with at most one of `--below-percent N`,
+  `--below-points N`, or `--letter-f` when the educator named a
+  threshold. You choose the arguments from what the educator said; if
+  they mean a quiz that is not last week's or this week's, ask which
+  quiz first. Names in the result are de-identified.
 - Every dispatch must carry the educator's identity for the mode gate:
   pass `--user-id` and `--conversation-id` to `dispatch/executor.py`
   (or set `MORROW_USER_ID` and `MORROW_CONVERSATION_ID`). Without a

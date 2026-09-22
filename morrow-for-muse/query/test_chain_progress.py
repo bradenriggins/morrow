@@ -61,8 +61,7 @@ def _run(progress):
     # production tenant (first-run audit 2026-09-22); the chain fails
     # closed without one, so synthetic tests pass their own.
     return C.run_query(
-        "show me all the students that failed last week's quiz",
-        "89585", reader=_reader(), now_utc=NOW, synthetic_rows=SYNTH,
+        "89585", "last_week", reader=_reader(), now_utc=NOW, synthetic_rows=SYNTH,
         tenant_base="https://school.example.edu",
         progress=progress)
 
@@ -71,7 +70,7 @@ def test_stage_order():
     stages = []
     res = _run(lambda stage, detail="": stages.append(stage))
     assert [s for s in stages] == [
-        "intent_parsed", "reader_ready", "quiz_resolved",
+        "arguments_checked", "reader_ready", "quiz_resolved",
         "threshold_computed", "submissions_fetched", "classified", "done"]
     assert "Fixture Ada" in res.text
 
@@ -96,25 +95,27 @@ def test_broken_callback_cannot_break_chain():
 def test_main_progress_flag_wires_callback(monkeypatch, capsys):
     captured = {}
 
-    def fake_run_query(text, course_id, tenant_base=None, progress=None):
+    def fake_run_query(course_id, quiz, tenant_base=None, progress=None,
+                       **_kw):
         captured["progress"] = progress
         return SimpleNamespace(text="ok")
 
     monkeypatch.setattr(C, "run_query", fake_run_query)
-    assert C.main(["--progress", "some query", "--course", "89585"]) == 0
+    assert C.main(["--progress", "--course", "89585", "--quiz", "last-week"]) == 0
     assert callable(captured["progress"])
-    captured["progress"]("intent_parsed", "x")
-    assert "[query] intent_parsed: x" in capsys.readouterr().err
+    captured["progress"]("arguments_checked", "x")
+    assert "[query] arguments_checked: x" in capsys.readouterr().err
 
 
 def test_main_default_no_progress(monkeypatch, capsys):
     captured = {}
 
-    def fake_run_query(text, course_id, tenant_base=None, progress=None):
+    def fake_run_query(course_id, quiz, tenant_base=None, progress=None,
+                       **_kw):
         captured["progress"] = progress
         return SimpleNamespace(text="ok")
 
     monkeypatch.setattr(C, "run_query", fake_run_query)
-    assert C.main(["some query", "--course", "89585"]) == 0
+    assert C.main(["--course", "89585", "--quiz", "last-week"]) == 0
     assert captured["progress"] is None
     assert capsys.readouterr().err == ""

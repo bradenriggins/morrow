@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""The failed-students query chain: NL text -> genuine results.
+"""The failed-students query chain: typed arguments -> genuine results.
+
+The agent reads the educator's words and passes typed arguments (the
+course, the quiz window, and at most one threshold). No code here reads
+the educator's text.
 
 Links:
-  1. intent.parse: recognize the "students that failed <quiz>" family.
-  2. quiz_resolve.resolve: "last week's quiz" -> exactly one quiz, with
+  1. argument check: the course is a Canvas course number, the quiz
+     window is "last_week" or "this_week", and the threshold is one of
+     below_percent (0-100), below_points (>= 0), or letter_f.
+  2. quiz_resolve.resolve: the quiz window -> exactly one quiz, with
      exact week/effective-date semantics; zero or multiple matches
      raise instead of silently picking.
   3. submissions fetch: paginated GET
@@ -31,7 +37,6 @@ _TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _TREE_ROOT not in sys.path:
     sys.path.insert(0, _TREE_ROOT)
 
-from query import intent as _intent
 from query import live_read as _live_read
 from query import present as _present
 from query import quiz_resolve as _qr
@@ -118,6 +123,48 @@ def _require_live_proven(block):
                           "request": block}, journal=False)
 
 
+class QueryArgumentsInvalid(ValueError):
+    """The typed arguments to the failed-students query are not valid."""
+
+
+QUIZ_WINDOWS = ("last_week", "this_week")
+
+
+def _checked_number(name, value, low, high=None):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise QueryArgumentsInvalid(
+            "%s must be a number, got %r" % (name, value))
+    if value < low or (high is not None and value > high):
+        raise QueryArgumentsInvalid(
+            "%s must be between %s and %s, got %r"
+            % (name, low, high if high is not None else "any", value))
+    return float(value)
+
+
+def _checked_arguments(quiz, below_percent, below_points, letter_f):
+    """(quiz_ref, threshold) for thresholds.threshold_points, or raise."""
+    if quiz not in QUIZ_WINDOWS:
+        raise QueryArgumentsInvalid(
+            "quiz must be one of %s, got %r" % (", ".join(QUIZ_WINDOWS),
+                                                quiz))
+    given = [n for n, v in (("below_percent", below_percent),
+                            ("below_points", below_points),
+                            ("letter_f", letter_f or None)) if v is not None]
+    if len(given) > 1:
+        raise QueryArgumentsInvalid(
+            "give at most one threshold, got %s" % ", ".join(given))
+    threshold = None
+    if below_percent is not None:
+        threshold = {"kind": "percent", "value": _checked_number(
+            "below_percent", below_percent, 0, 100)}
+    elif below_points is not None:
+        threshold = {"kind": "points", "value": _checked_number(
+            "below_points", below_points, 0)}
+    elif letter_f:
+        threshold = {"kind": "letter_f"}
+    return {"kind": quiz}, threshold
+
+
 class InvalidCourseId(ValueError):
     """The course the chain was given is not a Canvas course number."""
 
@@ -173,12 +220,15 @@ def _translate(operation, exc):
     return ChainFailure(_translator.translate(operation, exc))
 
 
-def run_query(text, course_id, reader=None, tenant_base=None,
+def run_query(course_id, quiz, below_percent=None, below_points=None,
+              letter_f=False, reader=None, tenant_base=None,
               now_utc=None, synthetic_rows=None, progress=None):
     """Run the full chain.
 
-    text: educator's natural-language query.
     course_id: Canvas course id.
+    quiz: the quiz window, "last_week" or "this_week".
+    below_percent / below_points / letter_f: at most one explicit fail
+        threshold; none means the assignment's own default.
     reader: a LiveReader (default: create and health-check one).
     tenant_base: tenant origin for the privacy binding.
     synthetic_rows: when set, a list of synthetic (fixture) submission
@@ -201,7 +251,8 @@ def run_query(text, course_id, reader=None, tenant_base=None,
         except Exception:
             pass
 
-    operation = "find students who failed the quiz (%r)" % text
+    operation = "find students who failed %s's quiz" % (
+        str(quiz).replace("_", " "))
     own_reader = False
     try:
         try:
@@ -209,10 +260,12 @@ def run_query(text, course_id, reader=None, tenant_base=None,
         except InvalidCourseId as exc:
             raise _translate(operation, exc)
         try:
-            parsed = _intent.parse(text)
-        except _intent.IntentNotRecognized as exc:
+            quiz_ref, threshold = _checked_arguments(
+                quiz, below_percent, below_points, letter_f)
+        except QueryArgumentsInvalid as exc:
             raise _translate(operation, exc)
-        _prog("intent_parsed", str(parsed.get("quiz_ref", "")))
+        parsed = {"quiz_ref": quiz_ref, "threshold": threshold}
+        _prog("arguments_checked", str(quiz_ref))
 
         if reader is None:
             tenant_base = tenant_base or _live_read.TENANT_BASE
@@ -402,11 +455,20 @@ def run_query(text, course_id, reader=None, tenant_base=None,
 def main(argv):
     import argparse
     ap = argparse.ArgumentParser(
-        description="Failed-students query chain")
-    ap.add_argument("text", help="educator query, e.g. "
-                    "\"show me all the students that failed last week's quiz\"")
+        description="Failed-students query chain. The agent reads what the "
+                    "educator asked and passes these typed arguments.")
     ap.add_argument("--course", required=True,
                     help="Canvas course id the query is about")
+    ap.add_argument("--quiz", required=True,
+                    choices=("last-week", "this-week"),
+                    help="which quiz: the one due last week or this week")
+    group = ap.add_mutually_exclusive_group()
+    group.add_argument("--below-percent", type=float, default=None,
+                       help="failed means below this percent (0-100)")
+    group.add_argument("--below-points", type=float, default=None,
+                       help="failed means below this many points")
+    group.add_argument("--letter-f", action="store_true",
+                       help="failed means a letter grade of F")
     ap.add_argument("--tenant", default=_live_read.TENANT_BASE)
     ap.add_argument("--progress", action="store_true",
                     help="QOL-3: print chain progress lines to stderr as "
@@ -421,7 +483,10 @@ def main(argv):
                 line += ": %s" % detail
             print(line, file=sys.stderr)
     try:
-        result = run_query(args.text, args.course,
+        result = run_query(args.course, args.quiz.replace("-", "_"),
+                           below_percent=args.below_percent,
+                           below_points=args.below_points,
+                           letter_f=args.letter_f,
                            tenant_base=args.tenant, progress=progress)
     except ChainFailure as exc:
         # TranslatedError is a dataclass, not an exception: the

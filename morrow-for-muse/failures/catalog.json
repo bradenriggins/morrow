@@ -1781,22 +1781,23 @@
       ]
     },
     {
-      "id": "query-intent-unrecognized",
-      "title": "Query text is not a failed-students query the chain understands",
-      "surface": "query/intent.py",
+      "id": "query-arguments-invalid",
+      "title": "Failed-students query arguments are not valid",
+      "surface": "query/chain.py",
       "severity_hint": "low",
       "severity_hint_inventory": "engineering",
-      "root_cause": "The chain only answers the \"students that failed <quiz>\" phrasing family (query/intent.py). Anything else raises IntentNotRecognized rather than being guessed at.",
-      "is_not": "This is not a Canvas or session problem: the text simply did not match the supported phrasing.",
-      "agent_message": "What was attempted: {operation}. What the evidence showed: the query text did not match the failed-students phrasing the chain understands (reference {correlation_id}). What this means: I did not guess at a different interpretation and ran no Canvas reads. What happens next: ask as \"show me the students that failed last week's quiz\" (or name the quiz and, optionally, a threshold like \"below 70%\").",
-      "auto_action": "Tell the educator the supported phrasing; do not reinterpret the query.",
+      "root_cause": "The failed-students query takes typed arguments (query/chain.py run_query): a quiz window of last_week or this_week, and at most one threshold (below_percent 0-100, below_points 0 or more, or letter_f). Any other value raises QueryArgumentsInvalid before any Canvas read.",
+      "is_not": "This is not a Canvas or session problem: the arguments passed to the query were not valid, so nothing was read.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: the query arguments were not valid ({evidence_summary}; reference {correlation_id}). What this means: I ran no Canvas reads and classified no students. What happens next: I will check what the educator asked for and run the query again with a quiz window of last week or this week and at most one threshold (a percent, a number of points, or a letter grade of F), asking the educator if their request is unclear.",
+      "auto_action": "Re-run with valid typed arguments; ask the educator when their request is unclear.",
       "escalate_when": "never; this is a usage message, not an incident",
       "signature": {
-        "error_class": "IntentNotRecognized"
+        "error_class": "QueryArgumentsInvalid"
       },
-      "signature_notes": "classification: \"IntentNotRecognized\"; fixed_behavior: \"no Canvas reads run on an unrecognized query\"; triggers: [\"non-quiz questions\", \"vague phrasing without a fail trigger\"]",
+      "signature_notes": "classification: \"QueryArgumentsInvalid\"; fixed_behavior: \"no Canvas reads run on invalid arguments\"; triggers: [\"an unknown quiz window\", \"more than one threshold\", \"a threshold out of range\"]",
       "placeholders": [
         "operation",
+        "evidence_summary",
         "correlation_id"
       ]
     },
@@ -1825,9 +1826,9 @@
       "title": "Quiz reference the chain cannot resolve yet (named, yesterday's, or bare \"the quiz\")",
       "surface": "query/quiz_resolve.py",
       "severity_hint": "medium",
-      "root_cause": "Verified in code (query/intent.py, query/quiz_resolve.py): the intent parser recognizes named quizzes (\"Quiz 3\"), \"yesterday's quiz\", and a bare \"the quiz\", but the resolver only implements the \"last week's quiz\" and \"this week's quiz\" week windows. It raises UnsupportedQuizRef instead of guessing a quiz.",
+      "root_cause": "Verified in code (query/quiz_resolve.py): the resolver only implements the \"last_week\" and \"this_week\" quiz windows. Any other quiz reference raises UnsupportedQuizRef instead of guessing a quiz. The typed query (query/chain.py) refuses other windows before calling the resolver, so this is reached only by a direct resolver caller.",
       "is_not": "This is not a Canvas outage, not a session problem, and not an empty course: the quiz list was never consulted because the reference itself is not resolvable yet.",
-      "agent_message": "What was attempted: {operation}. What the evidence showed: the quiz reference could not be resolved ({evidence_summary}; reference {correlation_id}). What this means: this query chain only resolves \"last week's quiz\" and \"this week's quiz\" so far; a named quiz, \"yesterday's quiz\", or a bare \"the quiz\" needs the educator to pick the quiz first. No students were classified and nothing was written. What happens next: ask the educator which quiz they mean (title plus due date from the course quiz list), then re-run with \"last week's quiz\" or \"this week's quiz\" as appropriate.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: the quiz reference could not be resolved ({evidence_summary}; reference {correlation_id}). What this means: this query only resolves the quiz due last week or this week so far; any other quiz needs the educator to pick it first. No students were classified and nothing was written. What happens next: ask the educator which quiz they mean (title plus due date from the course quiz list), then re-run for last week or this week as appropriate.",
       "auto_action": "Stop without reading submissions; ask the educator to name the quiz; never pick one silently.",
       "escalate_when": "If the educator names the quiz and the chain still cannot resolve it, escalate: the resolver may need the named-quiz lane.",
       "signature": {
