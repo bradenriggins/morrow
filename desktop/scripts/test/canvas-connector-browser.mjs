@@ -47,7 +47,10 @@ async function captureThemes(page, name, width = 900, { allowTechnicalTerms = fa
   await page.setViewportSize({ width, height: 760 });
   const mark = page.locator(".brand img, .brand-wordmark img").first();
   assert.equal(await mark.evaluate((image) => image.complete && image.naturalWidth > 0), true);
-  if (!allowTechnicalTerms) assert.doesNotMatch(await page.locator("body").innerText(), /\b(?:MCP|nonce|digest|dispatch|binding|frozen)\b/i);
+  if (!allowTechnicalTerms) {
+    const technicalTerm = /.{0,80}\b(?:MCP|nonce|digest|dispatch|binding|frozen)\b.{0,80}/i.exec(await page.locator("body").innerText());
+    assert.equal(technicalTerm, null, `${name} shows a technical term: ${technicalTerm?.[0]}`);
+  }
   for (const colorScheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme });
     await page.locator("main").screenshot({ path: join(OUTPUT, `${name}-${colorScheme}.png`) });
@@ -664,7 +667,7 @@ function startCanvas(directory) {
       const start = (page - 1) * 100;
       const nextPage = start + 100 < courses.length ? page + 1 : null;
       const nextUrl = nextPage === 3
-        ? `https://${request.headers.host}/api/v1/courses?enrollment_state=active&per_page=100&page=3`
+        ? `https://${request.headers.host}/api/v1/courses?enrollment_state=active&include[]=term&include[]=favorites&per_page=100&page=3`
         : `https://${request.headers.host}/api/v1/courses?bookmark=course-page-${nextPage}&signature=synthetic-signature-${nextPage}`;
       return json(200, courses.slice(start, start + 100), nextPage === null ? {} : {
         Link: `<${nextUrl}>; rel="next"`,
@@ -1238,8 +1241,19 @@ const operationApproval = new LoopbackApprovalServer({
     batchState = "completed";
   },
   setApprovalBaseUrl: () => undefined,
+  // The desktop runtime sends the approval key to the paired Bridge inside its ui_state command.
+  // This harness pairs the Bridge with the connector runtime directly, so it sends the same command.
+  setApprovalPresence: (presence) => { approvalPresence = presence; },
+  announceApprovalPresence: () => {
+    if (approvalPresence && runtime.bridge.health().connected) {
+      approvalPresenceSent = runtime.uiState({ reviews: [], presence: approvalPresence });
+    }
+  },
 });
+let approvalPresence = null;
+let approvalPresenceSent = null;
 const operationApprovalBaseUrl = await operationApproval.start();
+assert.equal(approvalPresence?.origin, operationApprovalBaseUrl);
 
 const profile = join(temporary, "chrome-profile");
 const launchBrowser = () => launchManagedChromiumPersistentContext(chromium, profile, {
@@ -1260,6 +1274,92 @@ try {
   process.stderr.write("[browser-test] starting temporary Chrome for Testing\n");
   context = await launchBrowser();
 
+
+  const worker = await waitFor(
+    () => context.serviceWorkers().find((candidate) => candidate.url() === `chrome-extension://${EXTENSION_ID}/src/service-worker.js`),
+    "connector service worker did not start",
+  );
+  assert.equal(new URL(worker.url()).hostname, EXTENSION_ID);
+  process.stderr.write("[browser-test] connector service worker ready\n");
+
+  const firstInstallSetupGuide = await waitFor(
+    () => context.pages().find((page) => page.url() === `chrome-extension://${EXTENSION_ID}/onboarding/onboarding.html`) || null,
+    "first install did not open Morrow setup",
+  );
+  await firstInstallSetupGuide.getByRole("heading", { name: "Morrow setup", exact: true }).waitFor();
+  await firstInstallSetupGuide.getByRole("heading", { name: "What Morrow Bridge can read", exact: true }).waitFor();
+  await firstInstallSetupGuide.getByText("Morrow Bridge will not connect to Morrow or read course data before you agree.", { exact: false }).waitFor();
+  assert.equal(await firstInstallSetupGuide.locator("#setup-content").isHidden(), true);
+  await captureSetupGuide(firstInstallSetupGuide, "setup-guide-course-data-consent");
+  await firstInstallSetupGuide.getByRole("button", { name: "Agree and continue", exact: true }).click();
+  await firstInstallSetupGuide.getByText("No assistant has approved this connection yet", { exact: true }).waitFor();
+  await firstInstallSetupGuide.getByText("Morrow version is checked when Morrow Bridge connects", { exact: true }).waitFor();
+  await firstInstallSetupGuide.getByText("No first read is completed yet", { exact: true }).waitFor();
+  await firstInstallSetupGuide.getByRole("heading", { name: "Open Morrow", exact: true }).waitFor();
+  assert.equal(await firstInstallSetupGuide.getByRole("button", { name: "Guide me", exact: true }).getAttribute("aria-pressed"), "true");
+  assert.doesNotMatch(await firstInstallSetupGuide.locator("main").textContent(), /(?:Terminal|command|Developer Mode|unpacked|\/path\/to|CLI)/i);
+  await captureSetupGuide(firstInstallSetupGuide, "setup-guide-first-install");
+  await firstInstallSetupGuide.getByRole("button", { name: "Setup overview", exact: true }).click();
+  await firstInstallSetupGuide.getByRole("heading", { name: "Three setup stages", exact: true }).waitFor();
+  for (const step of ["Choose your assistant in Morrow", "Finish Morrow Bridge setup", "Open and connect your course"]) {
+    await firstInstallSetupGuide.locator(".setup-steps strong", { hasText: step }).waitFor();
+  }
+  assert.doesNotMatch(await firstInstallSetupGuide.locator("main").textContent(), /(?:Terminal|command|Developer Mode|unpacked|\/path\/to|CLI)/i);
+  await captureSetupGuide(firstInstallSetupGuide, "setup-guide-all-steps");
+  await firstInstallSetupGuide.getByRole("button", { name: "Guide me", exact: true }).click();
+  await firstInstallSetupGuide.close();
+  process.stderr.write("[browser-test] first-install setup guide is guidance-only and fits 320, 390, and 1280px\n");
+
+  let canvasPage = context.pages()[0] || await context.newPage();
+  await canvasPage.goto(canvasUrl, { waitUntil: "domcontentloaded" });
+  await canvasPage.locator("h1", { hasText: "Synthetic Canvas Course" }).waitFor();
+  process.stderr.write("[browser-test] synthetic signed-in Canvas ready\n");
+
+  let popup = await context.newPage();
+  await popup.goto(`chrome-extension://${EXTENSION_ID}/popup/popup.html`);
+  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).waitFor();
+  await captureThemes(popup, "popup-unpaired", 360);
+  const approvalPromise = context.waitForEvent("page");
+  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).click();
+  const approval = await approvalPromise;
+  await approval.waitForURL((url) => url.origin === `http://127.0.0.1:${connectorConfig.port}` && /^\/morrow-bridge\/v1\/pair\/[0-9a-f-]+$/.test(url.pathname));
+  await approval.getByText("Your learning-platform password and sign-in details stay in Chrome", { exact: false }).waitFor();
+  await captureThemes(approval, "pairing");
+  process.stderr.write("[browser-test] pairing review ready\n");
+  const pairingApprovedAt = performance.now();
+  await approval.getByRole("button", { name: "Allow connection", exact: true }).click();
+  await approval.getByText(/approved/i).waitFor();
+  await captureThemes(approval, "pairing-approved");
+  await popup.bringToFront();
+  await popup.locator("#status-value").filter({ hasText: /^Connected$/ }).waitFor({ timeout: 5_000 });
+  assert.equal(await popup.locator("#canvas-value").innerText(), "Not connected");
+  assert.equal(runtime.bridge.health().connected, true);
+  const pairingReadyMs = Math.round(performance.now() - pairingApprovedAt);
+  process.stderr.write(`[browser-test] pairing ready without restart in ${pairingReadyMs}ms\n`);
+
+  await context.close();
+  context = await launchBrowser();
+  const replacementWorker = await waitFor(
+    () => context.serviceWorkers().find((candidate) => candidate.url() === `chrome-extension://${EXTENSION_ID}/src/service-worker.js`),
+    "connector service worker did not restart",
+  );
+  await waitFor(() => runtime.bridge.health().connected, "connector did not authenticate after extension restart");
+  process.stderr.write("[browser-test] pairing survived extension restart\n");
+
+  // A review page gets the Bridge's signing script only after the paired Bridge holds this approval
+  // server's key. The script lives in the extension's isolated world, so the worker reads it there.
+  const waitForReviewApprovalSigner = async (page) => {
+    const sent = await approvalPresenceSent;
+    assert.equal(sent?.ok, true, JSON.stringify(sent));
+    await waitFor(async () => await replacementWorker.evaluate(async (url) => {
+      const tab = (await chrome.tabs.query({})).find((candidate) => candidate.url === url);
+      if (!tab) return false;
+      const [execution] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id, frameIds: [0] }, func: () => globalThis.__morrowReviewApproval === true,
+      });
+      return execution?.result === true;
+    }, page.url()), "Morrow Bridge did not ready the review page for a signed approval");
+  };
   const operationApprovalPage = await context.newPage();
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/${encodeURIComponent(approvalSnapshot.operationId)}`);
   await operationApprovalPage.getByRole("heading", { name: "Add question?" }).waitFor();
@@ -1287,6 +1387,31 @@ try {
   await captureThemes(operationApprovalPage, "approval-try-question-narrow", 320);
   assert.equal(approvalStates.size, 0, "trying a question must not approve or execute it");
   await operationApprovalPage.getByRole("button", { name: "Answer key", exact: true }).click();
+  // The page's nonce and cookie prove only that a caller read the page. A program that posts the
+  // form itself has both, and still cannot approve without the Bridge's signature over it.
+  const presenceReviewUrl = operationApprovalPage.url();
+  const presenceNonce = await operationApprovalPage.locator('form[action$="/approve"] input[name="nonce"]').inputValue();
+  const unsignedApproval = await operationApprovalPage.request.post(`${presenceReviewUrl}/approve`, {
+    form: { nonce: presenceNonce },
+    headers: { origin: new URL(presenceReviewUrl).origin, referer: presenceReviewUrl },
+  });
+  assert.equal(unsignedApproval.status(), 403);
+  assert.equal((await unsignedApproval.json()).code, "approval_presence_required");
+  const forgedApproval = await operationApprovalPage.request.post(`${presenceReviewUrl}/approve`, {
+    form: { nonce: presenceNonce, presence: "A".repeat(43) },
+    headers: { origin: new URL(presenceReviewUrl).origin, referer: presenceReviewUrl },
+  });
+  assert.equal(forgedApproval.status(), 403);
+  assert.equal(approvalStates.size, 0, "an approval without the Bridge signature must not approve or run");
+  await waitForReviewApprovalSigner(operationApprovalPage);
+  // A synthetic submit event is not a person's click, so the Bridge does not sign it.
+  await operationApprovalPage.evaluate(() => {
+    const form = document.querySelector('form[action$="/approve"]');
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true, submitter: form.querySelector("button") }));
+  });
+  await delay(500);
+  assert.equal(approvalStates.size, 0, "a script-started submit must not approve");
+  assert.equal(operationApprovalPage.url(), presenceReviewUrl);
   await operationApprovalPage.getByRole("button", { name: "Add this question" }).click();
   await operationApprovalPage.getByRole("heading", { name: "Applying your changes" }).waitFor();
   assert.doesNotMatch(await operationApprovalPage.locator("body").innerText(), /Continue/);
@@ -1302,6 +1427,7 @@ try {
   await operationApprovalPage.locator(".change-item > summary").nth(1).click();
   assert.match(await operationApprovalPage.locator(".destination").nth(1).innerText(), /Human Anatomy[\s\S]+Outdated practice question/);
   await captureThemes(operationApprovalPage, "approval-batch");
+  await waitForReviewApprovalSigner(operationApprovalPage);
   await operationApprovalPage.getByRole("button", { name: "Apply all 2 changes" }).click();
   await operationApprovalPage.getByRole("heading", { name: "Applying your changes" }).waitFor();
   await operationApprovalPage.getByText("0 of 2 changes confirmed in Canvas.", { exact: true }).waitFor();
@@ -1390,81 +1516,11 @@ try {
   assert.equal(await operationApprovalPage.locator("button").count(), 0);
   await captureThemes(operationApprovalPage, "approval-expired");
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Aexpired-on-submit`);
+  await waitForReviewApprovalSigner(operationApprovalPage);
   await operationApprovalPage.getByRole("button", { name: "Add this question" }).click();
   await operationApprovalPage.getByRole("heading", { name: "Request cancelled" }).waitFor();
   assert.equal(await operationApprovalPage.getByRole("heading", { name: "Canvas saved the change. Morrow checked the result." }).count(), 0);
   process.stderr.write("[browser-test] operation approval UI ready\n");
-
-  const worker = await waitFor(
-    () => context.serviceWorkers().find((candidate) => candidate.url() === `chrome-extension://${EXTENSION_ID}/src/service-worker.js`),
-    "connector service worker did not start",
-  );
-  assert.equal(new URL(worker.url()).hostname, EXTENSION_ID);
-  process.stderr.write("[browser-test] connector service worker ready\n");
-
-  const firstInstallSetupGuide = await waitFor(
-    () => context.pages().find((page) => page.url() === `chrome-extension://${EXTENSION_ID}/onboarding/onboarding.html`) || null,
-    "first install did not open Morrow setup",
-  );
-  await firstInstallSetupGuide.getByRole("heading", { name: "Morrow setup", exact: true }).waitFor();
-  await firstInstallSetupGuide.getByRole("heading", { name: "What Morrow Bridge can read", exact: true }).waitFor();
-  await firstInstallSetupGuide.getByText("Morrow Bridge will not connect to Morrow or read course data before you agree.", { exact: false }).waitFor();
-  assert.equal(await firstInstallSetupGuide.locator("#setup-content").isHidden(), true);
-  await captureSetupGuide(firstInstallSetupGuide, "setup-guide-course-data-consent");
-  await firstInstallSetupGuide.getByRole("button", { name: "Agree and continue", exact: true }).click();
-  await firstInstallSetupGuide.getByText("No assistant has approved this connection yet", { exact: true }).waitFor();
-  await firstInstallSetupGuide.getByText("Morrow version is checked when Morrow Bridge connects", { exact: true }).waitFor();
-  await firstInstallSetupGuide.getByText("No first read is completed yet", { exact: true }).waitFor();
-  await firstInstallSetupGuide.getByRole("heading", { name: "Open Morrow", exact: true }).waitFor();
-  assert.equal(await firstInstallSetupGuide.getByRole("button", { name: "Guide me", exact: true }).getAttribute("aria-pressed"), "true");
-  assert.doesNotMatch(await firstInstallSetupGuide.locator("main").textContent(), /(?:Terminal|command|Developer Mode|unpacked|\/path\/to|CLI)/i);
-  await captureSetupGuide(firstInstallSetupGuide, "setup-guide-first-install");
-  await firstInstallSetupGuide.getByRole("button", { name: "Setup overview", exact: true }).click();
-  await firstInstallSetupGuide.getByRole("heading", { name: "Three setup stages", exact: true }).waitFor();
-  for (const step of ["Choose your assistant in Morrow", "Finish Morrow Bridge setup", "Open and connect your course"]) {
-    await firstInstallSetupGuide.locator(".setup-steps strong", { hasText: step }).waitFor();
-  }
-  assert.doesNotMatch(await firstInstallSetupGuide.locator("main").textContent(), /(?:Terminal|command|Developer Mode|unpacked|\/path\/to|CLI)/i);
-  await captureSetupGuide(firstInstallSetupGuide, "setup-guide-all-steps");
-  await firstInstallSetupGuide.getByRole("button", { name: "Guide me", exact: true }).click();
-  await firstInstallSetupGuide.close();
-  process.stderr.write("[browser-test] first-install setup guide is guidance-only and fits 320, 390, and 1280px\n");
-
-  let canvasPage = context.pages()[0] || await context.newPage();
-  await canvasPage.goto(canvasUrl, { waitUntil: "domcontentloaded" });
-  await canvasPage.locator("h1", { hasText: "Synthetic Canvas Course" }).waitFor();
-  process.stderr.write("[browser-test] synthetic signed-in Canvas ready\n");
-
-  let popup = await context.newPage();
-  await popup.goto(`chrome-extension://${EXTENSION_ID}/popup/popup.html`);
-  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).waitFor();
-  await captureThemes(popup, "popup-unpaired", 360);
-  const approvalPromise = context.waitForEvent("page");
-  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).click();
-  const approval = await approvalPromise;
-  await approval.waitForURL((url) => url.origin === `http://127.0.0.1:${connectorConfig.port}` && /^\/morrow-bridge\/v1\/pair\/[0-9a-f-]+$/.test(url.pathname));
-  await approval.getByText("Your learning-platform password and sign-in details stay in Chrome", { exact: false }).waitFor();
-  await captureThemes(approval, "pairing");
-  process.stderr.write("[browser-test] pairing review ready\n");
-  const pairingApprovedAt = performance.now();
-  await approval.getByRole("button", { name: "Allow connection", exact: true }).click();
-  await approval.getByText(/approved/i).waitFor();
-  await captureThemes(approval, "pairing-approved");
-  await popup.bringToFront();
-  await popup.locator("#status-value").filter({ hasText: /^Connected$/ }).waitFor({ timeout: 5_000 });
-  assert.equal(await popup.locator("#canvas-value").innerText(), "Not connected");
-  assert.equal(runtime.bridge.health().connected, true);
-  const pairingReadyMs = Math.round(performance.now() - pairingApprovedAt);
-  process.stderr.write(`[browser-test] pairing ready without restart in ${pairingReadyMs}ms\n`);
-
-  await context.close();
-  context = await launchBrowser();
-  const replacementWorker = await waitFor(
-    () => context.serviceWorkers().find((candidate) => candidate.url() === `chrome-extension://${EXTENSION_ID}/src/service-worker.js`),
-    "connector service worker did not restart",
-  );
-  await waitFor(() => runtime.bridge.health().connected, "connector did not authenticate after extension restart");
-  process.stderr.write("[browser-test] pairing survived extension restart\n");
 
   canvasPage = context.pages()[0] || await context.newPage();
   await canvasPage.goto(canvasUrl, { waitUntil: "domcontentloaded" });
@@ -1570,9 +1626,31 @@ try {
   process.stderr.write("[browser-test] synthetic Canvas file metadata exposes one canonical, unconsumed download URL\n");
   assert.equal(runtime.bridge.listBindings().length, 0);
   const settings = await context.newPage();
+  // Settings shows an Edit action's checkbox inside its closed area. A search opens every area that
+  // matches, which is how a person reaches one action by name.
+  const setEditAction = async (label, checked = true) => {
+    await settings.locator("#action-filter").fill(label);
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const box = settings.getByRole("checkbox", { name: new RegExp(`^${escaped}(?:\\s|$)`) });
+    await box.waitFor();
+    if (await box.isChecked() !== checked) await box.setChecked(checked);
+    assert.equal(await box.isChecked(), checked);
+    await settings.locator("#action-filter").fill("");
+  };
   await settings.goto(`chrome-extension://${EXTENSION_ID}/settings/settings.html`);
-  await settings.getByRole("heading", { name: "Plan and Edit" }).waitFor();
-  await settings.getByText("No connected courses are available.", { exact: false }).first().waitFor();
+  await settings.getByRole("heading", { name: "Courses and access", level: 1 }).waitFor();
+  await settings.locator("#connection-status").filter({ hasText: /^No course is connected yet\.$/ }).waitFor();
+  // Settings reads the available courses of every signed-in site as soon as it opens: no button.
+  const availableCourseListRead = async (message) => await waitFor(async () => {
+    if (!await settings.locator("#error").isHidden()) throw new Error(await settings.locator("#error").innerText());
+    return await settings.locator("#refresh").isEnabled()
+      && await settings.locator("[data-connect-row]").count() === 100
+      && await settings.locator(".listhead", { hasText: "Not connected · 100" }).count() === 1;
+  }, message);
+  await availableCourseListRead("opening settings did not list the first 100 available Canvas courses");
+  assert.equal(canvas.courseDiscoveryUrls().length, 1);
+  assert.equal(await settings.getByRole("button", { name: "Find available courses" }).count(), 0);
+  assert.equal(await settings.locator('#course-list input[type="checkbox"]').count(), 0, "an available course has its own Connect button, not a checkbox");
   const nativeFileStorageAccess = await settings.evaluate(async () => ({
     browserPermission: await chrome.permissions.contains({ origins: ["https://*/*"] }),
     enabled: (await chrome.storage.local.get("courseFileStorageAccessEnabled")).courseFileStorageAccessEnabled === true,
@@ -1612,12 +1690,11 @@ try {
   assert.equal(await privateChatOpen.getAttribute("aria-expanded"), "false");
   assert.equal(await privateChatOpen.evaluate((button) => button === document.activeElement), true);
   process.stderr.write("[browser-test] Private Chat makes the covered page inert, contains keyboard focus, and restores its opener\n");
-  await settings.getByRole("button", { name: "Find available courses" }).click();
-  await waitFor(async () => {
-    const text = await settings.locator("body").innerText();
-    if (/Morrow could not read available courses|course_discovery_failed/.test(text)) throw new Error(text);
-    return text.includes("Page 1 shows 100 available courses");
-  }, "initial Canvas discovery did not list its first 100 courses");
+  // Refresh connected courses read the site's list of available courses again.
+  await availableCourseListRead("Refresh connected courses did not list the first 100 available Canvas courses again");
+  assert.equal(canvas.courseDiscoveryUrls().length, 2, "Refresh connected courses must read the available courses again");
+  assert.doesNotMatch(await settings.locator("body").innerText(), /Morrow could not read available courses|course_discovery_failed/);
+  const discoveryUrlsBeforeCursorChecks = canvas.courseDiscoveryUrls().length;
   const cursorBoundary = await settings.evaluate(async () => {
     const saved = await chrome.storage.session.get("courseDiscoveries");
     const [[discoveryReceiptId, receipt]] = Object.entries(saved.courseDiscoveries || {});
@@ -1666,24 +1743,33 @@ try {
     repeated: "course_discovery_failed",
     pageLimit: "course_discovery_failed",
   });
-  assert.equal(canvas.courseDiscoveryUrls().length, 1, "invalid stored cursors must be refused before another provider request");
+  assert.equal(canvas.courseDiscoveryUrls().length, discoveryUrlsBeforeCursorChecks, "invalid stored cursors must be refused before another provider request");
   process.stderr.write("[browser-test] Canvas discovery refuses foreign, malformed, credentialed, fragmented, oversized, repeated, and over-limit cursors before provider access\n");
-  const canvasSite = new URL(canvasUrl).origin;
-  const courseSelectionName = (name, courseId, connect = true) =>
-    `Select Canvas course ${name} (course ID ${courseId}) at ${canvasSite} for 7${connect ? " to connect" : ""}`;
-  await settings.locator("#course-filter").fill("Introduction to Human Biology");
-  await settings.getByRole("checkbox", { name: courseSelectionName("Introduction to Human Biology", "42") }).check();
-  await settings.locator("#course-filter").fill("Synthetic Human Anatomy");
-  await settings.getByRole("checkbox", { name: courseSelectionName("Synthetic Human Anatomy", "43") }).check();
-  await settings.locator("#course-filter").fill("");
-  await settings.getByRole("button", { name: "Connect 2 selected courses in Plan" }).click();
-  await settings.getByText(/2 courses connected in Plan/).first().waitFor();
+  const courseSelectionName = (name, courseId) => `Select Canvas course ${name} (course ID ${courseId})`;
+  const connectAvailableCourse = async (name, filter) => {
+    await settings.locator("#course-filter").fill(filter);
+    await settings.getByRole("button", { name: `Connect Canvas course ${name}`, exact: true }).click();
+    await settings.locator("#notice").filter({ hasText: `${name} is connected in Plan. Morrow asks before each change.` }).waitFor();
+    await waitFor(async () => await settings.locator("#refresh").isEnabled(), `settings stayed busy after ${name} connected`);
+    await settings.locator("#course-filter").fill("");
+  };
+  // Each available course connects by itself, in Plan, from the list the site already returned.
+  await connectAvailableCourse("Introduction to Human Biology", "Introduction to Human Biology");
+  await connectAvailableCourse("Synthetic Human Anatomy", "Synthetic Human Anatomy");
+  assert.equal(canvas.courseDiscoveryUrls().length, discoveryUrlsBeforeCursorChecks, "connecting from a current list must not read the list again");
+  await settings.locator(".listhead", { hasText: "Connected · 2" }).waitFor();
+  const readDiscoveryPage = async () => await settings.evaluate(async () => {
+    const saved = await chrome.storage.session.get("courseDiscoveries");
+    return Object.values(saved.courseDiscoveries || {})[0]?.pageNumber ?? null;
+  });
+  const loadMoreStart = canvas.courseDiscoveryUrls().length;
   for (const pageNumber of [2, 3, 4, 5, 6]) {
     await settings.getByRole("button", { name: "Load more available courses" }).click();
-    await settings.locator("#discovery-progress-text").getByText(new RegExp(`Page ${pageNumber} shows`)).waitFor();
+    await waitFor(async () => await readDiscoveryPage() === pageNumber && await settings.locator("#discovery-more").isEnabled(), `Load more did not read page ${pageNumber}`);
   }
-  assert.match(canvas.courseDiscoveryUrls()[1], /\/api\/v1\/courses\?bookmark=course-page-2&signature=synthetic-signature-2$/);
-  assert.match(canvas.courseDiscoveryUrls()[2], /\/api\/v1\/courses\?enrollment_state=active&per_page=100&page=3$/);
+  assert.equal(await settings.locator("#discovery-more-row").isHidden(), true, "the last page of available courses must end Load more");
+  assert.match(canvas.courseDiscoveryUrls()[loadMoreStart], /\/api\/v1\/courses\?bookmark=course-page-2&signature=synthetic-signature-2$/);
+  assert.match(canvas.courseDiscoveryUrls()[loadMoreStart + 1], /\/api\/v1\/courses\?enrollment_state=active&include\[\]=term&include\[\]=favorites&per_page=100&page=3$/);
   process.stderr.write("[browser-test] Canvas discovery preserves opaque and numeric provider next URLs unchanged\n");
   const retainedDiscovery = await settings.evaluate(async () => {
     const saved = await chrome.storage.session.get("courseDiscoveries");
@@ -1695,12 +1781,37 @@ try {
     };
   });
   assert.deepEqual(retainedDiscovery, { receiptCount: 1, pageNumber: 6, courseCount: 1 });
+  await connectAvailableCourse(LONG_COURSE_NAME, "Evidence-Based Practice");
+  await waitFor(() => runtime.bridge.listBindings().length === 3, "course 501 did not connect after paged discovery");
+
+  // Disconnect removes one course and asks once first. Keep course leaves it connected.
   await settings.locator("#course-filter").fill("Evidence-Based Practice");
-  await settings.getByRole("checkbox", { name: courseSelectionName(LONG_COURSE_NAME, "501") }).check();
-  await settings.locator("#course-filter").fill("");
-  await settings.getByRole("button", { name: "Connect 1 selected course in Plan" }).click();
-  await settings.getByText(/1 course connected in Plan/).first().waitFor();
-  await settings.getByRole("button", { name: "View connected courses" }).click();
+  const course501Row = settings.locator('[data-toggle-course$=":c501"]');
+  await course501Row.click();
+  assert.equal(await course501Row.getAttribute("aria-expanded"), "true");
+  await settings.getByRole("button", { name: "Disconnect", exact: true }).click();
+  const disconnectConfirmation = settings.getByRole("group", { name: `Confirm disconnecting ${LONG_COURSE_NAME}` });
+  await disconnectConfirmation.waitFor();
+  assert.equal(await settings.getByRole("button", { name: "Keep course", exact: true }).evaluate((button) => button === document.activeElement), true);
+  await captureThemes(settings, "bridge-settings-disconnect-confirm", 900);
+  await settings.setViewportSize({ width: 900, height: 760 });
+  await settings.getByRole("button", { name: "Keep course", exact: true }).click();
+  await disconnectConfirmation.waitFor({ state: "detached" });
+  assert.equal(runtime.bridge.listBindings().length, 3, "Keep course must leave the course connected");
+  await settings.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await settings.getByRole("button", { name: "Disconnect this course", exact: true }).click();
+  await settings.locator("#notice").filter({ hasText: `${LONG_COURSE_NAME} is disconnected. Its Edit access was removed.` }).waitFor();
+  await waitFor(() => runtime.bridge.listBindings().length === 2 && !runtime.bridge.listBindings().some((entry) => entry.courseId === "501"), "Disconnect this course did not remove only course 501");
+  const disconnectedState = await settings.evaluate(async () => {
+    const stored = await chrome.storage.local.get(["bindings", "siteAnchors", "editPolicyRevisions"]);
+    const revision = Object.entries(stored.editPolicyRevisions || {}).find(([id]) => id.endsWith(":c501"))?.[1];
+    return { courseIds: (stored.bindings || []).map((entry) => entry.courseId).sort(), anchors: (stored.siteAnchors || []).length, revision };
+  });
+  assert.deepEqual(disconnectedState, { courseIds: ["42", "43"], anchors: 1, revision: 1 }, "Disconnect must keep the site and the other courses, and raise the course's policy revision");
+  // The disconnected course is available again, and connects again from the same list.
+  await connectAvailableCourse(LONG_COURSE_NAME, "Evidence-Based Practice");
+  process.stderr.write("[browser-test] one course disconnects after one confirmation, Keep course keeps it, and it can connect again\n");
+  await settings.locator(".listhead", { hasText: "Connected · 3" }).waitFor();
   const bindings = await waitFor(() => runtime.bridge.listBindings().length === 3 ? runtime.bridge.listBindings() : null, "selected Canvas courses did not bind to the shared site anchor");
   const binding = bindings.find((entry) => entry.courseId === "42");
   const binding43 = bindings.find((entry) => entry.courseId === "43");
@@ -2155,39 +2266,57 @@ try {
   await captureThemes(settings, "bridge-settings-plan-narrow", 320);
   await settings.setViewportSize({ width: 900, height: 760 });
 
-  const selectedCourseControl = settings.getByRole("checkbox", { name: courseSelectionName("Introduction to Human Biology", "42", false) });
+  // Select shows a checkbox on each connected course. An available course never has one.
+  await settings.getByRole("button", { name: "Select", exact: true }).click();
+  assert.equal(await settings.getByRole("button", { name: "Done", exact: true }).getAttribute("aria-pressed"), "true");
+  assert.equal(await settings.locator("#course-list .course-select").count(), 3);
+  const selectedCourseControl = settings.getByRole("checkbox", { name: courseSelectionName("Introduction to Human Biology", "42") });
   await selectedCourseControl.focus();
   await settings.keyboard.press("Space");
   await waitFor(async () => await selectedCourseControl.isChecked(), "Space did not select the focused course");
   await waitFor(async () => await selectedCourseControl.evaluate((input) => input === document.activeElement), "course focus did not survive its selected-state render");
   await settings.getByRole("radio", { name: /^Edit/ }).check();
-  await settings.getByRole("checkbox", { name: "Correct Canvas Page text" }).check();
-  assert.equal(await settings.locator("#edit-duration").inputValue(), String(60 * 60 * 1_000));
+  await setEditAction("Correct Canvas Page text");
+  // Edit is not timed: settings offers no end time to choose and names none.
+  assert.equal(await settings.locator("#edit-duration").count(), 0);
+  assert.equal(await settings.getByText(/Edit access ends after|Edit until|for 4 hours/).count(), 0);
 
   // An action whose saved result Canvas offers no read for is listed as Review only, with its reason,
   // and has no checkbox that could grant it ahead.
-  await settings.locator("#action-filter").fill("Remove course from favorites");
-  await settings.getByText("Review only: Remove course from favorites", { exact: false }).first().waitFor();
-  assert.equal(await settings.locator('label[for="category-action:canvas:canvas_remove_course_from_favorites"]').count(), 0);
+  const favoritesAction = fullEditOptions.options.find((option) => option.id === "action:canvas:canvas_remove_course_from_favorites");
+  assert.equal(favoritesAction?.availability, "review");
+  assert.match(favoritesAction.reviewReason, /Canvas has no read that shows the saved result of this change/);
+  await settings.locator("#action-filter").fill(favoritesAction.label);
+  await settings.getByText("No individual action matches this search.", { exact: true }).waitFor();
   assert.equal(await settings.locator('input[value="action:canvas:canvas_remove_course_from_favorites"]').count(), 0);
-  assert.ok(await settings.getByText(/Canvas has no read that shows the saved result of this change/).count() >= 1);
+  await settings.locator("#action-filter").fill("");
+  const reviewOnlyList = settings.locator("#category-list details.review-only-line");
+  await reviewOnlyList.locator("summary").click();
+  const favoritesReviewOnly = reviewOnlyList.locator("li").filter({ has: settings.locator("strong", { hasText: new RegExp(`^${favoritesAction.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }) });
+  assert.equal(await favoritesReviewOnly.count(), 1);
+  assert.match(await favoritesReviewOnly.innerText(), /Canvas has no read that shows the saved result of this change/);
   assert.equal(await settings.getByText("Saved result not checked", { exact: true }).count(), 0);
+  // Review-only entries keep Canvas's own action names, which can be technical. The capture shows
+  // the picker with that list closed, as a person first sees it.
+  await reviewOnlyList.locator("summary").click();
+  assert.equal(await reviewOnlyList.getAttribute("open"), null);
   await captureThemes(settings, "bridge-settings-exact-actions", 900);
   await settings.setViewportSize({ width: 900, height: 760 });
-  await settings.locator("#action-filter").fill("");
-  await waitFor(async () => await settings.locator("#save-edit").isDisabled() === false, "Save Edit access stayed disabled after the search was cleared");
+  await waitFor(async () => await settings.locator("#save-edit").isDisabled() === false, "Review and save stayed disabled after the search was cleared");
   process.stderr.write("[browser-test] Settings lists every Canvas action whose saved result Morrow cannot check as Review only, with no way to grant it ahead\n");
 
   await captureThemes(settings, "bridge-settings-edit", 900);
   await captureThemes(settings, "bridge-settings-edit-narrow", 320);
   await settings.setViewportSize({ width: 900, height: 760 });
-  await settings.getByRole("button", { name: "Save Edit access" }).click();
+  await settings.getByRole("button", { name: "Review and save", exact: true }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
+  assert.match(await settings.locator("#notice").innerText(), /It stays on until you return the course to Plan\.$/);
   const editPermission = await waitForPublishedEditPermission(
     (permission) => permission.enabledCategories?.join(",") === "canvas_page_content",
     "saved Edit permission was not published",
   );
   assert.deepEqual(editPermission.enabledCategories, ["canvas_page_content"]);
+  assert.equal(editPermission.expiresAt ?? null, null, "Edit access saved in settings has no end time");
   assert.deepEqual(editPermission.rules, [{ operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses", toolName: "canvas_update_create_page_courses", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "page_text" }]);
   const originalPolicy = await settings.evaluate(async (sourceBindingId) => {
     const stored = await chrome.storage.local.get("editPolicies");
@@ -2201,9 +2330,10 @@ try {
     });
   }, { sourceBindingId: binding.sourceBindingId, permission: originalPolicy });
   await settings.getByRole("button", { name: "Refresh connected courses" }).click();
-  await settings.getByText("This temporary Edit access has ended.", { exact: false }).first().waitFor();
+  // Only a grant saved while Edit was timed has an end time. Once it passes, the course is in Plan.
+  await settings.locator("#notice").filter({ hasText: "1 selected course returned to Plan. Its earlier Edit access had an end time, and that time has passed." }).waitFor();
   assert.equal(await settings.getByRole("radio", { name: "Plan" }).isChecked(), true);
-  await settings.getByText("returned to Plan because temporary Edit access ended.", { exact: false }).first().waitFor();
+  await settings.locator('[data-binding-id$=":c42"] .course-row-state').filter({ hasText: /^Plan\. Asks first\.$/ }).waitFor();
   await captureThemes(settings, "bridge-settings-expired", 900);
   await captureThemes(settings, "bridge-settings-expired-narrow", 320);
   await settings.evaluate(async ({ sourceBindingId, permission }) => {
@@ -2212,9 +2342,26 @@ try {
   }, { sourceBindingId: binding.sourceBindingId, permission: originalPolicy });
   await settings.setViewportSize({ width: 900, height: 760 });
   await settings.getByRole("button", { name: "Refresh connected courses" }).click();
-  await settings.getByText("Edit: 1 type", { exact: true }).first().waitFor();
-  const refusedSettingsMessage = await popup.evaluate(async () => await chrome.runtime.sendMessage({ type: "morrow_edit_policy_status" }));
-  assert.deepEqual(refusedSettingsMessage, { ok: false, code: "edit_policy_sender_refused", error: "edit_policy_sender_refused" });
+  await settings.locator('[data-binding-id$=":c42"] .course-row-state').filter({ hasText: /^Edit\. 1 kind of edit\.$/ }).waitFor();
+  assert.doesNotMatch(await settings.locator("#course-list").innerText(), /\buntil\b/);
+  // The popup may read Edit status and return a course to Plan. Every grant, course read and
+  // connection change stays with settings, and the popup never receives Private Chat.
+  const popupEditStatus = await popup.evaluate(async () => await chrome.runtime.sendMessage({ type: "morrow_edit_policy_status" }));
+  assert.equal(popupEditStatus?.ok, true, JSON.stringify(popupEditStatus));
+  assert.equal(Object.hasOwn(popupEditStatus.result, "privateChat"), false);
+  const refusedSettingsMessages = await popup.evaluate(async ({ sourceBindingId, siteAnchorId }) => ({
+    save: await chrome.runtime.sendMessage({ type: "morrow_edit_policy_save", sourceBindingId, enabledCategories: ["canvas_page_content"] }),
+    options: await chrome.runtime.sendMessage({ type: "morrow_edit_policy_options", sourceBindingId }),
+    disconnect: await chrome.runtime.sendMessage({ type: "morrow_course_disconnect", sourceBindingId }),
+    discovery: await chrome.runtime.sendMessage({ type: "morrow_course_discovery_start", siteAnchorId }),
+  }), { sourceBindingId: binding.sourceBindingId, siteAnchorId: binding.sourceBindingId.replace(/:c42$/, "") });
+  assert.deepEqual(refusedSettingsMessages, {
+    save: { ok: false, code: "edit_policy_sender_refused", error: "edit_policy_sender_refused" },
+    options: { ok: false, code: "edit_policy_sender_refused", error: "edit_policy_sender_refused" },
+    disconnect: { ok: false, code: "edit_policy_sender_refused", error: "edit_policy_sender_refused" },
+    discovery: { ok: false, code: "course_discovery_sender_refused", error: "course_discovery_sender_refused" },
+  });
+  assert.equal(runtime.bridge.listBindings().length, 3, "a refused popup message must not change any course");
 
   const unscoped = await runtime.call("canvas_item_bank_create_bank", {
     title: "Must not be created",
@@ -2912,10 +3059,9 @@ try {
   process.stderr.write("[browser-test] cancellation before provider dispatch sends nothing, while cancellation after Canvas receives a change reports an unknown outcome and suppresses the late result\n");
 
   await settings.getByRole("radio", { name: /^Edit/ }).check();
-  const textCategory = settings.getByRole("checkbox", { name: "Correct Canvas Page text" });
-  if (await textCategory.isChecked()) await textCategory.uncheck();
-  await settings.getByRole("checkbox", { name: "Add Canvas Page image alternative text" }).check();
-  await settings.getByRole("button", { name: "Save Edit access" }).click();
+  await setEditAction("Correct Canvas Page text", false);
+  await setEditAction("Add Canvas Page image alternative text");
+  await settings.getByRole("button", { name: "Review and save", exact: true }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
   const altPermission = await waitForPublishedEditPermission(
     (permission) => permission.enabledCategories?.join(",") === "canvas_page_image_alt",
@@ -3019,10 +3165,9 @@ try {
   process.stderr.write("[browser-test] sandboxed learner-render checks return one bounded signal record with no course text\n");
 
   await settings.getByRole("radio", { name: /^Edit/ }).check();
-  const pageAltCategory = settings.getByRole("checkbox", { name: "Add Canvas Page image alternative text" });
-  if (await pageAltCategory.isChecked()) await pageAltCategory.uncheck();
-  await settings.getByRole("checkbox", { name: "Add Canvas Assignment image alternative text" }).check();
-  await settings.getByRole("button", { name: "Save Edit access" }).click();
+  await setEditAction("Add Canvas Page image alternative text", false);
+  await setEditAction("Add Canvas Assignment image alternative text");
+  await settings.getByRole("button", { name: "Review and save", exact: true }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
   const assignmentAltPermission = await waitForPublishedEditPermission(
     (permission) => permission.enabledCategories?.join(",") === "canvas_assignment_image_alt",
@@ -3067,10 +3212,9 @@ try {
   assert.equal(canvas.assignmentWrites(), 1);
 
   await settings.getByRole("radio", { name: /^Edit/ }).check();
-  const assignmentAltCategory = settings.getByRole("checkbox", { name: "Add Canvas Assignment image alternative text" });
-  if (await assignmentAltCategory.isChecked()) await assignmentAltCategory.uncheck();
-  await settings.getByRole("checkbox", { name: "Add Canvas Discussion image alternative text" }).check();
-  await settings.getByRole("button", { name: "Save Edit access" }).click();
+  await setEditAction("Add Canvas Assignment image alternative text", false);
+  await setEditAction("Add Canvas Discussion image alternative text");
+  await settings.getByRole("button", { name: "Review and save", exact: true }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
   const discussionAltPermission = await waitForPublishedEditPermission(
     (permission) => permission.enabledCategories?.join(",") === "canvas_discussion_image_alt",
@@ -3119,10 +3263,9 @@ try {
   assert.equal(canvas.discussionWrites(), 1);
 
   await settings.getByRole("radio", { name: /^Edit/ }).check();
-  const discussionAltCategory = settings.getByRole("checkbox", { name: "Add Canvas Discussion image alternative text" });
-  if (await discussionAltCategory.isChecked()) await discussionAltCategory.uncheck();
-  await settings.getByRole("checkbox", { name: "Add Canvas Classic Quiz description image alternative text" }).check();
-  await settings.getByRole("button", { name: "Save Edit access" }).click();
+  await setEditAction("Add Canvas Discussion image alternative text", false);
+  await setEditAction("Add Canvas Classic Quiz description image alternative text");
+  await settings.getByRole("button", { name: "Review and save", exact: true }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
   const classicQuizDescriptionPermission = await waitForPublishedEditPermission(
     (permission) => permission.enabledCategories?.join(",") === "canvas_classic_quiz_description_image_alt",
@@ -3167,10 +3310,9 @@ try {
   assert.equal(canvas.classicQuizWrites(), 1);
 
   await settings.getByRole("radio", { name: /^Edit/ }).check();
-  const classicQuizDescriptionAltCategory = settings.getByRole("checkbox", { name: "Add Canvas Classic Quiz description image alternative text" });
-  if (await classicQuizDescriptionAltCategory.isChecked()) await classicQuizDescriptionAltCategory.uncheck();
-  await settings.getByRole("checkbox", { name: "Add Canvas Classic Quiz question image alternative text" }).check();
-  await settings.getByRole("button", { name: "Save Edit access" }).click();
+  await setEditAction("Add Canvas Classic Quiz description image alternative text", false);
+  await setEditAction("Add Canvas Classic Quiz question image alternative text");
+  await settings.getByRole("button", { name: "Review and save", exact: true }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
   const classicQuestionPermission = await waitForPublishedEditPermission(
     (permission) => permission.enabledCategories?.join(",") === "canvas_classic_quiz_question_image_alt",
@@ -3255,10 +3397,9 @@ try {
   process.stderr.write("[browser-test] a Classic Quiz question image repair rebuilds the whole question, keeps every other field, and refuses a grouped, unsupported, or changed question\n");
 
   await settings.getByRole("radio", { name: /^Edit/ }).check();
-  const classicQuizAltCategory = settings.getByRole("checkbox", { name: "Add Canvas Classic Quiz question image alternative text" });
-  if (await classicQuizAltCategory.isChecked()) await classicQuizAltCategory.uncheck();
-  await settings.getByRole("checkbox", { name: "Add Canvas New Quiz item image alternative text" }).check();
-  await settings.getByRole("button", { name: "Save Edit access" }).click();
+  await setEditAction("Add Canvas Classic Quiz question image alternative text", false);
+  await setEditAction("Add Canvas New Quiz item image alternative text");
+  await settings.getByRole("button", { name: "Review and save", exact: true }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
   const newQuizItemAltPermission = await waitForPublishedEditPermission(
     (permission) => permission.enabledCategories?.join(",") === "canvas_new_quiz_item_image_alt",
@@ -3306,10 +3447,9 @@ try {
   assert.equal(canvas.quizItemWrites(), 2);
 
   await settings.getByRole("radio", { name: /^Edit/ }).check();
-  const newQuizItemAltCategory = settings.getByRole("checkbox", { name: "Add Canvas New Quiz item image alternative text" });
-  if (await newQuizItemAltCategory.isChecked()) await newQuizItemAltCategory.uncheck();
-  await settings.getByRole("checkbox", { name: "Add Canvas New Quiz choice and feedback image alternative text" }).check();
-  await settings.getByRole("button", { name: "Save Edit access" }).click();
+  await setEditAction("Add Canvas New Quiz item image alternative text", false);
+  await setEditAction("Add Canvas New Quiz choice and feedback image alternative text");
+  await settings.getByRole("button", { name: "Review and save", exact: true }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
   const newQuizNestedPermission = await waitForPublishedEditPermission(
     (permission) => permission.enabledCategories?.join(",") === "canvas_new_quiz_nested_image_alt",
@@ -3447,17 +3587,15 @@ try {
   assert.equal(canvas.quizItemWrites(), 5);
 
   await settings.getByRole("radio", { name: /^Edit/ }).check();
-  const newQuizNestedCategory = settings.getByRole("checkbox", { name: "Add Canvas New Quiz choice and feedback image alternative text" });
-  if (await newQuizNestedCategory.isChecked()) await newQuizNestedCategory.uncheck();
-  await settings.getByRole("checkbox", { name: "Change Canvas Assignment due date" }).check();
-  await settings.getByRole("button", { name: "Save Edit access" }).click();
+  await setEditAction("Add Canvas New Quiz choice and feedback image alternative text", false);
+  await setEditAction("Change Canvas Assignment due date");
+  await settings.getByRole("button", { name: "Review and save", exact: true }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
   const settingsDuePermission = await waitForPublishedEditPermission(
     (permission) => permission.enabledCategories?.join(",") === "canvas_assignment_due_date",
     "saved Assignment due-date Edit permission was not published",
   );
-  assert.ok(settingsDuePermission.expiresAt > Date.now() + 59 * 60 * 1_000);
-  const conversationalStartedAt = Date.now();
+  assert.equal(settingsDuePermission.expiresAt ?? null, null, "Edit access saved in settings has no end time");
   const conversationalSet = await runtime.editPolicySet({
     mode: "edit",
     selections: [{
@@ -3468,12 +3606,11 @@ try {
   });
   assert.equal(conversationalSet.ok, true, JSON.stringify(conversationalSet));
   const duePermission = await waitForPublishedEditPermission(
-    (permission) => Number.isSafeInteger(permission.expiresAt),
-    "temporary Assignment due-date Edit permission was not published",
+    (permission) => permission.revision === settingsDuePermission.revision + 1,
+    "conversational Assignment due-date Edit permission was not published",
   );
-  assert.equal(duePermission.revision, settingsDuePermission.revision + 1);
-  assert.ok(duePermission.expiresAt > conversationalStartedAt + 29 * 60 * 1_000);
-  assert.ok(duePermission.expiresAt <= conversationalStartedAt + 30 * 60 * 1_000 + 1_000);
+  // Edit access allowed in a conversation has no end time either.
+  assert.equal(duePermission.expiresAt ?? null, null);
   assert.deepEqual(duePermission.rules, [{ operationKey: "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment", toolName: "canvas_edit_assignment", allowedChangedFields: ["assignment_due_at"] }]);
   const dueAt = "2026-09-10T12:00:00-05:00";
   const dueWrite = await runtime.call("canvas_edit_assignment", {
@@ -3536,6 +3673,14 @@ try {
   // published connection still says it is current and the change reaches the extension. Every change
   // probes that tab again first, so this one is refused before anything is sent, the refusal names
   // the exact site to reopen, and the record settles as sent nothing rather than as uncertain.
+  // "Open Canvas or Moodle when Morrow needs it" is on by default and would open the site in a new
+  // tab first. It is off here so the refusal comes from the one signed-out tab; the setting's own
+  // path is proved right after this.
+  const openPlatformWhenNeeded = settings.getByRole("checkbox", { name: "Open Canvas or Moodle when Morrow needs it." });
+  assert.equal(await openPlatformWhenNeeded.isChecked(), true);
+  await openPlatformWhenNeeded.uncheck();
+  await waitFor(async () => (await replacementWorker.evaluate(async () => (await chrome.storage.local.get("openPlatformWhenNeeded")).openPlatformWhenNeeded)) === false, "turning off Open Canvas when needed was not saved");
+  const pagesBeforeLostSite = context.pages().length;
   const sectionWritesBeforeLostSite = canvas.sectionWrites();
   canvas.setPrincipalId("8");
   const probesBeforeLostSiteWrite = await countAnchorProbes();
@@ -3546,7 +3691,7 @@ try {
   assert.equal(lostSiteWrite.problem.code, "canvas_binding_required", JSON.stringify(lostSiteWrite));
   assert.equal(
     lostSiteWrite.problem.message,
-    `Morrow sent nothing: the Canvas site tab for Introduction to Human Biology is not open and signed in. Open ${new URL(canvasUrl).origin} in Chrome, sign in, then select Connect Canvas in Morrow Bridge.`,
+    `Morrow sent nothing: the Canvas site tab for Introduction to Human Biology is not open and signed in. Select Open Canvas in the Morrow Bridge popup, or open ${new URL(canvasUrl).origin} in Chrome yourself, and sign in if asked.`,
   );
   assert.equal(canvas.sectionWrites(), sectionWritesBeforeLostSite);
   assert.equal(canvas.section("302").name, "Section B evening");
@@ -3559,6 +3704,22 @@ try {
   const restoredSiteRead = await runtime.call("canvas_get_single_course_courses", { id: "42", _morrow: { source_binding_id: binding.sourceBindingId } });
   assert.equal(restoredSiteRead.ok, true, JSON.stringify(restoredSiteRead));
   assert.equal(restoredSiteRead.result?.data?.id, "42");
+  assert.equal(context.pages().length, pagesBeforeLostSite, "with the setting off, Morrow Bridge must not open the site by itself");
+  // With the setting on, a change that finds the site signed out opens it once in a background tab,
+  // and still sends nothing while that tab is signed out too.
+  await openPlatformWhenNeeded.check();
+  await waitFor(async () => (await replacementWorker.evaluate(async () => (await chrome.storage.local.get("openPlatformWhenNeeded")).openPlatformWhenNeeded)) === true, "turning on Open Canvas when needed was not saved");
+  canvas.setPrincipalId("8");
+  const openedSitePage = context.waitForEvent("page");
+  const openedSiteWrite = await sectionCall("canvas_edit_section", { id: "302", course_section_name: "Must stay unchanged" }, "section-lost-course-site-opened");
+  assert.equal(openedSiteWrite.ok, false, JSON.stringify(openedSiteWrite));
+  assert.equal(openedSiteWrite.resultState, "not_sent", JSON.stringify(openedSiteWrite));
+  assert.equal(openedSiteWrite.problem.code, "canvas_binding_required", JSON.stringify(openedSiteWrite));
+  const reopenedSite = await openedSitePage;
+  assert.equal(reopenedSite.url(), `${new URL(canvasUrl).origin}/courses/42`);
+  assert.equal(canvas.sectionWrites(), sectionWritesBeforeLostSite);
+  await reopenedSite.close();
+  canvas.setPrincipalId("7");
   process.stderr.write("[browser-test] a course site tab lost mid-flight refuses the change before it is sent, names the exact site to reopen, and is proved again as soon as it returns\n");
 
   canvas.setPrincipalId("8");
@@ -3576,9 +3737,10 @@ try {
   // The closed course site tab reads as one state with one next action in both places a person
   // looks, and neither keeps the connected state it showed a moment earlier.
   await popup.bringToFront();
-  await waitFor(async () => (await popup.locator("#canvas-value").innerText()) === "Canvas tab needed", "the popup did not name the closed Canvas tab");
-  assert.equal(await popup.locator("#detail").innerText(), "This selected course is connected, but its Canvas tab is no longer open. Open the course in Chrome, sign in, then select Connect Canvas.");
-  const reconnectControl = popup.getByRole("button", { name: "Connect Canvas", exact: true });
+  await waitFor(async () => (await popup.locator("#canvas-value").innerText()) === "Canvas is closed", "the popup did not name the closed Canvas tab");
+  assert.equal(await popup.locator("#detail").innerText(), "This selected course is connected, but its Canvas tab is no longer open. Select Open Canvas to reopen it.");
+  assert.equal(await popup.getByRole("button", { name: "Connect this course", exact: true }).isVisible(), false);
+  const reconnectControl = popup.getByRole("button", { name: "Open Canvas", exact: true });
   assert.equal(await reconnectControl.isVisible(), true);
   assert.equal(await reconnectControl.isEnabled(), true);
   const lostSiteGuide = await context.newPage();
@@ -3586,7 +3748,12 @@ try {
   await lostSiteGuide.getByText("Saved Canvas needs sign-in or reconnection", { exact: true }).waitFor();
   await lostSiteGuide.getByRole("heading", { name: "Reconnect Canvas", exact: true }).waitFor();
   await lostSiteGuide.close();
-  process.stderr.write("[browser-test] a closed course site tab reads as one named state with one next action in the popup and the setup guide\n");
+  // Open Canvas reopens the saved site with the sign-in Chrome already has, and the courses on it
+  // are proved again without a new connection.
+  await popup.bringToFront();
+  await reconnectControl.click();
+  await waitFor(() => runtime.bridge.listBindings().length === 3 && runtime.bridge.listBindings().every((entry) => entry.runtimeVerified === true), "Open Canvas did not reopen the saved site and reverify its selected courses");
+  process.stderr.write("[browser-test] a closed course site tab reads as one named state with one next action in the popup and the setup guide, and that action reopens it\n");
 
   await runtime.close();
   runtime = await CanvasConnectorRuntime.start({ ...connectorConfig, token: "replacement-bridge-secret-".repeat(3) });
@@ -3620,6 +3787,10 @@ try {
   await context?.close().catch(() => undefined);
   await new Promise((resolveClose) => canvas.server.close(resolveClose));
   await new Promise((resolveClose) => externalFileStore.server.close(resolveClose));
+  // A failed assertion can leave an approved change waiting for its release, and the approval
+  // server waits for running changes before it closes.
+  finishApproval?.();
+  finishBatchApproval?.();
   await operationApproval.close();
   await runtime.close();
   rmSync(temporary, { recursive: true, force: true });
