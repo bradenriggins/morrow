@@ -204,13 +204,19 @@ async function refresh() {
     detectedProvider = null;
     editActive = [];
     editBindings = [];
+    let editStatusFailure = null;
     // WI-1.4: morrow_status carries no editPermission per binding, so the popup reads the same
     // command the settings page uses to learn which connections can act with no review. Skipped
     // while choosing courses: no course is selected yet, so no Edit access can exist. WI-5.8: the
     // same read also gives the course list its own name and D7 state, so the popup fetches nothing
-    // extra to show it.
+    // extra to show it. A failed read is named: hiding it would hide Edit access that is on.
     if (status?.consentRequired !== true && status?.paired === true && status?.connected === true && !canChooseCourses(status)) {
-      const editStatus = await message("morrow_edit_policy_status").catch(() => null);
+      let editStatus = null;
+      try {
+        editStatus = await message("morrow_edit_policy_status");
+      } catch (cause) {
+        editStatusFailure = cause;
+      }
       if (generation !== readGeneration) return;
       editActive = activeEditBindings(editStatus?.bindings);
       editBindings = Array.isArray(editStatus?.bindings) ? editStatus.bindings : [];
@@ -223,7 +229,8 @@ async function refresh() {
       detectedProvider = result?.provider === "canvas" || result?.provider === "moodle" ? result.provider : null;
     }
     render(status);
-    reportSuccess("status");
+    if (editStatusFailure) reportError("status", editStatusFailure);
+    else reportSuccess("status");
   } catch (cause) {
     if (generation !== readGeneration) return;
     editActive = [];

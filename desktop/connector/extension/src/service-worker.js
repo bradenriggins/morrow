@@ -1685,6 +1685,14 @@ function settingsSender(sender) {
   return sender?.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("settings/settings.html");
 }
 
+// The popup reads Edit status and can return a course to Plan. Returning to Plan only removes
+// access, so it is safe from the popup; every grant, save and course read stays with settings.
+function popupSender(sender) {
+  return sender?.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("popup/popup.html");
+}
+
+const POPUP_EDIT_POLICY_MESSAGES = new Set(["morrow_edit_policy_status", "morrow_edit_policy_revoke"]);
+
 function policyCode(error) {
   const code = String(error?.message || "");
   return /^(?:edit_policy|course_discovery|course_selection)_[a-z_]+$/.test(code)
@@ -1702,7 +1710,7 @@ function messageCode(error) {
   return /^[a-z][a-z0-9_]{2,80}$/.test(code) ? code : "bridge_request_failed";
 }
 
-async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityGeneration) {
+async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityGeneration, { includePrivateChat = true } = {}) {
   await requireCourseDataAuthority(authorityGeneration);
   const api = await catalog();
   await requireCourseDataAuthority(authorityGeneration);
@@ -1734,7 +1742,7 @@ async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityG
     bindingLimit: BRIDGE_BINDING_LIMIT,
     siteAnchors,
     bindings,
-    privateChat: privateChatStatus(),
+    ...(includePrivateChat ? { privateChat: privateChatStatus() } : {}),
   };
 }
 
@@ -6231,7 +6239,8 @@ async function cancelPairingAfterConsentWithdrawal() {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  const settingsAction = message?.type === "morrow_edit_policy_status" ? (authorityGeneration) => editPolicyStatus(authorityGeneration)
+  const fromPopup = POPUP_EDIT_POLICY_MESSAGES.has(message?.type) && popupSender(sender);
+  const settingsAction = message?.type === "morrow_edit_policy_status" ? (authorityGeneration) => editPolicyStatus(authorityGeneration, { includePrivateChat: !fromPopup })
     : message?.type === "morrow_edit_policy_options" ? (authorityGeneration) => editPolicyOptions(message.sourceBindingId, authorityGeneration)
       : message?.type === "morrow_edit_policy_save" ? (authorityGeneration) => saveEditPolicy(message.sourceBindingId, message.enabledCategories, authorityGeneration)
         : message?.type === "morrow_edit_policy_revoke" ? (authorityGeneration) => revokeEditPolicy(message.sourceBindingId, authorityGeneration)
@@ -6242,7 +6251,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   : message?.type === "morrow_private_chat_close" ? () => { clearPrivateChat({ answerPending: true, rememberClosed: true }); return { status: "closed" }; }
         : null;
   if (settingsAction) {
-    if (!settingsSender(sender)) {
+    if (!settingsSender(sender) && !fromPopup) {
       const code = String(message?.type || "").startsWith("morrow_course_") ? "course_discovery_sender_refused" : "edit_policy_sender_refused";
       sendResponse({ ok: false, code, error: code });
       return false;

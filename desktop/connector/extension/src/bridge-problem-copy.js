@@ -149,8 +149,8 @@ const COPY = {
     action: "Return the course to Plan in Plan and Edit settings, then choose Edit again.",
   },
   edit_policy_sender_refused: {
-    title: "This permission action was not started from Plan and Edit settings",
-    detail: "Morrow accepts a permission change only from its own settings page, so nothing changed.",
+    title: "Morrow did not accept this permission request from this page",
+    detail: "Morrow saves Edit access only from Plan and Edit settings, and reads it or returns a course to Plan only from there or the Morrow Bridge popup, so nothing changed.",
     action: "Open Plan and Edit settings from the Morrow popup, then make the change there.",
   },
   course_discovery_sender_refused: {

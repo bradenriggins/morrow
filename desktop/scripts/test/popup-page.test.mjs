@@ -30,7 +30,7 @@ const editPermission = (sourceBindingId, enabledCategories = ["canvas_page_conte
 });
 
 async function openPopup({ status, handlers = {}, ...rest } = {}) {
-  return await loadExtensionPage("popup/popup.html", { handlers: { morrow_status: () => status(), morrow_detect_course_platform: () => ({ provider: "canvas" }), ...handlers }, ...rest });
+  return await loadExtensionPage("popup/popup.html", { handlers: { morrow_status: () => status(), morrow_detect_course_platform: () => ({ provider: "canvas" }), morrow_edit_policy_status: () => ({ bindings: [] }), ...handlers }, ...rest });
 }
 
 /** Everything the popup shows a person, read from the rendered page. */
@@ -414,6 +414,25 @@ test("the setup guide opens from the popup, and says so when it cannot", async (
   });
   await refused.click("#setup-guide");
   assert.equal(refused.text("#error"), problemText("bridge_not_connected"));
+});
+
+// WI-1.4: morrow_status carries no editPermission per binding, so the popup reads
+// morrow_edit_policy_status once it is connected, the same command the settings page uses. The
+// service worker accepts that read and the Plan return from the popup's own page
+// (scripts/test/extension-lifecycle-authority.test.mjs, "the popup reads Edit status"), so these
+// handlers answer as it does.
+test("the popup reads Edit status with no other field, and names a refused read instead of hiding it", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
+    handlers: { morrow_edit_policy_status: () => ({ ok: false, code: "edit_policy_sender_refused", error: "edit_policy_sender_refused" }) },
+  });
+  assert.deepEqual(page.messages("morrow_edit_policy_status"), [{ type: "morrow_edit_policy_status" }]);
+  assert.equal(page.hidden("#error"), false);
+  assert.equal(page.text("#error"), problemText("edit_policy_sender_refused"));
+  assert.equal(page.hidden("#courses"), true);
+  assert.equal(page.hidden("#edit-access-banner"), true);
+  // The connection itself was read, so the rest of the popup still shows it.
+  assert.equal(page.text("#status-value"), "Connected");
 });
 
 // WI-1.4: morrow_status carries no editPermission per binding, so the popup reads

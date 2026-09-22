@@ -36,6 +36,7 @@ const STORED_ANCHORS_SOURCE = sliceIncluding("function storedAnchors(value) {", 
 const MESSAGE_CODE_SOURCE = sliceIncluding("function messageCode(error) {", "\n}\n");
 const HANDLER_SOURCE = sliceBefore("function awaitTabLoad(tabId, timeoutMs) {", "\nasync function disconnectConnector()");
 const ROUTER_SOURCE = sliceBefore("chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {", "\nchrome.permissions.onAdded.addListener");
+const POPUP_SENDER_SOURCE = sliceIncluding("function popupSender(sender) {", 'const POPUP_EDIT_POLICY_MESSAGES = new Set(["morrow_edit_policy_status", "morrow_edit_policy_revoke"]);');
 const ANCHOR_FOR_BINDING_SOURCE = sliceIncluding("function anchorForBinding(binding, anchors) {", "\n}\n");
 const SAVE_EDIT_POLICY_SOURCE = sliceIncluding(
   "async function saveEditPolicy(sourceBindingId, enabledCategories, authorityGeneration = state.courseDataAuthorityGeneration) {",
@@ -95,6 +96,7 @@ function harness({ anchors = [], bindings = [], matchResult = true, matchResults
     "const OPEN_PLATFORM_LOAD_TIMEOUT_MS = 40;", // WORKER_SOURCE pins the real 20_000ms budget; this test uses a short one.
     STORED_ANCHORS_SOURCE,
     MESSAGE_CODE_SOURCE,
+    POPUP_SENDER_SOURCE,
     ANCHOR_FOR_BINDING_SOURCE,
     HANDLER_SOURCE,
     SAVE_EDIT_POLICY_SOURCE,

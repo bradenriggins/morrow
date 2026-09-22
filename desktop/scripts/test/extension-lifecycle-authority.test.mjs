@@ -343,6 +343,10 @@ function settingsSender() {
   return { id: extensionId, url: `${extensionPrefix}settings/settings.html` };
 }
 
+function popupSender() {
+  return { id: extensionId, url: `${extensionPrefix}popup/popup.html` };
+}
+
 async function consentConnectScenario() {
   const value = fixture({ holdCatalog: true });
   const importing = importWorker("consent-connect");
@@ -750,6 +754,55 @@ async function policySetMergeLegacyTimedScenario() {
   const merged = value.local.values.editPolicies[bindingId];
   assert.deepEqual(merged.enabledCategories, [first.id, second.id].sort());
   assert.equal(merged.expiresAt, expiresAt);
+}
+
+// The popup reads Edit status and can return a course to Plan, the safe direction. Saving,
+// granting, reading the Edit action list and course discovery stay with Plan and Edit settings, and
+// every sender check is exact: this extension's id and the exact page address.
+async function popupEditStatusScenario() {
+  const value = fixture();
+  await importWorker("popup-edit-status");
+  const socket = await authenticate(value);
+  const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
+  const category = options.result.options.find((candidate) => candidate.availability === "edit");
+  const granted = await sendRuntime(value, { type: "morrow_edit_policy_save", sourceBindingId: bindingId, enabledCategories: [category.id] }, settingsSender());
+  assert.equal(granted.ok, true);
+
+  const status = await sendRuntime(value, { type: "morrow_edit_policy_status" }, popupSender());
+  assert.equal(status.ok, true, JSON.stringify(status));
+  assert.equal(status.result.bindings[0].sourceBindingId, bindingId);
+  assert.deepEqual(status.result.bindings[0].editPermission.sourceBindingId, bindingId);
+  assert.equal(Object.hasOwn(status.result, "privateChat"), false, "the popup's read carries no Private Chat conversation");
+
+  for (const message of [
+    { type: "morrow_edit_policy_save", sourceBindingId: bindingId, enabledCategories: [category.id] },
+    { type: "morrow_edit_policy_options", sourceBindingId: bindingId },
+    { type: "morrow_course_discovery_start", siteAnchorId: anchorId },
+    { type: "morrow_course_selection_save", siteAnchorId: anchorId, discoveryReceiptId: "discovery:x", courseIds: ["42"] },
+    { type: "morrow_private_chat_send", sourceBindingId: bindingId, text: "hi", assertedIdentifiers: ["x"] },
+  ]) {
+    const refused = await sendRuntime(value, message, popupSender());
+    assert.equal(refused.ok, false, message.type);
+    assert.match(refused.code, /_sender_refused$/, message.type);
+  }
+  for (const sender of [
+    { id: "b".repeat(32), url: `${extensionPrefix}popup/popup.html` },
+    { id: extensionId, url: `${extensionPrefix}popup/popup.html?x=1` },
+    { id: extensionId, url: `${extensionPrefix}onboarding/onboarding.html` },
+    { id: extensionId, url: "https://school.instructure.com/courses/42" },
+  ]) {
+    for (const type of ["morrow_edit_policy_status", "morrow_edit_policy_revoke"]) {
+      const refused = await sendRuntime(value, { type, sourceBindingId: bindingId }, sender);
+      assert.deepEqual(refused, { ok: false, code: "edit_policy_sender_refused", error: "edit_policy_sender_refused" }, `${type} from ${sender.url}`);
+    }
+  }
+  assert.equal(Object.hasOwn(value.local.values.editPolicies, bindingId), true, "a refused sender changed nothing");
+
+  const revoked = await sendRuntime(value, { type: "morrow_edit_policy_revoke", sourceBindingId: bindingId }, popupSender());
+  assert.equal(revoked.ok, true, JSON.stringify(revoked));
+  assert.equal(revoked.result.revoked, true);
+  assert.equal(Object.hasOwn(value.local.values.editPolicies, bindingId), false);
+  socket.close(1000, "done");
 }
 
 // Plan and Edit settings saves Edit access with no duration, and the saved grant has no end time.
@@ -1436,6 +1489,7 @@ const scenarios = {
   "policy-duration-refused": policySetDurationRefusedScenario,
   "policy-merge-legacy": policySetMergeLegacyTimedScenario,
   "settings-save-untimed": settingsSaveUntimedScenario,
+  "popup-edit-status": popupEditStatusScenario,
   "policy-merge-stale-revision": policySetMergeStaleRevisionScenario,
   "maintenance-cancel": () => maintenanceMutationScenario("cancel"),
   "maintenance-expiry": () => maintenanceMutationScenario("expiry"),
@@ -1544,6 +1598,10 @@ test("a policy-set that still names a duration is refused and saves nothing", as
 
 test("a policy-set merge into a grant saved with an end time keeps that end time", async () => {
   await isolatedScenario("policy-merge-legacy");
+});
+
+test("the popup reads Edit status and returns a course to Plan, and nothing else, from its exact page", async () => {
+  await isolatedScenario("popup-edit-status");
 });
 
 test("a Settings save creates Edit access with no end time", async () => {
