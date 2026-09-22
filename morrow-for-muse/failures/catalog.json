@@ -50,7 +50,12 @@
       "auto_action": "Verify the helper session is alive and the tenant tab is open, re-harvest _csrf_token from the live document.cookie, and resend the write through the canonical page-context path.",
       "escalate_when": "the helper session is healthy and the tenant tab is open but document.cookie still has no _csrf_token",
       "signature": {
-        "error_class": {"in": ["CsrfTokenMissing", "BrowserCsrfTokenMissing"]}
+        "error_class": {
+          "in": [
+            "CsrfTokenMissing",
+            "BrowserCsrfTokenMissing"
+          ]
+        }
       },
       "signature_notes": "fail-closed pre-send refusal raised by transport/local_chromium.py (CsrfTokenMissing) or transport/browser_backend.py (BrowserCsrfTokenMissing); no provider contact happened",
       "severity_hint_inventory": "config",
@@ -1114,6 +1119,28 @@
       "severity_hint_inventory": "transient",
       "placeholders": [
         "operation"
+      ]
+    },
+    {
+      "id": "write-readback-unconfirmed",
+      "title": "Write returned success but its readback could not confirm it (UncertainWrite)",
+      "surface": "canvas",
+      "severity_hint": "medium",
+      "root_cause": "Verified mechanism: every write is read back with a fresh GET and compared field by field. When that GET itself fails (HTTP 429 or 5xx, a transport error, or an answer that is not an object) after Canvas answered the write with success, the executor cannot prove the stored values either way, so it journals the op as uncertain instead of failed.",
+      "is_not": "This is not a failed write and not a confirmed success. Canvas accepted the write; only the check afterward did not complete.",
+      "agent_message": "What was attempted: I tried {operation}. What the evidence showed: Canvas answered the write with success, but when I read the object back to check it, that read did not complete (reference {correlation_id}), so I could not confirm what was stored. What this means: the change most likely landed, but it is unconfirmed, not a failure, and sending it again could make a duplicate. What happens next: I will read the object again to confirm it, and I will not resend the write unless that read proves it did not land.",
+      "auto_action": "Journal as uncertain; reconcile with a fresh readback of the written object; never blind-retry the write.",
+      "escalate_when": "Escalate if repeated readbacks cannot confirm the object, so the educator can check it in the Canvas UI.",
+      "signature": {
+        "error_class": "UncertainWrite",
+        "error_text": {
+          "contains": "readback could not confirm"
+        }
+      },
+      "signature_notes": "exception: \"UncertainWrite\" raised by dispatch/executor.py dispatch_entry when run_write_readback's GET fails after a 2xx write; journal: verification \"uncertain\", uncertain=true.",
+      "placeholders": [
+        "operation",
+        "correlation_id"
       ]
     },
     {

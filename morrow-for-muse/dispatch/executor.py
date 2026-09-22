@@ -6256,37 +6256,229 @@ def _is_empty_value(value) -> bool:
     return value is None or value == "" or value == [] or value == {}
 
 
-def _write_field_matches(want, got):
-    """Compare one requested scalar against the readback value.
+# Field-semantic comparison for write readback. Canvas echoes stored
+# values in its own representation: datetimes in UTC "Z" form, numbers
+# as floats, booleans as JSON booleans, HTML after its sanitizer. A
+# representation-only difference is a match; a difference that might be
+# Canvas's own normalization (HTML sanitizing, surrounding whitespace, a
+# naive or date-only time Canvas reads in the educator's zone) is
+# "uncertain", never a proven failure.
+_BOOL_TRUE_FORMS = frozenset({"true", "t", "1", "on", "yes"})
+_BOOL_FALSE_FORMS = frozenset({"false", "f", "0", "off", "no"})
+_NUMERIC_TEXT_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
+_ISO_DATETIME_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
+    r"(?:[Zz]|[+-]\d{2}(?::?\d{2})?)?)?$")
+_HTML_TAG_RE = re.compile(r"<\s*/?\s*[A-Za-z!][^>]*>")
+# Elements Canvas's sanitizer removes together with their content.
+_HTML_STRIPPED_ELEMENTS = frozenset({"script", "style", "object", "embed",
+                                     "applet", "noscript", "template"})
+
+
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _BOOL_TRUE_FORMS:
+            return True
+        if text in _BOOL_FALSE_FORMS:
+            return False
+    return None
+
+
+def _as_number(value):
+    from decimal import Decimal, InvalidOperation
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        text = repr(value) if isinstance(value, float) else str(value)
+    elif isinstance(value, str) and _NUMERIC_TEXT_RE.match(value.strip()):
+        text = value.strip()
+    else:
+        return None
+    try:
+        number = Decimal(text)
+    except InvalidOperation:
+        return None
+    return number if number.is_finite() else None
+
+
+def _as_datetime(value):
+    """(kind, datetime) for an ISO-8601 string: kind is "aware",
+    "naive" (no offset), or "date" (no time). None when not a date."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not _ISO_DATETIME_RE.match(text):
+        return None
+    if len(text) == 10:
+        try:
+            return "date", datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if text[-1] in "Zz":
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text.replace(" ", "T", 1))
+    except ValueError:
+        return None
+    return ("aware" if parsed.tzinfo is not None else "naive"), parsed
+
+
+def _html_tokens(value, drop_stripped=False):
+    """Canonical token list for an HTML fragment: start tags (lowercased,
+    attributes sorted) and whitespace-collapsed text. End tags are
+    ignored, so an unclosed tag matches its closed echo."""
+    import html.parser
+
+    class _Canon(html.parser.HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.tokens = []
+            self.skip = 0
+
+        def handle_starttag(self, tag, attrs):
+            if drop_stripped and tag in _HTML_STRIPPED_ELEMENTS:
+                self.skip += 1
+                return
+            if not self.skip:
+                self.tokens.append(("tag", tag, tuple(sorted(
+                    (k, v or "") for k, v in attrs))))
+
+        def handle_startendtag(self, tag, attrs):
+            if not self.skip and not (
+                    drop_stripped and tag in _HTML_STRIPPED_ELEMENTS):
+                self.tokens.append(("tag", tag, tuple(sorted(
+                    (k, v or "") for k, v in attrs))))
+
+        def handle_endtag(self, tag):
+            if drop_stripped and tag in _HTML_STRIPPED_ELEMENTS \
+                    and self.skip:
+                self.skip -= 1
+
+        def handle_data(self, data):
+            if self.skip:
+                return
+            if self.tokens and self.tokens[-1][0] == "text":
+                self.tokens[-1] = ("text", self.tokens[-1][1] + data)
+            else:
+                self.tokens.append(("text", data))
+
+    parser = _Canon()
+    parser.feed(value)
+    parser.close()
+    out = []
+    for token in parser.tokens:
+        if token[0] == "text":
+            text = " ".join(token[1].split())
+            if text:
+                out.append(("text", text))
+        else:
+            out.append(token)
+    return out
+
+
+def _html_text(tokens):
+    return " ".join(t[1] for t in tokens if t[0] == "text")
+
+
+def _html_verdict(want, got):
+    want_tokens, got_tokens = _html_tokens(want), _html_tokens(got)
+    if want_tokens == got_tokens:
+        return "match"
+    if _html_text(want_tokens) == _html_text(got_tokens):
+        return "uncertain"
+    if _html_text(_html_tokens(want, drop_stripped=True)) \
+            == _html_text(got_tokens):
+        return "uncertain"
+    return "mismatch"
+
+
+def _write_field_verdict(want, got):
+    """Compare one requested scalar against the readback value by field
+    meaning: "match", "mismatch" (a proven difference), or "uncertain"
+    (the difference could be the LMS's own normalization).
 
     Empty equivalents match each other: a cleared field sent as "" (or
-    an empty list) may be stored and echoed as null, and that
-    representation difference is not evidence of a failed write.
-    Otherwise: exact match first; numbers compare across int/float;
-    booleans compare against "true"/"false" strings case-insensitively;
-    anything else compares as strings (Canvas may echo 3 for a
-    requested "3")."""
+    an empty list) may be stored and echoed as null. Booleans compare in
+    canonical form (True, 1, "1", "true", "on"); numbers compare
+    numerically ("10" vs 10.0); ISO-8601 datetimes with an offset compare
+    as instants; HTML compares after tag/attribute/whitespace
+    canonicalization."""
     if _is_empty_value(want) or _is_empty_value(got):
-        return _is_empty_value(want) and _is_empty_value(got)
+        return "match" if (_is_empty_value(want)
+                           and _is_empty_value(got)) else "mismatch"
+    if isinstance(want, (dict, list)) or isinstance(got, (dict, list)):
+        return "match" if want == got else "mismatch"
     if isinstance(want, bool) or isinstance(got, bool):
-        return str(want).lower() == str(got).lower()
-    if isinstance(want, (int, float)) and isinstance(got, (int, float)):
-        return want == got
-    if type(want) is type(got):
-        return want == got
-    return str(want) == str(got)
+        want_b, got_b = _as_bool(want), _as_bool(got)
+        if want_b is None or got_b is None:
+            return "uncertain"
+        return "match" if want_b == got_b else "mismatch"
+    want_n, got_n = _as_number(want), _as_number(got)
+    if want_n is not None and got_n is not None:
+        return "match" if want_n == got_n else "mismatch"
+    want_d, got_d = _as_datetime(want), _as_datetime(got)
+    if want_d is not None and got_d is not None:
+        if want_d[0] == "aware" and got_d[0] == "aware":
+            return "match" if want_d[1] == got_d[1] else "mismatch"
+        if str(want).strip() == str(got).strip():
+            return "match"
+        # A naive or date-only time is read in the educator's Canvas zone.
+        return "uncertain"
+    if isinstance(want, str) and isinstance(got, str):
+        if want == got:
+            return "match"
+        if _HTML_TAG_RE.search(want) or _HTML_TAG_RE.search(got):
+            return _html_verdict(want, got)
+        if " ".join(want.split()) == " ".join(got.split()):
+            return "uncertain"
+        return "mismatch"
+    return "match" if str(want) == str(got) else "mismatch"
 
 
-def _compare_intent(want, got, path, compared, unechoed, mismatches):
+def _write_field_matches(want, got):
+    """True when the readback value proves the requested value landed."""
+    return _write_field_verdict(want, got) == "match"
+
+
+def _scalar_list_verdict(want, got):
+    remaining = list(got)
+    verdict = "match"
+    for item in want:
+        for index, candidate in enumerate(remaining):
+            if _write_field_verdict(item, candidate) == "match":
+                del remaining[index]
+                break
+        else:
+            for index, candidate in enumerate(remaining):
+                if _write_field_verdict(item, candidate) == "uncertain":
+                    del remaining[index]
+                    verdict = "uncertain"
+                    break
+            else:
+                return "mismatch"
+    return "mismatch" if remaining else verdict
+
+
+def _compare_intent(want, got, path, compared, unechoed, mismatches,
+                    unconfirmed=None):
     """Recursive intent-vs-readback comparison.
 
     Requested dict keys the provider did not echo go to unechoed (the
     field cannot be confirmed, so the write cannot be called verified);
     compared leaves go to compared; proven differences go to
-    mismatches. Scalar lists compare as multisets (order is not
-    persisted state). Lists of objects compare element by element when
-    the lengths agree; a length difference is not a proof (the provider
-    may add defaults), so the list is recorded as unechoed."""
+    mismatches; differences that could be the LMS's own normalization
+    go to unconfirmed (unechoed when no unconfirmed list is given).
+    Scalar lists compare as multisets (order is not persisted state).
+    Lists of objects compare element by element when the lengths agree;
+    a length difference is not a proof (the provider may add defaults),
+    so the list is recorded as unechoed."""
+    if unconfirmed is None:
+        unconfirmed = unechoed
     if isinstance(want, dict):
         if _is_empty_value(want) and _is_empty_value(got):
             compared.append(path)
@@ -6301,7 +6493,7 @@ def _compare_intent(want, got, path, compared, unechoed, mismatches):
                 unechoed.append(sub_path)
                 continue
             _compare_intent(sub, got[key], sub_path, compared, unechoed,
-                            mismatches)
+                            mismatches, unconfirmed)
         return
     if isinstance(want, list):
         if _is_empty_value(want) and _is_empty_value(got):
@@ -6312,8 +6504,11 @@ def _compare_intent(want, got, path, compared, unechoed, mismatches):
                               % (path, want, got))
             return
         if all(not isinstance(v, (dict, list)) for v in want + got):
-            if sorted(map(str, want)) == sorted(map(str, got)):
+            verdict = _scalar_list_verdict(want, got)
+            if verdict == "match":
                 compared.append(path)
+            elif verdict == "uncertain":
+                unconfirmed.append(path)
             else:
                 mismatches.append("%s: requested %r, persisted %r"
                                   % (path, want, got))
@@ -6323,10 +6518,14 @@ def _compare_intent(want, got, path, compared, unechoed, mismatches):
             return
         for index, (w, g) in enumerate(zip(want, got)):
             _compare_intent(w, g, "%s[%d]" % (path, index), compared,
-                            unechoed, mismatches)
+                            unechoed, mismatches, unconfirmed)
         return
-    compared.append(path)
-    if not _write_field_matches(want, got):
+    verdict = _write_field_verdict(want, got)
+    if verdict == "match":
+        compared.append(path)
+    elif verdict == "uncertain":
+        unconfirmed.append(path)
+    else:
         mismatches.append("%s: requested %r, persisted %r"
                           % (path, want, got))
 
@@ -6491,8 +6690,9 @@ def run_write_readback(entry, session, pack, config, params, transients,
         raise UncertainWrite(
             "write readback GET %s did not return a JSON object; the %s "
             "effect is unconfirmed, not a proven mismatch" % (target, method))
-    compared, unechoed, mismatches = [], [], []
-    _compare_intent(intent, parsed, "", compared, unechoed, mismatches)
+    compared, unechoed, mismatches, unconfirmed = [], [], [], []
+    _compare_intent(intent, parsed, "", compared, unechoed, mismatches,
+                    unconfirmed)
     if settings_block is not None:
         read_block = parsed.get("quiz_settings")
         if isinstance(read_block, dict):
@@ -6516,16 +6716,23 @@ def run_write_readback(entry, session, pack, config, params, transients,
             % (method, url, target, "; ".join(mismatches)))
         exc.readback_payload = parsed
         raise exc
-    if unechoed or not compared:
+    if unechoed or unconfirmed or not compared:
+        reasons = []
+        if unechoed:
+            reasons.append("requested field(s) the provider did not echo: "
+                           "%s" % ", ".join(sorted(unechoed)))
+        if unconfirmed:
+            reasons.append("field(s) stored in a form Canvas may have "
+                           "normalized, so they are neither proven nor "
+                           "disproven: %s" % ", ".join(sorted(unconfirmed)))
+        if not reasons:
+            reasons.append("any requested field (nothing comparable)")
         return {"status": "unverified",
                 "detail": "readback %s matched %d field(s) (%s) but could "
                           "not confirm %s"
                           % (target, len(compared),
                              ", ".join(sorted(compared)) or "none",
-                             ("requested field(s) the provider did not "
-                              "echo: %s" % ", ".join(sorted(unechoed)))
-                             if unechoed else
-                             "any requested field (nothing comparable)")}
+                             "; ".join(reasons))}
     return {"status": "pass",
             "detail": "readback %s matched %d requested field(s): %s"
                       % (target, len(compared), ", ".join(sorted(compared)))}
@@ -7601,6 +7808,38 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
             # pending shutdown now stops the run instead of continuing.
             _raise_if_shutdown_requested()
             raise
+        except UncertainWrite as exc:
+            # The write returned 2xx but its readback GET failed: the
+            # effect is unconfirmed, not failed. Journal it as uncertain
+            # (reconcile by readback, never blind-retry) and surface an
+            # UncertainWrite so the failure catalog classifies it.
+            verification = {"status": "uncertain",
+                            "detail": _provider_detail(exc)}
+            verification = _project_verification_detail(
+                projection_entry, verification, result.get("payload"),
+                tenant_base, entry_name)
+            after_digest = digest_of(result["receipt"])
+            record = _journal_record(entry_name, kind, effects, params, plan,
+                                     op_id, after_digest, verification,
+                                     result, attempts, uncertain=True,
+                                     approval_audit=approval_audit,
+                                     unproven_override=override_audit,
+                                     catalog_status=catalog_status,
+                                     target=target_identity_verified,
+                                     before_state=before_state_check,
+                                     undo_available=bool(entry.get("undo")))
+            journal_append(record)
+            if (_is_session_dead(exc)
+                    or _uncertain_write_from_session_death(exc)):
+                _on_session_death(op_id, entry_name,
+                                  "session dead during write readback: %s"
+                                  % type(exc).__name__)
+            _raise_if_shutdown_requested()
+            raise UncertainWrite(
+                "write op %s returned success, but the readback could not "
+                "confirm it: %s (journaled as uncertain, not failed)"
+                % (op_id, exc), evidence=exc.evidence,
+                attempts=exc.attempts) from exc
         except (VerificationFailed, UncertainWrite, ExecutorError) as exc:
             verification = {"status": "fail", "detail": _provider_detail(exc)}
             # W3-P2-5: the failure detail can carry raw readback values;

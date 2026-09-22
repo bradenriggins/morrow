@@ -2,7 +2,7 @@
 """Full test suite for the Morrow error translation layer.
 
 Covers failures/translator.py + failures/catalog.py + failures/catalog.json:
-  1. per-mode tests: every one of the 81 catalog modes gets a synthetic
+  1. per-mode tests: every one of the 82 catalog modes gets a synthetic
      raw error; asserts the right mode_id, the four message anchors, all
      placeholders filled, no em dashes, no shrug language, and the
      escalate flag matching the catalog.
@@ -508,6 +508,9 @@ MODE_CASES = {
     "quarantine-op-id-collision": lambda: {"quarantine_id_collision": True},
     "journal-torn-fail-closed": lambda: {"journal_torn": True},
     "uncertain-write-ambiguous": lambda: UncertainWrite("ambiguous"),
+    "write-readback-unconfirmed": lambda: UncertainWrite(
+        "write op x returned success, but the readback could not confirm "
+        "it: write readback GET /x failed HTTP 503"),
     "write-not-attempted": lambda: WriteNotAttempted("never dispatched"),
     "session-flapping-multi-uncertain": lambda: {
         "session_dead_signal": True, "uncertain_count": 3,
@@ -580,8 +583,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_81_modes(self):
-        self.assertEqual(81, len(CATALOG.entries))
+    def test_catalog_has_82_modes(self):
+        self.assertEqual(82, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):
