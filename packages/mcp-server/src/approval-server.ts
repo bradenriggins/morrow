@@ -1,8 +1,12 @@
+import { existsSync } from "node:fs";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { brandHead, brandHeader, serveBrandAsset } from "@morrow/bridge-loopback";
+import { canvasOperationMap, loadCanvasApiCatalog } from "@morrow/canvas-api-catalog";
 import type { ApprovalReviewContext, ApprovalReviewReadCache } from "./approval-context.js";
 import { escapeHtml, formattedTextPreview } from "./approval-preview.js";
 import { BLACKBOARD_CONTENT_PATCH_APPLY_TOOL } from "./blackboard-content-patch.js";
@@ -530,6 +534,34 @@ function readableName(value: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
+let canvasPlainLabels: ReadonlyMap<string, string> | undefined;
+
+/**
+ * Every Canvas write operation's curated plain label (WI-3.5), read from the generated
+ * catalog once and cached for the process. A missing catalog (an isolated test, a
+ * packaging layout without the artifact) leaves the map empty; readableName's own
+ * humanization of the tool name still names the change.
+ */
+function loadCanvasPlainLabels(): ReadonlyMap<string, string> {
+  try {
+    const path = resolve(dirname(fileURLToPath(import.meta.url)), "../../../artifacts/canvas-api/canvas-api-catalog.json");
+    if (!existsSync(path)) return new Map();
+    const labels = new Map<string, string>();
+    for (const operation of canvasOperationMap(loadCanvasApiCatalog(path)).values()) {
+      if (operation.plainLabel) labels.set(operation.toolName, operation.plainLabel);
+    }
+    return labels;
+  } catch {
+    return new Map();
+  }
+}
+
+/** The review title for a tool: its curated plain label when the catalog has one, else readableName's humanization. */
+function reviewTitle(tool: string): string {
+  canvasPlainLabels ??= loadCanvasPlainLabels();
+  return canvasPlainLabels.get(tool) || readableName(tool);
+}
+
 function requestFields(request: JsonObject, omitted: readonly string[] = []): string {
   return Object.entries(request).filter(([key]) => key !== "_morrow" && !omitted.includes(key)).map(([key, value]) => {
     const richText = isRichText(key, value) || (Array.isArray(value) && value.some(isJsonObject));
@@ -979,7 +1011,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, grant: () => string,
     const gradebookCurrent = typeof context?.current?.gradebook_current_name === "string" ? context.current.gradebook_current_name.trim() : "";
     const gradebookProposed = typeof request[entry.tool === "moodle_update_grade_category" ? "fullname" : "item_name"] === "string"
       ? String(request[entry.tool === "moodle_update_grade_category" ? "fullname" : "item_name"]).trim() : "";
-    const name = typeof entry.tool === "string" ? readableName(entry.tool) : "Requested changes";
+    const name = typeof entry.tool === "string" ? reviewTitle(entry.tool) : "Requested changes";
     const blackboardEdit = entry.tool === BLACKBOARD_CONTENT_PATCH_APPLY_TOOL;
     const blackboardPatch = blackboardEdit ? blackboardContentFields(object(request.patch)) : "";
     const blackboardCourseCopy = entry.tool === "blackboard_apply_reviewed_course_copy";
@@ -1046,8 +1078,14 @@ function html(target: ApprovalTarget, snapshot: JsonObject, grant: () => string,
   const changingPageText = !batch && isJsonObject(pageGuard) && ["text", "page_text"].includes(String(pageGuard.kind));
   const changingImageAlt = !batch && isJsonObject(pageGuard) && ["image_alt", "page_image_alt", "assignment_image_alt", "discussion_image_alt"].includes(String(pageGuard.kind));
   const markingImageDecorative = changingImageAlt && pageGuard.decorative === true;
-  const title = batch ? `Review ${plans.length} changes` : addingQuestion ? "Add question?" : changingPageText ? "Edit Page text?" : changingImageAlt ? markingImageDecorative ? "Mark decorative?" : "Add image alt text?" : `${readableName(String(plan.tool || "Review change"))}?`;
-  const approveLabel = batch ? `Apply all ${plans.length} changes` : addingQuestion ? "Add this question" : changingPageText ? "Change this text" : changingImageAlt ? markingImageDecorative ? "Mark as decorative" : "Add alternative text" : "Apply this change";
+  // The same source that sets tier: "destructive" for the Bridge options: catalog risk,
+  // carried onto the plan as `risk.approvalClass` (`effect-broker.ts`).
+  const destructive = !batch && object(plan.risk).approvalClass === "destructive";
+  const removalObjectName = destructive
+    ? changeTitle(object(plan.arguments), contexts.get(String(operations[0]?.operationId)), readableName(String(plan.tool || "Review change")))
+    : "";
+  const title = batch ? `Review ${plans.length} changes` : addingQuestion ? "Add question?" : changingPageText ? "Edit Page text?" : changingImageAlt ? markingImageDecorative ? "Mark decorative?" : "Add image alt text?" : `${reviewTitle(String(plan.tool || "Review change"))}?`;
+  const approveLabel = batch ? `Apply all ${plans.length} changes` : addingQuestion ? "Add this question" : changingPageText ? "Change this text" : changingImageAlt ? markingImageDecorative ? "Mark as decorative" : "Add alternative text" : destructive ? `Delete "${escapeHtml(removalObjectName)}"` : "Apply this change";
   const next = (limited
     ? '<p class="warning">Too many different courses or activities to review at once.</p><p>Return to your assistant and ask Morrow to split this into smaller groups. This page has not approved any changes.</p>'
     : missingNames
@@ -1057,8 +1095,8 @@ function html(target: ApprovalTarget, snapshot: JsonObject, grant: () => string,
       ? '<p class="warning">Canvas does not have the item this change names. It may have been renamed, moved, or removed since this change was prepared.</p><p>Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review. This page has not changed anything.</p>'
       : '<p class="warning">Morrow could not identify the course or a selected item in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
     : `<p>${batch ? `Morrow will apply all ${plans.length} changes and check each result in Canvas. Searching does not change what you approve.` : addingQuestion ? "Morrow will add this question and check it in Canvas." : "Morrow applies these changes and checks them in Canvas."}</p><p class="keep-open">${keepOpenInstruction(platform)}</p>`).replaceAll("Canvas", platform);
-  const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="approve" type="submit">${approveLabel}</button></form>`;
-  return pageShell(title, `<header class="hero"><h1>${escapeHtml(title)}</h1>${requestedByLine(snapshot, plans)}${batchSummary}${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${reviewContent}<footer class="decision"><div class="next-step">${next}</div><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="cancel" type="submit">Cancel</button></form></div><details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></footer>`);
+  const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="approve${destructive ? " danger" : ""}" type="submit">${approveLabel}</button></form>`;
+  return pageShell(title, `<header class="hero${destructive ? " danger" : ""}"><h1>${escapeHtml(title)}</h1>${requestedByLine(snapshot, plans)}${batchSummary}${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${reviewContent}<footer class="decision"><div class="next-step">${next}</div><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="cancel" type="submit">Cancel</button></form></div><details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></footer>`);
 }
 
 function cookieValue(request: IncomingMessage, name: string): string | null {

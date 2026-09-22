@@ -15,6 +15,18 @@ export function currentBinding(status) {
   return status?.bindings?.at(-1) || null;
 }
 
+// WI-2.4 (D1b): the reviews that wait, pushed by the runtime's ui_state command and kept by the
+// Bridge in memory only. The popup lists them; it never opens one by itself.
+export function pendingReviews(status) {
+  return Array.isArray(status?.reviews)
+    ? status.reviews.filter((review) => review && typeof review.url === "string" && typeof review.label === "string")
+    : [];
+}
+
+export function reviewButtonLabel(review) {
+  return `Review: ${review.label}`;
+}
+
 function providerName(provider) {
   return provider === "canvas" ? "Canvas" : provider === "moodle" ? "Moodle" : "";
 }

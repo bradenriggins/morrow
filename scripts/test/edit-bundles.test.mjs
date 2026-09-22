@@ -113,6 +113,47 @@ test("the curated bundle count is pinned", () => {
   assert.equal(CURATED_CATEGORY_SPECS.length, 33);
 });
 
+// WI-3.3: the three present Moodle bundle ids keep their rules unchanged and carry the routine and
+// rememberable flags the spec part gives them: `content` is routine and rememberable, `dates` is
+// rememberable only (D2b), and `organize` carries neither, because showing or hiding an existing
+// section or activity is a publish change (Customize view only).
+test("the three Moodle bundles carry the routine and rememberable flags WI-3.3 gives them, with their present rules unchanged", () => {
+  const moodleContent = CURATED_CATEGORY_SPECS.find((spec) => spec.id === "content");
+  assert.equal(moodleContent.routine, true);
+  assert.equal(moodleContent.rememberable, true);
+  assert.deepEqual(moodleContent.rules.map((rule) => rule.toolName), [
+    "moodle_update_page", "moodle_update_label", "moodle_update_assignment", "moodle_update_quiz",
+  ]);
+
+  const moodleDates = CURATED_CATEGORY_SPECS.find((spec) => spec.id === "dates");
+  assert.equal(moodleDates.routine, undefined);
+  assert.equal(moodleDates.rememberable, true);
+  assert.deepEqual(moodleDates.rules.map((rule) => rule.toolName), ["moodle_update_assignment", "moodle_update_quiz"]);
+
+  const moodleOrganize = CURATED_CATEGORY_SPECS.find((spec) => spec.id === "organize");
+  assert.equal(moodleOrganize.routine, undefined);
+  assert.equal(moodleOrganize.rememberable, undefined);
+  assert.deepEqual(moodleOrganize.rules.map((rule) => rule.toolName), [
+    "moodle_move_activity", "moodle_show_section", "moodle_hide_section", "moodle_show_activity", "moodle_hide_activity",
+  ]);
+});
+
+// The routine rule (D2a) is stated for the Canvas task bundles above; this proves the Moodle
+// `content` bundle, the one Moodle bundle WI-3.3 makes routine, actually satisfies it: no removal,
+// no reach beyond the course, and nothing learner-visible.
+test("the Moodle content bundle satisfies the routine rule: no removal, no reach beyond the course, nothing learner-visible", () => {
+  const moodleOperations = JSON.parse(readFileSync(new URL("connector/extension/generated/moodle-browser-catalog.json", root), "utf8")).operations;
+  const moodleByTool = new Map(moodleOperations.map((operation) => [operation.toolName, operation]));
+  const moodleContent = CURATED_CATEGORY_SPECS.find((spec) => spec.id === "content");
+  for (const rule of moodleContent.rules) {
+    const operation = moodleByTool.get(rule.toolName);
+    assert.ok(operation, rule.toolName);
+    assert.equal(destructiveOperation(operation), false, rule.toolName);
+    assert.equal(operationReach(operation), "course", rule.toolName);
+    assert.equal(operationLearnerVisible(operation, rule.allowedChangedFields), false, rule.toolName);
+  }
+});
+
 test("the seven alternative-text specs that canvas_alt_text joins keep their ids and stay in the option list, so a saved permission and the runtime's planners still find them", () => {
   const hiddenIds = [
     "canvas_page_image_alt", "canvas_assignment_image_alt", "canvas_discussion_image_alt",

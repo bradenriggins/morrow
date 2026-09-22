@@ -70,6 +70,57 @@ const COURSE_FILE_STORAGE_ORIGINS = ["https://*/*"];
 // Course-reach notes belong only to Edit categories that can send a change.
 // Item Bank writes are held and have no Edit category.
 const CATEGORY_COURSE_REACH = Object.freeze({});
+
+// F10: a generated option with more than 8 changeable fields is published with
+// `allowedChangedFields: []` and `requiresFieldSelection: true`, so a checkbox on it alone would
+// look like a grant and change nothing (WI-3.4). The public option carries no rule detail, so this
+// table names, by tool, the curated bundle ids from `src/edit-policy.js` `CURATED_CATEGORY_SPECS`
+// (WI-3.2, WI-3.3) that hold a rule for it. `scripts/test/settings-page.test.mjs` reads that source
+// and fails when this table drifts from it.
+const FIELD_SELECTION_BUNDLES = Object.freeze({
+  canvas_bulk_update_assignment_dates: Object.freeze(["canvas_dates"]),
+  canvas_create_assignment: Object.freeze(["canvas_assignment_create"]),
+  canvas_create_assignment_group: Object.freeze(["canvas_gradebook_setup"]),
+  canvas_create_calendar_event: Object.freeze(["canvas_calendar"]),
+  canvas_create_folder_courses: Object.freeze(["canvas_files_organize"]),
+  canvas_create_module: Object.freeze(["canvas_modules_create"]),
+  canvas_create_module_item: Object.freeze(["canvas_modules_create"]),
+  canvas_create_new_discussion_topic_courses: Object.freeze(["canvas_discussion_create"]),
+  canvas_create_page_courses: Object.freeze(["canvas_pages_create"]),
+  canvas_create_quiz_item: Object.freeze(["canvas_new_quiz_items"]),
+  canvas_create_single_quiz_question: Object.freeze(["canvas_classic_quiz_questions"]),
+  canvas_create_single_rubric: Object.freeze(["canvas_rubrics"]),
+  canvas_duplicate_page: Object.freeze(["canvas_pages_create"]),
+  canvas_edit_assignment: Object.freeze(["canvas_assignment_due_date", "canvas_assignment_text", "canvas_alt_text", "canvas_dates", "canvas_assignment_setup", "canvas_publish_state"]),
+  canvas_edit_assignment_group: Object.freeze(["canvas_gradebook_setup"]),
+  canvas_edit_quiz: Object.freeze(["canvas_classic_quiz_text", "canvas_alt_text", "canvas_dates", "canvas_publish_state", "canvas_classic_quiz_settings"]),
+  canvas_send_private_conversation: Object.freeze(["canvas_inbox_messages"]),
+  canvas_update_assignment_override: Object.freeze(["canvas_dates"]),
+  canvas_update_calendar_event: Object.freeze(["canvas_calendar"]),
+  canvas_update_create_front_page_courses: Object.freeze(["canvas_pages_text"]),
+  canvas_update_create_page_courses: Object.freeze(["canvas_page_content", "canvas_pages_text", "canvas_alt_text", "canvas_publish_state"]),
+  canvas_update_existing_quiz_question: Object.freeze(["canvas_alt_text", "canvas_classic_quiz_questions"]),
+  canvas_update_file: Object.freeze(["canvas_files_organize"]),
+  canvas_update_learning_object_s_date_information_assignments: Object.freeze(["canvas_dates"]),
+  canvas_update_learning_object_s_date_information_discussion_topics: Object.freeze(["canvas_dates"]),
+  canvas_update_learning_object_s_date_information_files: Object.freeze(["canvas_dates"]),
+  canvas_update_learning_object_s_date_information_pages: Object.freeze(["canvas_dates"]),
+  canvas_update_learning_object_s_date_information_quizzes: Object.freeze(["canvas_dates"]),
+  canvas_update_module: Object.freeze(["canvas_modules_structure", "canvas_publish_state"]),
+  canvas_update_module_item: Object.freeze(["canvas_modules_structure", "canvas_publish_state"]),
+  canvas_update_quiz_item: Object.freeze(["canvas_alt_text", "canvas_new_quiz_items"]),
+  canvas_update_single_rubric: Object.freeze(["canvas_rubrics"]),
+  canvas_update_topic_courses: Object.freeze(["canvas_discussion_text", "canvas_alt_text", "canvas_publish_state"]),
+  moodle_hide_activity: Object.freeze(["organize"]),
+  moodle_hide_section: Object.freeze(["organize"]),
+  moodle_move_activity: Object.freeze(["organize"]),
+  moodle_show_activity: Object.freeze(["organize"]),
+  moodle_show_section: Object.freeze(["organize"]),
+  moodle_update_assignment: Object.freeze(["dates", "content"]),
+  moodle_update_label: Object.freeze(["content"]),
+  moodle_update_page: Object.freeze(["content"]),
+  moodle_update_quiz: Object.freeze(["dates", "content"]),
+});
 const PRIVATE_CHAT_FOCUSABLE_SELECTOR = "button, select, textarea, input, [href], [tabindex]";
 
 let privateChatReturnFocus = null;
@@ -500,7 +551,9 @@ function rebuildCategories() {
 function availableCategoriesForSelection() {
   const selected = selectedBindings();
   if (!selected.length) return new Set();
-  return new Set(state.categories.filter((category) => category.availability === "edit" && selected.every((binding) => supportsCategory(binding, category.id))).map((category) => category.id));
+  // F10, WI-3.4: a requiresFieldSelection option grants nothing, so it is never selectable, and a
+  // stale selection of one (saved before this rule existed) is dropped by reconcileSelectedCategories.
+  return new Set(state.categories.filter((category) => category.availability === "edit" && !category.requiresFieldSelection && selected.every((binding) => supportsCategory(binding, category.id))).map((category) => category.id));
 }
 
 function reconcileSelectedCategories() {
@@ -602,6 +655,22 @@ function verificationNote(category) {
     : "";
 }
 
+/** F10, WI-3.4: the tool name a generated single-action id carries, or "" for a curated bundle id. */
+function fieldSelectionTool(category) {
+  const match = /^action:(?:canvas|moodle):(.+)$/.exec(category.id);
+  return match ? match[1] : "";
+}
+
+/** WI-3.4: an option that grants nothing alone (F10) names the bundle that can change it instead. */
+function fieldSelectionText(category) {
+  const bundles = (FIELD_SELECTION_BUNDLES[fieldSelectionTool(category)] || [])
+    .map((id) => categoryById(id))
+    .filter(Boolean);
+  return bundles.length
+    ? `Morrow can change this only through a bundle: ${labelList(bundles)}.`
+    : "Morrow always asks before this change.";
+}
+
 function renderCategoryGroup(group, categories, available, expanded) {
   return `
     <details class="category-group" aria-label="${escapeHtml(group)} actions" ${expanded || ["Focused Canvas repairs", "Common Moodle actions"].includes(group) ? "open" : ""}>
@@ -615,6 +684,12 @@ function renderCategoryGroup(group, categories, available, expanded) {
           if (category.availability === "review") {
             return `<article class="category-option review-only" aria-describedby="${escapeHtml(descriptionId)}">
               <span><strong>Review only: ${escapeHtml(category.label)}</strong>${categoryFlags(category)}<small id="${escapeHtml(descriptionId)}">${escapeHtml(category.description)}${escapeHtml(reason)}</small></span>
+            </article>`;
+          }
+          // F10, WI-3.4: this option's grant would be empty, so it never gets an active checkbox.
+          if (category.requiresFieldSelection) {
+            return `<article class="category-option field-selection" aria-describedby="${escapeHtml(descriptionId)}">
+              <span><strong>${escapeHtml(category.label)}</strong>${categoryFlags(category)}<small id="${escapeHtml(descriptionId)}">${escapeHtml(category.description)} ${escapeHtml(fieldSelectionText(category))}</small></span>
             </article>`;
           }
           const unavailable = isAvailable ? "" : " Not available for every selected course.";

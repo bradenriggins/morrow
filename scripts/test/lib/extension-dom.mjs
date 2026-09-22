@@ -480,7 +480,10 @@ class DomDocument {
 function createChromeStub({ handlers = {}, storage = {}, permission = {}, tabs = [] } = {}) {
   const messages = [];
   const permissionCalls = [];
+  const tabsCreated = [];
+  const tabsUpdated = [];
   let optionsPageOpens = 0;
+  let nextTabId = 9000;
   const stored = { ...storage };
   const listeners = { storage: [], message: [], permissionAdded: [], permissionRemoved: [] };
   let granted = permission.granted === true;
@@ -528,12 +531,28 @@ function createChromeStub({ handlers = {}, storage = {}, permission = {}, tabs =
       onRemoved: { addListener: (listener) => listeners.permissionRemoved.push(listener) },
     },
     tabs: {
-      async query() {
-        return tabs;
+      // A plain string `url` is the WI-2.4 review-tab lookup: an exact match against the open
+      // tabs this test gave the page, the same as Chrome matching one literal address. Any other
+      // query (for example the active-tab probe) keeps its full, unfiltered answer.
+      async query(queryInfo = {}) {
+        return typeof queryInfo.url === "string" ? tabs.filter((tab) => tab.url === queryInfo.url) : tabs;
+      },
+      async create(properties = {}) {
+        tabsCreated.push(properties);
+        const tab = { id: nextTabId, url: properties.url, active: true };
+        nextTabId += 1;
+        tabs.push(tab);
+        return tab;
+      },
+      async update(tabId, properties = {}) {
+        tabsUpdated.push({ tabId, properties });
+        const tab = tabs.find((entry) => entry.id === tabId);
+        if (tab && "active" in properties) tab.active = properties.active;
+        return tab;
       },
     },
   };
-  return { chrome, messages, permissionCalls, storage: stored, listeners, optionsPageOpens: () => optionsPageOpens };
+  return { chrome, messages, permissionCalls, tabsCreated, tabsUpdated, storage: stored, listeners, optionsPageOpens: () => optionsPageOpens };
 }
 
 // --- Loading a page ---------------------------------------------------------------------------
@@ -590,6 +609,8 @@ export async function loadExtensionPage(pagePath, options = {}) {
     window,
     storage: stub.storage,
     permissionCalls: stub.permissionCalls,
+    tabsCreated: stub.tabsCreated,
+    tabsUpdated: stub.tabsUpdated,
     listeners: stub.listeners,
     /** How many times the page has opened Plan and Edit settings. */
     get optionsPageOpens() {

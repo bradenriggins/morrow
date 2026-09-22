@@ -8,7 +8,9 @@ import {
   courseValue,
   detailText,
   nextError,
+  pendingReviews,
   primaryLabel,
+  reviewButtonLabel,
   runtimeNeedsReload,
   statusAnnouncement,
   statusValue,
@@ -94,6 +96,16 @@ test("each failure the popup can receive names its own state, and only an unname
   assert.equal(nextError(null, { source: "status", cause: new Error("Morrow could not complete this request.") }).code, "bridge_request_failed");
   // Chrome's own text for an unreachable extension is named rather than shown as it arrives.
   assert.equal(nextError(null, { source: "status", cause: new Error("Could not establish connection. Receiving end does not exist.") }).code, "bridge_extension_unreachable");
+});
+
+// WI-2.4 (D1b): the reviews that wait, as the runtime's ui_state command leaves them in the Bridge.
+test("pendingReviews keeps only well-formed entries, and reviewButtonLabel names the change", () => {
+  assert.deepEqual(pendingReviews(null), []);
+  assert.deepEqual(pendingReviews({}), []);
+  assert.deepEqual(pendingReviews({ reviews: [] }), []);
+  const good = { url: "http://127.0.0.1:9/operations/op-1", label: "Update due date in Anatomy" };
+  assert.deepEqual(pendingReviews({ reviews: [good, { url: 4, label: "bad url type" }, { label: "no url" }, null] }), [good]);
+  assert.equal(reviewButtonLabel(good), "Review: Update due date in Anatomy");
 });
 
 test("a missing Chrome permission prompt reads differently from a refused one", () => {
@@ -219,6 +231,8 @@ test("the popup answers a failed first status read with a retry, then clears it 
     "#edit-access-banner": stubElement("", true),
     "#edit-access-banner-text": stubElement(),
     "#ask-first-all-courses": stubElement("Ask first in all courses"),
+    "#reviews-waiting": stubElement("", true),
+    "#reviews-list": stubElement(),
   };
   nodes["#primary"].disabled = true;
   let respond = async () => { throw new Error("Could not establish connection. Receiving end does not exist."); };
