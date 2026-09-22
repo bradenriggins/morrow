@@ -1262,3 +1262,79 @@ describe("readable learner labels survive a restart", () => {
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 });
+
+describe("learner ids inside links", () => {
+  // A link is learner text too: Canvas and Moodle put the person's platform id
+  // in grade, submission, and profile links right next to the label Morrow gave.
+  const roster = () => {
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [
+      { id: "98765", name: "Jane Doe", email: "jane.doe@school.test" },
+      { id: "55123", name: "Robert Smith" },
+      { id: "17", name: "Mia Chen" },
+      { id: "_4411_1", name: "Omar Haddad" },
+    ]);
+    return { learnerRoster, learnerVault: new LearnerVault(":memory:"), learnerScope: scope };
+  };
+
+  it("replaces a learner id in Canvas grade and submission links next to the label", () => {
+    const context = roster();
+    const output = JSON.stringify(redactLearnerEgress([
+      { id: 98765, name: "Jane Doe", enrollments: [{ user_id: 98765, grades: { html_url: "https://school.instructure.com/courses/1/grades/98765", final_grade: "F" } }] },
+      { user_id: 55123, preview_url: "https://school.instructure.com/courses/1/assignments/3/submissions/55123?preview=1&version=2", html_url: "https://school.instructure.com/courses/1/assignments/3/submissions/55123" },
+      { note: "Open /courses/1/gradebook/speed_grader?assignment_id=3&student_id=98765 or /courses/1/users/98765/usage" },
+    ], context));
+    expect(output).not.toMatch(/98765|55123/u);
+    expect(output).toContain("/courses/1/grades/Student A1");
+    expect(output).toContain("/courses/1/assignments/3/submissions/Student A2?preview=1&version=2");
+    expect(output).toContain("speed_grader?assignment_id=3&student_id=Student A1");
+  });
+
+  it("replaces a learner id in Moodle profile, grade report, and activity links", () => {
+    const context = roster();
+    const links = [
+      ["https://moodle.school.test/user/view.php?id=17&course=42", "https://moodle.school.test/user/view.php?id=Student A3&course=42"],
+      ["https://moodle.school.test/user/profile.php?id=17", "https://moodle.school.test/user/profile.php?id=Student A3"],
+      ["https://moodle.school.test/user/view.php?course=42&id=17", "https://moodle.school.test/user/view.php?course=42&id=Student A3"],
+      ["https://moodle.school.test/grade/report/user/index.php?id=42&userid=17", "https://moodle.school.test/grade/report/user/index.php?id=42&userid=Student A3"],
+      ["https://moodle.school.test/mod/assign/view.php?id=17&action=grader&userid=17", "https://moodle.school.test/mod/assign/view.php?id=17&action=grader&userid=Student A3"],
+      ["https://moodle.school.test/mod/forum/user.php?id=17&course=42", "https://moodle.school.test/mod/forum/user.php?id=Student A3&course=42"],
+      ["<a href=\"https://moodle.school.test/report/log/index.php?chooselog=1&amp;user=17&amp;id=42\">log</a>", "<a href=\"https://moodle.school.test/report/log/index.php?chooselog=1&amp;user=Student A3&amp;id=42\">log</a>"],
+    ];
+    for (const [source, expected] of links) expect(redactKnownLearnerText(source!, context)).toBe(expected);
+  });
+
+  it("replaces a Blackboard learner id in a REST link", () => {
+    const context = roster();
+    expect(redactKnownLearnerText("/learn/api/public/v1/courses/_42_1/users/_4411_1?fields=id", context))
+      .toBe("/learn/api/public/v1/courses/_42_1/users/Student A4?fields=id");
+  });
+
+  it("finds a learner id inside an encoded return link", () => {
+    const context = roster();
+    expect(redactKnownLearnerText("/login?return_to=%2Fcourses%2F1%2Fgrades%2F98765", context))
+      .toBe("/login?return_to=%2Fcourses%2F1%2Fgrades%2FStudent A1");
+  });
+
+  it("replaces a long learner id written bare in prose, but not an object id or a short number", () => {
+    const context = roster();
+    expect(redactKnownLearnerText("grades for 98765 and 55123 posted", context)).toBe("grades for Student A1 and Student A2 posted");
+    for (const text of ["course 98765 opens Monday", "assignment 55123 is due", "17 of 20 points", "see /courses/98765/pages"]) {
+      expect(redactKnownLearnerText(text, context)).toBe(text);
+    }
+    expect(redactLearnerEgress({ course_id: "98765", note: "for 98765" }, context)).toEqual({ course_id: "98765", note: "for Student A1" });
+  });
+
+  it("keeps course, activity, file, and page ids that equal a learner id", () => {
+    const context = roster();
+    for (const link of [
+      "https://school.instructure.com/courses/17/assignments/17",
+      "https://school.instructure.com/courses/17/files/17/download?verifier=abc",
+      "https://school.instructure.com/courses/17/discussion_topics/17?page=17",
+      "https://moodle.school.test/course/view.php?id=17",
+      "https://moodle.school.test/mod/forum/discuss.php?d=17&parent=17",
+      "https://moodle.school.test/pluginfile.php/17/mod_forum/attachment/17/notes.pdf",
+      "https://moodle.school.test/course/modedit.php?update=17&return=1",
+    ]) expect(redactKnownLearnerText(link, context)).toBe(link);
+  });
+});
