@@ -1,6 +1,43 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-09-22)
+
+Release: `morrow-muse-connector-0.4.0.zip` from the `muse/v0.4.0`
+GitHub release. This release fixes every Critical and High defect
+found in the adversarial audits after 0.3.0.
+
+In plain words:
+
+- Every write path goes through the mode gate (discovery, pack
+  override, and undo included), and only live-proven operations run.
+  Undo is its own approved write, bound to the journaled operation.
+- An approval binds the exact method, path, query, and body, and the
+  vault token of each student label it names. Any non-empty educator
+  reply approves. The typed `plan-write` and `approve-write` commands
+  run the ceremony.
+- The phrase parser is gone. The agent calls typed `mode`, `settings`,
+  `query`, and `students` commands. Edit mode is one untimed grant,
+  and turning it off means Plan everywhere. Conversation overrides
+  last.
+- Work with students by name: `morrow students find` asks the
+  educator when a match is unsure, the model sees only labels, a write
+  by label reaches the right student, and a name reveal is
+  educator-only, for one course, short-lived, and never journaled in
+  the clear.
+- More learner data is labeled: ids inside URLs, SIS ids, bare user
+  records, content editors, date details, smart search, and outcome
+  alignments.
+- Write verification has three honest outcomes: verified, failed (a
+  proven wrong value), and uncertain (the readback could not confirm).
+- The sign-in pin fails closed, and the Chromium lane refuses a Canvas
+  account other than the pinned one. `disconnect` really disconnects.
+  Keepalive supervision works without cron, and `stop` ends the whole
+  loop.
+- `install.sh` installs from a carved tree of this repository. The
+  test suite never touches the real `~/.morrow`. The tree's packages
+  are regular packages, so installed packages cannot shadow them.
+
+The detailed notes below cover the work since 0.3.0.
 
 ### Privacy round 4: working by name, de-identified everywhere else (2026-09-22)
 

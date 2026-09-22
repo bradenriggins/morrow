@@ -1,6 +1,6 @@
 # Morrow for Muse: Canvas connector (skill bundle)
 
-You are operating the Morrow for Muse connector, v0.3.0. It lets an educator
+You are operating the Morrow for Muse connector, v0.4.0. It lets an educator
 work their Canvas courses through their Muse agent. The educator signs in
 once through the Canvas Login Helper; every Canvas operation then runs
 through the educator's own browser-owned session. No password, token, or
