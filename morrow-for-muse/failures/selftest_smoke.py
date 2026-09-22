@@ -14,6 +14,10 @@ modes + 1 destructive-confirmation mode + 2 CSRF/422-tier modes + 8
 newer workstream modes + 2 query-chain read/ref-resolution modes + 5 dispatch-outcome modes),
 at failures/catalog.json.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 
 import os
 import sys

@@ -5,6 +5,10 @@ Covers W4-P1-12 (isolated-world creation carries the root frame id from
 Page.getFrameTree) with a stubbed _proxy_post: no helper, no Chromium,
 no network. Fails loudly on the first failure; prints a summary.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 
 import os
 import sys

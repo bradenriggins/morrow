@@ -44,6 +44,10 @@ Covers the Phase 0 Worker A deliverable offline, with a mocked CDP layer
 
 No network, no Chromium, no session. Fakes only.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import io
 import json
 import os

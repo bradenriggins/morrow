@@ -13,6 +13,10 @@ exclusions, so there is no executor-side provision path left to test):
   2. provision CLI with no --course-id -> exit 2, fail-closed report.
   3. The CLI parser carries no default course.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import io
 import json
 import os

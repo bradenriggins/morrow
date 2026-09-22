@@ -30,6 +30,10 @@ Hermetic: scratch journal under this file's directory (never /tmp, per
 the standing rule); no network, no provider. Signal state is saved and
 restored so the test runner's own handlers are untouched.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import contextlib
 import io
 import os
