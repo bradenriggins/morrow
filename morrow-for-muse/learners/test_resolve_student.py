@@ -476,5 +476,62 @@ class EndToEndTests(unittest.TestCase):
         self.assertNotIn("Jane", str(exc))
 
 
+class CliPrivacyBoundaryTests(unittest.TestCase):
+    """The CLI output is agent-visible: it must carry course-scoped
+    labels, never raw Canvas user ids or names, and must fail closed
+    when no label can be issued."""
+
+    def _run_cli(self, argv, labeler):
+        import contextlib
+        import io
+        import json as _json
+        from learners import resolve_student as rs
+        body = _json.dumps([
+            _user(5550101, "Jane Doe", login_id="jdoe"),
+            _user(5550102, "Omar Haddad", section_id=12),
+        ])
+        fetch = _fetcher([(200, {}, body)])
+        fetch.close = lambda: None
+        saved = (rs.helper_fetch_factory, rs.vault_label_for, sys.argv)
+        rs.helper_fetch_factory = lambda base, timeout=60: fetch
+        rs.vault_label_for = labeler
+        sys.argv = ["resolve_student.py", "--tenant-base",
+                    "https://canvas.example.edu", "--course-id", "89585"] \
+            + argv
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                code = rs._cli()
+        finally:
+            rs.helper_fetch_factory, rs.vault_label_for, sys.argv = saved
+        return code, out.getvalue()
+
+    def _labeler(self, tenant_base, course_id, candidates):
+        labels = {c["user_id"]: "Student A%d" % (i + 1)
+                  for i, c in enumerate(candidates)}
+        return lambda uid: labels[uid]
+
+    def test_resolved_prints_label_not_raw_id(self):
+        code, out = self._run_cli(["--query", "jdoe"], self._labeler)
+        self.assertEqual(code, 0, out)
+        self.assertIn("Student A1", out)
+        for raw in ("5550101", "Jane", "jdoe\"", "user_id"):
+            self.assertNotIn(raw, out)
+
+    def test_ambiguous_lists_labels_not_names(self):
+        code, out = self._run_cli(["--query", "Student"], self._labeler)
+        self.assertNotIn("Jane", out)
+        self.assertNotIn("5550101", out)
+
+    def test_no_vault_fails_closed(self):
+        def broken(*_a):
+            raise RuntimeError("vault unavailable (cryptography missing)")
+        code, out = self._run_cli(["--query", "jdoe"], broken)
+        self.assertNotEqual(code, 0)
+        self.assertNotIn("5550101", out)
+        self.assertNotIn("Jane", out)
+        self.assertIn("label", out)
+
+
 if __name__ == "__main__":
     unittest.main()
