@@ -109,7 +109,7 @@ finally:
 #    chain's region infix is gone with it); the executor's PROVISION step
 #    uses provision.quiz_api_base verbatim.
 check("quiz-api host uses the provision derivation",
-      prov.quiz_api_base("chcp") == "https://chcp.quiz-api.instructure.com")
+      prov.quiz_api_base("example") == "https://example.quiz-api.instructure.com")
 try:
     prov.quiz_api_base("")
     check("quiz-api host rejects an empty tenant", False, "no exception")
@@ -167,7 +167,7 @@ check("PUT on New Quiz path raises NewQuizRefused",
                "PUT", _put_url, {}))
 check("PUT on quiz-API draw path raises NewQuizRefused",
       _refused(ex.guard_new_quiz_request, {"name": "draw"},
-               "PUT", "https://chcp.quiz-api-iad-prod.instructure.com/api/quizzes/b1/quiz_entries/e1", {}))
+               "PUT", "https://example.quiz-api-iad-prod.instructure.com/api/quizzes/b1/quiz_entries/e1", {}))
 try:
     ex.guard_new_quiz_request({"name": "canvas_update_quiz_item"}, "PATCH", _put_url, {})
     check("PATCH on New Quiz path passes the guard", True)

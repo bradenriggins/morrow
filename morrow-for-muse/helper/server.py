@@ -700,7 +700,7 @@ def _normalize_tenant_base(base_url):
             lab in _PLACEHOLDER_LABELS for lab in labels):
         raise ValueError(
             "CANVAS_BASE looks like a placeholder (%r); set your school's "
-            "real Canvas URL, e.g. https://yourschool.instructure.com "
+            "real Canvas URL, e.g. https://<your-school>.instructure.com "
             "(got %r)" % (host, base_url))
     try:
         literal = ipaddress.ip_address(host)

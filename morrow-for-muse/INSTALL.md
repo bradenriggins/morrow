@@ -20,13 +20,35 @@ prior knowledge of the project.
 - Python 3.11 or newer (`python3 --version`). The tree is stdlib-only;
   nothing needs pip. (Python 3.10 is refused: it reached security
   end-of-life in October 2026 per PEP 619.)
+- The command-line tools the installer and keepalive use: `curl`, `ss`,
+  `pgrep`, `flock`, `crontab`, and `openssl` (the helper's TLS selftest
+  makes a throwaway certificate). The Muse VM image has them. Install
+  step 1 stops and names a missing curl, ss, pgrep, or flock.
 - Network egress from the VM to your Canvas tenant: direct, or via the
   VM's `https_proxy`/`HTTPS_PROXY` (authenticated or not). The installer
   probes this and tells you which mode it found.
 - Your Canvas tenant URL (e.g. `https://myschool.instructure.com`) and
   the ability to sign in to it yourself (your SSO/MFA, on your phone).
 
-## Step 1: unzip
+## Step 1: get the release and unzip it
+
+The release is `morrow-muse-connector-<version>.zip` (this version:
+`morrow-muse-connector-0.3.0.zip`). If you have the source repository
+instead of a release zip, build the zip from it (Python 3, git):
+
+```
+cd <repo>/morrow-for-muse
+python3 scripts/carve.py --zip
+# -> <repo>/dist/morrow-muse-connector-0.3.0.zip
+```
+
+`scripts/carve.py` builds the installable tree from the files git tracks:
+it leaves out the dev-only surface (live-test drivers, proof evidence,
+Moodle research code), writes `pack/carve-manifest.json` (the SHA-256
+of every shipped file, which install step 2 verifies), and refuses to
+publish unless the secrets gate passes on the result. Do not run
+`install.sh` directly in a repository checkout: it has no carve manifest
+and step 2 refuses it on purpose.
 
 Unzip the release into the skills directory:
 
