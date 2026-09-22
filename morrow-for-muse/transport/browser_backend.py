@@ -2033,6 +2033,7 @@ def dispatch_browser_entry(entry, params, lane_state, pack, plan=None,
     # trusts the manifest's "effects" field. A write block declared as
     # effects="read" is refused here, not downgraded to a read.
     ex.enforce_effect_class(entry)
+    ex.live_proven_gate(entry)
     entry_name = entry.get("name")
     provider = entry.get("provider") or "canvas"
     # Best-effort TTL sweep of orphaned pending envelopes (crashes between
@@ -2124,6 +2125,7 @@ def dispatch_browser_undo(entry, params, result_payload, of_op_id, lane_state,
             "entry %r declares no undo block; the effect is non-undoable and "
             "the governance layer must disclose that to the educator before "
             "dispatch" % entry_name)
+    ex.live_proven_gate({"name": "%s#undo" % entry_name, "request": undo})
     provider = entry.get("provider") or "canvas"
     _, base, _principal0 = _lane_for(provider, lane_state)
     # Admission gate: undo is a write; it needs its own educator approval.

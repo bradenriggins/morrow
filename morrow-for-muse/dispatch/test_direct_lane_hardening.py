@@ -656,3 +656,26 @@ def test_mode_write_resolution_for_other_course_refused():
     with pytest.raises(ex.CourseResolutionRequired):
         ex.dispatch_entry(_mode_write_entry(), {"course_id": "7"},
                           FakeSession(), _pack(), dry_run=True, mode_ctx=ctx)
+
+
+# ----------------------------------------------------------------------
+# 2 (browser lane). The two-phase browser lane applies the same gate.
+# ----------------------------------------------------------------------
+
+def test_browser_lane_refuses_non_live_proven_entry():
+    from transport import browser_backend as bb
+    with pytest.raises(ex.CatalogNotProven):
+        bb.dispatch_browser_entry(_read_entry(PENDING_READ),
+                                  {"course_id": 1, "report_type": "x"},
+                                  {}, _pack())
+
+
+def test_browser_lane_refuses_unproven_undo_block():
+    from transport import browser_backend as bb
+    entry = _read_entry(PROVEN_READ)
+    entry["effects"] = "write"
+    entry["request"]["method"] = "PUT"
+    entry["undo"] = {"method": "POST",
+                     "url": "{canvas_base}/api/v1/courses/{course_id}/nope"}
+    with pytest.raises(ex.CatalogNotProven):
+        bb.dispatch_browser_undo(entry, {"course_id": 1}, {}, "x", {}, _pack())

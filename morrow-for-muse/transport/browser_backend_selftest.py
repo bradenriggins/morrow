@@ -89,6 +89,10 @@ _admission_mod.APPROVALS_DIR = os.path.join(WORK, "approvals")
 os.makedirs(_admission_mod.APPROVALS_DIR, exist_ok=True)
 
 ex.JOURNAL_PATH = JOURNAL
+# The fixtures use literal ids and synthetic paths that are not catalog
+# path templates; the live-proven catalog gate is covered by
+# dispatch/test_direct_lane_hardening.py and is a no-op here.
+ex.live_proven_gate = lambda *a, **k: None  # noqa: E731
 ex.WRITE_HALT_PATH = HALT
 
 LANE_STATE = {"canvas": {"base": "https://chcp.instructure.com",
