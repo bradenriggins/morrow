@@ -195,9 +195,8 @@ def main():
             egress.CA_PEM_CANDIDATES = orig
 
     # ---- 6. launcher defaults: explicit profile, canonical port -------
-    helper_profile = os.path.expanduser(
-        "~/workspace/canvas-login-helper/profile")
-    check("helper_profile_dir is the helper profile",
+    helper_profile = lc.tree_helper_profile_dir()
+    check("helper_profile_dir is this tree's helper profile",
           lc.helper_profile_dir() == helper_profile,
           lc.helper_profile_dir())
     check("no morrow-chromium default",

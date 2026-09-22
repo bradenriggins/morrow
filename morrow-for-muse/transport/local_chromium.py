@@ -2544,8 +2544,11 @@ def _probe_binary_version(path):
             "could not probe Chromium version for %r: %s" % (path, exc))
     out = (proc.stdout or "").strip().splitlines()
     text = out[0].strip() if out else ""
-    m = re.match(r"^(Chromium|Google Chrome)\s+(\d+)\.(\d+)\.(\d+)\.(\d+)\s*$",
-                 text)
+    # Distro builds append build notes after the version ("built on
+    # Debian GNU/Linux 13 (trixie)", "snap"); the version itself must
+    # still be exactly four numeric parts.
+    m = re.match(r"^(Chromium|Google Chrome)\s+(\d+)\.(\d+)\.(\d+)\.(\d+)"
+                 r"(?:\s+\S.*)?\s*$", text)
     if not m or proc.returncode != 0:
         raise RuntimeError(
             "refusing Chromium binary %r: --version did not report a sane "
@@ -2660,20 +2663,17 @@ def default_profile_dir():
         "helper_profile_dir() for the connector's unified live profile)")
 
 
-# The live helper's canonical profile. Hardcoded here (not derived):
-# every tree compares its own resolved profile against this to decide
-# whether it is asking for production identity.
-LIVE_HELPER_PROFILE_DIR = "/home/hatch/workspace/canvas-login-helper/profile"
-
-
 def helper_profile_dir():
     """The connector's unified live profile: the login helper's Chromium
     profile, which holds the educator's authenticated Canvas session.
 
+    It is this tree's helper profile (tree_helper_profile_dir: the
+    LOGIN_HELPER_PROFILE_DIR the helper runs with, else
+    <tree>/helper/profile, the directory install.sh creates), so the
+    executor's self-launch fallback and the provision launch driver ride
+    the same single profile as the helper for any install user.
+
     Explicit by name, never a silent default: default_profile_dir() raises
-    so nothing can open the live session by accident. Used by the
-    executor's self-launch fallback (transport/chromium_session.py) and the
-    provision launch driver, which ride the same single profile as the
-    helper (one profile, one browser, one CDP pipe).
+    so nothing can open the live session by accident.
     """
-    return os.path.expanduser(LIVE_HELPER_PROFILE_DIR)
+    return tree_helper_profile_dir()
