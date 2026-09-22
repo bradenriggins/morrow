@@ -194,8 +194,9 @@ def test_docs_and_scripts_tell_the_truth_about_cron():
         assert "background loop" in text, rel
         assert "The same script runs from cron every 5\n   minutes" \
             not in text, rel
-    deploy = read("DEPLOY.md")
-    assert "helper/supervisor.py" in deploy
+    # DEPLOY.md is a dev-tree record that the carved release leaves out.
+    if os.path.exists(os.path.join(TREE, "DEPLOY.md")):
+        assert "helper/supervisor.py" in read("DEPLOY.md")
 
 
 def test_helper_down_recovery_works_without_cron():
