@@ -16,7 +16,9 @@ authenticates by process ancestry instead. The launcher passes its own
 PID in MORROW_FORWARDER_LAUNCHER_PID; every accepted connection is
 authorized only when the peer socket belongs to a STRICT descendant of
 that PID (resolved via /proc/net/tcp and /proc/<pid>/stat, kernel-owned
-data a client process cannot forge). Anything else, including the
+data a client process cannot forge; where there is no /proc, via lsof
+and ps, which read the same kernel tables). Any lookup failure refuses
+the client. Anything else, including the
 launcher process itself, gets HTTP 403 and a log line. Without the env
 var the forwarder refuses to serve at all (fail closed). Consequence:
 one forwarder serves exactly one launcher's Chromium; a second
@@ -49,6 +51,7 @@ import asyncio
 import base64
 import os
 import ssl
+import subprocess
 import sys
 import time
 from urllib.parse import urlparse
@@ -367,11 +370,76 @@ def _socket_holder_pid_verified(inode):
     return pid
 
 
+def _ps_value(pid, field):
+    """One ps field for pid (e.g. "ppid", "lstart"), or None."""
+    try:
+        out = subprocess.run(["ps", "-o", "%s=" % field, "-p", str(pid)],
+                             capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = out.stdout.strip()
+    return value if out.returncode == 0 and value else None
+
+
+def _lsof_client_pid(peer_port):
+    """PID owning the client side of 127.0.0.1:peer_port ->
+    127.0.0.1:LISTEN_PORT, read with lsof (no /proc). None when it
+    cannot be resolved to exactly one other process: fail closed."""
+    try:
+        out = subprocess.run(
+            ["lsof", "-nP", "-iTCP@127.0.0.1:%d" % peer_port,
+             "-sTCP:ESTABLISHED", "-Fpn"],
+            capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    want = "n127.0.0.1:%d->127.0.0.1:%d" % (peer_port, LISTEN_PORT)
+    pid, owners = None, set()
+    for line in out.stdout.splitlines():
+        if line.startswith("p"):
+            try:
+                pid = int(line[1:])
+            except ValueError:
+                pid = None
+        elif line == want and pid is not None and pid != os.getpid():
+            owners.add(pid)
+    return owners.pop() if len(owners) == 1 else None
+
+
+def _client_authorized_no_proc(peer_port):
+    """_client_authorized where there is no /proc (macOS): the same
+    strict-descendant rule, with lsof and ps as the kernel readers."""
+    pid = _lsof_client_pid(peer_port)
+    if pid is None:
+        return False
+    key = (pid, _ps_value(pid, "lstart"))
+    if key[1] is None:
+        return False
+    if key in _AUTH_CACHE:
+        return _AUTH_CACHE[key]
+    seen = set()
+    cur = pid
+    ok = False
+    while cur and cur not in seen and cur != 1:
+        seen.add(cur)
+        raw = _ps_value(cur, "ppid")
+        try:
+            cur = int(raw) if raw is not None else None
+        except ValueError:
+            cur = None
+        if cur == _LAUNCHER_PID:
+            ok = True
+            break
+    _auth_cache_store(key, ok)
+    return ok
+
+
 def _client_authorized(peer_port):
     """W4-P2-9: True when the connecting client is a strict descendant
     of the launcher PID. Every lookup failure fails closed (False)."""
     if not peer_port:
         return False
+    if not os.path.exists("/proc/net/tcp"):
+        return _client_authorized_no_proc(peer_port)
     inode = _client_socket_inode(peer_port)
     if inode is None:
         return False

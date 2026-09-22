@@ -347,12 +347,13 @@ def t_quarantine_flow():
 
 def t_reapproval_requires_educator_authorization():
     # W6-P2-A5: the agent cannot self-approve a quarantined op. A
-    # missing, blank, or stub-short authorization raises before
-    # anything is approved; the op stays awaiting_approval.
+    # missing or blank authorization raises before anything is
+    # approved; the op stays awaiting_approval. Round-4 M1: any
+    # non-empty verbatim educator reply approves ("yes" is enough).
     op = str(uuid.uuid4())
     rsm.quarantine_op(op, "probe_action", "probe death")
     rsm.mark_ops_awaiting_approval()
-    for bad in (None, "", "   ", "yes", "approved"):
+    for bad in (None, "", "   "):
         try:
             rsm.approve_op(op, bad)
             check("w6p2a5: authorization %r refused" % (bad,),
@@ -367,8 +368,7 @@ def t_reapproval_requires_educator_authorization():
           rsm.op_quarantine_status(op))
     # The educator's real words approve, and the citation is sealed
     # into the ledger entry for audit.
-    words = ("I, the educator, approve re-dispatching this quarantined "
-             "op now")
+    words = "yes"
     check("w6p2a5: genuine educator authorization approves",
           rsm.approve_op(op, words) is True)
     check("w6p2a5: status approved",

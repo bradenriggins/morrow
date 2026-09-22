@@ -976,9 +976,9 @@ selftest_env() {
   done
   # shellcheck disable=SC2086
   env ${_st_args} HOME="${_st_home}" PYTHONDONTWRITEBYTECODE=1 "$@"
-  _st_rc=$?
-  rm -rf "${_st_home}"
-  return ${_st_rc}
+  # The scratch home lives under .selftest-work/, which is removed as a
+  # whole after the suites (and by rollback on failure).
+  return $?
 }
 PASS=0
 TOTAL=0

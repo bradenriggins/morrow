@@ -716,86 +716,94 @@ def main():
     check("W5-P2-3: _read_headers times out on stalled peer",
           got is None and dt < 5, "got=%r dt=%.1f" % (got, dt))
 
-    # f4. PID hints: after one verified lookup, the pid becomes a hint,
-    # so a second connection from the same process is found without a
-    # full /proc scan.
-    import socket as _sock3
-    srv = _sock3.socket()
-    srv.setsockopt(_sock3.SOL_SOCKET, _sock3.SO_REUSEADDR, 1)
-    srv.bind(("127.0.0.1", 0))
-    srv.listen(1)
-    srv_port = srv.getsockname()[1]
-    holder = subprocess.Popen(
-        [sys.executable, "-c",
-         "import socket,time;"
-         "a=socket.create_connection(('127.0.0.1',%d));"
-         "b=socket.create_connection(('127.0.0.1',%d));"
-         "time.sleep(10)" % (srv_port, srv_port)],
-        start_new_session=True)
-    try:
-        srv.settimeout(10)
-        c1, _ = srv.accept()
-        c2, _ = srv.accept()
-        fwmod._PID_HINTS.clear()
-
-        def _inode_of(sock):
-            tgt = os.readlink("/proc/self/fd/%d" % sock.fileno())
-            assert tgt.startswith("socket:["), tgt
-            return int(tgt[8:-1])
-
-        # Server-side inodes differ from the holder's; find the
-        # holder's inodes via the snapshot instead.
-        snap = fwmod._proc_socket_snapshot()
-        holder_inodes = [ino for ino, (p, _st) in snap.items()
-                         if p == holder.pid]
-        assert len(holder_inodes) >= 2, \
-            "expected 2 holder sockets, got %d" % len(holder_inodes)
-
-        # First lookup: hint miss -> snapshot scan -> pid remembered.
-        scans_before = len(fwmod._PID_HINTS)
-        p1 = fwmod._socket_holder_pid_verified(holder_inodes[0])
-        check("W5-P2-3: verified lookup finds the holder pid",
-              p1 == holder.pid, repr(p1))
-        check("W5-P2-3: holder pid becomes a hint",
-              len(fwmod._PID_HINTS) == scans_before + 1)
-
-        # Second lookup (different inode, same pid): served from the
-        # hint. Prove no full scan by breaking the snapshot builder.
-        orig_snap = fwmod._proc_socket_snapshot
-        fwmod._proc_socket_snapshot = lambda: (_ for _ in ()).throw(
-            AssertionError("full scan on hint hit"))
+    # f4/f5 exercise the /proc snapshot implementation, which exists
+    # only where there is /proc (Linux, the product platform). Without
+    # /proc the forwarder authenticates clients with lsof/ps instead
+    # (covered by the descendant-client checks above).
+    if not os.path.isdir("/proc"):
+        print("SKIP W5-P2-3 /proc snapshot checks: no /proc on this "
+              "machine (Linux only)")
+    else:
+        # f4. PID hints: after one verified lookup, the pid becomes a hint,
+        # so a second connection from the same process is found without a
+        # full /proc scan.
+        import socket as _sock3
+        srv = _sock3.socket()
+        srv.setsockopt(_sock3.SOL_SOCKET, _sock3.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        srv_port = srv.getsockname()[1]
+        holder = subprocess.Popen(
+            [sys.executable, "-c",
+             "import socket,time;"
+             "a=socket.create_connection(('127.0.0.1',%d));"
+             "b=socket.create_connection(('127.0.0.1',%d));"
+             "time.sleep(10)" % (srv_port, srv_port)],
+            start_new_session=True)
         try:
-            p2 = fwmod._socket_holder_pid_verified(holder_inodes[1])
-        finally:
-            fwmod._proc_socket_snapshot = orig_snap
-        check("W5-P2-3: second connection served from pid hint (no scan)",
-              p2 == holder.pid, repr(p2))
-    finally:
-        holder.terminate()
-        holder.wait(timeout=10)
-        srv.close()
+            srv.settimeout(10)
+            c1, _ = srv.accept()
+            c2, _ = srv.accept()
+            fwmod._PID_HINTS.clear()
 
-    # f5. _socket_holder_pid_verified: this process's own sockets are
-    # never attributed (the snapshot excludes self: fail closed).
-    import socket as _sock2
-    a, b = _sock2.socketpair()
-    try:
-        inode = None
-        for fd in (a.fileno(), b.fileno()):
+            def _inode_of(sock):
+                tgt = os.readlink("/proc/self/fd/%d" % sock.fileno())
+                assert tgt.startswith("socket:["), tgt
+                return int(tgt[8:-1])
+
+            # Server-side inodes differ from the holder's; find the
+            # holder's inodes via the snapshot instead.
+            snap = fwmod._proc_socket_snapshot()
+            holder_inodes = [ino for ino, (p, _st) in snap.items()
+                             if p == holder.pid]
+            assert len(holder_inodes) >= 2, \
+                "expected 2 holder sockets, got %d" % len(holder_inodes)
+
+            # First lookup: hint miss -> snapshot scan -> pid remembered.
+            scans_before = len(fwmod._PID_HINTS)
+            p1 = fwmod._socket_holder_pid_verified(holder_inodes[0])
+            check("W5-P2-3: verified lookup finds the holder pid",
+                  p1 == holder.pid, repr(p1))
+            check("W5-P2-3: holder pid becomes a hint",
+                  len(fwmod._PID_HINTS) == scans_before + 1)
+
+            # Second lookup (different inode, same pid): served from the
+            # hint. Prove no full scan by breaking the snapshot builder.
+            orig_snap = fwmod._proc_socket_snapshot
+            fwmod._proc_socket_snapshot = lambda: (_ for _ in ()).throw(
+                AssertionError("full scan on hint hit"))
             try:
-                tgt = os.readlink("/proc/self/fd/%d" % fd)
-            except OSError:
-                continue
-            if tgt.startswith("socket:["):
-                inode = int(tgt[8:-1])
-                break
-        assert inode is not None, "no socket inode found"
-        found = fwmod._socket_holder_pid_verified(inode)
-        check("W5-P2-3: verified lookup excludes own process (fail closed)",
-              found is None, repr(found))
-    finally:
-        a.close()
-        b.close()
+                p2 = fwmod._socket_holder_pid_verified(holder_inodes[1])
+            finally:
+                fwmod._proc_socket_snapshot = orig_snap
+            check("W5-P2-3: second connection served from pid hint (no scan)",
+                  p2 == holder.pid, repr(p2))
+        finally:
+            holder.terminate()
+            holder.wait(timeout=10)
+            srv.close()
+
+        # f5. _socket_holder_pid_verified: this process's own sockets are
+        # never attributed (the snapshot excludes self: fail closed).
+        import socket as _sock2
+        a, b = _sock2.socketpair()
+        try:
+            inode = None
+            for fd in (a.fileno(), b.fileno()):
+                try:
+                    tgt = os.readlink("/proc/self/fd/%d" % fd)
+                except OSError:
+                    continue
+                if tgt.startswith("socket:["):
+                    inode = int(tgt[8:-1])
+                    break
+            assert inode is not None, "no socket inode found"
+            found = fwmod._socket_holder_pid_verified(inode)
+            check("W5-P2-3: verified lookup excludes own process (fail closed)",
+                  found is None, repr(found))
+        finally:
+            a.close()
+            b.close()
 
     # f6. Connection shedding: a full semaphore gets an immediate 503
     # and never reaches the inner handler.

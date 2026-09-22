@@ -37,6 +37,12 @@ def test_tls_never_enabled_fails():
     assert hs.tls_check_outcome(False, "starting\nprofile: x")[0] == "fail"
 
 
+def test_chromium_missing_after_tls_enabled_skips():
+    out = ("TLS enabled on the helper listener (cert x)\n"
+           "FATAL: Chromium was not found at the probed locations\n")
+    assert hs.tls_check_outcome(False, out)[0] == "skip"
+
+
 def test_no_egress_before_serving_skips_with_reason():
     out = ("TLS enabled on the helper listener (cert x)\n"
            "egress probe: blocked (no usable egress)\n")

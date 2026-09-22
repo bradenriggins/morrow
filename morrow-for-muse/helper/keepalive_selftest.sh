@@ -225,7 +225,7 @@ test_shipped() {
           "a helper_token file" "none found"
       else
         t "helper auth token file is mode 0600" "600" \
-          "$(stat -c '%a' "${_tokfile}" 2>/dev/null)"
+          "$(python3 -c 'import os, sys; print("%o" % (os.stat(sys.argv[1]).st_mode & 0o777))' "${_tokfile}" 2>/dev/null)"
         if grep -qE '^[0-9a-f]{64}$' "${_tokfile}"; then pass; else
           fail "${label}" "helper auth token is 64 hex chars" \
             "64 hex" "malformed"; fi

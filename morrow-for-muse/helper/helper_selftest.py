@@ -42,7 +42,7 @@ def tls_check_outcome(served, server_output):
     out = server_output or ""
     if served:
         return "pass", "served /status over TLS"
-    if "FATAL" in out and "TLS" in out:
+    if any("FATAL" in line and "TLS" in line for line in out.splitlines()):
         return "fail", "helper TLS setup failed"
     if "TLS enabled on the helper listener" not in out:
         return "fail", "the helper never enabled TLS"

@@ -122,6 +122,7 @@ env tuning knobs.
 """
 
 import base64
+import fcntl
 import hashlib
 import hmac
 import ipaddress
@@ -862,8 +863,9 @@ def _display_profile_dir(path):
 # 4. Log rotation: server.log rotates when it passes LOG_ROTATE_BYTES
 #    (default 1 MiB), keeping LOG_ROTATE_KEEP archives (server.log.1 ..
 #    server.log.4, newest first). Rotation is copytruncate against the
-#    file stdout is appended to (discovered via /proc/self/fd/1, which is
-#    how keepalive.sh launches the server): the live file is copied to
+#    file stdout is appended to (discovered via /proc/self/fd/1, or
+#    F_GETPATH where there is no /proc; that file is how keepalive.sh
+#    launches the server): the live file is copied to
 #    server.log.1 and truncated in place, so the O_APPEND descriptor
 #    keepalive holds keeps working and no log line is reformatted. The
 #    server forces O_APPEND on its own stdout at import
@@ -976,6 +978,15 @@ def _stdout_log_path():
     try:
         path = os.readlink("/proc/self/fd/1")
     except OSError:
+        path = None
+    if path is None and hasattr(fcntl, "F_GETPATH"):
+        # No /proc (macOS): the kernel names the fd's file directly.
+        try:
+            raw = fcntl.fcntl(1, fcntl.F_GETPATH, b"\0" * 1024)
+            path = raw.split(b"\0", 1)[0].decode("utf-8", "replace")
+        except (OSError, ValueError):
+            path = None
+    if not path:
         return None
     try:
         if os.path.isfile(path):
