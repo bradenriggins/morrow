@@ -2181,7 +2181,7 @@ async function applyBridgeUiState(uiState) {
   return { schema: "morrow.bridge.ui-state.v1", accepted: uiState.reviews.length };
 }
 
-// The reviews that wait belong to one Morrow connection, so they end with it.
+// The waiting reviews and the approval key belong to one Morrow connection, so they end with it.
 function clearBridgeReviews() {
   void clearReviewApprovalPresence();
   if (!state.reviews.length && !state.reviewsWaiting) return;
