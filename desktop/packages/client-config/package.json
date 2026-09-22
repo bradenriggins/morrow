@@ -15,7 +15,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist",
@@ -23,8 +25,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@iarna/toml": "2.2.5",
     "@modelcontextprotocol/client": "2.0.0",
-    "@morrow/contracts": "workspace:*"
+    "@morrow/contracts": "workspace:*",
+    "smol-toml": "1.9.0"
   }
 }

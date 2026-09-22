@@ -45,7 +45,54 @@ const PUBLIC_ERRORS = Object.freeze({
   },
   assistant_configuration_changed: {
     message: "That assistant's settings file changed after Morrow wrote it.",
-    recovery: "Morrow left that file exactly as it is. Open it, remove the morrow entry yourself, then select Check status."
+    recovery: "Morrow left that file exactly as it is. Open it, remove the morrow entry yourself, then select Check status.",
+    fileRecovery: "Morrow left {file} exactly as it is. Open it, remove the morrow entry yourself, then select Check status."
+  },
+  assistant_config_invalid: {
+    message: "That assistant's settings file has a mistake Morrow cannot read.",
+    recovery: "Morrow changed nothing. Open the assistant's settings file, fix the mistake, then try again.",
+    fileRecovery: "Morrow changed nothing. Open {file}, fix the mistake, then try again."
+  },
+  assistant_config_unreadable: {
+    message: "Morrow cannot safely read that assistant's settings file.",
+    recovery: "Morrow changed nothing. The settings file must be one ordinary file under 4 MB that your account owns.",
+    fileRecovery: "Morrow changed nothing. {file} must be one ordinary file under 4 MB that your account owns. Fix that, then try again."
+  },
+  assistant_config_read_only: {
+    message: "That assistant's settings file is read-only.",
+    recovery: "Morrow changed nothing. Allow changes to the assistant's settings file, then try again.",
+    fileRecovery: "Morrow changed nothing. Allow changes to {file}, then try again."
+  },
+  assistant_config_permission_denied: {
+    message: "Morrow is not allowed to change that assistant's settings file.",
+    recovery: "Morrow changed nothing. Make sure your account can change the settings file and its folder, then try again.",
+    fileRecovery: "Morrow changed nothing. Make sure your account can change {file} and the folder it is in, then try again."
+  },
+  assistant_config_symlink: {
+    message: "That assistant's settings file is a link to another place.",
+    recovery: "Morrow changed nothing. Replace the link with the file itself, then try again.",
+    fileRecovery: "Morrow changed nothing. Replace the link at {file} with the file itself, then try again."
+  },
+  assistant_config_busy: {
+    message: "The assistant is using its settings file.",
+    recovery: "Quit the assistant, then try again. Morrow changed nothing.",
+    fileRecovery: "Quit the assistant, then try again. Morrow changed nothing in {file}."
+  },
+  assistant_not_connected: {
+    message: "Morrow has not heard from your assistant yet.",
+    recovery: "Quit the assistant completely, open it again, and start a new chat. Then select Check again."
+  },
+  assistant_connection_unconfirmed: {
+    message: "Morrow could not check your assistant yet.",
+    recovery: "Keep Morrow open until it is ready, then select Check again."
+  },
+  app_location_move_failed: {
+    message: "Morrow could not move itself to Applications.",
+    recovery: "Quit Morrow. In Finder, drag Morrow into your Applications folder, then open it from there."
+  },
+  app_location_unsupported: {
+    message: "Morrow must run from your Applications folder.",
+    recovery: "Select Move to Applications. Morrow moves itself there and opens again."
   },
   runtime_repair_required: {
     message: "Morrow needs repair.",
@@ -115,8 +162,20 @@ const PUBLIC_ERRORS = Object.freeze({
 
 const ERROR_CODES = new Set(Object.keys(PUBLIC_ERRORS));
 
-function errorDetails(code) {
-  return { code, ...PUBLIC_ERRORS[code] };
+/**
+ * An assistant's own settings file may be named in an error, because that file is the
+ * person's to fix. Only an absolute path with no control characters is accepted.
+ */
+function publicFile(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 4096
+    && /^(?:\/|[A-Za-z]:\\)/.test(value) && !/[\u0000-\u001f\u007f]/.test(value) ? value : null;
+}
+
+function errorDetails(code, file = null) {
+  const entry = PUBLIC_ERRORS[code];
+  const named = entry?.fileRecovery ? publicFile(file) : null;
+  const details = { code, message: entry?.message, recovery: named ? entry.fileRecovery.replace("{file}", named) : entry?.recovery };
+  return named ? { ...details, file: named } : details;
 }
 
 function assertAssistantId(value) {
@@ -131,7 +190,7 @@ function envelope(state, error = null) {
     schema: "morrow.installer-result.v1",
     ok: false,
     state,
-    error: errorDetails(error.code)
+    error: errorDetails(error.code, error.file)
   };
 }
 
@@ -143,6 +202,9 @@ function installerState(input) {
     detected: assistant.detected === true,
     configured: assistant.configured === true,
     pending: assistant.pending === true,
+    // The assistant's own Morrow session reached the runtime at least once since
+    // it was set up. Until then the assistant has not reloaded its settings.
+    connected: assistant.connected === true,
     selected: assistant.selected === true,
     needsWorkspace: assistant.needsWorkspace === true,
     supported: assistant.supported === true,
@@ -150,6 +212,11 @@ function installerState(input) {
   return {
     schema: "morrow.installer-state.v1",
     lifecycle: input.lifecycle,
+    // "move_required" when this Mac copy of Morrow runs outside Applications and
+    // must move before it writes its location into any assistant.
+    appLocation: input.appLocation === "move_required" ? "move_required" : "ok",
+    // An assistant still starts Morrow from where Morrow used to be; repair re-points it.
+    assistantsNeedRepoint: input.assistantsNeedRepoint === true,
     assistants,
     selectedAssistantId: typeof input.selectedAssistantId === "string" ? input.selectedAssistantId : null,
     workspaceSelected: input.workspaceSelected === true,
@@ -168,6 +235,10 @@ function installerState(input) {
       // when Morrow has no such proof. paired: the Bridge is connected to the
       // Morrow runtime. Writing the folder proves only folderReady.
       folderReady: input.bridgeFolderReady === true,
+      // The exact app-owned folder Chrome loads, so setup can show it and copy it.
+      folderPath: typeof input.bridgeFolderPath === "string" && input.bridgeFolderPath.length > 0 && input.bridgeFolderPath.length <= 4096
+        ? input.bridgeFolderPath
+        : null,
       loadedInChrome: input.bridgeLoadedInChrome === true ? true : input.bridgeLoadedInChrome === false ? false : "unknown",
       updateAvailable: input.bridgeUpdateAvailable === true,
       manualChromeReloadRequired: input.bridgeManualChromeReloadRequired === true,

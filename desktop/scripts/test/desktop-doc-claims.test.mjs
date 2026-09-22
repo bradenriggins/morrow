@@ -371,7 +371,7 @@ test("the data-removal action the Windows guide describes is the one the policy 
     platform: "win32",
     userData,
     state: join(userData, "State"),
-    backups: join(userData, "State", "Backups"),
+    backups: join(userData, "Assistant settings backups"),
     bridge: join(userData, "Bridge"),
     materials: join(userData, "Materials"),
     blackboardCredentials: credentials,
@@ -385,12 +385,12 @@ test("the data-removal action the Windows guide describes is the one the policy 
   const removable = snapshot.locations.filter((location) => location.removable).map((location) => location.id);
   assert.deepEqual(removable, [
     "state",
-    "backups",
     "bridge",
     "materials",
     "blackboard_credentials",
     "blackboard_configuration",
   ]);
+  assert.equal(snapshot.locations.find((location) => location.id === "backups").keptReason, "assistant_backup");
   const assistant = snapshot.locations.find((location) => location.id === "assistant_configuration");
   assert.equal(assistant.removable, false);
   assert.equal(assistant.keptReason, "assistant_configuration");

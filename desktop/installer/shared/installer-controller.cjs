@@ -42,6 +42,7 @@ const { completeBridgeUpdate, stageBridgeSwap } = require("./bridge-coordination
 const BRIDGE_RELOAD_WAIT_MS = 30_000;
 const BRIDGE_RELOAD_POLL_MS = 1_000;
 const {
+  detectClaudeDesktop,
   inspectClaudeDesktopConnection,
   isCurrentClaudeDesktopSetup,
   prepareClaudeDesktopBundle,
@@ -129,6 +130,7 @@ const ASSISTANT_CONFIG_READ_LIMIT = 4 * 1024 * 1024;
 const INSTALLER_RECORD_READ_LIMIT = 64 * 1024;
 const ASSISTANT_REMOVAL_READ_LIMIT = 16 * 1024;
 const ASSISTANT_REMOVAL_SCHEMA = "morrow.assistant-removal.v1";
+const ASSISTANT_CONNECTION_SCHEMA = "morrow.assistant-connections.v1";
 const CLAUDE_GENERATION_TRANSITION_READ_LIMIT = 64 * 1024;
 const CLAUDE_GENERATION_TRANSITION_SCHEMA = "morrow.claude-generation-transition.v1";
 const CLAUDE_SETUP_ROOT_LIMIT = 128;
@@ -317,7 +319,25 @@ async function commandFound(command) {
   });
 }
 
+async function findMacApplicationsByBundleIdentifier(identifier) {
+  if (process.platform !== "darwin" || !/^[A-Za-z0-9.-]{1,155}$/.test(identifier)) return [];
+  const output = await readCommandOutput("/usr/bin/mdfind", [`kMDItemCFBundleIdentifier == '${identifier}'`], {
+    timeoutMs: 3_000,
+    maxBytes: 16 * 1024
+  });
+  return String(output || "").split("\n").map((line) => line.trim()).filter((line) => path.isAbsolute(line));
+}
+
 async function detectAssistant(assistant) {
+  if (assistant.id === "claude-desktop") {
+    return detectClaudeDesktop({
+      platform: process.platform,
+      homeDirectory: os.homedir(),
+      exists,
+      readBundleIdentifier: readMacApplicationBundleIdentifier,
+      findByBundleIdentifier: findMacApplicationsByBundleIdentifier
+    });
+  }
   if (process.platform === "win32" && assistant.id === "codex") {
     return detectWindowsCodexPackage({ assistantId: assistant.id, runPowerShell: runWindowsPowerShell });
   }
@@ -334,6 +354,34 @@ async function detectAssistant(assistant) {
   if (assistant.id === "gemini-cli") return commandFound("gemini");
   if (assistant.id === "codex") return commandFound("codex");
   return false;
+}
+
+/**
+ * The public error for one refusal client-config reported in --json mode, naming the
+ * assistant's own settings file. `null` when the output carries no such report.
+ */
+const CLIENT_CONFIG_REFUSALS = Object.freeze({
+  config_invalid: "assistant_config_invalid",
+  config_unreadable: "assistant_config_unreadable",
+  config_read_only: "assistant_config_read_only",
+  config_permission_denied: "assistant_config_permission_denied",
+  config_symlink: "assistant_config_symlink",
+  config_busy: "assistant_config_busy",
+  config_existing_entry: "existing_morrow_configuration",
+  config_entry_not_morrow: "existing_morrow_configuration",
+  config_changed: "existing_morrow_configuration",
+});
+
+function clientConfigRefusal(output) {
+  for (const line of String(output || "").split(/\r?\n/)) {
+    if (!line.startsWith("{\"schema\":\"morrow.client-config-error.v1\"")) continue;
+    try {
+      const report = JSON.parse(line);
+      const code = Object.hasOwn(CLIENT_CONFIG_REFUSALS, report?.code) ? CLIENT_CONFIG_REFUSALS[report.code] : null;
+      if (code) return errorDetails(code, typeof report.path === "string" && path.isAbsolute(report.path) ? report.path : null);
+    } catch {}
+  }
+  return null;
 }
 
 /**
@@ -495,6 +543,10 @@ class InstallerController {
     this.trustedMcpRuntimeManifestSha256 = deps.trustedMcpRuntimeManifestSha256;
     this.trustedMcpRuntimeNodeSha256 = deps.trustedMcpRuntimeNodeSha256 || (() => null);
     this.detectAssistant = deps.detectAssistant;
+    // "ok", or "move_required" for a Mac app that runs from a disk image, a
+    // translocated copy, or anywhere outside Applications. See app-location.cjs.
+    this.appLocation = typeof deps.appLocation === "function" ? deps.appLocation : () => "ok";
+    this.moveApplication = typeof deps.moveToApplications === "function" ? deps.moveToApplications : async () => false;
     this.runCli = deps.runCli || runBoundedCommand;
     this.updateSnapshot = deps.updateSnapshot || (() => null);
     this.userData = this.app.getPath("userData");
@@ -502,6 +554,7 @@ class InstallerController {
     this.home = deps.homeDirectory;
     this.recordPath = path.join(this.paths.state, "installer.json");
     this.assistantRemovalPath = path.join(this.paths.state, "assistant-removal.json");
+    this.assistantConnectionPath = path.join(this.paths.state, "assistant-connections.json");
     this.claudeGenerationTransitionPath = path.join(this.paths.state, "claude-generation-transition.json");
     this.isCurrentClaudeDesktopSetup = deps.isCurrentClaudeDesktopSetup || isCurrentClaudeDesktopSetup;
     this.workspace = null;
@@ -1026,7 +1079,7 @@ class InstallerController {
    * the runtime, under the same fence repair and the data removal use.
    */
   async configureWorkspace(parent) {
-    const refused = this.maintenanceAdmission();
+    const refused = this.locationAdmission() || this.maintenanceAdmission();
     if (refused) throw errorDetails(refused);
     const result = await this.dialog.showOpenDialog(parent, {
       title: "Choose Morrow materials",
@@ -1099,9 +1152,8 @@ class InstallerController {
           staged.push(await this.stageClaudeDesktopSetup(assistant, entry, materials));
           continue;
         }
-        if (typeof entry.sha256 !== "string") throw errorDetails("setup_failed");
         const installed = await this.installClientConfiguration(assistant, entry.target, project, materials, {
-          expectedConfigSha256: entry.sha256,
+          rebind: true,
           updateRecord: false
         });
         staged.push({ assistant, entry: installed.entry, verify: installed.verify, rollback: installed.rollback });
@@ -1439,6 +1491,8 @@ class InstallerController {
       env: this.childEnvironment()
     });
     if (result.code !== 0) {
+      const refusal = clientConfigRefusal(result.stderr);
+      if (refusal) throw refusal;
       if (/Refusing to replace (?:existing Morrow (?:server|configuration)|.+ because it changed (?:after Morrow recorded it|during installation))/i.test(result.stderr)) {
         throw errorDetails("existing_morrow_configuration");
       }
@@ -1447,12 +1501,12 @@ class InstallerController {
   }
 
   async installAssistant(assistantId, parent) {
-    const refused = this.maintenanceAdmission();
+    const refused = this.locationAdmission() || this.maintenanceAdmission();
     if (refused) throw errorDetails(refused);
     const assistant = ASSISTANTS.find((candidate) => candidate.id === assistantId);
     // Setting up an assistant is an explicit step, so it reads this computer
     // again rather than trusting a cached answer from up to a minute ago.
-    if (!assistant || (assistant.id !== "claude-desktop" && !(await this.freshlyDetectedAssistant(assistant)))) throw errorDetails("assistant_not_found");
+    if (!assistant || !(await this.freshlyDetectedAssistant(assistant))) throw errorDetails("assistant_not_found");
     if (!assistant.supported) throw errorDetails("setup_failed");
     let project = null;
     if (assistant.needsProject) {
@@ -1505,6 +1559,7 @@ class InstallerController {
       const target = clientConfigTarget(assistant, this.home, project);
       if (!target) throw errorDetails("setup_failed");
       await this.installClientConfiguration(assistant, target, project, materials);
+      await this.forgetAssistantConnection(assistant.id);
       return null;
     });
 
@@ -1525,19 +1580,21 @@ class InstallerController {
 
   /**
    * Writes the Morrow entry into one assistant configuration file. The file is
-   * copied first. A first-time rollback removes only Morrow from the exact
-   * generation the client accepted; a rebind restores its copy only while the
-   * file on disk is still exactly what Morrow wrote.
+   * copied first. Morrow's own entry is found by what it is, so an assistant
+   * that rewrote the rest of its file since does not stop the write. A
+   * first-time rollback removes only Morrow from the exact generation the
+   * client accepted; a rebind restores its copy only while the file on disk is
+   * still exactly what Morrow wrote.
    */
   async installClientConfiguration(assistant, target, project, materials, options = {}) {
-    const backup = await captureConfiguration(target, path.join(this.paths.state, "Backups"));
+    const backup = await captureConfiguration(target, this.paths.assistantBackups);
     let installedConfigurationSha256 = null;
     const rollback = async () => {
       if (!installedConfigurationSha256) return false;
-      if (!options.expectedConfigSha256) {
+      if (options.rebind !== true) {
         const current = await readConfigurationFile(target);
         if (current === null || fileHash(current) !== installedConfigurationSha256) return false;
-        const previous = await this.configurationWithoutMorrow(assistant, current.toString("utf8"));
+        const previous = await this.configurationWithoutMorrow(assistant, current.toString("utf8"), target);
         if (previous === null) return false;
         await this.writeAssistantConfiguration(target, previous, installedConfigurationSha256);
         return true;
@@ -1559,10 +1616,7 @@ class InstallerController {
         "--workspace-root", materials
       ];
       if (project) argumentsValue.push("--client-project", project);
-      if (options.expectedConfigSha256) {
-        argumentsValue.push("--expected-config-sha256", options.expectedConfigSha256);
-      }
-      argumentsValue.push("--json");
+      argumentsValue.push("--replace-morrow-entry", "--json");
       await this.executeCli(argumentsValue);
       const content = await readConfigurationFile(target);
       if (!content) throw errorDetails("assistant_configuration_changed");
@@ -1572,7 +1626,7 @@ class InstallerController {
         const updated = await this.record();
         await this.writeRecord({
           ...updated,
-          selectedAssistantId: assistant.id,
+          selectedAssistantId: options.keepSelection === true ? updated.selectedAssistantId ?? assistant.id : assistant.id,
           configured: { ...(updated.configured || {}), [assistant.id]: entry }
         });
       }
@@ -1598,15 +1652,18 @@ class InstallerController {
    * and the file is left untouched. The file is read again afterwards: the
    * removal is proven by what that file says, not by the write call.
    */
-  async configurationWithoutMorrow(assistant, content) {
-    const module = await this.clientConfigModule();
+  async configurationWithoutMorrow(assistant, content, target = null) {
+    const module = await this.clientConfigModule().catch(() => { throw errorDetails("setup_failed"); });
     const remove = assistant.id === "codex" ? module.withoutMorrowCodexTable : module.withoutMorrowClientJson;
     if (typeof remove !== "function") throw errorDetails("setup_failed");
+    const options = { requireMorrowEntry: true };
     try {
       return assistant.id === "codex"
-        ? remove(content, MORROW_SERVER_NAME)
-        : remove(content, "mcpServers", MORROW_SERVER_NAME);
-    } catch {
+        ? remove(content, MORROW_SERVER_NAME, options)
+        : remove(content, "mcpServers", MORROW_SERVER_NAME, options);
+    } catch (error) {
+      if (error?.code === "config_entry_not_morrow") throw errorDetails("assistant_configuration_changed", target);
+      if (error?.code === "config_invalid") throw errorDetails("assistant_config_invalid", target);
       throw errorDetails("setup_failed");
     }
   }
@@ -1614,7 +1671,7 @@ class InstallerController {
   async confirmAssistantConfigurationRemoved(assistant, target, expectedSha256) {
     const written = await readConfigurationFile(target);
     if (written === null || fileHash(written) !== expectedSha256) throw errorDetails("setup_failed");
-    if (await this.configurationWithoutMorrow(assistant, written.toString("utf8")) !== null) {
+    if (await this.configurationWithoutMorrow(assistant, written.toString("utf8"), target) !== null) {
       throw errorDetails("setup_failed");
     }
   }
@@ -1627,18 +1684,15 @@ class InstallerController {
     // file Morrow cannot read whole is left exactly as it is and reported.
     if (content === null) {
       if (!await exists(target)) return null;
-      throw {
-        ...errorDetails("assistant_configuration_changed"),
-        recovery: `Morrow left ${target} exactly as it is. Open it, remove the morrow entry yourself, then select Check status.`
-      };
+      throw errorDetails("assistant_config_unreadable", target);
     }
-    if (fileHash(content) !== entry.sha256) {
-      throw {
-        ...errorDetails("assistant_configuration_changed"),
-        recovery: `Morrow left ${target} exactly as it is. Open it, remove the morrow entry yourself, then select Check status.`
-      };
-    }
-    const next = await this.configurationWithoutMorrow(assistant, content.toString("utf8"));
+    // The assistant may have rewritten the rest of its file since Morrow wrote
+    // it. Morrow's entry is found by what it is, and this exact generation is
+    // what the replacement below admits.
+    const beforeSha256 = fileHash(content);
+    const info = await fs.lstat(target).catch(() => null);
+    if (info && (info.mode & 0o200) === 0) throw errorDetails("assistant_config_read_only", target);
+    const next = await this.configurationWithoutMorrow(assistant, content.toString("utf8"), target);
     if (next === null) return null;
     const afterSha256 = fileHash(Buffer.from(next, "utf8"));
     const tombstone = await this.writeAssistantRemovalTombstone({
@@ -1646,12 +1700,12 @@ class InstallerController {
       operationId: crypto.randomUUID(),
       assistantId: assistant.id,
       target,
-      beforeSha256: entry.sha256,
+      beforeSha256,
       afterSha256,
       recordBeforeSha256: installerRecordDigest(recordBefore, this.home),
       recordAfterSha256: installerRecordDigest(recordAfter, this.home),
     });
-    await this.writeAssistantConfiguration(target, next, entry.sha256);
+    await this.writeAssistantConfiguration(target, next, beforeSha256);
     await this.confirmAssistantConfigurationRemoved(assistant, target, afterSha256);
     return tombstone;
   }
@@ -1697,6 +1751,9 @@ class InstallerController {
     let published = false;
     try {
       await fs.writeFile(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      // The file keeps the mode its owner gave it; other accounts never gain write access.
+      const current = await fs.lstat(target).catch(() => null);
+      if (this.platform !== "win32" && current?.isFile()) await fs.chmod(temporary, current.mode & 0o755);
       // The file this replaces was restricted to this Windows account when it
       // was written. The replacement carries the person's other configuration
       // entries, so it is restricted the same way before publication, by the
@@ -1775,7 +1832,7 @@ class InstallerController {
     }
 
     const entry = record.configured?.[assistant.id];
-    if (!entry || entry.target !== tombstone.target || entry.sha256 !== tombstone.beforeSha256) {
+    if (!entry || entry.target !== tombstone.target) {
       throw new Error("assistant_removal_recovery_required");
     }
     const recordAfter = recordWithoutAssistant(record, assistant.id);
@@ -1787,7 +1844,7 @@ class InstallerController {
     if (current === null) throw new Error("assistant_removal_recovery_required");
     const currentSha256 = fileHash(current);
     if (currentSha256 === tombstone.beforeSha256) {
-      const next = await this.configurationWithoutMorrow(assistant, current.toString("utf8"));
+      const next = await this.configurationWithoutMorrow(assistant, current.toString("utf8"), tombstone.target);
       if (next === null || fileHash(Buffer.from(next, "utf8")) !== tombstone.afterSha256) {
         throw new Error("assistant_removal_recovery_required");
       }
@@ -2095,6 +2152,23 @@ class InstallerController {
    * may begin while another operation holds a restart lease, and neither may
    * interrupt work in flight that Morrow cannot confirm is safe to stop.
    */
+  /**
+   * Moves this Mac app into Applications. On success the app quits and opens
+   * again from there, so this answers only when it could not move.
+   */
+  async moveToApplications() {
+    if (this.appLocation() === "ok") return false;
+    let moved = false;
+    try { moved = await this.moveApplication() === true; } catch { moved = false; }
+    if (!moved) throw errorDetails("app_location_move_failed");
+    return true;
+  }
+
+  /** The refusal for a step that would write this copy's location somewhere lasting. */
+  locationAdmission() {
+    return this.appLocation() === "ok" ? null : "app_location_unsupported";
+  }
+
   maintenanceAdmission({ pendingBridgeUpdate = false } = {}) {
     // A staged Bridge update keeps its own lease until Chrome reloads the Bridge. Finishing that
     // update is the one step that lease exists for, so it does not count as other work here.
@@ -2120,6 +2194,8 @@ class InstallerController {
    */
   async repair() {
     try {
+      const misplaced = this.locationAdmission();
+      if (misplaced) throw errorDetails(misplaced);
       const bridge = await this.readBridgeInstallation().catch(() => null);
       if (bridge?.manualChromeReloadRequired === true) return this.restorePreviousBridge();
       const record = await this.withDesktopMutation(async (transaction) => {
@@ -2266,31 +2342,32 @@ class InstallerController {
   }
 
   /**
-   * Re-runs the local setup, then the client configuration for the assistant
-   * this installation selected and only that one. Morrow rewrites its own
-   * assistant file only while the file still matches what Morrow wrote: an edit
-   * made after that is reported and left exactly as it is. Claude Desktop is
-   * configured by an approval inside that application, so repair leaves it to
-   * the person and does not open another application.
+   * Re-runs the local setup, then writes Morrow's entry again into every
+   * assistant file this installation configured, so each one points at this
+   * copy of Morrow and its materials folder, including after Morrow moved.
+   * Morrow replaces only an entry that carries its own marker: a server of
+   * that name someone else wrote is reported and left exactly as it is.
+   * Claude Desktop is configured by an approval inside that application, so
+   * repair leaves it to the person and does not open another application.
    */
   async repairAssistantConfiguration(record) {
     await this.executeCli([
       "setup", "--repository", this.paths.appRoot, "--upstreams", this.paths.upstreams, "--node", this.paths.node,
       "--state-directory", this.paths.state, "--replace-generated", "--json"
     ]);
-    const assistant = ASSISTANTS.find((candidate) => candidate.id === record.selectedAssistantId);
-    if (!assistant || assistant.id === "claude-desktop") return;
-    const entry = record.configured?.[assistant.id];
-    if (!entry || typeof entry.sha256 !== "string") return;
-    const configured = configuredProject(assistant, this.home, entry.target);
-    if (!configured) return;
-    const current = await readConfigurationFile(entry.target).then((value) => value === null ? null : fileHash(value));
-    if (current !== null && current !== entry.sha256) throw errorDetails("existing_morrow_configuration");
-    const materials = await this.effectiveWorkspace(record);
-    if (!materials) throw errorDetails("workspace_required");
-    await this.installClientConfiguration(assistant, entry.target, configured.project, materials, {
-      ...(current === null ? {} : { expectedConfigSha256: entry.sha256 })
-    });
+    const configured = record?.configured && typeof record.configured === "object" ? record.configured : {};
+    for (const assistant of ASSISTANTS) {
+      const entry = configured[assistant.id];
+      if (!entry || assistant.id === "claude-desktop") continue;
+      const located = configuredProject(assistant, this.home, entry.target);
+      if (!located) continue;
+      const materials = await this.effectiveWorkspace(record);
+      if (!materials) throw errorDetails("workspace_required");
+      await this.installClientConfiguration(assistant, entry.target, located.project, materials, {
+        rebind: await exists(entry.target),
+        keepSelection: true
+      });
+    }
   }
 
   /**
@@ -2309,7 +2386,7 @@ class InstallerController {
       platform: this.platform,
       userData: this.paths.userData,
       state: this.paths.state,
-      backups: path.join(this.paths.state, "Backups"),
+      backups: this.paths.assistantBackups,
       bridge: this.paths.bridgeDirectory,
       // The materials folder this installation uses, named without creating it.
       materials: this.workspace || record?.materialsFolder || this.paths.defaultMaterials,
@@ -2343,13 +2420,18 @@ class InstallerController {
   }
 
   async runDataRemoval(parent) {
-    const retention = this.retention(await this.record());
+    const record = await this.record();
+    const retention = this.retention(record);
     const removable = retention.locations.filter((location) => location.removable === true);
     const kept = retention.locations.filter((location) => location.removable !== true);
     const keptPaths = kept.map((location) => location.path);
+    const entries = ASSISTANTS.flatMap((assistant) => {
+      const target = record.configured?.[assistant.id]?.target;
+      return assistant.id !== "claude-desktop" && typeof target === "string" ? [{ label: assistant.title, path: target }] : [];
+    });
     const guard = await this.acquireDataRemovalGuard();
     this.dataRemovalGuard = guard;
-    if (!await this.confirmDataRemoval(parent, removable, kept)) {
+    if (!await this.confirmDataRemoval(parent, removable, kept, entries)) {
       await this.releaseDataRemovalGuard(guard);
       this.dataRemoval = { schema: DATA_REMOVAL_SCHEMA, status: "cancelled", removed: [], remaining: [], kept: keptPaths };
       return this.dataRemoval;
@@ -2357,6 +2439,10 @@ class InstallerController {
     const stoppedGuard = await this.stopRuntimeForDataRemoval(guard);
     this.dataRemovalGuard = stoppedGuard;
     try {
+      // An assistant keeps starting the Morrow its settings name, so Morrow's
+      // entries go first. A removal that cannot take one out stops here, before
+      // anything else is removed, and names that file.
+      await this.removeAssistantEntriesForDataRemoval();
       // Blackboard's configuration names its secret files. Remove and confirm
       // that routing first. A route that remains keeps every credential, while
       // a credential that remains after route removal is inert and is reported
@@ -2399,6 +2485,24 @@ class InstallerController {
         this.dataRemovalGuard = null;
       }
       throw error;
+    }
+  }
+
+  /**
+   * Takes Morrow's entry out of every assistant settings file this installation
+   * configured, and each assistant out of the record, one at a time. Claude
+   * Desktop's extension lives in State and goes with it.
+   */
+  async removeAssistantEntriesForDataRemoval() {
+    let record = await this.record();
+    for (const assistant of ASSISTANTS) {
+      const entry = record.configured?.[assistant.id];
+      if (!entry || assistant.id === "claude-desktop") continue;
+      const updated = recordWithoutAssistant(record, assistant.id);
+      const tombstone = await this.removeClientConfiguration(assistant, entry, record, updated);
+      await this.writeRecord(updated);
+      if (tombstone) await this.clearAssistantRemovalTombstone(tombstone);
+      record = updated;
     }
   }
 
@@ -2557,13 +2661,14 @@ class InstallerController {
    * button and not the button the Escape key answers with, and any other
    * answer, including a dialog Morrow cannot read, is not a confirmation.
    */
-  async confirmDataRemoval(parent, removable, kept) {
+  async confirmDataRemoval(parent, removable, kept, entries = []) {
     const lines = (locations) => locations.map((location) => `- ${location.label}: ${location.path}`);
     const answer = await this.dialog.showMessageBox(parent, {
       type: "warning",
       title: "Remove Morrow's data",
       message: "Remove Morrow's data from this computer?",
       detail: [
+        ...(entries.length ? ["Morrow will first take its own morrow entry out of:", ...lines(entries), ""] : []),
         "Morrow will remove:",
         ...lines(removable),
         ...(kept.length ? ["", "Morrow will not remove:", ...lines(kept)] : []),
@@ -2814,6 +2919,91 @@ class InstallerController {
   }
 
   /**
+   * The assistants whose own Morrow session has reached the runtime since they
+   * were last set up. A file Morrow cannot read counts as none observed, so the
+   * restart step is shown again rather than skipped.
+   */
+  async connectedAssistantIds() {
+    try {
+      const content = await readPrivateRegularFile(this.assistantConnectionPath, {
+        maxBytes: 4 * 1024,
+        trustedRoot: this.paths.state,
+      });
+      const parsed = parseStrictJson(content, "assistant connection record");
+      if (!exactObject(parsed, ["schema", "assistants"]) || parsed.schema !== ASSISTANT_CONNECTION_SCHEMA
+        || !Array.isArray(parsed.assistants)) return new Set();
+      return new Set(parsed.assistants.filter((id) => ASSISTANTS.some((assistant) => assistant.id === id)));
+    } catch {
+      return new Set();
+    }
+  }
+
+  async writeConnectedAssistantIds(ids) {
+    await this.ensureInstallerStateDirectory();
+    const assistants = ASSISTANTS.map((assistant) => assistant.id).filter((id) => ids.has(id));
+    const temporary = `${this.assistantConnectionPath}.tmp-${crypto.randomUUID()}`;
+    try {
+      await fs.writeFile(temporary, `${JSON.stringify({ schema: ASSISTANT_CONNECTION_SCHEMA, assistants })}\n`, { mode: 0o600, flag: "wx" });
+      if (this.platform !== "win32") await fs.chmod(temporary, 0o600);
+      await fs.rename(temporary, this.assistantConnectionPath);
+    } finally {
+      await fs.rm(temporary, { force: true }).catch(() => {});
+    }
+  }
+
+  /** Setting an assistant up again means it must be restarted again. */
+  async forgetAssistantConnection(assistantId) {
+    const ids = await this.connectedAssistantIds();
+    if (!ids.delete(assistantId)) return;
+    await this.writeConnectedAssistantIds(ids);
+  }
+
+  /**
+   * Checks whether an assistant's own Morrow session is connected. The runtime
+   * grants its maintenance lease only while Morrow's own monitor is its sole
+   * client, so a refusal naming another client, or a request from one, is that
+   * session. A granted lease is released at once and means none is connected.
+   * The runtime cannot say which assistant it is, so every assistant configured
+   * now is recorded.
+   */
+  async checkAssistantConnection() {
+    const refused = this.maintenanceAdmission();
+    if (refused) throw errorDetails(refused);
+    const lease = await this.acquireRestartLease();
+    if (lease?.status === "granted") {
+      await this.releaseRestartLease(lease.leaseId);
+      throw errorDetails("assistant_not_connected");
+    }
+    if (lease?.reason !== "local_owner_other_client_connected" && lease?.reason !== "local_owner_request_in_flight") {
+      throw errorDetails("assistant_connection_unconfirmed");
+    }
+    const record = await this.record();
+    const ids = await this.connectedAssistantIds();
+    for (const id of Object.keys(record.configured || {})) ids.add(id);
+    await this.writeConnectedAssistantIds(ids);
+    return true;
+  }
+
+  /**
+   * Whether this assistant's file still starts Morrow from another place, the
+   * way it does after Morrow moved, for example from a disk image into
+   * Applications. A different materials folder alone is not a move.
+   */
+  async assistantEntryMoved(assistant, entry) {
+    if (!entry || typeof entry.target !== "string" || assistant.id === "claude-desktop") return false;
+    const content = await readConfigurationFile(entry.target).catch(() => null);
+    if (content === null) return false;
+    try {
+      const module = await this.clientConfigModule();
+      if (typeof module.morrowServerEntryArguments !== "function") return false;
+      const args = module.morrowServerEntryArguments(assistant.id, content.toString("utf8"), MORROW_SERVER_NAME);
+      return Array.isArray(args) && typeof args[0] === "string" && args[0] !== this.paths.server;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Everything setup shows. `recheckAssistants` is the person selecting Check
    * status: it drops the cached detection answers so this read looks at the
    * computer again. Every other read, including the one on window focus, uses
@@ -2827,6 +3017,7 @@ class InstallerController {
     const materials = await this.effectiveWorkspace(record);
     const complete = await this.ensureRuntime().then(() => true, () => false);
     const configured = record.configured && typeof record.configured === "object" ? record.configured : {};
+    const connectedIds = await this.connectedAssistantIds();
     const assistants = await Promise.all(ASSISTANTS.map(async (assistant) => {
       const entry = configured[assistant.id];
       // Claude Desktop is configured once its connection receipt is present and
@@ -2837,10 +3028,14 @@ class InstallerController {
         ? await inspectClaudeDesktopConnection(entry, { platform: this.platform, homeDirectory: this.home })
         : null;
       const present = claude ? claude.installed === true : await this.assistantConfigurationPresent(assistant, entry, materials);
+      const moved = !claude && present !== true && await this.assistantEntryMoved(assistant, entry);
       return {
+        moved,
         ...assistant,
-        detected: assistant.id === "claude-desktop" ? true : await this.detectedAssistant(assistant),
+        detected: await this.detectedAssistant(assistant),
         configured: present,
+        // Claude Desktop counts as configured only after its session connected.
+        connected: present === true && (assistant.id === "claude-desktop" || connectedIds.has(assistant.id)),
         pending: assistant.id === "claude-desktop" && entry && present !== true,
         selected: record.selectedAssistantId === assistant.id,
         needsWorkspace: true
@@ -2887,7 +3082,9 @@ class InstallerController {
       && bridgeInstallation?.installed !== true
       && (this.bridgeStartupAttempted || this.bridgeVerificationFailed)
       && (bridge.paired === true || bridge.count > 0 || runtime.firstPreview.completed === true);
-    const lifecycle = currentRuntimeStatus === "repair_required" || bridgeRepairRequired ? "repair_required"
+    const appLocation = this.appLocation() === "ok" ? "ok" : "move_required";
+    const lifecycle = appLocation === "move_required" ? "move_required"
+      : currentRuntimeStatus === "repair_required" || bridgeRepairRequired ? "repair_required"
       : requestedAssistant?.pending && !ready ? "assistant_pending"
       : bridge.count > 0 && ready ? "ready"
       : bridge.paired === true && ready ? "course_not_connected"
@@ -2896,6 +3093,8 @@ class InstallerController {
     const updates = this.updateSnapshot();
     const current = installerState({
       lifecycle,
+      appLocation,
+      assistantsNeedRepoint: assistants.some((assistant) => assistant.moved === true),
       assistants,
       selectedAssistantId: requestedAssistant?.id || null,
       workspaceSelected: record.materialsFolder !== undefined,
@@ -2903,6 +3102,7 @@ class InstallerController {
       runtimeStatus: currentRuntimeStatus,
       bridgeDelivery: this.bridgeDelivery,
       bridgeFolderReady: bridgeInstallation?.installed === true,
+      bridgeFolderPath: this.paths.bridgeDirectory,
       bridgeLoadedInChrome: await this.bridgeLoadedInChrome(bridgeInstallation, runtime),
       bridgeUpdateAvailable: await this.bridgeReleaseUpdateAvailable(bridgeInstallation),
       bridgeManualChromeReloadRequired: bridgeInstallation?.manualChromeReloadRequired === true,

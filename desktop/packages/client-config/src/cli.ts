@@ -9,6 +9,7 @@ import {
   buildClientConfigBundle,
   buildClientParityReport,
   installMorrowClient,
+  MorrowClientConfigWriteRefusal,
   morrowClientConfigNotes,
   MORROW_CLIENT_SCOPES,
   SUPPORTED_MORROW_CLIENTS,
@@ -63,6 +64,7 @@ function usage(): string {
     "  --replace-generated       Replace an unchanged Morrow-generated local settings file.",
     "  --expected-config-sha256 <sha256>",
     "                            Replace an assistant entry only when the complete settings file still matches this recorded digest.",
+    "  --replace-morrow-entry    Replace an existing morrow entry that Morrow wrote, whatever else in the file changed.",
     "  --json                    Emit machine-readable output where supported.",
     "  --help                    Show this help.",
     "",
@@ -660,12 +662,15 @@ async function run(): Promise<void> {
   if (command === "mcp" && rest[0] === "install") {
     const client = exactClient(rest[1]);
     const { scope, rest: scopeArgs } = parseScope(rest.slice(2));
-    const { expectedConfigSha256, rest: optionArgs } = parseExpectedConfigSha256(scopeArgs);
+    const { expectedConfigSha256, rest: digestArgs } = parseExpectedConfigSha256(scopeArgs);
+    const replaceMorrowEntry = digestArgs.includes("--replace-morrow-entry");
+    const optionArgs = digestArgs.filter((argument) => argument !== "--replace-morrow-entry");
     const { options, json } = parseSharedOptions(optionArgs);
     const installed = installMorrowClient({
       ...requireUpstreams(options),
       ...(options.clientProject ? { projectRoot: options.clientProject } : {}),
       ...(expectedConfigSha256 ? { expectedConfigSha256 } : {}),
+      ...(replaceMorrowEntry ? { replaceMorrowEntry } : {}),
       client,
       scope,
     });
@@ -769,6 +774,10 @@ try {
   await run();
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
+  // The installer reads this line to tell the person which file to fix and how.
+  if (error instanceof MorrowClientConfigWriteRefusal && process.argv.includes("--json")) {
+    process.stderr.write(`${JSON.stringify({ schema: error.schema, code: error.code, path: error.path })}\n`);
+  }
   process.stderr.write(`[morrow] ${message}\n\n${usage()}`);
   process.exitCode = 1;
 }

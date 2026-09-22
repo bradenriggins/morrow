@@ -164,18 +164,18 @@ test("release dependency materialization ignores a poisoned live package tree an
     cpSync(join(entry.source, "package.json"), join(target, "package.json"));
   }
 
-  const poisoned = join(source, "packages/client-config/node_modules/@iarna/toml");
+  const poisoned = join(source, "packages/client-config/node_modules/smol-toml");
   mkdirSync(join(poisoned, ".."), { recursive: true });
-  cpSync(join(root, "packages/client-config/node_modules/@iarna/toml"), poisoned, { recursive: true, dereference: true });
+  cpSync(join(root, "packages/client-config/node_modules/smol-toml"), poisoned, { recursive: true, dereference: true });
   const marker = "MORROW_RELEASE_AUDIT_UNVERIFIED_DEPENDENCY_BYTES";
-  writeFileSync(join(poisoned, "toml.js"), `${readFileSync(join(poisoned, "toml.js"), "utf8")}\n// ${marker}\n`);
-  const resolvesFromPoisonedTree = createRequire(join(source, "packages/client-config/package.json")).resolve("@iarna/toml");
+  writeFileSync(join(poisoned, "dist/index.cjs"), `${readFileSync(join(poisoned, "dist/index.cjs"), "utf8")}\n// ${marker}\n`);
+  const resolvesFromPoisonedTree = createRequire(join(source, "packages/client-config/package.json")).resolve("smol-toml");
   assert.match(readFileSync(resolvesFromPoisonedTree, "utf8"), new RegExp(marker));
 
   const materialized = materializeRuntimeDependencies(workspacePackages(source), join(directory, "release"), source);
-  const isolatedToml = materialized.dependencies.get("@iarna/toml");
+  const isolatedToml = materialized.dependencies.get("smol-toml");
   assert.ok(isolatedToml);
-  assert.equal(readFileSync(join(isolatedToml, "toml.js"), "utf8").includes(marker), false);
+  assert.equal(readFileSync(join(isolatedToml, "dist/index.cjs"), "utf8").includes(marker), false);
   assert.notEqual(resolve(isolatedToml), resolve(poisoned));
   assert.equal(materialized.provenance.lockfile.sha256, createHash("sha256").update(readFileSync(join(source, "pnpm-lock.yaml"))).digest("hex"));
 });

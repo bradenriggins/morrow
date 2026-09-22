@@ -58,9 +58,9 @@ describe("withoutMorrowCodexTable", () => {
     }
   });
 
-  it("refuses a later table because the append-only installer did not create that shape", () => {
+  it("removes Morrow's table and keeps a later table the assistant added", () => {
     const content = "[mcp_servers.\"morrow\"]\ncommand = \"node\"\n\n[projects.\"/tmp/course\"]\ntrust_level = \"trusted\"\n";
-    expect(() => withoutMorrowCodexTable(content)).toThrow(/without rewriting existing TOML/);
+    expect(withoutMorrowCodexTable(content)).toBe("[projects.\"/tmp/course\"]\ntrust_level = \"trusted\"\n");
   });
 });
 
@@ -253,7 +253,7 @@ describe("buildClientConfigBundle", () => {
     const codex = fileContent(first, "codex.config.toml");
     expect(codex).toContain("[mcp_servers.morrow]");
     expect(codex).toContain('default_tools_approval_mode = "writes"');
-    expect(codex).toContain("required = true");
+    expect(codex).not.toContain("required");
     expect(codex).toContain("startup_timeout_sec = 75");
     expect(codex).toContain("tool_timeout_sec = 1200");
     expect(codex).toContain(`cwd = ${JSON.stringify(workspaceRoot)}`);
@@ -596,7 +596,8 @@ describe("project installation and hermetic parity", () => {
       if (process.platform !== "win32") {
         await chmod(cursorPath, 0o666);
         expect(installMorrowClient({ ...options, client: "cursor" })).toMatchObject({ changed: false });
-        expect((await stat(cursorPath)).mode & 0o777).toBe(0o600);
+        // Others lose write access to a file that names a program to run; the rest of the mode stays.
+        expect((await stat(cursorPath)).mode & 0o777).toBe(0o644);
         expect((await stat(vscodePath)).mode & 0o777).toBe(0o600);
       }
     } finally {
@@ -1801,8 +1802,10 @@ describe("private file restriction", () => {
       }
       // The refusal must be the replace itself, not an earlier check, or this
       // proves nothing about the state the failed replace leaves behind.
-      expect(failure?.syscall).toBe("rename");
-      expect(["EPERM", "EACCES", "EBUSY"]).toContain(failure?.code);
+      const cause = (failure?.cause ?? failure) as NodeJS.ErrnoException | undefined;
+      expect(cause?.syscall).toBe("rename");
+      expect(["EPERM", "EACCES", "EBUSY"]).toContain(cause?.code);
+      expect(["config_permission_denied", "config_busy"]).toContain(failure?.code);
       expect(await readFile(target, "utf8")).toBe(original);
       expect((await readdir(repositoryRoot)).filter((name) => name.includes(".tmp-"))).toEqual([]);
     } finally {

@@ -57,10 +57,10 @@ const WORKSPACE_PACKAGE_DIRECTORIES = Object.freeze([
   "contracts", "gateway-core", "legacy-bridge-mcp", "mcp-server", "operation-journal", "upstream-mcp"
 ]);
 const RUNTIME_DEPENDENCY_NAMES = Object.freeze([
-  "@iarna/toml", "@modelcontextprotocol/client", "@modelcontextprotocol/core", "@modelcontextprotocol/server", "cross-spawn", "dayjs", "deepmerge",
+  "@modelcontextprotocol/client", "@modelcontextprotocol/core", "@modelcontextprotocol/server", "cross-spawn", "dayjs", "deepmerge",
   "dom-serializer", "domelementtype", "domhandler", "domutils", "entities", "escape-string-regexp", "eventsource", "eventsource-parser",
   "htmlparser2", "is-plain-object", "isexe", "jose", "launder", "nanoid", "parse-srcset", "path-key", "picocolors", "pkce-challenge",
-  "postcss", "sanitize-html", "shebang-command", "shebang-regex", "source-map-js", "which", "ws", "zod"
+  "postcss", "sanitize-html", "shebang-command", "shebang-regex", "smol-toml", "source-map-js", "which", "ws", "zod"
 ]);
 const INSTALLER_RUNTIME_FILES = Object.freeze([
   "runtime-monitor.mjs",

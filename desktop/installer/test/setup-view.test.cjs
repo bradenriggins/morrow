@@ -26,7 +26,7 @@ const CLAUDE_DESKTOP = { id: "claude-desktop", title: "Claude Desktop", tier: "p
 
 const CONFIGURED = {
   lifecycle: "assistant_ready",
-  assistants: [{ ...CHATGPT, detected: true, configured: true, selected: true }],
+  assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }],
   selectedAssistantId: "codex"
 };
 
