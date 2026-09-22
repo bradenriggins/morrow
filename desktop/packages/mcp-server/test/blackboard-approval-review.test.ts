@@ -217,7 +217,9 @@ describe("Blackboard approval review page", () => {
       expect(page).toContain("Morrow applies these changes and checks them in Blackboard.");
       // The Blackboard route is this computer's REST connection, not the browser.
       expect(page).toContain("Keep your assistant open while Morrow works.");
-      expect(page).not.toContain("Chrome");
+      // Chrome appears only in the approval note: a person approves in Chrome with Morrow Bridge,
+      // even though the change itself goes over the REST connection.
+      expect(page.replace('<p class="presence-note">To approve, select the button here in Chrome with Morrow Bridge connected. A request sent to this page by another program cannot approve.</p>', "")).not.toContain("Chrome");
 
       // Named targets are resolved, so the page can be approved.
       expect(page).toContain('<button class="approve" type="submit">');

@@ -16,6 +16,8 @@ import { planAssignmentImageAltRepair, planDiscussionImageAltRepair, planPageCor
 import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
 import { assertPortListening, reserveLoopbackPort } from "./fixtures/loopback-port.js";
+import type { LoopbackApprovalServer } from "../src/approval-server.js";
+import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 
 /**
  * The deadline for one case, and for the fixture a group of cases shares. Every
@@ -73,7 +75,7 @@ function connectorConfig(directory: string, port: number) {
   });
 }
 
-async function approveBatch(url: string): Promise<void> {
+async function approveBatch(server: LoopbackApprovalServer, url: string): Promise<void> {
   const page = await fetch(url);
   const body = await page.text();
   const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1];
@@ -88,7 +90,7 @@ async function approveBatch(url: string): Promise<void> {
       origin: new URL(url).origin,
       referer: url,
     },
-    body: new URLSearchParams({ nonce: nonce! }),
+    body: new URLSearchParams({ nonce: nonce!, presence: bridgeSignedPresence(server, `${url}/approve`, nonce!) }),
   });
   expect(response.status).toBe(200);
 }
@@ -761,7 +763,7 @@ describe("Canvas connector gateway path", () => {
           });
           expect(course.isError).toBe(true);
           expect(JSON.stringify(course.structuredContent)).toContain("privacy_browser_binding_unverified");
-          expect(JSON.stringify(course)).toContain("Reconnect this course in Morrow Bridge.");
+          expect(JSON.stringify(course)).toContain("Open this course in Chrome and sign in, then select Connect this course in Morrow Bridge.");
           expect(JSON.stringify(course)).not.toContain("learner_roster_binding_unavailable");
         } finally {
           await client.close();
@@ -1678,7 +1680,7 @@ describe("Canvas connector gateway path", () => {
         })),
       });
       const batchId = String((created.batch as JsonObject).batchId);
-      await approveBatch(String(created.approvalUrl));
+      await approveBatch(runtime.approval, String(created.approvalUrl));
       await expect.poll(() => runtime.batchGet({ batchId }).batch).toMatchObject({ state: "completed" });
       const operationGet = vi.spyOn(runtime.gateway, "operationGet");
       const status = runtime.batchApprovalStatus(batchId);
@@ -1768,7 +1770,7 @@ describe("Canvas connector gateway path", () => {
       });
       const uncertainId = String((uncertain.batch as JsonObject).batchId);
       const uncertainUrl = String(uncertain.approvalUrl);
-      await approveBatch(uncertainUrl);
+      await approveBatch(runtime.approval, uncertainUrl);
       await expect.poll(async () => (await (await fetch(`${uncertainUrl}/status`)).json()).active).toBe(false);
       expect(runtime.batchGet({ batchId: uncertainId }).batch).toMatchObject({ state: "paused", pendingChildren: 1 });
       const uncertainView = await (await fetch(uncertainUrl)).text();

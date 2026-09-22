@@ -103,7 +103,7 @@ function confirmationMessage(prepared: BrowserEditAccessPrepared): string {
     return `${selection.courseName} (course ${selection.courseId}, ${selection.site}; ${categories})`;
   }).join("\n");
   const flagged = flaggedText(prepared);
-  const message = `Enable Morrow Edit access for these exact current course connections:\n${courses}\n\n${flagged ? `${flagged}\n\n` : ""}This temporary Edit scope expires in 30 minutes. Confirm this Edit scope.`;
+  const message = `Enable Morrow Edit access for these exact current course connections:\n${courses}\n\n${flagged ? `${flagged}\n\n` : ""}Edit stays on for these courses until you return them to Plan in Morrow Bridge. Confirm this Edit scope.`;
   if (message.length > 24_000) throw new Error("The selected courses exceed one confirmation form. Select fewer exact course connections.");
   return message;
 }
@@ -135,7 +135,9 @@ function actualSelection(selection: BrowserEditAccessSelection, result: BrowserE
     ? permission?.sourceBindingId === selection.sourceBindingId
       && permission.revision === selection.expectedPolicyRevision + 1
       && permission.catalogDigest === selection.catalogDigest
-      && typeof expiresAt === "number" && Number.isSafeInteger(expiresAt) && expiresAt > Date.now()
+      // A grant has no end time. Only a grant saved before that rule carries one, and it counts
+      // only while that time is still ahead.
+      && (expiresAt === undefined || (typeof expiresAt === "number" && Number.isSafeInteger(expiresAt) && expiresAt > Date.now()))
       && sameCategoryIds(selection.enabledCategories, permission.enabledCategories)
     : !permission && (revision === selection.expectedPolicyRevision || revision === selection.expectedPolicyRevision + 1));
   return {

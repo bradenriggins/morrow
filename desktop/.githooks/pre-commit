@@ -1,9 +1,18 @@
 #!/bin/sh
+# Runs the test suite of each product this commit changes.
+# Install once, from the repository root: git config core.hooksPath desktop/.githooks
 set -eu
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
+STAGED=$(git diff --cached --name-only)
 GIT_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars)
-cd "$REPO_ROOT"
 unset $GIT_LOCAL_ENV_VARS
 
-pnpm test
+# Desktop tests read the workflows under .github/, so a workflow change runs them too.
+if printf '%s\n' "$STAGED" | grep -Eq '^(desktop|\.github)/'; then
+  (cd "$REPO_ROOT/desktop" && pnpm test)
+fi
+
+if printf '%s\n' "$STAGED" | grep -q '^morrow-for-muse/'; then
+  (cd "$REPO_ROOT/morrow-for-muse" && python3 -m pytest -q)
+fi

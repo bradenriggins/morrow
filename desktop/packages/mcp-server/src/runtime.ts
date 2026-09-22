@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { DomUtils, parseDocument } from "htmlparser2";
 import sanitizeHtml from "sanitize-html";
 import {
-  BRIDGE_EDIT_DURATIONS_MS,
   MAX_BRIDGE_UI_REVIEWS,
   STRUCTURAL_EDIT_FIELDS,
   normalizeBridgeBindings,
@@ -19,6 +18,7 @@ import {
   type BridgePrivateAttachment,
   type BridgePrivateConversation,
   type BridgeUiReview,
+  type BridgeUiApprovalPresence,
   type BridgeUiState,
 } from "@morrow/bridge-protocol";
 import {
@@ -440,7 +440,7 @@ const LEARNER_PRIVACY_REFUSAL_TEXT = "Morrow did not return this result because 
 /** The fixed person-facing sentence for a privacy-boundary refusal. */
 export function privacyProblemText(code: string): string {
   if (code === "privacy_browser_binding_unverified") {
-    return "Reconnect this course in Morrow Bridge. Its signed-in Canvas tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection.";
+    return "Open this course in Chrome and sign in, then select Connect this course in Morrow Bridge. Its signed-in Canvas tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection.";
   }
   // The connection is working and carries another course, so this names what is
   // true instead of pointing at the privacy boundary.
@@ -762,14 +762,9 @@ const BROWSER_EDIT_ACCESS_REACH = new Set<string>(["course", "beyond"]);
 export interface RememberOfferResult {
   readonly categoryId: string;
   readonly label: string;
-  readonly until: number;
+  /** The course already holds an Edit grant saved with an end time; the bundle ends with it. */
+  readonly joinsTimedGrant?: true;
 }
-
-// D3: the review page's "do not ask again" grant, and the new grant a merge creates when no
-// permission is active yet, both last 4 hours. Read from BRIDGE_EDIT_DURATIONS_MS (not a bare
-// literal) so a rememberKind grant can only ever ask for one of the five fixed Edit durations F5
-// requires.
-const REMEMBER_KIND_DURATION_MS = BRIDGE_EDIT_DURATIONS_MS.find((ms) => ms === 4 * 60 * 60 * 1_000)!;
 
 export interface RememberableEditCategory {
   readonly id: string;
@@ -2010,6 +2005,7 @@ export class GatewayRuntime {
   private readonly mcpRuntime: McpRuntimeHealth | undefined;
   private readonly artifacts: ArtifactGenerationRegistry;
   private approvalBaseUrl: string | null = null;
+  private approvalPresence: BridgeUiApprovalPresence | null = null;
   /**
    * The requesting assistant for the tool call running on this async stack. One
    * runtime serves every connected assistant, so the identity travels with the
@@ -2530,6 +2526,22 @@ export class GatewayRuntime {
       throw new TypeError("approval service must use the loopback address");
     }
     this.approvalBaseUrl = parsed.origin;
+  }
+
+  /**
+   * The key Morrow Bridge uses to sign a person's approval click. It travels only inside
+   * `morrow_browser_ui_state` to the paired Bridge, never in a tool result or review URL.
+   */
+  setApprovalPresence(presence: BridgeUiApprovalPresence): void {
+    if (!this.approvalBaseUrl || presence.origin !== this.approvalBaseUrl) {
+      throw new TypeError("approval key must belong to the approval service");
+    }
+    this.approvalPresence = normalizeBridgeUiState({ reviews: [], presence }).presence ?? null;
+  }
+
+  /** A review page opened: send the approval key to Morrow Bridge again, with the current reviews. */
+  announceApprovalPresence(): void {
+    this.pushBrowserUiState();
   }
 
   approveOperation(operationId: string): JsonObject {
@@ -3492,7 +3504,8 @@ export class GatewayRuntime {
       const source = this.editAccessBindingsTool();
       const upstream = source ? this.upstreams.get(source.upstreamId) : undefined;
       if (!source || !upstream) return;
-      const command: BridgeUiState = normalizeBridgeUiState({ reviews: this.currentBrowserReviews() });
+      const presence = this.approvalPresence && this.approvalPresence.origin === this.approvalBaseUrl ? this.approvalPresence : null;
+      const command: BridgeUiState = normalizeBridgeUiState({ reviews: this.currentBrowserReviews(), ...(presence ? { presence } : {}) });
       Promise.resolve(upstream.callTool("morrow_browser_ui_state", command as unknown as JsonObject, { safeToRetry: false }))
         .catch(() => {});
     } catch {
@@ -3693,7 +3706,7 @@ export class GatewayRuntime {
 
   async applyBrowserEditAccess(
     prepared: BrowserEditAccessPrepared,
-    options: { readonly merge?: true; readonly expiresInMs?: number } = {},
+    options: { readonly merge?: true } = {},
   ): Promise<BrowserEditAccessResult> {
     const refreshed = await this.prepareBrowserEditAccess(prepared.mode, prepared.selections.map((selection) => ({
       sourceBindingId: selection.sourceBindingId,
@@ -3707,10 +3720,9 @@ export class GatewayRuntime {
     if (!source || !upstream) throw new Error("The current browser connection is unavailable.");
     const command = {
       mode: prepared.mode,
-      // `merge` and `expiresInMs` are for rememberKind's own grant only (WI-4.3): every other
-      // caller of this method omits them, and the Bridge still replaces the category list then (F6).
+      // `merge` is for rememberKind's own grant only (WI-4.3): every other caller of this method
+      // omits it, and the Bridge still replaces the category list then (F6).
       ...(prepared.mode === "edit" && options.merge ? { merge: true as const } : {}),
-      ...(prepared.mode === "edit" && options.expiresInMs !== undefined ? { expiresInMs: options.expiresInMs } : {}),
       selections: prepared.selections.map((selection) => ({
         sourceBindingId: selection.sourceBindingId,
         expectedPolicyRevision: selection.expectedPolicyRevision,
@@ -3741,7 +3753,7 @@ export class GatewayRuntime {
 
   /**
    * WI-4.3 (D2b, D3): whether the review page may offer "do not ask again" for the exact change
-   * one operation record already made, and if so which bundle and until when. Never called for an
+   * one operation record already made, and if so which bundle. Never called for an
    * MCP tool: only `rememberKind`, called only from the review page (approval-server.ts), reads
    * this. A failure anywhere here is an absent offer, never a thrown error, because an offer is
    * decoration on a review the person can already approve without it.
@@ -3810,14 +3822,12 @@ export class GatewayRuntime {
       const category = matches[0]!;
       const option = liveOptions.find((candidate) => candidate.id === category.id)!;
       const label = typeof option.label === "string" && option.label ? option.label : category.id;
-      // Step 5: the present end time if a permission is active, else now plus 4 hours (D3). A
-      // merge (WI-4.2) never moves the end time later, so the offer states the time the grant
-      // will actually carry.
+      // Step 5: Edit is not timed. A grant stays until the person returns the course to Plan. Only
+      // a grant saved before that rule carries an end time, and a merge keeps it, so the offer
+      // says when the bundle joins such a grant.
       const permission = isJsonObject(binding.editPermission) ? binding.editPermission : null;
-      const activeExpiresAt = permission && typeof permission.expiresAt === "number" && permission.expiresAt > Date.now()
-        ? permission.expiresAt
-        : null;
-      return { categoryId: category.id, label, until: activeExpiresAt ?? Date.now() + REMEMBER_KIND_DURATION_MS };
+      const joinsTimedGrant = Boolean(permission && typeof permission.expiresAt === "number" && permission.expiresAt > Date.now());
+      return { categoryId: category.id, label, ...(joinsTimedGrant ? { joinsTimedGrant: true as const } : {}) };
     } catch {
       return null;
     }
@@ -3825,7 +3835,7 @@ export class GatewayRuntime {
 
   /**
    * WI-4.3: grants the bundle `rememberOffer` offered for this operation, merged into any active
-   * grant for the same course, for 4 hours (D3). Called only from the review page, after
+   * grant for the same course, with no end time. Called only from the review page, after
    * `approveOperation` already succeeded (approval-server.ts, WI-4.4): a failed or refused grant
    * here must never fail or undo that approval, so every path returns `"failed"` rather than
    * throwing. No MCP tool exposes this method; the server instruction "Never enable or broaden
@@ -3842,7 +3852,7 @@ export class GatewayRuntime {
       const prepared = await this.prepareBrowserEditAccess("edit", [
         { sourceBindingId, enabledCategories: [offer.categoryId] },
       ]);
-      const result = await this.applyBrowserEditAccess(prepared, { merge: true, expiresInMs: REMEMBER_KIND_DURATION_MS });
+      const result = await this.applyBrowserEditAccess(prepared, { merge: true });
       return result.outcome === "received" ? "saved" : "failed";
     } catch {
       return "failed";

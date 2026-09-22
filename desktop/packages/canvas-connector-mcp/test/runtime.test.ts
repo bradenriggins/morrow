@@ -277,6 +277,33 @@ describe("CanvasConnectorRuntime", () => {
       .resolves.toMatchObject({ ok: false, problem: { code: "ui_state_invalid" } });
   });
 
+  it("hands the approval key to the Bridge and never echoes it back to the caller", async () => {
+    const runtime = await start([]);
+    const socket = sockets.at(-1)!;
+    const presence = { origin: "http://127.0.0.1:44200", key: "p".repeat(43) };
+    const sent: unknown[] = [];
+    socket.on("message", (raw) => {
+      const value = parseBridgeJson(raw.toString()) as { schema?: string };
+      if (value.schema !== BRIDGE_SCHEMAS.command) return;
+      const command = value as BridgeCommand;
+      sent.push(command.uiState);
+      socket.send(serializeBridgeMessage({
+        schema: BRIDGE_SCHEMAS.result,
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        requestId: command.requestId,
+        operationId: command.operationId,
+        generation: command.generation,
+        ok: true,
+        result: { schema: "morrow.bridge.ui-state-set.v1" },
+        completedAt: Date.now(),
+      }));
+    });
+    const result = await runtime.uiState({ reviews: [], presence });
+    expect(sent).toEqual([{ reviews: [], presence }]);
+    expect(result).toMatchObject({ ok: true, reviews: [] });
+    expect(JSON.stringify(result)).not.toContain(presence.key);
+  });
+
   it("reads individual Edit options only for one exact current browser binding", async () => {
     const runtime = await start();
     const socket = sockets.at(-1)!;

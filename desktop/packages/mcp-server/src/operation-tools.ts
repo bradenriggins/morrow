@@ -74,22 +74,28 @@ interface WaitSnapshot {
  * operation id is read with `operationGet`, the same call `morrow_operation_get` makes. A batch id
  * needs `batchApprovalStatus`, read from the batch's own `state` field, because a batch has no single
  * outer operation record of its own. */
-function readWaitSnapshot(runtime: GatewayRuntime, operationId: string | undefined, batchId: string | undefined): WaitSnapshot {
+function readWaitSnapshot(runtime: GatewayRuntime, composition: OperationToolComposition, operationId: string | undefined, batchId: string | undefined): WaitSnapshot {
   if (operationId !== undefined) {
     const record = runtime.operationGet(operationId);
     return { record, state: typeof record.state === "string" ? record.state : "unknown" };
   }
-  const batchRuntime = runtime as unknown as BatchStatusCapableRuntime;
-  if (typeof batchRuntime.batchApprovalStatus !== "function") {
+  if (typeof composition.batchApprovalStatus !== "function") {
     throw new Error("this server cannot report a batch's approval status");
   }
-  const record = batchRuntime.batchApprovalStatus(batchId as string);
+  const record = composition.batchApprovalStatus(batchId as string);
   const batch = record.batch;
   const state = isJsonObject(batch) && typeof batch.state === "string" ? batch.state : "unknown";
   return { record, state };
 }
 
-export function registerOperationTools(server: McpServer, runtime: GatewayRuntime): void {
+/** What the wider server composition adds to a GatewayRuntime for these tools. */
+export type OperationToolComposition = BatchStatusCapableRuntime & RecentChangesCapableRuntime;
+
+export function registerOperationTools(
+  server: McpServer,
+  runtime: GatewayRuntime,
+  composition: OperationToolComposition = runtime as unknown as OperationToolComposition,
+): void {
   server.registerTool(
     "morrow_operation_list",
     {
@@ -128,7 +134,7 @@ export function registerOperationTools(server: McpServer, runtime: GatewayRuntim
         const deadlineAt = startedAt + max_wait_seconds * 1000;
         const progressToken = context.mcpReq._meta?.progressToken;
         let lastProgressAt = startedAt;
-        let snapshot = readWaitSnapshot(runtime, operation_id, batch_id);
+        let snapshot = readWaitSnapshot(runtime, composition, operation_id, batch_id);
         while (WAIT_CONTINUE_STATES.has(snapshot.state) && Date.now() < deadlineAt && !context.mcpReq.signal.aborted) {
           const now = Date.now();
           if (progressToken !== undefined && now - lastProgressAt >= WAIT_PROGRESS_INTERVAL_MS) {
@@ -145,7 +151,7 @@ export function registerOperationTools(server: McpServer, runtime: GatewayRuntim
           }
           await waitDelay(Math.min(WAIT_POLL_INTERVAL_MS, Math.max(0, deadlineAt - Date.now())), context.mcpReq.signal);
           if (context.mcpReq.signal.aborted) break;
-          snapshot = readWaitSnapshot(runtime, operation_id, batch_id);
+          snapshot = readWaitSnapshot(runtime, composition, operation_id, batch_id);
         }
         const seconds = Math.round((Date.now() - startedAt) / 1000);
         const timedOut = !context.mcpReq.signal.aborted && WAIT_CONTINUE_STATES.has(snapshot.state);
@@ -305,7 +311,7 @@ export function registerOperationTools(server: McpServer, runtime: GatewayRuntim
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async () => {
-      const capable = runtime as unknown as RecentChangesCapableRuntime;
+      const capable = composition;
       if (typeof capable.recentChangesUrl !== "function") {
         return failure("recent_changes", "open", new Error("this server has no recent changes page"));
       }

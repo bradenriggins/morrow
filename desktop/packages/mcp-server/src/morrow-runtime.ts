@@ -756,6 +756,8 @@ export class MorrowRuntime {
         runApprovedOperation: (operationId, signal) => gateway.dispatchOperation(operationId, { signal }),
         cancelOperation: (operationId) => gateway.cancelOperation(operationId),
         setApprovalBaseUrl: (baseUrl) => gateway.setApprovalBaseUrl(baseUrl),
+        setApprovalPresence: (presence) => gateway.setApprovalPresence(presence),
+        announceApprovalPresence: () => gateway.announceApprovalPresence(),
         batchApprovalGet: (batchId) => runtime!.batchApprovalGet(batchId),
         batchApprovalStatus: (batchId) => runtime!.batchApprovalStatus(batchId),
         approveBatch: (batchId) => runtime!.approveBatch(batchId),
@@ -1494,6 +1496,13 @@ export class MorrowRuntime {
       targetCount: children.length,
       children,
     };
+  }
+
+  /** A one-time link to the review server's recent changes page (WI-6.4). */
+  recentChangesUrl(): string {
+    const baseUrl = this.approval.baseUrl;
+    if (!baseUrl) throw new Error("the review server is not running");
+    return `${baseUrl}/recent?entry=${encodeURIComponent(this.approval.issueRecentChangesEntry())}`;
   }
 
   batchApprovalStatus(batchId: string): JsonObject {

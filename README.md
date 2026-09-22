@@ -19,7 +19,7 @@ This is a monorepo. Each product lives in its own directory, ships on its own ve
 
 **Choose. Ask. Review.** Choose the courses your account can open, ask for the work, and review the result. Morrow checks each approved change against the course and tells you when something still needs attention.
 
-**Plan first.** Morrow starts each course in Plan, so you review proposed changes before they are saved. You can give Edit access to selected courses and types of change. After each change, your assistant checks the course and tells you what happened.
+**Plan first.** Morrow starts each course in Plan, so you review proposed changes before they are saved. You can give Edit access to selected courses and types of change. After each approved change, Morrow checks what the LMS saved, and your assistant tells you what happened.
 
 **Your sign-in stays yours.** Passwords, cookies, and sign-in details never go to the Morrow app or your assistant. Course access should not expose student identities to your assistant: before course information reaches it, Morrow replaces names, email addresses, usernames, and school or course account IDs with labels such as Student A1, and it stops if it cannot protect every student in those records.
 
@@ -27,10 +27,12 @@ This is a monorepo. Each product lives in its own directory, ships on its own ve
 
 ## Repository layout
 
-- `desktop/` — Morrow Desktop: app, Bridge extension, MCP server, installer, product docs.
-- `morrow-for-muse/` — Morrow for Muse: connector, Morrow Direct, dispatch engine, privacy boundary, proof battery.
-- `docs/` — family-level docs: [product overview](docs/products.md), [versioning](docs/versioning.md).
-- `.github/workflows/` — CI with path filters. Changes under `desktop/**` run the desktop suite; changes under `morrow-for-muse/**` run the muse suite; the required `check` job aggregates both.
+- `desktop/`: Morrow Desktop. The app, the Bridge extension, the MCP server, the installer, and product docs.
+- `morrow-for-muse/`: Morrow for Muse. The connector, Morrow Direct, the dispatch engine, the privacy boundary, and the proof battery.
+- `docs/`: family-level docs, the [product overview](docs/products.md) and [versioning](docs/versioning.md).
+- `.github/workflows/`: CI with path filters. Changes under `desktop/**` run the desktop suite. Changes under `morrow-for-muse/**` run the Muse suite. The required `check` job aggregates both.
+
+To run the same suites before each commit, install the pre-commit hook once from the repository root: `git config core.hooksPath desktop/.githooks`. It runs the desktop gate when a commit changes `desktop/` or `.github/`, and the Muse suite when a commit changes `morrow-for-muse/`.
 
 ## Versioning
 

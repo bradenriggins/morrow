@@ -352,7 +352,7 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
     return {
       title: "Open your course in Chrome.",
       copy: "Morrow Bridge identifies Canvas or Moodle after you open a signed-in course.",
-      body: '<ol class="instructions"><li>Open a Canvas or Moodle course you can access in <strong>Chrome</strong> and sign in.</li><li>Open <strong>Morrow Bridge</strong>. It identifies the platform and shows <strong>Connect Canvas</strong> or <strong>Connect Moodle</strong>.</li><li>Select that button and allow access to the exact platform address Chrome shows.</li><li>Open <strong>Plan and Edit settings</strong>, choose a course, then select <strong>Connect selected courses in Plan</strong>.</li></ol>',
+      body: '<ol class="instructions"><li>Open a Canvas or Moodle course you can access in <strong>Chrome</strong> and sign in.</li><li>Open <strong>Morrow Bridge</strong>. It identifies the platform and shows <strong>Connect this course</strong>.</li><li>Select that button and allow access to the exact platform address Chrome shows.</li><li>In Morrow Bridge, select <strong>Open Plan and Edit settings</strong>. Under <strong>Your courses</strong>, select <strong>Connect</strong> next to each course Morrow may use. Each course starts in Plan.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
     };
   }
   const course = bridge.firstPreviewCourseName || bridge.selectedCourseName || "your selected course";
@@ -436,7 +436,7 @@ export function retentionView(current) {
       kept.length ? `<div><h3>Morrow does not remove these</h3>${retentionRows(kept)}</div>` : "",
       retentionRemoval(retention.removal),
       `<p>${escapeHtml(UNINSTALL_STEPS[retention.uninstall] || UNINSTALL_STEPS.unknown)}</p>`,
-      '<p>Chrome loaded Morrow Bridge from the Bridge folder above. To remove it, open the Chrome <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>, then remove <strong>Morrow Bridge</strong>.</p>',
+      `<p>${current?.bridge?.delivery === "developer_temporary" ? "Chrome loaded Morrow Bridge from the Bridge folder above. " : ""}To remove Morrow Bridge from Chrome, open the Chrome <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>, then remove <strong>Morrow Bridge</strong>.</p>`,
       removable.length ? '<div class="inline-actions"><button class="secondary-button danger-button" type="button" data-action="remove-data">Remove Morrow&#39;s data</button></div>' : ""
     ].join("")
   };
@@ -492,7 +492,9 @@ export function supportView(current) {
   const supportRow = `<li><span class="support-label">Support</span><button class="quiet-button" type="button" data-action="open-support">${escapeHtml(SUPPORT_ADDRESS)}</button></li>`;
   return {
     title: "Where to get help",
-    copy: "Morrow opens its support page. Select Support to open it, and name the version below when you write.",
+    copy: version
+      ? "Morrow opens its support page. Select Support to open it, and name the version below when you write."
+      : "Morrow opens its support page. Select Support to open it.",
     body: `<ul class="support-list">${rows.map((row) => `<li><span class="support-label">${escapeHtml(row.label)}</span><span class="${row.path ? "support-path" : "support-value"}">${escapeHtml(row.value)}</span></li>`).join("")}${supportRow}</ul>`
   };
 }

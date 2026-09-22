@@ -229,6 +229,14 @@ test("a paired Bridge without a connected course asks for the course", () => {
   const current = state(PAIRED);
   const view = actionView(current, { chosenAssistantId: "codex" });
   assert.equal(view.title, "Open your course in Chrome.");
+  // Every control the steps name exists in Morrow Bridge, and the panel ends with an action.
+  for (const label of ["Connect this course", "Open Plan and Edit settings", "Your courses", "Connect", "Check Bridge"]) {
+    assert.ok(view.body.includes(`<strong>${label}</strong>`), `the steps name ${label}`);
+  }
+  for (const missing of ["Connect selected courses in Plan", "Connect Canvas", "Connect Moodle", "Plan and Edit settings</strong>, choose"]) {
+    assert.equal(view.body.includes(missing), false, `the steps name a control that does not exist: ${missing}`);
+  }
+  assert.match(view.body, /data-action="check-bridge"/);
   assert.equal(statusSummary(current), "Morrow Bridge is connected");
   assert.equal(step(current, "Morrow Bridge").status, "done");
   assert.equal(step(current, "Course").status, "current");
@@ -325,6 +333,10 @@ test("the data-retention section names every place, what it removes, and the ste
   assert.match(windows.body, /select Apps, select Morrow, and select Uninstall/);
   assert.equal(/Trash/.test(windows.body), false);
 
+  assert.match(retention().body, /Chrome loaded Morrow Bridge from the Bridge folder above/, "the temporary route loads the Bridge folder");
+  const store = retentionView(state({ bridgeDelivery: "available", retention: { uninstall: "move_to_trash", locations: RETENTION_LOCATIONS } }));
+  assert.doesNotMatch(store.body, /Bridge folder/, "a Chrome Web Store install did not load the Bridge folder");
+  assert.match(store.body, /remove <strong>Morrow Bridge<\/strong>/);
   assert.equal(retentionView(state()), null, "a state that names no place shows no section");
   assert.equal(retentionView(null), null);
 });
@@ -630,6 +642,7 @@ test("the support surface names this Morrow, the folders it uses, and where to w
   assert.equal(view.body.includes("<a "), false);
   assert.match(view.body, /<button class="quiet-button" type="button" data-action="open-support">https:\/\/meetmorrow\.app\/support<\/button>/);
   assert.match(view.copy, /Morrow opens its support page\. Select Support to open it, and name the version below when you write\./);
+  assert.doesNotMatch(supportView(state({ ...CONNECTED_COURSE })).copy, /version below/, "no version row, so the copy names none");
 
   // A state Morrow could not read names no version and no folder, and still
   // says where to write.

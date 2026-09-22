@@ -66,6 +66,7 @@ import { serializeBridgeResult } from "./bridge-transport.js";
 import { canvasProtectedRoster, protectLocalRequest, sourceProtectedRoster } from "./protected-request.js";
 import { MAX_RENDER_CHECK_SOURCE_CHARS, RENDER_CHECK_MESSAGE_TYPE, RENDER_CHECK_SCHEMA, renderCheckField } from "../render-check/render-check.js";
 import { PRIVATE_BRIDGE_OPERATION_CONTRACTS, bridgeCatalogCompatibilityContract, browserCatalogCompatibilityContract, canvasApiCompatibilityContract, fetchBoundedCatalogText, parseBrowserCatalogText, parseCanvasApiCatalogText, privateBridgeCompatibilityContract, stableJson } from "./catalog-compatibility.js";
+import { clearReviewApprovalPresence, installReviewApproval, parseReviewApprovalPresence, storeReviewApprovalPresence } from "./review-approval.js";
 
 const PORT = 32147;
 const BRIDGE_PATH = "/morrow-bridge/v1";
@@ -2139,9 +2140,10 @@ function bridgeUiState(command) {
     throw new Error("ui_state_stale");
   }
   const value = command.uiState;
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["reviews"].includes(key))) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["reviews", "presence"].includes(key))) {
     throw new Error("ui_state_invalid");
   }
+  const presence = value.presence === undefined ? null : parseReviewApprovalPresence(value.presence);
   if (!Array.isArray(value.reviews) || value.reviews.length > MAX_BRIDGE_UI_REVIEWS) {
     throw new Error("ui_state_invalid");
   }
@@ -2163,7 +2165,7 @@ function bridgeUiState(command) {
     if (typeof entry.label !== "string" || !entry.label.length || entry.label.length > 120) throw new Error("ui_state_invalid");
     return { url: entry.url, label: entry.label };
   });
-  return { reviews };
+  return presence ? { reviews, presence } : { reviews };
 }
 
 /**
@@ -2171,6 +2173,7 @@ function bridgeUiState(command) {
  * an open popup to read it.
  */
 async function applyBridgeUiState(uiState) {
+  if (uiState.presence) await storeReviewApprovalPresence(uiState.presence).catch(() => undefined);
   state.reviews = uiState.reviews;
   state.reviewsWaiting = uiState.reviews.length;
   await refreshBadge();
@@ -2180,6 +2183,7 @@ async function applyBridgeUiState(uiState) {
 
 // The reviews that wait belong to one Morrow connection, so they end with it.
 function clearBridgeReviews() {
+  void clearReviewApprovalPresence();
   if (!state.reviews.length && !state.reviewsWaiting) return;
   state.reviews = [];
   state.reviewsWaiting = 0;
@@ -6380,6 +6384,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   void cancelPairingAfterConsentWithdrawal().catch(() => {});
   void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
 });
+installReviewApproval();
 chrome.runtime.onStartup.addListener(() => { void pollPairing(); void connectBridge(); });
 chrome.runtime.onInstalled.addListener((details) => {
   void connectBridge();
