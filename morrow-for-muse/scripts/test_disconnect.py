@@ -190,7 +190,7 @@ def test_disconnect_without_crontab_still_disconnects(rig):
     os.makedirs(nocron, exist_ok=True)
     os.symlink(os.path.join(rig["root"], "bin", "ss"),
                os.path.join(nocron, "ss"))
-    seen = set()
+    seen = {"ss"}  # the rig's stub ss is linked above; never the real one
     for d in rig["env"]["PATH"].split(os.pathsep)[1:]:
         try:
             names = os.listdir(d)

@@ -1549,7 +1549,8 @@ try {
   await operationApprovalPage.getByRole("button", { name: "Cancel", exact: true }).click();
   await operationApprovalPage.getByRole("heading", { name: "Request cancelled" }).waitFor();
   await waitFor(async () => !(await operationApprovalPage.locator("body").innerText()).includes("Jane"), "the cancelled review still shows a learner name");
-  assert.equal(await replacementWorker.evaluate(async () => Object.keys(await chrome.storage.session.get("morrowReviewLearnerNames")).length), 0);
+  await waitFor(async () => (await replacementWorker.evaluate(async () => Object.keys(await chrome.storage.session.get("morrowReviewLearnerNames")).length)) === 0,
+    "the Bridge kept the learner names after the review was cancelled");
   process.stderr.write("[browser-test] learner names show in the Chrome review tab only; plain local HTTP reads labels\n");
   process.stderr.write("[browser-test] operation approval UI ready\n");
 
