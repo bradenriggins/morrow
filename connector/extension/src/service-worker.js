@@ -6066,6 +6066,7 @@ async function status() {
     anchorCount: siteAnchors.length,
     siteAnchors,
     bindingCount: bindings.length,
+    reviews: state.reviews,
     bindings: bindings.map((binding) => ({ sourceBindingId: binding.sourceBindingId, provider: binding.provider, origin: binding.origin, siteUrl: binding.siteUrl, courseId: binding.courseId, courseName: binding.courseName, runtimeVerified: binding.runtimeVerified, ...(binding.firstReadCompleted ? { firstReadCompleted: true } : {}), lastSeenAt: binding.lastSeenAt })),
   };
 }
@@ -6144,10 +6145,6 @@ async function bindingForCommand(command, operation) {
   } catch {
     return binding;
   }
-  // Say what happened (P2): recorded for the Bridge popup to show, one line, until it is closed.
-  await chrome.storage.local.set({
-    openPlatformNotice: { schema: "morrow.open-platform-notice.v1", provider: binding.provider, siteAnchorId: binding.siteAnchorId, at: Date.now() },
-  }).catch(() => undefined);
   return (await bindingFor(command.sourceBindingId, { fresh: true })) ?? binding;
 }
 

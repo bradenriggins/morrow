@@ -638,11 +638,6 @@ function optionsFor(binding) {
     : null;
 }
 
-function categoriesFor(binding) {
-  const values = optionsFor(binding)?.editPermission?.enabledCategories;
-  return Array.isArray(values) ? values.filter((value) => typeof value === "string") : [];
-}
-
 function supportsCategory(binding, id) {
   if (typeof id === "string" && id.startsWith("family:")) return bindingFamilyCategoryIds(binding, id.slice("family:".length)).length > 0;
   return optionsFor(binding)?.options.some((category) => category?.id === id && category.availability === "edit") === true;

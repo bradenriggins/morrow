@@ -245,8 +245,7 @@ test("setting on, one tab and one retry: openPlatform runs once, then the bindin
   assert.deepEqual(result, VERIFIED_BINDING, "the retried, now-verified binding is returned");
   assert.equal(harness1.calls.tabsCreated.length, 1, "openPlatform opens exactly one tab");
   assert.equal(harness1.calls.bindingFor.length, 2, "the binding is read once before, once after the retry");
-  assert.equal(harness1.calls.storageSet.length, 1, "the popup notice is recorded once");
-  assert.equal(harness1.calls.storageSet[0].openPlatformNotice.provider, "canvas");
+  assert.equal(harness1.calls.storageSet.length, 0, "no popup notice is recorded");
 });
 
 test("a missing openPlatformWhenNeeded key defaults to on, the same as setting it true", async () => {

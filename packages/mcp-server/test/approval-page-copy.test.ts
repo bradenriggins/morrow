@@ -429,7 +429,7 @@ describe("approval page copy", () => {
       expect(page).toContain("<h1>Moodle saved the change. Morrow checked the result.</h1>");
       expect(page).toContain('<p class="result-item">Week 2 overview</p>');
       expect(page).toContain("Return to your assistant. It continues on its own.");
-      expect(page).toContain('<a href="/recent">See recent changes</a>');
+      expect(page).toMatch(/<a href="\/recent\?entry=[A-Za-z0-9_-]+">See recent changes<\/a>/);
       expect(page).not.toContain("Open in Moodle");
     } finally {
       await server.close();

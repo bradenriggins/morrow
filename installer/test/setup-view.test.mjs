@@ -629,7 +629,7 @@ test("the support surface names this Morrow, the folders it uses, and where to w
   // do nothing.
   assert.equal(view.body.includes("<a "), false);
   assert.match(view.body, /<button class="quiet-button" type="button" data-action="open-support">https:\/\/meetmorrow\.app\/support<\/button>/);
-  assert.match(view.copy, /Morrow opens two pages only: its Chrome Web Store listing and its support page\./);
+  assert.match(view.copy, /Morrow opens its support page\. Select Support to open it, and name the version below when you write\./);
 
   // A state Morrow could not read names no version and no folder, and still
   // says where to write.
