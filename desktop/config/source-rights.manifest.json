@@ -642,6 +642,18 @@
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.4 publication; reviewer=Claude technical source review; source=HEAD"
     },
     {
+      "path": "connector/extension/src/review-approval-content.js",
+      "sha256": "ba02a3356de9be2826196bdb69512e2481fefe65769591ed1fad6276d6b155e2",
+      "disposition": "direct_owned",
+      "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.4 publication; reviewer=Claude technical source review; source=HEAD"
+    },
+    {
+      "path": "connector/extension/src/review-approval.js",
+      "sha256": "fb6a9672da147241f886383b959d6a35c974dea42f9ef21f004a363b86843dcf",
+      "disposition": "direct_owned",
+      "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.4 publication; reviewer=Claude technical source review; source=HEAD"
+    },
+    {
       "path": "connector/extension/src/service-worker.js",
       "sha256": "6310bd2dc9ce53ac74c6923e499a705c79a2777d19791c8c8e6845a9ea1a40f5",
       "disposition": "direct_owned",

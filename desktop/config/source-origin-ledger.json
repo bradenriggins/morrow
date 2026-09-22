@@ -1280,6 +1280,28 @@
       "afterDigest": "5097bc595c8e5bd08e4cff8aa88068a22b7c3c6311a92965944c42e2b70eb51e"
     },
     {
+      "path": "connector/extension/src/review-approval-content.js",
+      "sourceCommit": "d8796c3118473e23b0a1fe3496419e53dcd61eeb",
+      "originalPath": "connector/extension/src/review-approval-content.js",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "ba02a3356de9be2826196bdb69512e2481fefe65769591ed1fad6276d6b155e2"
+    },
+    {
+      "path": "connector/extension/src/review-approval.js",
+      "sourceCommit": "0af2cf877f9887770d11b78ae2fcc94d9fe430d7",
+      "originalPath": "connector/extension/src/review-approval.js",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "fb6a9672da147241f886383b959d6a35c974dea42f9ef21f004a363b86843dcf"
+    },
+    {
       "path": "connector/extension/src/service-worker.js",
       "sourceCommit": "51f1eb1c73dfd51cefd47b577d6f09a81522576d",
       "originalPath": "connector/extension/src/service-worker.js",
