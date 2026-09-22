@@ -7985,7 +7985,12 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                 % (op_id, exc), evidence=exc.evidence,
                 attempts=exc.attempts) from exc
         except (VerificationFailed, UncertainWrite, ExecutorError) as exc:
-            verification = {"status": "fail", "detail": _provider_detail(exc)}
+            # Only a proven verify mismatch is a failed write. Anything
+            # else here (a dead session, a stale command, another lane
+            # error) left the write's effect unconfirmed: uncertain.
+            proven = isinstance(exc, VerificationFailed)
+            verification = {"status": "fail" if proven else "uncertain",
+                            "detail": _provider_detail(exc)}
             # W3-P2-5: the failure detail can carry raw readback values;
             # project it through the learner boundary before journaling.
             verification = _project_verification_detail(
@@ -7994,13 +7999,13 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
             after_digest = digest_of(result["receipt"])
             record = _journal_record(entry_name, kind, effects, params, plan,
                                      op_id, after_digest, verification,
-                                     result, attempts, uncertain=True,
-                                                                  approval_audit=approval_audit,
-                                                                  unproven_override=override_audit,
-                                                                  catalog_status=catalog_status,
-                                                                  target=target_identity_verified,
-                                                                  before_state=before_state_check,
-                                                                  undo_available=bool(entry.get("undo")))
+                                     result, attempts, uncertain=not proven,
+                                     approval_audit=approval_audit,
+                                     unproven_override=override_audit,
+                                     catalog_status=catalog_status,
+                                     target=target_identity_verified,
+                                     before_state=before_state_check,
+                                     undo_available=bool(entry.get("undo")))
             journal_append(record)
             # W4-P2-1: a dead session during the verify readback arms the
             # re-auth machinery (halt + quarantine + notify) before
@@ -8019,11 +8024,18 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                 _on_stale_verify(op_id, entry_name,
                                  "stale verify command after lane "
                                  "re-authentication: %s" % type(exc).__name__)
-            # W5-P2-1: the failure outcome is journaled (drained); a
-            # pending shutdown now stops the run instead of continuing.
+            # W5-P2-1: the outcome is journaled (drained); a pending
+            # shutdown now stops the run instead of continuing.
             _raise_if_shutdown_requested()
-            raise VerificationFailed(
-                "verify block failed for op %s: %s (journaled as failed)" % (op_id, exc))
+            if proven:
+                raise VerificationFailed(
+                    "verify block failed for op %s: %s (journaled as failed)"
+                    % (op_id, exc))
+            raise UncertainWrite(
+                "write op %s returned success, but the readback could not "
+                "confirm it: %s (journaled as uncertain, not failed)"
+                % (op_id, exc), evidence=getattr(exc, "evidence", None),
+                attempts=getattr(exc, "attempts", None)) from exc
 
     # Learner-data privacy boundary: project the receipt through the
     # ported SourceMcpPrivacyBoundary before it is journaled or

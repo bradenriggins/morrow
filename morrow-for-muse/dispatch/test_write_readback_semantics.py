@@ -310,3 +310,62 @@ def test_unconfirmed_declared_verify_does_not_prove_the_write():
     out, _ = _write_dispatch(entry, {"course_id": "7", "want": "A"},
                              _course_then(handler))
     assert out["outcome"] == "unverified", out
+
+
+# ----------------------------------------------------------------------
+# Integrator follow-up: the declared-verify fallback for a dead session
+# (and any other unconfirmed verify) said "journaled as failed" while the
+# record was uncertain=True. It must say uncertain and raise
+# UncertainWrite; only a proven verify mismatch is a failed write, and
+# that one is journaled uncertain=False.
+# ----------------------------------------------------------------------
+
+class ChromiumSessionDead(ex.ExecutorError):
+    """Name-matched lane session-death signal (see _SESSION_DEAD_NAMES)."""
+
+
+def test_verify_session_death_is_uncertain_with_the_uncertain_message(
+        monkeypatch):
+    # The re-auth machinery is session-wide state; record that it is
+    # armed instead of arming it for every later test.
+    armed = []
+    monkeypatch.setattr(ex, "_on_session_death",
+                        lambda op_id, name, evidence: armed.append(op_id))
+
+    def handler(m, u, b):
+        if m == "POST":
+            return 200, {}, b'{"id": 42, "name": "A"}'
+        if u == VERIFY_URL:
+            raise ChromiumSessionDead("session died during verify")
+        return 200, {}, b'{"id": 42, "name": "A"}'
+
+    with pytest.raises(ex.UncertainWrite) as info:
+        _write_dispatch(_verified_entry(), {"course_id": "7"},
+                        _course_then(handler))
+    message = str(info.value)
+    assert "journaled as failed" not in message
+    assert "journaled as uncertain" in message
+    assert "could not confirm" in message
+    rec = ex.find_journal_op("11111111-1111-4111-8111-111111111111")
+    assert rec.get("uncertain") is True
+    assert rec.get("verification") == "uncertain"
+    assert armed == ["11111111-1111-4111-8111-111111111111"]
+
+
+def test_proven_verify_mismatch_is_failed_and_not_uncertain():
+    def handler(m, u, b):
+        if m == "POST":
+            return 200, {}, b'{"id": 42, "name": "A"}'
+        if u == VERIFY_URL:
+            return 200, {}, b'{"id": 42, "name": "Something else"}'
+        return 200, {}, b'{"id": 42, "name": "A"}'
+
+    entry = _verified_entry()
+    entry["verify"]["expect"] = {"name": "params.want"}
+    with pytest.raises(ex.VerificationFailed) as info:
+        _write_dispatch(entry, {"course_id": "7", "want": "A"},
+                        _course_then(handler))
+    assert not isinstance(info.value, ex.UncertainWrite)
+    rec = ex.find_journal_op("11111111-1111-4111-8111-111111111111")
+    assert rec.get("verification") == "fail"
+    assert rec.get("uncertain") is False
