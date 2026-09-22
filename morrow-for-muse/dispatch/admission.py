@@ -229,14 +229,24 @@ def extract_urls(entry: dict) -> list:
     signal carried only in the query (e.g. include[]=enrollments on a
     modules list) must not bypass the learner-data gate, so each
     template is returned with its canonical query text appended.
+
+    Every request-issuing block counts, not only request and
+    multi_step: discovery pre-passes, verify readbacks, before_state
+    freshness readers, undo, and any other top-level block (or list of
+    blocks) carrying a url. A roster read hidden in an auxiliary block
+    must meet the same never-dispatch and learner-data gates.
     """
     urls = []
-    block = entry.get("request") or {}
-    if block.get("url"):
-        urls.append(_url_with_query(block))
-    for step in entry.get("multi_step") or []:
-        if isinstance(step, dict) and step.get("url"):
-            urls.append(_url_with_query(step))
+    for key, value in (entry or {}).items():
+        if isinstance(value, dict):
+            blocks = [value]
+        elif isinstance(value, list):
+            blocks = [v for v in value if isinstance(v, dict)]
+        else:
+            continue
+        for block in blocks:
+            if block.get("url"):
+                urls.append(_url_with_query(block))
     return urls
 
 

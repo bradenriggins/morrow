@@ -183,3 +183,21 @@ def test_potential_collaborators_receipt_never_reaches_agent_raw(
     text = repr(out)
     for raw in ("Jane Doe", "Doe, Jane", "Omar Haddad", "5550101"):
         assert raw not in text, raw
+
+
+@pytest.mark.parametrize("block", ["discovery", "verify", "before_state",
+                                   "undo"])
+def test_auxiliary_blocks_are_scanned(block):
+    # A roster read hidden in a discovery pre-pass, a verify readback, a
+    # freshness reader, or an undo must trip the gate like the request.
+    entry = {"name": "probe", "request": {
+        "method": "GET",
+        "url": "{canvas_base}/api/v1/courses/{course_id}/modules"}}
+    assert not admission.touches_learner_data(entry)
+    entry[block] = {"method": "GET", "url": "{canvas_base}/api/v1/courses/"
+                    "{course_id}/users"}
+    assert admission.touches_learner_data(entry), block
+    listed = dict(entry)
+    listed[block] = [{"method": "GET", "url": "{canvas_base}/api/v1/"
+                      "courses/{course_id}/enrollments"}]
+    assert admission.touches_learner_data(listed), block

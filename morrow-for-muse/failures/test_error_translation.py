@@ -2,7 +2,7 @@
 """Full test suite for the Morrow error translation layer.
 
 Covers failures/translator.py + failures/catalog.py + failures/catalog.json:
-  1. per-mode tests: every one of the 77 catalog modes gets a synthetic
+  1. per-mode tests: every one of the 81 catalog modes gets a synthetic
      raw error; asserts the right mode_id, the four message anchors, all
      placeholders filled, no em dashes, no shrug language, and the
      escalate flag matching the catalog.
@@ -215,6 +215,21 @@ class AmbiguousCourseWriteRefused(Exception):
 class ModeSettingsTamper(Exception):
     """settings/ package guard: agent-initiated settings change without
     educator confirmation. Carries setting_name."""
+
+
+class CourseResolutionRequired(Exception):
+    """dispatch/executor.py: a mode-gated course write carried no course
+    resolution, or one naming a different course."""
+
+
+class EffectClassMismatch(Exception):
+    """dispatch/executor.py: an entry's declared effect class
+    contradicts the class derived from its own blocks."""
+
+
+class WriteFieldMismatch(Exception):
+    """dispatch/executor.py: the post-write readback proved Canvas
+    stored different fields than requested."""
 
 
 class DestructiveConfirmationRequired(Exception):
@@ -546,6 +561,15 @@ MODE_CASES = {
     "canvas-422-unprocessable":
         lambda: {"http_status": 422,
                  "body_text": '{"error_code":"unprocessable_content"}'},
+    "course_resolution_required":
+        lambda: CourseResolutionRequired("write to course 1 has no course "
+                                         "resolution"),
+    "effect_class_mismatch":
+        lambda: EffectClassMismatch("entry declares read but has a PUT"),
+    "write_field_mismatch":
+        lambda: WriteFieldMismatch("readback title differs"),
+    "write_unverified":
+        lambda: {"write_outcome": "unverified"},
     "unknown": lambda: {"some": "weird", "unmatched": 1},
 }
 
@@ -556,8 +580,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_77_modes(self):
-        self.assertEqual(77, len(CATALOG.entries))
+    def test_catalog_has_81_modes(self):
+        self.assertEqual(81, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):
