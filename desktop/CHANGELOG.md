@@ -1,0 +1,56 @@
+# Changelog
+
+Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
+
+## 1.0.5 (2026-09-22)
+
+Unsigned installers: `Morrow-1.0.5-mac-arm64.dmg`, `Morrow-1.0.5-mac-arm64.zip`, and `Morrow-1.0.5-win-x64.exe`. Ships with Morrow Bridge 1.0.119.
+
+This release fixes every Critical and High defect found in the adversarial audits after the 2026-09-22 handoff.
+
+### Approvals and Edit access
+
+- A change is approved only with a Morrow Bridge signature from the educator's own Chrome tab. A local program can no longer approve a change with a bare HTTP request.
+- Edit access has no time limit. Old timed grants fall back to Plan and are never extended.
+- A review that is waiting ends when its Morrow connection ends.
+
+### Morrow Bridge
+
+- The popup shows Edit status and can return a course to Plan.
+- Settings and the popup show the Edit actions a course allows, and one course can be disconnected on its own.
+- Course lists are read again after they expire, keep every site's courses, show true counts, and use natural order.
+- When a course site is closed, Morrow names the right button: Open Canvas or Open Moodle.
+- Long permission and privacy text is behind disclosures. Setup, recovery, and help text name only controls that exist.
+
+### Setup
+
+- The ChatGPT configuration no longer writes `required = true`. Morrow finds, repairs, and removes its own assistant entry by structure, not by text matching, and names each reason it refuses a change.
+- A "Quit and reopen" step checks that the assistant really connected.
+- On a Mac, Morrow offers to move itself to Applications when it runs from somewhere else.
+- The exact Bridge folder is shown with a Copy button. Long folder paths wrap.
+- Claude Desktop detection is real, including the Microsoft Store (MSIX) install on Windows.
+- Removal keeps a settings file's own permissions and refuses a read-only file.
+- The app says where unsigned builds get updates. The Mac note now says that moving Morrow to Applications can ask for an administrator password.
+
+### Privacy
+
+- Learner ids inside grade, submission, and profile links are replaced with labels.
+- Each student has one label everywhere. Real names reach the educator only through Morrow Bridge in their own tab (Private Chat and the review tab). Every HTTP endpoint serves labels only.
+- Private Chat reads a sentence start correctly through quotes and line breaks.
+
+### Interface
+
+- Supporting text fills its container instead of wrapping early.
+- Each setup state has one primary action, and the connected Home is clearer.
+
+### Build and CI
+
+- CI reads workflows from the repository root, runs each product's suite when it changes, and runs both suites when a workflow changes. The aggregate check fails when change detection fails.
+- Dependabot points at the real manifests. The pre-commit hook runs each product's suite from its own directory.
+- Both release jobs preflight the signed release configuration. The installer layout check runs with the browser harnesses.
+
+### Not verified for this release
+
+- Live Canvas, Moodle, or Blackboard runs of the new flows.
+- Windows-specific paths (Store Claude Desktop detection, locked files) on a real Windows host.
+- Signed builds: signing secrets do not exist yet, so this release is unsigned.

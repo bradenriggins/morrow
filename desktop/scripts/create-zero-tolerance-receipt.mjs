@@ -12,12 +12,13 @@ import { createWindowsSmokeBindingFromPackage, windowsSmokeObservation } from ".
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputRoot = resolve(root, "artifacts/release", `evidence-${Date.now()}`);
 const receiptPath = resolve(root, "artifacts/release/zero-tolerance-receipt.json");
+const RELEASE_VERSION = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).version;
 const WINDOWS_ACL_SKIP = Object.freeze({
   test: "the smoke access-control classification reads a real Windows access-control list",
   reason: "Windows access control needs a Windows host",
 });
 const WINDOWS_ACL_EVIDENCE = Object.freeze({
-  installer: "Morrow-1.0.4-win-x64.exe",
+  installer: `Morrow-${RELEASE_VERSION}-win-x64.exe`,
   packageReceipt: "package-receipt.json",
   smoke: "smoke.json",
   harness: "smoke.harness.json",
@@ -146,15 +147,15 @@ function isWindowsUpgradeReceipt(value, { commit, installerSha256 }) {
     && value.retention?.applicationStateAfterRuntime?.exactAcrossUninstall === true
     && value.statePresentAfterUpgrade === true
     && /^[a-f0-9]{64}$/.test(value.newApplication?.sha256)
-    && value.newApplication?.fileVersion === "1.0.4"
-    && value.newApplication?.productVersion === "1.0.4.0"
+    && value.newApplication?.fileVersion === RELEASE_VERSION
+    && value.newApplication?.productVersion === `${RELEASE_VERSION}.0`
     && value.newApplication?.productName === "Morrow"
     && value.newApplication?.companyName === "Braden Riggins"
     && value.newApplication?.fileDescription === "Morrow"
     && value.newApplication?.signatureStatus === "NotSigned"
     && value.newApplication?.signerCertificate === null
-    && value.registration?.displayName === "Morrow 1.0.4"
-    && value.registration?.displayVersion === "1.0.4"
+    && value.registration?.displayName === `Morrow ${RELEASE_VERSION}`
+    && value.registration?.displayVersion === RELEASE_VERSION
     && value.registration?.publisher === "Braden Riggins"
     && value.uninstall?.completed === true
     && value.uninstall?.uninstallerSignatureStatus === "NotSigned"
