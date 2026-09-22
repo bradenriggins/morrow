@@ -1003,6 +1003,26 @@ async function reviewContexts(
   return contexts;
 }
 
+/**
+ * Shows the educator who each learner label is, beside the label the assistant
+ * used. The names come from Morrow's own learner vault and reach only this
+ * loopback page; a label two reviewed operations name differently stays a label.
+ */
+function withLearnerNames(markup: string, contexts: ReadonlyMap<string, ApprovalReviewContext> | undefined): string {
+  const names = new Map<string, string | null>();
+  for (const context of contexts?.values() ?? []) {
+    for (const [label, name] of Object.entries(context.learnerNames ?? {})) {
+      if (!/^Student A[1-9][0-9]*$/u.test(label) || typeof name !== "string" || !name.trim()) continue;
+      names.set(label, names.has(label) && names.get(label) !== name ? null : name);
+    }
+  }
+  if (![...names.values()].some(Boolean)) return markup;
+  return markup.replace(/\bStudent A[1-9][0-9]*\b/gu, (label) => {
+    const name = names.get(label);
+    return name ? `${escapeHtml(name)} (${label})` : label;
+  });
+}
+
 function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boolean, contexts?: ReadonlyMap<string, ApprovalReviewContext>, rememberText?: string, recentEntry?: string | null): string {
   let state = reviewState(target, snapshot);
   if (active && state === "approved") state = "running";
@@ -1533,7 +1553,7 @@ export class LoopbackApprovalServer {
             ? await reviewContexts(this.controller, operations, signal)
             : undefined;
           const recentEntry = verifiedNow ? this.issueRecentChangesEntry(`${target.kind}:${target.id}`) : null;
-          sendJson(response, 200, { html: statusContent(target, snapshot, active, contexts, this.rememberText(target), recentEntry), active, states });
+          sendJson(response, 200, { html: withLearnerNames(statusContent(target, snapshot, active, contexts, this.rememberText(target), recentEntry), contexts), active, states });
           return;
         }
         const expiry = Date.parse(String(snapshot.approvalExpiresAt || snapshot.expiresAt || ""));
@@ -1549,7 +1569,7 @@ export class LoopbackApprovalServer {
           ? await this.controller.rememberOffer(target.id).catch(() => null)
           : null;
         const recentEntry = state === "verified" ? this.issueRecentChangesEntry(`${target.kind}:${target.id}`) : null;
-        const body = html(target, snapshot, () => (nonce = this.issueNonce(nonceKey, canApprove)), contexts, active, rememberOffer, this.rememberText(target), recentEntry);
+        const body = withLearnerNames(html(target, snapshot, () => (nonce = this.issueNonce(nonceKey, canApprove)), contexts, active, rememberOffer, this.rememberText(target), recentEntry), contexts);
         if (nonce && canApprove && state === "awaiting_approval") {
           try {
             this.controller.announceApprovalPresence?.();

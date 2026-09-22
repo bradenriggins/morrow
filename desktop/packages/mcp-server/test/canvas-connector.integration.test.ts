@@ -1052,6 +1052,29 @@ describe("Canvas connector gateway path", () => {
       runtime.cancelOperation(operationId(reviewPlan));
     }, CASE_TIMEOUT_MS);
 
+    it("names the student behind a learner label only on the educator's review page", async () => {
+      const roster = await runtime.call("canvas_list_users_in_course_users", {
+        course_id: "42", enrollment_type: ["student"], enrollment_state: ["active", "invited", "completed", "inactive"],
+        morrow_max_pages: 50, _morrow: { source_binding_id: sourceBindingId },
+      });
+      const label = /Student A[1-9][0-9]*/.exec(JSON.stringify(roster))?.[0];
+      expect(label).toBeTruthy();
+      const planned = await runtime.call("canvas_create_conversation", {
+        recipients: [label!], body: `Your extension is approved, ${label}.`,
+        _morrow: { source_binding_id: sourceBindingId },
+      });
+      expect(planned.structuredContent, JSON.stringify(planned)).toMatchObject({ status: "awaiting_approval" });
+      const id = operationId(planned);
+      const context = await runtime.operationReviewContext(id);
+      expect(context.learnerNames).toEqual({ [label!]: "Jane Doe" });
+      // The tool result and the saved operation keep the label; only the review page learns the name.
+      for (const value of [planned, runtime.operationGet(id), runtime.effects.get(id)]) {
+        expect(JSON.stringify(value)).not.toContain("Jane Doe");
+        expect(JSON.stringify(value)).not.toContain('"9001"');
+      }
+      runtime.cancelOperation(id);
+    }, CASE_TIMEOUT_MS);
+
     it("sends one approved course change, checks it again, and keeps learner identity out of the result", async () => {
       const planned = await runtime.call("canvas_update_course_settings", {
         course_id: "42",

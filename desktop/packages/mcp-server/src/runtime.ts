@@ -2462,7 +2462,7 @@ export class GatewayRuntime {
   ): Promise<ApprovalReviewContext> {
     try {
       const operation = this.effects.get(operationId);
-      return resolveApprovalReviewContext({
+      const context = await resolveApprovalReviewContext({
         operation,
         tools: this.catalog.tools,
         ...(cache ? { cache } : {}),
@@ -2470,11 +2470,44 @@ export class GatewayRuntime {
           await this.callSourceOwned(publicName, args, { signal }),
         ),
       });
+      const learnerNames = await this.reviewLearnerNames(operation, context).catch(() => null);
+      return learnerNames ? { ...context, learnerNames } : context;
     } catch {
       // A review that could not be resolved names nothing, and a page that names
       // nothing approves nothing.
       return { targets: [], unnamed: true };
     }
+  }
+
+  /**
+   * The student behind each learner label a reviewed change names, read from the
+   * learner vault in the change's current course scope. It serves only the
+   * educator's loopback review page. A label that does not resolve leaves the
+   * whole change without names, so the page never shows a partial guess.
+   */
+  private async reviewLearnerNames(
+    operation: EffectOperationRecord,
+    context: ApprovalReviewContext,
+  ): Promise<Record<string, string> | null> {
+    const labels = [...new Set(JSON.stringify([operation.plan, context]).match(/\bStudent A[1-9][0-9]*\b/gu) ?? [])];
+    const mapping = this.toolByPublicName.get(operation.publicToolName);
+    if (!labels.length || !operation.sourceBindingId || !mapping || !isCanvasConnector(mapping)) return null;
+    const args = isJsonObject(operation.plan.arguments) ? operation.plan.arguments : {};
+    const request = { ...args, _morrow: { source_binding_id: operation.sourceBindingId } };
+    const binding = await this.verifiedBrowserBindingBySource(mapping, request);
+    const courseId = this.requestCourseId(args) ?? this.exactString(binding.courseId, 160);
+    if (!courseId || binding.courseId !== courseId) return null;
+    const scope = binding.provider === "moodle"
+      ? this.moodleBindingScope(binding, operation.sourceBindingId, courseId)
+      : this.canvasBindingScope(binding, operation.sourceBindingId, courseId);
+    if (!scope) return null;
+    const names: Record<string, string> = {};
+    for (const label of labels) {
+      const name = this.learnerVault.resolve(scope, label).name;
+      if (!name) return null;
+      names[label] = name;
+    }
+    return names;
   }
 
   operationsRecent(input: RecentOperationsInput = {}): JsonObject {
