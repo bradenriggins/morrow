@@ -164,7 +164,7 @@ h3 { margin: 0; font-size: 0.875rem; font-weight: 700; letter-spacing: -.015em; 
 .assistant-groups { display: grid; gap: var(--space-3); }
 .assistant-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
 .advanced-assistants { border-top: 1px solid var(--border); padding-top: var(--space-3); }
-.advanced-assistants summary { color: var(--text-secondary); cursor: pointer; font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
+.advanced-assistants summary { display: flex; align-items: center; color: var(--text-secondary); cursor: pointer; font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
 .advanced-assistants > p { margin: var(--space-2) 0 var(--space-2); color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
 .assistant-card { position: relative; display: grid; min-height: 82px; padding: var(--space-3); text-align: left; }
 .assistant-card:hover:not(:disabled) { border-color: color-mix(in srgb, var(--action) 58%, var(--border)); background: color-mix(in srgb, var(--action) 4%, var(--surface)); }
@@ -192,8 +192,8 @@ h3 { margin: 0; font-size: 0.875rem; font-weight: 700; letter-spacing: -.015em; 
 .materials-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); }
 .materials-row > :first-child { flex: 1 1 240px; min-width: 0; }
 .materials-row p { margin-top: 3px; font-size: 0.8125rem; line-height: 1.45; }
-.optional-setup { margin-top: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-sunken); }
-.optional-setup summary { min-height: 44px; padding: var(--space-3) var(--space-4); color: var(--text-secondary); cursor: pointer; font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
+.optional-setup { margin-top: 0; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-sunken); }
+.optional-setup summary { display: flex; align-items: center; min-height: 44px; padding: var(--space-3) var(--space-4); color: var(--text-secondary); cursor: pointer; font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
 .optional-setup .materials-row { margin: 0 var(--space-3) var(--space-3); background: var(--surface); }
 .problem { margin-top: var(--space-4); padding: var(--space-3); border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border)); border-radius: var(--radius-control); background: color-mix(in srgb, var(--danger) 7%, var(--surface)); color: var(--danger); font-size: 0.8125rem; line-height: 1.45; }
 .problem strong { display: block; color: var(--text); }
