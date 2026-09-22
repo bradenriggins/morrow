@@ -89,6 +89,10 @@ bin/scheduler.py run-once # test both keepalives now
 ```
 **After a VM restart:** re-run `bin/scheduler.py start`. The scheduler is a
 userspace daemon (no cron on this VM); only `/home/hatch` survives restarts.
+The shipped product no longer needs this record's scheduler for the
+helper: without cron, `install.sh` starts `helper/supervisor.py`'s
+background loop, which runs `helper/keepalive.sh` every 5 minutes, and
+`bin/morrow start` restarts it after a reboot.
 
 ## Fixes applied
 
@@ -157,7 +161,9 @@ conventions in `proof-battery/OPERATION_CATALOG.md`). Neither uses
 
 **Note:** The VM has no cron daemon. The scheduler is a Python daemon under
 `/home/hatch` (survives restarts). After a VM reboot, run
-`bin/scheduler.py start`.
+`bin/scheduler.py start`. (The product helper's keepalive is separate:
+on this VM it runs from `helper/supervisor.py`'s background loop; after
+a reboot, `bin/morrow start` restarts it.)
 
 ## Post-deploy smoke-test receipts
 

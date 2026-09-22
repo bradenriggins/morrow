@@ -29,8 +29,9 @@ It checks python3 (>= 3.11; 3.10 refused, security EOL Oct 2026), locates Chromi
 (`transport/egress.py`: authenticated proxy, bare proxy, or direct),
 creates the effective `MORROW_HOME` state layout, creates
 `helper/profile/` on first install (an existing profile is never wiped,
-reset, or repackaged), ensures exactly one keepalive cron entry for this
-tree (migrating stale entries from other trees), runs the secrets
+reset, or repackaged), sets up keepalive supervision for this tree
+(exactly one keepalive cron entry when the machine has cron; otherwise
+a supervised background loop, see step 2 below), runs the secrets
 deny-list gate before launching anything, re-runs all 23 selftest suites,
 then launches the helper when `CANVAS_BASE` is set and prints the
 sign-in notice. The notice repeats on every install until onboarding
@@ -83,8 +84,11 @@ preemptively and never on every run: a healthy session needs no page.
    `helper/env`, pins the profile dir and the tree's CDP port, and
    launches the server on 127.0.0.1:8901 with Chromium on
    127.0.0.1:19223 (ports configurable per tree via `LOGIN_HELPER_PORT`
-   / `LOGIN_HELPER_CDP_PORT`). The same script runs from cron every 5
-   minutes and keeps it up.
+   / `LOGIN_HELPER_CDP_PORT`). The same script runs every 5 minutes and
+   keeps it up: from cron when the machine has cron, otherwise from a
+   supervised background loop (`helper/supervisor.py`; the Muse VM has
+   no cron daemon). After a reboot on a machine without cron, run
+   `bin/morrow start` (any `morrow` command also restarts the loop).
    The connector's Chromium IS the helper's Chromium: one profile
    (`helper/profile/`), one browser, one CDP port. Never launch a second
    one; a launcher that finds 19223 live attaches to it.
@@ -510,7 +514,8 @@ relay, and every row not marked live-proven. Full declaration:
 
 - `install.sh`: the idempotent installer (Chromium locate, egress probe,
   `~/.morrow` layout, `helper/profile/` creation without ever wiping it,
-  keepalive cron, helper launch, one-time onboarding notice, all 23
+  keepalive supervision (cron, or the background loop without cron),
+  helper launch, one-time onboarding notice, all 23
   selftests, the secrets gate).
 - `transport/`: the Chromium lane (`local_chromium.py`, `chromium_session.py`,
   `egress.py`, `proxy_forwarder.py`) and its selftests.

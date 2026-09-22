@@ -53,8 +53,9 @@ DEV_ONLY = (
     # rig-only session capture; production never runs it (SKILL.md)
     "session/capture.py",
     # the 2026-09-20 VM deployment record and its userspace scheduler
-    # (no cron on that VM); the product's keepalive is helper/keepalive.sh
-    # from cron, and Moodle is out for v1 (SCOPE.md)
+    # (no cron on that VM); the product's keepalive is helper/keepalive.sh,
+    # supervised by cron or, without cron, by helper/supervisor.py's
+    # background loop; Moodle is out for v1 (SCOPE.md)
     "DEPLOY.md", "bin/scheduler.py", "bin/scheduler_selftest.py",
     "bin/keepalive-canvas.sh", "bin/keepalive-moodle.sh",
     # live-test drivers: they need a real tenant and name it

@@ -54,7 +54,11 @@
 #   6. helper/profile creation (0700, first run only). An existing
 #      profile is NEVER wiped, reset, or repackaged: it holds the
 #      educator's authenticated Canvas session.
-#   7. Keepalive cron install (serialized across concurrent installers
+#   7. Keepalive supervision (helper/supervisor.py detects what the
+#      machine has). No cron: a supervised background loop runs
+#      keepalive.sh every 5 minutes (bin/morrow start, or the first
+#      morrow command after a reboot, restarts it). With cron: the
+#      keepalive cron install (serialized across concurrent installers
 #      with a lock file; the entry shell-quotes the tree path so trees
 #      under paths with spaces work; deduped by marker comment; stale
 #      entries from a previous tree are migrated, loudly; orphaned
@@ -115,7 +119,8 @@ UPGRADE_BACKUP=""
 _CREATED=""
 
 _track_created() {
-  # $1 = ledger entry ("dir:<path>", "file:<path>", or "cron").
+  # $1 = ledger entry ("dir:<path>", "file:<path>", "cron", or
+  # "supervisor").
   _CREATED="$1
 ${_CREATED}"
 }
@@ -212,6 +217,14 @@ _rollback_fresh_install() {
 "
             fi ;;
         esac ;;
+      supervisor)
+        if python3 "${TREE}/helper/supervisor.py" uninstall >/dev/null 2>&1; then
+          _rb_removed="${_rb_removed}keepalive background loop for this tree
+"
+        else
+          _rb_failed="${_rb_failed}keepalive background loop for this tree
+"
+        fi ;;
       cron)
         if _rollback_cron_entry; then
           _rb_removed="${_rb_removed}keepalive cron entry for this tree
@@ -430,6 +443,10 @@ def _is_allowed_extra(rel):
     # *.log directly under helper/: runtime logs.
     if rel.startswith("helper/") and "/" not in rel[7:] \
             and rel.endswith(".log"):
+        return True
+    # The keepalive background loop's state (no cron on this machine).
+    if rel in ("helper/keepalive-supervisor.json",
+               "helper/keepalive-supervisor.json.lock"):
         return True
     # Test scratch: .selftest-* anywhere, .selftest-work/ dirs.
     parts = rel.split("/")
@@ -735,11 +752,18 @@ else
   note "created helper/profile (0700). Your Canvas session will live here after the one-time sign-in."
 fi
 
-# -- 7. keepalive cron ------------------------------------------------------
-step "7/10 keepalive cron"
+# -- 7. keepalive supervision -----------------------------------------------
+# Round-4 M5: supervision does not depend on cron. helper/supervisor.py
+# detects what this machine has: cron (crontab installed and a cron
+# daemon running) gets the per-tree cron entry below; no cron gets a
+# supervised background loop that runs keepalive.sh every 5 minutes,
+# restarted by `bin/morrow start` and by the first morrow command
+# after a reboot.
+step "7/10 keepalive supervision"
+_SUPERVISION="$(python3 "${TREE}/helper/supervisor.py" detect 2>/dev/null || printf 'loop')"
 if [ "${MORROW_CRON:-1}" = "0" ]; then
-  note "MORROW_CRON=0: skipping cron install (you arrange your own scheduler)"
-elif command -v crontab >/dev/null 2>&1; then
+  note "MORROW_CRON=0: skipping keepalive supervision (you arrange your own scheduler)"
+elif [ "${_SUPERVISION}" = "cron" ]; then
   # W4-P1-7: serialize the crontab read-modify-write across concurrent
   # installers with a lock file under MORROW_HOME. Two installers
   # racing used to silently drop one tree's supervision entry; the loser
@@ -884,9 +908,19 @@ _DEAD_EOF
   exec 8>&-
   unset _cron_lock _cron_now _cron_base _cron_new _other _mine _mine_first _mine_n _line _canonical
 else
-  note "WARNING: crontab not found; the helper will not self-heal."
-  note "Arrange your own scheduler for ${TREE}/helper/keepalive.sh"
+  # No cron on this machine: the supervised background loop. Its first
+  # keepalive run comes one interval after start (step 10 launches the
+  # helper now).
+  if _loop_out="$(python3 "${TREE}/helper/supervisor.py" install-loop 2>&1)"; then
+    _track_created "supervisor"
+    note "no cron on this machine: keepalive runs as a supervised background loop every 5 minutes (${_loop_out})"
+    note "after a reboot, run 'bin/morrow start' (the first morrow command also restarts it)"
+  else
+    fail "supervision" "could not start the keepalive background loop: ${_loop_out}"
+  fi
+  unset _loop_out
 fi
+unset _SUPERVISION
 
 # -- 8. secrets gate (BEFORE any runtime logs exist) --------------------------
 step "8/10 secrets gate"
@@ -987,7 +1021,7 @@ if [ -z "${CANVAS_BASE:-}" ] && [ -f "${LEGACY_ENV_FILE}" ]; then
 fi
 if [ -z "${CANVAS_BASE:-}" ]; then
   note "CANVAS_BASE is not set yet: skipping the helper launch."
-  note "Set it in ${ENV_FILE}, then rerun this installer (or wait for the keepalive cron). The one-time sign-in comes after."
+  note "Set it in ${ENV_FILE}, then rerun this installer (or wait for the next keepalive run). The one-time sign-in comes after."
 else
   if [ -n "${_SHELL_CANVAS_BASE}" ] \
     && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?CANVAS_BASE=' "${ENV_FILE}" 2>/dev/null; then

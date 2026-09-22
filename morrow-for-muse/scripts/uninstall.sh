@@ -28,14 +28,21 @@
 #
 # Cron removal is NOT optional and NOT skippable: if the keepalive entry
 # survives, it will resurrect the helper every 5 minutes. The script
-# verifies no Morrow entry remains and fails loudly if one does.
+# verifies no Morrow entry remains and fails loudly if one does. On a
+# machine with no crontab, keepalive runs as a supervised background
+# loop (helper/supervisor.py) instead; the script stops that loop first
+# (exact PID, verified) and forgets it, so nothing restarts the helper.
 set -u
 
 TREE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TREE_REAL="$(readlink -f "${TREE}" 2>/dev/null || printf '%s' "${TREE}")"
 HELPER_PORT="${LOGIN_HELPER_PORT:-8901}"
 MORROW_HOME="${MORROW_HOME:-${HOME}/.morrow}"
-PROFILE_DIR="${LOGIN_HELPER_PROFILE_DIR:-${TREE}/helper/profile}"
+# Round-4 L3: the profile is the one keepalive.sh always uses
+# (<tree>/helper/profile; keepalive ignores LOGIN_HELPER_PROFILE_DIR).
+# An env-supplied path is never deleted: a stray variable must not make
+# disconnect remove an unrelated directory and keep the real session.
+PROFILE_DIR="${TREE}/helper/profile"
 # W4-P1-12: tree-specific cron marker (matches install.sh). Only this
 # tree's marker and command are removed; other trees' entries survive.
 CRON_MARKER="# morrow-muse-connector-keepalive"
@@ -226,7 +233,7 @@ stop_port_holder() {
 if [ "${MODE}" = "disconnect" ]; then
 note "Morrow for Muse disconnect. This will:"
 note "  1. stop the helper (port ${HELPER_PORT}) and its Chromium, if running"
-note "  2. remove the keepalive cron entries (otherwise keepalive relaunches the signed-in helper within 5 minutes)"
+note "  2. stop the keepalive background loop and remove the keepalive cron entries (otherwise keepalive relaunches the signed-in helper within 5 minutes)"
 note "  3. delete the Canvas session material:"
 for _p in ${DISCONNECT_PATHS}; do note "          ${_p}"; done
 note "  It keeps this install, your settings, the audit journal, and the learner vault."
@@ -234,7 +241,7 @@ note ""
 else
 note "Morrow for Muse uninstall. This will:"
 note "  1. stop the helper (port ${HELPER_PORT}), Chromium (CDP port from helper config), and the proxy forwarder, if running"
-note "  2. remove the keepalive cron entries (REQUIRED: a surviving entry resurrects the helper every 5 minutes)"
+note "  2. stop the keepalive background loop and remove the keepalive cron entries (REQUIRED: a surviving entry resurrects the helper every 5 minutes)"
 note "  3. delete: ${TREE}"
 note "          ${MORROW_HOME}"
 note "          ${PROFILE_DIR}"
@@ -272,6 +279,16 @@ fi
 # -- 1. stop the processes -------------------------------------------------
 step_n=1
 note "--- ${step_n}. stopping processes"
+# The keepalive background loop goes first, so it cannot relaunch the
+# helper while the helper is being stopped.
+if [ -f "${TREE}/helper/supervisor.py" ]; then
+  if _sup_out="$(PYTHONDONTWRITEBYTECODE=1 python3 "${TREE}/helper/supervisor.py" uninstall --tree "${TREE}" 2>&1)"; then
+    note "keepalive background loop: ${_sup_out}"
+  else
+    die "could not stop the keepalive background loop: ${_sup_out}"
+  fi
+  unset _sup_out
+fi
 stop_port_holder "${HELPER_PORT}" "helper"
 
 # CDP port: read it from this tree's helper/env (LOGIN_HELPER_CDP_PORT)
@@ -360,9 +377,14 @@ fi
 # -- 2. cron removal (REQUIRED, verified) ----------------------------------
 step_n=2
 note "--- ${step_n}. removing keepalive cron entries"
-command -v crontab >/dev/null 2>&1 \
-  || die "crontab not found; cannot verify cron removal. Remove any morrow keepalive entries by hand, then rerun."
-_cron_now="$(crontab -l 2>/dev/null || true)"
+if command -v crontab >/dev/null 2>&1; then
+  _cron_now="$(crontab -l 2>/dev/null || true)"
+else
+  # No crontab on this machine means no cron entry can exist; the
+  # background loop (the supervision used instead) was stopped above.
+  note "no crontab on this machine: there are no cron entries to remove (the keepalive background loop was stopped above)"
+  _cron_now=""
+fi
 # W3-P2-14: find this tree's keepalive entries by RESOLVING each entry's
 # command target (readlink -f), not by literal string match. A wrapper
 # path (/usr/local/bin/morrow-keepalive), a symlink, or a
