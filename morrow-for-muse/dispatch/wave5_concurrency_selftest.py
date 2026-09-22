@@ -45,6 +45,25 @@ for _p in (REPO, os.path.join(REPO, "dispatch")):
         sys.path.insert(0, _p)
 
 from dispatch import executor as ex  # noqa: E402
+
+# Selftest harness: the approvals here are minted on the driver
+# channel, so dispatch runs with require_educator_channel=False (the
+# production default is True).
+def _driver_channel(fn):
+    def call(*a, **k):
+        k.setdefault("require_educator_channel", False)
+        return fn(*a, **k)
+    return call
+
+
+ex.dispatch_entry = _driver_channel(ex.dispatch_entry)
+ex.dispatch_catalog_op = _driver_channel(ex.dispatch_catalog_op)
+ex.dispatch_undo = _driver_channel(ex.dispatch_undo)
+
+# The scenarios use literal ids and synthetic paths that are not
+# catalog path templates; the live-proven catalog gate is covered by
+# dispatch/test_direct_lane_hardening.py and is a no-op here.
+ex.live_proven_gate = lambda *a, **k: None  # noqa: E731
 from dispatch import admission as _ad_mod  # noqa: E402
 
 PASS = []
