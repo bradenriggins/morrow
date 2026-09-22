@@ -53,7 +53,7 @@ async function captureThemes(page, name, width = 900, { allowTechnicalTerms = fa
   }
   for (const colorScheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme });
-    await page.locator("main").screenshot({ path: join(OUTPUT, `${name}-${colorScheme}.png`) });
+    await page.locator("main").screenshot({ path: join(OUTPUT, `${name}-${colorScheme}.png`), animations: "disabled" });
   }
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
 }
