@@ -51,6 +51,24 @@ def _subkey():
         vault.close()
 
 
+def lookup_digest(tenant_base, course_id, typed_name):
+    """Keyed digest of a name typed into `students find` (final muse
+    audit M5). The journal records every lookup with this digest, never
+    the name: the journal cannot be purged. Anyone holding the vault key
+    can recompute it for a suspected name; without the key it says
+    nothing, and a purge_all (which deletes the key) unlinks it."""
+    vault = _core.LearnerVault(_vault_path())
+    try:
+        key = hmac.new(bytes(vault._key.view()), b"morrow.lookup-audit.v1",
+                       hashlib.sha256).digest()
+    finally:
+        vault.close()
+    typed = " ".join(str(typed_name or "").split()).casefold()
+    return hmac.new(key, ("%s\x00%s\x00%s" % (
+        _origin(tenant_base), course_id, typed)).encode("utf-8"),
+        hashlib.sha256).hexdigest()
+
+
 def _now():
     return datetime.datetime.now(datetime.timezone.utc)
 

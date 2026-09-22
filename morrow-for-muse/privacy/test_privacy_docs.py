@@ -42,3 +42,37 @@ def test_docs_do_not_make_the_false_claims():
     assert "names the educator types reach" in skill
     policy_json = _read("dispatch/admission_policy.json")
     assert "has not landed" not in policy_json
+
+
+def _flat(rel):
+    return " ".join(_read(rel).split())
+
+
+def test_docs_state_the_by_name_limits_honestly():
+    """Final muse audit M5: "the agent only ever learns the names you
+    type" was not true. A lookup with a guessed name confirms that a
+    student with that name is enrolled, and course content (a page
+    body) is not de-identified. FERPA_POLICY.md said a reveal needs 20
+    characters; any non-empty request is accepted."""
+    skill = _flat("SKILL.md")
+    consent = _flat("content/consent.md")
+    policy = _flat("privacy/FERPA_POLICY.md")
+    for text in (skill, consent):
+        assert "only ever learns the names you type" not in text
+        assert "confirms that a student with that name is enrolled" in text
+        assert "every lookup is journaled" in text
+        assert "page body" in text
+    limits = skill[skill.index("Honest limitations"):]
+    limits = limits[:limits.index("## Never")]
+    assert "page body" in limits
+    assert "confirms that a student with that name is enrolled" in limits
+    assert "at least 20 characters" not in policy
+    assert "any non-empty request" in policy
+
+
+def test_approval_display_describes_what_the_reply_approves():
+    """Final muse audit L5: approvals accept any non-empty educator
+    reply, so "Anything else is not approval" was false."""
+    display = _read("dispatch/approval_display.py")
+    assert "Anything else is not approval" not in display
+    assert "in any words" in display

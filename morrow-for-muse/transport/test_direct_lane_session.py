@@ -80,6 +80,11 @@ class _Transport:
 def no_reauth(monkeypatch):
     monkeypatch.setattr(cs.ChromiumSession, "_notify_reauth_machine",
                         lambda self, exc: None)
+    # A pinned account, so the write reaches the session (the pinned
+    # account check reads users/self first; see test_principal_check).
+    from reauth import state_machine as rsm
+    monkeypatch.setattr(rsm, "pinned_principal",
+                        lambda: {"id": 1, "name": "Edu", "base": BASE})
 
 
 def _session(transport):

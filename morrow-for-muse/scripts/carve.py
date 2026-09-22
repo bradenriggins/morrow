@@ -71,6 +71,9 @@ DEV_ONLY = (
     "dispatch/test_moodle_redirect_host.py",
     # pytest-only: the suite's scratch-HOME isolation and its check
     "conftest.py", "test_suite_isolation.py",
+    # pytest-only: the conftest missing-cryptography warning check, and
+    # the doc catalog-count check (it reads DEPLOY.md, which does not ship)
+    "test_optional_dependency_warning.py", "test_doc_catalog_counts.py",
 )
 # proof-battery/ is dev evidence except the catalog the executor reads
 # and the one driver integration_selftest checks for hygiene.

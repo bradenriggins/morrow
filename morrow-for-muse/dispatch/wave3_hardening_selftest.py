@@ -683,10 +683,24 @@ def t_verification_detail_consent_reveals():
         _write_consent(b"documented instructional purpose for review")
         detail = "provider returned 'Ada Lovelace'"
         from privacy import core as _pc
+        if _pc.AESGCM is None:
+            # Final muse audit H1: the journal gets the de-identified
+            # detail even under a reveal, which needs the vault; without
+            # 'cryptography' the reveal refuses loudly.
+            try:
+                ex._project_verification_detail(
+                    _learner_entry(), {"ok": False, "detail": detail},
+                    {"user_id": 1, "name": "Ada Lovelace"}, TENANT,
+                    "t_students",
+                    lane_context={"pii_reveal": _sealed_reveal("1")})
+            except ex.ExecutorError as exc:
+                assert "cryptography" in str(exc), str(exc)[:200]
+                return
+            raise AssertionError("expected a loud refusal without "
+                                 "cryptography")
         plain = ex._project_verification_detail(
             _learner_entry(), {"ok": False, "detail": detail},
-            {"user_id": 1, "name": "Ada Lovelace"}, TENANT, "t_students") \
-            if _pc.AESGCM is not None else {"detail": "(no vault here)"}
+            {"user_id": 1, "name": "Ada Lovelace"}, TENANT, "t_students")
         out = ex._project_verification_detail(
             _learner_entry(), {"ok": False, "detail": detail},
             {"user_id": 1, "name": "Ada Lovelace"}, TENANT, "t_students",
@@ -695,6 +709,8 @@ def t_verification_detail_consent_reveals():
         _restore_env(saved)
     assert "Ada Lovelace" not in plain["detail"], plain["detail"]
     assert out["detail"] == detail, "the reveal passes the detail through"
+    assert "Ada Lovelace" not in out["journal_detail"], \
+        "the journal view of a revealed detail must be de-identified"
     assert out["pii_reveal"]["revealed_by"] == "educator-sealed-record", \
         "the reveal must be journaled with the verification"
 check("P2-5/H2: a sealed educator reveal passes verification detail through",

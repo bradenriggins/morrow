@@ -66,6 +66,11 @@ from dispatch import executor as ex  # noqa: E402
 # dispatch/test_direct_lane_hardening.py and is a no-op here.
 ex.live_proven_gate = lambda *a, **k: None  # noqa: E731
 import chromium_session as cs  # noqa: E402
+# The signed-in account check (final muse audit M3) reads users/self
+# before writes; these fakes script every provider call, so it is a
+# no-op here. It is covered by transport/test_principal_check.py.
+cs.ChromiumSession._verify_principal = lambda *a, **k: None  # noqa: E731
+
 import local_chromium as lc  # noqa: E402
 
 PASS = []

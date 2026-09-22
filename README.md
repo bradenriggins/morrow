@@ -19,7 +19,7 @@ This is a monorepo. Each product lives in its own directory, ships on its own ve
 
 **Choose. Ask. Review.** Choose the courses your account can open, ask for the work, and review the result. Morrow checks each approved change against the course and tells you when something still needs attention.
 
-**Plan first.** Morrow starts each course in Plan, so you review proposed changes before they are saved. You can give Edit access to selected courses and types of change. After each approved change, Morrow checks what the LMS saved, and your assistant tells you what happened.
+**Plan first.** Morrow starts each course in Plan, so you review proposed changes before they are saved. Edit lets your assistant save changes without asking each time: in Morrow Desktop you grant it per course and per type of change, and in Morrow for Muse you turn it on for your account or for one conversation. After each approved change, Morrow checks what the LMS saved, and your assistant tells you what happened.
 
 **Your sign-in stays yours.** Passwords, cookies, and sign-in details never go to the Morrow app or your assistant. Course access should not expose student identities to your assistant: before course information reaches it, Morrow replaces names, email addresses, usernames, and school or course account IDs with labels such as Student A1, and it stops if it cannot protect every student in those records.
 

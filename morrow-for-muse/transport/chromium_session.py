@@ -104,6 +104,24 @@ class ChromiumSessionDead(ex.ExecutorError):
     attempted. Nothing is journaled, so the op_id stays reusable."""
 
 
+class PrincipalMismatch(ex.ExecutorError):
+    """The Canvas account signed in to the helper browser is not the
+    pinned account. Nothing was sent; the re-auth write halt stands
+    until the pinned account signs back in (reauth resume)."""
+
+
+class PrincipalNotPinned(ex.ExecutorError):
+    """No Canvas account is pinned (or the pin store cannot be trusted),
+    so a write cannot prove it runs as the educator. Nothing was sent."""
+
+
+# Final muse audit M3: the signed-in account is compared with the pinned
+# principal (reauth/state_machine.pin_principal) before every write and
+# once per session object for reads. The users/self read that makes the
+# comparison (and that pinning itself uses) is exempt.
+_PRINCIPAL_PATH = "/api/v1/users/self"
+
+
 # W4-P2-4: auth-death taxonomy. The browser lane proves only that the
 # session is dead; on the wire, natural expiry, a password change, and a
 # tenant-admin revocation all present identically (a rejected session, a
@@ -292,6 +310,9 @@ class ChromiumSession:
         self._had_live_session = False
         # W4-P2-3: the near-expiry warning is emitted once per object.
         self._expiry_warned = False
+        # Final muse audit M3: reads compare the signed-in account with
+        # the pin once per object; writes compare before every write.
+        self._principal_checked = False
 
     # -- sticky session death (W4-P2-2) ------------------------------------
 
@@ -492,6 +513,81 @@ class ChromiumSession:
             # cookie expiring within ~24h.
             self._check_expiry_warning()
         return self._transport
+
+    def _verify_principal(self, transport, is_write):
+        """Refuse unless the helper browser is signed in as the pinned
+        account. Writes: every time, and a pin is required. Reads: once
+        per session object; with no pin yet, reads run (nothing to
+        compare against) and the educator is asked to pin before any
+        write. A mismatch imposes the re-auth write halt."""
+        if not is_write and self._principal_checked:
+            return
+        try:
+            from reauth import state_machine as rsm
+        except Exception as exc:
+            raise PrincipalNotPinned(
+                "chromium backend: the pinned-account check could not run "
+                "(%s); nothing was sent" % type(exc).__name__)
+        try:
+            pin = rsm.pinned_principal()
+        except rsm.PrincipalPinError as exc:
+            raise PrincipalNotPinned(
+                "chromium backend: the record of the pinned Canvas account "
+                "cannot be trusted (%s), so this lane cannot prove it runs "
+                "as the educator. Nothing was sent. Recovery: disconnect "
+                "(bin/morrow disconnect) and sign in fresh, then pin the "
+                "account with reauth/state_machine.py pin --first-signin."
+                % exc)
+        if pin is None:
+            if is_write:
+                raise PrincipalNotPinned(
+                    "chromium backend: no Canvas account is pinned yet, so "
+                    "this write cannot prove it runs as the educator. "
+                    "Nothing was sent. Run reauth/state_machine.py pin "
+                    "--first-signin, confirm with the educator that the "
+                    "name it prints is theirs, then retry.")
+            self._principal_checked = True
+            return
+        try:
+            status, _hdrs, body = transport.api(
+                "GET", _PRINCIPAL_PATH, None, as_json=False,
+                timeout=ex.REQUEST_TIMEOUT_S, max_bytes=65536)
+            self._had_live_session = True
+        except lc.SessionDead as exc:
+            self._mark_session_dead(exc)
+            raise self._dead_exc("no live session when checking the "
+                                 "signed-in account")
+        except Exception as exc:
+            raise ex.ExecutorError(
+                "chromium backend: could not confirm which Canvas account "
+                "is signed in (%s); nothing was sent" % type(exc).__name__)
+        try:
+            me = json.loads(body) if status == 200 else None
+        except (TypeError, ValueError):
+            me = None
+        live_id = me.get("id") if isinstance(me, dict) else None
+        if live_id in (None, ""):
+            raise ex.ExecutorError(
+                "chromium backend: GET %s did not return the signed-in "
+                "account (HTTP %s); nothing was sent"
+                % (_PRINCIPAL_PATH, status))
+        if str(live_id) != str(pin.get("id")):
+            try:
+                rsm.impose_halt({"signal": "principal_mismatch",
+                                 "cause": "different_account_signed_in"},
+                                reason="a different Canvas account is "
+                                       "signed in to the helper")
+            except Exception:
+                pass
+            name = str(pin.get("name") or "").strip() or "the pinned account"
+            raise PrincipalMismatch(
+                "The Canvas account signed in to the login helper is not "
+                "the account this connector is pinned to (%s). Nothing was "
+                "sent, and writes are paused. Sign out in the helper page "
+                "and sign back in as %s, then run reauth/state_machine.py "
+                "resume. To use a different account, disconnect "
+                "(bin/morrow disconnect) and sign in fresh." % (name, name))
+        self._principal_checked = True
 
     def _check_expiry_warning(self):
         """W4-P2-3: warn once per session object when the helper's
@@ -907,6 +1003,9 @@ class ChromiumSession:
         path = parsed.path or "/"
         if parsed.query:
             path = path + "?" + parsed.query
+        if not (method.upper() == "GET" and not is_write
+                and parsed.path == _PRINCIPAL_PATH):
+            self._verify_principal(transport, is_write)
         # Item Banks SDK lane: every /api/banks/... path egresses through
         # the quiz-api host with the LTI-provisioned banks.build token,
         # not through the canvas-origin fetch (which 500s/404s there).

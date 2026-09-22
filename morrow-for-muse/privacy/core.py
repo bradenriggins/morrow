@@ -776,6 +776,12 @@ class LearnerVault:
         return output
 
     def resolve(self, scope_value, token_value):
+        return self.resolve_with_token(scope_value, token_value)[0]
+
+    def resolve_with_token(self, scope_value, token_value):
+        """(identity, token) for a label or token issued in this exact
+        scope. The token (learner_<uuid>) is new on every issue, so it
+        tells a re-issued label apart from the one an approval saw."""
         scope = exact_scope(scope_value)
         token = str(token_value or "").strip()
         if self._path != ":memory:":
@@ -787,7 +793,7 @@ class LearnerVault:
             entry = self._state["by_token"].get(token)
         if entry is None or scope_key(entry["scope"]) != scope_key(scope):
             raise PrivacyError("learner token is unavailable for this exact scope")
-        return dict(entry["identity"])
+        return dict(entry["identity"]), entry["token"]
 
     def identities_for_scope(self, scope_value):
         """Every identity this vault has published a label for under the

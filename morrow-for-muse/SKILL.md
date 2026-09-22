@@ -107,7 +107,13 @@ preemptively and never on every run: a healthy session needs no page.
    and confirm it is them before doing anything else. keepalive also
    runs this on its first healthy tick. The pin never changes silently:
    a different account signing in later is refused until the educator
-   disconnects and signs in fresh. To disconnect, tell the educator
+   disconnects and signs in fresh. The Chromium lane enforces it: before
+   every write, and on the first read of each session, it reads GET
+   /api/v1/users/self and compares it with the pin. A different account
+   stops the call (nothing is sent), pauses writes, and the educator
+   signs back in as the pinned account, then you run
+   `reauth/state_machine.py resume`. With no pin yet, reads run and
+   writes are refused until the account is pinned. To disconnect, tell the educator
    what will be removed, get their yes in chat, then run
    `bin/morrow disconnect --yes` (without a terminal, a run without
    `--yes` changes nothing and says so).
@@ -263,7 +269,16 @@ a frozen plan, an approval record, or a course resolution by hand:
    sends the write through every gate and prints the result. An
    approval is single use and expires (at most 24 hours; plan-write
    sets 1 hour). If the educator declines or changes anything, run
-   `plan-write` again with the new request.
+   `plan-write` again with the new request. A prepared write that is
+   never approved is deleted when it expires, and every purge deletes
+   prepared writes and approval records.
+
+A write that names a student uses the label from `students find`
+(`Student A3`, or the echoed `Jane Doe (Student A3)` with
+`--conversation-id` so the typed name can be checked). The approval is
+bound to that student, not to the label text: if the course's labels
+are issued again before the educator approves, `approve-write`
+refuses and sends nothing; run `students find` and `plan-write` again.
 
 Worked example: the educator asks to rename the Week 1 page of course
 89585 to "Week 1 Overview".
@@ -495,8 +510,9 @@ both modes.
 
 v1 ships the Canvas Chromium lane, dispatching only catalog rows marked
 `live-proven` in `proof-battery/OPERATION_CATALOG.md`: 457 rows total
-(437 Canvas C- rows + 20 Item Bank IB- rows), 210 marked live-proven as
-of 2026-09-22 (plus 10 of the 11 New Quiz sequence steps). The catalog row is the unit of truth: a row that is not
+(437 Canvas C- rows + 20 Item Bank IB- rows), 209 marked live-proven as
+of 2026-09-22 (195 Canvas, 14 Item Bank; the 10 live-proven New Quiz
+sequence steps of 11 run on those rows). The catalog row is the unit of truth: a row that is not
 marked live-proven does not dispatch. Absolutely refused on every
 tenant, with no override flag: never-dispatch routes (the standing
 exclusions: announcements, messages to people, support tickets,
@@ -602,17 +618,26 @@ journal sees it: names, emails, logins, SIS ids, and Canvas user ids
 student's work across reads. You can still work with a student BY
 NAME: when you name a student ("extend Jane Doe's due date by two
 days"), the agent looks that name up and, for the rest of this
-conversation, shows that student as "Jane Doe (Student A3)". The agent
-only ever learns the names you type yourself. The key that makes the
+conversation, shows that student as "Jane Doe (Student A3)". A name
+reaches the agent from Canvas only as the name you typed, but the
+lookup itself tells the agent something: when `students find` returns
+a label, it confirms that a student with that name is enrolled. The
+agent could run a lookup with a name you never typed (a guess), and
+nothing technical stops that; every lookup is journaled (course,
+conversation, outcome, and a keyed digest of the name, never the name
+itself), so a guess leaves a trail you can review. The key that makes the
 labels lives at `~/.morrow/morrow_source_vault.json.key` on your VM
 and is never part of any download or update.
 
 What de-identification does and does not cover (say this plainly if
 the educator asks): Morrow cannot intercept what the educator types to
 Muse, so names the educator types reach the Muse model, because the
-educator typed them. Morrow keeps every other student identifier from
-the LMS (every name the educator did not type, every email, login, SIS
-id, and Canvas id) out of what the model and the journal see.
+educator typed them. Morrow keeps every other student identifier in
+LMS records (every name the educator did not type, every email, login,
+SIS id, and Canvas id) out of what the model and the journal see. Two
+exceptions, below under Honest limitations: a name lookup confirms
+enrollment, and course content (a page body, an announcement, a
+discussion post) reaches the model as written.
 
 For the agent: people-bearing catalog rows (the `[LEARNER-DATA]` rows
 and every route whose response carries people) dispatch only on the
@@ -725,6 +750,17 @@ Honest limitations (not defects, but know them):
 - Nicknames: aliases derive from roster fields only, so a nickname
   the roster never mentions (for example "Bobby" for rostered
   "Robert J. Smith") survives redaction in free text.
+- Course content is not de-identified: a page body, announcement,
+  discussion post, or file that names a student ("Congrats to Jane
+  Doe") reaches the model as written, even when Morrow has labeled that
+  student elsewhere. Only people records in LMS responses (rosters,
+  submissions, authors, editors) are projected.
+- A name lookup confirms enrollment: when `students find` returns a
+  label for a name, it confirms that a student with that name is
+  enrolled in the course, even if the educator never typed that name
+  (an agent guess). Nothing technical prevents a guess; every lookup
+  is journaled (course, conversation, outcome, and a keyed digest of
+  the name, never the name), so guesses can be reviewed afterwards.
 
 ## Never
 

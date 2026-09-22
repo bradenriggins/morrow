@@ -83,6 +83,12 @@ ex.dispatch_undo = _driver_channel(ex.dispatch_undo)
 # catalog path templates; the live-proven catalog gate is covered by
 # dispatch/test_direct_lane_hardening.py and is a no-op here.
 ex.live_proven_gate = lambda *a, **k: None  # noqa: E731
+# The signed-in account check (final muse audit M3) reads users/self
+# before writes; these fakes script every provider call, so it is a
+# no-op here. It is covered by transport/test_principal_check.py.
+from transport import chromium_session as _cs_pkg  # noqa: E402
+_cs_pkg.ChromiumSession._verify_principal = lambda *a, **k: None  # noqa: E731
+
 from dispatch import admission as _ad_mod  # noqa: E402
 
 PASS = []

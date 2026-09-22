@@ -8,11 +8,12 @@ before any sign-in happens.*
 
 Morrow can do a defined set of Canvas tasks when you ask it to. The
 dispatch catalog lists 457 Canvas operations (437 course-level, 20
-Item Bank). Of those, 210 are live-proven through the Chromium lane,
-and 10 of the 11 New Quiz creation sequence steps are live-proven as
-well (step 7, whole-quiz archive, is unsupported by the provider);
-those 220 are what this build will dispatch, and anything not
-live-proven it refuses rather than guessing (checked 2026-09-22
+Item Bank). Of those, 209 are live-proven through the Chromium lane
+(195 course-level, 14 Item Bank), and 10 of the 11 New Quiz creation
+sequence steps, which run on those operations, are live-proven as
+well (step 7, whole-quiz archive, is unsupported by the provider).
+The 209 live-proven operations are what this build will dispatch, and
+anything not live-proven it refuses rather than guessing (checked 2026-09-22
 against proof-battery/OPERATION_CATALOG.md). Live-proven examples
 include listing your courses, assignments, and enrollments; creating
 draft quizzes and assignments; managing modules and pages; and
@@ -71,9 +72,20 @@ guesses.
 
 One thing Morrow cannot do: it cannot intercept what you type to
 Muse. The names you type reach the Muse model, because you typed
-them. Morrow keeps every other student identifier from Canvas (the
-names you did not type, emails, logins, and ID numbers) away from the
-model.
+them. Morrow keeps every other student identifier in Canvas records
+(the names you did not type, emails, logins, and ID numbers) away from
+the model, with two limits you should know:
+
+- Looking up a name tells the agent something. When the agent looks a
+  name up and gets a label back, that confirms that a student with that
+  name is enrolled in the course. The agent could look up a name you
+  did not type. Nothing technical stops that, but every lookup is
+  journaled (which course, which conversation, whether it matched, and
+  a sealed fingerprint of the name, never the name itself), so you can
+  review lookups afterwards.
+- Course content is not de-identified. If a page body, announcement,
+  discussion post, or file names a student, the agent reads that name
+  as written.
 
 To see real names from a Canvas read for one course, ask the agent in
 your own words. It records your request, sealed, for that one course

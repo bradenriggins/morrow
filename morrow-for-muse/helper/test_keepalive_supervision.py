@@ -106,6 +106,28 @@ def test_loop_runs_keepalive_repeatedly_single_instance_and_stops(tmp_path):
     assert len(ticks.read_text().splitlines()) == count
 
 
+def test_stop_also_ends_a_keepalive_run_in_progress(tmp_path):
+    """Final muse audit L1: stop killed only the loop's PID. A keepalive
+    run in progress (a child of the loop, in the loop's own session)
+    kept going and relaunched the helper after stop returned. Stop must
+    end the loop's whole process group and wait for it."""
+    tree, _ticks = _fake_tree(tmp_path)
+    log = tmp_path / "ka.log"
+    ka = tree / "helper" / "keepalive.sh"
+    ka.write_text("#!/bin/sh\necho start >> '%s'\nsleep 2\n"
+                  "echo relaunched-helper >> '%s'\n" % (log, log))
+    first = sup.ensure(str(tree), interval=30, first_delay=0.0)
+    try:
+        assert _wait(lambda: log.exists() and "start" in log.read_text())
+    finally:
+        stopped = sup.stop(str(tree))
+    assert stopped["stopped"] is True
+    with pytest.raises(ProcessLookupError):
+        os.killpg(first["pid"], 0)
+    time.sleep(3)
+    assert "relaunched-helper" not in log.read_text()
+
+
 def test_loop_restarts_after_its_process_died(tmp_path):
     tree, ticks = _fake_tree(tmp_path)
     first = sup.ensure(str(tree), interval=0.3, first_delay=0.0)
@@ -174,3 +196,19 @@ def test_docs_and_scripts_tell_the_truth_about_cron():
             not in text, rel
     deploy = read("DEPLOY.md")
     assert "helper/supervisor.py" in deploy
+
+
+def test_helper_down_recovery_works_without_cron():
+    """Final muse audit L2: the helper-down failure mode told the agent
+    supervision is cron-based and to run keepalive.sh only. On a
+    machine without cron, `bin/morrow start` is what brings the
+    supervision back, so the recovery must name it."""
+    with open(os.path.join(TREE, "failures", "catalog.json"),
+              encoding="utf-8") as fh:
+        catalog = json.load(fh)
+    mode = [e for e in catalog["entries"] if e["id"] == "helper-down"][0]
+    assert "bin/morrow start" in mode["auto_action"]
+    assert "helper/keepalive.sh" in mode["auto_action"]
+    for field in ("root_cause", "agent_message"):
+        assert "cron-based" not in mode[field], field
+        assert "background loop" in mode[field], field

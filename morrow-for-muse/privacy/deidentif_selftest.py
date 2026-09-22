@@ -653,6 +653,20 @@ def test_projection_wire_reveal_skips_deidentify():
         _write_legacy_consent(b"accommodation review with staff")
         result = {"receipt": [{"id": 1, "name": "Jane Doe"}],
                   "truncated": False, "bytes_received": 1}
+        if not _have_crypto():
+            # Final muse audit H1: a revealed read journals only its
+            # de-identified projection, which needs the vault; without
+            # 'cryptography' the reveal refuses loudly rather than
+            # leaving nothing safe to journal.
+            try:
+                bb._project_learner_result(
+                    entry, result, TENANT,
+                    lane_context={"pii_reveal": _sealed_reveal("1")})
+            except Exception as exc:
+                assert "cryptography" in str(exc), str(exc)[:200]
+                return
+            raise AssertionError(
+                "expected a loud refusal of a reveal without cryptography")
         out = bb._project_learner_result(
             entry, result, TENANT,
             lane_context={"pii_reveal": _sealed_reveal("1")})
@@ -660,6 +674,8 @@ def test_projection_wire_reveal_skips_deidentify():
         _restore_source_vault(old)
         _restore_tree_state(old_ts)
     assert out["receipt"] == [{"id": 1, "name": "Jane Doe"}]
+    assert "Jane" not in json.dumps(out["journal_receipt"]), \
+        "the journal view of a revealed read must be de-identified"
     assert out["pii_reveal"]["authorization"] == REVEAL_WORDS
     assert out["pii_reveal"]["revealed_by"] == "educator-sealed-record"
 

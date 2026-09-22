@@ -220,6 +220,36 @@ def test_echo_store_and_journal_hold_no_plaintext_name(home):
                for e in events)
 
 
+def _lookups():
+    from dispatch import executor as ex
+    with open(ex.JOURNAL_PATH, encoding="utf-8") as fh:
+        return [e for e in (json.loads(line) for line in fh if line.strip())
+                if e.get("event") == "privacy.students_find"]
+
+
+def test_every_lookup_is_journaled_without_the_name(home):
+    """Final muse audit M5: a guessed name confirms roster membership,
+    so every lookup leaves an audit record: course, conversation,
+    outcome, and a keyed digest of the typed name (an auditor holding
+    the vault key can check a suspected name; the journal never holds
+    the name itself, because it cannot be purged)."""
+    _find("Jane Doe")
+    _find("jane  doe")
+    _find("Quentin Zanzibar")
+    _find("Jane Doe", conversation_id=None)
+    events = _lookups()
+    assert [e["outcome"] for e in events] == [
+        "resolved", "resolved", "not_found", "resolved"]
+    assert [e["conversation_id"] for e in events] == [CONV, CONV, CONV,
+                                                      None]
+    assert all(e["course_id"] == COURSE for e in events)
+    digests = [e["query_digest"] for e in events]
+    assert digests[0] == digests[1] == digests[3] != digests[2]
+    text = json.dumps(events)
+    for word in ("Jane", "jane", "Doe", "Quentin", "Zanzibar"):
+        assert word not in text
+
+
 def test_no_conversation_means_no_echo(home):
     out = _find("Jane Doe", conversation_id=None)
     assert out["status"] == "resolved"

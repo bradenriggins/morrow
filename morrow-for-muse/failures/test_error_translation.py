@@ -2,7 +2,7 @@
 """Full test suite for the Morrow error translation layer.
 
 Covers failures/translator.py + failures/catalog.py + failures/catalog.json:
-  1. per-mode tests: every one of the 84 catalog modes gets a synthetic
+  1. per-mode tests: every one of the 86 catalog modes gets a synthetic
      raw error; asserts the right mode_id, the four message anchors, all
      placeholders filled, no em dashes, no shrug language, and the
      escalate flag matching the catalog.
@@ -155,6 +155,14 @@ def assert_message_quality(testcase, tr, entry):
 # ---------------------------------------------------------------------------
 
 class ChromiumSessionDead(Exception):
+    pass
+
+
+class PrincipalMismatch(Exception):
+    pass
+
+
+class PrincipalNotPinned(Exception):
     pass
 
 
@@ -453,6 +461,11 @@ MODE_CASES = {
                       "the login helper endpoint is down too -- start it "
                       "with helper/keepalive.sh, then retry",
     },
+    "canvas-account-mismatch": lambda: PrincipalMismatch(
+        "The Canvas account signed in to the login helper is not the "
+        "account this connector is pinned to (Edu T. Or)."),
+    "canvas-account-not-pinned": lambda: PrincipalNotPinned(
+        "chromium backend: no Canvas account is pinned yet"),
     "setup-tenant-not-configured": lambda: {
         "error_class": "SessionMissing", "provider": "canvas",
         "error_text": "chromium backend needs a Canvas base URL: pass "
@@ -599,8 +612,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_84_modes(self):
-        self.assertEqual(84, len(CATALOG.entries))
+    def test_catalog_has_86_modes(self):
+        self.assertEqual(86, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):
