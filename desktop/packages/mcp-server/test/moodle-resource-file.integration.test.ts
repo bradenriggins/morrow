@@ -14,6 +14,7 @@ import { createMorrowServer } from "../src/server.js";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
 import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
+import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 
 async function availablePort(): Promise<number> {
   const server = createServer();
@@ -282,7 +283,7 @@ describe("reviewed Moodle file dispatch", () => {
       const confirmed = await fetch(`${reviewUrl}/approve`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded", cookie: cookie!, origin: new URL(reviewUrl).origin, referer: reviewUrl },
-        body: new URLSearchParams({ nonce: nonce! }),
+        body: new URLSearchParams({ nonce: nonce!, presence: bridgeSignedPresence(approval!, `${reviewUrl}/approve`, nonce!) }),
       });
       expect(confirmed.status).toBe(200);
       await expect.poll(() => runtime.operationGet(id).state).toBe("verified");

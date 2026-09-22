@@ -14,7 +14,6 @@ import { assertPortListening, reserveLoopbackPort } from "./fixtures/loopback-po
 
 /** Mirrors canvas-connector.integration.test.ts: one connector, one course, cases share it. */
 const CASE_TIMEOUT_MS = 30_000;
-const FOUR_HOURS_MS = 4 * 60 * 60 * 1_000;
 
 function operationId(result: JsonObject): string {
   const value = isJsonObject(result.structuredContent) ? result.structuredContent.operationId : undefined;
@@ -127,6 +126,7 @@ describe("Runtime: the offer and the grant (WI-4.3)", () => {
     provider: "canvas" as const,
     origin: "https://school.instructure.com",
     courseId: "42",
+    courseName: "Biology",
     principalFingerprint: "c".repeat(64),
     sessionGeneration: 1,
     catalogDigest: browserCatalogDigest,
@@ -151,6 +151,7 @@ describe("Runtime: the offer and the grant (WI-4.3)", () => {
   let runtime: GatewayRuntime;
   let bridge: BridgeTestClient | undefined;
   let activeEditOptions: JsonObject[] = [];
+  const editPolicySets: JsonObject[] = [];
 
   /** Waits for the connector to take up the course connections just sent. */
   const bindingsApplied = () => new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
@@ -172,6 +173,11 @@ describe("Runtime: the offer and the grant (WI-4.3)", () => {
     bridge.onCommand((command) => {
       if (command.kind === "ui_state") {
         bridge?.respond(command, {});
+        return;
+      }
+      if (command.kind === "edit_policy_set") {
+        editPolicySets.push(command.editPolicySet as unknown as JsonObject);
+        bridge?.respond(command, { schema: "morrow.bridge.edit-policy-set.v1", applied: true });
         return;
       }
       if (command.kind === "edit_policy_options_get") {
@@ -219,9 +225,8 @@ describe("Runtime: the offer and the grant (WI-4.3)", () => {
     try {
       const offer = await runtime.rememberOffer(id);
       expect(offer).not.toBeNull();
-      expect(offer).toMatchObject({ categoryId: "canvas_alt_text", label: "Add alternative text to images" });
-      expect(offer!.until).toBeGreaterThan(Date.now());
-      expect(offer!.until).toBeLessThanOrEqual(Date.now() + FOUR_HOURS_MS + 1_000);
+      // Edit is not timed: the offer names the bundle and no end time.
+      expect(offer).toEqual({ categoryId: "canvas_alt_text", label: "Add alternative text to images" });
     } finally {
       activeEditOptions = [];
       runtime.cancelOperation(id);
@@ -312,6 +317,29 @@ describe("Runtime: the offer and the grant (WI-4.3)", () => {
       } finally {
         runtime.cancelOperation(id);
       }
+    }
+  }, CASE_TIMEOUT_MS);
+
+  it("asks the Bridge for an untimed grant that stays until the person returns the course to Plan", async () => {
+    const plan = await planPageImageAltRepair(runtime, {
+      source_binding_id: sourceBindingId, course_id: "42", page_url: "lesson",
+      expected_body_sha256: sha256Text(lesson.body), image_index: 1,
+      image_src_sha256: sha256Text("/courses/42/files/9?value=a>b&part=opaque"),
+      alt_text: "Cell membrane diagram", decorative: false,
+    });
+    const id = operationId(plan as unknown as JsonObject);
+    activeEditOptions = [canvasAltTextOption];
+    editPolicySets.length = 0;
+    try {
+      await runtime.rememberKind(id);
+      expect(editPolicySets).toEqual([{
+        mode: "edit",
+        merge: true,
+        selections: [{ sourceBindingId, expectedPolicyRevision: 0, enabledCategories: ["canvas_alt_text"] }],
+      }]);
+    } finally {
+      activeEditOptions = [];
+      runtime.cancelOperation(id);
     }
   }, CASE_TIMEOUT_MS);
 

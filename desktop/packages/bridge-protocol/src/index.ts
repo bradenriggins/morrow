@@ -135,8 +135,6 @@ export interface BridgeEditPolicySet {
   readonly selections: readonly BridgeEditPolicySelection[];
   /** Join the sent categories with any active grant instead of replacing it (Edit mode only). */
   readonly merge?: true;
-  /** The end time for a new grant a merge creates. Must be one of `BRIDGE_EDIT_DURATIONS_MS`. */
-  readonly expiresInMs?: number;
 }
 
 /**
@@ -160,8 +158,18 @@ export interface BridgeUiReview {
   readonly label: string;
 }
 
+/**
+ * The approval key for the review server at `origin`. Morrow Bridge holds it in memory and uses
+ * it only to sign a real click on an approve button in a tab at that origin.
+ */
+export interface BridgeUiApprovalPresence {
+  readonly origin: string;
+  readonly key: string;
+}
+
 export interface BridgeUiState {
   readonly reviews: readonly BridgeUiReview[];
+  readonly presence?: BridgeUiApprovalPresence;
 }
 
 export interface BridgePrivateFileManifest {
@@ -1073,20 +1081,8 @@ function parseEditCategories(value: unknown): readonly BridgeEditCategory[] | un
   return categories;
 }
 
-// The five times "do not ask again" (D3) and the "Routine edits" level may set for a grant (F5).
-// This list and SETTINGS_EDIT_DURATIONS in connector/extension/src/edit-policy.js must hold the
-// same values by hand: a duration present on one side and missing from the other becomes a time
-// the review page or the level can send but this validator refuses, or the reverse.
-export const BRIDGE_EDIT_DURATIONS_MS: readonly number[] = Object.freeze([
-  30 * 60 * 1_000,
-  60 * 60 * 1_000,
-  4 * 60 * 60 * 1_000,
-  8 * 60 * 60 * 1_000,
-  24 * 60 * 60 * 1_000,
-]);
-
 export function normalizeBridgeEditPolicySet(value: unknown): BridgeEditPolicySet {
-  if (!isJsonObject(value) || Object.keys(value).some((key) => !["mode", "selections", "merge", "expiresInMs"].includes(key))) {
+  if (!isJsonObject(value) || Object.keys(value).some((key) => !["mode", "selections", "merge"].includes(key))) {
     throw new TypeError("editPolicySet has unsupported fields");
   }
   const mode = value.mode;
@@ -1094,11 +1090,6 @@ export function normalizeBridgeEditPolicySet(value: unknown): BridgeEditPolicySe
   if (value.merge !== undefined) {
     if (mode !== "edit") throw new TypeError("editPolicySet.merge is invalid for Plan");
     if (value.merge !== true) throw new TypeError("editPolicySet.merge is invalid");
-  }
-  if (value.expiresInMs !== undefined) {
-    if (typeof value.expiresInMs !== "number" || !BRIDGE_EDIT_DURATIONS_MS.includes(value.expiresInMs)) {
-      throw new TypeError("editPolicySet.expiresInMs must be one of the fixed Edit durations");
-    }
   }
   if (!Array.isArray(value.selections) || value.selections.length === 0 || value.selections.length > MAX_BRIDGE_BINDINGS) {
     throw new TypeError("editPolicySet.selections exceeds the bridge limit");
@@ -1137,15 +1128,24 @@ export function normalizeBridgeEditPolicySet(value: unknown): BridgeEditPolicySe
     mode,
     selections,
     ...(value.merge === undefined ? {} : { merge: value.merge as true }),
-    ...(value.expiresInMs === undefined ? {} : { expiresInMs: value.expiresInMs as number }),
   };
 }
 
 const BRIDGE_UI_REVIEW_PATH = /^\/(operations|batches)\/[A-Za-z0-9_.:@-]{8,160}$/;
 
 export function normalizeBridgeUiState(value: unknown): BridgeUiState {
-  if (!isJsonObject(value) || Object.keys(value).some((key) => !["reviews"].includes(key))) {
+  if (!isJsonObject(value) || Object.keys(value).some((key) => !["reviews", "presence"].includes(key))) {
     throw new TypeError("uiState has unsupported fields");
+  }
+  let presence: BridgeUiApprovalPresence | undefined;
+  if (value.presence !== undefined) {
+    const candidate = value.presence;
+    if (!isJsonObject(candidate) || Object.keys(candidate).some((key) => !["origin", "key"].includes(key))
+      || typeof candidate.origin !== "string" || !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(candidate.origin)
+      || typeof candidate.key !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(candidate.key)) {
+      throw new TypeError("uiState.presence must name one loopback review origin and one 32-byte key");
+    }
+    presence = { origin: candidate.origin, key: candidate.key };
   }
   if (!Array.isArray(value.reviews) || value.reviews.length > MAX_BRIDGE_UI_REVIEWS) {
     throw new TypeError("uiState.reviews exceeds the bridge limit");
@@ -1177,7 +1177,7 @@ export function normalizeBridgeUiState(value: unknown): BridgeUiState {
     }
     return { url, label: requiredString(entry.label, `${label}.label`, 120) };
   });
-  return { reviews };
+  return { reviews, ...(presence ? { presence } : {}) };
 }
 
 function parseBinding(value: unknown): BridgeBinding {

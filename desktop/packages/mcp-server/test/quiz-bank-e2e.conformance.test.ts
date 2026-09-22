@@ -21,6 +21,8 @@ import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
 import { assertPortListening, reserveLoopbackPort } from "./fixtures/loopback-port.js";
+import type { LoopbackApprovalServer } from "../src/approval-server.js";
+import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 
 type QuestionFixtures = {
   quizBankE2eQuestionPayloads(): Record<string, JsonObject>;
@@ -304,7 +306,7 @@ async function waitFor(check: () => boolean, message: string): Promise<void> {
   throw new Error(message);
 }
 
-async function approveThroughReviewPage(url: string): Promise<void> {
+async function approveThroughReviewPage(server: LoopbackApprovalServer, url: string): Promise<void> {
   const page = await fetch(url);
   const body = await page.text();
   const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1];
@@ -319,7 +321,7 @@ async function approveThroughReviewPage(url: string): Promise<void> {
       origin: new URL(url).origin,
       referer: url,
     },
-    body: new URLSearchParams({ nonce }),
+    body: new URLSearchParams({ nonce, presence: bridgeSignedPresence(server, `${url}/approve`, nonce) }),
   });
   expect(response.status).toBe(303);
 }
@@ -1801,7 +1803,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       if (webApproval) {
         const url = morrow!.gateway.approvalUrl(id);
         expect(typeof url).toBe("string");
-        await approveThroughReviewPage(String(url));
+        await approveThroughReviewPage(morrow!.approval, String(url));
         await waitFor(() => morrow!.gateway.effects.get(id).state === "verified", `${name} did not settle after review approval`);
         const result = await client!.callTool({ name: "morrow_operation_get", arguments: { operation_id: id } }) as CallToolResult;
         expect(writeCommands, `${name} dispatched more or less than once`).toHaveLength(before + 1);

@@ -1,7 +1,7 @@
 import type { CallToolResult, McpServer, ServerContext } from "@modelcontextprotocol/server";
 import type { JsonObject } from "@morrow/contracts";
 import { describe, expect, it } from "vitest";
-import { registerOperationTools } from "../src/operation-tools.js";
+import { registerOperationTools, type OperationToolComposition } from "../src/operation-tools.js";
 import type { GatewayRuntime } from "../src/runtime.js";
 
 type WaitInput = { operation_id?: string; batch_id?: string; max_wait_seconds?: number };
@@ -14,7 +14,7 @@ type LooseSchema = { safeParse: (value: unknown) => { success: boolean } };
  * own timing and its refusal to touch the runtime beyond one durable read, not MCP wire framing --
  * a fake `McpServer` that only records the registration is the smallest thing that can show that.
  */
-function registerWait(runtime: GatewayRuntime): { handler: WaitHandler; inputSchema: LooseSchema } {
+function registerWait(runtime: GatewayRuntime, composition?: OperationToolComposition): { handler: WaitHandler; inputSchema: LooseSchema } {
   let handler: WaitHandler | undefined;
   let inputSchema: LooseSchema | undefined;
   const fakeServer = {
@@ -25,7 +25,7 @@ function registerWait(runtime: GatewayRuntime): { handler: WaitHandler; inputSch
       }
     },
   } as unknown as McpServer;
-  registerOperationTools(fakeServer, runtime);
+  registerOperationTools(fakeServer, runtime, composition);
   if (!handler || !inputSchema) throw new Error("morrow_operation_wait was not registered");
   return { handler, inputSchema };
 }
@@ -117,6 +117,15 @@ describe("morrow_operation_wait", () => {
     const result = await handler({ operation_id: "op:local-only-1", max_wait_seconds: 5 }, context(new AbortController().signal));
     expect(result.isError).not.toBe(true);
     expect(calls.count).toBe(2);
+  });
+
+  it("reads a batch through the server composition that owns batches", async () => {
+    const { handler } = registerWait(operationOnlyRuntime(["verified"], { count: 0 }), {
+      batchApprovalStatus: (batchId) => ({ batch: { batchId, state: "completed" } }),
+    });
+    const result = await handler({ batch_id: "bat:wait-1234", max_wait_seconds: 1 }, context(new AbortController().signal));
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({ batch: { batchId: "bat:wait-1234", state: "completed" } });
   });
 
   it("requires exactly one of operation_id or batch_id", () => {

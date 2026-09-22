@@ -10,6 +10,7 @@ import { GatewayRuntime } from "../src/runtime.js";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
 import type { ApprovalReviewContext } from "../src/approval-context.js";
 import type { ApprovalReviewContext } from "../src/approval-context.js";
+import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 
@@ -438,7 +439,7 @@ describe("outer provider effects", () => {
           origin: new URL(url as string).origin,
           referer: url as string,
         },
-        body: new URLSearchParams({ nonce: validNonce! }),
+        body: new URLSearchParams({ nonce: validNonce!, presence: bridgeSignedPresence(runtime.approval, `${url}/approve`, validNonce!) }),
       });
       expect(approval.status).toBe(200);
       expect(await approval.text()).not.toContain("Continue");

@@ -56,3 +56,48 @@ describe("morrow_recent_changes", () => {
     expect((structured.data as JsonObject)?.code).toBe("operation_unavailable");
   });
 });
+
+describe("morrow_recent_changes in the full Morrow server", () => {
+  it("hands out a link that opens the recent changes page once", async () => {
+    const { Client, InMemoryTransport } = await import("@modelcontextprotocol/client");
+    const { serveStdio } = await import("@modelcontextprotocol/server/stdio");
+    const { fileURLToPath } = await import("node:url");
+    const { parseGatewayConfig } = await import("../src/config.js");
+    const { MorrowRuntime } = await import("../src/morrow-runtime.js");
+    const { createFullMorrowServer } = await import("../src/full-server.js");
+    const runtime = await MorrowRuntime.connect(parseGatewayConfig({
+      schema: "morrow.upstreams.v1",
+      profile: "private-full",
+      upstreams: [{
+        id: "morrow-legacy",
+        label: "Morrow legacy fixture",
+        kind: "mcp-stdio",
+        command: process.execPath,
+        args: [fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url))],
+        env: { FAKE_SOURCE: "morrow-legacy" },
+        priority: 1,
+        required: true,
+        enabled: true,
+      }],
+      filters: { excludePrefixes: [], excludeNames: [] },
+      operationJournal: { path: ":memory:" },
+      maxCatalogTools: 20,
+    }), { statePath: ":memory:" });
+    const client = new Client({ name: "recent-changes-test", version: "1" });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const server = serveStdio(() => createFullMorrowServer(runtime), { transport: b });
+    try {
+      await client.connect(a);
+      const result = await client.callTool({ name: "morrow_recent_changes", arguments: {} }) as CallToolResult;
+      expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+      const url = String((result.structuredContent as JsonObject).url);
+      expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/recent\?entry=[A-Za-z0-9_-]{43}$/);
+      expect((await fetch(url, { redirect: "manual" })).status).toBe(303);
+      expect((await fetch(url, { redirect: "manual" })).status).toBe(409);
+    } finally {
+      await client.close();
+      await server.close();
+      await runtime.close();
+    }
+  }, 20_000);
+});

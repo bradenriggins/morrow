@@ -140,6 +140,47 @@ describe("WI-2.4: the reviews that wait, pushed to the Bridge popup", () => {
     expect(runtime.operationGet(id)).toMatchObject({ state: "cancelled" });
   }, CASE_TIMEOUT_MS);
 
+  it("hands the approval key to the Bridge with each push, and again when a review page opens", async () => {
+    directory = mkdtempSync(join(tmpdir(), "morrow-ui-state-"));
+    const port = await reserveLoopbackPort();
+    const config = connectorConfig(directory, port);
+    runtime = await GatewayRuntime.connect(config);
+    runtime.setApprovalBaseUrl("http://127.0.0.1:4317");
+    const presence = { origin: "http://127.0.0.1:4317", key: "q".repeat(43) };
+    runtime.setApprovalPresence(presence);
+
+    const root = resolve("../..");
+    const browserDigest = bridgeCatalogDigestForTests(root);
+    bridge = await connectBridgeTestClient({
+      port,
+      token: "gateway-connector-secret-".repeat(3),
+      extensionId: "a".repeat(32),
+      catalogDigest: browserDigest,
+      bindings: [],
+    });
+    bridge.onCommand((command) => {
+      if (command.kind === "ui_state") {
+        bridge!.respond(command, {});
+        return;
+      }
+      bridge!.respondProblem(command, { schema: "morrow.bridge.problem.v1", code: "unexpected_command", message: "unexpected command in this case", recoverable: false });
+    });
+    await assertPortListening(port);
+
+    runtime.announceApprovalPresence();
+    const announced = await bridge.waitForCommand((command) => command.kind === "ui_state");
+    expect(announced.uiState).toEqual({ reviews: [], presence });
+  }, CASE_TIMEOUT_MS);
+
+  it("never sends a key that belongs to another review origin", async () => {
+    directory = mkdtempSync(join(tmpdir(), "morrow-ui-state-"));
+    const port = await reserveLoopbackPort();
+    runtime = await GatewayRuntime.connect(connectorConfig(directory, port));
+    runtime.setApprovalBaseUrl("http://127.0.0.1:4317");
+    expect(() => runtime!.setApprovalPresence({ origin: "http://127.0.0.1:9999", key: "q".repeat(43) }))
+      .toThrow("approval key must belong to the approval service");
+  }, CASE_TIMEOUT_MS);
+
   // WI-3.5: the review link label names the change with the catalog's curated plain
   // label, not the raw catalog title, wherever a review is offered (the assistant's
   // attention text and this popup list both call the same private helper).

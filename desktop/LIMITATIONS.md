@@ -97,7 +97,9 @@ its own ability to change the course, and nothing but a person can undo that.
 
 The browser connector prevents credentials from entering MCP messages, client configuration, logs, or durable operation records. It does not protect a computer that is already compromised, a malicious Chrome extension with broader access, or a malicious local process running as the same operating-system user.
 
-The local approval page requires a separate decision outside the MCP tool surface. It checks the local origin, page nonce, and browser cookie. It cannot prove human presence against software with local HTTP or browser control. It is not multi-person institutional approval.
+The local approval page requires a separate decision outside the MCP tool surface. It checks the local origin, page nonce, and browser cookie, and it requires a signature from Morrow Bridge over that exact form. The runtime sends the Bridge the signing key over the paired connection; the key never appears in a page, header, URL, or tool result. The Bridge signs only a trusted click or key press on the approve button, in the top frame of a tab that shows a review from that same review server. A program that reads and posts the review page over local HTTP, such as `curl`, a script, or an assistant's shell command, cannot approve a change or save "do not ask again".
+
+This is not proof that a person is present. It does not stop software that controls Chrome input, such as browser automation or operating-system accessibility control, and it does not stop a same-user process that reads Morrow's process memory or takes over the paired Bridge connection with the local pairing token. Every approval, for Canvas, Moodle, and Blackboard, needs Chrome with Morrow Bridge connected. It is not multi-person institutional approval.
 
 The desktop app's own half of that boundary is exercised as executed tests in `installer/test/adversarial.test.cjs` and `installer/test/adversarial-bridge.test.mjs`. They run the shipped code and check both halves of each answer: the refusal, and that the refused step changed nothing.
 

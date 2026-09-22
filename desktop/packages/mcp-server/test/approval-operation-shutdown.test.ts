@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { sha256Json, type JsonObject } from "@morrow/contracts";
 import { describe, expect, it } from "vitest";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
+import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 
@@ -22,7 +23,7 @@ function snapshot(operationId: string, state: string): JsonObject {
   };
 }
 
-async function approve(baseUrl: string, operationId: string): Promise<void> {
+async function approve(server: LoopbackApprovalServer, baseUrl: string, operationId: string): Promise<void> {
   const reviewUrl = `${baseUrl}/operations/${encodeURIComponent(operationId)}`;
   const review = await fetch(reviewUrl);
   const html = await review.text();
@@ -38,7 +39,7 @@ async function approve(baseUrl: string, operationId: string): Promise<void> {
       origin: baseUrl,
       referer: reviewUrl,
     },
-    body: new URLSearchParams({ nonce: nonce! }),
+    body: new URLSearchParams({ nonce: nonce!, presence: bridgeSignedPresence(server, `${reviewUrl}/approve`, nonce!) }),
     redirect: "manual",
   });
   expect(response.status).toBe(303);
@@ -131,7 +132,7 @@ describe("single-operation approval shutdown", () => {
     });
     try {
       const baseUrl = await server.start();
-      await approve(baseUrl, operationId);
+      await approve(server, baseUrl, operationId);
       await started.promise;
 
       await expect(Promise.race([
@@ -166,7 +167,7 @@ describe("single-operation approval shutdown", () => {
         beforeSettlement = beforeSend!.gateway.operationGet(operationId);
         return result;
       };
-      await approve(new URL(before.url).origin, before.id);
+      await approve(beforeSend.approval, new URL(before.url).origin, before.id);
       await beforeStarted.promise;
       await beforeSend.close();
       beforeSend = undefined;
@@ -184,7 +185,7 @@ describe("single-operation approval shutdown", () => {
         afterSettlement = afterSend!.gateway.operationGet(operationId);
         return result;
       };
-      await approve(new URL(after.url).origin, after.id);
+      await approve(afterSend.approval, new URL(after.url).origin, after.id);
       await waitUntil(() => afterSend!.gateway.operationGet(after.id).state === "dispatching", "provider dispatch");
       await afterSend.close();
       afterSend = undefined;
