@@ -367,7 +367,10 @@ primary.addEventListener("click", async () => {
 });
 
 canvasAction.addEventListener("click", async () => {
-  await runAction(connectCanvasCourse, () => clearNotice());
+  await runAction(connectCanvasCourse, (result) => {
+    clearNotice();
+    if (result?.siteAnchorId) openCourseSelection();
+  });
 });
 
 // WI-1.1: opens the saved, already-permitted site itself. No permission prompt, because Chrome

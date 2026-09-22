@@ -316,6 +316,23 @@ test("choosing courses opens Plan and Edit settings and asks Chrome for nothing"
   assert.equal(page.optionsPageOpens, 2);
 });
 
+// "Check or switch course" connects the course open in the active tab, then opens course selection,
+// where the course to work in is chosen, the same as Connect this course.
+test("Check or switch course connects the active tab's site, then opens course selection", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
+    tabs: [{ id: 12, url: `${COURSE_ORIGIN}/courses/2` }],
+    handlers: {
+      morrow_connect_course_prepare: () => ({ id: "intent-2", origins: [`${COURSE_ORIGIN}/*`] }),
+      morrow_connect_course_complete: () => ({ siteAnchorId: "canvas:site" }),
+    },
+  });
+  assert.equal(page.text("#canvas-action"), "Check or switch course");
+  await page.click("#canvas-action");
+  assert.deepEqual(page.messages("morrow_connect_course_complete"), [{ type: "morrow_connect_course_complete", intentId: "intent-2" }]);
+  assert.equal(page.optionsPageOpens, 1);
+});
+
 test("a failed action keeps its message until the next action, because a background read is not its answer", async () => {
   const tabs = [];
   const page = await openPopup({
