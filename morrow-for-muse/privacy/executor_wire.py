@@ -416,6 +416,14 @@ def _legacy_tree_slug(tree_root):
     return slug or "tree"
 
 
+def without_pii_reveal(lane_context):
+    """lane_context with any educator reveal removed: the view every
+    journal record is projected with."""
+    out = dict(lane_context or {})
+    out.pop("pii_reveal", None)
+    return out
+
+
 def project_learner_result(entry, result, tenant_base, lane_context=None,
                            error_cls=Exception):
     """Project one applied result's receipt through the source privacy
@@ -447,14 +455,29 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
     course_id = _entry_course_id(entry)
     reveal = pii_reveal_audit(error_cls, lane_context.get("pii_reveal"),
                               tenant_base, course_id)
+    if reveal is not None:
+        # Final muse audit H1: the journal is sealed and append-only, so
+        # purge can never take a name back out of it. Project twice:
+        # the revealed result for the agent, and the de-identified
+        # projection (exactly what an unrevealed read yields) as
+        # "journal_receipt", which is all the journal ever records.
+        deidentified, _none = project_learner_result(
+            entry, result, tenant_base,
+            lane_context=without_pii_reveal(lane_context),
+            error_cls=error_cls)
+        if _admission.touches_learner_data(entry):
+            revealed = dict(result)
+        else:
+            revealed = _label_editor_records(entry, result, tenant_base,
+                                             lane_context, error_cls,
+                                             reveal=reveal)
+            revealed = dict(revealed)
+        revealed["pii_reveal"] = reveal
+        revealed["journal_receipt"] = deidentified.get("receipt")
+        return revealed, reveal
     if not _admission.touches_learner_data(entry):
         return _label_editor_records(entry, result, tenant_base,
-                                     lane_context, error_cls,
-                                     reveal=reveal), None
-    if reveal is not None:
-        revealed = dict(result)
-        revealed["pii_reveal"] = reveal
-        return revealed, reveal
+                                     lane_context, error_cls), None
     provider = entry.get("provider") or "canvas"
     if not course_id:
         raise error_cls(
@@ -627,29 +650,82 @@ def _same_typed_name(left, right):
         " ".join(str(right).split()).casefold()
 
 
-def resolve_learner_labels(value, tenant_base, course_id, conversation_id,
-                           error_cls=Exception, provider=None):
-    """Replace learner labels with real LMS ids for ONE course's write.
+# Learner-id positions (final muse audit L3). A label is a learner
+# reference only where a learner id belongs: a value under a person-id
+# key ("student_ids", "user_id", "assignment_override[student_ids][]"),
+# the "id" of a person record ("user": {"id": ...}), or a path parameter
+# that follows a person route word ("/users/{id}"). Free text whose
+# whole value happens to be a label (a page titled "Student A1") is
+# text, and relabeling never touches an object's own id or an
+# html_url segment that is not a person route.
+_KEY_SEGMENT_RE = re.compile(r"[A-Za-z0-9_]+")
+_PERSON_ROUTE_WORD = r"(?:%ss?|people)" % _PERSON_NOUN_RE
+_PERSON_ROUTE_SLOT_RE = re.compile(
+    r"/%s/\{([A-Za-z0-9_]+)\}" % _PERSON_ROUTE_WORD, re.IGNORECASE)
 
-    A string that is exactly a label ("Student A3") or the echoed form
-    ("Jane Doe (Student A3)") is a learner reference; it becomes the
-    learner's real id (an int when numeric). The label must have been
-    issued in THIS course's vault scope, so a label from another course
-    is refused; an echoed name must match what the educator typed in
-    this conversation, so a stale or cross-course echo is refused.
-    Free text is never rewritten. Returns (resolved_value,
-    {str(real_id): label}) so the caller can relabel everything the
-    agent or the journal sees afterwards.
-    """
+
+def _key_segment(key):
+    parts = _KEY_SEGMENT_RE.findall(str(key or ""))
+    return parts[-1] if parts else ""
+
+
+def is_learner_id_key(key, parent_key=None):
+    """True when a value under key (inside parent_key) is a learner id."""
+    segment = _key_segment(key)
+    if person_key_kind(segment) == "ids":
+        return True
+    return segment == "id" and parent_key is not None and \
+        person_key_kind(_key_segment(parent_key)) == "record"
+
+
+def learner_route_param_keys(entry):
+    """Path parameter names that sit after a person route word in any of
+    the entry's request URLs ("/users/{id}" gives "id")."""
+    keys = set()
+
+    def scan(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "url" and isinstance(v, str):
+                    keys.update(_PERSON_ROUTE_SLOT_RE.findall(v))
+                else:
+                    scan(v)
+        elif isinstance(node, list):
+            for v in node:
+                scan(v)
+    scan(entry or {})
+    return frozenset(keys)
+
+
+def _map_learner_positions(value, fn, extra_keys=frozenset(), key="",
+                           parent=None, in_position=False):
+    """Apply fn(text) to every string in a learner-id position."""
+    if isinstance(value, str):
+        return fn(value) if in_position else value
+    if isinstance(value, list):
+        return [_map_learner_positions(v, fn, extra_keys, key, parent,
+                                       in_position) for v in value]
+    if isinstance(value, dict):
+        return {k: _map_learner_positions(
+            v, fn, extra_keys, k, key,
+            is_learner_id_key(k, key) or k in extra_keys)
+            for k, v in value.items()}
+    return value
+
+
+def _lookup_learner_refs(value, tenant_base, course_id, conversation_id,
+                         error_cls, provider, extra_keys):
+    """{reference text: (label, identity, token)} for every label or
+    echoed label in a learner-id position of value."""
     refs = []
 
-    def collect(text, _key):
+    def collect(text):
         if _LABEL_VALUE_RE.match(text) or _ECHO_VALUE_RE.match(text):
             refs.append(text)
         return text
-    _walk_strings(value, collect)
+    _map_learner_positions(value, collect, extra_keys)
     if not refs:
-        return value, {}
+        return {}
     if _privacy_core.AESGCM is None:
         raise error_cls(
             "this write names a student by label, and turning a label "
@@ -670,11 +746,10 @@ def resolve_learner_labels(value, tenant_base, course_id, conversation_id,
     from privacy import name_echo as _echo
     introduced = None
     vault = _privacy_core.LearnerVault(path)
-    mapping = {}
-    by_text = {}
+    found = {}
     try:
         for text in refs:
-            if text in by_text:
+            if text in found:
                 continue
             echo = _ECHO_VALUE_RE.match(text)
             label = echo.group(2) if echo else text
@@ -690,31 +765,73 @@ def resolve_learner_labels(value, tenant_base, course_id, conversation_id,
                         "find` again for this course. Nothing was sent."
                         % (label, course_id))
             try:
-                identity = vault.resolve(scope, label)
+                identity, token = vault.resolve_with_token(scope, label)
             except _privacy_core.PrivacyError:
                 raise error_cls(
                     "%s was never issued in course %s (labels belong to one "
                     "course); run `morrow students find` for this course "
                     "and use the label it returns. Nothing was sent."
                     % (label, course_id))
-            raw = identity["id"]
-            by_text[text] = int(raw) if raw.isdigit() else raw
-            mapping[str(raw)] = label
+            found[text] = (label, identity, token)
     finally:
         vault.close()
+    return found
 
-    def resolve(text, _key):
-        return by_text.get(text, text)
 
-    def walk(node):
-        if isinstance(node, str):
-            return resolve(node, "")
-        if isinstance(node, list):
-            return [walk(v) for v in node]
-        if isinstance(node, dict):
-            return {k: walk(v) for k, v in node.items()}
-        return node
-    return walk(value), mapping
+def resolve_learner_labels(value, tenant_base, course_id, conversation_id,
+                           error_cls=Exception, provider=None,
+                           extra_keys=frozenset(), tokens_out=None):
+    """Replace learner labels with real LMS ids for ONE course's write.
+
+    A string in a learner-id position (is_learner_id_key, or a key in
+    extra_keys such as a person route's path parameter) that is exactly
+    a label ("Student A3") or the echoed form ("Jane Doe (Student A3)")
+    is a learner reference; it becomes the learner's real id (an int
+    when numeric). The label must have been issued in THIS course's
+    vault scope, so a label from another course is refused; an echoed
+    name must match what the educator typed in this conversation, so a
+    stale or cross-course echo is refused. Free text is never rewritten.
+    Returns (resolved_value, {str(real_id): label}) so the caller can
+    relabel everything the agent or the journal sees afterwards. When
+    tokens_out is a dict it receives {label: vault token}.
+    """
+    found = _lookup_learner_refs(value, tenant_base, course_id,
+                                 conversation_id, error_cls, provider,
+                                 extra_keys)
+    if not found:
+        return value, {}
+    mapping = {}
+    by_text = {}
+    for text, (label, identity, token) in found.items():
+        raw = identity["id"]
+        by_text[text] = int(raw) if raw.isdigit() else raw
+        mapping[str(raw)] = label
+        if tokens_out is not None:
+            tokens_out[label] = token
+    return _map_learner_positions(
+        value, lambda text: by_text.get(text, text), extra_keys), mapping
+
+
+def bind_learner_labels(value, tenant_base, course_id, conversation_id,
+                        error_cls=Exception, provider=None,
+                        extra_keys=frozenset()):
+    """What a Plan-mode write stores for the educator's approval.
+
+    Every learner reference in a learner-id position is checked exactly
+    as resolve_learner_labels checks it, then stored as the bare label
+    (the typed name of an echoed label stays in the encrypted name-echo
+    store only). Returns (value_with_bare_labels, {label: vault token});
+    the tokens bind the approval to the students, not to the label
+    text, and never reveal a real id."""
+    found = _lookup_learner_refs(value, tenant_base, course_id,
+                                 conversation_id, error_cls, provider,
+                                 extra_keys)
+    if not found:
+        return value, {}
+    bare = {text: label for text, (label, _i, _t) in found.items()}
+    tokens = {label: token for label, _i, token in found.values()}
+    return _map_learner_positions(
+        value, lambda text: bare.get(text, text), extra_keys), tokens
 
 
 # Bookkeeping fields that are never learner references (op ids, claim
@@ -725,43 +842,51 @@ _RELABEL_SKIP_KEYS = frozenset({
 
 
 def relabel_learner_ids(value, mapping):
-    """Put labels back wherever a resolved real id shows up.
+    """Put labels back wherever a resolved real id stands for a learner.
 
-    mapping is resolve_learner_labels' {str(real_id): label}. A string
-    gets every digit-bounded occurrence of a resolved id replaced (URL
-    segments percent-encoded so the URL stays intact); an int equal to a
-    resolved id under a person-id key becomes the label."""
+    mapping is resolve_learner_labels' {str(real_id): label}. A value in
+    a learner-id position (is_learner_id_key) equal to a resolved id
+    becomes the label. In other text, an occurrence is relabeled only
+    right after a person word ("user 98765", "/users/98765",
+    "student_ids": [98765]); inside a URL the label is percent-encoded
+    so the URL stays intact. An object's own id or an html_url segment
+    that happens to equal a student's id is left alone."""
     if not mapping:
         return value
     ids = sorted(mapping, key=len, reverse=True)
-    pattern = re.compile(r"(?<![0-9A-Za-z])(%s)(?![0-9A-Za-z])"
-                         % "|".join(re.escape(i) for i in ids))
+    pattern = re.compile(
+        r"(?<![0-9A-Za-z])(%s(?:_ids?)?(?:\[\])?[\"']?"
+        r"(?:\s*(?:[:=/#]|%%2[Ff])\s*\[?\s*|\s+))(%s)(?![0-9A-Za-z])"
+        % (_PERSON_ROUTE_WORD, "|".join(re.escape(i) for i in ids)),
+        re.IGNORECASE)
 
     def text_fn(text):
         spans = [(m.start(), m.end()) for m in
                  _privacy_core._URL_TOKEN_RE.finditer(text)]
 
         def sub(match):
-            label = mapping[match.group(1)]
-            inside = any(a <= match.start() < b for a, b in spans)
-            return urllib.parse.quote(label, safe="") if inside else label
+            label = mapping[match.group(2)]
+            inside = any(a <= match.start(2) < b for a, b in spans)
+            return match.group(1) + (urllib.parse.quote(label, safe="")
+                                     if inside else label)
         return pattern.sub(sub, text)
 
-    def walk(node, key=""):
+    def walk(node, key="", parent=None):
         if key in _RELABEL_SKIP_KEYS or str(key).endswith("_digest"):
             return node
+        position = is_learner_id_key(key, parent)
         if isinstance(node, str):
+            if position and node in mapping:
+                return mapping[node]
             return text_fn(node)
         if isinstance(node, bool):
             return node
-        if isinstance(node, int) and str(node) in mapping and (
-                person_key_kind(key) is not None or key in (
-                    "id", "user_id", "student_id")):
+        if isinstance(node, int) and position and str(node) in mapping:
             return mapping[str(node)]
         if isinstance(node, list):
-            return [walk(v, key) for v in node]
+            return [walk(v, key, parent) for v in node]
         if isinstance(node, dict):
-            return {k: walk(v, k) for k, v in node.items()}
+            return {k: walk(v, k, key) for k, v in node.items()}
         return node
     return walk(value)
 
@@ -783,6 +908,14 @@ def _purge_transient_state():
     at module top, so importing it here at module top would cycle."""
     from transport import browser_backend as _bb
     return _bb.purge_transient_state()
+
+
+def _purge_write_ceremony_files(tenant_base=None, course_id=None):
+    """Final muse audit M2: prepared writes (pending_writes/) and signed
+    approval records (approvals/<op>.json) name students by label and
+    carry the educator's words, so every purge removes them too."""
+    from dispatch import executor as _ex
+    return _ex.purge_write_ceremony_files(tenant_base, course_id)
 
 
 def purge_tenant(tenant_base, error_cls=Exception):
@@ -809,10 +942,12 @@ def purge_tenant(tenant_base, error_cls=Exception):
     from privacy import name_echo as _echo
     _echo.purge(origin)
     pending, briefs, inflight_skipped = _purge_transient_state()
-    return {"tenant": origin, "vault_records_purged": records,
-            "pending_envelopes_removed": pending,
-            "briefs_removed": briefs,
-            "inflight_envelopes_skipped": inflight_skipped}
+    report = {"tenant": origin, "vault_records_purged": records,
+              "pending_envelopes_removed": pending,
+              "briefs_removed": briefs,
+              "inflight_envelopes_skipped": inflight_skipped}
+    report.update(_purge_write_ceremony_files(origin))
+    return report
 
 
 def purge_course(tenant_base, course_id, error_cls=Exception):
@@ -825,11 +960,13 @@ def purge_course(tenant_base, course_id, error_cls=Exception):
     from privacy import name_echo as _echo
     _echo.purge(origin, course_id)
     pending, briefs, inflight_skipped = _purge_transient_state()
-    return {"tenant": origin, "course_id": str(course_id),
-            "vault_records_purged": records,
-            "pending_envelopes_removed": pending,
-            "briefs_removed": briefs,
-            "inflight_envelopes_skipped": inflight_skipped}
+    report = {"tenant": origin, "course_id": str(course_id),
+              "vault_records_purged": records,
+              "pending_envelopes_removed": pending,
+              "briefs_removed": briefs,
+              "inflight_envelopes_skipped": inflight_skipped}
+    report.update(_purge_write_ceremony_files(origin, course_id))
+    return report
 
 
 def purge_all(full_profile=False, error_cls=Exception):
@@ -857,6 +994,7 @@ def purge_all(full_profile=False, error_cls=Exception):
             report[label] = True
         except OSError:
             pass
+    report.update(_purge_write_ceremony_files())
     pending, briefs, inflight_skipped = _bb.purge_transient_state()
     report["pending_envelopes_removed"] = pending
     report["briefs_removed"] = briefs

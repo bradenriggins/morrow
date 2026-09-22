@@ -95,6 +95,7 @@ import copy
 import email.utils
 import errno
 import fcntl
+import glob
 import hashlib
 import hmac
 import http.client
@@ -1415,6 +1416,7 @@ class FrozenPlan:
                         % (path, key, type(value).__name__))
         self.target_identity = dict(target_identity) if target_identity else {}
         self.request_digest = data.get("request_digest")
+        self.learner_tokens = {}
         if self.request_digest is not None:
             request = data.get("request")
             if not isinstance(request, dict) or \
@@ -1422,6 +1424,12 @@ class FrozenPlan:
                 raise MissingFrozenPlan(
                     "frozen plan %s: request does not match its "
                     "request_digest" % path)
+            tokens = request.get("learner_tokens") or {}
+            if not isinstance(tokens, dict):
+                raise MissingFrozenPlan(
+                    "frozen plan %s: learner_tokens must be an object"
+                    % path)
+            self.learner_tokens = dict(tokens)
         self.path = path
         self.digest = digest_of(data)
 
@@ -5682,11 +5690,16 @@ def _project_verification_detail(entry: dict, verification: dict,
             "entry %r: %s" % (entry_name, exc))
     if reveal is not None:
         # Round-4 H2: a sealed educator reveal for this course, so the
-        # detail passes through raw. The reveal audit rides with the
-        # verification dict so the journal records exactly who revealed
-        # and why, the same as it does for receipts.
+        # detail passes through raw for the agent. The reveal audit
+        # rides with the verification dict so the journal records who
+        # revealed and why. Final muse audit H1: the journal gets the
+        # de-identified detail ("journal_detail"), never the raw one.
         out = dict(verification)
         out["pii_reveal"] = reveal
+        out["journal_detail"] = _project_verification_detail(
+            entry, verification, raw_payload, tenant_base, entry_name,
+            lane_context=_wire.without_pii_reveal(lane_context)).get(
+                "detail")
         return out
     projected_detail = (projected.get("receipt") or {}).get(
         "verification_detail")
@@ -7182,20 +7195,42 @@ def _verify_plan_target_corroboration(entry: dict, params: dict, plan) -> dict |
     return {"course_id": write_cid}
 
 
-def _verify_plan_request(entry: dict, params: dict, plan) -> None:
+def _verify_plan_request(entry: dict, params: dict, plan,
+                         learner_tokens=None) -> None:
     """Round-4 H1: a plan frozen for one request never covers another.
 
     A plan that records its request (plan-write always does) must name
     exactly this dispatch's params and request (method, path, query,
-    body). Legacy plans without a request_digest are unaffected."""
+    body). Legacy plans without a request_digest are unaffected.
+
+    Final muse audit M1: a plan that names students by label also
+    records each label's vault token (learner_<uuid>, new on every
+    issue), inside the digested request. learner_tokens is what the
+    labels resolve to now; a label that now names a different issue
+    (the course's labels were purged and re-issued between plan and
+    approval) is refused, so an approval never follows the label text
+    to another student."""
     if plan is None or getattr(plan, "request_digest", None) is None:
         return
     if digest_of(plan.params or {}) != digest_of(params or {}):
         raise MissingFrozenPlan(
             "frozen plan %s was built for different params than this "
             "dispatch; nothing was sent" % plan.path)
-    if admission_request_digest(admission_request_subject(entry, params)) \
-            != plan.request_digest:
+    subject = admission_request_subject(entry, params)
+    planned = getattr(plan, "learner_tokens", None) or {}
+    current = learner_tokens or {}
+    if planned or current:
+        changed = sorted(label for label in set(planned) | set(current)
+                         if planned.get(label) != current.get(label))
+        if changed:
+            raise LearnerLabelUnresolved(
+                "%s no longer names the student the educator approved: "
+                "this course's student labels were cleared and issued "
+                "again after the approval was prepared. Nothing was sent. "
+                "Run `morrow students find` again, then prepare a new "
+                "approval with plan-write." % ", ".join(changed))
+        subject = dict(subject, learner_tokens=current)
+    if admission_request_digest(subject) != plan.request_digest:
         raise MissingFrozenPlan(
             "frozen plan %s was built for a different request (method, "
             "path, query, or body) than this dispatch sends; nothing was "
@@ -7242,7 +7277,7 @@ def _check_expected_digest_guard(entry: dict, params: dict, plan,
 
 def _check_write_gates(entry: dict, params: dict, plan, op_id, kind="dispatch",
                       resume=False, claim_token=None, dry_run=False,
-                      plan_not_required=False) -> tuple:
+                      plan_not_required=False, learner_tokens=None) -> tuple:
     """Shared write gating: halt file, frozen plan, duplicate op id, concurrency.
 
     Returns (op_id, claim_token). The op-id guard is an atomic
@@ -7323,7 +7358,7 @@ def _check_write_gates(entry: dict, params: dict, plan, op_id, kind="dispatch",
             raise MissingFrozenPlan(
                 "frozen plan names %r, but entry is %r" % (plan.entry_name, entry_name))
         if is_write and plan is not None:
-            _verify_plan_request(entry, params, plan)
+            _verify_plan_request(entry, params, plan, learner_tokens)
             _verify_plan_target_corroboration(entry, params, plan)
         _check_expected_digest_guard(entry, params, plan)
         return op_id, None
@@ -7346,9 +7381,10 @@ def _check_write_gates(entry: dict, params: dict, plan, op_id, kind="dispatch",
         # refused and the just-taken claim is released (nothing
         # dispatched, op_id reusable).
         try:
-            _verify_plan_request(entry, params, plan)
+            _verify_plan_request(entry, params, plan, learner_tokens)
             _verify_plan_target_corroboration(entry, params, plan)
-        except (TargetIdentityMismatch, MissingFrozenPlan):
+        except (TargetIdentityMismatch, MissingFrozenPlan,
+                LearnerLabelUnresolved):
             try:
                 release_op_id(op_id, claim_token,
                               "target identity corroboration failed; nothing dispatched")
@@ -7575,7 +7611,8 @@ def _journalable_result(projection_entry: dict, result: dict, tenant_base,
     from privacy import executor_wire as _wire
     try:
         projected, _reveal = _wire.project_learner_result(
-            projection_entry, result, tenant_base, lane_context=lane_context,
+            projection_entry, result, tenant_base,
+            lane_context=_wire.without_pii_reveal(lane_context),
             error_cls=ExecutorError)
         return projected
     except Exception:
@@ -7725,23 +7762,26 @@ def _relabel_exception(exc, mapping):
 
 
 def _resolve_dispatch_labels(entry, params, tenant_base, mode_ctx):
-    """(entry, params, {real id: label}) with learner labels resolved for
-    the course this dispatch targets. No labels: inputs unchanged."""
+    """(entry, params, {real id: label}, {label: vault token}) with
+    learner labels resolved for the course this dispatch targets. No
+    labels: inputs unchanged."""
     from privacy import executor_wire as _wire
     course_id = _write_target_course_id(entry, params)
     conversation_id = mode_ctx.get("conversation_id") \
         if isinstance(mode_ctx, dict) else None
+    tokens = {}
     resolved, mapping = _wire.resolve_learner_labels(
         {"entry": entry, "params": params}, tenant_base, course_id,
         conversation_id, error_cls=LearnerLabelUnresolved,
-        provider=entry.get("provider"))
+        provider=entry.get("provider"),
+        extra_keys=_wire.learner_route_param_keys(entry), tokens_out=tokens)
     if not mapping:
-        return entry, params, {}
+        return entry, params, {}, {}
     if not course_id:
         raise LearnerLabelUnresolved(
             "this dispatch names a student by label but targets no course; "
             "labels belong to one course. Nothing was sent.")
-    return resolved["entry"], resolved["params"], mapping
+    return resolved["entry"], resolved["params"], mapping, tokens
 
 
 def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
@@ -7823,8 +7863,8 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
     # gate and BEFORE the write gates claim the op (a refusal here leaves
     # nothing claimed). The gates and every journal record keep the
     # label params; provider calls get the resolved ones.
-    wire_entry, wire_params, id_labels = _resolve_dispatch_labels(
-        entry, params, tenant_base, mode_ctx)
+    wire_entry, wire_params, id_labels, label_tokens = \
+        _resolve_dispatch_labels(entry, params, tenant_base, mode_ctx)
     lane_context = {"pii_reveal": pii_reveal} if pii_reveal else None
     # Learner-data decision 2026-09-20: the raw lane passes no vault_ready,
     # so learner-bearing entries are refused here (LearnerDataGated) rather
@@ -7847,7 +7887,8 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                        and approval_audit.get("mode") == "edit")
     op_id, claim_token = _check_write_gates(entry, params, plan, op_id, kind,
                                             dry_run=dry_run,
-                                            plan_not_required=mode_edit_write)
+                                            plan_not_required=mode_edit_write,
+                                            learner_tokens=label_tokens)
     journal_params = params
     entry, params = wire_entry, wire_params
     if id_labels and isinstance(_labels, dict):
@@ -8358,7 +8399,8 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # uncertain write raises instead of returning.
         "outcome": outcome,
         "verified": outcome == "verified",
-        "verification": verification,
+        "verification": {k: v for k, v in verification.items()
+                         if k != "journal_detail"},
         "receipt": result["receipt"],
         "truncated": truncation is not None,
         "truncation": truncation,
@@ -8431,9 +8473,14 @@ def _journal_record(entry_name, kind, effects, params, plan, op_id,
         "before_state_digest": plan.before_state_digest if plan else None,
         "after_state_digest": after_digest,
         "verification": verification["status"],
+        # Final muse audit H1: under an educator reveal the agent gets
+        # real names, the journal only ever the de-identified projection.
         "verification_detail": redact_payload(
-            verification.get("detail"), DEFAULT_REDACT_PATTERNS),
-        "receipt": redact_payload(result["receipt"], DEFAULT_REDACT_PATTERNS),
+            verification.get("journal_detail", verification.get("detail")),
+            DEFAULT_REDACT_PATTERNS),
+        "receipt": redact_payload(result.get("journal_receipt",
+                                             result["receipt"]),
+                                  DEFAULT_REDACT_PATTERNS),
         "truncated": result["truncated"],
         "bytes_received": result["bytes_received"],
         "attempts": attempts,
@@ -9463,23 +9510,48 @@ def _read_course_identity(entry: dict, params: dict, session, pack: dict,
 def prepare_plan_write(name: str, method: str, path_template: str,
                        params: dict, body, session, pack: dict,
                        provider: str = "canvas",
-                       ttl_seconds: int = 3600) -> dict:
+                       ttl_seconds: int = 3600,
+                       conversation_id: str | None = None) -> dict:
     """Prepare one Plan-mode catalog write for the educator's approval.
 
     Runs the catalog and policy gates, reads the target course, builds
     the frozen plan and the unsigned approval record bound to the exact
     request, and stores them as a pending write. Sends nothing and
-    journals nothing. Returns what the agent shows the educator."""
+    journals nothing. Returns what the agent shows the educator.
+
+    Students named by label (or by the echoed "<typed name> (label)"
+    form, checked against conversation_id) are stored as bare labels,
+    and the plan binds each label to its vault token (final muse audit
+    M1/M2): the typed name stays in the encrypted name-echo store, and
+    approve-write refuses when a label names a different issue."""
     try:
         from dispatch.admission import mint_approval
         from dispatch.approval_display import render_approval_display
     except ImportError:  # run as a script: dispatch/ itself is on sys.path
         from admission import mint_approval
         from approval_display import render_approval_display
+    expire_write_ceremony_files(quiet=True)
     params = dict(params or {})
     extra = {"body": body} if body is not None else None
     entry = catalog_descriptor_to_entry(name, method, path_template, None,
                                         provider, None, extra)
+    from privacy import executor_wire as _wire
+    bound, learner_tokens = _wire.bind_learner_labels(
+        {"params": params, "body": body},
+        session.base_for(provider or "canvas"),
+        _write_target_course_id(entry, params), conversation_id,
+        error_cls=LearnerLabelUnresolved, provider=provider,
+        extra_keys=_wire.learner_route_param_keys(entry))
+    if learner_tokens:
+        if _write_target_course_id(entry, params) is None:
+            raise LearnerLabelUnresolved(
+                "this write names a student by label but targets no "
+                "course; labels belong to one course. Nothing was "
+                "prepared.")
+        params, body = dict(bound["params"]), bound["body"]
+        extra = {"body": body} if body is not None else None
+        entry = catalog_descriptor_to_entry(name, method, path_template,
+                                            None, provider, None, extra)
     if entry.get("effects") != "write":
         raise ExecutorError(
             "plan-write prepares writes only; %r is a %s operation (run "
@@ -9499,6 +9571,8 @@ def prepare_plan_write(name: str, method: str, path_template: str,
                                        course_id)
     op_id = str(uuid.uuid4())
     subject = admission_request_subject(entry, params)
+    if learner_tokens:
+        subject = dict(subject, learner_tokens=learner_tokens)
     plan = {
         "op_id": op_id,
         "entry_name": name,
@@ -9515,6 +9589,11 @@ def prepare_plan_write(name: str, method: str, path_template: str,
     record = mint_approval(entry, params, tenant_base, ttl_seconds,
                            target_identity=target)
     display = render_approval_display(record, params, entry=entry)
+    if learner_tokens and conversation_id and course_id is not None:
+        # Shown to the educator (through the agent, in this conversation
+        # only): the names the educator typed, next to their labels.
+        display = _wire.apply_name_echo(display, tenant_base, course_id,
+                                        conversation_id)
     _write_private_json(pending_write_path(op_id), {
         "version": 1,
         "op_id": op_id,
@@ -9553,6 +9632,7 @@ def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
         from dispatch.admission import sign_approval
     except ImportError:  # run as a script: dispatch/ itself is on sys.path
         from admission import sign_approval
+    expire_write_ceremony_files(quiet=True)
     path = pending_write_path(op_id)
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -9560,7 +9640,8 @@ def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
     except (OSError, ValueError):
         raise MissingFrozenPlan(
             "no prepared write %s is waiting for approval (it was sent "
-            "already, or never prepared); run plan-write again" % op_id)
+            "already, it expired, or it was never prepared); run "
+            "plan-write again" % op_id)
     descriptor = doc.get("descriptor") or {}
     plan_path = path[:-len(".json")] + ".plan.json"
     _write_private_json(plan_path, doc.get("plan") or {})
@@ -9597,6 +9678,131 @@ def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
     except OSError:
         pass
     return out
+
+
+# Final muse audit M2: prepared writes the educator never approved, and
+# signed approval records of finished writes, do not stay on disk
+# forever. A prepared write goes when its approval expires; a signed
+# approval record goes a day after its expiry (the browser lane's
+# complete phase re-reads it within minutes). consumed.json, the
+# single-use replay guard, is never touched here. Every purge removes
+# them too (privacy/executor_wire.purge_*).
+APPROVAL_RECORD_RETENTION = timedelta(hours=24)
+
+
+def _approvals_dir():
+    try:
+        from dispatch import admission as _adm
+    except ImportError:  # run as a script: dispatch/ itself is on sys.path
+        import admission as _adm
+    return _adm.APPROVALS_DIR
+
+
+def _record_expiry(record, fallback_path):
+    expires = None
+    if isinstance(record, dict):
+        try:
+            expires = datetime.fromisoformat(
+                str(record.get("expires_at")))
+        except ValueError:
+            expires = None
+    if expires is None or expires.tzinfo is None:
+        try:
+            mtime = os.path.getmtime(fallback_path)
+        except OSError:
+            return None
+        expires = datetime.fromtimestamp(
+            mtime, timezone.utc) + timedelta(days=1)
+    return expires
+
+
+def _ceremony_files():
+    """[(kind, path, approval record or None)] for every prepared write
+    and every signed approval record on disk."""
+    out = []
+    pending_dir = os.path.join(MORROW_HOME, PENDING_WRITES_DIRNAME)
+    for path in sorted(glob.glob(os.path.join(pending_dir, "*.json"))):
+        if path.endswith(".plan.json"):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                doc = json.load(fh)
+        except (OSError, ValueError):
+            doc = {}
+        out.append(("pending", path, (doc or {}).get("approval")
+                    if isinstance(doc, dict) else None))
+    approvals = _approvals_dir()
+    for path in sorted(glob.glob(os.path.join(approvals, "*.json"))):
+        stem = os.path.basename(path)[:-len(".json")]
+        try:
+            check_uuid(stem)
+        except Exception:
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                record = json.load(fh)
+        except (OSError, ValueError):
+            record = None
+        out.append(("approval", path, record))
+    return out
+
+
+def _remove_ceremony_file(kind, path):
+    removed = False
+    for target in ((path, path[:-len(".json")] + ".plan.json")
+                   if kind == "pending" else (path,)):
+        try:
+            os.unlink(target)
+            removed = removed or target == path
+        except OSError:
+            pass
+    return removed
+
+
+def expire_write_ceremony_files(now=None, quiet=False) -> dict:
+    """Remove expired prepared writes and old signed approval records.
+
+    Runs at every plan-write and approve-write; quiet=True never
+    raises. Returns {"pending_writes_removed", "approval_records_removed"}."""
+    now = now or datetime.now(timezone.utc)
+    report = {"pending_writes_removed": 0, "approval_records_removed": 0}
+    try:
+        for kind, path, record in _ceremony_files():
+            expires = _record_expiry(record, path)
+            if expires is None:
+                continue
+            if kind == "approval":
+                expires = expires + APPROVAL_RECORD_RETENTION
+            if expires < now and _remove_ceremony_file(kind, path):
+                report["pending_writes_removed" if kind == "pending"
+                       else "approval_records_removed"] += 1
+    except Exception:
+        if not quiet:
+            raise
+    return report
+
+
+def purge_write_ceremony_files(tenant_base=None, course_id=None) -> dict:
+    """Remove prepared writes and signed approval records for one tenant
+    (and optionally one course on it), or every one when tenant_base is
+    None. Returns the same report shape as expire_write_ceremony_files."""
+    def norm(base):
+        return str(base or "").strip().rstrip("/").lower()
+    report = {"pending_writes_removed": 0, "approval_records_removed": 0}
+    for kind, path, record in _ceremony_files():
+        if tenant_base is not None:
+            target = (record or {}).get("target") \
+                if isinstance(record, dict) else None
+            target = target if isinstance(target, dict) else {}
+            if norm(target.get("tenant")) != norm(tenant_base):
+                continue
+            if course_id is not None and \
+                    str(target.get("course_id")) != str(course_id):
+                continue
+        if _remove_ceremony_file(kind, path):
+            report["pending_writes_removed" if kind == "pending"
+                   else "approval_records_removed"] += 1
+    return report
 
 
 def _load_plan(text: str) -> bytes:
@@ -10030,10 +10236,12 @@ def main(argv=None):
                         raise ExecutorError("--body is not valid JSON")
                     if not isinstance(body, dict):
                         raise ExecutorError("--body must be a JSON object")
-                out = prepare_plan_write(args.name, args.method, args.path,
-                                         _load_params(args.params), body,
-                                         session, pack,
-                                         provider=args.provider)
+                out = prepare_plan_write(
+                    args.name, args.method, args.path,
+                    _load_params(args.params), body, session, pack,
+                    provider=args.provider,
+                    conversation_id=(_mode_ctx_from_args(args) or {}).get(
+                        "conversation_id"))
             else:
                 out = approve_plan_write(args.op_id, args.authorization,
                                          session, pack,
