@@ -143,8 +143,9 @@ class SafeRedirectSession(requests.Session if requests is not None else object):
       the generator, which only sees each hop AFTER requests has
       already sent it: the downgraded request would already be on
       the wire. Never check post-send.)
-    - STRIPS Authorization and Proxy-Authorization when the host
-      changes (stock requests behavior, kept) AND on any scheme
+    - REFUSES a redirect to another host or port (a 307/308 would
+      re-send the body, e.g. the login form with the password).
+    - STRIPS Authorization and Proxy-Authorization on any scheme
       change, even same-host (stricter than stock requests). The
       stripping lives in rebuild_auth(), which requests calls
       before sending each redirected request.
@@ -177,7 +178,19 @@ class SafeRedirectSession(requests.Session if requests is not None else object):
         prev_scheme = urlparse(prev_url).scheme
         # Location may be relative ("/foo"); resolve it against the
         # URL that produced the redirect before judging the scheme.
-        new_scheme = urlparse(urljoin(resp.url or prev_url, target)).scheme
+        resolved = urlparse(urljoin(resp.url or prev_url, target))
+        new_scheme = resolved.scheme
+        prev_parts = urlparse(prev_url)
+        if (resolved.hostname or "").lower() != \
+                (prev_parts.hostname or "").lower() \
+                or resolved.port != prev_parts.port:
+            # A 307/308 re-sends the body (the login form carries the
+            # password), so the lane never follows a redirect off the
+            # Moodle host.
+            raise MoodleLaneError(
+                "network",
+                "refused redirect off the Moodle host: %s -> %s (no "
+                "request was sent to the other host)" % (prev_url, target))
         if prev_scheme == "https" and new_scheme == "http":
             raise MoodleLaneError(
                 "network",
