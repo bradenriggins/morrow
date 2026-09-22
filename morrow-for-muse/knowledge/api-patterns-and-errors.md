@@ -205,7 +205,8 @@ news, which is exactly why they keep biting.
   served tool bundle (NQS-7).
 - **Learner-bearing routes** (`/users/`, `/enrollments`,
   `/submissions`, `/gradebook`, `/grades`, `/analytics`,
-  `/ai_conversations`, `/ai_experiences`) are refused by the
-  admission gate as learner-data (`LearnerDataGated`) until the
-  tokenization boundary is proven. The admission gate refuses them on
-  every tenant; there is no bypass. `/users/self` is the exception.
+  `/ai_conversations`, `/ai_experiences`) are learner data: they
+  dispatch only on the Chromium lane with the encrypted learner vault,
+  where every receipt is de-identified, and are refused
+  (`LearnerDataGated`) everywhere else, on every tenant; there is no
+  bypass. `/users/self` is the exception.

@@ -53,8 +53,12 @@ where it comes from.
 Two guardrails are always in force, and the agent enforces them no
 matter the mode:
 
-1. **Student privacy.** Student data is de-identified before the agent
-   can see it. This is not a setting and cannot be turned off.
+1. **Student privacy.** Student data from Canvas is de-identified
+   before the agent can see it. You can still name a student; the
+   agent then shows that student by the name you typed, in that
+   conversation only. This is not a setting and cannot be turned off.
+   Morrow cannot intercept what you type to Muse, so the names you
+   type reach the Muse model.
 2. **Safe operations in Canvas.** Every write runs only through the
    governed dispatcher (live-proven operations only, never-dispatch
    routes refused). If you also want deletes and other destructive

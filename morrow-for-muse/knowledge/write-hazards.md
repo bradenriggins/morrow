@@ -35,10 +35,10 @@ Changing `due_at` on the same call does NOT move existing overrides
 
 Admission treatment: before any points change, ask the educator
 whether submissions already exist on the assignment and disclose the
-rescale to them in plain language as part of the approval (you cannot
-read submissions yourself: the admission gate refuses submission
-reads as learner-data, `LearnerDataGated`, which is a refusal, not an
-evidence-hold). The educator approves the
+rescale to them in plain language as part of the approval (submission
+reads are learner data: they dispatch only on the Chromium lane with
+the encrypted vault, de-identified, and only for live-proven rows; do
+not rely on them for this check). The educator approves the
 rescale explicitly, not just the number. The post-write readback compares
 more than the points field: read the assignment back and confirm the
 points landed, and name the rescale in the receipt.
