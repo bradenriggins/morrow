@@ -315,6 +315,14 @@ Morrow supports durable read and write batches across explicit course sets.
 
 Morrow projects results before it returns them to the AI client. It applies field policy, record limits, byte limits, free-text policy, and learner tokenization at the gateway boundary. Sensitive nested errors are scrubbed. The learner vault, operation journal, encrypted batch manifests, pairing state, and verification receipts stay on the user's computer.
 
+Learner tokenization works from the complete course roster. Each student on it gets one course label, such as `Student A4`, and the assistant receives that label in place of the student's name, email address, login, SIS id, and platform id. Morrow also replaces the platform id where a link carries it, such as a Canvas grade or submission link or a Moodle profile or grade report link, and a rostered id of five or more digits written on its own in text. When the assistant writes to a label, Morrow sends the student's real platform id to Canvas or Moodle and returns the label again. See [learner privacy limits](LIMITATIONS.md#learner-privacy).
+
+The assistant sees labels; the educator sees names on Morrow's own pages on this computer. The review page for a change shows each student's name beside the label the assistant used, for example `Jane Doe (Student A4)`. Those names come from the learner vault on this computer. They are never part of a tool result, a receipt, or anything else Morrow returns to the assistant.
+
+### Private Chat
+
+`morrow_private_chat` opens the Private Chat drawer in Morrow Bridge's settings page and relays a conversation about one connected course to the assistant through MCP sampling. The educator writes with student names and lists each student the message names. Before the message leaves Chrome, Morrow Bridge reads a fresh, complete course roster and replaces each name, email address, login, SIS id, and platform id it matches with that student's course label. It matches names with or without accents. The label comes from the same learner vault as tool results, so one student has one label everywhere in that course. Morrow Bridge sends Morrow only the platform ids of the students it found, to ask for their labels; no name leaves Chrome. A capitalized word that looks like a name but matches no student stops the message, and Morrow Bridge names it; the educator adds the student to the list or sends the message again to send it as written. The drawer shows the educator each student's name where the assistant sees a label. Closing the drawer ends the session and clears the conversation and its names. See [learner privacy limits](LIMITATIONS.md#learner-privacy).
+
 Client configuration contains only the local Node command, server entry path, working directory, and `MORROW_UPSTREAMS_FILE`. It contains no Canvas credential, Blackboard secret, or browser secret.
 
 ## The Morrow desktop app
