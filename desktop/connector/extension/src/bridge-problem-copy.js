@@ -144,9 +144,9 @@ const COPY = {
     action: "Select at least one available change type before saving.",
   },
   edit_policy_expiration_invalid: {
-    title: "That Edit access length is not one Morrow offers",
-    detail: "Edit access ends by itself, so it is saved only with one of the listed lengths.",
-    action: "Choose one of the listed lengths, then save again.",
+    title: "This saved Edit access has an end time Morrow cannot use",
+    detail: "The course kept Edit access from an earlier version of Morrow Bridge, and its saved end time is not valid, so Morrow does not use it.",
+    action: "Return the course to Plan in Plan and Edit settings, then choose Edit again.",
   },
   edit_policy_sender_refused: {
     title: "This permission action was not started from Plan and Edit settings",

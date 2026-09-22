@@ -8,7 +8,6 @@ const categoryFieldset = document.querySelector("#category-fieldset");
 const categoryList = document.querySelector("#category-list");
 const actionFilter = document.querySelector("#action-filter");
 const actionCheckedOnly = document.querySelector("#action-checked-only");
-const editDuration = document.querySelector("#edit-duration");
 const routineSwitchContainer = document.querySelector("#routine-switch");
 const routineSwitch = document.querySelector("#routine-edits");
 const routineBundleList = document.querySelector("#routine-bundle-list");
@@ -79,10 +78,6 @@ const SCOPES = Object.freeze([
 ]);
 /** WI-5.3 row order: needs attention, then connected, then not connected. */
 const SCOPE_RANK = Object.freeze({ attention: 0, connected: 1, available: 2 });
-const DEFAULT_EDIT_DURATION_MS = 60 * 60 * 1_000;
-// D3: the Routine edits switch always starts a grant at 4 hours, independent of the Customize
-// picker's own default above.
-const ROUTINE_EDIT_DURATION_MS = 4 * 60 * 60 * 1_000;
 const COURSE_FILE_STORAGE_ACCESS_KEY = "courseFileStorageAccessEnabled";
 // WI-1.2 (D1a): the same storage key src/service-worker.js reads (openPlatform, :6141). A missing
 // key means on, so the checkbox starts checked before the first storage read settles.
@@ -204,7 +199,6 @@ const state = {
   // itself when no routine bundle remains available for the selected courses.
   routineMode: false,
   openPlatformProgressVisible: false,
-  pendingDurationMs: null,
   optionsByBinding: new Map(),
   optionsLoading: false,
   optionsRequestToken: 0,
@@ -581,20 +575,11 @@ function permissionExpiresAt(binding) {
   return null;
 }
 
+// Edit is not timed. Only a grant saved while it was carries an end time, and that grant lapses to
+// Plan at that time.
 function permissionHasExpired(binding) {
   const expiresAt = permissionExpiresAt(binding);
   return expiresAt !== null && Date.now() >= expiresAt;
-}
-
-function expiryLabel(expiresAt) {
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short"
-  }).format(expiresAt);
 }
 
 function isStale(binding) {
@@ -1069,22 +1054,16 @@ const ROUTINE_CATEGORY_IDS_BY_PROVIDER = CURATED_CATEGORY_SPECS.filter((spec) =>
     return byProvider;
   }, {});
 
-function clockTime(ms) {
-  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(ms);
-}
-
 /** D7: the row's own state text. It reads only the saved summary (binding.editPermission), so a
  * row needs no per-course options fetch to show it. */
 function courseStateText(binding) {
   const ids = Array.isArray(binding?.editPermission?.enabledCategories) ? binding.editPermission.enabledCategories.filter((id) => typeof id === "string") : [];
   if (!ids.length || permissionHasExpired(binding) || isStale(binding)) return "Plan. Asks first.";
-  const expiresAt = permissionExpiresAt(binding);
-  const until = expiresAt !== null ? `Edit until ${clockTime(expiresAt)}.` : "Edit.";
   const routineIds = ROUTINE_CATEGORY_IDS_BY_PROVIDER[binding.provider] || [];
   const isRoutine = routineIds.length > 0 && ids.length === routineIds.length && routineIds.every((id) => ids.includes(id));
-  if (isRoutine) return `${until} Routine edits.`;
-  if (ids.length === 1) return `${until} 1 kind of edit.`;
-  return `${until} Custom.`;
+  if (isRoutine) return "Edit. Routine edits.";
+  if (ids.length === 1) return "Edit. 1 kind of edit.";
+  return "Edit. Custom.";
 }
 
 /** WI-5.4: "plan" | "routine" | "custom", for the detail's Plan/Edit control and its third "Custom"
@@ -1110,16 +1089,6 @@ function categoryLabelFor(id) {
 
 function courseDetailDomId(sourceBindingId) {
   return `course-detail-${String(sourceBindingId).replace(/[^A-Za-z0-9_-]/g, "-")}`;
-}
-
-/** WI-5.4 ("Remove" and the Ends menu's own selection): the fixed duration (F5) closest to what
- * remains until a saved expiresAt, since morrow_edit_policy_save accepts only the five fixed
- * durations, never an arbitrary remaining time. */
-function closestEditDuration(expiresAt) {
-  const durations = allowedEditDurations();
-  if (!durations.length) return null;
-  const remaining = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - Date.now()) : 0;
-  return durations.reduce((closest, entry) => Math.abs(entry.value - remaining) < Math.abs(closest.value - remaining) ? entry : closest, durations[0]).value;
 }
 
 /** WI-1.1, WI-5.3: the reason a "Needs attention" row needs a button instead of the D7 text. */
@@ -1194,26 +1163,16 @@ function renderCourseDetail(binding, isOpen) {
   if (!isOpen) return `<div class="course-detail morrow-panel" id="${escapeHtml(detailId)}"></div>`;
   const level = courseLevel(binding);
   const ids = level === "plan" ? [] : (Array.isArray(binding?.editPermission?.enabledCategories) ? binding.editPermission.enabledCategories.filter((value) => typeof value === "string") : []);
-  const expiresAt = permissionExpiresAt(binding);
-  const until = level !== "plan" && expiresAt !== null ? clockTime(expiresAt) : null;
   const lead = level === "routine"
-    ? `Until ${escapeHtml(until)}, Morrow makes the routine edits below without another approval. It always asks before it creates, publishes, removes, posts, or changes a date, points or a setting.`
+    ? "Morrow makes the routine edits below without another approval until you choose Plan. It always asks before it creates, publishes, removes, posts, or changes a date, points or a setting."
     : level === "custom"
-      ? `Morrow makes the changes you selected in Customize until ${escapeHtml(until)}. It asks before every other change.`
+      ? "Morrow makes the changes you selected in Customize until you choose Plan. It asks before every other change."
       : "Morrow asks before each change. To skip the review for one kind of edit, choose Edit above, or use “do not ask again” on a review.";
   const listHtml = ids.length ? `<div class="routine-bundle-list">${ids.map((id) => `
     <div class="routine-bundle-item">
       <span>${escapeHtml(categoryLabelFor(id))}</span>
       <button type="button" class="secondary" data-remove-category="${escapeHtml(id)}" ${state.busy ? "disabled" : ""}>Remove</button>
     </div>`).join("")}</div>` : "";
-  const currentDurationValue = level !== "plan" ? closestEditDuration(expiresAt) : null;
-  const endsField = level !== "plan" ? `
-    <label class="duration-field" for="course-ends-${escapeHtml(detailId)}">
-      <span>Ends</span>
-      <select id="course-ends-${escapeHtml(detailId)}" data-end-duration ${state.busy ? "disabled" : ""}>
-        ${allowedEditDurations().map((entry) => `<option value="${entry.value}" ${entry.value === currentDurationValue ? "selected" : ""}>${escapeHtml(clockTime(Date.now() + entry.value))} (${escapeHtml(entry.label)})</option>`).join("")}
-      </select>
-    </label>` : "";
   return `
     <div class="course-detail morrow-panel is-open" id="${escapeHtml(detailId)}" data-binding-id="${escapeHtml(binding.sourceBindingId)}">
       <div class="course-detail-top">
@@ -1222,7 +1181,6 @@ function renderCourseDetail(binding, isOpen) {
           <button type="button" data-set-level="routine" aria-pressed="${level === "routine"}" ${state.busy ? "disabled" : ""}>Edit. Routine edits.</button>
           ${level === "custom" ? `<button type="button" aria-pressed="true" data-open-customize="1">Custom</button>` : ""}
         </div>
-        ${endsField}
       </div>
       <p class="field-help">${lead}</p>
       ${listHtml}
@@ -1352,31 +1310,6 @@ function renderCourseList(focus = focusedCourseControl()) {
   restoreCourseFocus(focus);
 }
 
-function allowedEditDurations() {
-  const values = Array.isArray(state.status?.editDurations) ? state.status.editDurations : [];
-  return values.filter((entry) => Number.isSafeInteger(entry?.value) && entry.value > 0 && typeof entry.label === "string" && entry.label);
-}
-
-function selectedEditDuration() {
-  const value = Number(editDuration.value);
-  return allowedEditDurations().some((entry) => entry.value === value) ? value : null;
-}
-
-function renderEditDuration(showEditStage) {
-  const durations = allowedEditDurations();
-  // WI-4.5 (D3): the Routine edits switch asks for one render with a forced duration (4 hours),
-  // then this field goes back to remembering whatever the person last chose.
-  const requested = state.pendingDurationMs;
-  state.pendingDurationMs = null;
-  const selected = requested !== null && durations.some((entry) => entry.value === requested) ? requested : selectedEditDuration();
-  const preferred = durations.some((entry) => entry.value === selected)
-    ? selected
-    : durations.find((entry) => entry.value === DEFAULT_EDIT_DURATION_MS)?.value || durations[0]?.value || null;
-  editDuration.innerHTML = durations.map((entry) => `<option value="${entry.value}">${escapeHtml(entry.label)}</option>`).join("");
-  if (preferred !== null) editDuration.value = String(preferred);
-  editDuration.disabled = state.busy || !showEditStage || !durations.length;
-}
-
 /** WI-4.5 (D2, P2): the switch and its always-visible, never-disclosed list of included bundles. */
 function renderRoutineSwitch(showEditStage) {
   const ids = routineCategoryIds();
@@ -1403,15 +1336,13 @@ function renderRoutineSwitch(showEditStage) {
 }
 
 /** WI-5.5: the Customize view's summary bar sentence, "N actions in N areas, no removal (or "K
- * remove content"), N courses, until <clock time>". Always visible above "Review and save", so it
- * states the grant in one sentence before a person saves it. */
+ * remove content"), N courses". Always visible above "Review and save", so it states the grant in
+ * one sentence before a person saves it. */
 function renderSummaryBar(selected, ids) {
   const categories = ids.map(categoryById).filter(Boolean);
   const areas = new Set(categories.map((category) => categoryAreaId(category)));
   const removals = categories.filter((category) => categoryKind(category) === "remove").length;
-  const duration = selectedEditDuration();
-  const until = duration !== null ? clockTime(Date.now() + duration) : "the selected time";
-  return `${plural(categories.length, "action")} in ${plural(areas.size, "area")}, ${removals ? `${plural(removals, "action")} remove content` : "no removal"}, ${plural(selected.length, "course")}, until ${until}`;
+  return `${plural(categories.length, "action")} in ${plural(areas.size, "area")}, ${removals ? `${plural(removals, "action")} remove content` : "no removal"}, ${plural(selected.length, "course")}`;
 }
 
 /** WI-5.2: the Course access panel sits between "Your courses" and "Browser permissions and
@@ -1435,10 +1366,6 @@ function renderSelection() {
   const showEditStage = state.mode === "edit" && selected.length > 0 && !needsSite;
   categoryFieldset.hidden = !showEditStage;
   categoryFieldset.disabled = state.busy || !showEditStage;
-  // WI-5.5: the summary bar's "until <clock time>" reads #edit-duration's own value, so it must be
-  // set (renderEditDuration also resolves a pending routine-switch duration, D3) before that sentence
-  // is built below.
-  renderEditDuration(showEditStage);
   renderRoutineSwitch(showEditStage);
   selectionSummary.textContent = state.statusReadFailed
     ? "Course access was not checked. Select Refresh connected courses."
@@ -1477,7 +1404,7 @@ function renderSelection() {
   }
   confirmSaveButton.disabled = state.busy;
   cancelSaveButton.disabled = state.busy;
-  saveEditButton.disabled = state.busy || confirming || !showEditStage || !categoriesSelected || !availableCategories.size || !selectedEditDuration();
+  saveEditButton.disabled = state.busy || confirming || !showEditStage || !categoriesSelected || !availableCategories.size;
   returnPlanButton.textContent = `Return ${plural(selected.length, "selected course")} to Plan`;
   // WI-5.5: the summary bar's own button. The progress label from saveEditAccess (WI-F.10, "Saving N
   // of N courses") still takes over once a save runs long enough to need it.
@@ -1490,7 +1417,7 @@ function renderSelection() {
       ? "The selected courses use different platforms. Choose courses from one platform before you save Edit."
       : !categoriesSelected
         ? "Choose at least one action. Unchecked actions stay in Plan for your review."
-        : `Morrow can apply only the checked actions in these courses for ${editDuration.options[editDuration.selectedIndex]?.text || "the selected duration"}. Save again if available actions change.`;
+        : "Morrow can apply only the checked actions in these courses until you return them to Plan. Save again if available actions change.";
 }
 
 function renderFileStorageAccess() {
@@ -1638,7 +1565,7 @@ function render(courseFocus = focusedCourseControl()) {
 }
 
 function normalizeStatus(result) {
-  if (!result || typeof result !== "object" || !Array.isArray(result.bindings) || !Array.isArray(result.editDurations)) {
+  if (!result || typeof result !== "object" || !Array.isArray(result.bindings)) {
     throw new Error("edit_policy_status_unreadable");
   }
   return result;
@@ -1694,7 +1621,7 @@ async function refresh() {
       state.selectedCategories.clear();
       modePlan.checked = true;
       modeEdit.checked = false;
-      showNotice(`${plural(expiredSelected.length, "selected course")} returned to Plan because temporary Edit access ended.`);
+      showNotice(`${plural(expiredSelected.length, "selected course")} returned to Plan. ${expiredSelected.length === 1 ? "Its" : "Their"} earlier Edit access had an end time, and that time has passed.`);
     }
     if (state.discovery && !anchors().some((anchor) => anchor.siteAnchorId === state.discovery.siteAnchorId)) {
       state.discovery = null;
@@ -1797,8 +1724,7 @@ async function returnToPlan(bindings, { doneMessage } = {}) {
 async function saveEditAccess() {
   const bindings = selectedBindings();
   const enabledCategories = [...state.selectedCategories];
-  const expiresInMs = selectedEditDuration();
-  if (!bindings.length || !enabledCategories.length || !availableCategoriesForSelection().size || !expiresInMs || state.busy) return;
+  if (!bindings.length || !enabledCategories.length || !availableCategoriesForSelection().size || state.busy) return;
   // WI-5.6: a mixed selection's own choice is a platform-neutral family id; each connection saves
   // its own ids for it, never the literal list. A single-platform choice is a literal id, and every
   // selected connection must support every one of them, exactly as before WI-5.6.
@@ -1819,7 +1745,6 @@ async function saveEditAccess() {
   clearError();
   clearNotice();
   let completed = 0;
-  let expiresAt = null;
   const total = bindings.length;
   // WI-F.10: "Saving 2 of 5 courses" only once the save has run long enough to need it (400 ms),
   // shown within 100 ms of that wait, so a fast save never flashes a progress line.
@@ -1830,18 +1755,17 @@ async function saveEditAccess() {
   }, 400);
   try {
     for (const { binding, ids } of perBinding) {
-      const result = await request("morrow_edit_policy_save", { sourceBindingId: binding.sourceBindingId, enabledCategories: ids, expiresInMs });
+      const result = await request("morrow_edit_policy_save", { sourceBindingId: binding.sourceBindingId, enabledCategories: ids });
       if (!result?.editPermission || !Array.isArray(result.editPermission.enabledCategories)) {
         throw new Error("edit_policy_save_unconfirmed");
       }
-      if (Number.isSafeInteger(result.editPermission.expiresAt)) expiresAt = result.editPermission.expiresAt;
       completed += 1;
       if (state.saveProgressText) {
         state.saveProgressText = saveProgressLabel();
         renderSelection();
       }
     }
-    showNotice(`Edit access saved for ${plural(completed, "course")}. Allowed actions: ${labelList(enabledCategories.map((id) => categoryById(id) || { label: id }))}. It ends ${expiresAt ? expiryLabel(expiresAt) : "after the selected duration"}.`);
+    showNotice(`Edit access saved for ${plural(completed, "course")}. Allowed actions: ${labelList(enabledCategories.map((id) => categoryById(id) || { label: id }))}. It stays on until you return ${completed === 1 ? "the course" : "these courses"} to Plan.`);
   } catch (cause) {
     showError(cause, { prefix: completed ? `Edit access saved for ${plural(completed, "course")}. ` : "" });
   } finally {
@@ -1897,23 +1821,22 @@ function routineCategoryIdsFor(binding) {
 }
 
 /**
- * WI-5.4: saves one course's own category list from its detail ("Edit. Routine edits.", "Remove",
- * or the Ends menu). Unlike saveEditAccess, it never touches state.selected, state.mode or the
+ * WI-5.4: saves one course's own category list from its detail ("Edit. Routine edits." or
+ * "Remove"). Unlike saveEditAccess, it never touches state.selected, state.mode or the
  * confirm step: the detail's own control already decided everything the request needs, and a
  * routine bundle is never destructive (D2a), so no confirmation step applies here.
  */
-async function saveCourseCategories(binding, enabledCategories, expiresInMs, successMessage) {
+async function saveCourseCategories(binding, enabledCategories, successMessage) {
   if (state.busy) return;
   setBusy(true);
   clearError();
   clearNotice();
   try {
-    const result = await request("morrow_edit_policy_save", { sourceBindingId: binding.sourceBindingId, enabledCategories, expiresInMs });
+    const result = await request("morrow_edit_policy_save", { sourceBindingId: binding.sourceBindingId, enabledCategories });
     if (!result?.editPermission || !Array.isArray(result.editPermission.enabledCategories)) {
       throw new Error("edit_policy_save_unconfirmed");
     }
-    const expiresAt = Number.isSafeInteger(result.editPermission.expiresAt) ? result.editPermission.expiresAt : null;
-    showNotice(typeof successMessage === "function" ? successMessage(expiresAt) : successMessage);
+    showNotice(successMessage);
   } catch (cause) {
     showError(cause);
   } finally {
@@ -1930,8 +1853,8 @@ async function setCoursePlan(binding) {
   await returnToPlan([binding], { doneMessage: `${courseName(binding)} is in Plan. Morrow asks first.` });
 }
 
-/** WI-5.4: the detail's own "Edit. Routine edits." button (D2, D3): always the routine set, always
- * 4 hours, for this one course only. */
+/** WI-5.4: the detail's own "Edit. Routine edits." button (D2): always the routine set, for this
+ * one course only. */
 async function setCourseRoutine(binding) {
   if (state.busy || courseLevel(binding) === "routine") return;
   clearError();
@@ -1946,11 +1869,10 @@ async function setCourseRoutine(binding) {
     render();
     return;
   }
-  await saveCourseCategories(binding, ids, ROUTINE_EDIT_DURATION_MS, (expiresAt) =>
-    `Routine edits are on for ${courseName(binding)} until ${expiresAt !== null ? clockTime(expiresAt) : "the selected time"}.`);
+  await saveCourseCategories(binding, ids, `Routine edits are on for ${courseName(binding)}. They stay on until you choose Plan.`);
 }
 
-/** WI-5.4: "Remove" saves the list without that category and keeps the end time. The last category
+/** WI-5.4: "Remove" saves the list without that category. The last category
  * removed leaves nothing to save (morrow_edit_policy_save refuses an empty list), so the course
  * returns to Plan instead, exactly what an empty allowed list means everywhere else (D7). */
 async function removeCourseCategory(binding, categoryId) {
@@ -1962,18 +1884,8 @@ async function removeCourseCategory(binding, categoryId) {
     await returnToPlan([binding], { doneMessage: `${courseName(binding)} is in Plan. Morrow asks first.` });
     return;
   }
-  const expiresInMs = closestEditDuration(permissionExpiresAt(binding)) ?? DEFAULT_EDIT_DURATION_MS;
   const label = categoryLabelFor(categoryId);
-  await saveCourseCategories(binding, ids, expiresInMs, `Removed. Morrow asks again before it changes ${label.toLowerCase()} in ${courseName(binding)}.`);
-}
-
-/** WI-5.4: the "Ends" menu's own change: the same category list, a new fixed duration (F5). */
-async function changeCourseEnds(binding, expiresInMs) {
-  if (state.busy || !Number.isFinite(expiresInMs)) return;
-  const ids = Array.isArray(binding?.editPermission?.enabledCategories) ? binding.editPermission.enabledCategories.filter((id) => typeof id === "string") : [];
-  if (!ids.length) return;
-  await saveCourseCategories(binding, ids, expiresInMs, (expiresAt) =>
-    `Access in ${courseName(binding)} ends ${expiresAt !== null ? clockTime(expiresAt) : "at the selected time"}.`);
+  await saveCourseCategories(binding, ids, `Removed. Morrow asks again before it changes ${label.toLowerCase()} in ${courseName(binding)}.`);
 }
 
 /**
@@ -2163,13 +2075,12 @@ modeEdit.addEventListener("change", () => {
   }
 });
 
-// WI-4.5 (D2): one switch sets enabledCategories to every routine bundle for the selection, at 4
-// hours (D3). Turning it off clears the selection; it never merges with a manual Customize pick.
+// WI-4.5 (D2): one switch sets enabledCategories to every routine bundle for the selection.
+// Turning it off clears the selection; it never merges with a manual Customize pick.
 routineSwitch.addEventListener("change", () => {
   state.routineMode = routineSwitch.checked;
   if (state.routineMode) {
     state.selectedCategories = new Set(routineCategoryIds());
-    state.pendingDurationMs = ROUTINE_EDIT_DURATION_MS;
   } else {
     state.selectedCategories.clear();
   }
@@ -2258,8 +2169,6 @@ categoryList.addEventListener("click", (event) => {
   }
 });
 
-editDuration.addEventListener("change", () => renderSelection());
-
 // WI-5.3: any filter change resets the "Show more" row cap, so a narrower list starts unpaginated.
 function setCourseFilters(patch) {
   Object.assign(state.filters, patch);
@@ -2302,8 +2211,8 @@ courseSelectModeButton.addEventListener("click", () => {
 
 courseBulkPlanButton.addEventListener("click", () => void returnToPlan(selectedBindings()));
 
-// WI-5.3, D2a: the bulk bar's Edit shortcut is always the routine set, always 4 hours (D3), the
-// same computation the "Routine edits" switch in the Course access panel below uses.
+// WI-5.3, D2a: the bulk bar's Edit shortcut is always the routine set, the same computation the
+// "Routine edits" switch in the Course access panel below uses.
 async function bulkRoutineEdit() {
   if (state.busy) return;
   const bindings = selectedBindings();
@@ -2318,7 +2227,6 @@ async function bulkRoutineEdit() {
   modeEdit.checked = true;
   modePlan.checked = false;
   state.selectedCategories = new Set(ids);
-  state.pendingDurationMs = ROUTINE_EDIT_DURATION_MS;
   state.pendingSaveConfirmation = false;
   state.saveConfirmedFor = null;
   render();
@@ -2391,12 +2299,6 @@ courseList.addEventListener("click", (event) => {
 
 courseList.addEventListener("change", (event) => {
   const input = event.target;
-  // WI-5.4: the detail's own "Ends" menu re-saves the same categories with the new duration.
-  if (input instanceof Element && input.localName === "select" && input.hasAttribute("data-end-duration")) {
-    const binding = bindingById(input.closest("[data-binding-id]")?.dataset.bindingId);
-    if (binding) void changeCourseEnds(binding, Number(input.value));
-    return;
-  }
   if (!(input instanceof HTMLInputElement) || !input.classList.contains("course-select")) return;
   const row = input.closest("[data-binding-id]");
   const id = row?.dataset.bindingId;

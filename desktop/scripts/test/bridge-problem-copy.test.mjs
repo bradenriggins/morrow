@@ -28,7 +28,7 @@ const WORKER_CODES = [
   "bridge_not_connected", "bridge_version_mismatch", "bridge_request_failed", "connector_catalog_invalid",
   "course_tab_missing", "course_site_access_required", "course_sign_in_required", "blackboard_browser_unsupported",
   "edit_policy_failed", "edit_policy_binding_missing", "edit_policy_binding_stale", "edit_policy_revision_stale",
-  "edit_policy_categories_invalid", "edit_policy_expiration_invalid", "edit_policy_sender_refused",
+  "edit_policy_categories_invalid", "edit_policy_sender_refused",
   "course_discovery_sender_refused", "course_discovery_anchor_missing", "course_discovery_anchor_stale",
   "course_discovery_failed", "course_discovery_receipt_missing", "course_discovery_receipt_stale",
   "course_discovery_complete", "course_selection_invalid", "course_selection_unavailable",

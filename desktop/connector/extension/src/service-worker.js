@@ -60,7 +60,7 @@ import { executeMoodleBigBlueButtonInPage } from "./moodle-bbb-executor.js";
 import { executeMoodleSubsectionInPage } from "./moodle-subsection-executor.js";
 import { executeMoodleBackupInPage } from "./moodle-backup-executor.js";
 import { collectMoodleCourseParticipantRoster } from "./moodle-privacy.js";
-import { CONVERSATIONAL_EDIT_DURATION_MS, EDIT_PERMISSION_SCHEMA, EDIT_POLICY_SELECTION_LIMIT, SETTINGS_EDIT_DURATIONS, categoriesForBinding, changedFields, createEditPermission, guardedItemBankUpdate, migrateLegacyEditPermission, validEditDuration, validEditPermission } from "./edit-policy.js";
+import { EDIT_PERMISSION_SCHEMA, EDIT_POLICY_SELECTION_LIMIT, categoriesForBinding, changedFields, createEditPermission, guardedItemBankUpdate, migrateLegacyEditPermission, validEditPermission } from "./edit-policy.js";
 import { BridgeMaintenanceError, createBridgeMaintenance } from "./bridge-maintenance.js";
 import { serializeBridgeResult } from "./bridge-transport.js";
 import { canvasProtectedRoster, protectLocalRequest, sourceProtectedRoster } from "./protected-request.js";
@@ -1599,10 +1599,6 @@ function forgetTabSiteAnchorVerifications(tabId) {
   }
 }
 
-function badgeClockTime(expiresAt) {
-  return new Date(expiresAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
 /**
  * WI-1.3. A count of reviews wins over Edit, because a wait for the person's decision is the more
  * urgent state. `state.reviewsWaiting` does not exist before R2 (WI-2.4 sets it); it reads as 0
@@ -1639,10 +1635,12 @@ async function refreshBadge() {
   await chrome.action?.setBadgeText({ text: editCount > 0 ? "ON" : "" });
   if (editCount > 0) await chrome.action?.setBadgeBackgroundColor({ color: BADGE_ACTION_COLOR });
   await chrome.action?.setTitle({
-    title: editCount === 0 || earliestExpiresAt === null
+    title: editCount === 0
       ? "Morrow Bridge"
-      : `Morrow Bridge. Morrow can change ${editCount} course${editCount === 1 ? "" : "s"} with no review until ${badgeClockTime(earliestExpiresAt)}.`,
+      : `Morrow Bridge. Morrow can change ${editCount} course${editCount === 1 ? "" : "s"} with no review.`,
   });
+  // Only a grant saved while Edit was timed has an end time. The alarm refreshes the badge when that
+  // grant lapses to Plan.
   if (earliestExpiresAt === null) await chrome.alarms.clear(BADGE_ALARM_NAME);
   else await chrome.alarms.create(BADGE_ALARM_NAME, { when: earliestExpiresAt });
 }
@@ -1734,7 +1732,6 @@ async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityG
   return {
     catalogDigest: api.catalogDigest,
     bindingLimit: BRIDGE_BINDING_LIMIT,
-    editDurations: SETTINGS_EDIT_DURATIONS,
     siteAnchors,
     bindings,
     privateChat: privateChatStatus(),
@@ -1967,9 +1964,8 @@ function editPermissionSummary(permission) {
   };
 }
 
-async function saveEditPolicy(sourceBindingId, enabledCategories, expiresInMs, authorityGeneration = state.courseDataAuthorityGeneration) {
+async function saveEditPolicy(sourceBindingId, enabledCategories, authorityGeneration = state.courseDataAuthorityGeneration) {
   if (typeof sourceBindingId !== "string" || !sourceBindingId || !Array.isArray(enabledCategories) || !enabledCategories.length) throw new Error("edit_policy_categories_invalid");
-  if (!validEditDuration(expiresInMs)) throw new Error("edit_policy_expiration_invalid");
   await requireCourseDataAuthority(authorityGeneration);
   const api = await catalog();
   const result = await queueStorageMutation(async () => {
@@ -1991,7 +1987,7 @@ async function saveEditPolicy(sourceBindingId, enabledCategories, expiresInMs, a
     const policies = storedPolicies(stored.editPolicies);
     const revisions = storedPolicyRevisions(stored.editPolicyRevisions);
     const priorRevision = Math.max(Number.isSafeInteger(revisions[sourceBindingId]) ? revisions[sourceBindingId] : 0, Number.isSafeInteger(policies[sourceBindingId]?.revision) ? policies[sourceBindingId].revision : 0);
-    const editPermission = await createEditPermission({ binding, catalogDigest: api.catalogDigest, revision: priorRevision + 1, enabledCategories, operations: [...state.operations.values()], expiresAt: Date.now() + expiresInMs });
+    const editPermission = await createEditPermission({ binding, catalogDigest: api.catalogDigest, revision: priorRevision + 1, enabledCategories, operations: [...state.operations.values()] });
     await setCourseDataBoundFields(chrome.storage.local, {
       editPolicies: { ...policies, [sourceBindingId]: editPermission },
       editPolicyRevisions: { ...revisions, [sourceBindingId]: editPermission.revision },
@@ -2036,14 +2032,13 @@ function bridgePolicySet(command) {
     throw new Error("edit_policy_set_stale");
   }
   const value = command.editPolicySet;
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["mode", "selections", "merge", "expiresInMs"].includes(key))
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["mode", "selections", "merge"].includes(key))
     || !["edit", "plan"].includes(value.mode) || !Array.isArray(value.selections) || !value.selections.length || value.selections.length > EDIT_POLICY_SELECTION_LIMIT) {
     throw new Error("edit_policy_set_invalid");
   }
   // WI-4.1/WI-4.2: checked again here, the same as normalizeBridgeEditPolicySet in
   // packages/bridge-protocol, because a command reaches this worker straight from the socket.
   if (value.merge !== undefined && (value.mode !== "edit" || value.merge !== true)) throw new Error("edit_policy_set_invalid");
-  if (value.expiresInMs !== undefined && !validEditDuration(value.expiresInMs)) throw new Error("edit_policy_set_invalid");
   const selections = value.selections.map((selection) => {
     if (!selection || typeof selection !== "object" || Array.isArray(selection)
       || Object.keys(selection).some((key) => !["sourceBindingId", "expectedPolicyRevision", "enabledCategories"].includes(key))
@@ -2071,7 +2066,6 @@ function bridgePolicySet(command) {
     mode: value.mode,
     selections,
     ...(value.merge === undefined ? {} : { merge: value.merge }),
-    ...(value.expiresInMs === undefined ? {} : { expiresInMs: value.expiresInMs }),
   };
 }
 
@@ -2210,15 +2204,14 @@ async function applyBridgePolicySet(policySet, command) {
         continue;
       }
       try {
-        // WI-4.2 (F7, D3): a merge unions the sent categories into an active grant and keeps its
-        // end time (a merge never moves the end time later). Without an active grant there is
-        // nothing to merge, so it starts a fresh grant at the chosen or the conversational
-        // duration, same as a non-merge grant.
+        // WI-4.2 (F7): a merge unions the sent categories into an active grant. Edit is not timed, so
+        // a new grant has no end time. A grant saved while Edit was timed keeps its own end time
+        // through a merge: it lapses to Plan then, and a merge never extends it.
         const merging = policySet.merge === true && Boolean(permission);
         const enabledCategories = merging
           ? [...new Set([...permission.enabledCategories, ...selection.enabledCategories])].sort()
           : selection.enabledCategories;
-        const expiresAt = merging ? permission.expiresAt : Date.now() + (policySet.expiresInMs ?? CONVERSATIONAL_EDIT_DURATION_MS);
+        const expiresAt = merging ? permission.expiresAt : undefined;
         const editPermission = await createEditPermission({
           binding,
           catalogDigest: api.catalogDigest,
@@ -6240,7 +6233,7 @@ async function cancelPairingAfterConsentWithdrawal() {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const settingsAction = message?.type === "morrow_edit_policy_status" ? (authorityGeneration) => editPolicyStatus(authorityGeneration)
     : message?.type === "morrow_edit_policy_options" ? (authorityGeneration) => editPolicyOptions(message.sourceBindingId, authorityGeneration)
-      : message?.type === "morrow_edit_policy_save" ? (authorityGeneration) => saveEditPolicy(message.sourceBindingId, message.enabledCategories, message.expiresInMs, authorityGeneration)
+      : message?.type === "morrow_edit_policy_save" ? (authorityGeneration) => saveEditPolicy(message.sourceBindingId, message.enabledCategories, authorityGeneration)
         : message?.type === "morrow_edit_policy_revoke" ? (authorityGeneration) => revokeEditPolicy(message.sourceBindingId, authorityGeneration)
           : message?.type === "morrow_course_discovery_start" ? (authorityGeneration) => startCourseDiscovery(message.siteAnchorId, authorityGeneration)
             : message?.type === "morrow_course_discovery_more" ? (authorityGeneration) => continueCourseDiscovery(message.siteAnchorId, message.discoveryReceiptId, authorityGeneration)

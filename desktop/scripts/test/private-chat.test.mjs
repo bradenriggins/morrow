@@ -172,7 +172,6 @@ test("the tucked-away drawer sends through an active relay and closing it clears
   const status = {
     catalogDigest: "c".repeat(64),
     bindingLimit: 500,
-    editDurations: [{ value: 3_600_000, label: "1 hour" }],
     siteAnchors: [],
     bindings: [{
       sourceBindingId: "canvas:course-89585",

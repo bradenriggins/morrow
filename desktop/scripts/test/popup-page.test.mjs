@@ -25,8 +25,8 @@ const connection = (fields = {}) => ({
 });
 const anchor = (fields = {}) => ({ siteAnchorId: "canvas:site", provider: "canvas", origin: COURSE_ORIGIN, principalId: "teacher@example.edu", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
 const binding = (fields = {}) => ({ sourceBindingId: "canvas:course-1", provider: "canvas", courseName: "Anatomy", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
-const editPermission = (sourceBindingId, expiresAt, enabledCategories = ["canvas_page_content"]) => ({
-  schema: "morrow.bridge.edit-permission.v1", sourceBindingId, revision: 1, scopeDigest: "d".repeat(64), catalogDigest: "c".repeat(64), expiresAt, enabledCategories,
+const editPermission = (sourceBindingId, enabledCategories = ["canvas_page_content"]) => ({
+  schema: "morrow.bridge.edit-permission.v1", sourceBindingId, revision: 1, scopeDigest: "d".repeat(64), catalogDigest: "c".repeat(64), enabledCategories,
 });
 
 async function openPopup({ status, handlers = {}, ...rest } = {}) {
@@ -419,8 +419,7 @@ test("the setup guide opens from the popup, and says so when it cannot", async (
 // WI-1.4: morrow_status carries no editPermission per binding, so the popup reads
 // morrow_edit_policy_status once it is connected, the same command the settings page uses.
 test("the popup's banner offers to ask first in all courses, and the result is announced", async () => {
-  const expiresAt = Date.now() + 60 * 60 * 1_000;
-  let permission = editPermission("canvas:course-1", expiresAt);
+  let permission = editPermission("canvas:course-1");
   const revoked = [];
   const page = await openPopup({
     status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
@@ -447,12 +446,11 @@ test("the popup's banner offers to ask first in all courses, and the result is a
 // WI-5.8: the popup as home. Up to 5 connected courses with their own D7 state, then "All courses",
 // which opens the same Plan and Edit settings page Options does.
 test("the popup lists up to 5 connected courses with their own state, then All courses", async () => {
-  const expiresAt = Date.now() + 60 * 60 * 1_000;
   const bindings = Array.from({ length: 7 }, (_, index) => ({
     sourceBindingId: `canvas:course-${index}`,
     courseName: `Course ${index}`,
     provider: "canvas",
-    ...(index === 0 ? { editPermission: { enabledCategories: ["canvas_page_content"], expiresAt } } : {}),
+    ...(index === 0 ? { editPermission: { enabledCategories: ["canvas_page_content"] } } : {}),
   }));
   const page = await openPopup({
     status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
@@ -462,7 +460,7 @@ test("the popup lists up to 5 connected courses with their own state, then All c
   const rows = page.queryAll("#courses-list .course-row-name").map((node) => node.textContent);
   assert.deepEqual(rows, ["Course 0", "Course 1", "Course 2", "Course 3", "Course 4"]);
   const states = page.queryAll("#courses-list .course-row-state").map((node) => node.textContent);
-  assert.equal(states[0], `Edit until ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(expiresAt)}. 1 kind of edit.`);
+  assert.equal(states[0], "Edit. 1 kind of edit.");
   assert.equal(states[1], "Plan. Asks first.");
   assert.equal(page.hidden("#all-courses"), false);
 
