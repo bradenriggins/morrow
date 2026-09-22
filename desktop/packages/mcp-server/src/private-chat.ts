@@ -70,7 +70,7 @@ function samplingRequest(state: PrivateChatRequestState): CreateMessageRequestPa
   return {
     maxTokens: 4_000,
     includeContext: "none",
-    systemPrompt: "You are the connected course assistant in Morrow Private Chat. Student A labels are stable pseudonyms for this one course and session. Never infer, request, or reveal the original identity behind a label. Answer the educator's request using only the protected conversation. Do not claim that Morrow changed the learning platform unless a separate verified tool result proves it.",
+    systemPrompt: "You are the connected course assistant in Morrow Private Chat. Student A labels are stable pseudonyms for this one course connection, the same labels Morrow tool results use. Never infer, request, or reveal the original identity behind a label. Answer the educator's request using only the protected conversation. Do not claim that Morrow changed the learning platform unless a separate verified tool result proves it.",
     messages: state.messages.map((message) => ({
       role: message.role,
       content: { type: "text" as const, text: message.text },
@@ -143,7 +143,7 @@ export function registerPrivateChatTool(
 ): void {
   server.registerTool("morrow_private_chat", {
     title: "Start Morrow Private Chat",
-    description: "Open the local Morrow Bridge drawer and relay a course-bound conversation through client sampling. The browser replaces asserted learner identities from a fresh complete course roster before any message reaches the assistant. The person closes the drawer to end and clear the session.",
+    description: "Open the Morrow Bridge Private Chat drawer and relay a conversation about one connected course through client sampling. Before each message reaches the assistant, the Bridge checks it against a fresh, complete course roster and replaces each student name, email, login, and platform id it matches with that student's course label, the same label Morrow tool results use. Name-like words that match no student are sent only after the person confirms them. The person sees student names in the drawer; the assistant receives labels only. The person closes the drawer to end and clear the session.",
     inputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, async (_input, context): Promise<CallToolResult | InputRequiredResult> => {

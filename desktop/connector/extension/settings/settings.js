@@ -212,6 +212,7 @@ const state = {
   saveProgressText: null,
   privateChatOpen: false,
   privateChatBusy: false,
+  privateChatReview: null,
   readGeneration: 0,
   saveConfirmedFor: null,
   selected: new Set(),
@@ -233,6 +234,7 @@ function privateChatCourses() {
 function wipePrivateChat() {
   privateChatIdentifiers.value = "";
   privateChatMessage.value = "";
+  state.privateChatReview = null;
   privateChatHistory.innerHTML = '<p class="state-message">No messages in this local conversation.</p>';
 }
 
@@ -314,7 +316,7 @@ function renderPrivateChat() {
   privateChatSendButton.disabled = privateChatMessage.disabled || state.privateChatBusy;
   const messages = Array.isArray(chat?.messages) ? chat.messages : [];
   privateChatHistory.innerHTML = messages.length
-    ? messages.map((message) => `<div class="private-chat-message private-chat-message-${message.role === "assistant" ? "assistant" : "user"}"><strong>${message.role === "assistant" ? escapeHtml(selectedClient?.name || "Assistant") : "You"}</strong><p>${escapeHtml(message.text)}</p></div>`).join("")
+    ? messages.map((message) => `<div class="private-chat-message private-chat-message-${message.role === "assistant" ? "assistant" : "user"}"><strong>${message.role === "assistant" ? escapeHtml(selectedClient?.name || "Assistant") : "You"}</strong><p>${privateChatMessageHtml(message)}</p></div>`).join("")
     : '<p class="state-message">No messages in this local conversation.</p>';
   privateChatHistory.scrollTop = privateChatHistory.scrollHeight;
   privateChatStatus.textContent = !transportAvailable
@@ -326,6 +328,21 @@ function renderPrivateChat() {
         : !selectedCourse
           ? "The course used by this Private Chat is no longer connected. Close the drawer and start again."
         : "Ready. Morrow replaces the listed student identities before the message reaches the assistant.";
+}
+
+// The educator sees each student's name where the assistant sees a label. The
+// names come from this Bridge's own course roster and never leave this page.
+function privateChatMessageHtml(message) {
+  if (!Array.isArray(message.parts) || !message.parts.length) return escapeHtml(message.text);
+  return message.parts.map((part) => (typeof part?.name === "string" && typeof part.label === "string"
+    ? `<span class="private-chat-name" title="The assistant sees ${escapeHtml(part.label)}">${escapeHtml(part.name)}</span>`
+    : escapeHtml(part?.text))).join("");
+}
+
+// Name-like words that matched no student are sent as written only after the
+// educator sends the same message again.
+function privateChatConfirmedNames(key) {
+  return state.privateChatReview?.key === key ? { confirmedNames: state.privateChatReview.names } : {};
 }
 
 async function sendPrivateChatMessage() {
@@ -344,8 +361,17 @@ async function sendPrivateChatMessage() {
     sourceBindingId: binding.sourceBindingId,
     text,
     assertedIdentifiers: identifiers,
+    ...privateChatConfirmedNames(JSON.stringify([binding.sourceBindingId, text, identifiers])),
   }).catch(() => ({ ok: false, error: "private_chat_send_failed" }));
   state.privateChatBusy = false;
+  state.privateChatReview = null;
+  if (response?.ok && response.result?.status === "review" && Array.isArray(response.result.names)) {
+    state.privateChatReview = { key: JSON.stringify([binding.sourceBindingId, text, identifiers]), names: response.result.names.map(String) };
+    renderPrivateChat();
+    privateChatStatus.textContent = `Not sent. These words look like names but match no student in this course: ${state.privateChatReview.names.join(", ")}. If one is a student, add that name to the list. To send the message as written, select Send again.`;
+    announce(privateChatStatus.textContent);
+    return;
+  }
   if (!response?.ok) {
     renderPrivateChat();
     privateChatStatus.textContent = "Morrow could not protect and send this message. Check every listed student identity and try again.";

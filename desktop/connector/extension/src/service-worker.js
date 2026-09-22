@@ -1765,10 +1765,29 @@ function privateChatStatus() {
       sampling: true,
       pushSampling: false,
     }] : [],
-    messages: chat ? chat.messages.map((message) => ({ ...message })) : [],
+    messages: chat ? chat.messages.map((message) => ({ ...message, parts: privateChatDisplayParts(message.text, chat.namesByLabel) })) : [],
     ...(chat?.sourceBindingId ? { sourceBindingId: chat.sourceBindingId, courseId: chat.courseId } : {}),
     code: chat?.pending ? "private_chat_ready" : "private_chat_start_required",
   };
+}
+
+/**
+ * The educator's own view of a protected message: each label this chat assigned is
+ * shown with the student's name. These parts go only to the Bridge's own settings
+ * page. The assistant and the gateway receive the protected text alone.
+ */
+function privateChatDisplayParts(text, namesByLabel = {}) {
+  const parts = [];
+  let cursor = 0;
+  for (const match of String(text).matchAll(/\bStudent A[1-9][0-9]*\b/gu)) {
+    const name = Object.hasOwn(namesByLabel, match[0]) ? namesByLabel[match[0]] : null;
+    if (!name) continue;
+    if (match.index > cursor) parts.push({ text: text.slice(cursor, match.index) });
+    parts.push({ name, label: match[0] });
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < text.length) parts.push({ text: text.slice(cursor) });
+  return parts;
 }
 
 function notifyPrivateChatChanged() {
@@ -1790,6 +1809,12 @@ function clearPrivateChat({ answerPending = false, rememberClosed = false } = {}
   }
   chat.messages.splice(0, chat.messages.length);
   for (const id of Object.keys(chat.labelsById || {})) delete chat.labelsById[id];
+  for (const label of Object.keys(chat.namesByLabel || {})) delete chat.namesByLabel[label];
+  if (chat.awaitingLabels) {
+    clearTimeout(chat.awaitingLabels.timer);
+    chat.awaitingLabels.reject(new Error("private_chat_closed"));
+    chat.awaitingLabels = null;
+  }
   state.privateChat = null;
   notifyPrivateChatChanged();
 }
@@ -1797,22 +1822,28 @@ function clearPrivateChat({ answerPending = false, rememberClosed = false } = {}
 function privateChatCommandInput(command) {
   const value = command?.arguments;
   if (!value || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value).some((key) => !["schema", "sessionId", "assistantName", "action", "assistantReply", "sourceBindingId", "courseId"].includes(key))
+    || Object.keys(value).some((key) => !["schema", "sessionId", "assistantName", "action", "assistantReply", "sourceBindingId", "courseId", "labelsById"].includes(key))
     || value.schema !== "morrow.private-chat.exchange.v1"
     || typeof value.sessionId !== "string" || !/^[A-Za-z0-9_.:@-]{8,160}$/.test(value.sessionId)
     || typeof value.assistantName !== "string" || !value.assistantName.trim() || value.assistantName.length > 200
-    || !["listen", "reply_and_listen"].includes(value.action)) return null;
+    || !["listen", "reply_and_listen", "labels"].includes(value.action)) return null;
   const reply = value.assistantReply;
   const hasScope = typeof value.sourceBindingId === "string" && /^[A-Za-z0-9_.:@-]{1,160}$/.test(value.sourceBindingId)
     && typeof value.courseId === "string" && /^[1-9][0-9]{0,18}$/.test(value.courseId);
+  const labels = value.labelsById;
   if (value.action === "listen") {
-    if (reply !== undefined || value.sourceBindingId !== undefined || value.courseId !== undefined) return null;
-  } else if (!hasScope || typeof reply !== "string" || !reply.trim() || reply.length > 100_000) return null;
+    if (reply !== undefined || labels !== undefined || value.sourceBindingId !== undefined || value.courseId !== undefined) return null;
+  } else if (value.action === "labels") {
+    if (!hasScope || reply !== undefined || !labels || typeof labels !== "object" || Array.isArray(labels)
+      || Object.keys(labels).length > 500
+      || Object.entries(labels).some(([id, label]) => !/^[A-Za-z0-9_.:@-]{1,160}$/.test(id) || typeof label !== "string" || !/^Student A[1-9][0-9]{0,6}$/.test(label))) return null;
+  } else if (!hasScope || labels !== undefined || typeof reply !== "string" || !reply.trim() || reply.length > 100_000) return null;
   return {
     sessionId: value.sessionId,
     assistantName: value.assistantName.trim(),
     action: value.action,
     ...(reply === undefined ? {} : { assistantReply: reply }),
+    ...(labels === undefined ? {} : { labelsById: { ...labels } }),
     ...(hasScope ? { sourceBindingId: value.sourceBindingId, courseId: value.courseId } : {}),
   };
 }
@@ -1825,20 +1856,38 @@ async function handlePrivateChatExchange(command) {
   }
   const closed = state.privateChatClosed;
   if (closed && closed.expiresAt <= Date.now()) state.privateChatClosed = null;
-  if (input.action === "reply_and_listen" && !state.privateChat && closed?.sessionId === input.sessionId
+  if (input.action !== "listen" && !state.privateChat && closed?.sessionId === input.sessionId
     && closed.assistantName === input.assistantName && closed.expiresAt > Date.now()) {
     state.privateChatClosed = null;
     sendResult(command, true, { schema: "morrow.private-chat.exchange.v1", status: "closed" }, null);
     return;
   }
   let chat = state.privateChat;
-  if (input.action === "listen") {
+  if (input.action === "labels") {
+    const awaiting = chat?.awaitingLabels;
+    if (!chat || !awaiting || chat.pending || chat.sessionId !== input.sessionId || chat.assistantName !== input.assistantName
+      || awaiting.sourceBindingId !== input.sourceBindingId || awaiting.courseId !== input.courseId) {
+      sendResult(command, false, null, problem("private_chat_scope_changed", "The Private Chat assistant or course changed.", false));
+      return;
+    }
+    chat.awaitingLabels = null;
+    clearTimeout(awaiting.timer);
+    const ids = Object.keys(input.labelsById).sort();
+    if (ids.join("\n") !== [...awaiting.learnerIds].sort().join("\n")
+      || new Set(Object.values(input.labelsById)).size !== ids.length) {
+      sendResult(command, false, null, problem("private_chat_labels_invalid", "Morrow could not match the course labels to this message.", false));
+      awaiting.reject(new Error("private_chat_labels_invalid"));
+      clearPrivateChat();
+      return;
+    }
+    awaiting.resolve({ command, labelsById: input.labelsById });
+  } else if (input.action === "listen") {
     if (chat && (chat.sessionId !== input.sessionId || chat.assistantName !== input.assistantName)) {
       sendResult(command, false, null, problem("private_chat_busy", "Another Private Chat is already open.", true));
       return;
     }
     state.privateChatClosed = null;
-    if (!chat) chat = state.privateChat = { sessionId: input.sessionId, assistantName: input.assistantName, messages: [], labelsById: {}, pending: null, timer: null };
+    if (!chat) chat = state.privateChat = { sessionId: input.sessionId, assistantName: input.assistantName, messages: [], labelsById: {}, namesByLabel: {}, awaitingLabels: null, pending: null, timer: null };
   } else {
     if (!chat || chat.sessionId !== input.sessionId || chat.assistantName !== input.assistantName
       || chat.sourceBindingId !== input.sourceBindingId || chat.courseId !== input.courseId || chat.pending) {
@@ -1921,16 +1970,49 @@ async function privateChatRoster(binding, expiresAt, authorityGeneration) {
   return canvasProtectedRoster(current.data, history.data, binding.courseId);
 }
 
-async function submitPrivateChatMessage(sourceBindingId, text, assertedIdentifiers) {
+/**
+ * Asks the gateway for the course labels of the students this message names, so
+ * a student has the same label here as in every tool result. Only platform ids
+ * cross; the gateway answers from its own course roster and learner vault.
+ */
+function privateChatCourseLabels(chat, command, binding, learnerIds) {
+  if (chat.timer) clearTimeout(chat.timer);
+  chat.timer = null;
+  chat.pending = null;
+  return new Promise((resolve, reject) => {
+    chat.awaitingLabels = {
+      sourceBindingId: binding.sourceBindingId,
+      courseId: binding.courseId,
+      learnerIds: [...learnerIds],
+      resolve,
+      reject,
+      timer: setTimeout(() => {
+        if (state.privateChat !== chat || !chat.awaitingLabels) return;
+        chat.awaitingLabels = null;
+        reject(new Error("private_chat_labels_unavailable"));
+        clearPrivateChat();
+      }, 60_000),
+    };
+    sendResult(command, true, {
+      schema: "morrow.private-chat.exchange.v1", status: "labels_required",
+      sessionId: chat.sessionId, sourceBindingId: binding.sourceBindingId, courseId: binding.courseId,
+      learnerIds: [...learnerIds].sort(),
+    }, null);
+  });
+}
+
+async function submitPrivateChatMessage(sourceBindingId, text, assertedIdentifiers, confirmedNames = []) {
   const authorityGeneration = state.courseDataAuthorityGeneration;
   if (!await courseDataAuthorityCurrent(authorityGeneration)) throw new Error("course_data_consent_required");
   const chat = state.privateChat;
-  const command = chat?.pending;
+  let command = chat?.pending;
   if (!chat || !command) throw new Error("private_chat_start_required");
   if (typeof sourceBindingId !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(sourceBindingId)
     || typeof text !== "string" || !text.trim() || text.length > 100_000
     || !Array.isArray(assertedIdentifiers) || assertedIdentifiers.length < 1 || assertedIdentifiers.length > 100
-    || assertedIdentifiers.some((value) => typeof value !== "string" || !value.trim() || value.length > 500)) {
+    || assertedIdentifiers.some((value) => typeof value !== "string" || !value.trim() || value.length > 500)
+    || !Array.isArray(confirmedNames) || confirmedNames.length > 100
+    || confirmedNames.some((value) => typeof value !== "string" || !value.trim() || value.length > 500)) {
     throw new Error("private_chat_message_invalid");
   }
   const binding = await bindingFor(sourceBindingId, { fresh: true });
@@ -1940,7 +2022,7 @@ async function submitPrivateChatMessage(sourceBindingId, text, assertedIdentifie
     throw new Error("private_chat_scope_change_refused");
   }
   const roster = await privateChatRoster(binding, Math.min(command.expiresAt, Date.now() + 60_000), authorityGeneration);
-  const protectedRequest = protectLocalRequest({
+  const request = {
     sourceBindingId: binding.sourceBindingId,
     courseId: binding.courseId,
     text,
@@ -1949,12 +2031,28 @@ async function submitPrivateChatMessage(sourceBindingId, text, assertedIdentifie
     rosterComplete: true,
     rosterFreshAt: Date.now(),
     labelsById: chat.labelsById,
-  });
+  };
+  const draft = protectLocalRequest(request);
+  if (state.privateChat !== chat || chat.pending !== command || command.expiresAt <= Date.now()) throw new Error("private_chat_exchange_changed");
+  const unconfirmed = draft.unmatchedNames.filter((name) => !confirmedNames.includes(name));
+  if (unconfirmed.length) return { status: "review", names: unconfirmed };
+  let assignedLabelsById;
+  if (draft.usedIds.length) {
+    const assigned = await privateChatCourseLabels(chat, command, binding, draft.usedIds);
+    command = assigned.command;
+    assignedLabelsById = assigned.labelsById;
+  }
+  const protectedRequest = protectLocalRequest({ ...request, ...(assignedLabelsById ? { assignedLabelsById } : {}) });
   const protectedText = protectedRequest.protectedText;
   if (state.privateChat !== chat || chat.pending !== command || command.expiresAt <= Date.now()) throw new Error("private_chat_exchange_changed");
   chat.sourceBindingId = binding.sourceBindingId;
   chat.courseId = binding.courseId;
   chat.labelsById = protectedRequest.labelsById;
+  const names = new Map(roster.map((identity) => [String(identity.id), identity.name]));
+  for (const id of protectedRequest.usedIds) {
+    const label = protectedRequest.labelsById[id];
+    if (label && names.get(id)) chat.namesByLabel[label] = names.get(id);
+  }
   chat.messages.push({ role: "user", text: protectedText });
   if (chat.timer) clearTimeout(chat.timer);
   chat.timer = null;
@@ -6303,7 +6401,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           : message?.type === "morrow_course_discovery_start" ? (authorityGeneration) => startCourseDiscovery(message.siteAnchorId, authorityGeneration)
             : message?.type === "morrow_course_discovery_more" ? (authorityGeneration) => continueCourseDiscovery(message.siteAnchorId, message.discoveryReceiptId, authorityGeneration)
               : message?.type === "morrow_course_selection_save" ? (authorityGeneration) => saveCourseSelection(message.siteAnchorId, message.discoveryReceiptId, message.courseIds, authorityGeneration)
-                : message?.type === "morrow_private_chat_send" ? () => submitPrivateChatMessage(message.sourceBindingId, message.text, message.assertedIdentifiers)
+                : message?.type === "morrow_private_chat_send" ? () => submitPrivateChatMessage(message.sourceBindingId, message.text, message.assertedIdentifiers, message.confirmedNames)
                   : message?.type === "morrow_private_chat_close" ? () => { clearPrivateChat({ answerPending: true, rememberClosed: true }); return { status: "closed" }; }
         : null;
   if (settingsAction) {

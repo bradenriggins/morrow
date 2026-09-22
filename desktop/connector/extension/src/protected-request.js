@@ -19,9 +19,40 @@ function optionalText(value, code) {
   return text(value, code);
 }
 
-function normalize(value) {
-  return String(value).normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");
+// Accents fold away on both sides, so "Jose Garcia" matches the rostered "José García".
+function fold(value) {
+  return String(value).normalize("NFKD").replace(/\p{M}/gu, "").normalize("NFKC");
 }
+
+function normalize(value) {
+  return fold(value).trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");
+}
+
+// Given names and family names that are also everyday English words. One of these
+// alone names a student only where it is written as a name.
+const COMMON_NAME_WORDS = new Set(("will grant rose mark bill faith hope joy may june april august grace brook dean frank "
+  + "iris jack lane long young white black brown green gray grey king hunter rich sky summer winter autumn ray amber dawn "
+  + "eve holly ivy lily pat rob sue sunny wade chase cash drew glen heath penny ruby sage star storm stone wolf fox bird "
+  + "bush ford hall hill wood park rice cook baker miller carter mason porter turner walker ward price bell banks marsh "
+  + "moss reed rush sharp short strong swift bond best love hart page cross field fields gold house north south west east "
+  + "early day knight noble major miles hunt gene art don max jean rusty dusty honey cherry melody harmony destiny "
+  + "trinity justice liberty journey river ocean forest rain snow case bay lake key law lord story rivers faith hazel "
+  + "olive pearl violet willow jade crystal sterling cole lee may summers love bishop chance dale dell doll free golden "
+  + "grant hardy hope lamb ladd little lucky mercy new nice ransom read royal sly smart spring sweet tender true").split(" "));
+
+// Capitalized words in a request that are almost never a person's name.
+const NOT_NAME_WORDS = new Set(("monday tuesday wednesday thursday friday saturday sunday january february march april "
+  + "may june july august september october november december canvas moodle blackboard morrow chrome google zoom teams "
+  + "english spanish french german math mathematics algebra calculus biology chemistry physics history science art music "
+  + "student students course courses module modules unit units chapter week weeks quiz quizzes exam exams test tests "
+  + "assignment assignments discussion discussions page pages section sections lab labs final finals midterm project "
+  + "projects essay essays grade grades gradebook rubric syllabus announcement announcements mr mrs ms mx dr professor "
+  + "prof i ok ta am pm yes no thanks thank hi hello dear please the a an and but or if so then also this that these "
+  + "those what why how when where who which can could would should did does do is are was were has have had let make "
+  + "show list find review compare check ask tell send give email message help note new my our their his her it we they "
+  + "you your he she today tomorrow yesterday morning afternoon evening spring summer fall winter autumn semester term "
+  + "part question questions answer answers extra credit late due draft group groups team teams for on in at by to from "
+  + "with about after before during all any each every some most more less first second third last next").split(" "));
 
 function learnerNameAliases(identity) {
   const name = normalize(identity.name);
@@ -135,24 +166,123 @@ function boundaryPattern(alias, flags = "giu") {
   return new RegExp(`(?<![\\p{L}\\p{N}_])(?:${aliasPattern(alias)})(?![\\p{L}\\p{N}_])`, flags);
 }
 
-function aliasIndex(roster, priorLabels) {
-  if (priorLabels === undefined) priorLabels = {};
-  if (!priorLabels || typeof priorLabels !== "object" || Array.isArray(priorLabels)
-    || Object.keys(priorLabels).length > MAX_IDENTITIES
-    || Object.entries(priorLabels).some(([id, label]) => !id || id.length > 500 || typeof label !== "string" || !/^Student A[1-9][0-9]*$/u.test(label))
-    || new Set(Object.values(priorLabels)).size !== Object.keys(priorLabels).length) {
-    fail("protected_request_label_map_invalid");
+/** A folded copy of the text whose every UTF-16 unit remembers its source range. */
+function foldedView(value) {
+  let text = "";
+  const spans = [];
+  let offset = 0;
+  for (const point of value) {
+    const folded = fold(point);
+    for (let index = 0; index < folded.length; index += 1) spans.push([offset, offset + point.length]);
+    text += folded;
+    offset += point.length;
   }
+  return { text, spans };
+}
+
+function sourceRange(view, start, end) {
+  return [view.spans[start][0], view.spans[end - 1][1]];
+}
+
+function sentenceStart(text, index) {
+  return /(?:^|[.!?\n…]["”’)\]]?)\s*["“‘(\[]?\s*$/u.test(text.slice(Math.max(0, index - 12), index)) && !/\S/u.test(text.slice(0, index))
+    || /[.!?\n…]["”’)\]]?\s*["“‘(\[]?\s*$/u.test(text.slice(Math.max(0, index - 12), index));
+}
+
+function capitalizedWords(text) {
+  return text.split(/\s+/u).every((word) => /^\p{Lu}/u.test(word));
+}
+
+function aliasKind(value, identity) {
+  const key = normalize(value);
+  if (/^student a[1-9][0-9]*$/u.test(key)) return "label";
+  if (/^[0-9]+$/u.test(key)) return "number";
+  const nameKeys = new Set([identity.name, ...learnerNameAliases(identity)].map(normalize));
+  const nameLike = nameKeys.has(key) || /^[\p{L}' ,.-]+$/u.test(key) && ![identity.email, identity.loginId, identity.sisUserId]
+    .filter(Boolean).map(normalize).includes(key);
+  if (!nameLike) return "other";
+  return /^[\p{L}'-]+$/u.test(key) ? "part" : "name";
+}
+
+/**
+ * Every roster reference in the text that names one student. A name made only of
+ * everyday words, such as "Will Grant", counts only where it is written as a name,
+ * so "will get a grant" stays as written. A lone everyday name word at the start of
+ * a sentence could be either, so it is reported instead of replaced.
+ */
+function aliasMatches(value, index, asserted, flagged) {
+  const view = foldedView(value);
+  const candidates = [...index.aliases.keys()]
+    .filter((alias) => index.kinds.get(alias) !== "number" || asserted.has(alias))
+    .sort((left, right) => right.length - left.length);
+  if (!candidates.length) return [];
+  const matcher = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${candidates.map(aliasPattern).join("|")})(?![\\p{L}\\p{N}_])`, "giu");
+  const output = [];
+  for (const match of view.text.matchAll(matcher)) {
+    const key = normalize(match[0]);
+    const kind = index.kinds.get(key);
+    const common = (kind === "part" || kind === "name") && key.split(/[\s,]+/u).filter(Boolean).every((word) => COMMON_NAME_WORDS.has(word));
+    if (common && !asserted.has(key)) {
+      if (!capitalizedWords(match[0])) continue;
+      if (kind === "part" && sentenceStart(view.text, match.index)) {
+        flagged.push({ at: sourceRange(view, match.index, match.index + match[0].length)[0], text: value.slice(...sourceRange(view, match.index, match.index + match[0].length)) });
+        continue;
+      }
+    }
+    const matches = index.aliases.get(key) || [];
+    if (matches.length !== 1) fail("protected_request_identifier_ambiguous");
+    const [start, end] = sourceRange(view, match.index, match.index + match[0].length);
+    output.push({ start, end, entry: matches[0] });
+  }
+  return output;
+}
+
+function replaceAliases(value, index, usedIds, asserted, flagged = []) {
+  const text = value.normalize("NFKC");
+  let output = "";
+  let cursor = 0;
+  for (const { start, end, entry } of aliasMatches(text, index, asserted, flagged)) {
+    usedIds.add(entry.identity.id);
+    output += text.slice(cursor, start) + entry.label;
+    cursor = end;
+  }
+  return output + text.slice(cursor);
+}
+
+function labelMap(value, code) {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).length > MAX_IDENTITIES
+    || Object.entries(value).some(([id, label]) => !id || id.length > 500 || typeof label !== "string" || !/^Student A[1-9][0-9]*$/u.test(label))
+    || new Set(Object.values(value)).size !== Object.keys(value).length) {
+    fail(code);
+  }
+  return value;
+}
+
+/**
+ * The roster lookup for one request. When the gateway supplied its course labels,
+ * each student keeps that one label, the same one every tool result shows.
+ */
+function aliasIndex(roster, priorLabels, assignedLabels) {
+  priorLabels = labelMap(priorLabels, "protected_request_label_map_invalid");
+  const assigned = assignedLabels === undefined ? null : labelMap(assignedLabels, "protected_request_label_map_invalid");
   const aliases = new Map();
+  const kinds = new Map();
   const byId = new Map();
   const labelsById = { ...priorLabels };
   let nextLabel = Math.max(0, ...Object.values(labelsById).map((label) => Number(label.slice("Student A".length)))) + 1;
   roster.forEach((raw) => {
     const identity = exactIdentity(raw);
     if (byId.has(identity.id)) fail("protected_request_roster_duplicate");
-    const label = labelsById[identity.id] || `Student A${nextLabel++}`;
-    labelsById[identity.id] = label;
-    const entry = { identity, label };
+    if (assigned && priorLabels[identity.id] && assigned[identity.id] && priorLabels[identity.id] !== assigned[identity.id]) {
+      fail("protected_request_label_changed");
+    }
+    const label = assigned
+      ? assigned[identity.id] || priorLabels[identity.id] || null
+      : labelsById[identity.id] || `Student A${nextLabel++}`;
+    if (label) labelsById[identity.id] = label;
+    const entry = { identity, label: label || "" };
     byId.set(identity.id, entry);
     const values = [label, identity.id, identity.name, identity.email, identity.loginId, identity.sisUserId,
       ...identity.aliases, ...learnerNameAliases(identity)].filter(Boolean);
@@ -162,9 +292,10 @@ function aliasIndex(roster, priorLabels) {
       const matches = aliases.get(key) || [];
       if (!matches.some((candidate) => candidate.identity.id === identity.id)) matches.push(entry);
       aliases.set(key, matches);
+      if (!kinds.has(key)) kinds.set(key, aliasKind(value, identity));
     }
   });
-  return { aliases, byId, labelsById };
+  return { aliases, kinds, byId, labelsById };
 }
 
 function exactAlias(value, aliases) {
@@ -175,28 +306,19 @@ function exactAlias(value, aliases) {
 }
 
 function containsAlias(value, alias) {
-  return boundaryPattern(alias).test(value.normalize("NFKC"));
+  return boundaryPattern(alias).test(fold(value.normalize("NFKC")));
 }
 
-function replaceAliases(value, aliases, usedIds, allowedNumericAliases = new Set()) {
-  let output = value.normalize("NFKC");
-  const ordered = [...aliases.entries()]
-    .filter(([alias]) => !/^[0-9]+$/u.test(alias) || allowedNumericAliases.has(alias))
-    .sort((left, right) => right[0].length - left[0].length);
-  for (const [alias, matches] of ordered) {
-    const matcher = boundaryPattern(alias);
-    if (!matcher.test(output)) continue;
-    if (matches.length !== 1) fail("protected_request_identifier_ambiguous");
-    usedIds.add(matches[0].identity.id);
-    output = output.replace(boundaryPattern(alias), matches[0].label);
-  }
-  return output;
-}
+// A number this long in a request is a platform id, not a count or a score. A word
+// before it that names a course object says whose id it is.
+const BARE_ID = /(?<![\p{L}\p{N}_/=.#:%&-])([0-9]{5,500})(?![\p{L}\p{N}_/.%])/gu;
+const OBJECT_WORD = /\b(?:course|courses|assignment|assignments|quiz|quizzes|module|modules|page|pages|file|files|section|sections|group|groups|item|items|question|questions|rubric|outcome|term|account|attempt|version|order|room|zip|phone|ext)\s*$/iu;
 
 function replaceContextualIds(value, byId, usedIds) {
   const patterns = [
     /((?:["']?(?:learner|student|user|recipient|enrollment|submission)[_-]?id["']?)\s*[:=]\s*["']?)([0-9]{1,500})/giu,
     /((?:\b(?:learner|student|user|recipient|enrollment|submission|grade)\b\s*(?:id\b\s*)?[#:=]\s*))([0-9]{1,500})\b/giu,
+    /((?:\b(?:learners?|students?|users?|recipients?)\b\s*(?:ids?\b\s*)?\s))([0-9]{1,500})\b/giu,
     /(\/(?:users|learners|students)\/)([0-9]{1,500})\b/giu,
   ];
   let output = value;
@@ -207,18 +329,48 @@ function replaceContextualIds(value, byId, usedIds) {
       return entry ? `${prefix}${entry.label}` : whole;
     });
   }
-  return output;
+  return output.replace(BARE_ID, (whole, id, offset, text) => {
+    const entry = byId.get(id);
+    if (!entry || OBJECT_WORD.test(text.slice(Math.max(0, offset - 40), offset))) return whole;
+    usedIds.add(entry.identity.id);
+    return entry.label;
+  });
 }
 
-function transformStructured(value, aliases, byId, usedIds, allowedNumericAliases, key = "", depth = 0) {
+/** Capitalized words that look like a name and matched nobody on the roster. */
+function unmatchedNameWords(value) {
+  const text = value.replace(/\bStudent A[1-9][0-9]*\b/gu, (label) => "x".padEnd(label.length, " "));
+  const word = /\p{Lu}[\p{Ll}\p{M}]+(?:['’-]\p{Lu}?[\p{Ll}\p{M}]+)*/u;
+  const found = [];
+  for (const run of text.matchAll(new RegExp(`${word.source}(?:[ \\t]+${word.source})*`, "gu"))) {
+    const words = run[0].split(/[ \t]+/u);
+    let start = run.index;
+    let group = [];
+    const flush = () => {
+      if (group.length && !(group.length === 1 && group[0].start === run.index && sentenceStart(text, run.index))) {
+        found.push({ at: group[0].start, text: group.map((entry) => entry.word).join(" ") });
+      }
+      group = [];
+    };
+    for (const entry of words) {
+      if (NOT_NAME_WORDS.has(normalize(entry))) flush();
+      else group.push({ word: entry, start });
+      start += entry.length + 1;
+    }
+    flush();
+  }
+  return found;
+}
+
+function transformStructured(value, index, byId, usedIds, asserted, flagged, key = "", depth = 0) {
   if (depth > 20) fail("protected_request_too_deep");
   if (typeof value === "string") {
     if (IDENTITY_KEY.test(key)) {
-      const entry = exactAlias(value, aliases);
+      const entry = exactAlias(value, index.aliases);
       usedIds.add(entry.identity.id);
       return entry.label;
     }
-    return replaceContextualIds(replaceAliases(value, aliases, usedIds, allowedNumericAliases), byId, usedIds);
+    return replaceContextualIds(replaceAliases(value, index, usedIds, asserted, flagged), byId, usedIds);
   }
   if (typeof value === "number" && Number.isSafeInteger(value) && IDENTITY_KEY.test(key)) {
     const entry = byId.get(String(value));
@@ -226,13 +378,13 @@ function transformStructured(value, aliases, byId, usedIds, allowedNumericAliase
     usedIds.add(entry.identity.id);
     return entry.label;
   }
-  if (Array.isArray(value)) return value.map((entry) => transformStructured(entry, aliases, byId, usedIds, allowedNumericAliases, key, depth + 1));
+  if (Array.isArray(value)) return value.map((entry) => transformStructured(entry, index, byId, usedIds, asserted, flagged, key, depth + 1));
   if (!value || typeof value !== "object") return value;
   const output = {};
   for (const [field, child] of Object.entries(value)) {
-    const protectedField = replaceAliases(field, aliases, usedIds, allowedNumericAliases);
+    const protectedField = replaceAliases(field, index, usedIds, asserted, flagged);
     if (Object.hasOwn(output, protectedField)) fail("protected_request_key_collision");
-    output[protectedField] = transformStructured(child, aliases, byId, usedIds, allowedNumericAliases, field, depth + 1);
+    output[protectedField] = transformStructured(child, index, byId, usedIds, asserted, flagged, field, depth + 1);
   }
   return output;
 }
@@ -263,8 +415,10 @@ export function protectLocalRequest(input) {
     fail("protected_request_identifiers_required");
   }
   const roster = input.roster.map(exactIdentity).sort((left, right) => left.id.localeCompare(right.id, "en", { numeric: true }));
-  const { aliases, byId, labelsById } = aliasIndex(roster, input.labelsById);
+  const index = aliasIndex(roster, input.labelsById, input.assignedLabelsById);
+  const { aliases, byId, labelsById } = index;
   const usedIds = new Set();
+  const flagged = [];
   const allowedLabels = new Set(Object.values(input.labelsById || {}));
   const suppliedLabels = input.text.normalize("NFKC").match(/\bstudent\s+a[1-9][0-9]*\b/giu) || [];
   if (suppliedLabels.some((label) => {
@@ -281,17 +435,29 @@ export function protectLocalRequest(input) {
   if (/^\s*[\[{]/u.test(input.text)) {
     let parsed;
     try { parsed = JSON.parse(input.text); } catch { fail("protected_request_structured_invalid"); }
-    protectedText = JSON.stringify(transformStructured(parsed, aliases, byId, usedIds, assertedAliases));
+    protectedText = JSON.stringify(transformStructured(parsed, index, byId, usedIds, assertedAliases, flagged));
   } else {
-    protectedText = replaceContextualIds(replaceAliases(input.text, aliases, usedIds, assertedAliases), byId, usedIds);
+    protectedText = replaceContextualIds(replaceAliases(input.text, index, usedIds, assertedAliases, flagged), byId, usedIds);
   }
+  if ([...usedIds].some((id) => !byId.get(id)?.label)) fail("protected_request_label_unavailable");
   if (remainingUnknownIdentifier(protectedText)) fail("protected_request_identifier_unknown");
-  for (const alias of aliases.keys()) {
-    if (/^student a[1-9][0-9]*$/u.test(alias)) continue;
-    if (/^[0-9]+$/u.test(alias) && !assertedAliases.has(alias)) continue;
-    if (boundaryPattern(alias).test(protectedText)) fail("protected_request_identity_leak_refused");
+  const leaks = aliasMatches(protectedText, index, assertedAliases, [])
+    .some(({ start, end }) => !/^Student A[1-9][0-9]*$/u.test(protectedText.slice(start, end)));
+  if (leaks || [...protectedText.matchAll(BARE_ID)].some((match) => byId.has(match[1])
+    && !OBJECT_WORD.test(protectedText.slice(Math.max(0, match.index - 40), match.index)))) {
+    fail("protected_request_identity_leak_refused");
   }
   const retainedLabels = { ...(input.labelsById || {}) };
   for (const id of usedIds) retainedLabels[id] = labelsById[id];
-  return Object.freeze({ protectedText, labelsById: Object.freeze(retainedLabels) });
+  const seen = new Set();
+  const unmatchedNames = [...flagged, ...unmatchedNameWords(protectedText).map((entry) => ({ ...entry, at: entry.at + 0.5 }))]
+    .sort((left, right) => left.at - right.at)
+    .map((entry) => entry.text)
+    .filter((name) => !seen.has(name) && seen.add(name));
+  return Object.freeze({
+    protectedText,
+    labelsById: Object.freeze(retainedLabels),
+    usedIds: Object.freeze([...usedIds]),
+    unmatchedNames: Object.freeze(unmatchedNames),
+  });
 }
