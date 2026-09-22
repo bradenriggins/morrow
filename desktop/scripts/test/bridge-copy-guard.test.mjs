@@ -252,7 +252,8 @@ test("the Chrome pairing pages carry no decorative eyebrow label", async () => {
   // This connection carries Canvas and Moodle. Blackboard uses the local REST connection instead.
   assert.match(pages.asked, /work with Canvas and Moodle through this Chrome extension/);
   assert.match(pages.answered, /Open a signed-in Canvas or Moodle course in Chrome\./);
-  assert.match(pages.answered, /shows Connect Canvas or Connect Moodle/);
+  assert.match(pages.answered, /shows Connect this course/);
+  assert.doesNotMatch(pages.answered, /Connect Canvas|Connect Moodle/, "the popup has no such buttons");
 });
 
 test("the approval result page states the result without a label above it", async () => {

@@ -440,7 +440,7 @@ const LEARNER_PRIVACY_REFUSAL_TEXT = "Morrow did not return this result because 
 /** The fixed person-facing sentence for a privacy-boundary refusal. */
 export function privacyProblemText(code: string): string {
   if (code === "privacy_browser_binding_unverified") {
-    return "Reconnect this course in Morrow Bridge. Its signed-in Canvas tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection.";
+    return "Open this course in Chrome and sign in, then select Connect this course in Morrow Bridge. Its signed-in Canvas tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection.";
   }
   // The connection is working and carries another course, so this names what is
   // true instead of pointing at the privacy boundary.

@@ -94,6 +94,11 @@ export async function storeReviewApprovalPresence(presence) {
   await Promise.all(tabs.filter((tab) => Number.isInteger(tab.id) && reviewPagePath(tab.url, presence)).map((tab) => injectInto(tab.id)));
 }
 
+/** Forgets the key when the paired connection ends; the runtime sends it again on the next review. */
+export async function clearReviewApprovalPresence() {
+  await chrome.storage.session.remove(PRESENCE_STORAGE_KEY).catch(() => undefined);
+}
+
 /** Registers the worker's listeners. Called once, when the worker module first runs. */
 export function installReviewApproval() {
   chrome.webNavigation?.onCompleted?.addListener((details) => {

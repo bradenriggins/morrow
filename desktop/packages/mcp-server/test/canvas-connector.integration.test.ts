@@ -763,7 +763,7 @@ describe("Canvas connector gateway path", () => {
           });
           expect(course.isError).toBe(true);
           expect(JSON.stringify(course.structuredContent)).toContain("privacy_browser_binding_unverified");
-          expect(JSON.stringify(course)).toContain("Reconnect this course in Morrow Bridge.");
+          expect(JSON.stringify(course)).toContain("Open this course in Chrome and sign in, then select Connect this course in Morrow Bridge.");
           expect(JSON.stringify(course)).not.toContain("learner_roster_binding_unavailable");
         } finally {
           await client.close();
