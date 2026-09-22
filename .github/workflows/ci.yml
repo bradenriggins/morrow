@@ -56,10 +56,9 @@ jobs:
       - name: Install Playwright's Chromium
         run: pnpm exec playwright install --with-deps chromium
       - run: pnpm check
+      # pnpm check already runs the desktop installer suites (pnpm test ends with pnpm test:desktop).
       - name: Browser integration harnesses
         run: xvfb-run -a node scripts/run-browser-harnesses.mjs
-      - name: Desktop installer suites
-        run: pnpm test:desktop
 
   check-muse:
     needs: changes
