@@ -68,6 +68,26 @@ const DISCLOSURES = installerState({
   materialsFolder: null
 });
 
+// One unbroken folder name longer than the 320px window, the way a synced or managed folder can be.
+const LONG_FOLDER = `/Users/teacher/Library/Application Support/Morrow/${"ExtremelyLongSyncedFolderNameWithoutSpaces".repeat(3)}/Bridge`;
+const ADD_BRIDGE = installerState({
+  ...BASE,
+  bridgeLoadedInChrome: false,
+  bridgePaired: false,
+  bridgeFolderPath: LONG_FOLDER
+});
+const LONG_MATERIALS = installerState({ ...BASE, materialsFolder: LONG_FOLDER.replace(/Bridge$/, "Materials") });
+const COURSE_CONNECTED = installerState({
+  ...BASE,
+  lifecycle: "ready",
+  bridgePaired: true,
+  courseSite: true,
+  runtimeVerifiedCourseCount: 1,
+  selectedCourseName: "BIO 101",
+  firstPreviewCourseName: "BIO 101",
+  firstPreview: { available: true, completed: true }
+});
+
 function serveInstaller() {
   const server = createServer((request, response) => {
     const file = path.join(ROOT, path.normalize(new URL(request.url, "http://127.0.0.1").pathname));
@@ -277,6 +297,57 @@ try {
     assert.equal(heading.sideways, true, `the welcome screen must not scroll sideways at ${width}px`);
     console.log(`${String(width).padStart(4)}px  heading "${heading.text}" on ${heading.lines} line(s), intro on ${heading.copyLines} line(s)`);
   }
+
+  // A long folder path wraps inside its row at the narrowest window instead of pushing it sideways.
+  for (const [name, snapshot, view] of [["Bridge folder", ADD_BRIDGE, "home"], ["Materials folder", LONG_MATERIALS, "settings"]]) {
+    const paths = await openSetup(browser, "darwin", snapshot);
+    if (view === "settings") await paths.click("#nav-settings");
+    for (const width of [940, 320]) {
+      await paths.setViewportSize({ width, height: 900 });
+      const row = await paths.evaluate((heading) => {
+        const title = [...document.querySelectorAll(".materials-row h3")].find((element) => element.textContent === heading);
+        const box = title.closest(".materials-row");
+        const path = box.querySelector("p");
+        const rowRect = box.getBoundingClientRect();
+        const pathRect = path.getBoundingClientRect();
+        return {
+          text: path.textContent,
+          wrap: getComputedStyle(path).overflowWrap,
+          inside: pathRect.right <= rowRect.right + 0.5 && pathRect.width <= rowRect.width,
+          rowInside: rowRect.right <= window.innerWidth + 0.5,
+          sideways: document.documentElement.scrollWidth <= window.innerWidth
+        };
+      }, name);
+      assert.match(row.text, /ExtremelyLongSyncedFolderName/, `${name} shows its path`);
+      assert.equal(row.wrap, "anywhere", `the ${name} path may break anywhere at ${width}px`);
+      assert.equal(row.inside, true, `the ${name} path stays inside its row at ${width}px`);
+      assert.equal(row.rowInside, true, `the ${name} row stays inside the window at ${width}px`);
+      assert.equal(row.sideways, true, `a long ${name} path must not scroll the window sideways at ${width}px`);
+    }
+  }
+  console.log("paths   a long Bridge or Materials folder path wraps inside its row at 320px");
+
+  // A Copy button says Copied for about 2 seconds, and a screen reader hears it once.
+  const copying = await openSetup(browser, "darwin", COURSE_CONNECTED);
+  const copyButton = copying.locator('[data-action="copy-example-prompt"]').first();
+  const prompt = await copyButton.getAttribute("data-prompt");
+  await copyButton.click();
+  await copying.waitForFunction((text) => [...document.querySelectorAll('[data-action="copy-example-prompt"]')]
+    .find((button) => button.dataset.prompt === text)?.textContent === "Copied", prompt);
+  assert.deepEqual(
+    await copying.evaluate(() => window.__morrowInvocations.find(([method]) => method === "installer:copy-to-clipboard")),
+    ["installer:copy-to-clipboard", { text: prompt }]
+  );
+  const live = await copying.locator("#copy-status").evaluate((element) => ({ text: element.textContent, live: element.getAttribute("aria-live"), role: element.getAttribute("role") }));
+  assert.deepEqual(live, { text: "Copied to the clipboard.", live: "polite", role: "status" });
+  assert.equal(await copying.locator('[data-action="copy-example-prompt"]').nth(1).textContent(), "Copy", "only the chosen button says Copied");
+  const copiedAt = Date.now();
+  await copying.waitForFunction((text) => [...document.querySelectorAll('[data-action="copy-example-prompt"]')]
+    .find((button) => button.dataset.prompt === text)?.textContent === "Copy", prompt, { timeout: 5_000 });
+  const shownFor = Date.now() - copiedAt;
+  assert.ok(shownFor >= 1_500 && shownFor <= 3_500, `Copied showed for ${shownFor}ms`);
+  assert.equal(await copying.locator("#copy-status").textContent(), "");
+  console.log(`copy    the chosen Copy button said Copied for ${shownFor}ms and announced it once`);
 
   const unknown = await openSetup(browser, undefined, WELCOME);
   assert.equal(await unknown.locator("#windows-note").isVisible(), false);

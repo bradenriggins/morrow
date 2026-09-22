@@ -66,8 +66,11 @@ test("continuous integration installs the installer dependencies and runs the de
   const commands = [...workflow.matchAll(/^\s+(?:- )?run: (.+)$/gm)].map((match) => match[1].trim());
   const install = commands.indexOf("pnpm --dir installer --ignore-workspace install --frozen-lockfile");
   const check = commands.indexOf("pnpm check");
-  const desktop = commands.indexOf("pnpm test:desktop");
   assert.ok(install >= 0, "ci.yml must install the installer dependencies");
   assert.ok(check > install, "ci.yml must install the installer dependencies before pnpm check");
-  assert.ok(desktop > check, "ci.yml must run the desktop suites");
+  // pnpm check runs pnpm test, and pnpm test ends with pnpm test:desktop, so CI runs the desktop
+  // suites once, inside pnpm check. A second, separate run only doubles the time.
+  assert.match(rootPackage.scripts.check, /&& pnpm test$/);
+  assert.match(rootPackage.scripts.test, /&& pnpm test:desktop$/);
+  assert.equal(commands.includes("pnpm test:desktop"), false, "ci.yml must not run the desktop suites a second time");
 });

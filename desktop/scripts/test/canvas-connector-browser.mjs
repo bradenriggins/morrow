@@ -1190,6 +1190,7 @@ const operationApproval = new LoopbackApprovalServer({
     ...(id === "op:lesson-preview" ? { plan: { ...approvalSnapshot.plan, tool: "canvas_update_create_page_courses", arguments: { course_id: "42", url_or_id: "lesson", wiki_page_body: '<h2>Blood has a job to do.</h2><p>Every heartbeat moves a living transport system through your body. Its parts work together to deliver oxygen, respond to infection, and limit blood loss.</p><h3>Three parts. Three essential roles.</h3><table><caption>Blood components at a glance</caption><thead><tr><th scope="col">Component</th><th scope="col">Main role</th></tr></thead><tbody><tr><td><strong>Red blood cells</strong></td><td>Carry oxygen to tissues</td></tr><tr><td><strong>White blood cells</strong></td><td>Help defend against infection</td></tr><tr><td><strong>Platelets</strong></td><td>Help form blood clots</td></tr></tbody></table><blockquote><p><strong>Make the connection</strong><br>If red blood cell levels fall, less oxygen may reach the tissues. How might that affect a patient during exercise?</p></blockquote><h3>Before you move on</h3><ol><li>Explain the role of hemoglobin.</li><li>Distinguish oxygen transport from clotting.</li><li>Use those differences to explain one patient symptom.</li></ol>' } } } : {}),
     ...(id === "op:unsafe-preview" ? { plan: { ...approvalSnapshot.plan, arguments: { ...approvalSnapshot.plan.arguments, item_entry_item_body: '<p>Safe lesson content.</p><script>window.previewEscaped=true;fetch("/unexpected-write",{method:"POST"})</script><style>body{display:none}</style><img src="https://invalid.example/track" onerror="window.previewEscaped=true" alt="Illustration"><iframe src="/operations"></iframe><form action="/unexpected-write"><input name="nonce"><button>Injected approval</button></form><a href="javascript:alert(1)">Read more</a><meta http-equiv="refresh" content="0;url=https://invalid.example/"><svg onload="window.previewEscaped=true"><foreignObject><div>Untrusted embedded content</div></foreignObject></svg>' } } } : {}),
     ...(id === "op:expired-ui-test" ? { approvalExpiresAt: new Date(Date.now() - 60_000).toISOString() } : {}),
+    ...(id === "op:learner-names" ? { plan: { ...approvalSnapshot.plan, tool: "canvas_create_assignment_override", arguments: { course_id: "42", assignment_id: "77", student_ids: ["Student A1"], title: "Extension for Student A1" } } } : {}),
     ...(id === "op:unnamed-file" ? { plan: { ...approvalSnapshot.plan, tool: "canvas_delete_file", arguments: { id: "88" }, risk: { approvalClass: "destructive" } } } : {}),
   }),
   operationReviewContext: async (id) => ({ targets: id === "op:missing-names"
@@ -1208,6 +1209,7 @@ const operationApproval = new LoopbackApprovalServer({
       { field: "assignment_id", label: "Quiz", name: "Week 3: Blood and Circulation", url: "https://canvas.example.edu/courses/42/assignments/77" },
     ],
     ...(id === "op:unnamed-file" ? { unnamed: true } : {}),
+    ...(id === "op:learner-names" ? { learnerNames: { "Student A1": "Jane Doe" } } : {}),
   }),
   operationList: () => ({ schema: "morrow.operations.v1", operations: [approvalSnapshot] }),
   approveOperation: (id) => {
@@ -1243,15 +1245,24 @@ const operationApproval = new LoopbackApprovalServer({
   setApprovalBaseUrl: () => undefined,
   // The desktop runtime sends the approval key to the paired Bridge inside its ui_state command.
   // This harness pairs the Bridge with the connector runtime directly, so it sends the same command.
+  // The runtime also sends who each learner label on a review is, over the same channel only.
   setApprovalPresence: (presence) => { approvalPresence = presence; },
-  announceApprovalPresence: () => {
-    if (approvalPresence && runtime.bridge.health().connected) {
-      approvalPresenceSent = runtime.uiState({ reviews: [], presence: approvalPresence });
-    }
+  announceApprovalPresence: () => pushReviewUiState(),
+  setReviewLearnerNames: (path, names) => {
+    if (names) reviewLearnerNames.set(path, { path, names });
+    else if (!reviewLearnerNames.delete(path)) return;
+    pushReviewUiState();
   },
 });
 let approvalPresence = null;
 let approvalPresenceSent = null;
+const reviewLearnerNames = new Map();
+function pushReviewUiState() {
+  if (approvalPresence && runtime.bridge.health().connected) {
+    const learnerNames = [...reviewLearnerNames.values()];
+    approvalPresenceSent = runtime.uiState({ reviews: [], presence: approvalPresence, ...(learnerNames.length ? { learnerNames } : {}) });
+  }
+}
 const operationApprovalBaseUrl = await operationApproval.start();
 assert.equal(approvalPresence?.origin, operationApprovalBaseUrl);
 
@@ -1520,6 +1531,26 @@ try {
   await operationApprovalPage.getByRole("button", { name: "Add this question" }).click();
   await operationApprovalPage.getByRole("heading", { name: "Request cancelled" }).waitFor();
   assert.equal(await operationApprovalPage.getByRole("heading", { name: "Canvas saved the change. Morrow checked the result." }).count(), 0);
+  // Learner names reach the review tab only through Morrow Bridge. The same page read over plain
+  // local HTTP, the way an assistant's shell command would read it, carries the label and no name.
+  await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Alearner-names`);
+  await operationApprovalPage.getByText("Extension for Jane Doe (Student A1)", { exact: true }).first().waitFor();
+  assert.doesNotMatch(await operationApprovalPage.locator(".decision details pre").textContent(), /Jane/);
+  assert.equal(await operationApprovalPage.locator("form input").evaluateAll((inputs) => inputs.some((input) => input.value.includes("Jane"))), false);
+  await captureThemes(operationApprovalPage, "approval-learner-names");
+  const namesReviewUrl = operationApprovalPage.url();
+  const plainReview = await (await fetch(namesReviewUrl, { headers: { accept: "text/html" } })).text();
+  const plainStatus = await (await fetch(`${namesReviewUrl}/status`)).text();
+  const plainList = await (await fetch(`${operationApprovalBaseUrl}/operations`)).text();
+  assert.match(plainReview, /Extension for Student A1/);
+  for (const plain of [plainReview, plainStatus, plainList]) assert.doesNotMatch(plain, /Jane/);
+  // Cancelling ends the review: the Bridge forgets the names, and the result tab shows none.
+  await waitForReviewApprovalSigner(operationApprovalPage);
+  await operationApprovalPage.getByRole("button", { name: "Cancel", exact: true }).click();
+  await operationApprovalPage.getByRole("heading", { name: "Request cancelled" }).waitFor();
+  await waitFor(async () => !(await operationApprovalPage.locator("body").innerText()).includes("Jane"), "the cancelled review still shows a learner name");
+  assert.equal(await replacementWorker.evaluate(async () => Object.keys(await chrome.storage.session.get("morrowReviewLearnerNames")).length), 0);
+  process.stderr.write("[browser-test] learner names show in the Chrome review tab only; plain local HTTP reads labels\n");
   process.stderr.write("[browser-test] operation approval UI ready\n");
 
   canvasPage = context.pages()[0] || await context.newPage();

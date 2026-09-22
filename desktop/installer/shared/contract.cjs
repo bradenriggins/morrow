@@ -80,11 +80,11 @@ const PUBLIC_ERRORS = Object.freeze({
   },
   assistant_not_connected: {
     message: "Morrow has not heard from your assistant yet.",
-    recovery: "Quit the assistant completely, open it again, and start a new chat. Then select Check again."
+    recovery: "Quit the assistant completely, open it again, and start a new chat. Then select the Check button that names your assistant."
   },
   assistant_connection_unconfirmed: {
     message: "Morrow could not check your assistant yet.",
-    recovery: "Keep Morrow open until it is ready, then select Check again."
+    recovery: "Keep Morrow open until it is ready, then select the Check button that names your assistant."
   },
   app_location_move_failed: {
     message: "Morrow could not move itself to Applications.",

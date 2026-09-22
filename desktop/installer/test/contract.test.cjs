@@ -335,6 +335,11 @@ test("the installer uses the shared knot with a live-text wordmark and the ChatG
   assert.doesNotMatch(renderer, /\.png/);
   assert.match(renderer, /id="windows-note"[^>]*data-platform="win32" hidden/);
   assert.match(renderer, /id="macos-note"[^>]*data-platform="darwin" hidden/);
+  // Moving to Applications uses macOS's own move, which asks for an administrator password when
+  // this account cannot write to Applications, as on many managed Macs. The note must not deny it.
+  const macNote = /id="macos-note"[^>]*>([^<]+)</.exec(renderer)[1];
+  assert.doesNotMatch(macNote, /does not ask for an administrator password/);
+  assert.match(macNote, /can ask for an administrator password/);
   for (const raster of ["morrow-wordmark.png", "morrow-wordmark-dark.png"]) {
     assert.equal(fs.existsSync(path.join(installerRoot, "assets", raster)), false, `${raster} is no longer used`);
   }

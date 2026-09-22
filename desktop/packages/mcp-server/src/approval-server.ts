@@ -167,6 +167,13 @@ export interface ApprovalOperationController {
   setApprovalPresence?(presence: ReviewApprovalPresence): void;
   /** A review page with an approve button opened: send the key to Morrow Bridge again. */
   announceApprovalPresence?(): void;
+  /**
+   * Who each learner label on the review at `reviewPath` is, or null when the review names no
+   * one or has ended. The runtime sends it only to the paired Morrow Bridge, which shows the names
+   * in the review tab. This server never puts a name in a page or a JSON answer, because any
+   * local program can read those.
+   */
+  setReviewLearnerNames?(reviewPath: string, names: Readonly<Record<string, string>> | null): void;
   batchApprovalGet?(batchId: string): JsonObject;
   batchApprovalStatus?(batchId: string): JsonObject;
   approveBatch?(batchId: string): JsonObject;
@@ -1004,11 +1011,10 @@ async function reviewContexts(
 }
 
 /**
- * Shows the educator who each learner label is, beside the label the assistant
- * used. The names come from Morrow's own learner vault and reach only this
- * loopback page; a label two reviewed operations name differently stays a label.
+ * Who each learner label in the reviewed operations is, from Morrow's own learner vault. A label
+ * two operations name differently is left out, so the Bridge never shows a guess.
  */
-function withLearnerNames(markup: string, contexts: ReadonlyMap<string, ApprovalReviewContext> | undefined): string {
+function reviewLearnerNames(contexts: ReadonlyMap<string, ApprovalReviewContext> | undefined): Record<string, string> | null {
   const names = new Map<string, string | null>();
   for (const context of contexts?.values() ?? []) {
     for (const [label, name] of Object.entries(context.learnerNames ?? {})) {
@@ -1016,12 +1022,11 @@ function withLearnerNames(markup: string, contexts: ReadonlyMap<string, Approval
       names.set(label, names.has(label) && names.get(label) !== name ? null : name);
     }
   }
-  if (![...names.values()].some(Boolean)) return markup;
-  return markup.replace(/\bStudent A[1-9][0-9]*\b/gu, (label) => {
-    const name = names.get(label);
-    return name ? `${escapeHtml(name)} (${label})` : label;
-  });
+  const known = [...names].filter((entry): entry is [string, string] => typeof entry[1] === "string");
+  return known.length ? Object.fromEntries(known) : null;
 }
+
+const ENDED_REVIEW_STATES = new Set(["cancelled", "closed_by_person", "expired", "unavailable"]);
 
 function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boolean, contexts?: ReadonlyMap<string, ApprovalReviewContext>, rememberText?: string, recentEntry?: string | null): string {
   let state = reviewState(target, snapshot);
@@ -1459,7 +1464,14 @@ export class LoopbackApprovalServer {
     this.rememberResults.set(operationId, text);
   }
 
-  async start(): Promise<string> {
+  /** Hands the review's label-to-name map to the runtime for Morrow Bridge. A failure changes nothing here. */
+  private shareLearnerNames(target: ApprovalTarget, contexts: ReadonlyMap<string, ApprovalReviewContext> | undefined): void {
+    try {
+      this.controller.setReviewLearnerNames?.(`/${target.kind}/${target.id}`, reviewLearnerNames(contexts));
+    } catch { /* the page still shows every learner by label */ }
+  }
+
+    async start(): Promise<string> {
     if (this.baseUrl) return this.baseUrl;
     await new Promise<void>((resolve, reject) => {
       this.server.once("error", reject);
@@ -1553,7 +1565,8 @@ export class LoopbackApprovalServer {
             ? await reviewContexts(this.controller, operations, signal)
             : undefined;
           const recentEntry = verifiedNow ? this.issueRecentChangesEntry(`${target.kind}:${target.id}`) : null;
-          sendJson(response, 200, { html: withLearnerNames(statusContent(target, snapshot, active, contexts, this.rememberText(target), recentEntry), contexts), active, states });
+          if (verifiedNow) this.shareLearnerNames(target, contexts);
+          sendJson(response, 200, { html: statusContent(target, snapshot, active, contexts, this.rememberText(target), recentEntry), active, states });
           return;
         }
         const expiry = Date.parse(String(snapshot.approvalExpiresAt || snapshot.expiresAt || ""));
@@ -1569,7 +1582,8 @@ export class LoopbackApprovalServer {
           ? await this.controller.rememberOffer(target.id).catch(() => null)
           : null;
         const recentEntry = state === "verified" ? this.issueRecentChangesEntry(`${target.kind}:${target.id}`) : null;
-        const body = withLearnerNames(html(target, snapshot, () => (nonce = this.issueNonce(nonceKey, canApprove)), contexts, active, rememberOffer, this.rememberText(target), recentEntry), contexts);
+        const body = html(target, snapshot, () => (nonce = this.issueNonce(nonceKey, canApprove)), contexts, active, rememberOffer, this.rememberText(target), recentEntry);
+        this.shareLearnerNames(target, ENDED_REVIEW_STATES.has(state) ? undefined : contexts);
         if (nonce && canApprove && state === "awaiting_approval") {
           try {
             this.controller.announceApprovalPresence?.();

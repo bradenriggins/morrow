@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DomUtils, parseDocument } from "htmlparser2";
 import sanitizeHtml from "sanitize-html";
 import {
+  MAX_BRIDGE_UI_LEARNER_NAME_REVIEWS,
   MAX_BRIDGE_UI_REVIEWS,
   STRUCTURAL_EDIT_FIELDS,
   normalizeBridgeBindings,
@@ -19,6 +20,7 @@ import {
   type BridgePrivateConversation,
   type BridgeUiReview,
   type BridgeUiApprovalPresence,
+  type BridgeUiLearnerNames,
   type BridgeUiState,
 } from "@morrow/bridge-protocol";
 import {
@@ -109,6 +111,7 @@ import { readExactTrustFile, readExactTrustJson } from "./exact-trust-file.js";
 
 export const MAX_PUBLICATION_POLICY_BYTES = 8 * 1024 * 1024;
 export const MAX_MCP_RUNTIME_MANIFEST_BYTES = 1024 * 1024;
+const REVIEW_LEARNER_NAMES_LIFETIME_MS = 15 * 60_000;
 
 const NEW_QUIZ_ACCOMMODATION_TOOLS = new Set([
   "canvas_set_course_level_accommodations",
@@ -2007,6 +2010,12 @@ export class GatewayRuntime {
   private approvalBaseUrl: string | null = null;
   private approvalPresence: BridgeUiApprovalPresence | null = null;
   /**
+   * Who each learner label on an open review is, keyed by review path, for Morrow Bridge only.
+   * An entry ends with its review: when the change is cancelled, or 15 minutes after the review
+   * page last showed it, the same lifetime as the page's approval cookie.
+   */
+  private readonly bridgeReviewLearnerNames = new Map<string, { readonly entry: BridgeUiLearnerNames; readonly expiresAt: number }>();
+  /**
    * The requesting assistant for the tool call running on this async stack. One
    * runtime serves every connected assistant, so the identity travels with the
    * call rather than with the runtime.
@@ -2481,9 +2490,10 @@ export class GatewayRuntime {
 
   /**
    * The student behind each learner label a reviewed change names, read from the
-   * learner vault in the change's current course scope. It serves only the
-   * educator's loopback review page. A label that does not resolve leaves the
-   * whole change without names, so the page never shows a partial guess.
+   * learner vault in the change's current course scope. The review server hands
+   * it on only to Morrow Bridge, which shows it in the educator's review tab; the
+   * server itself shows labels only. A label that does not resolve leaves the
+   * whole change without names, so the Bridge never shows a partial guess.
    */
   private async reviewLearnerNames(
     operation: EffectOperationRecord,
@@ -2575,6 +2585,39 @@ export class GatewayRuntime {
   /** A review page opened: send the approval key to Morrow Bridge again, with the current reviews. */
   announceApprovalPresence(): void {
     this.pushBrowserUiState();
+  }
+
+  /**
+   * Keeps who each learner label on one review is and sends it to the paired Morrow Bridge, the
+   * only place it goes. Null forgets the review. A path or map the Bridge would refuse is dropped.
+   */
+  setReviewLearnerNames(reviewPath: string, names: Readonly<Record<string, string>> | null): void {
+    if (!names) {
+      if (this.bridgeReviewLearnerNames.delete(reviewPath)) this.pushBrowserUiState();
+      return;
+    }
+    let entry: BridgeUiLearnerNames | undefined;
+    try {
+      entry = normalizeBridgeUiState({ reviews: [], learnerNames: [{ path: reviewPath, names }] }).learnerNames?.[0];
+    } catch {
+      return;
+    }
+    if (!entry) return;
+    this.bridgeReviewLearnerNames.delete(reviewPath);
+    this.bridgeReviewLearnerNames.set(reviewPath, { entry, expiresAt: Date.now() + REVIEW_LEARNER_NAMES_LIFETIME_MS });
+    for (const path of this.bridgeReviewLearnerNames.keys()) {
+      if (this.bridgeReviewLearnerNames.size <= MAX_BRIDGE_UI_LEARNER_NAME_REVIEWS) break;
+      this.bridgeReviewLearnerNames.delete(path);
+    }
+    this.pushBrowserUiState();
+  }
+
+  private currentReviewLearnerNames(): readonly BridgeUiLearnerNames[] {
+    const now = Date.now();
+    for (const [path, { expiresAt }] of this.bridgeReviewLearnerNames) {
+      if (expiresAt <= now) this.bridgeReviewLearnerNames.delete(path);
+    }
+    return [...this.bridgeReviewLearnerNames.values()].map(({ entry }) => entry);
   }
 
   approveOperation(operationId: string): JsonObject {
@@ -3522,7 +3565,12 @@ export class GatewayRuntime {
     if (!mapping || !isCanvasConnector(mapping)) return;
     const waiting = record.state === "awaiting_approval";
     const known = this.browserReviewWaiting.has(record.operationId);
-    if (waiting === known) return;
+    const ended = (record.state === "cancelled" || record.state === "closed_by_person")
+      && this.bridgeReviewLearnerNames.delete(`/operations/${record.operationId}`);
+    if (waiting === known) {
+      if (ended) this.pushBrowserUiState();
+      return;
+    }
     if (waiting) this.browserReviewWaiting.add(record.operationId);
     else this.browserReviewWaiting.delete(record.operationId);
     this.pushBrowserUiState();
@@ -3538,7 +3586,12 @@ export class GatewayRuntime {
       const upstream = source ? this.upstreams.get(source.upstreamId) : undefined;
       if (!source || !upstream) return;
       const presence = this.approvalPresence && this.approvalPresence.origin === this.approvalBaseUrl ? this.approvalPresence : null;
-      const command: BridgeUiState = normalizeBridgeUiState({ reviews: this.currentBrowserReviews(), ...(presence ? { presence } : {}) });
+      const learnerNames = this.currentReviewLearnerNames();
+      const command: BridgeUiState = normalizeBridgeUiState({
+        reviews: this.currentBrowserReviews(),
+        ...(presence ? { presence } : {}),
+        ...(learnerNames.length ? { learnerNames } : {}),
+      });
       Promise.resolve(upstream.callTool("morrow_browser_ui_state", command as unknown as JsonObject, { safeToRetry: false }))
         .catch(() => {});
     } catch {

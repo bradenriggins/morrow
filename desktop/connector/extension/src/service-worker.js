@@ -66,7 +66,7 @@ import { serializeBridgeResult } from "./bridge-transport.js";
 import { canvasProtectedRoster, protectLocalRequest, sourceProtectedRoster } from "./protected-request.js";
 import { MAX_RENDER_CHECK_SOURCE_CHARS, RENDER_CHECK_MESSAGE_TYPE, RENDER_CHECK_SCHEMA, renderCheckField } from "../render-check/render-check.js";
 import { PRIVATE_BRIDGE_OPERATION_CONTRACTS, bridgeCatalogCompatibilityContract, browserCatalogCompatibilityContract, canvasApiCompatibilityContract, fetchBoundedCatalogText, parseBrowserCatalogText, parseCanvasApiCatalogText, privateBridgeCompatibilityContract, stableJson } from "./catalog-compatibility.js";
-import { clearReviewApprovalPresence, handleReviewApprovalMessage, installReviewApproval, parseReviewApprovalPresence, storeReviewApprovalPresence } from "./review-approval.js";
+import { clearReviewApprovalPresence, clearReviewLearnerNames, handleReviewApprovalMessage, handleReviewLearnerNamesMessage, installReviewApproval, parseReviewApprovalPresence, parseReviewLearnerNames, storeReviewApprovalPresence, storeReviewLearnerNames } from "./review-approval.js";
 
 const PORT = 32147;
 const BRIDGE_PATH = "/morrow-bridge/v1";
@@ -2243,10 +2243,11 @@ function bridgeUiState(command) {
     throw new Error("ui_state_stale");
   }
   const value = command.uiState;
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["reviews", "presence"].includes(key))) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["reviews", "presence", "learnerNames"].includes(key))) {
     throw new Error("ui_state_invalid");
   }
   const presence = value.presence === undefined ? null : parseReviewApprovalPresence(value.presence);
+  const learnerNames = parseReviewLearnerNames(value.learnerNames);
   if (!Array.isArray(value.reviews) || value.reviews.length > MAX_BRIDGE_UI_REVIEWS) {
     throw new Error("ui_state_invalid");
   }
@@ -2268,7 +2269,7 @@ function bridgeUiState(command) {
     if (typeof entry.label !== "string" || !entry.label.length || entry.label.length > 120) throw new Error("ui_state_invalid");
     return { url: entry.url, label: entry.label };
   });
-  return presence ? { reviews, presence } : { reviews };
+  return { reviews, ...(presence ? { presence } : {}), ...(learnerNames.length ? { learnerNames } : {}) };
 }
 
 /**
@@ -2277,6 +2278,8 @@ function bridgeUiState(command) {
  */
 async function applyBridgeUiState(uiState) {
   if (uiState.presence) await storeReviewApprovalPresence(uiState.presence).catch(() => undefined);
+  // The runtime sends every review's names each time, so an absent list forgets them all.
+  await storeReviewLearnerNames(uiState.learnerNames || []).catch(() => undefined);
   state.reviews = uiState.reviews;
   state.reviewsWaiting = uiState.reviews.length;
   await refreshBadge();
@@ -2284,9 +2287,11 @@ async function applyBridgeUiState(uiState) {
   return { schema: "morrow.bridge.ui-state.v1", accepted: uiState.reviews.length };
 }
 
-// The waiting reviews and the approval key belong to one Morrow connection, so they end with it.
+// The waiting reviews, the approval key, and the learner names belong to one Morrow connection, so
+// they end with it.
 function clearBridgeReviews() {
-  void clearReviewApprovalPresence();
+  // Names first: open review tabs are found by the key's origin, so the key must outlast them.
+  void clearReviewLearnerNames().finally(clearReviewApprovalPresence);
   if (!state.reviews.length && !state.reviewsWaiting) return;
   state.reviews = [];
   state.reviewsWaiting = 0;
@@ -6392,6 +6397,7 @@ async function cancelPairingAfterConsentWithdrawal() {
 installReviewApproval();
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "morrow_review_approval_sign") return handleReviewApprovalMessage(message, sender, sendResponse);
+  if (message?.type === "morrow_review_learner_names") return handleReviewLearnerNamesMessage(message, sender, sendResponse);
   const fromPopup = POPUP_EDIT_POLICY_MESSAGES.has(message?.type) && popupSender(sender);
   const settingsAction = message?.type === "morrow_edit_policy_status" ? (authorityGeneration) => editPolicyStatus(authorityGeneration, { includePrivateChat: !fromPopup })
     : message?.type === "morrow_edit_policy_options" ? (authorityGeneration) => editPolicyOptions(message.sourceBindingId, authorityGeneration)

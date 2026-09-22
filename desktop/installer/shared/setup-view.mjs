@@ -116,7 +116,10 @@ export function progress(current) {
   const paired = bridge.paired === true;
   const firstPreviewReady = previewReady(current);
   const firstPreviewCompleted = previewCompleted(current);
-  const active = repairRequired ? -1 : !assistant ? 0 : reloadRequired || updateAvailable || !paired ? 1 : firstPreviewCompleted ? -1 : 2;
+  // After the first read, the panel asks for a quit and reopen until the assistant connects, so the
+  // rail points back at the Assistant step for that time.
+  const restart = firstPreviewCompleted && !repairRequired ? restartAssistant(current) : null;
+  const active = repairRequired ? -1 : !assistant ? 0 : reloadRequired || updateAvailable || !paired ? 1 : restart ? 0 : firstPreviewCompleted ? -1 : 2;
   const bridgeDetail = blocked
     ? "Not available yet"
     : reloadRequired
@@ -140,7 +143,7 @@ export function progress(current) {
         ? `${course}; first read not started`
         : "Open Canvas or Moodle in Chrome";
   return [
-    { label: "Assistant", detail: repairRequired ? "Waiting for repair" : assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? "Finish approval in Claude Desktop" : "Choose an installed assistant", status: repairRequired ? "pending" : assistant ? "done" : "current" },
+    { label: "Assistant", detail: repairRequired ? "Waiting for repair" : restart && active === 0 ? `Quit and reopen ${restart.title}` : assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? "Finish approval in Claude Desktop" : "Choose an installed assistant", status: repairRequired ? "pending" : restart && active === 0 ? "current" : assistant ? "done" : "current" },
     { label: "Morrow Bridge", detail: bridgeDetail, status: blocked ? "blocked" : active === 1 ? "current" : paired ? "done" : "pending" },
     { label: "Course", detail: courseDetail, status: firstPreviewCompleted ? "done" : active === 2 ? "current" : "pending" },
   ].map((step, index) => ({ ...step, current: index === active && step.status !== "done" }));
@@ -198,7 +201,7 @@ function materialsRow(current, { optionalDisclosure = false } = {}) {
   const detail = current?.workspaceSelected === true
     ? `Morrow works with the course materials in this folder.${rebind}`
     : `Morrow made this folder for course materials. Choose a different folder to work somewhere else.${rebind}`;
-  return `<div class="materials-row"><div><h3>Materials folder</h3><p>${escapeHtml(folder)}</p><p>${detail}</p></div><button class="secondary-button" type="button" data-action="choose-workspace">${settled ? "Change folder" : "Choose folder"}</button></div>`;
+  return `<div class="materials-row"><div><h3>Materials folder</h3><p class="path-text">${escapeHtml(folder)}</p><p>${detail}</p></div><button class="secondary-button" type="button" data-action="choose-workspace">${settled ? "Change folder" : "Choose folder"}</button></div>`;
 }
 
 /** What one assistant row says about that assistant, in the words it can prove. */
@@ -295,7 +298,7 @@ function bridgeFolderBlock(current, { platform = null, bridgeWaitExpired = false
   const late = bridgeWaitExpired
     ? '<div class="blocked-box"><strong>Chrome has not loaded Morrow Bridge yet</strong><p>Check that you chose this exact folder in <strong>Load unpacked</strong>, not a folder inside it or a copy of it.</p></div>'
     : "";
-  return `${late}<div class="materials-row"><div><h3>Bridge folder</h3><p>${escapeHtml(folder)}</p><p>${reach}</p></div><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="${escapeHtml(folder)}" aria-label="Copy the Bridge folder path">Copy path</button></div>`;
+  return `${late}<div class="materials-row"><div><h3>Bridge folder</h3><p class="path-text">${escapeHtml(folder)}</p><p>${reach}</p></div><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="${escapeHtml(folder)}" aria-label="Copy the Bridge folder path">Copy path</button></div>`;
 }
 
 function actionPanel(current, { chosenAssistantId = null, platform = null, bridgeWaitExpired = false } = {}) {
@@ -397,7 +400,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
     };
   }
   const course = bridge.firstPreviewCourseName || bridge.selectedCourseName || "your selected course";
-  if (previewCompleted(current) && restartAssistant(current)) return restartPanel(restartAssistant(current));
+  if (previewCompleted(current) && restartAssistant(current)) return restartPanel(restartAssistant(current), current);
   if (previewCompleted(current)) {
     return {
       title: "Your course is connected.",
@@ -430,12 +433,18 @@ function restartAssistant(current) {
   return assistant && assistant.id !== "claude-desktop" && assistant.connected !== true ? assistant : null;
 }
 
-function restartPanel(assistant) {
+function restartPanel(assistant, current) {
   const title = escapeHtml(assistant.title);
+  // The runtime sees that an assistant session connected, not which assistant it is, so a check
+  // after any one reopens counts for every assistant set up.
+  const configured = configuredAssistants(current);
+  const which = configured.length > 1
+    ? `<div class="info-box"><strong>Reopen each assistant</strong><p>Morrow can tell that an assistant opened Morrow, but it cannot tell which one. Quit and reopen each assistant you set up: ${assistantTitles(configured)}.</p></div>`
+    : "";
   return {
     title: "Quit and reopen your assistant.",
     copy: `${assistant.title} reads its settings only when it starts. It cannot use Morrow until you open it again.`,
-    body: `<ol class="instructions"><li>Quit <strong>${title}</strong> completely. Closing its window is not enough.</li><li>Open <strong>${title}</strong> again and start a new chat.</li><li>Return here and select <strong>Check ${title}</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
+    body: `${which}<ol class="instructions"><li>Quit <strong>${title}</strong> completely. Closing its window is not enough.</li><li>Open <strong>${title}</strong> again and start a new chat.</li><li>Return here and select <strong>Check ${title}</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
   };
 }
 

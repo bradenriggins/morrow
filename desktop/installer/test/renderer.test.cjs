@@ -22,7 +22,7 @@ const SELECTORS = [
   "#blackboard-base-url-error", "#blackboard-application-key-error", "#blackboard-application-secret-error",
   "#blackboard-courses", "#blackboard-courses-copy", "#blackboard-course-list",
   "#retention-panel", "#retention-summary", "#retention-title", "#retention-copy", "#retention-body",
-  "#removal-status", "#support"
+  "#removal-status", "#copy-status", "#support"
 ];
 
 // The inline message index.html ties to each Blackboard field.
@@ -992,6 +992,10 @@ test("copying an example request sends its exact text through the clipboard chan
     method: "installer:copy-to-clipboard",
     payload: { text: "Move the due date of the first assignment one week later." }
   });
+  const labels = dom.element("#action-body").querySelectorAll("[data-action]")
+    .filter((element) => element.dataset.action === "copy-example-prompt").map((element) => element.textContent);
+  assert.deepEqual(labels.filter((label) => label === "Copied").length, 1);
+  assert.equal(dom.element("#copy-status").textContent, "Copied to the clipboard.");
 });
 
 test("the nav switches between Home and Settings, and Manage on Home reaches Settings (D8, D9)", async () => {
