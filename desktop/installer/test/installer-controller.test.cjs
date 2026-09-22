@@ -93,7 +93,22 @@ async function completePayload(root, options = {}) {
   await fs.writeFile(path.join(app, "installer", "process-lifetime.cjs"), "module.exports = {};\n");
   // Writing an assistant's configuration restricts the file to this account on
   // win32 before checking its digest, through the real client-config module.
-  await fs.writeFile(path.join(app, "packages", "client-config", "dist", "index.js"), "export function restrictToCurrentAccount() {}\n");
+  await fs.writeFile(path.join(app, "packages", "client-config", "dist", "index.js"), [
+    "export function restrictToCurrentAccount() {}",
+    "export function withoutMorrowCodexTable(content, name, options = {}) {",
+    "  const lines = content.split('\\n');",
+    "  const start = lines.findIndex((line) => line.trim() === '[mcp_servers.morrow]');",
+    "  if (start === -1) return null;",
+    "  const next = lines.findIndex((line, index) => index > start && line.trimStart().startsWith('['));",
+    "  const table = lines.slice(start, next === -1 ? lines.length : next);",
+    "  if (options.requireMorrowEntry && !table.some((line) => line.includes('MORROW_UPSTREAMS_FILE'))) {",
+    "    throw Object.assign(new Error('not written by Morrow'), { code: 'config_entry_not_morrow' });",
+    "  }",
+    "  if (next === -1) { const kept = lines.slice(0, start).join('\\n').trimEnd(); return kept ? `${kept}\\n` : ''; }",
+    "  return [...lines.slice(0, start), ...lines.slice(next)].join('\\n');",
+    "}",
+    ""
+  ].join("\n"));
 
   // The gateway runs as ESM from app/packages while its sealed copy under
   // app/node_modules carries the digests the manifest binds.
@@ -1714,8 +1729,9 @@ test("repair refuses a payload that no longer verifies and changes nothing", asy
   assert.deepEqual(calls, []);
 });
 
-test("repair leaves an assistant configuration edited after Morrow wrote it exactly as it is", async () => {
+test("repair re-points Morrow's entry after the assistant edited its file, and leaves an entry someone else wrote", async () => {
   const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
   const { installer, calls } = await repairableController(root);
   const target = path.join(root, "Home", ".codex", "config.toml");
   await fs.mkdir(path.dirname(target), { recursive: true });
@@ -1729,10 +1745,20 @@ test("repair leaves an assistant configuration edited after Morrow wrote it exac
     configured: { codex: { target, sha256: morrowSha256 } }
   });
 
+  await installer.repair();
+  assert.deepEqual(calls.map((entry) => entry[0]), ["setup", "mcp"], "the edit elsewhere in the file does not stop repair");
+
+  const runCli = installer.runCli;
+  installer.runCli = async (executable, argumentsValue, options) => {
+    if (argumentsValue[1] !== "mcp") return runCli(executable, argumentsValue, options);
+    return {
+      code: 1,
+      stdout: "",
+      stderr: `${JSON.stringify({ schema: "morrow.client-config-error.v1", code: "config_entry_not_morrow", path: target })}\n`
+    };
+  };
   await assert.rejects(() => installer.repair(), (error) => error.code === "existing_morrow_configuration");
-  assert.deepEqual(await fs.readFile(target), edited, "the newer edit is still on disk, byte for byte");
-  assert.deepEqual(calls.map((entry) => entry[0]), ["setup"], "no client-config install ran against that file");
-  assert.equal((await installer.record()).configured.codex.sha256, morrowSha256);
+  assert.deepEqual(await fs.readFile(target), edited, "the file is still on disk, byte for byte");
   assert.equal((await fs.stat(path.join(root, "UserData", "Bridge", "manifest.json"))).isFile(), true);
 });
 
@@ -1875,7 +1901,7 @@ test("assistant status keeps an exact Morrow entry configured after unrelated cl
   });
 });
 
-test("repair replaces an unchanged assistant configuration only through its recorded digest", async () => {
+test("repair re-points every configured assistant by Morrow's own entry, not by the whole file", async () => {
   const root = await temporaryRoot();
   await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
   const target = path.join(root, "Home", ".codex", "config.toml");
@@ -1892,8 +1918,10 @@ test("repair replaces an unchanged assistant configuration only through its reco
   await installer.repair();
 
   assert.deepEqual(calls.map((entry) => entry[0]), ["setup", "mcp"]);
-  assert.equal(calls[1][calls[1].indexOf("--expected-config-sha256") + 1], recorded);
+  assert.equal(calls[1].includes("--replace-morrow-entry"), true);
+  assert.equal(calls[1].includes("--expected-config-sha256"), false);
   assert.equal((await installer.record()).configured.codex.sha256, recorded);
+  assert.equal((await installer.record()).selectedAssistantId, "codex");
 });
 
 /**
@@ -1919,7 +1947,10 @@ async function installationWithData(root, response, overrides = {}) {
   await fs.writeFile(path.join(stateDirectory, "morrow.upstreams.json"), "{}\n");
   await fs.writeFile(path.join(stateDirectory, "morrow.sqlite3"), "journal\n");
   await fs.mkdir(path.join(stateDirectory, "Backups"), { recursive: true });
-  await fs.writeFile(path.join(stateDirectory, "Backups", "config.toml"), "an earlier assistant setting\n");
+  await fs.writeFile(path.join(stateDirectory, "Backups", "installer-invalid.json"), "an earlier setup record\n");
+  const assistantBackups = path.join(userData, "Assistant settings backups");
+  await fs.mkdir(assistantBackups, { recursive: true });
+  await fs.writeFile(path.join(assistantBackups, "config.toml.2026-09-01T10-00-00Z.bak"), "an earlier assistant setting\n");
   // Fixture construction owns no runtime. Give only this setup call a stopped
   // guard so tests below can choose their own live-owner behavior.
   const acquireDesktopMutationGuard = installer.acquireDesktopMutationGuard;
@@ -1938,7 +1969,7 @@ async function installationWithData(root, response, overrides = {}) {
   await fs.writeFile(path.join(materials, "syllabus.md"), "week one\n");
   const assistantConfiguration = path.join(home, ".codex", "config.toml");
   await fs.mkdir(path.dirname(assistantConfiguration), { recursive: true });
-  await fs.writeFile(assistantConfiguration, "[mcp_servers.morrow]\ncommand = \"morrow\"\n");
+  await fs.writeFile(assistantConfiguration, "model = \"gpt-6\"\n\n[mcp_servers.morrow]\ncommand = \"morrow\"\nenv = { MORROW_UPSTREAMS_FILE = \"/State/morrow.upstreams.json\" }\n");
   await installer.writeRecord({
     ...freshRecord(),
     selectedAssistantId: "codex",
@@ -1956,7 +1987,7 @@ async function installationWithData(root, response, overrides = {}) {
       userData,
       home,
       state: stateDirectory,
-      backups: path.join(stateDirectory, "Backups"),
+      backups: path.join(userData, "Assistant settings backups"),
       bridge: path.join(userData, "Bridge"),
       materials: path.join(userData, "Materials"),
       credentials,
@@ -1981,9 +2012,10 @@ test("the state names every place this installation keeps data, by its exact pat
   ]);
   assert.deepEqual(
     retention.locations.filter((location) => location.removable).map((location) => location.path),
-    [paths.state, paths.backups, paths.bridge, paths.materials, paths.credentials, paths.blackboardConfiguration]
+    [paths.state, paths.bridge, paths.materials, paths.credentials, paths.blackboardConfiguration]
   );
   assert.equal(retention.locations.find((location) => location.path === paths.assistantConfiguration).keptReason, "assistant_configuration");
+  assert.equal(retention.locations.find((location) => location.path === paths.backups).keptReason, "assistant_backup");
   assert.equal(retention.removal, null);
   // Every path it named is a real path on this computer.
   for (const location of retention.locations) {
@@ -2010,12 +2042,13 @@ test("a data removal without an explicit confirmation removes nothing", async ()
   assert.deepEqual(options.buttons, ["Cancel", "Remove data"]);
   assert.equal(options.defaultId, 0, "the destructive button is not the default button");
   assert.equal(options.cancelId, 0, "Escape answers with Cancel");
-  for (const value of [paths.state, paths.backups, paths.bridge, paths.materials, paths.credentials, paths.blackboardConfiguration]) {
+  for (const value of [paths.state, paths.bridge, paths.materials, paths.credentials, paths.blackboardConfiguration]) {
     assert.ok(options.detail.includes(value), `the confirmation names ${value} as removed`);
   }
-  for (const value of [paths.assistantConfiguration]) {
+  for (const value of [paths.backups, paths.assistantConfiguration]) {
     assert.ok(options.detail.includes(value), `the confirmation names ${value} as kept`);
   }
+  assert.ok(options.detail.includes(`Morrow will first take its own morrow entry out of:\n- ChatGPT: ${paths.assistantConfiguration}`));
   assert.ok(options.detail.includes("Morrow will not remove:"));
 
   // The state carries that nothing was removed, so the panel never reports a
@@ -2209,21 +2242,26 @@ test("a confirmed removal removes what it listed, keeps what it did not, and rea
 
   assert.equal(receipt.schema, "morrow.installer-data-removal.v1");
   assert.equal(receipt.status, "removed");
-  assert.deepEqual(receipt.removed, [paths.state, paths.backups, paths.bridge, paths.materials, paths.credentials, paths.blackboardConfiguration]);
+  assert.deepEqual(receipt.removed, [paths.state, paths.bridge, paths.materials, paths.credentials, paths.blackboardConfiguration]);
   assert.deepEqual(receipt.remaining, []);
-  assert.deepEqual(receipt.kept, [paths.assistantConfiguration]);
+  assert.deepEqual(receipt.kept, [paths.backups, paths.assistantConfiguration]);
+  // The assistant no longer starts a Morrow that is gone; the rest of its file stays.
+  assert.equal(await fs.readFile(paths.assistantConfiguration, "utf8"), "model = \"gpt-6\"\n");
   assert.ok(globalThis.__morrowRepairOrder.includes("closed"), "the runtime holding the journal is stopped before its folder is removed");
 
   // A fresh read of the disk, not the removal's own report.
   for (const removed of receipt.removed) {
     assert.equal(await fs.lstat(removed).then(() => true, () => false), false, `${removed} is gone`);
   }
-  assert.deepEqual(await treeDigest(paths.userData), [], "nothing Morrow owns is left behind");
+  const left = await treeDigest(paths.userData);
+  assert.equal(left.length, 2);
+  assert.equal(left[0], "Assistant settings backups/");
+  assert.ok(left[1].startsWith("Assistant settings backups/config.toml.2026-09-01T10-00-00Z.bak"), "only the kept copies of assistant settings are left");
   assert.deepEqual(
-    await treeDigest(paths.home),
+    (await treeDigest(paths.home)).filter((entry) => !entry.startsWith(".codex/config.toml ")),
     homeBefore.filter((entry) => !entry.startsWith(".morrow/blackboard-learn.json ")
-      && !entry.startsWith(".morrow/credentials/blackboard")),
-    "every path outside the list is exactly as it was"
+      && !entry.startsWith(".morrow/credentials/blackboard") && !entry.startsWith(".codex/config.toml ")),
+    "every other path outside the list is exactly as it was"
   );
 
   // Morrow does not make the materials folder again on its own after removing
@@ -2276,8 +2314,25 @@ test("a path the removal could not remove is reported as remaining, never as rem
   assert.equal(receipt.status, "incomplete");
   assert.deepEqual(receipt.remaining, [paths.credentials]);
   assert.equal(receipt.removed.includes(paths.credentials), false);
-  assert.deepEqual(receipt.removed, [paths.state, paths.backups, paths.bridge, paths.materials, paths.blackboardConfiguration]);
+  assert.deepEqual(receipt.removed, [paths.state, paths.bridge, paths.materials, paths.blackboardConfiguration]);
   assert.equal(await fs.lstat(path.join(paths.credentials, "default.secret")).then(() => true, () => false), true,
     "the secret Morrow could not remove is still on this computer");
   assert.equal((await installer.state()).retention.removal.status, "incomplete");
+});
+
+test("a data removal that cannot take Morrow's entry out of an assistant removes nothing and names that file", async () => {
+  const root = await temporaryRoot();
+  const { installer, paths } = await installationWithData(root, 1);
+  const foreign = "[mcp_servers.morrow]\ncommand = \"someone-else\"\n";
+  await fs.writeFile(paths.assistantConfiguration, foreign);
+  const before = await treeDigest(paths.userData);
+
+  await assert.rejects(() => installer.removeData(null), (error) => {
+    assert.equal(error.code, "assistant_configuration_changed");
+    assert.equal(error.file, paths.assistantConfiguration);
+    return true;
+  });
+
+  assert.equal(await fs.readFile(paths.assistantConfiguration, "utf8"), foreign);
+  assert.deepEqual(await treeDigest(paths.userData), before, "nothing was removed");
 });

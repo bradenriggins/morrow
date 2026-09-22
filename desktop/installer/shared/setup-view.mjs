@@ -378,13 +378,14 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
 }
 
 const UNINSTALL_STEPS = Object.freeze({
-  move_to_trash: "To remove the Morrow application, quit Morrow and move it to the Trash.",
-  windows_settings_apps: "To remove the Morrow application, quit Morrow, then open Settings, select Apps, select Morrow, and select Uninstall.",
-  unknown: "To remove the Morrow application, quit Morrow and remove it the way this computer removes an application."
+  move_to_trash: "To remove the Morrow application, first select Remove Morrow's data so your assistants stop starting Morrow. Then quit Morrow and move it to the Trash.",
+  windows_settings_apps: "To remove the Morrow application, first select Remove Morrow's data so your assistants stop starting Morrow. Then quit Morrow, open Settings, select Apps, select Morrow, and select Uninstall.",
+  unknown: "To remove the Morrow application, first select Remove Morrow's data so your assistants stop starting Morrow. Then quit Morrow and remove it the way this computer removes an application."
 });
 
 const KEPT_REASONS = Object.freeze({
-  assistant_configuration: "Your assistant's own settings file. Morrow leaves it as it is.",
+  assistant_configuration: "Your assistant's own settings file. Remove Morrow's data takes only Morrow's own entry out of it and leaves the rest.",
+  assistant_backup: "Copies of your assistant settings from before Morrow changed them. Morrow keeps these copies so you can put a settings file back.",
   outside_morrow_data: "Outside the folders Morrow keeps its own files in. Morrow leaves it as it is."
 });
 

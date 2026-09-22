@@ -255,3 +255,20 @@ test("configuration rollback preserves an existing user-owned project directory 
   assert.equal(await fs.readFile(config, "utf8"), "before\n");
   assert.equal((await fs.stat(project)).mode & 0o777, 0o775);
 });
+
+test("an assistant settings backup is named after its file and time, and lives outside State", async () => {
+  const { captureConfiguration } = require("../shared/runtime.cjs");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-backup-name-"));
+  test.after(() => fs.rm(root, { recursive: true, force: true }));
+  const layout = payloadLayout(path.join(root, "Payload"), path.join(root, "UserData"));
+  assert.equal(layout.assistantBackups, path.join(root, "UserData", "Assistant settings backups"));
+  assert.equal(layout.assistantBackups.startsWith(layout.state), false);
+  const config = path.join(root, ".codex", "config.toml");
+  await fs.mkdir(path.dirname(config), { recursive: true });
+  await fs.writeFile(config, "model = \"gpt-6\"\n");
+  const first = await captureConfiguration(config, layout.assistantBackups, new Date("2026-09-22T10:11:12.345Z"));
+  const second = await captureConfiguration(config, layout.assistantBackups, new Date("2026-09-22T10:11:12.345Z"));
+  assert.match(path.basename(first.backup), /^config\.toml\.2026-09-22T10-11-12Z(?:-[0-9]+)?\.bak$/);
+  assert.notEqual(first.backup, second.backup, "two copies in the same second keep both");
+  assert.equal(await fs.readFile(first.backup, "utf8"), "model = \"gpt-6\"\n");
+});

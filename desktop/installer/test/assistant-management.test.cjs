@@ -36,9 +36,12 @@ async function temporaryRoot() {
     "  const lines = content.split('\\n');",
     "  const start = lines.findIndex((line) => /^\\s*\\[\\s*mcp_servers\\s*\\.\\s*(?:morrow|\\\"morrow\\\"|'morrow')\\s*\\]\\s*(?:#.*)?$/.test(line));",
     "  if (start === -1) return null;",
-    "  if (lines.slice(start + 1).some((line) => line.trimStart().startsWith('['))) throw new Error('unsupported table order');",
-    "  const kept = lines.slice(0, start).join('\\n').trimEnd();",
-    "  return kept ? `${kept}\\n` : '';",
+    "  const next = lines.findIndex((line, index) => index > start && line.trimStart().startsWith('['));",
+    "  if (next === -1) {",
+    "    const kept = lines.slice(0, start).join('\\n').trimEnd();",
+    "    return kept ? `${kept}\\n` : '';",
+    "  }",
+    "  return [...lines.slice(0, start), ...lines.slice(next)].join('\\n');",
     "}",
     "export function withoutMorrowClientJson(content, container = 'mcpServers', serverName = 'morrow') {",
     "  const document = JSON.parse(content);",
@@ -63,13 +66,13 @@ function codexTable(workspaceRoot) {
     "[mcp_servers.morrow]",
     "command = \"node\"",
     `cwd = "${workspaceRoot}"`,
-    "required = true",
+    "env = { MORROW_UPSTREAMS_FILE = \"/Morrow/State/morrow.upstreams.json\" }",
     ""
   ].join("\n");
 }
 
 function claudeCodeEntry(workspaceRoot) {
-  return { mcpServers: { morrow: { type: "stdio", command: "node", cwd: workspaceRoot } } };
+  return { mcpServers: { morrow: { type: "stdio", command: "node", cwd: workspaceRoot, env: { MORROW_UPSTREAMS_FILE: "/Morrow/State/morrow.upstreams.json" } } } };
 }
 
 async function writeFile(target, content) {
@@ -148,8 +151,16 @@ function controller(root, overrides = {}) {
           return { code: 1, stdout: "", stderr: "Refusing to replace existing Morrow server morrow" };
         }
         if (args[2] === "codex") {
-          const withoutMorrow = current.replace(/(?:^|\n)\[mcp_servers\.morrow\]\n[\s\S]*$/, "").trimEnd();
-          await writeFile(target, `${withoutMorrow}${withoutMorrow ? "\n\n" : ""}${codexTable(workspaceRoot)}`);
+          const start = current.search(/(?:^|\n)\[mcp_servers\.morrow\]\n/);
+          if (start === -1) {
+            const kept = current.trimEnd();
+            await writeFile(target, `${kept}${kept ? "\n\n" : ""}${codexTable(workspaceRoot)}`);
+          } else {
+            const body = start === 0 ? 0 : start + 1;
+            const next = current.slice(body + 1).search(/\n\[/);
+            const after = next === -1 ? "" : current.slice(body + 1 + next + 1);
+            await writeFile(target, `${current.slice(0, body)}${codexTable(workspaceRoot)}${after ? `\n${after}` : ""}`);
+          }
         } else {
           const document = current.trim() ? JSON.parse(current) : {};
           document.mcpServers = { ...(document.mcpServers || {}), ...claudeCodeEntry(workspaceRoot).mcpServers };
@@ -252,28 +263,81 @@ test("an assistant configuration changed during its atomic write is reported as 
   );
 });
 
-test("removing an assistant whose settings file changed after Morrow wrote it is refused, and changes nothing", async () => {
+test("removing an assistant after Codex rewrote its settings file removes only Morrow's table", async () => {
   const root = await temporaryRoot();
   const { installer, calls } = controller(root);
   const target = path.join(root, "Home", ".codex", "config.toml");
-  const recorded = await writeFile(target, codexTable(path.join(root, "Materials")));
-  const edited = `[mcp_servers.other]\ncommand = "other"\n\n${codexTable(path.join(root, "Materials"))}`;
-  await writeFile(target, edited);
+  const recorded = await writeFile(target, `model = "gpt-5"\n\n${codexTable(path.join(root, "Materials"))}`);
+  // What Codex writes after Morrow: a new model, then a trusted project and a notice table after Morrow's.
+  const rewritten = `model = "gpt-6"\n\n${codexTable(path.join(root, "Materials"))}\n[projects."/Users/t/course"]\ntrust_level = "trusted"\n\n[tui.notices]\nhide = true\n`;
+  await writeFile(target, rewritten);
   await installer.writeRecord({
     ...freshRecord(),
     selectedAssistantId: "codex",
     configured: { codex: { target, sha256: recorded } }
   });
 
+  await installer.removeAssistant("codex");
+
+  assert.equal(await fs.readFile(target, "utf8"), `model = "gpt-6"\n\n[projects."/Users/t/course"]\ntrust_level = "trusted"\n\n[tui.notices]\nhide = true\n`);
+  assert.deepEqual((await installer.record()).configured, {});
+  assert.deepEqual(calls, [], "no command ran against that file");
+  assert.equal(await fs.lstat(installer.assistantRemovalPath).then(() => true, () => false), false);
+});
+
+test("removing an entry Morrow did not write is refused, names the file, and changes nothing", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const foreign = "[mcp_servers.morrow]\ncommand = \"someone-else\"\n";
+  const recorded = await writeFile(target, foreign);
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: recorded } } });
+  const received = [];
+  installer.clientConfigModule = async () => ({
+    restrictToCurrentAccount() {},
+    withoutMorrowCodexTable(content, name, options) {
+      received.push(options);
+      throw Object.assign(new Error("not written by Morrow"), { code: "config_entry_not_morrow", path: "Codex configuration" });
+    }
+  });
+
   await assert.rejects(() => installer.removeAssistant("codex"), (error) => {
     assert.equal(error.code, "assistant_configuration_changed");
-    assert.equal(error.message, "That assistant's settings file changed after Morrow wrote it.");
-    assert.equal(error.recovery, `Morrow left ${target} exactly as it is. Open it, remove the morrow entry yourself, then select Check status.`);
+    assert.equal(error.file, target);
     return true;
   });
-  assert.equal(await fs.readFile(target, "utf8"), edited, "the file is exactly as it was, byte for byte");
+  assert.deepEqual(received, [{ requireMorrowEntry: true }]);
+  assert.equal(await fs.readFile(target, "utf8"), foreign);
   assert.deepEqual((await installer.record()).configured, { codex: { target, sha256: recorded } });
-  assert.deepEqual(calls, [], "no command ran against that file");
+});
+
+test("a refusal client-config names in --json mode reaches setup as its own public error for that file", async () => {
+  const root = await temporaryRoot();
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  for (const [code, publicCode] of [
+    ["config_invalid", "assistant_config_invalid"],
+    ["config_read_only", "assistant_config_read_only"],
+    ["config_permission_denied", "assistant_config_permission_denied"],
+    ["config_symlink", "assistant_config_symlink"],
+    ["config_busy", "assistant_config_busy"],
+    ["config_unreadable", "assistant_config_unreadable"],
+    ["config_entry_not_morrow", "existing_morrow_configuration"],
+    ["config_existing_entry", "existing_morrow_configuration"],
+    ["config_changed", "existing_morrow_configuration"],
+  ]) {
+    const { installer } = controller(root, {
+      runCli: async () => ({
+        code: 1,
+        stdout: "",
+        stderr: `${JSON.stringify({ schema: "morrow.client-config-error.v1", code, path: target })}\n[morrow] technical detail\n`
+      })
+    });
+    await assert.rejects(() => installer.executeCli(["mcp", "install", "codex", "--json"]), (error) => {
+      assert.equal(error.code, publicCode, code);
+      if (publicCode !== "existing_morrow_configuration") assert.equal(error.file, target, code);
+      return true;
+    });
+  }
 });
 
 test("assistant removal preserves a pathname replaced at its final write boundary and keeps its tombstone", async () => {
@@ -418,8 +482,8 @@ test("JSON assistant removal uses the shared offset-preserving JSONC remover", a
   });
   const calls = [];
   installer.clientConfigModule = async () => ({
-    withoutMorrowClientJson(value, container, serverName) {
-      calls.push([value, container, serverName]);
+    withoutMorrowClientJson(value, container, serverName, options) {
+      calls.push([value, container, serverName, options]);
       if (value === content) return expected;
       if (value === expected) return null;
       throw new Error("unexpected JSONC source");
@@ -430,8 +494,8 @@ test("JSON assistant removal uses the shared offset-preserving JSONC remover", a
 
   assert.equal(await fs.readFile(target, "utf8"), expected);
   assert.deepEqual(calls, [
-    [content, "mcpServers", "morrow"],
-    [expected, "mcpServers", "morrow"],
+    [content, "mcpServers", "morrow", { requireMorrowEntry: true }],
+    [expected, "mcpServers", "morrow", { requireMorrowEntry: true }],
   ]);
   assert.deepEqual((await installer.record()).configured, {});
   assert.equal(await fs.lstat(installer.assistantRemovalPath).then(() => true, () => false), false);
@@ -872,8 +936,11 @@ test("changing the materials folder writes the new folder into every configured 
   // The project is the one the record describes, rebuilt from the file Morrow
   // recorded for that assistant, never a fresh guess.
   assert.equal(calls[1][calls[1].indexOf("--client-project") + 1], project);
-  assert.equal(calls[0][calls[0].indexOf("--expected-config-sha256") + 1], codexSha256);
-  assert.equal(calls[1][calls[1].indexOf("--expected-config-sha256") + 1], claudeCodeSha256);
+  // Morrow re-points its own entry by what the entry is, not by the whole file's digest.
+  for (const call of calls) {
+    assert.equal(call.includes("--replace-morrow-entry"), true);
+    assert.equal(call.includes("--expected-config-sha256"), false);
+  }
 });
 
 test("choosing the folder that is already in use records the choice and rewrites no assistant", async () => {
@@ -1007,14 +1074,14 @@ test("a later assistant refusal rolls every earlier folder rebind back", async (
   assert.deepEqual(await installer.record(), originalRecord);
 });
 
-test("a concurrent assistant edit during folder rebind is never replaced or rolled back", async () => {
+test("an assistant edit made before a folder rebind is kept, and only Morrow's entry moves", async () => {
   const root = await temporaryRoot();
   const originalMaterials = path.join(root, "Materials");
   const chosen = path.join(root, "Fall biology");
   for (const directory of [originalMaterials, chosen]) await fs.mkdir(directory, { recursive: true });
   const codex = path.join(root, "Home", ".codex", "config.toml");
   const original = codexTable(originalMaterials);
-  const edited = `[mcp_servers.other]\ncommand = "newer"\n\n${original}`;
+  const edited = `[mcp_servers.other]\ncommand = "newer"\n\n${original}\n[projects."/x"]\ntrust_level = "trusted"\n`;
   const recorded = await writeFile(codex, original);
   let changed = false;
   const { installer, calls } = controller(root, {
@@ -1025,19 +1092,20 @@ test("a concurrent assistant edit during folder rebind is never replaced or roll
       await fs.writeFile(target, edited);
     }
   });
-  const originalRecord = {
+  await installer.writeRecord({
     ...freshRecord(),
     materialsFolder: originalMaterials,
     selectedAssistantId: "codex",
     configured: { codex: { target: codex, sha256: recorded } }
-  };
-  await installer.writeRecord(originalRecord);
+  });
 
-  await assert.rejects(() => installer.configureWorkspace(null), (error) => error.code === "existing_morrow_configuration");
+  assert.equal(await installer.configureWorkspace(null), true);
 
-  assert.equal(await fs.readFile(codex, "utf8"), edited);
-  assert.deepEqual(await installer.record(), originalRecord);
-  assert.equal(calls[0][calls[0].indexOf("--expected-config-sha256") + 1], recorded);
+  const canonical = await fs.realpath(chosen);
+  const content = await fs.readFile(codex, "utf8");
+  assert.equal(content, `[mcp_servers.other]\ncommand = "newer"\n\n${codexTable(canonical)}\n[projects."/x"]\ntrust_level = "trusted"\n`);
+  assert.equal((await installer.record()).configured.codex.sha256, sha256(Buffer.from(content)));
+  assert.equal(calls[0].includes("--replace-morrow-entry"), true);
 });
 
 test("an earlier assistant edit during a later rebind prevents the workspace commit", async () => {

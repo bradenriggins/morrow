@@ -212,6 +212,9 @@ function payloadLayout(payloadRoot, userData) {
     payload,
     userData: root,
     state: path.join(root, "State"),
+    // Copies of assistant settings files taken before Morrow changed them. They
+    // stay out of State so removing Morrow's data keeps them for the person.
+    assistantBackups: path.join(root, "Assistant settings backups"),
     defaultMaterials: path.join(root, "Materials"),
     appRoot: path.join(payload, "app"),
     node: process.platform === "win32"
@@ -276,13 +279,26 @@ async function canonicalDirectory(value) {
   return resolved;
 }
 
-async function captureConfiguration(file, backupRoot) {
-  const id = crypto.randomUUID();
-  const backup = path.join(backupRoot, id);
+/**
+ * Copies one settings file before Morrow changes it. The copy is named after
+ * the file and the time, for example config.toml.2026-09-22T10-11-12Z.bak, so
+ * a person can tell which file it restores.
+ */
+async function captureConfiguration(file, backupRoot, now = new Date()) {
   const present = await exists(file);
   if (!present) return { file, backup: null, present: false };
   await mkdirPrivate(backupRoot);
-  await fs.copyFile(file, backup, fs.constants.COPYFILE_EXCL);
+  const stamp = now.toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "-");
+  let backup = null;
+  for (let attempt = 0; backup === null; attempt += 1) {
+    const candidate = path.join(backupRoot, `${path.basename(file)}.${stamp}${attempt === 0 ? "" : `-${attempt}`}.bak`);
+    try {
+      await fs.copyFile(file, candidate, fs.constants.COPYFILE_EXCL);
+      backup = candidate;
+    } catch (error) {
+      if (error?.code !== "EEXIST" || attempt >= 99) throw error;
+    }
+  }
   if (process.platform !== "win32") await fs.chmod(backup, 0o600);
   return { file, backup, present: true };
 }

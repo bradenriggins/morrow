@@ -664,3 +664,13 @@ test("a data removal is announced in the words the panel shows", () => {
   assert.equal(/removed its data/.test(incomplete), false, "an incomplete removal never announces a complete one");
   assert.match(announced({ status: "incomplete", removed: [], remaining: ["/Morrow/State", "/Morrow/Bridge"], kept: [] }), /2 places are still on this computer/);
 });
+
+test("kept copies of assistant settings, and the entry a data removal takes out, are each explained", () => {
+  const view = retentionView(state({ retention: { uninstall: "move_to_trash", locations: [
+    ...RETENTION_LOCATIONS,
+    { id: "backups", label: "Copies of assistant settings Morrow changed", path: "/Morrow/Assistant settings backups", removable: false, keptReason: "assistant_backup" }
+  ] } }));
+  assert.match(view.body, /Morrow keeps these copies so you can put a settings file back/);
+  assert.match(view.body, /Remove Morrow&#39;s data takes only Morrow&#39;s own entry out of it/);
+  assert.match(view.body, /first select Remove Morrow&#39;s data/);
+});
