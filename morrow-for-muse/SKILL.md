@@ -332,10 +332,19 @@ both modes.
   mode") means plan everywhere: `default_mode` goes back to plan and
   every grant and per-conversation override is cleared
   (`modes.state.switch_mode(user_id, "plan")`). It applies at once,
-  with no confirmation round trip. Any negated or off phrasing about
-  edit mode is plan; a negated plan phrasing ("turn off plan mode")
-  changes nothing and asks which mode the educator wants. The parser
-  never proposes edit mode from a negation.
+  with no confirmation round trip. The parser proposes edit mode ONLY
+  when the whole utterance is one of a short allowlist of affirmative
+  commands ("use edit mode", "switch to edit mode", "turn on edit
+  mode", "edit mode on", "enable edit mode", "make edit mode my
+  default", "use edit mode for this conversation", and close variants
+  with "please", "thanks", case, or "edit-mode" spelling), with no
+  question mark. Any other utterance that mentions edit mode is plan
+  when it carries any off or negative signal (off, stop, pause, avoid,
+  skip, undo, without, instead, gone, away, less, not, a contraction
+  such as "didn't", or a mention of plan mode), and otherwise changes
+  nothing and asks a clarifying question. A negated plan phrasing
+  ("turn off plan mode") also changes nothing and asks. The allowlist
+  is pinned by `settings/test_mode_allowlist.py`.
 - Most recent explicit action wins between a per-conversation override
   ("use plan mode for this conversation", "use edit mode for this
   conversation") and the persisted default. Both are tamper-sealed in

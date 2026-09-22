@@ -26,6 +26,10 @@ Utterance mapping:
   "turn off plan mode" / "stop asking before writes"
                                          -> invalid: asks which mode;
                                            a negation never proposes edit
+  any other mention of edit mode         -> plan when it carries an off or
+                                           negative signal, else asks;
+                                           edit comes ONLY from the
+                                           _EDIT_COMMAND allowlist
   "what is my default mode"              -> reports the saved default
   "switch to edit mode for this conversation" -> conversation override
                                            (any verb; "chat" also works)
@@ -346,20 +350,44 @@ _TIME_LIMIT = re.compile(
     r"\bedit\s+sessions?\b|\bedit\s+grant\s+(?:default\s+)?duration\b")
 
 # ---------------------------------------------------------------------------
-# Mode intent. Off-direction is decided BEFORE on-direction, and anything
-# negated or ambiguous lands in plan or asks. Nothing here can propose
-# edit mode from a phrase that says off, stop, leave, end, exit, no more,
-# don't, never, or not.
+# Mode intent. Edit mode is proposed ONLY when the whole utterance is one
+# of a small allowlist of affirmative commands (_EDIT_COMMAND), with
+# politeness, case, hyphen, and trailing punctuation tolerated and no
+# question mark. Word lists of off-words kept leaking ("pause edit mode",
+# "I didn't want edit mode"), so they no longer decide edit at all: any
+# other utterance that mentions edit mode is Plan when it carries an off
+# or negative signal, and otherwise gets a clarifying question.
 # ---------------------------------------------------------------------------
 
-# "edit mode" / "edit session" (off-direction also accepts "editing").
+_POLITE_PRE = r"(?:(?:please|ok|okay)[, ]+)*"
+_POLITE_POST = r"(?:,? (?:please|thanks|thank you))?"
+_CONV_SUFFIX = r"(?P<conv> for (?:this|the current) (?:conversation|chat)" \
+               r"(?: only)?)"
+_CONV_PREFIX = r"(?P<convpre>for this (?:conversation|chat), )"
+_TIME_SUFFIX = r"(?: for (?:an?|one|\d+) (?:minutes?|mins?|hours?|hrs?))"
+_EDIT_VERB = (r"(?:use|switch to|turn on|enable|activate|put me in|go to|"
+              r"go into|change to|i want)")
+_EDIT_CORE = (
+    r"(?:" + _EDIT_VERB + r" edit mode|turn edit mode on"
+    r"|switch from plan mode to edit mode)")
+_EDIT_COMMAND = re.compile(
+    r"^" + _POLITE_PRE + r"(?:"
+    r"" + _CONV_PREFIX + r"(?:use|switch to) edit mode"
+    r"|" + _EDIT_CORE + _TIME_SUFFIX + r"?" + _CONV_SUFFIX + r"?"
+    r"|(?:make edit mode my default|edit mode on|switch to edit)"
+    r"" + _TIME_SUFFIX + r"?"
+    r"|edit mode please"
+    r")" + _POLITE_POST + r"$")
+
+# Mentions that make an utterance about edit mode.
 _EDIT_MODE_REF = re.compile(
-    r"\bedit\s+mode\b|\b(?:to|into)\s+(?:the\s+)?edit$")
-_EDIT_OFF_REF = re.compile(
-    r"\bedit(?:ing)?\s+(?:mode|session)s?\b|\bediting\b|"
-    r"\b(?:to|into)\s+(?:the\s+)?edit$")
+    r"\bedit\s+(?:mode|sessions?)\b|\b(?:to|into)\s+(?:the\s+)?edit$")
+# "editing" alone is only an edit reference when something turns it off
+# ("stop editing"); "I am editing the syllabus" is not a mode command.
+_EDITING_REF = re.compile(r"\bediting\b")
 _PLAN_REF = re.compile(
-    r"\bplan(?:ning)?\s+mode\b|\b(?:to|into|in)\s+(?:the\s+)?plan$|^plan$")
+    r"\bplan(?:ning)?\s+mode\b|\b(?:to|into|in)\s+(?:the\s+)?plan$|^plan$|"
+    r"\bswitch\s+to\s+plan\b")
 # "ask me before every write", "require approval again": plan direction.
 _ASK_FIRST = re.compile(
     r"\bask(?:ing)?(?:\s+me)?(?:\s+first)?\s+before\s+(?:(?:every|each|any|"
@@ -369,17 +397,27 @@ _ASK_FIRST = re.compile(
 _WITHOUT_ASKING = re.compile(
     r"\bwithout\s+(?:asking|approval|checking|permission)\b")
 _NEGATION = re.compile(
-    r"\b(?:don't|dont|do\s+not|doesn't|never|no|not|no\s+longer)\b")
+    r"\b(?:don't|dont|do\s+not|doesn't|never|no|not|no\s+longer|without|"
+    r"instead\s+of)\b")
+# Any of these next to an edit-mode mention means the educator is not
+# asking for edit: the utterance is Plan.
+_OFF_SIGNAL = re.compile(
+    r"n't\b|\b(?:no|not|nor|never|none|nothing|nope|nah|without|"
+    r"instead|rather|less|fewer|gone|away|rid|remov\w*|paus\w*|"
+    r"suspend\w*|avoid\w*|skip\w*|undo\w*|revert\w*|off|stop\w*|end|ends|"
+    r"ended|ending|exit\w*|leav\w*|quit\w*|cancel\w*|disabl\w*|"
+    r"deactivat\w*|kill\w*|drop\w*|revok\w*|out|done|finish\w*|enough|"
+    r"over|regret\w*|hate\w*|dislike\w*|risky|unsafe|dangerous|too|down|"
+    r"lower|reduc\w*|halt\w*|abandon\w*|ditch\w*|lose|delet\w*|clear\w*|"
+    r"reset\w*|wrong|mistake\w*|accident\w*|oops|unwanted|"
+    r"shouldn't|shouldnt|cannot|won't|wont|don't|dont|didn't|didnt|"
+    r"wouldn't|wouldnt|can't|cant|isn't|isnt|aren't|arent|doesn't|"
+    r"doesnt|haven't|havent|hasn't|hasnt|wasn't|wasnt|weren't|werent|"
+    r"no\s+longer|get\s+rid|go\s+away|back\s+off|turn\s+down)\b")
 _OFF_WORD = re.compile(
     r"\b(?:off|stop\w*|end|ends|ended|ending|exit\w*|leav\w*|quit\w*|"
     r"cancel\w*|disabl\w*|deactivat\w*|kill\w*|drop\w*|revok\w*|out\s+of|"
     r"done\s+with|finish\w*\s+with|enough|over)\b")
-_ON_WORD = re.compile(
-    r"\b(?:use|using|switch|change|go|move|set|make|turn\s+on|enable|"
-    r"activate|put|start|want|like|prefer|give|default|into|to|please|"
-    r"let's|lets|try|keep|stay)\b")
-_EXPLICIT_ON = re.compile(
-    r"\b(?:use|switch|change|set|make|turn\s+on|enable|activate|put|go)\b")
 _CONVERSATION_SCOPE = re.compile(
     r"\b(?:for|in|during|within)\s+(?:this|the|our)\s+(?:current\s+)?"
     r"(?:conversation|chat|thread)\b|\bthis\s+(?:conversation|chat)\s+only\b")
@@ -388,28 +426,69 @@ _REQUEST_PREFIX = re.compile(
 _QUESTION = re.compile(
     r"^(?:what|which|how|why|when|where|who|is|are|am|does|do\s+i|did|"
     r"explain|tell\s+me\s+about)\b|\bknow\s+about\b|\bmeans?\b")
+# Status questions answered by the status branch, never by a mode change.
+_STATUS_QUESTION = re.compile(
+    r"\bwhat\s+mode\b|\bwhich\s+mode\b|\bam\s+i\s+in\b|\bplan\s+or\s+edit\b|"
+    r"\bdefault\s+mode\b.*\b(?:what|which|show|tell)\b|"
+    r"\b(?:what|which|show|tell)\b.*\bdefault\s+mode\b")
 
 _ASK = "ask"
 
 
-def _mode_intent(t):
+def _canon_mode_words(t):
+    """Fold "edit-mode", "edit_mode", "editmode" (and plan) into two words."""
+    return re.sub(r"\b(edit|plan)[-_]?mode\b", r"\1 mode", t)
+
+
+def _edit_command_scope(t, raw):
+    """"default"/"conversation" when t is an allowlisted edit command."""
+    if "?" in (raw or ""):
+        return None
+    candidate = re.sub(r"[.!]+$", "", t).strip()
+    m = _EDIT_COMMAND.match(candidate)
+    if m is None:
+        return None
+    if m.groupdict().get("conv") or m.groupdict().get("convpre"):
+        return "conversation"
+    return "default"
+
+
+def _mode_intent(t, raw=None):
     """The educator's mode intent in normalized text t.
 
-    Returns None (not a mode command), _ASK (negated or ambiguous: ask,
-    never propose edit), or (mode, scope) with mode "plan"|"edit" and
-    scope "conversation"|"default". Checks run off-direction first.
+    Returns None (not a mode command), _ASK (unclear: ask a clarifying
+    question, never propose edit), or (mode, scope) with mode
+    "plan"|"edit" and scope "conversation"|"default". Edit comes ONLY
+    from the _EDIT_COMMAND allowlist.
     """
-    t = _REQUEST_PREFIX.sub("", t)
-    edit_on = bool(_EDIT_MODE_REF.search(t))
-    edit_any = bool(_EDIT_OFF_REF.search(t))
+    t = _canon_mode_words(t)
+    edit_scope = _edit_command_scope(t, raw if raw is not None else t)
+    if edit_scope is not None:
+        return ("edit", edit_scope)
+
+    scope = "conversation" if _CONVERSATION_SCOPE.search(t) else "default"
+    edit_ref = bool(_EDIT_MODE_REF.search(t))
+    editing = bool(_EDITING_REF.search(t))
     plan = bool(_PLAN_REF.search(t))
     ask_first = _ASK_FIRST.search(t)
     without = bool(_WITHOUT_ASKING.search(t))
-    if not (edit_any or plan or ask_first or without):
+
+    if edit_ref:
+        if _STATUS_QUESTION.search(t):
+            return None
+        if _OFF_SIGNAL.search(t) or plan or ask_first or without:
+            return ("plan", scope)
+        if _TIME_LIMIT.search(t):
+            # "give me edit mode for 2 hours" asks for a timed grant,
+            # which does not exist: the caller explains instead.
+            return None
+        return _ASK
+
+    t = _REQUEST_PREFIX.sub("", t)
+    if not (editing or plan or ask_first or without):
         return None
     if _QUESTION.search(t):
         return None
-    scope = "conversation" if _CONVERSATION_SCOPE.search(t) else "default"
     negated = bool(_NEGATION.search(t))
     off = bool(_OFF_WORD.search(t))
     if ask_first:
@@ -419,31 +498,20 @@ def _mode_intent(t):
         return ("plan", scope)
     if without and (negated or off):
         return ("plan", scope)
-    if edit_any and (negated or off):
+    if editing and (negated or off):
         return ("plan", scope)
     if plan and (negated or off):
         return _ASK
-    if plan and edit_on:
-        if re.search(r"\bto\s+(?:the\s+)?edit\b", t) \
-                and not re.search(r"\bto\s+(?:the\s+)?plan\b", t):
-            return ("edit", scope)
-        return ("plan", scope)
     if plan:
         return ("plan", scope)
-    if edit_on and _ON_WORD.search(t):
-        if _TIME_LIMIT.search(t) and not _EXPLICIT_ON.search(t):
-            # "give me edit mode for 2 hours" asks for a timed grant,
-            # which does not exist: explain instead of proposing one.
-            return None
-        return ("edit", scope)
     return None
 
 
 def _ask_which_mode():
-    return ("I did not change anything, because I am not sure which way "
-            "you mean. Say 'use plan mode' to have every write ask for your "
-            "approval first, or 'use edit mode' to let writes run without "
-            "asking.")
+    return ("I did not change anything, because I am not sure what you "
+            "want. In plan mode every write asks for your approval first; "
+            "in edit mode writes run without asking. Say 'use plan mode' "
+            "or 'use edit mode'.")
 
 
 def _help_sentence():
@@ -483,7 +551,7 @@ def _parse_command_inner(text, user_id=None, conversation_id=None):
 
     timed_ask = bool(re.search(r"\bedit", t) and _TIME_LIMIT.search(t))
 
-    intent = _mode_intent(t)
+    intent = _mode_intent(t, text)
     if intent == _ASK:
         op = {"action": "invalid", "key": "default_mode", "value": None,
               "needs_confirmation": False}
