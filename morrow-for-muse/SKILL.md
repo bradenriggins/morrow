@@ -223,8 +223,15 @@ unrecognized files on the next install/upgrade.)
 `proof-battery/OPERATION_CATALOG.md`.)
 
 `catalog` takes `--name`, `--method`, `--path` (path template),
-`--class read|write|plan`, `--params` (JSON), `--backend chromium`, and
-`--canvas-base` (or the `CANVAS_BASE` env var). Every dispatch is governed
+`--class read|write|plan`, `--params` (JSON), `--body` (a JSON object:
+the write's request body, which the post-write readback compares
+against; values may reference params as `"params.<name>"`),
+`--backend chromium`, and `--canvas-base` (or the `CANVAS_BASE` env
+var). The CLI always runs the shipped `pack/pack.json`; there is no
+pack override. A write result's `outcome` is `verified` (a readback
+confirmed it) or `unverified` (Canvas said success and nothing
+confirmed it): relay `unverified` to the educator as unconfirmed, never
+as done. Every dispatch is governed
 and journaled to `~/.morrow/trees/<tree-id>/journal/ops.jsonl` (per-tree;
 the legacy `~/.morrow/journal/ops.jsonl` is read for historical idempotency
 only).
@@ -260,13 +267,13 @@ block as a new, separately journaled operation.
   Only operations marked `live-proven` in
   `proof-battery/OPERATION_CATALOG.md` dispatch. The only override is an
   educator-signed `--allow-unproven` flag for edge cases, signed by the
-  educator as part of the approval. Learner-data operations are refused
-  (`LearnerDataGated`) when the projection vault is not ready; through
-  the browser lane they are admitted and their receipts are projected
-  through the de-identification boundary before anything is
-  agent-visible or journaled (the de-identification boundary is proven:
-  de-identification 30/30, boundary invoke 69/69;
-  `--allow-unproven` cannot override a learner-data refusal).
+  educator as part of the approval. Learner-data operations (any
+  operation whose response carries people; see SCOPE.md) are refused
+  (`LearnerDataGated`) by `executor.py catalog` on every lane, and
+  `--allow-unproven` cannot override that. Manifest entries
+  (`execute --entry`) on the Chromium lane are admitted and their
+  receipts projected through the de-identification boundary instead,
+  but v1 ships no manifest entries.
 - Journaling: a dispatch journals more than one record. Reads journal a
   `wal="claimed"` record before provider work, then a completion record;
   writes journal an fsynced `wal="pending"` claim, then a `wal="complete"`
@@ -372,11 +379,10 @@ tenant, with no override flag: never-dispatch routes (the standing
 exclusions: announcements, messages to people, support tickets,
 subaccount-affecting operations), catalog-unsupported rows, failed
 rows, evidence-hold rows (including New Quiz create, C-286), and
-learner-data rows on the raw lane (no projection point there).
-Learner-data reads through the browser lane are admitted and projected
-through the de-identification boundary (see Privacy below), not refused.
-Item Bank IB- rows are marked in the catalog but cannot dispatch through
-the governed executor yet. Out for v1: Moodle, Blackboard (an
+learner-data rows (people-bearing responses; `executor.py catalog`
+refuses them on every lane). Item Bank IB- rows marked live-proven
+dispatch through the executor's Item Banks SDK lane (see SCOPE.md for
+which ones). Out for v1: Moodle, Blackboard (an
 honestly-disclosed roadmap item, not a ship criterion), the retired form
 relay, and every row not marked live-proven. Full declaration:
 `SCOPE.md`. Do not imply capabilities beyond it.
@@ -385,7 +391,7 @@ relay, and every row not marked live-proven. Full declaration:
 
 - `install.sh`: the idempotent installer (Chromium locate, egress probe,
   `~/.morrow` layout, `helper/profile/` creation without ever wiping it,
-  keepalive cron, helper launch, one-time onboarding notice, all 8
+  keepalive cron, helper launch, one-time onboarding notice, all 23
   selftests, the secrets gate).
 - `transport/`: the Chromium lane (`local_chromium.py`, `chromium_session.py`,
   `egress.py`, `proxy_forwarder.py`) and its selftests.
@@ -400,7 +406,6 @@ relay, and every row not marked live-proven. Full declaration:
   plugin-attachment proof).
 - `content/`: educator-facing consent, setup, and revocation pages.
 - `proof-battery/OPERATION_CATALOG.md`: the op catalog with proof statuses.
-- `defects/DEFECTS.md`: the adversarial defect log.
 - `pack/`: `pack.json` (chromium lane pinned) and `deny-list.txt`.
 - `scripts/verify-no-secrets.sh`: the packaging secrets gate. Run it before
   any distribution step; it must pass.
@@ -472,8 +477,10 @@ that makes the labels lives at
 `~/.morrow/morrow_source_vault.json.key` on your VM and is never part
 of any download or update.
 
-For the agent: de-identification applies automatically to every
-learner-data read in the browser lane. Every receipt is projected
+For the agent: in v1, `executor.py catalog` refuses learner-data rows
+outright, so you get no student data through it. Where learner data
+is dispatched (manifest entries on the Chromium lane), de-identification
+applies automatically to every learner-data read. Every receipt is projected
 through the source privacy boundary (`privacy/boundary.py`,
 `SourceMcpPrivacyBoundary`) before it becomes agent-visible or
 journaled. The wired choke point is `dispatch/executor.py` in
@@ -499,10 +506,9 @@ journaled. The wired choke point is `dispatch/executor.py` in
   `Staff` label instead of leaking the name or refusing the read.
   Spec-typed LTI identity fields (`lis_person_name_full` and family)
   are redacted even for people absent from the roster.
-- Projects, never refuses, in the synchronous executor:
-  learner-data entries are refused (`LearnerDataGated`) only when
-  the projection vault is not ready, on the raw lane, which has no
-  projection point.
+- On the entry path it projects rather than refuses: learner-data
+  entries are refused (`LearnerDataGated`) there only on the raw lane,
+  which has no projection point.
 
 You do not need to ask for it and must not work
 around it. The ONLY override is explicit and educator-driven: the

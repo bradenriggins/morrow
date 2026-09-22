@@ -47,7 +47,7 @@ Morrow has two modes, and you switch between them by talking to the agent:
 - **Plan mode** (the default): Morrow asks your permission before every change. Reads never need approval.
 - **Edit mode**: you have told Morrow it may make changes without asking each time. That is the only difference between the two modes: reads never need approval in either one, and if Morrow is ever unsure which course you mean, it asks you to confirm instead of guessing, in either mode.
 
-Say "make edit mode my default", "use edit mode for this conversation", or "switch to plan mode". There is no settings page; the conversation is the settings page.
+Say "use edit mode", "use edit mode for this conversation", or "turn off edit mode". Edit mode has no time limit: it stays on until you turn it off, and turning it off puts you back in plan mode everywhere. There is no settings page; the conversation is the settings page.
 
 ## Weeks later: what session expiry looks like
 

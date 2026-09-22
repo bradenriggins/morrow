@@ -80,11 +80,16 @@ On detection:
 3. Tell the educator plainly: their Canvas session expired. They open
    the helper UI and sign in again themselves (SSO/MFA included),
    leaving "Stay signed in" on.
-4. Re-run the session check (`users/self`-equivalent through the
-   executor). The principal id MUST match the pinned id from before;
-   on mismatch the halt stays and this escalates (possible account
-   change), never auto-resumes.
-5. On match, lift the halt (remove `~/.morrow/write_halt`).
+4. Run `python3 reauth/state_machine.py resume`. It reads the live
+   account (helper `/status`, then GET /api/v1/users/self) and
+   requires it to match the account pinned at first sign-in
+   (`~/.morrow/browser_lane.json`); on mismatch the halt stays and this
+   escalates (possible account change), never auto-resumes. With no
+   pinned account it refuses too and names the recovery: the educator
+   confirms in their own words that the account is theirs, then
+   `state_machine.py pin --confirm-account "<their words>"`.
+5. On match, resume lifts the halt itself. Never delete
+   `~/.morrow/write_halt` by hand: that skips the account check.
    Quarantined ops replay only with explicit per-action approval;
    nothing auto-retries.
 

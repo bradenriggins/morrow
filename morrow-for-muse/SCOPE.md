@@ -54,25 +54,21 @@ marked `live-proven` is not a v1 claim.
   the integrated-path battery passed with full cleanup. Explicitly
   excluded: quiz publish (never tested) and quiz reports (provider
   400s on report creation; honestly failed).
-- Item Banks: bank-level write operations (create, rename, share,
-  unshare, archive) are live-proven through the Chromium lane
-  (IB-1 archive, IB-5 create, IB-16 rename, IB-17 share, IB-20
-  unshare, 2026-09-21 write battery). Bank-level reads (list, list entries,
-  get entry, list shares; IB-9/IB-10/IB-12/IB-13/IB-15) are marked
-  live-proven in the catalog on the earlier quiz-api-token lane only;
-  Chromium-lane read proof is pending, so they are carried as v1
-  claims on the catalog marks, not on Chromium-lane evidence. Item
-  create/read/update are implemented through the Item Banks SDK lane
-  (`transport/item_bank_sdk.py`, ported 2026-09-21 from Meridian
-  production's proven recipe: dynamic LTI tool resolution, course-scoped
-  launch, CDP Network interception of the banks.build response with the
-  token held in memory only, per-tenant quiz-api host derivation, item
-  fetches evaluated in the live quiz-lti frame's execution context,
-  fields nested under top-level "item"); live proof is pending educator
-  sign-in, so they are cataloged as pending, not live-proven. Item delete
-  is implemented in the lane but unproven (Meridian has no delete_item
-  flow); the live battery attempts it against a disposable item before
-  any claim is made.
+- Item Banks, through the Item Banks SDK lane (`transport/item_bank_sdk.py`:
+  course-scoped banks.build launch, token held in memory only,
+  per-tenant quiz-api host). Bank writes (IB-1 archive, IB-4 attach
+  entry, IB-5 create, IB-16 rename, IB-17 share, IB-20 unshare) and
+  bank reads (IB-9 get bank, IB-10 get entry, IB-12 list banks, IB-13
+  list entries, IB-15 list shares) are live-proven through the governed
+  executor pipeline (2026-09-22 Lane 6 battery, disposable objects,
+  full cleanup), most also in the 2026-09-21 Chromium write battery.
+  Item create (IB-6) and item update (IB-18) are live-proven through
+  the Chromium SDK lane (2026-09-21; item 11244176 in disposable bank
+  4062; update read back through the bank entry). Entry delete (IB-7)
+  is live-proven. Not v1 claims: direct item GET (IB-11, the provider
+  answers 404 on live items; the bank entry GET is the working item
+  read), item delete (IB-19, never proven on any lane), and the quiz
+  entry routes (IB-2/IB-3/IB-8/IB-14, evidence-hold).
 - 113 verified GETs (2026-09-21; GET/HEAD only, no writes):
   108 Canvas reads plus 5 Item Bank reads, all recorded
   `live-proven` in `proof-battery/OPERATION_CATALOG.md`, across course
@@ -81,6 +77,13 @@ marked `live-proven` is not a v1 claim.
   grading standards, rubrics, outcomes, external tools and feeds,
   content migrations and exports, groups, users and search, conferences,
   collaborations, media objects, permissions, and activity stream.
+  Some of these reads return people and are now classified as learner
+  data, so they are refused like every other learner-data row (see
+  "Out for v1"): C-78 potential collaborators, C-105/C-106 activity
+  stream, C-112 effective due dates, C-274/C-343/C-344 assignment
+  overrides, and C-327/C-331/C-332 page revisions. The live-proven
+  override writes (C-34, C-36, C-39, C-41, C-51, C-284) and the page
+  revision revert (C-328) are refused for the same reason.
 - The governance layer that makes it safe: frozen plans, the admission
   gate (`dispatch/admission.py`) enforcing the live-proven catalog,
   educator-signed approvals, per-category never-dispatch lists,
@@ -109,20 +112,35 @@ live battery marks them live-proven in
   C-238 date_details): catalog live-proven only (C-139/C-141/C-167
   through the retired form lane 2026-09-20; C-238 through the
   2026-09-21 Chromium battery), withheld from v1 claims.
-- Item-level Item Bank CRUD (IB-6/IB-11/IB-18/IB-19): implemented in
-  the SDK lane (`transport/item_bank_sdk.py`), pending live proof.
+- Item Bank item read and delete (IB-11/IB-19): implemented in the SDK
+  lane, not proven (see Item Banks above).
 
 ## Out for v1
 
-- Moodle. Proven in a sandbox, but not packaged. Not a v1 claim.
+- Moodle. The catalog records a few Moodle operations proven on a
+  public Moodle sandbox (sandbox.moodledemo.net, 2026-09-20), such as
+  M-9 list my courses and forum discussion create/delete. The executor
+  does not dispatch Moodle rows, the Moodle code (`moodle/`) is not in
+  the release, and production SSO and session lifetime are unproven.
+  No Moodle read or write is a v1 claim. v1 connects to Canvas only.
 - Blackboard. No implementation exists: no auth, no lane, no transport,
   no catalog, no proof. An honestly-disclosed roadmap item, not a v1
   ship criterion.
-- Learner-data operations (grades, submissions, student profiles beyond
-  the account/user read scope): refused by the admission gate
-  (`LearnerDataGated`) until the tokenization boundary is proven. The
-  admission gate refuses them on every tenant by default; this is a
-  learner-data refusal, not an evidence-hold.
+- Learner-data operations: every operation whose response carries
+  people (rosters, enrollments, submissions, grades, collaborators,
+  activity, per-student dates and overrides, edit history). The
+  classification is structural (`dispatch/admission_policy.json`
+  `learner_data`) plus the catalog `[LEARNER-DATA]` flag. The product
+  dispatch path, `executor.py catalog`, refuses them on every lane and
+  every tenant (`LearnerDataGated`; `--allow-unproven` cannot override
+  it). This is a learner-data refusal, not an evidence-hold. The
+  de-identification boundary itself is built and tested
+  (`privacy/`, wired in `dispatch_entry`: on the Chromium lane a
+  learner receipt is replaced with course-scoped labels such as
+  `Student A1` before the agent or the journal sees it), but it is
+  reached only through manifest entries, and v1 ships no manifest
+  entries (`pack/pack.json` `entries` is empty). So no learner data is
+  a v1 claim.
 - Discussions: discussion writes are proven but not v1 claims.
   C-139 (create), C-141 (delete), and C-167 (update) are catalog
   live-proven on 2026-09-20 (discussion 1241942 lifecycle) but carry

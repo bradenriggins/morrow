@@ -69,7 +69,8 @@ not the list length.
 ## Pre-dispatch guardrails (shipped in the executor)
 
 These run before any provider call, live-proven through the Chromium
-lane on course 89585 (D-009/D-010/D-011, `defects/DEFECTS.md`):
+lane on course 89585 (defects D-009/D-010/D-011; the defect log is
+operator history and is not part of this tree):
 
 - **Post-write readback**: after a create/update on assignment-group,
   discussion, assignment, module, quiz, or page surfaces, the executor

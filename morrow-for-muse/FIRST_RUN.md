@@ -70,8 +70,10 @@ Expected behavior:
 
 - Plan mode is the default: reads need no approval, writes require
   approval of a validated plan.
-- Edit mode is one blanket grant: "make edit mode my default". Reads
-  stay unrestricted; writes stop surfacing per-change approval.
+- Edit mode is one blanket grant with no time limit: "use edit mode"
+  turns it on, "turn off edit mode" puts the educator back in plan
+  mode everywhere. Reads stay unrestricted; in edit mode writes stop
+  surfacing per-change approval.
   That is the only difference between the two modes: reads never
   need approval in either one, and the agent confirms the course
   with you conversationally instead of guessing, in either mode.
@@ -104,7 +106,7 @@ every setup state above has a classified mode with a regression test.
 
 ## Regression coverage
 
-- `failures/test_error_translation.py`: every catalog mode (now 77)
+- `failures/test_error_translation.py`: every catalog mode (now 81)
   has a fixture; `setup-tenant-not-configured` and `helper-down`
   fixtures use evidence the producers actually emit.
 - `failures/selftest_smoke.py` and `failures/selftest_wiring.py`:

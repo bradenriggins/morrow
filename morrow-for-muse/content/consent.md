@@ -47,9 +47,10 @@ without asking each time. That is the entire difference between the
 two modes: reads never need approval in either one, and every other
 protection, student-data privacy, refusing unproven operations, and
 never guessing which course you mean, works exactly the same in
-both. You choose the mode by talking to the agent ("make edit mode
-my default", "use edit mode for this conversation", "switch to plan
-mode"). If Morrow is ever unsure which course you mean, it asks you
+both. You choose the mode by talking to the agent ("use edit mode",
+"use edit mode for this conversation", "turn off edit mode"). Edit
+mode has no time limit: it stays on until you turn it off, and
+turning it off puts you back in plan mode everywhere. If Morrow is ever unsure which course you mean, it asks you
 to confirm the course instead of guessing, in either mode.
 
 ## Your students' privacy
@@ -82,14 +83,14 @@ on your Muse's own computer, never in a download or update.
 
 ## How to revoke
 
-- Sign out of Canvas inside the helper browser, or delete the
-  helper profile's cookies. Either ends the session Morrow uses.
-- For a full disconnect, delete the helper profile directory
-  (`<tree>/helper/profile/`), which holds the session cookies, and
-  remove the tree state directory (`~/.morrow/trees/<this-tree>`),
-  which holds the per-tree journal and install records. Deleting only
-  the state directory does not clear the helper profile; both steps
-  are needed for a complete disconnect.
+- Sign out of Canvas inside the helper browser. That ends the
+  session Morrow uses.
+- For a full disconnect, say "disconnect Morrow from Canvas". Muse
+  runs `bin/morrow disconnect`, which stops the helper, removes its
+  restart schedule (otherwise it would restart the signed-in helper
+  within five minutes), deletes the helper profile
+  (`<tree>/helper/profile/`, which holds the session cookies), and
+  checks each step before it reports done.
 
 Logging out of Canvas on your laptop or phone does not reliably end
 the helper's own session, because Canvas sessions are per-device.
@@ -97,8 +98,8 @@ There is no token to delete: v1 creates no API token, so there is
 no "Morrow for Muse" entry in your Canvas account's Approved
 Integrations.
 
-Once revoked, Morrow cannot reach Canvas at all. Reconnecting means
-going through the short setup again. (Full steps: `revoke.md`.)
+Once disconnected, Morrow cannot reach Canvas at all. Reconnecting
+means going through the short setup again. (Full steps: `revoke.md`.)
 
 ## Your school's rules
 
