@@ -213,6 +213,8 @@ def render_approval_display(record, params, entry=None):
                              % (item.get("token"),
                                 item.get("displayed_as")))
     lines.append("")
-    lines.append("Reply with your explicit authorization for THIS exact "
-                 "action to approve it. Anything else is not approval.")
+    lines.append("To approve THIS exact action, reply in any words you "
+                 "like (\"Yes\" is enough); your reply is recorded word for "
+                 "word with the approval. If you do not want it, say so, "
+                 "and nothing is sent.")
     return "\n".join(lines)

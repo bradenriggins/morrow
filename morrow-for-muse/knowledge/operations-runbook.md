@@ -7,13 +7,13 @@ enforcement gate. Both must agree before anything dispatches.
 
 ## The catalog in one minute
 
-`proof-battery/OPERATION_CATALOG.md` holds 456 rows: 436 Canvas rows
-(C-1 through C-436) plus 20 Item Bank quiz-api rows (IB-1 through
+`proof-battery/OPERATION_CATALOG.md` holds 457 rows: 437 Canvas rows
+(C-1 through C-437) plus 20 Item Bank quiz-api rows (IB-1 through
 IB-20). Each row names a tool, an HTTP method, a path template, a
 read/write class, a mechanism, a proof status, and evidence notes.
-Current status counts (Canvas rows): live-proven 194, pending 210,
+Current status counts (Canvas rows): live-proven 195, pending 210,
 failed 12, unsupported 11, excluded 8, evidence-hold 1. Item Bank rows:
-live-proven 13, pending 2, failed 1, evidence-hold 4.
+live-proven 14, pending 2, failed 0, evidence-hold 4.
 
 Statuses mean:
 - `live-proven`: a disposable live battery proved the operation through

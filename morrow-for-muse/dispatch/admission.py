@@ -1132,8 +1132,8 @@ def mint_pii_reveal(tenant_base: str, course_id, authorization: str,
     if not isinstance(authorization, str) or \
             len(authorization.strip()) < APPROVAL_AUTH_MIN_LEN:
         raise ValueError(
-            "a PII reveal needs the educator's verbatim request (at least "
-            "%d characters)" % APPROVAL_AUTH_MIN_LEN)
+            "a PII reveal needs the educator's verbatim request (any "
+            "non-empty request)")
     if channel not in ("educator-chat", "driver"):
         raise ValueError("reveal channel must be 'educator-chat' or "
                          "'driver', got %r" % (channel,))

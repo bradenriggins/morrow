@@ -200,7 +200,7 @@ De-identification is ON by default for every learner-data read. The
 only way to see real names from an LMS read is an educator reveal: a
 record sealed with the machine-held HMAC key
 (`dispatch/admission.mint_pii_reveal`) carrying the educator's
-verbatim request (at least 20 characters), the `educator-chat`
+verbatim request (any non-empty request), the `educator-chat`
 channel, ONE course on ONE tenant, and an expiry of at most 30
 minutes. It is passed to the executor (`--pii-reveal <file>`), checked
 at projection time (a tampered, expired, over-long, or driver-channel
