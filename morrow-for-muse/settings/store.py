@@ -21,9 +21,16 @@ Layers (most recent explicit educator action wins; resolved by the
 single authoritative resolver modes.state.current_mode, which this
 module's effective_mode delegates to):
   1. Per-conversation override ("use plan/edit mode for this
-     conversation"): lasts for that conversation only, never persisted.
-     Held in memory; modes consults it via get_conversation_override.
-     A modes conversation grant plays the same role, persisted.
+     conversation"): lasts for that conversation only. Persisted in the
+     educator's sealed settings file (keyed by conversation id) and
+     journaled, because every dispatch is a new process: an override
+     held in one process's memory never reaches the write gate. modes
+     consults it via get_conversation_override. A plan override
+     survives restarts until the conversation ends. An edit override
+     ends when the conversation ends (end_conversation) or when the
+     educator turns edit mode off anywhere (switch_mode("plan")); a
+     tampered or unreadable override store resolves to plan. A modes
+     conversation grant plays the same role.
   2. default_mode: the persisted default. Setting it to "edit" IS the
      standing edit grant: journaled, educator-confirmed, plainly
      documented. It is NOT timed: it stays on until the educator turns
@@ -76,12 +83,12 @@ import json
 import os
 import re
 import sys
-import threading
 import uuid
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 ".."))
+from config.identity import USER_ID_RULE, is_valid_user_id  # noqa: E402
 from config.paths import morrow_home  # noqa: E402
 from modes.state import (  # noqa: E402
     current_mode as _modes_current_mode,
@@ -323,16 +330,12 @@ def _validate_mode(mode):
 # Paths
 # ---------------------------------------------------------------------------
 
-_USER_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
-
-
 def _slug_user_id(user_id):
     if not isinstance(user_id, str):
         raise SettingsError("user_id must be a string, got %r" % (user_id,))
-    if not _USER_ID_RE.fullmatch(user_id):
+    if not is_valid_user_id(user_id):
         raise SettingsError(
-            "user_id %r is invalid: use 1-64 chars of letters, digits, "
-            "underscore, dot, or dash" % (user_id,))
+            "user_id %r is invalid: use %s" % (user_id, USER_ID_RULE))
     return user_id
 
 
@@ -377,7 +380,23 @@ def _default_doc():
     # change_count is the audit sidecar: verify_audit() reconciles the
     # journal's record count against it, so a truncated tail (which a
     # hash chain alone cannot see) fails closed.
-    return {"version": 1, "settings": {}, "change_count": 0}
+    return {"version": 1, "settings": {}, "change_count": 0,
+            "conversation_overrides": {}}
+
+
+def _validate_overrides(overrides, path):
+    if not isinstance(overrides, dict):
+        raise SettingsCorrupt(
+            "settings file %s holds invalid conversation overrides; "
+            "refusing to guess." % path)
+    for conv, entry in overrides.items():
+        if not isinstance(conv, str) or not conv \
+                or not isinstance(entry, dict) \
+                or entry.get("mode") not in MODES \
+                or not isinstance(entry.get("set_at"), str):
+            raise SettingsCorrupt(
+                "settings file %s holds an invalid conversation override "
+                "for %r; refusing to guess." % (path, conv))
 
 
 def _read_doc_locked(user_id):
@@ -416,9 +435,13 @@ def _read_doc_locked(user_id):
                 raise SettingsCorrupt(
                     "settings file %s holds invalid value for %r (%s); "
                     "refusing to guess." % (path, key, exc))
+    overrides = doc.get("conversation_overrides", {})
+    _validate_overrides(overrides, path)
     return {"version": doc.get("version", 1),
             "settings": dict(stored),
-            "change_count": doc.get("change_count")}
+            "change_count": doc.get("change_count"),
+            "conversation_overrides": {k: dict(v)
+                                       for k, v in overrides.items()}}
 
 
 def _seal_doc(doc):
@@ -634,47 +657,61 @@ def _transact(user_id, doc_mutator, kind, key, educator, extra=None):
 
 
 # ---------------------------------------------------------------------------
-# Session-scoped state.
+# Per-conversation overrides.
 #
 # Mode authority lives in modes/state.py; this module keeps NO grant
-# store of its own. Per-conversation overrides stay in-memory here
-# (never persisted) and are consulted by modes.current_mode via
-# get_conversation_override, most-recent-wins against grants.
+# store of its own. Per-conversation overrides are persisted in the
+# educator's sealed settings file (conversation_overrides, keyed by
+# conversation id) through _transact, so every change is journaled and
+# every later process (each dispatch is one) sees it. modes.current_mode
+# consults them via get_conversation_override, most-recent-wins against
+# grants.
 # ---------------------------------------------------------------------------
 
-_SESSION_LOCK = threading.Lock()
-# (user_id, conversation_id) -> {"mode", "set_at"}
-_CONVERSATION_MODES = {}
+_CONVERSATION_ID_MAX = 256
+
+
+def _conversation_key(conversation_id):
+    if conversation_id is None or str(conversation_id) == "":
+        raise SettingsError("conversation_id is required for a "
+                            "per-conversation override")
+    key = str(conversation_id)
+    if len(key) > _CONVERSATION_ID_MAX:
+        raise SettingsError("conversation_id is longer than %d characters"
+                            % _CONVERSATION_ID_MAX)
+    return key
 
 
 def set_conversation_mode(user_id, conversation_id, mode,
                           educator_confirmed=False, educator=None):
     """Set a per-conversation mode override.
 
-    Lasts for that conversation only; never persisted. Requires
-    educator_confirmed=True and is journaled like any other
-    consequential change. The override is consulted by the single
+    Lasts for that conversation only (see the module docstring for the
+    restart rules). Persisted and journaled like any other
+    consequential change. "edit" requires educator_confirmed=True;
+    "plan" is the safe direction and applies at once, like turning
+    edit mode off. The override is consulted by the single
     authoritative resolver (modes.current_mode), most-recent-wins
     against grants.
     """
     _slug_user_id(user_id)
     _validate_mode(mode)
-    if not conversation_id:
-        raise SettingsError("conversation_id is required for a "
-                            "per-conversation override")
-    if not educator_confirmed:
+    key = _conversation_key(conversation_id)
+    if mode == "edit" and not educator_confirmed:
         raise SettingsTamperRefused(
-            "a per-conversation mode override changes whether writes "
+            "a per-conversation edit override changes whether writes "
             "surface approval; the educator must be told and confirm it "
             "first (educator_confirmed=True)")
-    old_mode = effective_mode(user_id, conversation_id)
-    # Journal BEFORE activating: an override never goes live unaudited.
-    _transact(user_id, lambda doc: (old_mode, mode),
-              "settings.conversation_mode", "conversation_mode", educator,
-              extra={"conversation_id": conversation_id})
-    with _SESSION_LOCK:
-        _CONVERSATION_MODES[(user_id, conversation_id)] = {
+    old_mode = effective_mode(user_id, key)
+
+    def mutate(doc):
+        doc.setdefault("conversation_overrides", {})[key] = {
             "mode": mode, "set_at": utc_now_iso()}
+        return old_mode, mode
+
+    _transact(user_id, mutate, "settings.conversation_mode",
+              "conversation_mode", educator,
+              extra={"conversation_id": key})
     return mode
 
 
@@ -688,49 +725,62 @@ def get_conversation_override(user_id, conversation_id):
     """The full conversation override entry {"mode", "set_at"}, or None.
 
     Used by modes.current_mode for most-recent-wins resolution against
-    grants. In-memory only; never persisted.
+    grants. Raises SettingsCorrupt (including SettingsTamper) when the
+    settings file cannot be trusted; the resolver treats that as plan.
     """
     _slug_user_id(user_id)
-    if not conversation_id:
+    if conversation_id is None or str(conversation_id) == "":
         return None
-    with _SESSION_LOCK:
-        entry = _CONVERSATION_MODES.get((user_id, conversation_id))
-        return dict(entry) if entry else None
+    doc = _read_doc_locked(user_id)
+    entry = doc["conversation_overrides"].get(str(conversation_id))
+    return dict(entry) if entry else None
 
 
-def clear_conversation_overrides(user_id):
+def clear_conversation_overrides(user_id, educator=None):
     """Drop every per-conversation override for user_id.
 
     Part of turning edit mode off everywhere (modes.switch_mode("plan")).
-    Returns the number of overrides removed. In-memory state only; the
-    mode switch journals the change.
+    Journaled when anything was cleared. Returns the number removed.
     """
     _slug_user_id(user_id)
-    with _SESSION_LOCK:
-        keys = [k for k in _CONVERSATION_MODES if k[0] == user_id]
-        for key in keys:
-            _CONVERSATION_MODES.pop(key, None)
-    return len(keys)
+    if not _read_doc_locked(user_id)["conversation_overrides"]:
+        return 0
+    removed = []
+
+    def mutate(doc):
+        old = dict(doc.get("conversation_overrides") or {})
+        removed.extend(old)
+        doc["conversation_overrides"] = {}
+        return old, {}
+
+    _transact(user_id, mutate, "settings.conversation_overrides_cleared",
+              "conversation_mode", educator)
+    return len(removed)
 
 
 def end_conversation(user_id, conversation_id):
     """Tear down conversation-scoped state.
 
-    Pops the in-memory override and revokes every live grant bound to
-    the conversation. This is
-    the harness's explicit duty when a Muse conversation ends: without
-    it, a conversation-bound grant could outlive the conversation it
-    was granted for. Session teardown, not an educator choice: not
-    journaled in the settings audit (grant revocations are journaled
-    in the modes audit).
+    Removes the persisted override (journaled) and revokes every live
+    grant bound to the conversation (journaled in the modes audit).
+    This is the harness's explicit duty when a Muse conversation ends:
+    without it, a conversation-bound override or grant could outlive
+    the conversation it was granted for.
     """
     _slug_user_id(user_id)
-    if not conversation_id:
+    if conversation_id is None or str(conversation_id) == "":
         return
-    with _SESSION_LOCK:
-        _CONVERSATION_MODES.pop((user_id, conversation_id), None)
+    key = str(conversation_id)
+    if key in _read_doc_locked(user_id)["conversation_overrides"]:
+        def mutate(doc):
+            old = (doc.get("conversation_overrides") or {}).pop(key, None)
+            return old, None
+
+        _transact(user_id, mutate, "settings.conversation_ended",
+                  "conversation_mode", None,
+                  extra={"conversation_id": key})
     _modes_revoke_grant(user_id, reason="conversation ended",
-                        conversation_id=conversation_id)
+                        conversation_id=key)
 
 
 def effective_mode(user_id, conversation_id=None):

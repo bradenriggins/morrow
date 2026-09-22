@@ -79,8 +79,7 @@ class IntegrationCase(unittest.TestCase):
                                              "approval-signing.key")
         self.user = "integ-educator-%d" % os.getpid()
         self.conv = "integ-conv-%d" % os.getpid()
-        with settings._SESSION_LOCK:
-            settings._CONVERSATION_MODES.clear()
+        settings.clear_conversation_overrides(self.user)
         mode_state.revoke_edit_grant(self.user, reason="test reset")
 
     def tearDown(self):

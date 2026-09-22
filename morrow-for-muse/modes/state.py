@@ -83,7 +83,6 @@ from __future__ import annotations
 import fcntl
 import json
 import os
-import re
 import sys
 import uuid
 from contextlib import contextmanager
@@ -92,6 +91,7 @@ from datetime import datetime, timezone
 _TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _TREE_ROOT not in sys.path:
     sys.path.insert(0, _TREE_ROOT)
+from config.identity import USER_ID_RULE, is_valid_user_id  # noqa: E402
 from config.paths import morrow_home  # noqa: E402
 from modes.errors import (  # noqa: E402
     ModeSelfGrantRefused,
@@ -124,8 +124,6 @@ AUTH_MIN_LEN = 20
 # "timed" is absent too: edit mode is not timed, and legacy timed
 # grants on disk are never live (see _is_live).
 _SCOPE_TYPES = ("conversation",)
-# Filesystem-safe user ids (mirrors the desktop sourceBindingId shape).
-_USER_ID_RE = re.compile(r"^[A-Za-z0-9_.:@-]{1,160}$")
 
 
 # ---------------------------------------------------------------------------
@@ -208,9 +206,9 @@ def _parse_time(value):
 # ---------------------------------------------------------------------------
 
 def _validate_user_id(user_id):
-    if not isinstance(user_id, str) or not _USER_ID_RE.match(user_id):
+    if not is_valid_user_id(user_id):
         raise ValueError(
-            "user_id must match [A-Za-z0-9_.:@-]{1,160}; got %r" % (user_id,))
+            "user_id %r is invalid: use %s" % (user_id, USER_ID_RULE))
 
 
 def _grants_path(user_id):
@@ -391,6 +389,11 @@ def _conversation_override(user_id, conversation_id):
     """(mode, set_at_iso) for the settings conversation override, or
     (None, None). Lazy import: settings/store.py imports this module at
     top level, so settings must only ever be imported here at use time.
+
+    An override store that exists but cannot be read or trusted
+    (corrupt, tampered) resolves to a plan override stamped now: it may
+    hold a plan override the educator set, and guessing edit there
+    would admit writes the educator asked to approve.
     """
     if not conversation_id:
         return None, None
@@ -403,7 +406,7 @@ def _conversation_override(user_id, conversation_id):
         try:
             entry = _get_override(user_id, conversation_id)
         except Exception:
-            entry = None
+            return "plan", None
     if not isinstance(entry, dict):
         return None, None
     mode = entry.get("mode")
@@ -657,7 +660,8 @@ def switch_mode(user_id, mode, conversation_id=None, educator=None):
             clear_conversation_overrides as _clear_overrides)
     except Exception:
         _clear_overrides = None
-    cleared = _clear_overrides(user_id) if _clear_overrides else 0
+    cleared = _clear_overrides(user_id, educator=educator) \
+        if _clear_overrides else 0
     default_changed = False
     if _standing_edit_default(user_id):
         _, set_setting = _settings_fns()

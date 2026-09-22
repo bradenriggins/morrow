@@ -78,9 +78,12 @@ safe direction when it says "plan"). `current_mode` raises
 `ModeSettingsTamper` (fail closed) when the grant file's tamper seal
 does not verify or a stored setting value is invalid.
 
-Conversation overrides are in-memory, per (user, conversation), and
-are cleared by `settings.end_conversation(user_id, conversation_id)`,
-which also revokes grants bound to that conversation.
+Conversation overrides are persisted in the educator's sealed settings
+file, per (user, conversation), so every dispatch process sees them.
+They are cleared (journaled) by `settings.end_conversation(user_id,
+conversation_id)`, which also revokes grants bound to that
+conversation, and by `switch_mode(user, "plan")`. An unreadable or
+tampered override store resolves to plan.
 
 ## Write authority
 
@@ -203,7 +206,7 @@ lives inside the deploy tree. `user_id` is restricted to
   `"read_confirmations"`.
 - `settings.effective_mode(user_id, conversation_id)` delegates to
   `modes.state.current_mode`: one resolver, no second authority.
-- `end_conversation(...)` clears the in-memory override and revokes
+- `end_conversation(...)` clears the persisted override and revokes
   conversation-bound grants. `clear_conversation_overrides(user_id)`
   clears every override for the educator.
 - `switch_mode(user, "plan")` turns edit off everywhere: it revokes
