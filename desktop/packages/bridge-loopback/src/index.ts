@@ -1069,6 +1069,8 @@ export class LoopbackBridgeServer {
         operationId: `edit-options:${randomUUID()}`,
         ...(invocation.signal ? { signal: invocation.signal } : {}),
       });
+      // A cancel that lands during this read ends the write before it was sent; say so.
+      if (!detailResponse.ok && detailResponse.problem?.code === "request_cancelled_before_dispatch") return detailResponse;
       if (!detailResponse.ok || !detailResponse.result) {
         throw new BridgeUnavailableError("Morrow could not read the current Edit permission for this course. Create a fresh plan from the current binding.");
       }
