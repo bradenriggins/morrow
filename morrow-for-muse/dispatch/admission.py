@@ -28,9 +28,12 @@ Approval records (v2): JSON, either supplied as a dict or read from
 ~/.morrow/approvals/<op_id>.json. Fields:
     {"version": 2, "by": "educator", "at": "<ISO-8601 issued>",
      "expires_at": "<ISO-8601>", "op": "<entry name>",
-     "op_digest": "<sha256 of canonical (op, params, tenant)>",
+     "op_digest": "<sha256 of canonical (op, params, tenant, category,
+                    request_digest)>",
      "category": "<operation family, e.g. canvas.assignment>",
      "params_digest": "<sha256 of canonical params>",
+     "request": {"method", "url", "path", "query", "body"[, "multi_step"]},
+     "request_digest": "<sha256 of the canonical request above>",
      "authorization": "<verbatim educator authorization basis>",
      "channel": "<'educator-chat' | 'driver'>",
      "sig": "<HMAC-SHA256 tamper seal over the other fields>"}
@@ -42,8 +45,9 @@ seal covers it; a record without allow_unproven: true can never
 authorize an unproven op, and the field authorizes nothing else. Unknown
 operations (not in the catalog at all) cannot be overridden.
 The gate recomputes the op digest from the actual dispatch (entry name,
-canonical params, tenant base) and refuses on any mismatch, so one
-approval authorizes exactly one action on one tenant. Approvals expire
+canonical params, tenant base, and the exact request: method, path,
+query, and body) and refuses on any mismatch, so one approval
+authorizes exactly one request on one tenant. Approvals expire
 (time-boxed, max 24h TTL) and are single-use: a consumed op_digest is
 recorded under ~/.morrow/approvals/consumed.json and refused on replay.
 Only "educator" is accepted as the approver; the agent cannot
@@ -118,9 +122,10 @@ CONSUMED_MAX_ENTRIES = 200_000
 # In-process cache for _load_consumed (W5-P1-3): (mtime_ns, size) key.
 _consumed_cache = None
 _consumed_cache_key = None
-# The authorization basis must cite an explicit educator authorization;
-# a stub or empty citation is refused.
-APPROVAL_AUTH_MIN_LEN = 20
+# The authorization basis is the educator's verbatim reply. Any
+# non-empty reply is enough ("Yes" is an approval): what binds it to one
+# action is the digest, not the reply's length.
+APPROVAL_AUTH_MIN_LEN = 1
 # Clock skew tolerated when checking issued-at against now.
 _APPROVAL_SKEW_SECONDS = 5 * 60
 
@@ -826,18 +831,93 @@ def entry_category(entry: dict) -> str:
     return ("%s.%s" % (provider, fam)) if provider else fam
 
 
-def op_digest_of(entry_name: str, params: dict, tenant_base: str | None,
-                 category: str | None = None) -> str:
-    """SHA-256 binding one approval to one action on one tenant.
+_BASE_SLOT_RE = re.compile(r"^\{[a-z_]+_base\}")
+_SLOT_RE = re.compile(r"\{([A-Za-z0-9_]+)\}")
 
-    Covers the entry name, the canonical params, the tenant base, and the
-    operation family, so the digest cannot be replayed for different
-    params, a different tenant, or a different category.
+
+def _resolve_param_refs(value, params: dict):
+    """value with every "params.<name>" string replaced by the param's
+    value (the same references the executor resolves at send time).
+    Transient and result references stay as written: they are filled
+    from provider data at send time, which the educator cannot see
+    before approving, and the digest binds the reference itself."""
+    if isinstance(value, str):
+        if value.startswith("params.") and isinstance(params, dict):
+            key = value[len("params."):]
+            if key in params:
+                return params[key]
+        return value
+    if isinstance(value, dict):
+        return {k: _resolve_param_refs(v, params) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_resolve_param_refs(v, params) for v in value]
+    return value
+
+
+def _render_path(url_template: str, params: dict) -> str:
+    """The request path the educator sees: the tenant base dropped and
+    every {param} slot filled from params (unfilled slots stay)."""
+    path = _BASE_SLOT_RE.sub("", str(url_template or ""))
+
+    def fill(match):
+        key = match.group(1)
+        if isinstance(params, dict) and params.get(key) is not None:
+            return str(params[key])
+        return match.group(0)
+    return _SLOT_RE.sub(fill, path)
+
+
+def request_subject(entry: dict, params: dict) -> dict:
+    """The exact request an approval covers: method, URL template, the
+    rendered path, query, and body (param references resolved), plus
+    the multi-step blocks when the entry has them.
+
+    Round-4 audit H1: the approval used to bind the op name, params,
+    tenant, and category only, so a changed body rode on an approval
+    for another body. This subject is bound into the op digest, stamped
+    into the record for the approval display, and recomputed at
+    dispatch and at the complete phase.
     """
+    req = entry.get("request") or {}
+    subject = {
+        "method": str(req.get("method") or "").upper(),
+        "url": str(req.get("url") or ""),
+        "path": _render_path(req.get("url"), params),
+        "query": _resolve_param_refs(req.get("query"), params),
+        "body": _resolve_param_refs(req.get("body"), params),
+    }
+    if entry.get("multi_step"):
+        subject["multi_step"] = _resolve_param_refs(entry.get("multi_step"),
+                                                    params)
+    return subject
+
+
+def request_digest(subject: dict) -> str:
+    """SHA-256 over the canonical JSON of a request_subject()."""
+    canonical = json.dumps(subject or {}, sort_keys=True,
+                           separators=(",", ":"), ensure_ascii=True,
+                           default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def op_digest_of(entry_name: str, params: dict, tenant_base: str | None,
+                 category: str | None = None,
+                 request: dict | None = None) -> str:
+    """SHA-256 binding one approval to one request on one tenant.
+
+    Covers the entry name, the canonical params, the tenant base, the
+    operation family, and (when given) the request_subject(): method,
+    path, query, and body. The digest cannot be replayed for different
+    params, a different tenant, a different category, or a different
+    request body.
+    """
+    doc = {"op": entry_name, "params": params or {},
+           "tenant": tenant_base or "", "category": category or ""}
+    if request is not None:
+        doc["request_digest"] = request_digest(request)
     canonical = json.dumps(
-        {"op": entry_name, "params": params or {},
-         "tenant": tenant_base or "", "category": category or ""},
-        sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+        doc, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -868,15 +948,21 @@ def mint_approval(entry: dict, params: dict, tenant_base: str | None = None,
                          % MAX_APPROVAL_TTL_SECONDS)
     now = datetime.datetime.now(datetime.timezone.utc)
     category = entry_category(entry)
+    subject = request_subject(entry, params)
     record = {
         "version": APPROVAL_VERSION,
         "by": None,
         "at": now.isoformat(),
         "expires_at": (now + datetime.timedelta(seconds=ttl_seconds)).isoformat(),
         "op": entry.get("name"),
-        "op_digest": op_digest_of(entry.get("name"), params, tenant_base, category),
+        "op_digest": op_digest_of(entry.get("name"), params, tenant_base,
+                                  category, request=subject),
         "category": category,
         "params_digest": canonical_params_digest(params),
+        # Round-4 H1: the exact request this approval covers, for the
+        # approval display; bound by request_digest and the op digest.
+        "request": subject,
+        "request_digest": request_digest(subject),
         "authorization": None,
         "note": ("Set by=\"educator\" via sign_approval() only on the "
                  "educator's explicit authorization of this exact action."),
@@ -934,7 +1020,7 @@ def sign_approval(record: dict, authorization: str,
     W6-P2-A3: the identity schedule is NO LONGER covered by the action
     authorization alone. When resolved_identities is non-empty, a
     SEPARATE identity_authorization (the educator's own words naming
-    the identities, >= 20 chars) is required and is sealed and journaled
+    the identities, any non-empty reply) is required and is sealed and journaled
     alongside the action authorization. Bundling the write action and
     the identity list into one rubber-stamp invited skipping the
     identity half (the FERPA-consequential half); two citations force
@@ -948,7 +1034,7 @@ def sign_approval(record: dict, authorization: str,
     Honest trust statement: this function runs in the agent's process,
     so it cannot cryptographically prove the authorization string came
     from the educator. What it does guarantee: (a) the citation is
-    non-trivial and journaled verbatim for audit; (b) the seal binds
+    non-empty and journaled verbatim for audit; (b) the seal binds
     every field (op, digests, tenant, category, expiry, authorization,
     identity authorization, channel, identity schedule) against
     post-signing modification; (c) a record that never passed through
@@ -961,9 +1047,9 @@ def sign_approval(record: dict, authorization: str,
     """
     if not isinstance(authorization, str) or len(authorization.strip()) < APPROVAL_AUTH_MIN_LEN:
         raise ValueError(
-            "sign_approval requires the verbatim educator authorization "
-            "for the action (at least %d characters); inferred or "
-            "standing-note approvals are not accepted" % APPROVAL_AUTH_MIN_LEN)
+            "sign_approval requires the educator's verbatim reply "
+            "approving the action (any non-empty reply, e.g. \"Yes\"); "
+            "inferred or standing-note approvals are not accepted")
     if channel not in ("educator-chat", "driver"):
         raise ValueError(
             "sign_approval channel must be 'educator-chat' or 'driver', "
@@ -994,10 +1080,9 @@ def sign_approval(record: dict, authorization: str,
                 or len(identity_authorization.strip()) < APPROVAL_AUTH_MIN_LEN):
             raise ValueError(
                 "sign_approval: a resolved_identities schedule requires a "
-                "separate identity_authorization (the educator's own words "
-                "naming the identities, at least %d characters); the action "
-                "authorization does not cover the identity schedule"
-                % APPROVAL_AUTH_MIN_LEN)
+                "separate identity_authorization (the educator's own "
+                "non-empty reply naming the identities); the action "
+                "authorization does not cover the identity schedule")
         record["identity_authorization"] = identity_authorization.strip()
     else:
         record["identity_authorization"] = None
@@ -1626,13 +1711,20 @@ def _verify_record_binding(entry: dict, params: dict, record: dict,
         raise ApprovalMismatch(
             "approval for %r exceeds the maximum %dh TTL"
             % (entry.get("name"), MAX_APPROVAL_TTL_SECONDS // 3600))
+    subject = request_subject(entry, params)
+    if record.get("request_digest") != request_digest(subject):
+        raise ApprovalMismatch(
+            "approval for %r was given for a different request (method, "
+            "path, query, or body) than this dispatch sends; the educator "
+            "approved exactly what they were shown, so a changed request "
+            "needs a new approval" % entry.get("name"))
     expected_digest = op_digest_of(entry.get("name"), params, tenant_base,
-                                   expected_category)
+                                   expected_category, request=subject)
     if record.get("op_digest") != expected_digest:
         raise ApprovalMismatch(
             "approval op_digest does not match this dispatch (entry, params, "
-            "tenant); an approval is bound to one specific action and cannot "
-            "be reused or retargeted")
+            "tenant, request); an approval is bound to one specific action "
+            "and cannot be reused or retargeted")
     if record.get("params_digest") != canonical_params_digest(params):
         raise ApprovalMismatch(
             "approval params_digest does not match this dispatch's params")
@@ -1899,13 +1991,20 @@ def reverify_approval(entry: dict, params: dict, tenant_base: str | None,
             "phase; refusing to complete on an expired approval"
             % (op_id, record.get("expires_at")))
     expected_category = entry_category(entry)
+    subject = request_subject(entry, params)
+    if record.get("request_digest") != request_digest(subject):
+        raise ApprovalMismatch(
+            "persisted approval for op %s was given for a different "
+            "request (method, path, query, or body) than this complete; "
+            "completing something other than what was approved is "
+            "refused" % (op_id,))
     expected_digest = op_digest_of(entry.get("name"), params, tenant_base,
-                                   expected_category)
+                                   expected_category, request=subject)
     if record.get("op_digest") != expected_digest:
         raise ApprovalMismatch(
             "persisted approval op_digest does not match this complete "
-            "(entry, params, tenant); completing something other than "
-            "what was approved is refused")
+            "(entry, params, tenant, request); completing something other "
+            "than what was approved is refused")
     if expected_digest not in _load_consumed():
         raise ApprovalMismatch(
             "approval for op %s was never consumed at dispatch; refusing "
@@ -2019,7 +2118,7 @@ def check_mode_authority(entry: dict, params: dict,
     try:
         decision, code, auth = mode_state.authorize_write(
             user_id, course_id=course_id, resolution=resolution,
-            conversation_id=conversation_id)
+            conversation_id=conversation_id, observe=journal)
     except mode_errors.ModeError as exc:
         refused(
             user_id, entry_name, course_id, op_id,

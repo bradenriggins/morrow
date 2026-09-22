@@ -222,9 +222,11 @@ def test_self_promotion_refused_non_educator(no_settings):
     with pytest.raises(mode_errors.ModeSelfGrantRefused):
         mode_state.request_edit_grant(
             uid, educator_confirmation=_confirmation(by="agent"))
+    # Round-4 M1: an empty citation is refused; any non-empty verbatim
+    # reply ("yes") is a valid educator citation.
     with pytest.raises(mode_errors.ModeSelfGrantRefused):
         mode_state.request_edit_grant(
-            uid, educator_confirmation=_confirmation("yes"))
+            uid, educator_confirmation=_confirmation("   "))
     assert mode_state.current_mode(uid) == "plan"
 
 

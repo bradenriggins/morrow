@@ -344,7 +344,8 @@ def t_digest_stable():
 check("params digest stable across key order", t_digest_stable)
 
 
-# 16. mint_approval never self-signs; sign_approval needs a real citation.
+# 16. mint_approval never self-signs; sign_approval needs a non-empty
+# verbatim citation (round-4 M1: "Yes" is a valid approval).
 def t_mint_unsigned():
     e = write_entry()
     rec = mint_approval(e, {"course_id": "1"},
@@ -355,8 +356,8 @@ def t_mint_unsigned():
     assert rec["version"] == APPROVAL_VERSION
     assert len(rec["op_digest"]) == 64
     try:
-        sign_approval(rec, "ok", channel="driver")
-        raise AssertionError("short citation accepted")
+        sign_approval(rec, "", channel="driver")
+        raise AssertionError("empty citation accepted")
     except ValueError:
         pass
     try:
@@ -807,7 +808,9 @@ def t_identity_schedule_needs_own_citation():
     rec = mint_approval(e, params, tenant_base=tenant,
                         target_identity={"course_id": "1",
                                          "course_name": "Admission Selftest"})
-    for bad in (None, "", "   ", "yes, those students"):
+    # Round-4 M1: a missing or empty citation is refused; any
+    # non-empty verbatim reply ("yes, those students") is accepted.
+    for bad in (None, "", "   "):
         expect_raises(ValueError,
                       lambda b=bad: sign_approval(
                           mint_approval(e, params, tenant_base=tenant,
@@ -817,6 +820,13 @@ def t_identity_schedule_needs_own_citation():
                           AUTH, channel="educator-chat",
                           resolved_identities=schedule,
                           identity_authorization=b))
+    short = sign_approval(
+        mint_approval(e, params, tenant_base=tenant,
+                      target_identity={"course_id": "1",
+                                       "course_name": "Admission Selftest"}),
+        AUTH, channel="educator-chat", resolved_identities=schedule,
+        identity_authorization="yes, those students")
+    assert short["identity_authorization"] == "yes, those students"
     # An empty schedule needs no second citation.
     ok = sign_approval(rec, AUTH, channel="educator-chat",
                        resolved_identities=[],
@@ -946,46 +956,50 @@ def t_double_consume_refused():
 check("double consume refused as replay", t_double_consume_refused)
 
 
-# 44. Concurrent consumption: N racers, exactly one winner.
+# 44. Concurrent consumption: N racers, exactly one winner, under every
+# multiprocessing start method this platform has. The worker lives at
+# module level in dispatch/admission_race.py (a local function cannot
+# be pickled under spawn or forkserver) and the race runs in its own
+# interpreter, so a spawned child never re-runs this selftest.
 def t_concurrent_consume_single_winner():
     import multiprocessing as _mp
+    import subprocess as _sp
     e = write_entry()
     params = {"course_id": "46b"}
     ap = signed_approval(e, params)
-    digest = ap["op_digest"]
-    consumed = _admission_mod._load_consumed()
-    consumed.pop(digest, None)
-    with open(_admission_mod.CONSUMED_PATH, "w", encoding="utf-8") as fh:
-        json.dump(consumed, fh)
-    # W6-P1-6: the consumed set is HMAC-sealed; re-seal after the
-    # direct write so workers' verification passes.
-    _admission_mod._write_consumed_seal()
-
-    def worker(start_ev, rec, q):
-        start_ev.wait()
-        try:
-            _admission_mod.consume_approval(rec)
-        except ApprovalMismatch:
-            q.put("lost")
-        except Exception as exc:  # noqa: BLE001 - report, don't crash
-            q.put("error:%r" % (exc,))
-        else:
-            q.put("won")
-
-    n = 8
-    start = _mp.Event()
-    q = _mp.Queue()
-    procs = [_mp.Process(target=worker, args=(start, ap, q))
-             for _ in range(n)]
-    for p in procs:
-        p.start()
-    start.set()
-    for p in procs:
-        p.join(30)
-    assert all(p.exitcode == 0 for p in procs), "worker crashed"
-    results = [q.get() for _ in range(n)]
-    assert results.count("won") == 1, results
-    assert results.count("lost") == n - 1, results
+    rec_path = os.path.join(_admission_mod.APPROVALS_DIR, "race-record.json")
+    os.makedirs(os.path.dirname(rec_path), exist_ok=True)
+    tree = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    methods = [m for m in ("spawn", "forkserver", "fork")
+               if m in _mp.get_all_start_methods()]
+    assert methods, "no multiprocessing start method available"
+    for method in methods:
+        digest = ap["op_digest"]
+        consumed = _admission_mod._load_consumed()
+        consumed.pop(digest, None)
+        with open(_admission_mod.CONSUMED_PATH, "w", encoding="utf-8") as fh:
+            json.dump(consumed, fh)
+        # W6-P1-6: the consumed set is HMAC-sealed; re-seal after the
+        # direct write so workers' verification passes.
+        _admission_mod._write_consumed_seal()
+        _admission_mod._invalidate_consumed_cache()
+        with open(rec_path, "w", encoding="utf-8") as fh:
+            json.dump(ap, fh)
+        n = 8
+        overrides = []
+        for name in ("APPROVALS_DIR", "CONSUMED_PATH", "SECRETS_DIR",
+                     "SIGNING_KEY_PATH"):
+            overrides += ["--set", "%s=%s"
+                          % (name, getattr(_admission_mod, name))]
+        r = _sp.run([sys.executable, "-m", "dispatch.admission_race",
+                     rec_path, method, str(n)] + overrides,
+                    cwd=tree, capture_output=True, text=True, timeout=300)
+        assert r.returncode == 0, (method, r.stderr[-400:])
+        out = json.loads(r.stdout.strip().splitlines()[-1])
+        assert out["exitcodes"] == [0] * n, (method, out)
+        assert out["results"].count("won") == 1, (method, out)
+        assert out["results"].count("lost") == n - 1, (method, out)
+    os.unlink(rec_path)
 check("concurrent consume: exactly one winner", t_concurrent_consume_single_winner)
 
 

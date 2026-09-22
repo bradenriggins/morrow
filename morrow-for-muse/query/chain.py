@@ -411,7 +411,11 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                     "detail": cls["detail"]})
 
         eff, eff_field = _qr.effective_date(quiz, assignment)
-        win_start, win_end = _qr.last_week_window(now_utc)
+        win_start = (ctx or {}).get("window_start")
+        win_end = (ctx or {}).get("window_end")
+        if win_start is None or win_end is None:
+            raise _translate(operation, RuntimeError(
+                "quiz resolution returned no window"))
         report = {
             "quiz_title": quiz.get("title"),
             "quiz_id": quiz.get("id"),

@@ -1,17 +1,19 @@
 #!/bin/bash
 # Keep-alive for the Morrow Canvas login helper (helper/server.py).
-# Ensures exactly one healthy helper instance runs. Safe to run every few
-# minutes from cron; also self-heals after VM restarts (supervision
-# resumes at the next five-minute cron tick, so expect up to five minutes
-# of downtime after a reboot before the helper is back).
+# Ensures exactly one healthy helper instance runs. Runs every five
+# minutes, supervised by cron where the machine has it, otherwise by the
+# background loop in helper/supervisor.py (install.sh picks; the Muse VM
+# has no cron daemon). Self-heals after VM restarts: with cron,
+# supervision resumes at the next five-minute tick; without cron, run
+# `bin/morrow start` (the first morrow command also restarts the loop).
 #
-# Install: add to crontab (crontab -e):
+# Install: install.sh sets up supervision. By hand with cron:
 #   */5 * * * * /path/to/tree/helper/keepalive.sh
 #
-# Uninstall: removing this cron entry is MANDATORY. If it survives, it
-# will relaunch the helper within five minutes, resurrecting an
-# "uninstalled" connector. Use scripts/uninstall.sh, which verifies the
-# entry is gone.
+# Uninstall: removing the supervision (cron entry or loop) is MANDATORY.
+# If it survives, it will relaunch the helper within five minutes,
+# resurrecting an "uninstalled" connector. Use scripts/uninstall.sh,
+# which stops the loop and verifies the cron entry is gone.
 #
 # Configuration is TREE-SCOPED (W2-P1-27): ${HELPER_DIR}/env (this tree's
 # own env file) is sourced with setdefault semantics (the real environment

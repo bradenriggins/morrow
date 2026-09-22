@@ -130,3 +130,31 @@ def test_cli_takes_typed_flags(monkeypatch):
     assert captured["course_id"] == "89585"
     with pytest.raises(SystemExit):
         C.main(["show me the students that failed", "--course", "1"])
+
+
+class _ThisWeekReader(_Reader):
+    """A quiz due inside this week (2026-09-21..2026-09-27, Chicago)."""
+
+    def get_paginated(self, path):
+        self.paths.append(path)
+        if "/quiz/v1/" in path:
+            return 200, [], None
+        if "/quizzes" in path:
+            return 200, [{"id": 1, "title": "This Week Quiz",
+                          "published": True, "assignment_id": 11}], None
+        return 200, [{"id": 11, "name": "This Week Quiz",
+                      "due_at": "2026-09-23T05:00:00Z",
+                      "grading_type": "points", "points_possible": 50.0,
+                      "published": True}], None
+
+
+def test_report_window_is_the_window_the_quiz_was_resolved_in():
+    """Round-4 audit M3 (probe audit-muse4/q_window.py): a this_week
+    query reported last week's window (2026-09-14..2026-09-20) while it
+    resolved the quiz in this week's window."""
+    res = _run(reader=_ThisWeekReader(), quiz="this_week")
+    assert res.report["window"] == \
+        "2026-09-21..2026-09-27 (America/Chicago)"
+    res = _run(quiz="last_week")
+    assert res.report["window"] == \
+        "2026-09-14..2026-09-20 (America/Chicago)"

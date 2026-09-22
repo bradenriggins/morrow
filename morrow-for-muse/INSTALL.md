@@ -18,12 +18,14 @@ prior knowledge of the project.
   VM does not provide it, place a Chromium binary at
   `transport/chromium/chrome` inside this tree before installing.
 - Python 3.11 or newer (`python3 --version`). The tree is stdlib-only;
-  nothing needs pip. (Python 3.10 is refused: it reached security
+  nothing needs pip. (Python 3.10 is refused: it reaches security
   end-of-life in October 2026 per PEP 619.)
 - The command-line tools the installer and keepalive use: `curl`, `ss`,
-  `pgrep`, `flock`, `crontab`, and `openssl` (the helper's TLS selftest
-  makes a throwaway certificate). The Muse VM image has them. Install
-  step 1 stops and names a missing curl, ss, pgrep, or flock.
+  `pgrep`, `flock`, and `openssl` (the helper's TLS selftest makes a
+  throwaway certificate). Install step 1 stops and names a missing
+  curl, ss, pgrep, or flock. `crontab` is optional: without cron (the
+  Muse VM image runs no cron daemon), keepalive runs as a supervised
+  background loop instead (step 7).
 - Network egress from the VM to your Canvas tenant: direct, or via the
   VM's `https_proxy`/`HTTPS_PROXY` (authenticated or not). The installer
   probes this and tells you which mode it found.
@@ -105,14 +107,22 @@ it does, in order:
    first install. An existing profile is never wiped, reset, or
    repackaged: your authenticated Canvas session survives reinstalls
    and updates.
-7. **Keepalive cron install.** Ensures this tree has its own cron entry (every 5
-   minutes) running this tree's `helper/keepalive.sh`, guarded by a
-   tree-specific marker comment. Entries belonging to other installed
-   trees are preserved, so two trees on one machine each keep their
-   own supervision. Skip with `MORROW_CRON=0` if you arrange your own scheduler.
-   Reboot note: after a VM reboot, supervision resumes at the next
-   five-minute cron tick, so expect up to five minutes of downtime
-   before the helper is back.
+7. **Keepalive supervision.** `helper/supervisor.py detect` checks what
+   this machine has, and install prints which one it chose.
+   - **No cron** (no `crontab`, or no cron daemon running, as on the
+     Muse VM): keepalive runs as a supervised background loop, one per
+     tree, that runs this tree's `helper/keepalive.sh` every 5 minutes.
+     After a reboot, run `bin/morrow start`; the first `morrow` command
+     after a reboot also restarts it. `bin/morrow start` is safe to run
+     any time: it never starts a second loop.
+   - **Cron:** ensures this tree has its own cron entry (every 5
+     minutes) running this tree's `helper/keepalive.sh`, guarded by a
+     tree-specific marker comment. Entries belonging to other
+     installed trees are preserved, so two trees on one machine each
+     keep their own supervision. Reboot note: after a reboot,
+     supervision resumes at the next five-minute cron tick, so expect
+     up to five minutes of downtime before the helper is back.
+   Skip either with `MORROW_CRON=0` if you arrange your own scheduler.
 8. **Secrets gate.** Runs `scripts/verify-no-secrets.sh` against the
    tree, enforcing `pack/deny-list.txt` (no profiles, logs, session
    material, secret-shaped content, or non-example tenant hostnames).
@@ -310,9 +320,11 @@ Without a terminal (an agent run) there is no prompt to answer, so a
 run without `--yes` changes nothing and says to rerun with `--yes`.
 The agent asks the educator to confirm in chat first.
 
-Stops the helper and its Chromium (exact-PID signaling only), removes
-this tree's keepalive cron entry, and deletes the Canvas session
-material: `<tree>/helper/profile/` (or `LOGIN_HELPER_PROFILE_DIR`), the
+Stops the keepalive background loop (when this machine has no cron),
+the helper, and its Chromium (exact-PID signaling only), removes this
+tree's keepalive cron entry, and deletes the Canvas session material:
+`<tree>/helper/profile/` (the profile keepalive uses; an env-supplied
+`LOGIN_HELPER_PROFILE_DIR` is never deleted), the
 pinned account (`MORROW_HOME/browser_lane.json`), the rig session
 record, and the browser transient state. It verifies each removal and
 exits non-zero if anything survived. The tree, settings, audit journal,
@@ -325,17 +337,20 @@ in again.
 bash scripts/uninstall.sh      # from the tree root
 ```
 
-The uninstall script stops the helper (exact-PID signaling only, never
-`pkill`), removes the keepalive cron entry, and deletes the tree, the
+The uninstall script stops the keepalive background loop and the helper
+(exact-PID signaling only, never `pkill`), removes the keepalive cron
+entry, and deletes the tree, the
 effective `MORROW_HOME` state, the browser profile, the learner source
 vault, the upgrade backups (`<tree>.bak-*`, including partial
 `.PARTIAL` backups), and any failed-upgrade trees (`<tree>.failed-*`).
 It verifies each step and reports what was actually removed.
 
-Cron removal is mandatory: if the keepalive entry survives, it will
-relaunch the helper (and its Chromium) within five minutes, resurrecting
-the "uninstalled" connector. Both disconnect and uninstall refuse to
-finish until the cron entry is gone.
+Supervision removal is mandatory: if the keepalive cron entry or the
+background loop survives, it will relaunch the helper (and its
+Chromium) within five minutes, resurrecting the "uninstalled"
+connector. Both disconnect and uninstall stop the loop first and refuse
+to finish until the cron entry is gone. On a machine with no crontab
+there is no cron entry to remove, and they say so.
 
 Deleting the profile removes the session from this machine. Canvas may
 still consider that session valid on its side until it expires. To end

@@ -1144,6 +1144,28 @@
       ]
     },
     {
+      "id": "write-readback-mismatch",
+      "title": "Write returned success but its declared check proved a different result (VerificationFailed)",
+      "surface": "canvas",
+      "severity_hint": "high",
+      "root_cause": "Verified mechanism: a write that declares a verify block is read back after Canvas answers with success, and the readback is compared with what the write asked for. When that readback completes and proves the stored object differs (a field has another value, or the object is missing), the executor journals the op as failed, not uncertain, and raises VerificationFailed naming the mismatch.",
+      "is_not": "This is not an uncertain write: the readback completed and proved the result differs. It is not a success either, and it is not a session or network problem.",
+      "agent_message": "What was attempted: I tried {operation}. What the evidence showed: Canvas answered the write with success, but when I read the object back to check it, the result did not match what the write asked for (reference {correlation_id}); the journal records the mismatch as a failed write. What this means: the change did not land as intended, so I am treating it as failed, not done. What happens next: I will show you what Canvas actually has next to what was requested, and you decide whether I correct it, remove it, or leave it as it is.",
+      "auto_action": "Record as a failed write; never report success; present the requested vs stored values and the object address; never blind-retry.",
+      "escalate_when": "Always surface to the educator with the mismatch; they choose correct, remove, or keep.",
+      "signature": {
+        "error_class": "VerificationFailed",
+        "error_text": {
+          "contains": "verify block failed"
+        }
+      },
+      "signature_notes": "exception: \"VerificationFailed\" raised by dispatch/executor.py dispatch_entry when a declared verify block's readback completed and proved a mismatch (the proven branch); journal: verification \"failed\". An unproven readback raises UncertainWrite instead (write-readback-unconfirmed).",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
       "id": "write-not-attempted",
       "title": "Write never reached the provider (WriteNotAttempted, safe to retry)",
       "surface": "canvas",
@@ -1492,8 +1514,8 @@
       "severity_hint": "high",
       "root_cause": "Destructive writes (HTTP DELETE, or entries marked destructive) are the one category that can still surface a confirmation inside edit mode while the educator's confirm_destructive_writes setting is on (off by default; edit mode does not ask per write unless the educator turns this guardrail on). The write was attempted without a recorded educator yes for that specific destructive action.",
       "is_not": "This is not a mode-authority problem and not a provider problem; the educator is in edit mode and the write is authorized, but the destructive confirmation is missing.",
-      "agent_message": "What was attempted: I tried to {operation}, which destroys data. What the evidence showed: a destructive-confirmation refusal (reference {correlation_id}); your confirm_destructive_writes setting is on, and I have no recorded yes from you for this specific deletion. Nothing was destroyed. What this means: edit mode skips per-write approval, but destructive writes still need your explicit yes while that setting is on. What happens next: tell me plainly what will be destroyed and confirm it (or turn the setting off), and I will run it.",
-      "auto_action": "Refuse the write; name exactly what would be destroyed; run only after the educator confirms that specific destructive action conversationally.",
+      "agent_message": "What was attempted: I tried to {operation}, which destroys data. What the evidence showed: a destructive-confirmation refusal (reference {correlation_id}); your confirm_destructive_writes setting is on, and I have no recorded yes from you for this specific deletion. Nothing was destroyed. What this means: edit mode skips per-write approval, but destructive writes still need your explicit yes while that setting is on. What happens next: I will tell you exactly what will be destroyed and ask for your yes; I run it only after you say yes (or you can turn the setting off).",
+      "auto_action": "Refuse the write; the agent names exactly what would be destroyed and asks the educator for a yes; run only after that yes.",
       "escalate_when": "Always: the educator must confirm the destructive action; the agent never destroys data on an implied yes.",
       "signature": {
         "__any_of": [

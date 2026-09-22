@@ -44,8 +44,11 @@ You can ask in your own words. The agent works out what you mean and
 makes the change through a fixed command; if it is not sure what you
 want, it asks you instead of guessing.
 
-When more than one of these is in play, the last thing you said wins.
-"What mode am I in" always tells you the effective mode right now and
+Changing the saved default ends every per-conversation override: "use
+edit mode" (or "use plan mode") for everywhere takes effect in every
+conversation at once. A per-conversation mode you set after that
+applies in that conversation only. "What mode am I in" always tells
+you the effective mode right now, for the conversation you are in, and
 where it comes from.
 
 ## The safety rules that stay on

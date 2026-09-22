@@ -84,6 +84,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -1846,6 +1847,45 @@ def _default_profile_dir():
     return os.path.join(tree, "helper", "profile")
 
 
+def _ps_argv_lines():
+    """Every process's command line from `ps`, or None when the process
+    table cannot be read."""
+    try:
+        proc = subprocess.run(["ps", "-axww", "-o", "args="],
+                              capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.splitlines()
+
+
+def _ps_line_names_profile(line, want):
+    """True when a ps command line carries --user-data-dir=<want> (or
+    the two-token form) as a whole argument. ps joins argv with
+    spaces, so a value runs to the next " --" flag or the line end."""
+    for marker in ("--user-data-dir=", "--user-data-dir "):
+        start = 0
+        while True:
+            at = line.find(marker, start)
+            if at < 0:
+                break
+            if at > 0 and not line[at - 1].isspace():
+                start = at + 1
+                continue
+            value = line[at + len(marker):]
+            end = value.find(" --")
+            if end >= 0:
+                value = value[:end]
+            try:
+                if os.path.realpath(value.rstrip()) == want:
+                    return True
+            except OSError:
+                pass
+            start = at + 1
+    return False
+
+
 def _profile_in_use(profile_dir):
     """True when a live process's argv carries an exact
     --user-data-dir=<profile_dir> element. Mirrors the argv matching in
@@ -1856,11 +1896,15 @@ def _profile_in_use(profile_dir):
     except OSError:
         return False
     if not os.path.isdir("/proc"):
-        # No process table to scan: fall back to the Chromium singleton
-        # lock file. A live browser holds it; a stale one does not prove
-        # a running browser, so absence of /proc is fail-closed here.
-        return os.path.exists(os.path.join(profile_dir, "SingletonSocket")) \
-            or os.path.exists(os.path.join(profile_dir, "SingletonLock"))
+        # No /proc (macOS, some sandboxes): read the process table with
+        # ps instead. When that is unreadable too, fail closed: answer
+        # "in use", so a live browser's stores are never purged on a
+        # guess. (Round-4 L7: this branch used to answer "not in use"
+        # whenever no Chromium lock file existed.)
+        lines = _ps_argv_lines()
+        if lines is None:
+            return True
+        return any(_ps_line_names_profile(line, want) for line in lines)
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue

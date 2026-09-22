@@ -122,6 +122,8 @@ try:
         load_policy, check_never_dispatch, check_unsupported,
         check_evidence_holds, check_learner_data, check_unproven_override,
         touches_learner_data as admission_touches_learner_data,
+        request_subject as admission_request_subject,
+        request_digest as admission_request_digest,
     )
 except ImportError:  # run as a script: dispatch/ itself is on sys.path
     from admission import (
@@ -129,6 +131,8 @@ except ImportError:  # run as a script: dispatch/ itself is on sys.path
         load_policy, check_never_dispatch, check_unsupported,
         check_evidence_holds, check_learner_data, check_unproven_override,
         touches_learner_data as admission_touches_learner_data,
+        request_subject as admission_request_subject,
+        request_digest as admission_request_digest,
     )
 
 # W4-P1-17: the morrow state root (and the stable tree UUID) has ONE
@@ -1383,6 +1387,10 @@ class FrozenPlan:
     # verifies the provider's course name/term against it and refuses on
     # mismatch; the approval record also carries it so the educator sees
     # the target they are signing for.
+    # Optional (round-4 H1). "request" + "request_digest": the exact
+    # request (admission.request_subject) the plan was frozen for. When
+    # present, a dispatch whose request or params differ is refused
+    # (plan-write always writes them).
 
     def __init__(self, data: dict, path: str):
         missing = [k for k in self.REQUIRED if k not in data]
@@ -1406,6 +1414,14 @@ class FrozenPlan:
                         "frozen plan %s: target_identity.%s must be a scalar, got %r"
                         % (path, key, type(value).__name__))
         self.target_identity = dict(target_identity) if target_identity else {}
+        self.request_digest = data.get("request_digest")
+        if self.request_digest is not None:
+            request = data.get("request")
+            if not isinstance(request, dict) or \
+                    admission_request_digest(request) != self.request_digest:
+                raise MissingFrozenPlan(
+                    "frozen plan %s: request does not match its "
+                    "request_digest" % path)
         self.path = path
         self.digest = digest_of(data)
 
@@ -7166,6 +7182,26 @@ def _verify_plan_target_corroboration(entry: dict, params: dict, plan) -> dict |
     return {"course_id": write_cid}
 
 
+def _verify_plan_request(entry: dict, params: dict, plan) -> None:
+    """Round-4 H1: a plan frozen for one request never covers another.
+
+    A plan that records its request (plan-write always does) must name
+    exactly this dispatch's params and request (method, path, query,
+    body). Legacy plans without a request_digest are unaffected."""
+    if plan is None or getattr(plan, "request_digest", None) is None:
+        return
+    if digest_of(plan.params or {}) != digest_of(params or {}):
+        raise MissingFrozenPlan(
+            "frozen plan %s was built for different params than this "
+            "dispatch; nothing was sent" % plan.path)
+    if admission_request_digest(admission_request_subject(entry, params)) \
+            != plan.request_digest:
+        raise MissingFrozenPlan(
+            "frozen plan %s was built for a different request (method, "
+            "path, query, or body) than this dispatch sends; nothing was "
+            "sent" % plan.path)
+
+
 def _check_expected_digest_guard(entry: dict, params: dict, plan,
                                  release=None) -> None:
     """The concurrency.requires == "expected_digest" guard, honestly
@@ -7287,6 +7323,7 @@ def _check_write_gates(entry: dict, params: dict, plan, op_id, kind="dispatch",
             raise MissingFrozenPlan(
                 "frozen plan names %r, but entry is %r" % (plan.entry_name, entry_name))
         if is_write and plan is not None:
+            _verify_plan_request(entry, params, plan)
             _verify_plan_target_corroboration(entry, params, plan)
         _check_expected_digest_guard(entry, params, plan)
         return op_id, None
@@ -7309,8 +7346,9 @@ def _check_write_gates(entry: dict, params: dict, plan, op_id, kind="dispatch",
         # refused and the just-taken claim is released (nothing
         # dispatched, op_id reusable).
         try:
+            _verify_plan_request(entry, params, plan)
             _verify_plan_target_corroboration(entry, params, plan)
-        except TargetIdentityMismatch:
+        except (TargetIdentityMismatch, MissingFrozenPlan):
             try:
                 release_op_id(op_id, claim_token,
                               "target identity corroboration failed; nothing dispatched")
@@ -9349,6 +9387,218 @@ def _mode_ctx_from_args(args) -> dict | None:
     return ctx
 
 
+
+# --------------------------------------------------------------------------
+# Plan-mode write ceremony from the typed interface (round-4 M4)
+#
+# plan-write builds everything a Plan-mode write needs from the catalog
+# row, the params and body, and one course read: the frozen plan (with
+# the course name Canvas reports), the unsigned approval record bound
+# to the exact request, and the approval display the educator reviews.
+# approve-write signs the educator's verbatim reply and sends the write
+# in one call. The agent never assembles frozen-plan fields or a course
+# resolution by hand.
+# --------------------------------------------------------------------------
+
+PENDING_WRITES_DIRNAME = "pending_writes"
+
+
+def pending_write_path(op_id: str) -> str:
+    """Where plan-write keeps a prepared write until approve-write."""
+    return os.path.join(MORROW_HOME, PENDING_WRITES_DIRNAME,
+                        check_uuid(str(op_id)) + ".json")
+
+
+def _write_private_json(path: str, doc: dict) -> None:
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    tmp = "%s.tmp.%d" % (path, os.getpid())
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, sort_keys=True)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
+def _read_course_identity(entry: dict, params: dict, session, pack: dict,
+                          course_id: str) -> dict:
+    """The course as Canvas names it: {"course_id", "course_name",
+    "term"}. Refuses a missing course, an id mismatch, or a spoofed
+    name; the educator must see the real name of the course the write
+    targets."""
+    config = {"canvas_base": session.base_for("canvas")}
+    block = {"method": "GET",
+             "url": "{canvas_base}/api/v1/courses/%s"
+                    % urllib.parse.quote(str(course_id), safe=""),
+             "headers": {}}
+    try:
+        rmethod, rurl, rheaders, rbody = build_request(
+            entry, block, params, session, pack, config, {})
+        _status, _hdrs, raw, _attempts = session.raw_request(
+            rmethod, rurl, rheaders, rbody, is_write=False)
+    except ProviderHttpError as exc:
+        raise TargetIdentityMismatch(
+            "course %s could not be read (HTTP %s); nothing was prepared. "
+            "Check the course id with the educator." % (course_id,
+                                                       exc.status))
+    course = _parse_provider_json(raw, "course %s read" % course_id)
+    if str(course.get("id")) != str(course_id):
+        raise TargetIdentityMismatch(
+            "Canvas returned course id %r for requested course %s; "
+            "nothing was prepared." % (course.get("id"), course_id))
+    name = course.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise TargetIdentityMismatch(
+            "course %s has no name to show the educator; nothing was "
+            "prepared." % course_id)
+    assert_no_spoof_identifier(name, "course name")
+    identity = {"course_id": str(course_id), "course_name": name}
+    term = course.get("term")
+    term_name = term.get("name") if isinstance(term, dict) else term
+    if isinstance(term_name, str) and term_name.strip():
+        identity["term"] = term_name
+    return identity
+
+
+def prepare_plan_write(name: str, method: str, path_template: str,
+                       params: dict, body, session, pack: dict,
+                       provider: str = "canvas",
+                       ttl_seconds: int = 3600) -> dict:
+    """Prepare one Plan-mode catalog write for the educator's approval.
+
+    Runs the catalog and policy gates, reads the target course, builds
+    the frozen plan and the unsigned approval record bound to the exact
+    request, and stores them as a pending write. Sends nothing and
+    journals nothing. Returns what the agent shows the educator."""
+    try:
+        from dispatch.admission import mint_approval
+        from dispatch.approval_display import render_approval_display
+    except ImportError:  # run as a script: dispatch/ itself is on sys.path
+        from admission import mint_approval
+        from approval_display import render_approval_display
+    params = dict(params or {})
+    extra = {"body": body} if body is not None else None
+    entry = catalog_descriptor_to_entry(name, method, path_template, None,
+                                        provider, None, extra)
+    if entry.get("effects") != "write":
+        raise ExecutorError(
+            "plan-write prepares writes only; %r is a %s operation (run "
+            "it with the catalog command, no approval needed)"
+            % (name, entry.get("effects")))
+    enforce_effect_class(entry)
+    _catalog_provenance_gate(entry, name, method, path_template, params,
+                             provider, approval=None, allow_unproven=False,
+                             session=session)
+    check_policy_gates(entry, bool(getattr(session, "browser_owned_auth",
+                                           False)))
+    tenant_base = session.base_for(provider or "canvas")
+    course_id = _write_target_course_id(entry, params)
+    target = None
+    if course_id is not None:
+        target = _read_course_identity(entry, params, session, pack,
+                                       course_id)
+    op_id = str(uuid.uuid4())
+    subject = admission_request_subject(entry, params)
+    plan = {
+        "op_id": op_id,
+        "entry_name": name,
+        "params": params,
+        "before_state_digest": "",
+        "frozen_readback": ({"course_id": target["course_id"],
+                             "name": target["course_name"]}
+                            if target else {}),
+        "request": subject,
+        "request_digest": admission_request_digest(subject),
+    }
+    if target:
+        plan["target_identity"] = target
+    record = mint_approval(entry, params, tenant_base, ttl_seconds,
+                           target_identity=target)
+    display = render_approval_display(record, params, entry=entry)
+    _write_private_json(pending_write_path(op_id), {
+        "version": 1,
+        "op_id": op_id,
+        "created_at": utc_now_iso(),
+        "descriptor": {"name": name, "method": method,
+                       "path": path_template, "provider": provider,
+                       "params": params, "body": body},
+        "plan": plan,
+        "approval": record,
+    })
+    return {
+        "ok": True,
+        "status": "awaiting_approval",
+        "op_id": op_id,
+        "course": ({"id": target["course_id"], "name": target["course_name"],
+                    "term": target.get("term")} if target else None),
+        "approval_display": display,
+        "expires_at": record.get("expires_at"),
+        "message": ("Nothing was sent. Show the educator approval_display "
+                    "exactly as written and ask them to approve this write. "
+                    "When they approve, run approve-write --op-id %s "
+                    "--authorization \"<their reply, verbatim>\"." % op_id),
+    }
+
+
+def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
+                       mode_ctx: dict | None = None,
+                       channel: str = "educator-chat") -> dict:
+    """Sign the educator's verbatim reply for a prepared write and send
+    it, in one call. The write goes through the full pipeline (every
+    gate, the approval bound to the exact request, single use). The
+    course resolution is the course the educator saw named in the
+    approval display; the provider name is re-verified before the
+    write."""
+    try:
+        from dispatch.admission import sign_approval
+    except ImportError:  # run as a script: dispatch/ itself is on sys.path
+        from admission import sign_approval
+    path = pending_write_path(op_id)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        raise MissingFrozenPlan(
+            "no prepared write %s is waiting for approval (it was sent "
+            "already, or never prepared); run plan-write again" % op_id)
+    descriptor = doc.get("descriptor") or {}
+    plan_path = path[:-len(".json")] + ".plan.json"
+    _write_private_json(plan_path, doc.get("plan") or {})
+    plan = load_frozen_plan(plan_path, descriptor.get("name"))
+    signed = sign_approval(doc.get("approval") or {}, authorization,
+                           channel=channel)
+    ctx = dict(mode_ctx) if isinstance(mode_ctx, dict) else None
+    target = plan.target_identity or {}
+    if ctx and ctx.get("user_id") and not ctx.get("course_resolution") \
+            and target.get("course_id") is not None:
+        ctx["course_resolution"] = {
+            "course_id": target.get("course_id"),
+            "confidence": 1.0,
+            "user_confirmed": True,
+            "basis": "the educator approved the write shown to them, "
+                     "which named course %r" % target.get("course_name"),
+        }
+    body = descriptor.get("body")
+    try:
+        out = dispatch_catalog_op(
+            descriptor.get("name"), descriptor.get("method"),
+            descriptor.get("path"), None, descriptor.get("params") or {},
+            provider=descriptor.get("provider") or "canvas", plan=plan,
+            op_id=plan.op_id, pack=pack,
+            extra={"body": body} if body is not None else None,
+            approval=signed, session=session, mode_ctx=ctx)
+    finally:
+        try:
+            os.unlink(plan_path)
+        except OSError:
+            pass
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    return out
+
+
 def _load_plan(text: str) -> bytes:
     if not text:
         return None
@@ -9523,6 +9773,36 @@ def main(argv=None):
     add_mode_ctx(p_cat)
     add_dry_run(p_cat)
     add_channel_gate(p_cat)
+
+    p_pw = sub.add_parser(
+        "plan-write",
+        help="Plan mode: prepare one catalog write for the educator's "
+             "approval. Reads the course, builds the frozen plan and the "
+             "approval bound to the exact request, prints the approval "
+             "display to show the educator. Sends nothing.")
+    p_pw.add_argument("--name", required=True)
+    p_pw.add_argument("--method", required=True)
+    p_pw.add_argument("--path", required=True,
+                      help="path template, e.g. /api/v1/courses/{course_id}")
+    p_pw.add_argument("--params", default="{}",
+                      help="params as a JSON object string (include "
+                           "course_id for a course write)")
+    p_pw.add_argument("--body", default=None,
+                      help="request body as a JSON object string")
+    p_pw.add_argument("--provider", default="canvas")
+    add_backend(p_pw)
+    add_mode_ctx(p_pw)
+    p_aw = sub.add_parser(
+        "approve-write",
+        help="Plan mode: the educator approved a prepared write. Signs "
+             "their verbatim reply and sends the write in one call.")
+    p_aw.add_argument("--op-id", required=True,
+                      help="the op_id plan-write printed")
+    p_aw.add_argument("--authorization", required=True,
+                      help="the educator's reply approving the write, "
+                           "verbatim (any non-empty reply, e.g. \"Yes\")")
+    add_backend(p_aw)
+    add_mode_ctx(p_aw)
 
     p_undo = sub.add_parser("undo", help="run an entry's undo block as a new op")
     p_undo.add_argument("--entry", required=True)
@@ -9737,6 +10017,30 @@ def main(argv=None):
                                       mode_ctx=mode_ctx,
                                       pii_reveal=_load_reveal(args.pii_reveal))
         print(canonical(out))
+    elif args.command in ("plan-write", "approve-write"):
+        session = need_chromium_session() if args.backend == "chromium" \
+            else SessionStore.load(args.session)
+        try:
+            if args.command == "plan-write":
+                body = None
+                if args.body is not None:
+                    try:
+                        body = json.loads(args.body)
+                    except ValueError:
+                        raise ExecutorError("--body is not valid JSON")
+                    if not isinstance(body, dict):
+                        raise ExecutorError("--body must be a JSON object")
+                out = prepare_plan_write(args.name, args.method, args.path,
+                                         _load_params(args.params), body,
+                                         session, pack,
+                                         provider=args.provider)
+            else:
+                out = approve_plan_write(args.op_id, args.authorization,
+                                         session, pack,
+                                         mode_ctx=_mode_ctx_from_args(args))
+        finally:
+            close_chromium_session(session)
+        print(canonical(out))
     elif args.command == "undo":
         entry = load_manifest_entry(args.entry, pack)
         params = _load_params(args.params)
@@ -9879,7 +10183,7 @@ def _funnel_operation(argv):
     subcommand = next((t for t in tokens if not t.startswith("-")), None)
     target = _flag("--entry") or _flag("--name")
     op_id = _flag("--op-id")
-    if subcommand in ("execute", "catalog", "undo"):
+    if subcommand in ("execute", "catalog", "undo", "plan-write"):
         label = subcommand
         if target:
             label += " %s" % target

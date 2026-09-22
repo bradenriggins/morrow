@@ -112,11 +112,11 @@ def test_first_signin_pin_skipped_during_reauth_halt(home):
 
 def test_educator_confirmation_recovers_unpinned_install(home):
     op = _halt_with_op()
+    # Round-4 M1: an empty confirmation is refused; a short verbatim
+    # reply ("yes") is the educator's confirmation.
     with pytest.raises(rsm.PrincipalPinError):
-        rsm.pin_principal(BASE, 777, "Edu T. Or", confirmation="ok")
-    rsm.pin_principal(
-        BASE, 777, "Edu T. Or",
-        confirmation="Yes, Edu T. Or is my own Canvas account")
+        rsm.pin_principal(BASE, 777, "Edu T. Or", confirmation="   ")
+    rsm.pin_principal(BASE, 777, "Edu T. Or", confirmation="yes")
     assert rsm.verified_resume_after_manual_signin(777, "Edu T. Or") == 1
     assert rsm.op_quarantine_status(op) == "awaiting_approval"
 

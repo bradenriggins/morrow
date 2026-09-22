@@ -43,7 +43,7 @@ flag, scope_type, conversation_id, source_utterance}`.
 
 The grant STILL requires an educator-issued confirmation:
 `{"by": "educator", "authorization": "<verbatim educator utterance,
-at least 20 chars>", "channel": "educator-chat" | "driver"}`.
+non-empty>", "channel": "educator-chat" | "driver"}`.
 The agent must NEVER promote itself to edit mode:
 - `request_edit_grant` without a valid confirmation raises
   `ModeSelfGrantRefused`.

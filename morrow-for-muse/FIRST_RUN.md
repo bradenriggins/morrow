@@ -99,14 +99,15 @@ every setup state above has a classified mode with a regression test.
   entries, and never wipes an existing helper profile.
 - Revocation: signing out in the helper browser ends the session.
   `bin/morrow disconnect --yes` disconnects fully: it stops the helper,
-  removes the keepalive cron entry (which would otherwise relaunch the
+  stops the keepalive background loop and removes the keepalive cron
+  entry (either would otherwise relaunch the
   signed-in helper within 5 minutes), deletes `<tree>/helper/profile/`
   and the pinned account, and verifies each step. Reconnecting is
   rerunning `install.sh`, then steps 2 to 4.
 
 ## Regression coverage
 
-- `failures/test_error_translation.py`: every catalog mode (now 83)
+- `failures/test_error_translation.py`: every catalog mode (now 84)
   has a fixture; `setup-tenant-not-configured` and `helper-down`
   fixtures use evidence the producers actually emit.
 - `failures/selftest_smoke.py` and `failures/selftest_wiring.py`:
