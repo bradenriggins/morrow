@@ -240,7 +240,7 @@ def test_purge_of_another_tenant_keeps_this_tenants_files():
     from privacy import executor_wire as wire
     label = _find("Jane Doe")["student"]
     pending = _plan(BrowserFake(), label)
-    wire.purge_tenant("https://other.instructure.com")
+    wire.purge_tenant("https://example.instructure.com")
     assert os.path.exists(ex.pending_write_path(pending["op_id"]))
 
 

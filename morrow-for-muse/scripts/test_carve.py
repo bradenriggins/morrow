@@ -107,7 +107,11 @@ def test_dev_only_surface_does_not_ship(carved):
                 "scripts/carve.py", "bin/keepalive-moodle.sh",
                 "bin/keepalive-canvas.sh", "bin/scheduler.py", "DEPLOY.md",
                 # pytest-only: the suite's HOME isolation and its check
-                "conftest.py", "test_suite_isolation.py"):
+                "conftest.py", "test_suite_isolation.py",
+                # pytest-only: the conftest warning check, and the doc
+                # count check (it reads DEPLOY.md, which does not ship)
+                "test_optional_dependency_warning.py",
+                "test_doc_catalog_counts.py"):
         assert not os.path.exists(os.path.join(carved, rel)), rel
     for rel in ("install.sh", "proof-battery/OPERATION_CATALOG.md",
                 "scripts/uninstall.sh", "dispatch/executor.py",
