@@ -6409,10 +6409,12 @@ def _verify_delete(entry, session, pack, config, params, transients, method,
             "delete readback GET %s failed (%s); the %s effect is "
             "unconfirmed, not a proven failure"
             % (target, type(exc).__name__, method))
-    if isinstance(parsed, dict) and \
-            str(parsed.get("workflow_state") or "").lower() == "deleted":
+    if isinstance(parsed, dict) and (
+            str(parsed.get("workflow_state") or "").lower() == "deleted"
+            or parsed.get("deleted") is True or parsed.get("deleted_at")):
         return {"status": "pass",
-                "detail": "readback %s shows workflow_state deleted" % target}
+                "detail": "readback %s shows the object marked deleted"
+                          % target}
     if not (isinstance(parsed, dict) and (parsed.get("id") is not None
                                           or parsed.get("url"))):
         return {"status": "unverified",

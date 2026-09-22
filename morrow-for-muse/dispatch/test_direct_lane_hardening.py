@@ -359,9 +359,13 @@ def test_delete_verified_by_absence():
     assert [c[0] for c in sess.calls] == ["GET"]
 
 
-def test_delete_soft_deleted_state_is_verified():
+@pytest.mark.parametrize("body", [
+    b'{"id": 42, "workflow_state": "deleted"}',
+    b'{"id": 42, "deleted": true}',
+    b'{"id": 42, "deleted_at": "2026-09-22T10:00:00Z"}'])
+def test_delete_soft_deleted_state_is_verified(body):
     out, _ = _readback("DELETE", ASSIGNMENTS + "/42", None,
-                       lambda m, u, b: (200, {}, b'{"id": 42, "workflow_state": "deleted"}'))
+                       lambda m, u, b: (200, {}, body))
     assert out["status"] == "pass"
 
 
