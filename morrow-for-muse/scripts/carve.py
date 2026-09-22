@@ -60,6 +60,9 @@ DEV_ONLY = (
     "transport/selftest.py", "transport/browser_backend_selftest.py",
     "transport/item_bank_sdk_selftest.py",
     "provision/provision_selftest.py", "provision/launch_driver_selftest.py",
+    # tests the dev-only moodle/ package; lives in dispatch/ so pytest does
+    # not put moodle/ on sys.path and shadow reauth
+    "dispatch/test_moodle_redirect_host.py",
 )
 # proof-battery/ is dev evidence except the catalog the executor reads
 # and the one driver integration_selftest checks for hygiene.
