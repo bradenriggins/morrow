@@ -62,9 +62,11 @@ def _journal_forward_write(ex, entry, params, receipt):
         "verification": "pass", "uncertain": False}, token)
     return op_id
 
-def _approve(name, params):
-    """Test-only educator approval for a write fixture (v2 record)."""
-    entry = {"name": name, "provider": "canvas"}
+def _approve(entry, params):
+    """Test-only educator approval for a write fixture (v2 record).
+
+    Minted against the entry itself: the approval binds the exact
+    request (method, path, body) the entry sends (round-4 H1)."""
     rec = mint_approval(entry, params,
                         tenant_base="https://chcp.instructure.com",
                         ttl_seconds=3600,
@@ -305,7 +307,7 @@ def main():
             plan=kw.get("plan", fake_plan(entry["name"])),
             brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
             approval=kw.get("approval",
-                            _approve(entry["name"], params)))
+                            _approve(entry, params)))
         check("write dispatch renders fetch brief: " + label,
               out["status"] == "awaiting_browser_task")
         with open(out["brief_file"], encoding="utf-8") as fh:
@@ -325,21 +327,21 @@ def main():
 
     _wparams = {"course_id": "89585", "name": "Weasel Test"}
     _write_renders_fetch(WRITE_ENTRY, _wparams, "POST create",
-                         approval=_approve("test.create_assignment", _wparams))
+                         approval=_approve(WRITE_ENTRY, _wparams))
 
     put_entry = {"name": "test.put", "provider": "canvas", "effects": "write",
                  "request": {"method": "PUT",
                              "url": "{canvas_base}/api/v1/x/1",
                              "body": {"a": "params.a"}}}
     _write_renders_fetch(put_entry, {"a": "b"}, "PUT",
-                         approval=_approve("test.put", {"a": "b"}))
+                         approval=_approve(put_entry, {"a": "b"}))
 
     list_entry = {"name": "test.list", "provider": "canvas", "effects": "write",
                   "request": {"method": "POST",
                               "url": "{canvas_base}/api/v1/x",
                               "body": {"ids[]": ["params.a", "params.b"]}}}
     _write_renders_fetch(list_entry, {"a": "1", "b": "2"}, "POST list fields",
-                         approval=_approve("test.list", {"a": "1", "b": "2"}))
+                         approval=_approve(list_entry, {"a": "1", "b": "2"}))
 
     # -- capability classification --------------------------------------
     json_entry = {"name": "test.json", "provider": "canvas", "effects": "write",
@@ -354,7 +356,7 @@ def main():
         json_entry, {"a": "b"}, LANE_STATE, {},
         plan=fake_plan("test.json"), brief_dir=BRIEF_DIR,
         pending_dir=PENDING_DIR,
-        approval=_approve("test.json", {"a": "b"}))
+        approval=_approve(json_entry, {"a": "b"}))
     check("JSON body write dispatches to the fetch lane",
           _json_out["status"] == "awaiting_browser_task")
 
@@ -422,7 +424,7 @@ def main():
                   bb.dispatch_browser_entry, chain_entry, {"n": "x", "n2": "y"},
                   LANE_STATE, {}, plan=fake_plan("test.chain"),
                   brief_dir=BRIEF_DIR,
-                  approval=_approve("test.chain", {"n": "x", "n2": "y"}))
+                  approval=_approve(chain_entry, {"n": "x", "n2": "y"}))
 
     local_entry = {"name": "test.local", "provider": "canvas", "effects": "read",
                    "request": {"method": "GET", "url": "local://governance/check"}}
@@ -457,7 +459,7 @@ def main():
                   bb.dispatch_browser_entry, WRITE_ENTRY,
                   {"course_id": "1", "name": "x"}, LANE_STATE, {},
                   brief_dir=BRIEF_DIR,
-                  approval=_approve("test.create_assignment",
+                  approval=_approve(WRITE_ENTRY,
                                     {"course_id": "1", "name": "x"}))
 
     # -- admission gate ------------------------------------------------
@@ -821,7 +823,7 @@ def main():
             entry, params, LANE_STATE, {},
             plan=fake_plan(entry["name"], op_id), op_id=op_id,
             brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
-            approval=_approve(entry["name"], params))
+            approval=_approve(entry, params))
         return op_id
 
     _wbody = json.dumps({"id": 79, "name": "Weasel Test"})
@@ -955,7 +957,7 @@ def main():
         WRITE_ENTRY, _wparams, LANE_STATE, {},
         plan=fake_plan("test.create_assignment", _wop), op_id=_wop,
         brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
-        approval=_approve("test.create_assignment", _wparams))
+        approval=_approve(WRITE_ENTRY, _wparams))
     check("422 op id reusable for a corrected retry",
           _wop2["op_id"] == _wop)
 
@@ -981,7 +983,7 @@ def main():
         WRITE_ENTRY, _wparams, LANE_STATE, {},
         plan=fake_plan("test.create_assignment", _wop), op_id=_wop,
         brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
-        approval=_approve("test.create_assignment", _wparams))
+        approval=_approve(WRITE_ENTRY, _wparams))
     check("CSRF_MISSING op id reusable for a corrected retry",
           _wop2["op_id"] == _wop)
 
@@ -1021,7 +1023,7 @@ def main():
                   bb.dispatch_browser_entry, WRITE_ENTRY,
                   {"course_id": "1", "name": "x"}, LANE_STATE, {},
                   fake_plan("test.create_assignment"), BRIEF_DIR,
-                  approval=_approve("test.create_assignment",
+                  approval=_approve(WRITE_ENTRY,
                                     {"course_id": "1", "name": "x"}))
     os.remove(HALT)
 
@@ -1038,7 +1040,7 @@ def main():
     uout = bb.dispatch_browser_undo(
         WRITE_ENTRY, _up, {"id": 99}, _orig,
         LANE_STATE, {}, brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
-        approval=_approve(_uentry["name"], _uparams))
+        approval=_approve(_uentry, _uparams))
     check("undo dispatch renders fetch brief",
           uout["status"] == "awaiting_browser_task"
           and uout["kind"] == "undo"
@@ -1480,7 +1482,7 @@ def main():
         WRITE_ENTRY, _wparams, LANE_STATE, {},
         plan=fake_plan("test.create_assignment", _pm_op), op_id=_pm_op,
         brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
-        approval=_approve("test.create_assignment", _wparams))
+        approval=_approve(WRITE_ENTRY, _wparams))
     _other_lane = {"canvas": {"base": "https://chcp.instructure.com",
                               "principal": {"id": 99999,
                                             "name": "Someone Else"},
@@ -1604,7 +1606,7 @@ def main():
             WRITE_ENTRY, _wparams, LANE_STATE, {},
             plan=fake_plan("test.create_assignment", _t408), op_id=_t408,
             brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
-            approval=_approve("test.create_assignment", _wparams))
+            approval=_approve(WRITE_ENTRY, _wparams))
         check("uncertain write cannot be re-dispatched", False)
     except (bb.ConflictLockHeld, ex.DuplicateOpId):
         check("uncertain write cannot be re-dispatched", True)
