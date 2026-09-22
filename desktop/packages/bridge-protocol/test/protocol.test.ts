@@ -803,6 +803,30 @@ describe("bridge protocol", () => {
     }
   });
 
+  it("carries the label-to-name map for a review only in an exact, bounded shape", () => {
+    const entry = { path: "/operations/op:learner-1234", names: { "Student A1": "Jane Doe", "Student A12": "Ana Rivera" } };
+    expect(normalizeBridgeUiState({ reviews: [], learnerNames: [entry] })).toEqual({ reviews: [], learnerNames: [entry] });
+    expect(normalizeBridgeUiState({ reviews: [], learnerNames: [] })).toEqual({ reviews: [] });
+    for (const bad of [
+      [{ ...entry, extra: true }],
+      [{ ...entry, path: "/recent" }],
+      [{ ...entry, path: "/operations/op%3Alearner-1234" }],
+      [{ ...entry, path: "http://127.0.0.1:44300/operations/op:learner-1234" }],
+      [{ ...entry, names: {} }],
+      [{ ...entry, names: { "Student B1": "Jane Doe" } }],
+      [{ ...entry, names: { "Student A0": "Jane Doe" } }],
+      [{ ...entry, names: { "Student A1": "" } }],
+      [{ ...entry, names: { "Student A1": "x".repeat(121) } }],
+      [{ ...entry, names: { "Student A1": 7 } }],
+      [{ ...entry, names: Object.fromEntries(Array.from({ length: 301 }, (_, index) => [`Student A${index + 1}`, "Jane Doe"])) }],
+      [entry, entry],
+      Array.from({ length: 21 }, (_, index) => ({ ...entry, path: `/operations/op:learner-${1000 + index}` })),
+      entry,
+    ]) {
+      expect(() => normalizeBridgeUiState({ reviews: [], learnerNames: bad }), JSON.stringify(bad).slice(0, 80)).toThrow("uiState.learnerNames");
+    }
+  });
+
   it("refuses an editPolicySet merge with mode Plan", () => {
     const planSelection = { sourceBindingId: "canvas-101", expectedPolicyRevision: 3 };
     expect(() => normalizeBridgeEditPolicySet({ mode: "plan", selections: [planSelection], merge: true }))

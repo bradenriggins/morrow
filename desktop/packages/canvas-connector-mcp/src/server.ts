@@ -346,7 +346,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
   }, async (input) => toolResult(await runtime.editPolicySet(input)));
   registerTool("morrow_browser_ui_state", {
     title: "Show reviews waiting in the Bridge popup",
-    description: "Internal Morrow control that pushes the present list of reviews waiting for the person to the Bridge popup (D1b), and the key the Bridge uses to sign a person's approval click. The Bridge never opens one of these by itself. This tool is not a catalog capability.",
+    description: "Internal Morrow control that pushes the present list of reviews waiting for the person to the Bridge popup (D1b), the key the Bridge uses to sign a person's approval click, and who each learner label in a review is, for the review tab only. The Bridge never opens one of these by itself. This tool is not a catalog capability.",
     inputSchema: z.strictObject({
       reviews: z.array(z.strictObject({
         url: z.string().min(1).max(300),
@@ -356,6 +356,10 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
         origin: z.string().min(1).max(40),
         key: z.string().length(43),
       }).optional(),
+      learnerNames: z.array(z.strictObject({
+        path: z.string().min(1).max(200),
+        names: z.record(z.string().min(1).max(20), z.string().min(1).max(120)),
+      })).max(20).optional(),
     }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async (input) => toolResult(await runtime.uiState(input)));

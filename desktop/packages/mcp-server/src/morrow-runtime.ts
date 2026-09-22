@@ -758,6 +758,7 @@ export class MorrowRuntime {
         setApprovalBaseUrl: (baseUrl) => gateway.setApprovalBaseUrl(baseUrl),
         setApprovalPresence: (presence) => gateway.setApprovalPresence(presence),
         announceApprovalPresence: () => gateway.announceApprovalPresence(),
+        setReviewLearnerNames: (reviewPath, names) => gateway.setReviewLearnerNames(reviewPath, names),
         batchApprovalGet: (batchId) => runtime!.batchApprovalGet(batchId),
         batchApprovalStatus: (batchId) => runtime!.batchApprovalStatus(batchId),
         approveBatch: (batchId) => runtime!.approveBatch(batchId),

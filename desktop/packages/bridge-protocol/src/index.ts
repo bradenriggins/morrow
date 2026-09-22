@@ -167,9 +167,19 @@ export interface BridgeUiApprovalPresence {
   readonly key: string;
 }
 
+/**
+ * Who each learner label in one review is, for the review tab only. The review server shows
+ * labels to any local program; Morrow Bridge shows the names in the review tab for `path`.
+ */
+export interface BridgeUiLearnerNames {
+  readonly path: string;
+  readonly names: Readonly<Record<string, string>>;
+}
+
 export interface BridgeUiState {
   readonly reviews: readonly BridgeUiReview[];
   readonly presence?: BridgeUiApprovalPresence;
+  readonly learnerNames?: readonly BridgeUiLearnerNames[];
 }
 
 export interface BridgePrivateFileManifest {
@@ -1132,11 +1142,39 @@ export function normalizeBridgeEditPolicySet(value: unknown): BridgeEditPolicySe
 }
 
 const BRIDGE_UI_REVIEW_PATH = /^\/(operations|batches)\/[A-Za-z0-9_.:@-]{8,160}$/;
+export const MAX_BRIDGE_UI_LEARNER_NAME_REVIEWS = 20;
+export const MAX_BRIDGE_UI_LEARNER_NAMES = 300;
+const BRIDGE_UI_LEARNER_LABEL = /^Student A[1-9][0-9]{0,5}$/;
+
+function normalizeBridgeUiLearnerNames(value: unknown): BridgeUiLearnerNames[] {
+  const refuse = (): never => {
+    throw new TypeError("uiState.learnerNames must list each review path once, with 1 to 300 learner labels and names");
+  };
+  if (!Array.isArray(value) || value.length > MAX_BRIDGE_UI_LEARNER_NAME_REVIEWS) refuse();
+  const paths = new Set<string>();
+  return (value as unknown[]).map((entry) => {
+    if (!isJsonObject(entry) || Object.keys(entry).some((key) => !["path", "names"].includes(key))
+      || typeof entry.path !== "string" || !BRIDGE_UI_REVIEW_PATH.test(entry.path) || paths.has(entry.path)
+      || !isJsonObject(entry.names)) refuse();
+    const record = entry as { path: string; names: Record<string, unknown> };
+    const labels = Object.keys(record.names);
+    if (!labels.length || labels.length > MAX_BRIDGE_UI_LEARNER_NAMES) refuse();
+    const names: Record<string, string> = {};
+    for (const label of labels) {
+      const name = record.names[label];
+      if (!BRIDGE_UI_LEARNER_LABEL.test(label) || typeof name !== "string" || !name.trim() || name.length > 120) refuse();
+      names[label] = name as string;
+    }
+    paths.add(record.path);
+    return { path: record.path, names };
+  });
+}
 
 export function normalizeBridgeUiState(value: unknown): BridgeUiState {
-  if (!isJsonObject(value) || Object.keys(value).some((key) => !["reviews", "presence"].includes(key))) {
+  if (!isJsonObject(value) || Object.keys(value).some((key) => !["reviews", "presence", "learnerNames"].includes(key))) {
     throw new TypeError("uiState has unsupported fields");
   }
+  const learnerNames = value.learnerNames === undefined ? [] : normalizeBridgeUiLearnerNames(value.learnerNames);
   let presence: BridgeUiApprovalPresence | undefined;
   if (value.presence !== undefined) {
     const candidate = value.presence;
@@ -1177,7 +1215,7 @@ export function normalizeBridgeUiState(value: unknown): BridgeUiState {
     }
     return { url, label: requiredString(entry.label, `${label}.label`, 120) };
   });
-  return { reviews, ...(presence ? { presence } : {}) };
+  return { reviews, ...(presence ? { presence } : {}), ...(learnerNames.length ? { learnerNames } : {}) };
 }
 
 function parseBinding(value: unknown): BridgeBinding {

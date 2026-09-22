@@ -106,6 +106,7 @@ function reviewTab(response) {
   const cancel = new HTMLFormElement("form");
   cancel.setAttribute("action", `${pagePath}/cancel`);
   const messages = [];
+  const nameRequests = [];
   const context = {
     HTMLFormElement,
     HTMLButtonElement,
@@ -115,7 +116,18 @@ function reviewTab(response) {
       addEventListener: (type, listener) => listeners.push({ type, listener }),
       createElement: (tag) => new Element(tag),
     },
-    chrome: { runtime: { sendMessage: async (message) => { messages.push(message); return response; } } },
+    chrome: { runtime: {
+      sendMessage: async (message) => {
+        // The script also asks once for the learner names on its page; this review has none.
+        if (message?.type === "morrow_review_learner_names") {
+          nameRequests.push(message);
+          return { ok: true, names: {} };
+        }
+        messages.push(message);
+        return response;
+      },
+      onMessage: { addListener: () => undefined },
+    } },
   };
   context.globalThis = context;
   runInNewContext(CONTENT_SOURCE, context);
@@ -125,7 +137,7 @@ function reviewTab(response) {
     await new Promise((resolve) => setImmediate(resolve));
     return event;
   };
-  return { form, cancel, remember, container, posted, messages, submit };
+  return { form, cancel, remember, container, posted, messages, nameRequests, submit };
 }
 
 test("adds the signature only after a person's own click, and keeps the chosen button", async () => {
@@ -134,6 +146,7 @@ test("adds the signature only after a person's own click, and keeps the chosen b
   assert.equal(event.prevented, true);
   assert.deepEqual(JSON.parse(JSON.stringify(tab.messages)), [{ type: "morrow_review_approval_sign", approvePath, nonce }]);
   assert.deepEqual(JSON.parse(JSON.stringify(tab.posted)), [{ nonce, presence: "signed-value", remember: "1" }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(tab.nameRequests)), [{ type: "morrow_review_learner_names" }]);
 });
 
 test("never asks the Bridge to sign a submit that a script started", async () => {
