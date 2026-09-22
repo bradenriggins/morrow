@@ -710,6 +710,41 @@ describe("Canvas connector gateway path", () => {
       }
     }, CASE_TIMEOUT_MS);
 
+    it("carries a Bridge edit option's WI-3.1 facts into the prepared Edit access selection", async () => {
+      const factfulAction = {
+        id: "action:canvas:canvas_update_create_page_courses",
+        group: "Canvas · Pages",
+        label: "Update/create page",
+        description: "Update a page.",
+        availability: "edit",
+        area: "pages",
+        kind: "edit",
+        reach: "course",
+        learnerVisible: false,
+        routine: true,
+        rememberable: true,
+      };
+      activeEditOptions = [factfulAction];
+      bridge!.updateBindings([{ ...binding(), courseName: "Biology" }]);
+      await bindingsApplied();
+      try {
+        const prepared = await runtime.prepareBrowserEditAccess("edit", [{ sourceBindingId, enabledCategories: [factfulAction.id] }]);
+        expect(prepared.selections[0]?.enabledCategories[0]).toMatchObject({
+          id: factfulAction.id,
+          area: "pages",
+          kind: "edit",
+          reach: "course",
+          learnerVisible: false,
+          routine: true,
+          rememberable: true,
+        });
+      } finally {
+        activeEditOptions = [];
+        bridge!.updateBindings([binding()]);
+        await bindingsApplied();
+      }
+    }, CASE_TIMEOUT_MS);
+
     it("tells the person to reconnect a course whose signed-in Canvas tab no longer proves it", async () => {
       const writesBefore = writeCommands;
       bridge!.updateBindings([{ ...binding(), runtimeVerified: false }]);

@@ -1,5 +1,5 @@
 import { problemText } from "../src/bridge-problem-copy.js";
-import { activeEditBindings, canChooseCourses, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, editBannerText, nextError, openPlatformLabel, platformClosed, primaryLabel, runtimeNeedsReload, statusAnnouncement, statusValue } from "./popup-view.js";
+import { activeEditBindings, canChooseCourses, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, editBannerText, nextError, openPlatformLabel, pendingReviews, platformClosed, primaryLabel, reviewButtonLabel, runtimeNeedsReload, statusAnnouncement, statusValue } from "./popup-view.js";
 
 const primary = document.querySelector("#primary");
 const consentAction = document.querySelector("#consent-action");
@@ -27,6 +27,8 @@ const setupGuide = document.querySelector("#setup-guide");
 const editAccessBanner = document.querySelector("#edit-access-banner");
 const editAccessBannerText = document.querySelector("#edit-access-banner-text");
 const askFirstAllCoursesButton = document.querySelector("#ask-first-all-courses");
+const reviewsWaiting = document.querySelector("#reviews-waiting");
+const reviewsList = document.querySelector("#reviews-list");
 let current = null;
 let actionInFlight = false;
 let banner = null;
@@ -45,6 +47,31 @@ async function message(type, fields = {}) {
 
 function openCourseSelection() {
   void chrome.runtime.openOptionsPage();
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>'"]/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
+  })[character]);
+}
+
+// WI-2.4 (D1b): the reviews that wait. The Bridge never opens one by itself; a click opens the
+// named address, and reuses an already open tab at that address rather than collecting a second one.
+function renderReviews(status) {
+  const reviews = pendingReviews(status);
+  reviewsWaiting.hidden = reviews.length === 0;
+  reviewsList.innerHTML = reviews
+    .map((review) => `<button type="button" class="secondary" data-review-url="${escapeHtml(review.url)}">${escapeHtml(reviewButtonLabel(review))}</button>`)
+    .join("");
+}
+
+async function openReview(url) {
+  const [existing] = await chrome.tabs.query({ url });
+  if (existing?.id !== undefined) {
+    await chrome.tabs.update(existing.id, { active: true });
+    return;
+  }
+  await chrome.tabs.create({ url });
 }
 
 /** WI-1.4: the "Ask first in all courses" banner, shown while any connection can act with no review. */
@@ -66,8 +93,10 @@ function render(status) {
   if (consentRequired) {
     pulse.classList.remove("online");
     editAccessBanner.hidden = true;
+    reviewsWaiting.hidden = true;
     return;
   }
+  renderReviews(status);
   renderEditBanner();
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
@@ -331,6 +360,12 @@ openPlatformAction.addEventListener("click", async () => {
     openPlatformProgressVisible = false;
     await refresh();
   }
+});
+
+reviewsList.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-review-url]");
+  if (!button) return;
+  void openReview(button.dataset.reviewUrl).catch((cause) => reportError("action", cause));
 });
 
 askFirstAllCoursesButton.addEventListener("click", async () => {

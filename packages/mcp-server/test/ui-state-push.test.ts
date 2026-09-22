@@ -139,4 +139,56 @@ describe("WI-2.4: the reviews that wait, pushed to the Bridge popup", () => {
     expect(cancelled).toMatchObject({ state: "cancelled" });
     expect(runtime.operationGet(id)).toMatchObject({ state: "cancelled" });
   }, CASE_TIMEOUT_MS);
+
+  // WI-3.5: the review link label names the change with the catalog's curated plain
+  // label, not the raw catalog title, wherever a review is offered (the assistant's
+  // attention text and this popup list both call the same private helper).
+  it("names a waiting review with the tool's curated plain label", async () => {
+    directory = mkdtempSync(join(tmpdir(), "morrow-ui-state-"));
+    const port = await reserveLoopbackPort();
+    const config = connectorConfig(directory, port);
+    runtime = await GatewayRuntime.connect(config);
+    runtime.setApprovalBaseUrl("http://127.0.0.1:4317");
+
+    const root = resolve("../..");
+    const browserDigest = bridgeCatalogDigestForTests(root);
+    const sourceBindingId = "canvas:ui-state-label-test";
+    bridge = await connectBridgeTestClient({
+      port,
+      token: "gateway-connector-secret-".repeat(3),
+      extensionId: "a".repeat(32),
+      catalogDigest: browserDigest,
+      bindings: [{
+        sourceBindingId, provider: "canvas", origin: "https://school.instructure.com",
+        courseId: "42", principalFingerprint: "c".repeat(64), sessionGeneration: 1,
+        catalogDigest: browserDigest, runtimeVerified: true, editPolicyRevision: 0, editOptionsAvailable: true,
+      }],
+    });
+    bridge.onCommand((command) => {
+      if (command.kind === "ui_state") {
+        bridge!.respond(command, {});
+        return;
+      }
+      bridge!.respondProblem(command, { schema: "morrow.bridge.problem.v1", code: "unexpected_command", message: "unexpected command in this case", recoverable: false });
+    });
+    await assertPortListening(port);
+
+    // A destructive tool always goes to review (D2a), so this needs no Edit grant.
+    // The catalog's curated label for `canvas_delete_quiz` is "Remove a quiz", distinct
+    // from its raw summary "Delete a quiz" (the pre-WI-3.5 fallback).
+    const planned = await runtime.call("canvas_delete_quiz", {
+      course_id: "42", id: "88",
+      _morrow: { source_binding_id: sourceBindingId },
+    });
+    expect(planned.isError).not.toBe(true);
+    const id = operationId(planned);
+    expect(runtime.operationGet(id)).toMatchObject({ state: "awaiting_approval" });
+
+    const opened = await bridge.waitForCommand((command) => command.kind === "ui_state");
+    expect(opened.uiState?.reviews).toHaveLength(1);
+    expect(opened.uiState?.reviews[0]).toMatchObject({
+      url: `http://127.0.0.1:4317/operations/${id}`,
+      label: "Remove a quiz in course 42",
+    });
+  }, CASE_TIMEOUT_MS);
 });

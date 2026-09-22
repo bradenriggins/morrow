@@ -700,13 +700,13 @@ describe("outer provider effects", () => {
       const url = await approval.start();
       const named = await (await fetch(`${url}/operations/canvas-quiz-delete`)).text();
       expect(named).toContain("MORROW quiz");
-      expect(named).toContain('class="approve"');
+      expect(named).toContain('class="approve danger"');
 
       // A change that reaches no named object is still the person's to approve:
       // the page shows the exact request it will send.
       review = { targets: [] };
       const plain = await (await fetch(`${url}/operations/canvas-quiz-delete`)).text();
-      expect(plain).toContain('class="approve"');
+      expect(plain).toContain('class="approve danger"');
       expect(plain).toContain("338137");
 
       review = { targets: [], unnamed: true };

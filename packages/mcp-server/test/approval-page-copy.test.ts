@@ -295,10 +295,51 @@ describe("approval page copy", () => {
     try {
       const baseUrl = await server.start();
       const { body } = await reviewPage(baseUrl);
-      expect(body).toContain("<h1>Delete page courses?</h1>");
+      expect(body).toContain("<h1>Remove a page in a course?</h1>");
       expect(body).not.toContain("URL or ID");
       expect(body).not.toContain("week-2-overview");
       expect(body).not.toContain("<dt>Course ID</dt>");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("titles a Canvas change from the catalog's plain label, not the raw tool name", async () => {
+    const snapshot: JsonObject = {
+      ...moodleSnapshot("awaiting_approval"),
+      plan: {
+        tool: "canvas_update_topic_courses",
+        arguments: { course_id: "42", topic_id: "9" },
+      },
+    };
+    const server = approvalServer(snapshot, snapshot, [
+      { field: "course_id", label: "Course", name: "Biology 101" },
+    ]);
+    try {
+      const baseUrl = await server.start();
+      const { body } = await reviewPage(baseUrl);
+      expect(body).toContain("<h1>Edit a topic in a course?</h1>");
+      expect(body).not.toContain("<h1>Edit discussion?</h1>");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("falls back to the tool name's own words when the catalog has no plain label for it", async () => {
+    const snapshot: JsonObject = {
+      ...moodleSnapshot("awaiting_approval"),
+      plan: {
+        tool: "canvas_not_a_real_catalog_tool",
+        arguments: { course_id: "42" },
+      },
+    };
+    const server = approvalServer(snapshot, snapshot, [
+      { field: "course_id", label: "Course", name: "Biology 101" },
+    ]);
+    try {
+      const baseUrl = await server.start();
+      const { body } = await reviewPage(baseUrl);
+      expect(body).toContain("<h1>Not a real catalog tool?</h1>");
     } finally {
       await server.close();
     }
@@ -393,6 +434,43 @@ describe("approval page copy", () => {
       const page = await (await fetch(`${baseUrl}/operations/${encodedId}`)).text();
       expect(page).not.toContain("outcome-success");
       expect(page).not.toContain("success-mark");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("marks a removal review as dangerous and names the exact object in the approve button", async () => {
+    const snapshot: JsonObject = {
+      ...moodleSnapshot("awaiting_approval"),
+      plan: {
+        tool: "canvas_delete_page_courses",
+        arguments: { course_id: "42", url_or_id: "old-syllabus-draft" },
+        risk: { approvalClass: "destructive" },
+      },
+    };
+    const server = approvalServer(snapshot, snapshot, [
+      { field: "course_id", label: "Course", name: "Biology 101" },
+      { field: "url_or_id", label: "Page", name: "Old Syllabus Draft" },
+    ]);
+    try {
+      const baseUrl = await server.start();
+      const { body } = await reviewPage(baseUrl);
+      expect(body).toContain('<header class="hero danger">');
+      expect(body).toContain('<button class="approve danger" type="submit">Delete "Old Syllabus Draft"</button>');
+      expect(body).not.toContain("autofocus");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not mark an ordinary edit review as dangerous", async () => {
+    const server = approvalServer(moodleSnapshot("awaiting_approval"));
+    try {
+      const baseUrl = await server.start();
+      const { body } = await reviewPage(baseUrl);
+      expect(body).toContain('<header class="hero">');
+      expect(body).not.toContain("hero danger");
+      expect(body).toContain('<button class="approve" type="submit">Apply this change</button>');
     } finally {
       await server.close();
     }

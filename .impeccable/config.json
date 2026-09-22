@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "dark-glow",
+        "value": "*",
+        "files": [
+          "connector/extension/popup/popup.html"
+        ],
+        "createdAt": "2026-09-22T00:43:21.614Z",
+        "reason": "false positive: popup.html has no shadow declarations; popup.css's .connection-status box-shadow is a neutral low-opacity navy elevation shadow (rgb 23 33 60), not a colored glow halo; unrelated to this card's WI-2.4e change"
+      }
+    ]
+  }
+}

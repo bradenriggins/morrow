@@ -433,6 +433,54 @@ test("the popup's banner offers to ask first in all courses, and the result is a
   assert.equal(page.hidden("#edit-access-banner"), true);
 });
 
+// WI-2.4 (D1b): the popup lists the reviews the runtime pushed through ui_state; it never opens one
+// by itself. A click opens the named address, reusing an already open tab rather than collecting a
+// second one for the same review.
+test("the popup lists the reviews that wait, and a click opens the named one", async () => {
+  const page = await openPopup({
+    status: () => connection({
+      paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()],
+      reviews: [
+        { url: "http://127.0.0.1:44210/operations/op-1", label: "Update due date in Anatomy" },
+        { url: "http://127.0.0.1:44210/batches/batch-1", label: "Update 3 pages in Anatomy" },
+      ],
+    }),
+  });
+  assert.equal(page.hidden("#reviews-waiting"), false);
+  const buttons = page.queryAll("#reviews-list button");
+  assert.deepEqual(buttons.map((button) => button.textContent), [
+    "Review: Update due date in Anatomy",
+    "Review: Update 3 pages in Anatomy",
+  ]);
+
+  buttons[0].click();
+  await page.flush();
+  assert.deepEqual(page.tabsCreated, [{ url: "http://127.0.0.1:44210/operations/op-1" }]);
+  assert.deepEqual(page.tabsUpdated, []);
+});
+
+test("a review tab already open is made active instead of opening a second one", async () => {
+  const tabs = [{ id: 7, url: "http://127.0.0.1:44210/operations/op-1" }];
+  const page = await openPopup({
+    status: () => connection({
+      paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()],
+      reviews: [{ url: "http://127.0.0.1:44210/operations/op-1", label: "Update due date in Anatomy" }],
+    }),
+    tabs,
+  });
+  await page.click("#reviews-list button");
+  assert.deepEqual(page.tabsUpdated, [{ tabId: 7, properties: { active: true } }]);
+  assert.deepEqual(page.tabsCreated, []);
+});
+
+test("no reviews waiting keeps the section out of the page entirely", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
+  });
+  assert.equal(page.hidden("#reviews-waiting"), true);
+  assert.equal(page.query("#reviews-list").children.length, 0);
+});
+
 test("the popup's banner stays hidden with no active Edit access, and asks nothing while choosing courses", async () => {
   const noEdit = await openPopup({
     status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),

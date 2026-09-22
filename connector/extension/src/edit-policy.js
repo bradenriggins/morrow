@@ -178,23 +178,30 @@ const itemBankDestructive = (operation) => String(operation?.toolName || "").sta
 const CHECKED = Object.freeze({ verification: "checked" });
 
 export const CURATED_CATEGORY_SPECS = Object.freeze([
+  // WI-3.3: `dates` is rememberable only (D2b), never routine, because a date change is visible to
+  // learners as soon as Moodle saves it.
   Object.freeze({
     id: "dates",
     group: "Common Moodle actions",
     label: "Change Moodle assignment and quiz dates",
     description: "Change Moodle Assignment due dates and Quiz open or close dates in this course.",
     provider: "moodle",
+    rememberable: true,
     rules: Object.freeze([
       Object.freeze({ provider: "moodle", operationKey: "moodle.form.course.modedit.assign.write.v1", toolName: "moodle_update_assignment", allowedChangedFields: Object.freeze(["due_date"]) }),
       Object.freeze({ provider: "moodle", operationKey: "moodle.form.course.modedit.quiz.write.v1", toolName: "moodle_update_quiz", allowedChangedFields: Object.freeze(["close_at", "open_at"]) }),
     ]),
   }),
+  // WI-3.3: `content` changes what already exists (title or body text), so it is routine and
+  // rememberable, same as the Canvas text bundles above.
   Object.freeze({
     id: "content",
     group: "Common Moodle actions",
     label: "Edit Moodle lesson content",
     description: "Edit saved Moodle Page, Text and media area, Assignment, and Quiz titles or content in this course.",
     provider: "moodle",
+    routine: true,
+    rememberable: true,
     rules: Object.freeze([
       Object.freeze({ provider: "moodle", operationKey: "moodle.form.course.modedit.page.write.v1", toolName: "moodle_update_page", allowedChangedFields: Object.freeze(["content", "name"]) }),
       Object.freeze({ provider: "moodle", operationKey: "moodle.form.course.modedit.label.write.v1", toolName: "moodle_update_label", allowedChangedFields: Object.freeze(["content"]) }),
@@ -202,6 +209,8 @@ export const CURATED_CATEGORY_SPECS = Object.freeze([
       Object.freeze({ provider: "moodle", operationKey: "moodle.form.course.modedit.quiz.write.v1", toolName: "moodle_update_quiz", allowedChangedFields: Object.freeze(["instructions", "name"]) }),
     ]),
   }),
+  // WI-3.3: `organize` can show or hide an existing section or activity, and that is a publish
+  // change, so it carries neither `routine` nor `rememberable` and stays Customize view only.
   Object.freeze({
     id: "organize",
     group: "Common Moodle actions",

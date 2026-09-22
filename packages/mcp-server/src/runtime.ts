@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DomUtils, parseDocument } from "htmlparser2";
@@ -12,6 +13,7 @@ import {
   normalizeBridgePrivateConversation,
   normalizeBridgeUiState,
   type BridgeBinding,
+  type BridgeEditOption,
   type BridgePrivateAttachment,
   type BridgePrivateConversation,
   type BridgeUiReview,
@@ -61,7 +63,9 @@ import {
   type LearnerTextRedactionContext,
 } from "@morrow/gateway-core";
 import {
+  canvasOperationMap,
   evaluateBrowserReadback,
+  loadCanvasApiCatalog,
   matchesReadbackAssertions,
   readbackFieldValue,
   type BrowserReadbackAssertion,
@@ -400,6 +404,28 @@ function blackboardCreateReadbackContract(mapping: CatalogTool): Readonly<{ sche
   return BLACKBOARD_CREATE_READBACK_CONTRACTS[mapping.upstreamName] || null;
 }
 
+let canvasPlainLabels: ReadonlyMap<string, string> | undefined;
+
+/**
+ * Every Canvas write operation's curated plain label (WI-3.5), read from the generated
+ * catalog once and cached for the process. A missing catalog (an isolated test, a
+ * packaging layout without the artifact) leaves the map empty; the caller's own
+ * fallback still names the change.
+ */
+function loadCanvasPlainLabels(): ReadonlyMap<string, string> {
+  try {
+    const path = resolve(dirname(fileURLToPath(import.meta.url)), "../../../artifacts/canvas-api/canvas-api-catalog.json");
+    if (!existsSync(path)) return new Map();
+    const labels = new Map<string, string>();
+    for (const operation of canvasOperationMap(loadCanvasApiCatalog(path)).values()) {
+      if (operation.plainLabel) labels.set(operation.toolName, operation.plainLabel);
+    }
+    return labels;
+  } catch {
+    return new Map();
+  }
+}
+
 /** A selected Edit category names an action this gateway cannot invoke. */
 export class EditCategoryUnavailableError extends Error {
   constructor(readonly categoryId: string, readonly reason: string) {
@@ -707,6 +733,12 @@ export interface BrowserEditAccessCategory {
   readonly description: string;
   readonly destructive: boolean;
   readonly unchecked: boolean;
+  readonly area?: BridgeEditOption["area"];
+  readonly kind?: BridgeEditOption["kind"];
+  readonly reach?: BridgeEditOption["reach"];
+  readonly learnerVisible?: boolean;
+  readonly routine?: boolean;
+  readonly rememberable?: boolean;
 }
 
 export interface BrowserEditAccessPrepared {
@@ -720,6 +752,10 @@ export interface BrowserEditAccessResult {
   readonly bindings: readonly JsonObject[];
   readonly outcome: "received" | "unknown" | "not_sent";
 }
+
+const BROWSER_EDIT_ACCESS_AREAS = new Set<string>(["pages", "assignments", "quizzes", "discussions", "files", "calendar", "people", "accessibility", "beyond_course", "other"]);
+const BROWSER_EDIT_ACCESS_KINDS = new Set<string>(["edit", "publish", "remove"]);
+const BROWSER_EDIT_ACCESS_REACH = new Set<string>(["course", "beyond"]);
 
 function compareAscii(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -3067,11 +3103,12 @@ export class GatewayRuntime {
     });
   }
 
-  // A curated plainLabel (WI-3.5) does not exist yet. The catalog title is the
-  // best human name available today; this call site moves onto plainLabel once
-  // that work item lands.
+  // WI-3.5's curated plainLabel, the same label the review page and the confirm
+  // form use. The catalog title, then the tool name itself, cover a tool the
+  // generated catalog does not name (a non-Canvas source, or an isolated test).
   private plainOperationLabel(record: EffectOperationRecord, mapping: CatalogTool | undefined): string {
-    return mapping?.title || record.publicToolName;
+    canvasPlainLabels ??= loadCanvasPlainLabels();
+    return canvasPlainLabels.get(record.publicToolName) || mapping?.title || record.publicToolName;
   }
 
   // No operation record carries a course name (only a course id, when the tool's
@@ -3444,11 +3481,19 @@ export class GatewayRuntime {
         || (category.availability !== undefined && category.availability !== "edit" && category.availability !== "review")
         || (category.destructive !== undefined && typeof category.destructive !== "boolean")
         || (category.verification !== undefined && typeof category.verification !== "string")
+        || (category.area !== undefined && (typeof category.area !== "string" || !BROWSER_EDIT_ACCESS_AREAS.has(category.area)))
+        || (category.kind !== undefined && (typeof category.kind !== "string" || !BROWSER_EDIT_ACCESS_KINDS.has(category.kind)))
+        || (category.reach !== undefined && (typeof category.reach !== "string" || !BROWSER_EDIT_ACCESS_REACH.has(category.reach)))
+        || (category.learnerVisible !== undefined && typeof category.learnerVisible !== "boolean")
+        || (category.routine !== undefined && typeof category.routine !== "boolean")
+        || (category.rememberable !== undefined && typeof category.rememberable !== "boolean")
         || available.has(category.id)) {
         throw new Error("The selected browser course categories changed. Read current course connections and try again.");
       }
       // The confirmation a person accepts has to name what the settings page names, so the two
       // flags its confirmation stage reads travel with the label instead of being dropped here.
+      // The six WI-3.1 option facts (area, kind, reach, learnerVisible, routine, rememberable)
+      // pass through the same way, for later work items that read a category's facts here.
       if (category.availability !== "review") {
         available.set(category.id, {
           id: category.id,
@@ -3456,6 +3501,12 @@ export class GatewayRuntime {
           description: category.description,
           destructive: category.destructive === true || category.tier === "destructive",
           unchecked: category.verification === "unchecked",
+          ...(category.area !== undefined ? { area: category.area as BridgeEditOption["area"] } : {}),
+          ...(category.kind !== undefined ? { kind: category.kind as BridgeEditOption["kind"] } : {}),
+          ...(category.reach !== undefined ? { reach: category.reach as BridgeEditOption["reach"] } : {}),
+          ...(category.learnerVisible !== undefined ? { learnerVisible: category.learnerVisible as boolean } : {}),
+          ...(category.routine !== undefined ? { routine: category.routine as boolean } : {}),
+          ...(category.rememberable !== undefined ? { rememberable: category.rememberable as boolean } : {}),
         });
       }
     }

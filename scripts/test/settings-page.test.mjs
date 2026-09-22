@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import test, { after } from "node:test";
 import { clearExtensionGlobals, loadExtensionPage } from "./lib/extension-dom.mjs";
 import { problemText } from "../../connector/extension/src/bridge-problem-copy.js";
+import { CURATED_CATEGORY_SPECS } from "../../connector/extension/src/edit-policy.js";
 
 const root = new URL("../../", import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL("connector/extension/manifest.json", root), "utf8"));
@@ -30,6 +31,13 @@ const CHECKED_ACTION = Object.freeze({ id: "canvas_page_content", group: "Focuse
 const UNCHECKED_ACTION = Object.freeze({ id: "action:canvas:canvas_add_course_to_favorites", group: "Canvas actions", label: "Add course to favorites", description: "Mark a course as a favorite.", availability: "edit", destructive: false, verification: "unchecked", verificationReason: "Morrow cannot check this change after it is saved: the route returns no saved record. Morrow reports the saved result as unconfirmed." });
 const DESTRUCTIVE_ACTION = Object.freeze({ id: "action:canvas:canvas_delete_page", group: "Canvas actions", label: "Delete page", description: "Remove one page from a course.", availability: "edit", destructive: true, verification: "checked" });
 const REVIEW_ONLY_ACTION = Object.freeze({ id: "action:canvas:canvas_update_quiz_item", group: "Canvas actions", label: "Update New Quiz item", description: "Change one New Quiz question.", availability: "review", destructive: false, reviewReason: "New Quizzes matches the parts of a question by id, so this change needs the delete-then-add contract." });
+// F10, WI-3.4: a generated option with more than 8 changeable fields is published with
+// allowedChangedFields: [], so a checkbox on it alone grants nothing. `canvas_edit_assignment` is a
+// real key of settings.js's FIELD_SELECTION_BUNDLES table; `canvas_update_wide_thing` is not, so it
+// proves the other branch of the message.
+const FIELD_SELECTION_BUNDLE = Object.freeze({ id: "canvas_assignment_text", group: "Canvas task bundles", label: "Edit assignment titles and instructions", description: "Change an assignment's title or instructions.", availability: "edit", destructive: false, verification: "checked", routine: true, rememberable: true });
+const FIELD_SELECTION_WITH_BUNDLE = Object.freeze({ id: "action:canvas:canvas_edit_assignment", group: "Canvas actions", label: "Edit an assignment", description: "Change an existing Canvas Assignment.", availability: "edit", destructive: false, verification: "checked", requiresFieldSelection: true });
+const FIELD_SELECTION_NO_BUNDLE = Object.freeze({ id: "action:canvas:canvas_update_wide_thing", group: "Canvas actions", label: "Update a wide thing", description: "Change many settings at once.", availability: "edit", destructive: false, verification: "checked", requiresFieldSelection: true });
 
 function canvasCourse(id, courseName, fields = {}) {
   return {
@@ -429,6 +437,70 @@ test("an action published for review only carries its reason and no Edit control
   assert.equal(reviewOnly.querySelector("input"), null);
   assert.equal(page.queryAll(`#category-list input[value="${REVIEW_ONLY_ACTION.id}"]`).length, 0);
   assert.equal(actionInput(page, CHECKED_ACTION.id).disabled, false);
+});
+
+// F10, WI-3.4: an option that would grant nothing (allowedChangedFields: []) never gets an active
+// checkbox. It names the bundle that covers its tool when one is offered, else it says Morrow
+// always asks first.
+test("an option that grants nothing alone gets no checkbox, and names the covering bundle, or says Morrow always asks first", async () => {
+  const page = await openEditStage([CHECKED_ACTION, FIELD_SELECTION_BUNDLE, FIELD_SELECTION_WITH_BUNDLE, FIELD_SELECTION_NO_BUNDLE]);
+  const options = page.queryAll("#category-list .category-option");
+  const fieldSelectionOptions = options.filter((option) => option.classList.contains("field-selection"));
+  assert.equal(fieldSelectionOptions.length, 2);
+
+  const withBundle = fieldSelectionOptions.find((option) => option.querySelector("strong").textContent === FIELD_SELECTION_WITH_BUNDLE.label);
+  assert.equal(withBundle.querySelector("input"), null);
+  assert.equal(withBundle.querySelector("small").textContent,
+    `${FIELD_SELECTION_WITH_BUNDLE.description} Morrow can change this only through a bundle: ${FIELD_SELECTION_BUNDLE.label}.`);
+
+  const noBundle = fieldSelectionOptions.find((option) => option.querySelector("strong").textContent === FIELD_SELECTION_NO_BUNDLE.label);
+  assert.equal(noBundle.querySelector("input"), null);
+  assert.equal(noBundle.querySelector("small").textContent, `${FIELD_SELECTION_NO_BUNDLE.description} Morrow always asks before this change.`);
+
+  assert.equal(page.queryAll(`#category-list input[value="${FIELD_SELECTION_WITH_BUNDLE.id}"]`).length, 0);
+  assert.equal(page.queryAll(`#category-list input[value="${FIELD_SELECTION_NO_BUNDLE.id}"]`).length, 0);
+  // The bundle itself keeps its ordinary, active checkbox: only the field-capped single action loses it.
+  assert.equal(actionInput(page, FIELD_SELECTION_BUNDLE.id).disabled, false);
+});
+
+// WI-3.4, F10: settings.js keeps its own table naming, for each tool, the curated bundles that cover
+// it (the public option carries no rule detail). This proves that table names exactly the bundles
+// CURATED_CATEGORY_SPECS gives each tool, for every tool any visible bundle covers, so the two lists
+// (the project keeps such lists in two places by hand, `src/edit-policy.js:15`) cannot silently drift.
+test("the bundle names a field-selection option shows match src/edit-policy.js's curated bundle rules for every tool a visible bundle covers", async () => {
+  const visible = CURATED_CATEGORY_SPECS.filter((spec) => spec.hiddenFromUi !== true && (spec.provider === "canvas" || spec.provider === "moodle"));
+  const labelById = new Map(visible.map((spec) => [spec.id, spec.label]));
+  const bundleIdsByTool = new Map();
+  for (const spec of visible) {
+    for (const rule of spec.rules) {
+      if (!bundleIdsByTool.has(rule.toolName)) bundleIdsByTool.set(rule.toolName, new Set());
+      bundleIdsByTool.get(rule.toolName).add(spec.id);
+    }
+  }
+  const bundleCategories = visible.map((spec) => ({
+    id: spec.id, group: spec.group, label: spec.label, description: spec.description,
+    availability: "edit", destructive: false, verification: "checked",
+  }));
+  const toolLabel = (toolName) => `Field-capped: ${toolName}`;
+  const toolActions = [...bundleIdsByTool.keys()].map((toolName) => ({
+    id: `action:${toolName.startsWith("moodle_") ? "moodle" : "canvas"}:${toolName}`,
+    group: "Field-capped actions", label: toolLabel(toolName), description: `${toolName} description.`,
+    availability: "edit", destructive: false, verification: "checked", requiresFieldSelection: true,
+  }));
+
+  const page = await openEditStage([...bundleCategories, ...toolActions], [ANATOMY]);
+  const rendered = page.queryAll("#category-list .category-option").filter((option) => option.classList.contains("field-selection"));
+  assert.equal(rendered.length, toolActions.length);
+
+  for (const [toolName, bundleIds] of bundleIdsByTool) {
+    const option = rendered.find((entry) => entry.querySelector("strong").textContent === toolLabel(toolName));
+    assert.ok(option, `no rendered field-selection option for ${toolName}`);
+    // A bundle label can itself hold a comma ("Rename and move files, create folders"), so the
+    // expected text is built in the same insertion order this tool's rules appear in
+    // CURATED_CATEGORY_SPECS and compared whole, rather than split back apart from the rendering.
+    const expectedText = `${toolName} description. Morrow can change this only through a bundle: ${[...bundleIds].map((id) => labelById.get(id)).join(", ")}.`;
+    assert.equal(option.querySelector("small").textContent, expectedText, toolName);
+  }
 });
 
 test("the action search and the checked-only filter change which actions a person can choose", async () => {

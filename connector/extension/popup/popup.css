@@ -34,6 +34,10 @@ button { width: 100%; margin-top: var(--space-2); }
 .help ol { margin: var(--space-2) 0 0; padding-left: var(--space-6); }
 .help li + li { margin-top: var(--space-1); }
 footer { margin-top: var(--space-4); border-top: 1px solid var(--border); padding-top: var(--space-4); color: var(--text-subtle); font-size: 0.8125rem; line-height: 1.4; }
+.reviews-waiting { margin-bottom: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: var(--radius-card); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.reviews-waiting h2 { margin: 0 0 var(--space-2); font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
+.reviews-waiting button { margin-top: var(--space-2); }
+.reviews-waiting button:first-child { margin-top: 0; }
 .edit-access-banner { margin-bottom: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border)); border-radius: var(--radius-card); background: color-mix(in srgb, var(--success) 8%, var(--surface)); }
 .edit-access-banner p { margin: 0; color: var(--text); font-size: 0.8125rem; line-height: 1.4; }
 .edit-access-banner button { margin-top: var(--space-2); min-height: 44px; }
@@ -42,4 +46,4 @@ footer { margin-top: var(--space-4); border-top: 1px solid var(--border); paddin
 .edit-access p { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
 .edit-access p strong { color: var(--text); font-weight: 700; }
 .edit-access button { margin-top: var(--space-2); min-height: 44px; padding: var(--space-2) var(--space-4); }
-@media (max-width: 340px) { main { padding: var(--space-3); } .connection-status, .account, .data-disclosure, .edit-access, .edit-access-banner { padding-left: var(--space-3); padding-right: var(--space-3); } }
+@media (max-width: 340px) { main { padding: var(--space-3); } .connection-status, .account, .data-disclosure, .edit-access, .edit-access-banner, .reviews-waiting { padding-left: var(--space-3); padding-right: var(--space-3); } }
