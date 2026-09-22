@@ -2133,6 +2133,10 @@ def dispatch_browser_undo(entry, params, result_payload, of_op_id, lane_state,
     # bound to the undo action and its target (never the forward write's).
     ex._check_auxiliary_learner_data(entry, _vault.vault_available())
     _admission.check_policy_gates(entry, _vault.vault_available())
+    # The undo target comes ONLY from the original op's journaled
+    # receipt; a caller payload that disagrees is refused.
+    result_payload = ex.journaled_undo_result(entry, params, of_op_id,
+                                              result_payload)
     undo_entry, undo_params = ex.undo_approval_subject(
         entry, params, of_op_id, result_payload)
     _, _approval_record = admit(

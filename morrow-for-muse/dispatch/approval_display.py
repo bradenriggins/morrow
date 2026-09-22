@@ -116,7 +116,20 @@ def render_approval_display(record, params, entry=None):
                  "the payload is complete and unaltered): %s"
                  % params_digest(params))
     lines.append("")
-    if undo_available(entry):
+    undo_request = (params or {}).get("_undo_request") \
+        if isinstance(params, dict) else None
+    if isinstance(undo_request, dict) or \
+            str((entry or {}).get("name") or "").endswith("#undo"):
+        req = undo_request if isinstance(undo_request, dict) else {}
+        lines.append("Undo      : This approval IS an undo. It reverses "
+                     "operation %s by sending %s %s (target %s). The undo "
+                     "itself cannot be automatically reversed."
+                     % ((params or {}).get("_undo_of"),
+                        req.get("method") or "(unknown method)",
+                        req.get("path") or "(unknown path)",
+                        json.dumps((params or {}).get("_undo_target"),
+                                   sort_keys=True, default=str)))
+    elif undo_available(entry):
         lines.append("Undo      : AVAILABLE. This operation declares an "
                      "undo block; the change can be reversed.")
     else:

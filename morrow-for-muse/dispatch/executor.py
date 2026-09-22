@@ -508,6 +508,14 @@ class EffectClassMismatch(ExecutorError):
     never be dispatched as "read" (or "plan") to dodge write approval."""
 
 
+class UndoTargetMismatch(ExecutorError):
+    """An undo's target could not be bound to the op it claims to undo:
+    no completed write is journaled under --of-op-id, it was a different
+    entry or ran with different params, or the caller's result payload
+    disagrees with that op's journaled receipt. The undo target comes
+    ONLY from the journal; nothing was sent."""
+
+
 class TargetIdentityMismatch(ExecutorError):
     """The write target's identity did not verify (W4-P0-11). Raised when
     the frozen plan's readback does not corroborate the plan's course_id,
@@ -8536,23 +8544,105 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
 # Undo: an entry's undo block as a new, separately journaled operation
 # --------------------------------------------------------------------------
 
+_RESULT_REF_RE = re.compile(r"\{result\.([^{}]+)\}|\"?result\.([A-Za-z0-9_.\[\]]+)")
+
+
+def _undo_result_refs(undo) -> list:
+    """The result.<path> references an undo block resolves, sorted."""
+    refs = set()
+    for match in _RESULT_REF_RE.finditer(json.dumps(undo, sort_keys=True)):
+        refs.add(match.group(1) or match.group(2))
+    return sorted(refs)
+
+
+def journaled_undo_result(entry: dict, params: dict, of_op_id: str,
+                          caller_result=None):
+    """The result payload an undo resolves against: ONLY the journaled
+    receipt of of_op_id.
+
+    Refuses (UndoTargetMismatch) unless a completed write outcome is
+    journaled under of_op_id for this same entry with these same params,
+    and unless every result field the undo block references agrees with
+    caller_result when the caller passed one. An empty caller_result is
+    fine: the journal alone decides the target."""
+    original = find_journal_op(str(of_op_id))
+    if not isinstance(original, dict) or original.get("wal") != "complete":
+        raise UndoTargetMismatch(
+            "no completed write is journaled under op id %r, so there is "
+            "nothing this undo can be bound to; nothing was sent"
+            % str(of_op_id))
+    if original.get("kind") == "undo" or original.get("effect") != "write":
+        raise UndoTargetMismatch(
+            "op %r is not a forward write (kind %r, effect %r); only a "
+            "forward write can be undone" % (str(of_op_id),
+                                           original.get("kind"),
+                                           original.get("effect")))
+    if original.get("entry_name") != entry.get("name"):
+        raise UndoTargetMismatch(
+            "op %r ran entry %r, not %r; an undo must use the undo block of "
+            "the entry that made the change" % (
+                str(of_op_id), original.get("entry_name"), entry.get("name")))
+    if original.get("params_digest") != digest_of(params or {}):
+        raise UndoTargetMismatch(
+            "the params for this undo differ from the params op %r ran "
+            "with; pass the original op's params" % str(of_op_id))
+    journaled = original.get("receipt")
+    if caller_result:
+        for ref in _undo_result_refs(entry.get("undo")):
+            try:
+                theirs = resolve_path(caller_result, ref)
+            except Exception:
+                theirs = None
+            try:
+                ours = resolve_path(journaled, ref)
+            except Exception:
+                ours = None
+            if theirs != ours:
+                raise UndoTargetMismatch(
+                    "the result payload passed for this undo says "
+                    "result.%s is %r, but op %r journaled %r; the undo "
+                    "target comes only from the journal" % (
+                        ref, theirs, str(of_op_id), ours))
+    return journaled
+
+
 def undo_approval_subject(entry: dict, params: dict, of_op_id: str,
-                          result_payload) -> tuple:
+                          result_payload=None) -> tuple:
     """(undo_entry, undo_params): what an undo is approved and admitted as.
 
     An undo is its own write, so its approval must never be the forward
     write's: the entry is "<name>#undo" with the undo block as its
     request (so destructiveness and learner-data checks see the request
-    that is actually sent), and the params bind the original op and the
-    undo target (the result payload the undo block resolves against).
-    Mint the educator's undo approval with
+    that is actually sent), and the params bind the original op, the
+    exact undo request (method and path, rendered from the original op's
+    JOURNALED receipt), and the target fields it resolves. The approval
+    display therefore shows the educator exactly what will be undone.
+    result_payload, when given, must agree with the journal
+    (journaled_undo_result). Mint the educator's undo approval with
     admission.mint_approval(undo_entry, undo_params, tenant_base)."""
     undo = entry.get("undo")
     undo_entry = undo_admission_entry(entry)
+    journaled = journaled_undo_result(entry, params, of_op_id,
+                                      result_payload)
     undo_params = dict(params or {})
     undo_params["_undo_of"] = str(of_op_id)
-    undo_params["_undo_target"] = digest_of({"undo": undo,
-                                             "result": result_payload})
+    target = {}
+    for ref in _undo_result_refs(undo):
+        try:
+            target[ref] = resolve_path(journaled, ref)
+        except Exception:
+            target[ref] = None
+    undo_params["_undo_target"] = target
+    url_template = str(undo.get("url") or "")
+    try:
+        path = render_template(url_template, {"canvas_base": ""},
+                               params or {}, journaled)
+    except ExecutorError:
+        path = url_template
+    undo_params["_undo_request"] = {
+        "method": str(undo.get("method") or "").upper(),
+        "path": path,
+    }
     return undo_entry, undo_params
 
 
@@ -8621,6 +8711,10 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
     _check_auxiliary_learner_data(entry, vault_ready=False)
     # The forward entry's own policy gates still apply to its undo.
     check_policy_gates(entry)
+    # The undo target comes ONLY from the original op's journaled
+    # receipt; a caller payload that disagrees is refused.
+    result_payload = journaled_undo_result(entry, params, of_op_id,
+                                           result_payload)
     undo_entry, undo_params = undo_approval_subject(entry, params, of_op_id,
                                                     result_payload)
     approval_audit, approval_record = admit(
@@ -9036,7 +9130,12 @@ def main(argv=None):
     p_undo.add_argument("--entry", required=True)
     p_undo.add_argument("--of-op-id", required=True, help="original op id being undone")
     p_undo.add_argument("--params", default="{}", help="original params as a JSON object string")
-    p_undo.add_argument("--result", default="{}", help="original result payload as a JSON object string")
+    p_undo.add_argument("--result", default="{}",
+                        help="optional: the original result payload as a "
+                             "JSON object string. The undo target comes "
+                             "ONLY from the journaled receipt of "
+                             "--of-op-id; a payload that disagrees with it "
+                             "is refused")
     p_undo.add_argument("--approval", default=None,
                         help="path to an educator-signed v2 approval record JSON (undo is a write); "
                              "must be digest-bound to this exact undo, unexpired, category-scoped, "
