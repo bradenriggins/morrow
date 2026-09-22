@@ -52,8 +52,9 @@ dispatchable through `dispatch/executor.py --backend chromium`:
 436 Canvas rows (C-1 through C-436) and 20 Item Bank rows (IB-1
 through IB-20). Each row names a tool, method, path template,
 read/write class, mechanism, proof status, and evidence notes. Only
-rows marked `live-proven` dispatch without an educator-signed
-`--allow-unproven` override, and the admission policy
+rows marked `live-proven` dispatch; a row marked `pending` also runs
+with an educator-signed `--allow-unproven` override, and rows marked
+`failed`, `unsupported`, or `excluded` never run. The admission policy
 (`dispatch/admission_policy.json`) can hold even a live-proven row
 when the integrated product pipeline has no live runs yet (the
 `canvas_create_new_quiz` case: provider path proven, product pipeline

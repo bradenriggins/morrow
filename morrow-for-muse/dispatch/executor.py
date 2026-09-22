@@ -8374,6 +8374,12 @@ def _journal_catalog_refusal(name, method, path_template, params, status,
               file=sys.stderr)
 
 
+# Catalog statuses the educator-signed --allow-unproven override may
+# reach: rows never tried live. failed, unsupported, excluded, and
+# evidence-hold rows are refused with or without it.
+_UNPROVEN_OVERRIDABLE = frozenset({"pending"})
+
+
 def _catalog_provenance_gate(entry: dict, name: str, method: str,
                              path_template: str, params: dict,
                              provider: str, approval, allow_unproven: bool,
@@ -8392,9 +8398,11 @@ def _catalog_provenance_gate(entry: dict, name: str, method: str,
       - a supplied method/path that does not match the catalog row raises
         CatalogNotProven (a proven name cannot be paired with arbitrary
         CLI arguments);
-      - any status other than live-proven raises CatalogNotProven unless
-        allow_unproven is set AND the educator-signed approval record
-        carries allow_unproven: true (sealed by sign_approval).
+      - a failed, unsupported, or excluded row raises CatalogNotProven
+        and cannot be overridden;
+      - a pending row raises CatalogNotProven unless allow_unproven is
+        set AND the educator-signed approval record carries
+        allow_unproven: true (sealed by sign_approval).
 
     Every refusal is journaled under its own refusal event id.
     """
@@ -8436,6 +8444,17 @@ def _catalog_provenance_gate(entry: dict, name: str, method: str,
     status = descriptor["status"]
     if status == "live-proven":
         return status, (None, None)
+    if status not in _UNPROVEN_OVERRIDABLE:
+        # A row the live battery proved failed, or marked unsupported or
+        # excluded, has no working route: no override reaches it.
+        detail = ("operation %r is marked %r in the catalog; only "
+                  "live-proven operations run, and the educator-signed "
+                  "--allow-unproven override reaches only rows marked "
+                  "pending (never tried live). Refusing."
+                  % (name, status or "unmarked"))
+        _journal_catalog_refusal(name, method, path_template, params,
+                                 status or "unmarked", detail)
+        raise CatalogNotProven(detail)
     if not allow_unproven:
         detail = ("operation %r is marked %r in the catalog, not "
                   "live-proven; dispatch needs --allow-unproven plus an "

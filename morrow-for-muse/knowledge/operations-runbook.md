@@ -45,9 +45,11 @@ The gate checks the catalog row BEFORE anything else
    method and path exactly. A proven name paired with arbitrary CLI
    arguments raises `CatalogNotProven`. You cannot smuggle a new request
    shape behind a proven name.
-3. The row status must be `live-proven`, or you must pass
-   `--allow-unproven` with an educator-signed approval record carrying
-   `allow_unproven: true` (sealed by `sign_approval`).
+3. The row status must be `live-proven`. The one exception: a row
+   marked `pending` (never tried live) runs with `--allow-unproven` plus
+   an educator-signed approval record carrying `allow_unproven: true`
+   (sealed by `sign_approval`). Rows marked `failed`, `unsupported`, or
+   `excluded` are refused with or without it.
 
 Then the absolute refusals run, and `--allow-unproven` cannot touch
 them: `never_dispatch` rows (blueprint, CSP, SIS, conversations,

@@ -87,13 +87,16 @@ marked `live-proven` is not a v1 claim.
 - The governance layer that makes it safe: frozen plans, the admission
   gate (`dispatch/admission.py`) enforcing the live-proven catalog,
   educator-signed approvals, per-category never-dispatch lists,
-  journaled dispatches, and undo entries for undoable writes. A
-  non-live-proven operation dispatches only with `--allow-unproven`
+  journaled dispatches, and undo entries for undoable writes. Only
+  live-proven operations run, with one exception: a catalog row marked
+  `pending` (never tried live) dispatches only with `--allow-unproven`
   plus an educator-signed v2 approval carrying `allow_unproven: true`,
-  bound to the exact operation and parameters, for that known catalog
-  row only. It does not bypass write approval, frozen-plan
-  requirements, never-dispatch, unsupported, evidence-hold,
-  learner-data refusal, or unknown-operation refusal.
+  bound to that exact operation and its parameters, single use. The
+  educator must sign it; the agent cannot. Rows marked `failed`,
+  `unsupported`, `excluded`, or `evidence-hold` are refused with or
+  without it, and it does not bypass write approval, frozen-plan
+  requirements, never-dispatch, learner-data refusal, or
+  unknown-operation refusal.
 - The Canvas Login Helper (`helper/`): educator self-sign-in,
   SSO/MFA-capable, with keepalive.
 

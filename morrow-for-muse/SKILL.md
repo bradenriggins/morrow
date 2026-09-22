@@ -255,9 +255,16 @@ Writes need three things or they are refused:
 3. No write halt: if `~/.morrow/write_halt` exists, all writes refuse.
 
 Only operations marked `live-proven` in
-`proof-battery/OPERATION_CATALOG.md` dispatch. The one exception is an
-educator-signed `--allow-unproven` override for edge cases, signed by the
-educator as part of the approval.
+`proof-battery/OPERATION_CATALOG.md` dispatch, with one exception, the
+`--allow-unproven` exception: a catalog row marked `pending` (never
+tried live) dispatches only when the caller passes `--allow-unproven`
+AND the approval is an educator-signed v2 approval carrying
+`allow_unproven: true`, bound to that exact operation and its
+parameters, single use. The educator must sign it; the agent cannot.
+It reaches `pending` rows only: rows marked `failed`, `unsupported`,
+`excluded`, or `evidence-hold`, unknown operations, never-dispatch
+routes, and learner-data rows are refused with or without it. It does
+not skip write approval, the frozen plan, or any other gate.
 
 Entry manifests: `execute --entry <manifest.json> --params '{...}'`
 dispatches a manifest entry the same way. `undo` runs an entry's undo
@@ -279,9 +286,9 @@ is on. `--dry-run` journals nothing, in either mode.
 - Frozen plans: a write's plan digest must match the action exactly.
 - Admission: `dispatch/admission.py` enforces the live-proven catalog.
   Only operations marked `live-proven` in
-  `proof-battery/OPERATION_CATALOG.md` dispatch. The only override is an
-  educator-signed `--allow-unproven` flag for edge cases, signed by the
-  educator as part of the approval. Learner-data operations (any
+  `proof-battery/OPERATION_CATALOG.md` dispatch; the only exception is
+  the educator-signed `--allow-unproven` override for `pending` rows
+  described above. Learner-data operations (any
   operation whose response carries people; see SCOPE.md) are refused
   (`LearnerDataGated`) by `executor.py catalog` on every lane, and
   `--allow-unproven` cannot override that. Manifest entries
