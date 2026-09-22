@@ -344,7 +344,8 @@ def t_digest_stable():
 check("params digest stable across key order", t_digest_stable)
 
 
-# 16. mint_approval never self-signs; sign_approval needs a real citation.
+# 16. mint_approval never self-signs; sign_approval needs a non-empty
+# verbatim citation (round-4 M1: "Yes" is a valid approval).
 def t_mint_unsigned():
     e = write_entry()
     rec = mint_approval(e, {"course_id": "1"},
@@ -355,8 +356,8 @@ def t_mint_unsigned():
     assert rec["version"] == APPROVAL_VERSION
     assert len(rec["op_digest"]) == 64
     try:
-        sign_approval(rec, "ok", channel="driver")
-        raise AssertionError("short citation accepted")
+        sign_approval(rec, "", channel="driver")
+        raise AssertionError("empty citation accepted")
     except ValueError:
         pass
     try:

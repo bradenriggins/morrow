@@ -64,7 +64,8 @@ signed record. Nothing in this tree de-tokenizes.
    `mint_approval(entry, params, tenant_base, ttl,
    target_identity={course_id, course_name, term})`, which binds the
    op digest over (entry name, canonical params, tenant base,
-   category) and stamps the human-readable write target (tenant,
+   category, and the exact request: method, path, query, and body)
+   and stamps the human-readable write target (tenant,
    course ID, course name, term when known) into the record's
    `target` block, under the tamper seal. The record is unsigned
    (`by=None`).
@@ -89,10 +90,15 @@ signed record. Nothing in this tree de-tokenizes.
    the ceremony channel (`educator-chat` when the authorization was
    captured from the educator's own reply, `driver` for every other
    path), and tamper-seals the record with the machine-held HMAC
-   key. One signature covers the action AND the identity schedule;
-   the educator never performs a second ceremony.
+   key. When params carry learner tokens, the identity schedule needs
+   its own citation: `identity_authorization`, the educator's own
+   reply naming the identities, separate from the action
+   authorization (W6-P2-A3). Both are sealed in the same record, so
+   there is still one signing step. Any non-empty verbatim reply is a
+   valid citation ("Yes" approves); what binds it to one action is
+   the digest, not its length.
 5. **Admit.** `check_write_approval()` enforces the v2 contract
-   (seal, signature, citation length, digest match, category, tenant,
+   (seal, signature, a non-empty citation, digest match, category, tenant,
    expiry, single-use, identity-schedule match, and the W4-P0-11
    target cross-check: the record's `target` tenant/course_id must
    agree with this dispatch's tenant and params). On success it
@@ -181,7 +187,11 @@ Code enforces:
 - unsigned, unsealed, tampered, expired, future-dated, wrong-tenant,
   wrong-op, wrong-category, mutated, replayed, or identity-mismatched
   approvals are refused;
-- the citation is non-trivial (>= 20 chars) and journaled verbatim;
+- the citation is non-empty and journaled verbatim (any reply the
+  educator gave, "Yes" included, bound to the op digest);
+- the op digest binds the exact request (method, path, query, and
+  body): a request changed after approval is refused at dispatch and
+  at the complete phase;
 - every write journal row carries the approval audit block
   (op_digest, by, channel, provenance, authorization citation,
   issued/expiry, category);

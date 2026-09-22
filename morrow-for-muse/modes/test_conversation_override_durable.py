@@ -134,10 +134,20 @@ def test_edit_override_ends_with_the_conversation(home):
     assert json.loads(out) == ["plan", "needs-approval", None]
 
 
-def test_plan_override_survives_later_edit_default_elsewhere(home):
+def test_later_edit_default_ends_an_earlier_plan_override(home):
+    # Round-4 audit M2: "edit everywhere" takes effect everywhere. A
+    # plan override set before it ends (it used to survive, so "every
+    # conversation" was false for that one).
     _run(home, "mode('plan', this=True); print('ok')")
     _run(home, "mode('edit', conv=OTHER); "
                "print('ok')")
+    out = _run(home, "print(json.dumps([gate(CONV), gate(OTHER)]))")
+    assert json.loads(out) == ["admitted-edit", "admitted-edit"]
+
+
+def test_plan_override_set_after_edit_default_survives_elsewhere(home):
+    _run(home, "mode('edit', conv=OTHER); print('ok')")
+    _run(home, "mode('plan', this=True); print('ok')")
     out = _run(home, "print(json.dumps([gate(CONV), gate(OTHER)]))")
     assert json.loads(out) == ["needs-approval", "admitted-edit"]
 

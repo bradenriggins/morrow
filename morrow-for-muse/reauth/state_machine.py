@@ -829,8 +829,9 @@ def op_quarantine_status(op_id):
 
 # W6-P2-A5: the re-approval citation bar, matching the admission
 # ceremony's APPROVAL_AUTH_MIN_LEN (the state machine must not import
-# the dispatcher; the value is mirrored, not shared).
-_REAPPROVAL_AUTH_MIN_LEN = 20
+# the dispatcher; the value is mirrored, not shared). Any non-empty
+# verbatim reply counts: "yes" is an approval.
+_REAPPROVAL_AUTH_MIN_LEN = 1
 
 
 def approve_op(op_id, authorization=None):
@@ -842,7 +843,7 @@ def approve_op(op_id, authorization=None):
     whose newest quarantine status is not 'approved'.
 
     W6-P2-A5: `authorization` is REQUIRED: the educator's verbatim
-    words approving THIS op's re-dispatch (>= 20 chars), sealed into
+    words approving THIS op's re-dispatch (any non-empty reply), sealed into
     the ledger entry. The old signature let the agent "approve" a
     quarantined op with no educator input at all; the whole
     "explicit approval" loop was agent-self-certified. A short or
@@ -855,10 +856,9 @@ def approve_op(op_id, authorization=None):
     if (not isinstance(authorization, str)
             or len(authorization.strip()) < _REAPPROVAL_AUTH_MIN_LEN):
         raise ValueError(
-            "approve_op requires the educator's verbatim authorization "
-            "for re-dispatching this op (at least %d characters); the "
-            "agent cannot self-approve a quarantined op"
-            % _REAPPROVAL_AUTH_MIN_LEN)
+            "approve_op requires the educator's verbatim reply approving "
+            "the re-dispatch of this op (any non-empty reply); the agent "
+            "cannot self-approve a quarantined op")
     changed = False
     with _ledger_locked():
         tmp = QUAR_PATH + ".mutate"
@@ -921,7 +921,7 @@ class PrincipalPinError(Exception):
 
 
 PIN_AUDIT_PATH_NAME = "principal_pin.json"
-PIN_CONFIRM_MIN_LEN = 20
+PIN_CONFIRM_MIN_LEN = 1
 
 
 def _lane_state_module():
@@ -984,7 +984,7 @@ def pin_principal(base, principal_id, principal_name, first_signin=False,
       is the educator's own onboarding, so it is pinned.
     - No pin during a write halt: pinning whoever signed back in would
       defeat the check, so it needs the educator's verbatim confirming
-      words (confirmation, at least 20 characters).
+      words (confirmation, any non-empty reply).
     """
     if principal_id in (None, ""):
         raise PrincipalPinError("no principal id to pin")
@@ -1013,8 +1013,8 @@ def pin_principal(base, principal_id, principal_name, first_signin=False,
     if not first_signin and not confirmed:
         raise PrincipalPinError(
             "pinning needs either the first sign-in (--first-signin) or "
-            "the educator's confirming words (--confirm-account, at least "
-            "%d characters)" % PIN_CONFIRM_MIN_LEN)
+            "the educator's confirming words (--confirm-account, any "
+            "non-empty reply)")
     if not base:
         raise PrincipalPinError("no Canvas base URL to pin against")
     lane.save(base, principal_id, str(principal_name or "").strip())

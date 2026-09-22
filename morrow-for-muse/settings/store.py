@@ -17,9 +17,13 @@ journaled, educator-confirmed, and plainly documented. There is no
 separate grant machinery standing between the educator and edit mode;
 the educator asked for default edit mode as a first-class choice.
 
-Layers (most recent explicit educator action wins; resolved by the
-single authoritative resolver modes.state.current_mode, which this
-module's effective_mode delegates to):
+Layers (resolved by the single authoritative resolver
+modes.state.current_mode, which this module's effective_mode delegates
+to). Changing the saved default ends every per-conversation override,
+so a conversation override is always newer than the default it
+overrides: in its conversation it wins; everywhere else the default
+applies. An override stored before the newest default change (an
+older install could leave one) has ended and is ignored.
   1. Per-conversation override ("use plan/edit mode for this
      conversation"): lasts for that conversation only. Persisted in the
      educator's sealed settings file (keyed by conversation id) and
@@ -437,11 +441,19 @@ def _read_doc_locked(user_id):
                     "refusing to guess." % (path, key, exc))
     overrides = doc.get("conversation_overrides", {})
     _validate_overrides(overrides, path)
-    return {"version": doc.get("version", 1),
-            "settings": dict(stored),
-            "change_count": doc.get("change_count"),
-            "conversation_overrides": {k: dict(v)
-                                       for k, v in overrides.items()}}
+    default_set_at = doc.get("default_mode_set_at")
+    if default_set_at is not None and not isinstance(default_set_at, str):
+        raise SettingsCorrupt(
+            "settings file %s holds an invalid default_mode_set_at; "
+            "refusing to guess." % path)
+    out = {"version": doc.get("version", 1),
+           "settings": dict(stored),
+           "change_count": doc.get("change_count"),
+           "conversation_overrides": {k: dict(v)
+                                      for k, v in overrides.items()}}
+    if default_set_at is not None:
+        out["default_mode_set_at"] = default_set_at
+    return out
 
 
 def _seal_doc(doc):
@@ -715,6 +727,70 @@ def set_conversation_mode(user_id, conversation_id, mode,
     return mode
 
 
+def _default_mode_set_at(user_id, doc):
+    """When the educator last set default_mode (ISO string), or None.
+
+    Recorded in the settings doc from round 4 on; for older files the
+    newest default_mode change in the audit journal says it."""
+    stamp = doc.get("default_mode_set_at")
+    if isinstance(stamp, str):
+        return stamp
+    try:
+        records = read_audit(user_id)
+    except (OSError, SettingsAuditError):
+        return None
+    for rec in reversed(records):
+        if rec.get("kind") == "settings.change" \
+                and rec.get("key") == "default_mode":
+            at = rec.get("at")
+            return at if isinstance(at, str) else None
+    return None
+
+
+def _override_ended(entry, default_set_at):
+    """True when the override is older than the newest saved-default
+    change: that change ended it."""
+    if not default_set_at or not isinstance(entry, dict):
+        return False
+    try:
+        set_at = datetime.fromisoformat(
+            str(entry.get("set_at")).replace("Z", "+00:00"))
+        default_at = datetime.fromisoformat(
+            str(default_set_at).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if set_at.tzinfo is None:
+        set_at = set_at.replace(tzinfo=timezone.utc)
+    if default_at.tzinfo is None:
+        default_at = default_at.replace(tzinfo=timezone.utc)
+    return set_at < default_at
+
+
+def _live_overrides(user_id, doc):
+    """The conversation overrides still in force: every override older
+    than the newest saved-default change has ended."""
+    overrides = doc.get("conversation_overrides") or {}
+    if not overrides:
+        return {}
+    default_set_at = _default_mode_set_at(user_id, doc)
+    return {conv: entry for conv, entry in overrides.items()
+            if not _override_ended(entry, default_set_at)}
+
+
+def ended_conversation_override(user_id, conversation_id):
+    """The stored override for conversation_id that ended because the
+    educator changed the saved default after it, or None. For status
+    messages: it no longer applies."""
+    _slug_user_id(user_id)
+    if conversation_id is None or str(conversation_id) == "":
+        return None
+    doc = _read_doc_locked(user_id)
+    entry = doc["conversation_overrides"].get(str(conversation_id))
+    if entry and _override_ended(entry, _default_mode_set_at(user_id, doc)):
+        return dict(entry)
+    return None
+
+
 def get_conversation_mode(user_id, conversation_id):
     """The conversation override, or None when unset."""
     entry = get_conversation_override(user_id, conversation_id)
@@ -725,14 +801,16 @@ def get_conversation_override(user_id, conversation_id):
     """The full conversation override entry {"mode", "set_at"}, or None.
 
     Used by modes.current_mode for most-recent-wins resolution against
-    grants. Raises SettingsCorrupt (including SettingsTamper) when the
-    settings file cannot be trusted; the resolver treats that as plan.
+    grants. An override older than the newest saved-default change has
+    ended and reads as None. Raises SettingsCorrupt (including
+    SettingsTamper) when the settings file cannot be trusted; the
+    resolver treats that as plan.
     """
     _slug_user_id(user_id)
     if conversation_id is None or str(conversation_id) == "":
         return None
     doc = _read_doc_locked(user_id)
-    entry = doc["conversation_overrides"].get(str(conversation_id))
+    entry = _live_overrides(user_id, doc).get(str(conversation_id))
     return dict(entry) if entry else None
 
 
@@ -825,7 +903,8 @@ def has_plan_override(user_id):
     """
     _slug_user_id(user_id)
     try:
-        overrides = _read_doc_locked(user_id)["conversation_overrides"]
+        doc = _read_doc_locked(user_id)
+        overrides = _live_overrides(user_id, doc)
     except SettingsCorrupt:
         return True
     return any(entry.get("mode") == "plan" for entry in overrides.values())
@@ -836,7 +915,9 @@ def effective_mode(user_id, conversation_id=None):
 
     Delegates to the single authoritative resolver
     modes.state.current_mode: the most recent explicit educator action
-    among the conversation override and live conversation grants wins; otherwise the persisted default_mode
+    among the conversation override and live conversation grants wins
+    (a saved-default change ends every override); otherwise the
+    persisted default_mode
     ("edit" only when the educator set it as their standing default).
     The admission gate uses the same resolver, so the conversational
     layer and the write gate can never disagree.
@@ -903,12 +984,26 @@ def set_setting(user_id, key, value, educator_confirmed, educator=None):
             "exact change and confirm it before it is applied "
             "(educator_confirmed=True)" % (key,))
 
+    # Filled inside the lock by mutate(); _transact journals it with the
+    # change (the mutator runs before the journal append).
+    extra = {} if key == "default_mode" else None
+
     def mutate(doc):
         old_value = doc["settings"].get(key, entry["default"])
         doc["settings"][key] = value
+        if key == "default_mode":
+            # Round-4 M2: a saved-default change applies everywhere, so
+            # it ends every per-conversation override (journaled with
+            # the change). A later override then wins in its own
+            # conversation only.
+            extra["overrides_ended"] = sorted(
+                doc.get("conversation_overrides") or {})
+            doc["conversation_overrides"] = {}
+            doc["default_mode_set_at"] = utc_now_iso()
         return old_value, value
 
-    _transact(user_id, mutate, "settings.change", key, educator)
+    _transact(user_id, mutate, "settings.change", key, educator,
+              extra=extra)
     return value
 
 

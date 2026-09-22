@@ -116,9 +116,10 @@ GRANT_FILE_VERSION = 1
 # Course-resolution confidence below this (without explicit user
 # confirmation) refuses the write as ambiguous.
 CONFIDENCE_THRESHOLD = 0.9
-# The authorization citation must be non-trivial, mirroring the
-# approval record's APPROVAL_AUTH_MIN_LEN.
-AUTH_MIN_LEN = 20
+# The authorization citation is the educator's verbatim reply; any
+# non-empty reply counts, mirroring the approval record's
+# APPROVAL_AUTH_MIN_LEN.
+AUTH_MIN_LEN = 1
 # Grantable scope types. "standing" is deliberately absent: standing
 # edit mode is the educator's default_mode setting, never a grant.
 # "timed" is absent too: edit mode is not timed, and legacy timed
@@ -366,9 +367,9 @@ def _require_educator_confirmation(educator_confirmation):
     auth = conf.get("authorization")
     if not isinstance(auth, str) or len(auth.strip()) < AUTH_MIN_LEN:
         raise ModeSelfGrantRefused(
-            "edit mode requires the educator's verbatim authorization "
-            "citation (at least %d characters); inferred or standing "
-            "approvals are not accepted" % AUTH_MIN_LEN)
+            "edit mode requires the educator's verbatim reply (any "
+            "non-empty reply); inferred or standing approvals are not "
+            "accepted")
     channel = conf.get("channel", "driver")
     if channel not in ("educator-chat", "driver"):
         raise ModeSelfGrantRefused(
@@ -534,7 +535,7 @@ def request_edit_grant(user_id, scope_type="conversation",
     grant: it sets default_mode="edit" in settings.
 
     educator_confirmation is required: {"by": "educator",
-    "authorization": "<verbatim educator utterance, >= 20 chars>",
+    "authorization": "<verbatim educator utterance, non-empty>",
     "channel": "educator-chat" | "driver"}. Without it (or with a
     non-educator confirmation) this raises ModeSelfGrantRefused: the
     agent must never promote itself to edit mode.
@@ -732,7 +733,7 @@ def _resolution_signals(resolution):
 
 
 def authorize_write(user_id, course_id=None, resolution=None,
-                  conversation_id=None):
+                  conversation_id=None, observe=True):
     """Decide write authority and return the auth context.
 
     Returns (decision, reason_code, auth_ctx):
@@ -750,11 +751,17 @@ def authorize_write(user_id, course_id=None, resolution=None,
     conversation_id scopes conversation grants: a grant bound to a
     different conversation does not authorize writes here.
 
+    observe=False (a dry run) decides the same way but changes nothing:
+    other conversations' edit state is not ended and nothing is
+    journaled. Ending another conversation's edit state never changes
+    this conversation's decision, so the answer is identical.
+
     check_write_authority is the 2-tuple wrapper; the admission hook
     uses this form for the audit block and usage journaling.
     """
     _validate_user_id(user_id)
-    _observe_conversation(user_id, conversation_id)
+    if observe:
+        _observe_conversation(user_id, conversation_id)
     now = _utcnow()
     # THE critical invariant: admission uses the same most-recent-wins
     # authority as current_mode, via _newest_authority. A newer

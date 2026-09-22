@@ -75,7 +75,9 @@ from settings.store import (  # noqa: E402
     _audit_path,
     _settings_path,
     effective_mode,
+    ended_conversation_override,
     get_conversation_mode,
+    has_plan_override,
     get_setting,
     list_settings,
     observe_conversation,
@@ -175,7 +177,22 @@ def _edit_sources(user_id, conversation_id):
     return why
 
 
+def _ended_override_note(user_id, conversation_id):
+    """A sentence for an override that ended when the educator changed
+    the saved default after setting it, or ""."""
+    try:
+        ended = ended_conversation_override(user_id, conversation_id) \
+            if conversation_id else None
+    except Exception:
+        ended = None
+    if not ended:
+        return ""
+    return (" Your older %s override for this conversation ended when you "
+            "changed your saved default after it." % ended.get("mode"))
+
+
 def _status_message(user_id, conversation_id, mode):
+    ended = _ended_override_note(user_id, conversation_id)
     if mode == "plan":
         sentence = ("You are in plan mode right now: writes ask for your "
                     "approval, reads never need it.")
@@ -183,6 +200,7 @@ def _status_message(user_id, conversation_id, mode):
             override = get_conversation_mode(user_id, conversation_id) \
                 if conversation_id else None
             default = get_setting(user_id, "default_mode")
+            other_plan = (not conversation_id) and has_plan_override(user_id)
         except SettingsCorrupt:
             return sentence + " " + _repair_hint(user_id)
         except Exception:
@@ -191,12 +209,19 @@ def _status_message(user_id, conversation_id, mode):
             sentence += (" That comes from your plan override for this "
                          "conversation. Your saved default is %s mode."
                          % default)
-        return sentence
+        elif other_plan:
+            sentence += (" This request named no conversation, and you set "
+                         "plan mode for another conversation, so I cannot "
+                         "tell this is not that conversation. Your saved "
+                         "default is %s mode." % default)
+        else:
+            sentence += " That comes from your saved default."
+        return sentence + ended
     why = _edit_sources(user_id, conversation_id) or ["your saved default"]
     return ("You are in edit mode right now: writes do not ask for "
             "approval, reads never need it. That comes from %s, and it "
-            "stays on until you turn it off. %s"
-            % (" and ".join(why), _destructive_note(user_id)))
+            "stays on until you turn it off.%s %s"
+            % (" and ".join(why), ended, _destructive_note(user_id)))
 
 
 def _result(status, user_id, conversation_id, message, **extra):
@@ -327,7 +352,8 @@ def mode_set(user_id, mode, conversation_id=None, this_conversation=False,
     where = ("in this conversation, until you turn edit mode off, this "
              "conversation ends, or you start a different conversation"
              if this_conversation else
-             "in every conversation, until you turn edit mode off")
+             "in every conversation, until you turn edit mode off (any "
+             "per-conversation mode you set earlier has ended)")
     return _result(
         "done", user_id, conversation_id,
         "Done: you are in edit mode now. Writes apply without asking you "

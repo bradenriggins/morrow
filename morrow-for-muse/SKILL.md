@@ -239,20 +239,71 @@ and journaled to `~/.morrow/trees/<tree-id>/journal/ops.jsonl` (per-tree;
 the legacy `~/.morrow/journal/ops.jsonl` is read for historical idempotency
 only).
 
-Writes need three things or they are refused:
+Writes in plan mode (the default) need the educator's approval of the
+exact write. Two typed commands do the whole ceremony; you never build
+a frozen plan, an approval record, or a course resolution by hand:
 
-1. A frozen plan file (`--plan`), digest-bound to the exact action.
-2. An educator-signed approval record (`--approval`), digest-bound to the
-   exact action, unexpired, category-scoped, and unused. Mint it with
-   `dispatch/admission.py` (see its `mint_approval` / `sign_approval`
-   helpers). The ceremony rule is simple: the educator approves the exact
-   action, in their own words, before it runs; a tampered or replayed
-   approval is refused. Before asking, show the educator the FULL
-   payload with `dispatch/approval_display.py`
-   (`render_approval_display`: op, target, full params, undo
-   availability, identity schedule): approving an op name without seeing
-   the exact request body is not informed consent.
-3. No write halt: if `~/.morrow/write_halt` exists, all writes refuse.
+1. `plan-write` prepares the write and sends nothing. It reads the
+   course from Canvas (the course name the educator will see comes from
+   Canvas, not from you), builds the frozen plan and the approval bound
+   to the exact request (method, path, query, and body), and prints
+   `approval_display`: the op, the course (id and Canvas name), the
+   exact body that will be sent, the params, expiry, and whether the
+   change can be undone.
+2. Show the educator `approval_display` exactly as printed (it is
+   produced by `dispatch/approval_display.py`) and ask them to approve
+   it. Change nothing between showing it and sending it: a changed
+   request, params, or course is refused.
+3. When the educator approves, in any words ("Yes" is enough), run
+   `approve-write` with their reply verbatim. It signs that reply, then
+   sends the write through every gate and prints the result. An
+   approval is single use and expires (at most 24 hours; plan-write
+   sets 1 hour). If the educator declines or changes anything, run
+   `plan-write` again with the new request.
+
+Worked example: the educator asks to rename the Week 1 page of course
+89585 to "Week 1 Overview".
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py plan-write \
+  --name canvas_update_create_page_courses --method PUT \
+  --path '/api/v1/courses/{course_id}/pages/{url_or_id}' \
+  --params '{"course_id": "89585", "url_or_id": "week-1"}' \
+  --body '{"wiki_page": {"title": "Week 1 Overview"}}' \
+  --backend chromium --canvas-base "$CANVAS_BASE" \
+  --user-id "$MORROW_USER_ID" --conversation-id "$MORROW_CONVERSATION_ID"
+```
+
+It prints one JSON object: `op_id`, `course` (`id`, `name`, `term`),
+`approval_display`, `expires_at`, and `message`. You show
+`approval_display` (it names the course as Canvas does, for example
+"Biology 101", and the body `{"wiki_page": {"title": "Week 1
+Overview"}}`). The educator replies "Yes, do it". You run:
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py approve-write \
+  --op-id <op_id from plan-write> --authorization "Yes, do it" \
+  --backend chromium --canvas-base "$CANVAS_BASE" \
+  --user-id "$MORROW_USER_ID" --conversation-id "$MORROW_CONVERSATION_ID"
+```
+
+The result's `outcome` is `verified` or `unverified` (relay
+`unverified` as unconfirmed, never as done). The course resolution is
+the course the educator saw named in the display; Canvas's name for it
+is checked again right before the write.
+
+In edit mode, writes do not ask: run the `catalog` command directly
+with `--course-resolution '{"course_id": "89585", "confidence": 1.0,
+"user_confirmed": true}'` when you took the course id from the
+educator (lower `confidence` below 0.9 without their confirmation is
+refused as ambiguous, never guessed). `plan-write` and `approve-write`
+also work in edit mode.
+
+Every write is refused while `~/.morrow/write_halt` exists.
+
+The lower-level path (`catalog --plan <file> --approval <file>`, built
+with `dispatch/admission.py` `mint_approval` / `sign_approval`) stays
+for proof drivers and scripts; use the two commands above instead.
 
 Only operations marked `live-proven` in
 `proof-battery/OPERATION_CATALOG.md` dispatch, with one exception, the
@@ -352,17 +403,22 @@ both modes.
   never turn edit mode on from an unclear, negated, or questioning
   request. Relay the command's `message`: it states the true resulting
   mode, read back after the change.
-- Most recent explicit action wins between a per-conversation override
-  ("use plan mode for this conversation", "use edit mode for this
-  conversation") and the persisted default. Both are tamper-sealed in
-  the settings file, journaled, and seen by every later dispatch
-  process. Both apply at once. An edit override ends when edit mode is
-  turned off anywhere, when
-  the conversation ends (`settings.store.end_conversation`), or as soon
-  as Morrow sees a different conversation id for the educator (any mode
-  command or write gate). An unreadable or tampered override store
-  resolves to plan, and a write with no conversation id is plan while
-  any plan override exists. Resolve with
+- Changing the saved default ends every per-conversation override:
+  `morrow mode set edit` (or `plan`) without `--this-conversation`
+  takes effect in every conversation at once, including one that had
+  its own mode. A per-conversation override ("use plan mode for this
+  conversation", "use edit mode for this conversation") set after that
+  applies in its conversation only; everywhere else the saved default
+  applies. Both are tamper-sealed in the settings file, journaled, and
+  seen by every later dispatch process. An edit override also ends
+  when edit mode is turned off anywhere, when the conversation ends
+  (`settings.store.end_conversation`), or as soon as Morrow sees a
+  different conversation id for the educator (any mode command or
+  write gate). An override stored before the newest default change
+  (an older install could leave one) has ended; `mode status` says so.
+  An unreadable or tampered override store resolves to plan, and a
+  write with no conversation id is plan while any plan override exists
+  (the status says why). Resolve with
   `modes.state.current_mode(user_id, conversation_id)` (the single
   authoritative resolver; `settings.store.effective_mode` delegates to
   it); Agent A's contract `settings.store.get_setting(user_id, key)`

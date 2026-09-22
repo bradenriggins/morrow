@@ -2,7 +2,7 @@
 """Full test suite for the Morrow error translation layer.
 
 Covers failures/translator.py + failures/catalog.py + failures/catalog.json:
-  1. per-mode tests: every one of the 83 catalog modes gets a synthetic
+  1. per-mode tests: every one of the 84 catalog modes gets a synthetic
      raw error; asserts the right mode_id, the four message anchors, all
      placeholders filled, no em dashes, no shrug language, and the
      escalate flag matching the catalog.
@@ -172,6 +172,12 @@ class UncertainWrite(Exception):
 
 class WriteNotAttempted(Exception):
     pass
+
+
+class VerificationFailed(Exception):
+    """dispatch/executor.py: a declared verify block's readback
+    completed and proved the write's result differs (journaled as
+    failed)."""
 
 
 class EvidenceHold(Exception):
@@ -518,6 +524,9 @@ MODE_CASES = {
     "write-readback-unconfirmed": lambda: UncertainWrite(
         "write op x returned success, but the readback could not confirm "
         "it: write readback GET /x failed HTTP 503"),
+    "write-readback-mismatch": lambda: VerificationFailed(
+        "verify block failed for op x: readback title is 'A', expected "
+        "'B' (journaled as failed)"),
     "write-not-attempted": lambda: WriteNotAttempted("never dispatched"),
     "session-flapping-multi-uncertain": lambda: {
         "session_dead_signal": True, "uncertain_count": 3,
@@ -590,8 +599,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_83_modes(self):
-        self.assertEqual(83, len(CATALOG.entries))
+    def test_catalog_has_84_modes(self):
+        self.assertEqual(84, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):
