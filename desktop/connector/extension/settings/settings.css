@@ -138,6 +138,7 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
 .more-info > summary:hover { color: var(--accent-hover); }
 .more-info > .field-help { margin: 0 0 var(--space-2); }
 .more-info.access-rules { margin-top: 0; }
+.permissions-group:has(> .access-rules) { margin-top: var(--space-2); }
 .more-info.access-rules > summary { color: var(--text); }
 .more-info.access-rules > summary h3 { margin: 0; }
 .browser-permissions-panel h3 { margin: 0 0 var(--space-1); font-size: 0.9375rem; line-height: 1.4; }
