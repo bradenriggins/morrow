@@ -1,0 +1,48 @@
+{
+ "stamp": "LIVE-RESOLUTION-20260922T131134Z",
+ "tenant_base": "https://chcp.instructure.com",
+ "course_id": "89585",
+ "note": "Read-only live run of resolve_in_course. Course 89585 holds zero real students and one LMS test account enrolled as a regular active StudentEnrollment; the account's numeric id is redacted from this evidence per the learner privacy boundary.",
+ "paths": {
+  "exact_name_resolves_live": {
+   "resolved": true,
+   "match_kind": "name_exact",
+   "user_id": "<redacted: test-account id withheld per privacy boundary>",
+   "roles": [
+    "StudentEnrollment"
+   ],
+   "enrollment_types": [
+    "StudentEnrollment"
+   ],
+   "enrollment_states": [
+    "active"
+   ],
+   "candidates_examined": 1,
+   "pool_size": 1,
+   "fetch_pages": 1,
+   "live_proof_ok": true
+  },
+  "near_miss_stays_unresolved": {
+   "resolved": false,
+   "error_class": "StudentNotFound",
+   "message": "student query matched no roster entry",
+   "excluded_summary": "",
+   "candidates_examined": 1,
+   "pool_size": 1,
+   "fetch_pages": 1,
+   "live_proof_ok": true
+  },
+  "nonsense_query_no_match": {
+   "resolved": false,
+   "error_class": "StudentNotFound",
+   "message": "student query matched no roster entry",
+   "excluded_summary": "",
+   "candidates_examined": 1,
+   "pool_size": 1,
+   "fetch_pages": 1,
+   "live_proof_ok": true
+  }
+ },
+ "live_proof_ok": true,
+ "failures": []
+}

@@ -1,0 +1,89 @@
+# Desktop Morrow to Morrow for Muse: Parity Audit
+
+**Date:** 2026-09-20
+**Auditor:** Hermes (read-only audit; the desktop tree was never modified)
+**Source:** `~/workspace/morrow-fix` (desktop Morrow worktree, Mac repo, read-only)
+**Target:** `~/workspace/morrow-for-muse-deploy` (Muse product)
+
+Braden's worry was direct: the desktop was three parts (desktop app, bridge, MCP server) and the Muse version is one connector with no MCP. This audit maps every part and every subsystem, names exactly what made it across and what did not, and ranks the gaps.
+
+Method: two independent readers inventoried the desktop tree (user-facing capabilities: `~/workspace/parity-audit-work/desktop-capabilities.md`; internals: `~/workspace/parity-audit-work/desktop-internals.md`); the auditor read every file of the Muse deploy tree (49 files, ~5,200 lines of Python plus manifests and docs) directly. Nothing below is claimed without a file read on both sides.
+
+## The three parts, and where they went
+
+The desktop architecture (ARCHITECTURE.md) is one local operations layer with three parts plus a Blackboard child server:
+
+| Desktop part | What it owned | Muse equivalent | Verdict |
+|---|---|---|---|
+| Desktop app (installer/, client-config) | Client config writing, MCP payload verification, bridge delivery, setup/repair flows, CLI (setup, mcp install, doctor, profile, catalog stats, backend status, operation get/reconcile/cancel) | content/setup-guide.md, consent.md, revoke.md; transport/onboarding_reauth.md; no installer, no CLI, no repair flow | Partial. The setup narrative exists as docs. There is no actual setup/repair program. |
+| MCP server (packages/mcp-server, 70+ tool files) | 1137-operation Canvas API catalog, on the order of 90 morrow_* tool registrations, frozen write plans, local approval server, operation journal with effect receipts, encrypted batch manifests, privacy projection with learner tokenization, result paging and evidence | dispatch/executor.py (manifest pipeline: frozen plans, journal, verify blocks, retry), provision/provision.py (LTI chain), 2 pinned manifest entries, catalog dispatch | Partial. The governance spine (frozen plans, journal, verify, retry, undo) crossed. The catalog shrank from 1137 ops to 2 pinned entries plus ad-hoc catalog dispatch with no admission gate. Learner tokenization did not cross. |
+| Bridge (connector/extension MV3 + canvas-connector-mcp) | Loopback protocol on 127.0.0.1:32147, pairing, CSRF handling, Item Bank frame execution, provider readback after writes, validated catalog digest/pairing secret/protocol version | transport/batch.py (browser-task briefs), session/cdp.py, session/capture.py, provision/provision.py CDP reads | Partial. Transport mechanics were rebuilt, not ported. The validation layer (pairing secret, catalog digest, protocol version, operation ID, source binding, command expiry) has no equivalent. |
+| Blackboard REST server (packages/blackboard-learn-api) | Anthology Learn REST operations (announcements, assignments, content patch, course contents, lifecycle, files, gradebook, groups, memberships, health) | Nothing | Missing, but the desktop side was live-untested on Blackboard and the Muse product does not claim Blackboard. Not a launch blocker. |
+
+## What the Muse side has (verified by reading)
+
+This is the complete Muse deploy surface, so gaps below can be checked against it:
+
+- **dispatch/executor.py** (1,361 lines): manifest digest pinning (SHA-256 against pack.json), frozen write plans (op_id, entry_name, params, before_state_digest, frozen_readback), write halt file, duplicate op-id refusal, retry discipline (4 attempts, 30s timeout, 408/429/500/502/503/504 retryable; writes never retried after an uncertain response), result bounding (max_bytes, head/tail truncation, receipt extraction, key-pattern redaction), verify blocks with expect assertions, append-only JSONL journal with before/after digests, uncertain-write journaling, PROVISION multi-step (LTI chain via provision.py, fail-closed, no ServicesJwt fallback), catalog dispatch (synthetic entries from name/method/path/effect class), undo as a separately journaled op. Credential slots: canvas_pat, canvas_session, moodle_session, moodle_sesskey, local (refused). Session hygiene: 0600 mode enforced.
+- **provision/provision.py** (884 lines): the 5-step LTI chain (CDP in-tab JWTS mint, banks page window.ENV.NEW_QUIZZES read, native launch, banks.build mint, quiz-api verify). Fail-closed on native AMS tenants, absent/expired session, missing banks tab. Build token memory-only; quiz material merged to session file (0600).
+- **pack/pack.json** (v0.2.4): 2 pinned entries (morrow_check_new_quiz, morrow_read_item_bank_fan_out). Credential slot declarations with inject/derive rules.
+- **provision/manifests/**: the quiz check entry JSON (`morrow_check_new_quiz`; the read-only fan-out entry was removed 2026-09-21, W3-P2-21; no write entries pinned).
+- **transport/batch.py, state.py, selftest.py**: browser-task brief renderer and result parser (GET by navigation, writes as form POSTs with authenticity_token harvest and _method overrides, max 15 ops per batch), lane metadata state (secrets refused by key pattern), 21-check selftest.
+- **session/capture.py, cdp.py**: rig-Chrome CDP capture (retired for the Muse lane per transport/README.md; left in place).
+- **lanes/detect.py**: read-only PAT mintability prober (users/self, /profile/settings markers, tokens list API). Built on raw cookie input; flagged for a browser-task-native rewrite.
+- **reauth/state_machine.py**: Canvas re-auth machine (detect 401-unauthenticated / 302-to-login, write halt, quarantine ledger, notify.txt, guided re-sign-in with principal pinning, verified resume, per-action approval re-arm, simulated selftest).
+- **moodle/**: login.py (form bootstrap on the public sandbox), session.py (MoodleSession: AJAX dispatcher over lib/ajax/service.php, form-path fallback, classify_signal reauth/sesskey/provider, frozen-plan writes with verify, JSONL journal, used-op-id set), probe.py (read-only capability probe: version, function allowed_from_ajax classification, sesskey stability, unobservable deployment killers recorded as such), reauth.py (Moodle re-auth machine with live-signal characterization drill).
+- **bin/**: keepalive-canvas.sh, keepalive-moodle.sh, scheduler.py (userspace daemon, daily/6h). `smoke_bank_lifecycle.py` was removed 2026-09-21 (W3-P2-21); the SDK live battery is `proof-battery/item_bank_sdk_battery.py` (development-only test instrument, not shipped).
+- **content/**: consent.md, setup-guide.md, revoke.md (plain-language, with UNVERIFIED-BY-US markers on claims not yet live-verified).
+- **proof-battery/LEDGER.md**: the operation proof ledger (counts unverified; under separate audit).
+
+## Gap list, ranked
+
+### Launch-blocking
+
+1. **Learner PII tokenization is missing.** Desktop: `packages/gateway-core/src/privacy.ts` (1,424 lines): LearnerVault with AES-256-GCM encrypted persistent vaults, opaque `learner_<uuid>` tokens, stable display labels (Student A1), exact-scope resolution (canvasOrigin/account/course/principal/profile), 60-second roster freshness, `projectOutput()` with OutputPrivacyDescriptor (allowed fields, field policy, data class, record/byte limits, free-text policy, learner-token requirement, artifact inspection), `redactKnownLearnerText()`, `redactLearnerEgress()`, `resolveLearnerTokens()` for authorized write-side resolution, fail-closed on malformed/oversized/duplicate/misscoped vault data. Muse: `dispatch/executor.py::redact_payload()` masks configured key patterns as `[redacted]`; `moodle/session.py::_receipt()` extracts identifying fields only. No vault, no tokens, no scope, no free-text learner redaction, no output projection. Any learner-data read (enrollments, submissions, gradebook, discussions, Moodle participants/grades/forums) exposes raw student PII to the agent today. This is the single biggest silently-dropped subsystem.
+
+2. **No operation admission gate.** Desktop: `packages/canvas-api-catalog/src/operation-admission.ts`: account-authority routes held (accounts, global, developer keys, LTI registration), learner-record routes held (submissions, quiz submissions, group memberships, calendar reservations), cross-course object routes held (files, folders, groups, outcomes, sections, calendar events, appointment groups) pending semantic target resolution, no-readable-effect routes refused (token minting, error reports). Plus `readback-plan.ts` (readback assessment: structurally_exact / unconfirmed / blocked / unavailable) and `semantic-target.ts`. Muse: `dispatch_catalog_op()` builds a synthetic entry from any caller-supplied method + path template with `params: {additionalProperties: True}` and no admission check at all. The catalog surface is 1,137 gated operations on desktop versus an ungated generic dispatcher on Muse. Braden's exclusions (support tickets, messages to people, subaccount effects) are policy text, not code.
+
+3. **Approval is policy text, not a mechanism.** Desktop: `packages/mcp-server/src/approval-server.ts` (local HTTP approval server with timing-safe comparison), approval-context/entry/preview modules, consent.md's per-action approval claim. Muse: executor enforces frozen plans and write halt; the reauth machine re-arms "fresh per-action approval" as a policy note; consent.md itself carries `[UNVERIFIED-BY-US: ... we have not yet verified the per-action approval mapping on a live Muse account]`. "Morrow asks your permission before it changes anything" is a product commitment with no verified enforcement point in the Muse path.
+
+4. **The Muse Canvas write transport is a third-party scratch form builder.** `transport/batch.py` instructs the browser task to build write forms at `https://htmledit.squarefree.com/`. This is a load-bearing dependency on an unrelated third-party site for every Canvas write, with no fallback and no production replacement built. The desktop bridge executed in Canvas page context with CSRF handling built in. (A consented session-bound fetch primitive was requested from the Muse platform team; no response.)
+
+### Important
+
+5. **No reconciliation or recovery pass.** Desktop: `packages/operation-journal/src/effect-broker.ts` (1,278 lines), `morrow_operation_reconcile`, `morrow_operation_verify`, `morrow_operation_close_unresolved`, `morrow_operation_undo`, `morrow_operation_cancel`; `packages/batch-engine/src/recovery.ts` (inspect/apply_safe recovery modes), settlement.ts. Muse: uncertain writes are journaled as uncertain and verification failures are journaled as failed, but nothing ever revisits them. No reconcile command, no recovery mode, no close_unresolved. An uncertain write sits in the journal forever.
+
+6. **Batch engine missing.** Desktop: `@morrow/batch-engine` (facade, recovery, settlement, canvas-result-binding) with encrypted batch manifests, child state, settlement records, and tools morrow_batch_create/run/pause/resume/cancel/reconcile/recover/health/results_page/batches_recent. Muse: transport batches are capped at 15 ops with no dependency chaining, no pause/resume, no settlement, no encryption. Dependent ops span multiple browser tasks manually.
+
+7. **Result paging and evidence artifacts missing.** Desktop: `result-artifacts.ts` (64k inline cap, 1M artifact pages), `canvas-read.ts` result paging. Muse: max_bytes truncation (262k) with head/tail cut, receipts only. Large reads (gradebook exports, full item banks) have no paging story; truncation silently drops data beyond the receipt fields.
+
+8. **Source attestation and exact-state file discipline missing.** Desktop: `source-attestation.ts`, `exact-trust-file.ts`, `state-lease.ts`, `private-state-file.ts` (exact private files with anti-symlink atomic writes and PID-reuse-safe transaction locks), `private-sqlite-state.ts` (WAL journal with private sidecars), `private-file-access.ts` (POSIX/macOS/Windows ACL verification and hardening), `process-lifetime.ts` (PID start-time matching). Note: desktop operation journals are SQLite with private access, not encrypted at rest; only the learner vault is encrypted. Muse: JSON session/state files with 0600 modes and tmp-file atomic replace, but no exact-byte attestation, no state leases, no UTF-8 strictness, no ACL verification.
+
+9. **Catalog digest and protocol validation missing.** Desktop bridge (Morrow Bridge v1.0.6, Manifest V3): validated extension ID, catalog digest, connector revision, pairing secret, protocol version (bridge path /morrow-bridge/v1, command kinds invoke_read/invoke_write/stage_write/task_get/bindings_get/edit_policy_set/edit_policy_options_get/private_chat_exchange/bridge_maintenance), request/operation IDs, source binding, connection generation, command expiry, single-use outer effect receipt, exact expected form digest on Moodle writes. Muse: pack pins entry digests (good), but there is no pairing, no protocol version, no request IDs, no source binding, no command expiry, no single-use effect receipts, no form-digest check on the Moodle form path.
+
+10. **Moodle write coverage is thin.** Desktop has a 250-operation Moodle browser-session catalog (read groups across 20+ activity modules, learner data privacy-redacted to readable labels, reports, admin) plus 9 staged-file planners with SHA-256 frozen plans and 15-minute approval expiry. Muse moodle/ proves one forum discussion lifecycle plus a function probe; there is no pinned Moodle manifest entry at all (pack has zero Moodle entries).
+
+11. **New Quiz write operations have no pinned manifest entries.** The pack holds zero entries (pack/pack.json entry_count 0). Item bank create/read/attach/archive went through `dispatch_catalog_op` (ad-hoc, ungated, see gap 2), not through pinned, reviewed entries. Desktop has morrow_plan_new_quiz_create/delete, morrow_plan_new_quiz_item_create/delete, item-bank fan-out/repair, new-quiz-effects, new-quiz-settings, new-quiz-item-order, item lifecycle modules.
+
+12. **Client config and repair flows missing.** Desktop: `morrow` CLI (setup, mcp install/print-config, doctor, profile show, catalog stats, backend status, operation get/reconcile/cancel, batch get/pause/resume/cancel, conformance report, clients render), installer with setup views, bridge delivery/updates, runtime monitor, update feed. Muse: docs and a lane-probe script. No doctor, no repair, no update path, no backend status. When something breaks on the educator's VM, the only tooling is logs and rerun scripts.
+
+### Nice-to-have / intentionally dropped
+
+- **Blackboard lane**: desktop has 67 Blackboard tools in plan/apply/verify triplets, but per in-source comments no Blackboard tenant has ever been read and live validation has not happened. The Muse product does not claim Blackboard. Dropping it is correct; do not re-add silently.
+- **Meridian adapters** (meridian-runtime-adapter.ts, meridian-catalog-truth.ts): example-platform scaffolding, not product surface.
+- **Lesson review / private chat / program ledger / course inventory / course audit / activity tools** (morrow_review_lesson, morrow_private_chat, morrow_program_inventory_create, morrow_inventory_courses, morrow_audit_course, morrow_activity): higher-level workflow tools with no Muse equivalent. These are feature gaps, not safety gaps; they can be rebuilt on the Muse side once the safety gaps close.
+- **Image alt-text repair planners** (the morrow_plan_*_image_alt_repair family), page correction, discussion/file/conversation planners, classic quiz tools: legitimate product features present on desktop, absent on Muse. Feature backlog, not launch-blocking.
+- **Sandbox upstream** (`sandbox-upstream.ts`): a deterministic 100-course synthetic Canvas estate for the sandbox profile. Test harness, not product.
+- **Profiles and tool surfaces**: desktop ships four runtime profiles (private-full, public-canvas, sandbox, read-only) and two tool surfaces (compact with 28 tools, full). The Muse product has no profile or surface model; every installed connector gets the same surface. This is a deliberate simplification, but the read-only profile is a genuine safety feature with no Muse equivalent.
+- **The sealed MCP payload / packager admission** (installer/shared/packager-admission.cjs): desktop distribution integrity; the Muse analog is pack digest pinning, which exists.
+
+## What the Muse version does better or differently (honest credit)
+
+- The executor's governance spine is genuinely good: frozen plans, digest-pinned entries, write halt, uncertain-write journaling, no-blind-retry discipline, verify blocks, and undo-as-new-op are all real and read-verified.
+- The Moodle lane is better characterized than anything on the desktop side: per-function allowed_from_ajax probing, invalidsesskey vs dead-session separation, live-signal re-auth drill. The desktop Moodle modules have no equivalent drill.
+- The lane prober's kill-switch detection and the principal-pinning re-auth flow are thoughtful and live-grounded.
+- Dropping the browser extension removes a real distribution and permission burden; the browser-task transport is a legitimate simplification, with the caveat in gap 4.
+
+## Bottom line for Braden
+
+His disbelief is justified. The Muse version is not a port of the desktop three-part system; it is a rebuild of the transport and governance layers with the two safety-critical subsystems (learner tokenization, operation admission) and the two reliability subsystems (reconciliation/recovery, batch engine) left behind. The dangerous part is that nothing in the Muse tree announces their absence: the consent copy promises per-action approval and "works with exactly the permissions your account has," while the code paths that would enforce both do not exist yet. Close gaps 1 through 4 before any learner data flows, and do not present the current build as having desktop parity.

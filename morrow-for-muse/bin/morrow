@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""Morrow for Muse: one front door for the operator CLIs.
+
+QOL-2 (2026-09-22): the tree has several entry points (dispatch/executor.py,
+catalog/a11y/runner.py, query/chain.py) and operators should not have to
+remember which file does what. This wrapper routes to them with friendlier
+help and consistent exit codes. It changes no behavior: every subcommand
+execs the existing entry point with the operator's arguments untouched.
+
+Subcommands:
+  dispatch  run dispatch/executor.py (manifest entries, catalog ops, journal)
+  audit     run the a11y audit mode (catalog/a11y/runner.py audit ...)
+  plan      run the a11y planner mode (catalog/a11y/runner.py plan ...)
+  query     run the failed-students query chain (query/chain.py)
+  doctor    read-only health check: helper status, tree sanity
+  version   read-only: print the tree version and command inventory
+  failure   read-only: look up one failure-catalog entry by id or fragment
+
+Stdlib only.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import urllib.request
+
+DEPLOY_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if DEPLOY_DIR not in sys.path:
+    sys.path.insert(0, DEPLOY_DIR)
+
+_COMMANDS = {
+    "dispatch": ("dispatch/executor.py",
+                 "execute manifest entries and catalog operations"),
+    "audit": ("catalog/a11y/runner.py",
+              "accessibility audit of one course target (read-only)"),
+    "plan": ("catalog/a11y/runner.py",
+             "accessibility repair planning (validates, never writes)"),
+    "query": ("query/chain.py",
+              "natural-language learner query chain, e.g. failed students"),
+}
+
+# audit/plan need their runner subcommand prepended.
+_PREPEND = {"audit": ["audit"], "plan": ["plan"]}
+
+HELPER_STATUS_URL = os.environ.get(
+    "MORROW_HELPER_STATUS_URL", "http://127.0.0.1:8901/status")
+
+
+def _print_help():
+    lines = ["usage: morrow <command> [args...]",
+             "",
+             "Morrow for Muse operator front door.",
+             "",
+             "commands:"]
+    for name in sorted(_COMMANDS):
+        script, blurb = _COMMANDS[name]
+        lines.append("  %-10s %s" % (name, blurb))
+    lines.append("  %-10s %s" % ("doctor", "read-only health check"))
+    lines.append("  %-10s %s" % ("version", "read-only: version and command inventory"))
+    lines.append("  %-10s %s" % ("failure", "read-only: failure-catalog lookup"))
+    lines.append("")
+    lines.append("Each command passes its arguments through to the underlying")
+    lines.append("entry point; run `morrow <command> --help` for details.")
+    print("\n".join(lines))
+
+
+def _run_passthrough(name, argv):
+    script, _blurb = _COMMANDS[name]
+    script_path = os.path.join(DEPLOY_DIR, script)
+    cmd = [sys.executable, script_path] + _PREPEND.get(name, []) + argv
+    try:
+        proc = subprocess.run(cmd)
+    except OSError as exc:
+        print("morrow: cannot launch %s: %s" % (script, exc),
+              file=sys.stderr)
+        return 127
+    return proc.returncode
+
+
+def _version():
+    """Read-only version report. Reads VERSION and the command table only."""
+    version = "unknown"
+    path = os.path.join(DEPLOY_DIR, "VERSION")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            version = fh.read().strip() or "unknown"
+    except OSError:
+        pass
+    commands = sorted(list(_COMMANDS) + ["doctor", "version", "failure"])
+    lines = [
+        "morrow %s" % version,
+        "tree: %s" % DEPLOY_DIR,
+        "python: %s" % sys.version.split()[0],
+        "commands: %s" % " ".join(commands),
+    ]
+    print("\n".join(lines))
+    return 0
+
+
+def _failure(argv):
+    """Read-only failure-catalog lookup. Never writes; never touches the
+    network, sessions, or secrets. Exit 0 on an exact/unique hit, 1 when
+    nothing (or more than one thing) matches, 2 on usage errors."""
+    from failures.catalog import load_catalog
+
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print("usage: morrow failure <id-or-text-fragment> | morrow failure --list")
+        print("")
+        print("Look up one failure-catalog entry. Read-only: the catalog")
+        print("file is loaded and validated, nothing is written.")
+        return 2 if not argv else 0
+    try:
+        cat = load_catalog()
+    except Exception as exc:
+        print("morrow failure: cannot load catalog (%s: %s)"
+              % (type(exc).__name__, exc), file=sys.stderr)
+        return 1
+
+    if argv[0] == "--list":
+        for entry in cat.entries:
+            print(entry["id"])
+        return 0
+
+    needle = " ".join(argv).strip().lower()
+    exact = cat.get(" ".join(argv).strip())
+    if exact is not None:
+        print(_render_failure(exact))
+        return 0
+    hits = [e for e in cat.entries
+            if needle in e["id"].lower() or needle in e.get("title", "").lower()]
+    if len(hits) == 1:
+        print(_render_failure(hits[0]))
+        return 0
+    if not hits:
+        print("morrow failure: no catalog entry matches %r" % needle,
+              file=sys.stderr)
+        print("hint: run `morrow failure --list` for every entry id.",
+              file=sys.stderr)
+        return 1
+    print("morrow failure: %r matches %d entries:" % (needle, len(hits)),
+          file=sys.stderr)
+    for e in hits[:20]:
+        print("  %s: %s" % (e["id"], e.get("title", "")), file=sys.stderr)
+    if len(hits) > 20:
+        print("  ... and %d more" % (len(hits) - 20), file=sys.stderr)
+    return 1
+
+
+def _render_failure(entry):
+    """Human rendering of one catalog entry. Pure function, no side effects."""
+    lines = [
+        "id: %s" % entry["id"],
+        "title: %s" % entry.get("title", ""),
+        "surface: %s   severity: %s"
+        % (entry.get("surface", "?"), entry.get("severity_hint", "?")),
+    ]
+    placeholders = entry.get("placeholders") or []
+    if placeholders:
+        lines.append("placeholders: %s" % ", ".join(placeholders))
+    lines.append("")
+    lines.append("What to tell the educator:")
+    lines.append(entry.get("agent_message", "(no message recorded)"))
+    lines.append("")
+    lines.append("What to do:")
+    lines.append(entry.get("auto_action", "(no action recorded)"))
+    escalate = entry.get("escalate_when")
+    if escalate:
+        lines.append("")
+        lines.append("Escalate when:")
+        lines.append(escalate)
+    return "\n".join(lines)
+
+
+def _doctor(json_mode=False):
+    """Read-only health check. No auth material is read or sent; the
+    helper /status endpoint is the same read-only check operators use
+    with curl. Exit 0 only when every check passes."""
+    ok = True
+    lines = []
+    facts = {"helper": {}, "tree": {}, "entries": {}}
+
+    # 1. Helper reachability and session state (read-only).
+    try:
+        with urllib.request.urlopen(HELPER_STATUS_URL, timeout=10) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        logged_in = bool(payload.get("logged_in"))
+        alive = bool(payload.get("chromium_alive"))
+        lines.append("helper: reachable (%s)" % HELPER_STATUS_URL)
+        lines.append("helper: logged_in=%s chromium_alive=%s"
+                     % (logged_in, alive))
+        facts["helper"] = {"reachable": True, "logged_in": logged_in,
+                            "chromium_alive": alive}
+        if not (logged_in and alive):
+            ok = False
+    except Exception as exc:
+        lines.append("helper: UNREACHABLE (%s: %s)"
+                     % (type(exc).__name__, exc))
+        facts["helper"] = {"reachable": False,
+                            "error": "%s: %s" % (type(exc).__name__, exc)}
+        ok = False
+
+    # 2. Tree sanity: the files every command needs must exist and parse.
+    for rel in ("VERSION", "failures/catalog.json"):
+        path = os.path.join(DEPLOY_DIR, rel)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                content = fh.read()
+            if rel.endswith(".json"):
+                json.loads(content)
+            lines.append("tree: %s ok" % rel)
+            facts["tree"][rel] = "ok"
+        except Exception as exc:
+            lines.append("tree: %s BROKEN (%s)" % (rel, exc))
+            facts["tree"][rel] = "BROKEN: %s" % exc
+            ok = False
+
+    # 3. Entry points present and executable.
+    for name, (script, _blurb) in sorted(_COMMANDS.items()):
+        path = os.path.join(DEPLOY_DIR, script)
+        if os.path.isfile(path):
+            lines.append("entry: %s ok" % name)
+            facts["entries"][name] = "ok"
+        else:
+            lines.append("entry: %s MISSING (%s)" % (name, script))
+            facts["entries"][name] = "MISSING"
+            ok = False
+
+    if json_mode:
+        # Opt-in machine-readable form. Same facts, same exit contract.
+        facts["ok"] = ok
+        print(json.dumps(facts, indent=2, sort_keys=True))
+    else:
+        print("\n".join(lines))
+    return 0 if ok else 1
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        _print_help()
+        return 0
+    name = argv[0]
+    rest = argv[1:]
+    if name == "doctor":
+        if rest and rest != ["--json"]:
+            print("usage: morrow doctor [--json]", file=sys.stderr)
+            return 2
+        return _doctor(json_mode=(rest == ["--json"]))
+    if name == "version":
+        if rest:
+            print("usage: morrow version", file=sys.stderr)
+            return 2
+        return _version()
+    if name == "failure":
+        return _failure(rest)
+    if name not in _COMMANDS:
+        print("morrow: unknown command %r" % name, file=sys.stderr)
+        _print_help()
+        return 2
+    return _run_passthrough(name, rest)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

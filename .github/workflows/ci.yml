@@ -1,5 +1,11 @@
 name: ci
 
+# Monorepo CI. The `changes` job detects which products a push/PR touches;
+# each product suite runs only when its directory changed. The `check` job
+# aggregates both suites and keeps the required status-check name stable,
+# so branch protection keeps working when a change touches one product only
+# (the other suite skips, and `check` still reports).
+
 on:
   pull_request:
   push:
@@ -9,9 +15,30 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      desktop: ${{ steps.filter.outputs.desktop }}
+      muse: ${{ steps.filter.outputs.muse }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            desktop:
+              - 'desktop/**'
+            muse:
+              - 'morrow-for-muse/**'
+
+  check-desktop:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
@@ -30,3 +57,43 @@ jobs:
         run: xvfb-run -a node scripts/run-browser-harnesses.mjs
       - name: Desktop installer suites
         run: pnpm test:desktop
+
+  check-muse:
+    needs: changes
+    if: needs.changes.outputs.muse == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: morrow-for-muse
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: pip install pytest
+      - name: Install dev dependencies (hash-locked)
+        run: pip install -r requirements-dev.txt
+      - name: Muse test suite
+        run: python -m pytest -q
+
+  check:
+    needs: [check-desktop, check-muse]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate product suites
+        run: |
+          fail=0
+          for r in "${{ needs.check-desktop.result }}" "${{ needs.check-muse.result }}"; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "suite result: $r"
+              fail=1
+            fi
+          done
+          if [ "$fail" = "1" ]; then
+            echo "A product suite failed."
+            exit 1
+          fi
+          echo "All required suites passed (skipped suites did not change)."

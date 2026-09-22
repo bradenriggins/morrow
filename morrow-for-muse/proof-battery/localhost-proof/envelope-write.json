@@ -1,0 +1,18 @@
+{
+  "base": "https://chcp.instructure.com",
+  "batch_id": "batch-05b90ce6-request",
+  "brief_file": "/home/hatch/.morrow/browser-briefs/05b90ce6-98f1-4e25-b766-f88686f69098-request.txt",
+  "defer_verify": true,
+  "entry_name": "proof_create_assignment",
+  "kind": "dispatch",
+  "op_id": "05b90ce6-98f1-4e25-b766-f88686f69098",
+  "ops": [
+    "05b90ce6-98f1-4e25-b766-f88686f69098"
+  ],
+  "phase": "request",
+  "principal": {
+    "id": 28206,
+    "name": "Braden Riggins"
+  },
+  "status": "awaiting_browser_task"
+}

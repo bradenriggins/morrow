@@ -1,0 +1,71 @@
+# Dev-only dependencies for Morrow for Muse (exact pins, hash-locked 2026-09-21).
+#
+# DEV-ONLY, NEVER SHIPPED. These packages are imported only by
+# source-tree modules that the carve pipeline excludes from the carved
+# distribution (verified: the dist-wide AST import sweep shows no
+# `requests` import, and `moodle/`, `lanes/`, `qr-proof/` are absent
+# from the dist). Nothing in this file may ever be added to the
+# shipped surface or to requirements-optional.txt; the educator's
+# install stays stdlib-only (+ the optional hash-pinned cryptography).
+#
+#   requests: the Moodle lane (moodle/session.py, moodle/login.py,
+#     moodle/probe.py, moodle/reauth.py) and the lane detector
+#     (lanes/detect.py). Pinned 2.34.2 (latest on PyPI 2026-09-21).
+#   opencv-python-headless: qr-proof/qr_proof.py only (`cv2.imread`
+#     + QRCodeDetector on educator-supplied screenshots). Kept as the
+#     executable record of the QR-bootstrapped mobile OAuth proof.
+#     Pinned 5.0.0.93. Untrusted image codec risk: imread parses
+#     attacker-influenced image bytes; the native codecs have a long
+#     CVE history, so the pin stays on an audited build.
+#
+# Hash-locked (W4-P2-24/W4-P2-25): --require-hashes means pip verifies
+# every downloaded artifact against one of the hashes below before
+# installing. The FULL transitive closure is pinned, because with
+# --require-hashes pip refuses to install ANY package that lacks a
+# listed hash, including transitive dependencies:
+#   - requests==2.34.2 requires charset-normalizer, idna, urllib3, certifi
+#   - opencv-python-headless==5.0.0.93 requires numpy (>=2 on Python 3.9+)
+#   - numpy==2.2.6 is the latest numpy supporting the Python 3.11 floor
+#     (numpy 2.5.x requires Python >=3.12); it has no dependencies.
+#   - charset-normalizer, idna, urllib3, certifi have no runtime deps
+#     (idna/urllib3 extras are not used).
+#
+# Coverage (2026-09-21): wheels for CPython 3.11 and 3.12 on manylinux
+# x86_64 (the reference dev VM), plus sdists for the pure-Python
+# packages (requests, idna, urllib3, certifi) and charset-normalizer
+# as the fallback. Binary sdists for numpy and opencv-python-headless
+# are not hashed here; other platforms regenerate via the recipe below.
+# Regenerating hashes when a pin is raised: download the new
+# version's artifacts into the scratch lock dir and re-run
+# gen-dev-lock.py, e.g.
+#   pip download --no-deps -d <lockdir> "requests==X.Y.Z"
+#   pip download --no-deps --no-binary :all: -d <lockdir> "requests==X.Y.Z"
+# (repeat for each package in the closure; for binary wheels add
+# --platform/--python-version/--abi as needed). Then re-run the
+# offline-install proof below.
+#
+# Offline-install proof (2026-09-21): a fresh venv installed with
+# --no-index --find-links on the local artifact dir, WITH dependencies
+# (not --no-deps), so the transitive closure is exercised.
+--require-hashes
+requests==2.34.2 \
+    --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
+    --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
+opencv-python-headless==5.0.0.93 \
+    --hash=sha256:09a872a157c1376ab922a69bbf22f9a95bcc7b658a9d8b436a60212b02b2eeb4
+charset-normalizer==3.5.1 \
+    --hash=sha256:c7b742bf31c88566b4bb6335a7f393bb322e580b6bb98df7bd0c25e6e3519ce8 \
+    --hash=sha256:b9af956078716df40d985fb0dfeb2c2120c5ca92ba4ff4b388acfd01cdc14d08 \
+    --hash=sha256:6117b84ea48435e5356dc737f5121485c30920ba43375fa7b434fd753df0eac3
+idna==3.20 \
+    --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c \
+    --hash=sha256:a7db850025b95ded1eae8a46181a1a6c56c92c96f0e2b005d9ff8dc0210cab44
+urllib3==2.8.0 \
+    --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \
+    --hash=sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63
+certifi==2026.7.22 \
+    --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775 \
+    --hash=sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55
+numpy==2.2.6 \
+    --hash=sha256:ba10f8411898fc418a521833e014a77d3ca01c15b0c6cdcce6a0d2897e6dbbdf \
+    --hash=sha256:fd83c01228a688733f1ded5201c678f0c53ecc1006ffbc404db9f7a899ac6249

@@ -1,0 +1,8 @@
+{
+  "op_id": "24c04681-e8ef-47d7-a866-2af956417437",
+  "outcome": "failed",
+  "browser_task_id": "browser-task:05107610-70ad-48f6-957a-f8b165c0a4ec",
+  "session_check": "PASSED (user id 28206, Braden Riggins)",
+  "detail": "Path 1 (direct POST tool): not offered by the browser toolset (goto/GET navigation only). Path 2 (file:// form-host): attempted twice; both navigations to file:///home/hatch/workspace/morrow-for-muse-deploy/transport/form-host/index.html crashed the browser automation process (browser_process_failed) before the page loaded. No form rendered, no submission, no side effects. No GET substituted, web UI not used.",
+  "conclusion": "file:// form-host is not viable in the managed browser environment. Localhost HTTP fallback required."
+}

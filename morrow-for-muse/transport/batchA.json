@@ -1,0 +1,1 @@
+[{"method":"GET","op_id":"op-course","path":"/api/v1/courses/89585"},{"fields":{"assignment[name]":"Weasel Batch Proof (delete me)"},"method":"POST","op_id":"op-create","path":"/api/v1/courses/89585/assignments"}]

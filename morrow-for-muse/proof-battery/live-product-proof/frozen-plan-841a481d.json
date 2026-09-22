@@ -1,0 +1,9 @@
+{
+  "before_state_digest": "sha256:d3f4c7935b286010dc74092c0f9e9d1135a863115e589c10bbbb304db211eca9",
+  "entry_name": "proof_create_assignment",
+  "frozen_readback": "live product proof run, course 89585",
+  "op_id": "841a481d-1915-46bd-9a9b-e395e2e0d35c",
+  "params": {
+    "course_id": "89585"
+  }
+}

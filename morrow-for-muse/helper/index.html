@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Morrow &middot; Canvas Login Helper</title>
+<style>
+  :root {
+    --morrow-blue: #6080f0;
+    --morrow-lime: #c0d070;
+    --bg: #0e1020;
+    --panel: #161a30;
+    --panel-2: #1e2440;
+    --text: #eef0ff;
+    --muted: #9aa3c7;
+    --amber: #f0b860;
+    --green: #7bc96f;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  /* ---------- header ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 18px;
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border-bottom: 1px solid #2a3160;
+    flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+  .brand img {
+    width: 40px; height: 40px; border-radius: 10px;
+    background: #fff; padding: 3px; display: block;
+  }
+  .brand .name { font-size: 19px; font-weight: 700; letter-spacing: 0.2px; }
+  .brand .name span { color: var(--morrow-blue); }
+  .brand .sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+  #badge {
+    font-size: 13px; font-weight: 600;
+    padding: 6px 14px; border-radius: 999px;
+    background: #3a4166; color: var(--muted);
+    border: 1px solid #4a5280;
+    white-space: nowrap;
+  }
+  #badge.in { background: rgba(123, 201, 111, 0.15); color: var(--green); border-color: var(--green); }
+  #badge.need { background: rgba(240, 184, 96, 0.12); color: var(--amber); border-color: var(--amber); }
+
+  #url {
+    font-size: 12px; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 34vw;
+  }
+
+  #controls { display: flex; gap: 8px; align-items: center; }
+  #controls input {
+    background: #0e1020; color: var(--text);
+    border: 1px solid #3a4166; border-radius: 8px;
+    padding: 8px 10px; width: 240px; font-size: 13px;
+  }
+  #controls input:focus { outline: none; border-color: var(--morrow-blue); }
+  #controls button, .btn {
+    background: var(--morrow-blue); color: #fff; border: 0;
+    border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 600;
+    cursor: pointer;
+  }
+  #controls button:hover, .btn:hover { filter: brightness(1.1); }
+
+  /* ---------- signed-in banner ---------- */
+  #done-banner {
+    display: none;
+    margin: 14px auto 0;
+    max-width: 1600px; width: calc(100% - 28px);
+    background: rgba(123, 201, 111, 0.1);
+    border: 1px solid var(--green);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-size: 14px;
+  }
+  #done-banner strong { color: var(--green); }
+  #done-banner .fine { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+
+  /* ---------- session notice (W6-P1-S2) ---------- */
+  #session-notice {
+    display: none;
+    margin: 14px auto 0;
+    max-width: 1600px; width: calc(100% - 28px);
+    background: rgba(240, 184, 96, 0.14);
+    border: 2px solid var(--amber);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    font-size: 14px;
+  }
+  #session-notice strong { color: var(--amber); display: block; margin-bottom: 6px; font-size: 15px; }
+  #session-notice .body { white-space: pre-wrap; }
+
+  #err {
+    display: none;
+    margin: 14px auto 0; max-width: 1600px; width: calc(100% - 28px);
+    color: #ffb3b3; background: rgba(255, 120, 120, 0.08);
+    border: 1px solid #a05050; border-radius: var(--radius);
+    font-size: 13px; padding: 10px 14px;
+  }
+
+  /* ---------- stage: the browser window, as large as the screen allows ---------- */
+  main { flex: 1; display: flex; flex-direction: column; padding: 14px; }
+  #stage {
+    position: relative; outline: none; cursor: text;
+    width: 100%; max-width: 1600px; margin: 0 auto;
+    border-radius: var(--radius);
+    border: 1px solid #2a3160;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+  }
+  #stage:focus { border-color: var(--morrow-blue); box-shadow: 0 0 0 2px var(--morrow-blue), 0 8px 40px rgba(0,0,0,0.45); }
+  #screen {
+    display: block; width: 100%; height: auto; background: #fff;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  #hint {
+    text-align: center; font-size: 12.5px; color: var(--muted);
+    padding: 10px 16px 4px; max-width: 900px; margin: 0 auto;
+  }
+  #hint b { color: var(--text); }
+  footer {
+    text-align: center; font-size: 11.5px; color: #6b739e;
+    padding: 10px 0 14px;
+  }
+  footer a { color: var(--morrow-blue); text-decoration: none; }
+
+  @media (max-width: 700px) {
+    #url { display: none; }
+    #controls input { width: 150px; }
+    .brand .sub { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <img src="logo.png" alt="Morrow logo">
+    <div>
+      <div class="name">Morrow <span>&middot;</span> Canvas Login Helper</div>
+      <div class="sub">Sign in once. Morrow keeps the session for you.</div>
+    </div>
+  </div>
+  <span id="badge">checking&hellip;</span>
+  <span id="url"></span>
+  <span id="controls">
+    <input id="tenant" placeholder="https://canvas.yourschool.edu" spellcheck="false" aria-label="Canvas site address">
+    <button id="go" type="button">Go</button>
+  </span>
+</header>
+
+<div id="done-banner" role="status">
+  <strong>You&rsquo;re signed in.</strong>
+  <div class="fine">You can close this page. Morrow keeps your Canvas session on your own machine, and you won&rsquo;t need to sign in again unless Canvas itself expires it. If that ever happens, just come back here. <b>Check the signed-in name above matches your Canvas account</b>, especially on a shared machine or after an SSO account switch.</div>
+</div>
+<div id="err" role="alert"></div>
+<div id="session-notice" role="alert">
+  <strong>Action needed: your Canvas session notice</strong>
+  <div class="body" id="session-notice-body"></div>
+</div>
+
+<main>
+  <div id="stage" tabindex="0" aria-label="Canvas page. Click to focus, then type.">
+    <img id="screen" alt="Live Canvas page" draggable="false">
+  </div>
+  <div id="hint"><b>Click the page, then type.</b> Sign in exactly as you normally would, including SSO and MFA. If Canvas offers <b>&ldquo;Stay signed in&rdquo;</b>, leave it on. Nothing you type is shown here or sent anywhere except the Canvas page itself.</div>
+</main>
+<footer>
+  Your sign-in stays in this browser on your machine. Morrow never sees your password. &middot; <a href="https://meetmorrow.app" target="_blank" rel="noopener">meetmorrow.app</a>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var img = document.getElementById("screen");
+  var stage = document.getElementById("stage");
+  var badge = document.getElementById("badge");
+  var banner = document.getElementById("done-banner");
+  var noticeEl = document.getElementById("session-notice");
+  var noticeBody = document.getElementById("session-notice-body");
+  var urlEl = document.getElementById("url");
+  var errEl = document.getElementById("err");
+  var tenantInput = document.getElementById("tenant");
+  var goBtn = document.getElementById("go");
+
+  // W3-P0-7: the server injects this tree's launch token into the
+  // __HELPER_TOKEN__ placeholder when it serves this page. Every
+  // protected endpoint (all POSTs, plus /screenshot) sends it back as
+  // the X-Helper-Token header. /status stays open and needs no token.
+  var HELPER_TOKEN = "__HELPER_TOKEN__";
+  var AUTH_HEADERS = { "X-Helper-Token": HELPER_TOKEN };
+
+  function showErr(msg) {
+    errEl.style.display = "block";
+    errEl.textContent = msg;
+  }
+  function clearErr() {
+    errEl.style.display = "none";
+    errEl.textContent = "";
+  }
+
+  // --- screenshot stream: refresh every 500ms ---
+  var lastObjUrl = null;
+  function refresh() {
+    fetch("/screenshot", { cache: "no-store", headers: AUTH_HEADERS })
+      .then(function (r) {
+        if (!r.ok) throw new Error("screenshot HTTP " + r.status);
+        return r.blob();
+      })
+      .then(function (blob) {
+        clearErr();
+        if (lastObjUrl) URL.revokeObjectURL(lastObjUrl);
+        lastObjUrl = URL.createObjectURL(blob);
+        img.src = lastObjUrl;
+      })
+      .catch(function (e) { showErr("Screenshot stream failed: " + e.message); });
+  }
+  setInterval(refresh, 500);
+  refresh();
+
+  // --- login status ---
+  function pollStatus() {
+    fetch("/status", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (st) {
+        urlEl.textContent = st.url || "";
+        // W6-P1-S2: surface a pending educator notification (session
+        // death paused ops) as a prominent banner. textContent only:
+        // the notice text is our own file content, never page HTML.
+        if (st.session_notice) {
+          noticeBody.textContent = st.session_notice;
+          noticeEl.style.display = "block";
+        } else {
+          noticeEl.style.display = "none";
+          noticeBody.textContent = "";
+        }
+        if (st.chromium_alive === false) {
+          badge.textContent = "browser not running. The helper will restart it; no need to sign in again";
+          badge.className = "need";
+          banner.style.display = "none";
+        } else if (st.logged_in) {
+          // W6-P2-A4: show WHO is signed in, not just that someone is.
+          // The name comes from the pinned session record; if the
+          // educator switched accounts in the tab, the name may lag,
+          // so the banner still says to come back if anything looks off.
+          if (st.principal_name) {
+            badge.textContent = "signed in as " + st.principal_name;
+          } else {
+            badge.textContent = "signed in";
+          }
+          badge.className = "in";
+          banner.style.display = "block";
+        } else {
+          var onLogin = (st.url || "").indexOf("/login") !== -1;
+          if (st.starting === true) {
+            badge.textContent = "starting\u2026";
+            badge.className = "";
+          } else {
+            badge.textContent = onLogin ? "sign in needed" : "checking\u2026";
+            badge.className = onLogin ? "need" : "";
+          }
+          banner.style.display = "none";
+        }
+      })
+      .catch(function () { badge.textContent = "status unknown"; badge.className = ""; });
+  }
+  setInterval(pollStatus, 2000);
+  pollStatus();
+
+  // --- coordinate mapping: displayed px -> page px ---
+  function toPage(e) {
+    var r = img.getBoundingClientRect();
+    var sx = img.naturalWidth / r.width;
+    var sy = img.naturalHeight / r.height;
+    return { x: Math.round((e.clientX - r.left) * sx),
+             y: Math.round((e.clientY - r.top) * sy) };
+  }
+
+  function postMouse(kind, x, y, button) {
+    fetch("/input/mouse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json",
+                 "X-Helper-Token": HELPER_TOKEN },
+      body: JSON.stringify({ kind: kind, x: x, y: y, button: button || "left" })
+    }).catch(function () {});
+  }
+  function postKey(kind, key, code, keyCode) {
+    fetch("/input/key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json",
+                 "X-Helper-Token": HELPER_TOKEN },
+      body: JSON.stringify({ kind: kind, key: key, code: code, keyCode: keyCode })
+    }).catch(function () {});
+  }
+
+  // --- mouse: click to focus fields, drag-free simple clicks ---
+  img.addEventListener("mousedown", function (e) {
+    e.preventDefault();
+    stage.focus();
+    var p = toPage(e);
+    postMouse("pressed", p.x, p.y, e.button === 2 ? "right" : "left");
+  });
+  img.addEventListener("mouseup", function (e) {
+    var p = toPage(e);
+    postMouse("released", p.x, p.y, e.button === 2 ? "right" : "left");
+  });
+  // Touch: one tap = click (mobile sign-in).
+  img.addEventListener("touchstart", function (e) {
+    e.preventDefault();
+    stage.focus();
+    var t = e.changedTouches[0];
+    var p = toPage(t);
+    postMouse("pressed", p.x, p.y, "left");
+    postMouse("released", p.x, p.y, "left");
+  }, { passive: false });
+  var lastMove = 0;
+  img.addEventListener("mousemove", function (e) {
+    var now = Date.now();
+    if (now - lastMove < 60) return; // throttle hover traffic
+    lastMove = now;
+    var p = toPage(e);
+    postMouse("moved", p.x, p.y);
+  });
+  img.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+
+  // --- keyboard: forward everything while the stage is focused ---
+  stage.addEventListener("keydown", function (e) {
+    e.preventDefault();
+    postKey("down", e.key, e.code, e.keyCode);
+  });
+  stage.addEventListener("keyup", function (e) {
+    e.preventDefault();
+    postKey("up", e.key, e.code, e.keyCode);
+  });
+  // Note: no blur refocus here. Clicking the tenant field, badge, or header
+  // must not steal focus back mid-typing; clicking the stage image refocuses.
+
+  // --- tenant switcher: type a Canvas base URL, we navigate there ---
+  function goTenant() {
+    var raw = tenantInput.value.trim().replace(/\/+$/, "");
+    if (!raw) {
+      showErr("Enter your Canvas site address, like canvas.yourschool.edu.");
+      return;
+    }
+    var host = raw.replace(/^https?:\/\//i, "");
+    // Must be a plausible hostname (optional :port); no spaces, no path.
+    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d+)?$/i.test(host)) {
+      showErr("That does not look like a valid Canvas address. Type just the hostname, like canvas.yourschool.edu.");
+      return;
+    }
+    // Warn when the host does not look like a real Canvas tenant.
+    var bare = host.split(":")[0].toLowerCase();
+    if (bare.indexOf(".") === -1 ||
+        bare === "myschool" ||
+        bare === "canvas.instructure.com" ||
+        /(^|\.)example\./.test(bare) ||
+        bare === "example") {
+      showErr("That address does not look like your school\u2019s Canvas site. Use your school\u2019s Canvas hostname, like canvas.yourschool.edu.");
+      return;
+    }
+    clearErr();
+    var base = raw;
+    if (!/^https?:\/\//i.test(base)) base = "https://" + base;
+    fetch("/navigate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json",
+                 "X-Helper-Token": HELPER_TOKEN },
+      body: JSON.stringify({ url: base })
+    }).then(function () { stage.focus(); })
+      .catch(function (e) { showErr("Navigate failed: " + e.message); });
+  }
+  goBtn.addEventListener("click", goTenant);
+  tenantInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") goTenant();
+    e.stopPropagation(); // don't forward the tenant box keystrokes to Canvas
+  });
+  tenantInput.addEventListener("keyup", function (e) { e.stopPropagation(); });
+
+  stage.focus();
+})();
+</script>
+</body>
+</html>

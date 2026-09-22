@@ -1,0 +1,98 @@
+{
+ "stamp": "LIVE-READS-20260922T131034Z",
+ "tenant_base": "https://chcp.instructure.com",
+ "course_id": "89585",
+ "note": "Read-only GETs through the helper browser. Course 89585 has zero students, so list reads are expected empty; resolution logic is proven by the synthetic unit suite, not by these reads.",
+ "checks": [
+  [
+   "users_self",
+   {
+    "url": "https://chcp.instructure.com/api/v1/users/self",
+    "http_status": 200,
+    "is_list": false,
+    "is_dict": true,
+    "length": null,
+    "link_header": null,
+    "shape_ok": true,
+    "fields": {
+     "id": true,
+     "name": true,
+     "sortable_name": true,
+     "short_name": true,
+     "login_id": false,
+     "sis_user_id": true,
+     "sis_login_id": false,
+     "email": true,
+     "avatar_url": true
+    },
+    "id": 28206,
+    "name": "Braden Riggins"
+   }
+  ],
+  [
+   "course_show",
+   {
+    "url": "https://chcp.instructure.com/api/v1/courses/89585",
+    "http_status": 200,
+    "is_list": false,
+    "is_dict": true,
+    "length": null,
+    "link_header": null,
+    "shape_ok": true
+   }
+  ],
+  [
+   "course_users_student",
+   {
+    "url": "https://chcp.instructure.com/api/v1/courses/89585/users?enrollment_type%5B%5D=student&include%5B%5D=enrollments&per_page=100",
+    "http_status": 200,
+    "is_list": true,
+    "is_dict": false,
+    "length": 1,
+    "link_header": "<https://chcp.instructure.com/api/v1/courses/89585/users?enrollment_type%5B%5D=student&include%5B%5D=enrollments&page=1&per_page=100>; rel=\"current\",<https://chcp.instructure.com/api/v1/courses/89585/users?enrollment_type%5B%5D=student&include%5B%5D=enrollments&page=1&per_page=100>; rel=\"first\",<https://chcp.instructure.com/api/v1/courses/89585/users?enrollment_type%5B%5D=student&include%5B%5D=enrollments&page=1&per_page=100>; rel=\"last\"",
+    "shape_ok": true,
+    "expected_empty": false,
+    "first_user_fields": [
+     "created_at",
+     "email",
+     "enrollments",
+     "has_non_collaborative_groups",
+     "id",
+     "integration_id",
+     "name",
+     "short_name",
+     "sis_import_id",
+     "sis_user_id",
+     "sortable_name"
+    ]
+   }
+  ],
+  [
+   "course_enrollments",
+   {
+    "url": "https://chcp.instructure.com/api/v1/courses/89585/enrollments?per_page=100&type%5B%5D=StudentEnrollment",
+    "http_status": 200,
+    "is_list": true,
+    "is_dict": false,
+    "length": 1,
+    "link_header": "<https://chcp.instructure.com/api/v1/courses/89585/enrollments?type%5B%5D=StudentEnrollment&page=first&per_page=100>; rel=\"current\",<https://chcp.instructure.com/api/v1/courses/89585/enrollments?type%5B%5D=StudentEnrollment&page=first&per_page=100>; rel=\"first\",<https://chcp.instructure.com/api/v1/courses/89585/enrollments?type%5B%5D=StudentEnrollment&page=first&per_page=100>; rel=\"last\"",
+    "shape_ok": true,
+    "expected_empty": false
+   }
+  ],
+  [
+   "course_search_users_no_match",
+   {
+    "url": "https://chcp.instructure.com/api/v1/courses/89585/search_users?search_term=zzz_no_such_student_zzz&per_page=10",
+    "http_status": 200,
+    "is_list": true,
+    "is_dict": false,
+    "length": 0,
+    "link_header": "<https://chcp.instructure.com/api/v1/courses/89585/users?search_term=zzz_no_such_student_zzz&page=1&per_page=10>; rel=\"current\",<https://chcp.instructure.com/api/v1/courses/89585/users?search_term=zzz_no_such_student_zzz&page=1&per_page=10>; rel=\"first\",<https://chcp.instructure.com/api/v1/courses/89585/users?search_term=zzz_no_such_student_zzz&page=1&per_page=10>; rel=\"last\"",
+    "shape_ok": true,
+    "expected_empty": true
+   }
+  ]
+ ],
+ "all_shape_ok": true
+}
