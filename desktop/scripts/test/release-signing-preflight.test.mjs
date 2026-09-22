@@ -22,7 +22,7 @@ import {
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const script = join(root, "scripts/release-signing-preflight.mjs");
 const workflowPath = ".github/workflows/desktop-release.yml";
-const releaseWorkflow = readFileSync(join(root, workflowPath), "utf8");
+const releaseWorkflow = readFileSync(join(root, "..", workflowPath), "utf8");
 
 /**
  * A keychain listing shaped like the one `security find-identity -v -p codesigning` prints on a Mac
@@ -443,6 +443,8 @@ test("the command runs on this host, prints one receipt, and exits 0 while a pub
     MACOS_NOTARIZATION_STRATEGY_INPUT,
     WINDOWS_SIGNING_STRATEGY_INPUT,
   ]);
+  assert.equal(receipt.repository.present, true, `the command must read ${workflowPath} from the repository root`);
+  assert.deepEqual(receipt.repository.referencedSecrets, referencedSecretNames(releaseWorkflow));
   if (process.platform === "darwin") {
     assert.equal(receipt.macos.identities.inspected, true, "security find-identity has to answer on macOS");
     assert.equal(typeof receipt.macos.identities.developerIdApplication, "number");

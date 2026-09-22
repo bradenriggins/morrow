@@ -62,7 +62,7 @@ test("a missing installer install reports the install command instead of a resol
 });
 
 test("continuous integration installs the installer dependencies and runs the desktop suites", () => {
-  const workflow = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+  const workflow = readFileSync(join(root, "..", ".github/workflows/ci.yml"), "utf8");
   const commands = [...workflow.matchAll(/^\s+(?:- )?run: (.+)$/gm)].map((match) => match[1].trim());
   const install = commands.indexOf("pnpm --dir installer --ignore-workspace install --frozen-lockfile");
   const check = commands.indexOf("pnpm check");

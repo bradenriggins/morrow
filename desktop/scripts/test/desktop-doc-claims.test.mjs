@@ -22,7 +22,9 @@ const root = new URL("../../", import.meta.url);
 const rootPath = fileURLToPath(root);
 const require = createRequire(import.meta.url);
 const read = (relativePath) => readFileSync(new URL(relativePath, root), "utf8");
-const present = (relativePath) => existsSync(new URL(relativePath, root));
+// `.github/` is at the repository root, one level above the desktop product; every other named
+// path is relative to the desktop product.
+const present = (relativePath) => existsSync(new URL(relativePath, relativePath.startsWith(".github/") ? new URL("../", root) : root));
 
 /** The documents that carry a desktop claim, public first. */
 const DOCS = [
