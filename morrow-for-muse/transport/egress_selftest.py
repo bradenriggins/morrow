@@ -214,8 +214,18 @@ def main():
           retired_raised)
     check("canonical CDP port",
           lc.HELPER_CDP_PORT == 19223, str(lc.HELPER_CDP_PORT))
-    launcher = lc.ChromiumLauncher(
-        lc.default_binary(), lc.helper_profile_dir())
+    # These checks never start a browser, so they need no real
+    # Chromium: a stub executable stands in when none is installed
+    # (a dev machine), and the real binary is used when it is.
+    try:
+        _binary = lc.default_binary()
+    except RuntimeError:
+        os.makedirs(WORK, exist_ok=True)
+        _binary = os.path.join(WORK, "stub-chrome")
+        with open(_binary, "w") as fh:
+            fh.write("#!/bin/sh\nexit 1\n")
+        os.chmod(_binary, 0o755)
+    launcher = lc.ChromiumLauncher(_binary, lc.helper_profile_dir())
     check("launcher default port is 19223",
           launcher.cdp_port == 19223, str(launcher.cdp_port))
 
@@ -226,13 +236,10 @@ def main():
     # The egress-relevant assertions survive without any browser: the
     # launcher's probe reports proxy_auth, wants the forwarder, and
     # never leaks credentials into detail/proxy.
-    probe_profile = os.path.join(
-        os.path.expanduser(
-            "~/workspace/audits/adversarial-wave-4-2026-09-21/scratch/worker-browser"),
-        ".egress-selftest-probe-profile")
+    # Round-4 L6: scratch under this tree, never an external path.
+    probe_profile = os.path.join(WORK, "egress-selftest-probe-profile")
     with fake_env(https_proxy=FAKE_PROXY_AUTH, HTTPS_PROXY=None):
-        launcher = lc.ChromiumLauncher(
-            lc.default_binary(), probe_profile)
+        launcher = lc.ChromiumLauncher(_binary, probe_profile)
         probe = launcher._probe()
         check("launcher probe mode here", probe["mode"] == "proxy_auth",
               probe["mode"])

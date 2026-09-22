@@ -315,7 +315,7 @@ for _tool in curl ss pgrep flock; do
     || fail "prereq" "${_tool} not found on PATH"
 done
 unset _tool
-# W4-P2-23: floor is 3.11, not 3.10. Python 3.10 reached security
+# W4-P2-23: floor is 3.11, not 3.10. Python 3.10 reaches security
 # end-of-life in October 2026 (PEP 619); a security-sensitive package
 # fails closed on an EOL interpreter rather than warning. The tree
 # has no 3.10-only need (match statements and stdlib use are 3.11+
@@ -323,7 +323,7 @@ unset _tool
 PY_VER="$(python3 --version 2>&1)"
 PY_OK="$(python3 -c 'import sys; print("yes" if sys.version_info >= (3, 11) else "no")')"
 [ "${PY_OK}" = "yes" ] \
-  || fail "python3" "python3 >= 3.11 required (found: ${PY_VER}). Python 3.10 reached security end-of-life in October 2026 (PEP 619) and no longer receives security fixes; install Python 3.11 or newer and rerun."
+  || fail "python3" "python3 >= 3.11 required (found: ${PY_VER}). Python 3.10 reaches security end-of-life in October 2026 (PEP 619) and will stop receiving security fixes; install Python 3.11 or newer and rerun."
 note "ok: ${PY_VER}"
 
 # -- 2. integrity + upgrade -----------------------------------------------

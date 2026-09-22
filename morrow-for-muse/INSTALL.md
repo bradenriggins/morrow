@@ -18,7 +18,7 @@ prior knowledge of the project.
   VM does not provide it, place a Chromium binary at
   `transport/chromium/chrome` inside this tree before installing.
 - Python 3.11 or newer (`python3 --version`). The tree is stdlib-only;
-  nothing needs pip. (Python 3.10 is refused: it reached security
+  nothing needs pip. (Python 3.10 is refused: it reaches security
   end-of-life in October 2026 per PEP 619.)
 - The command-line tools the installer and keepalive use: `curl`, `ss`,
   `pgrep`, `flock`, `crontab`, and `openssl` (the helper's TLS selftest
