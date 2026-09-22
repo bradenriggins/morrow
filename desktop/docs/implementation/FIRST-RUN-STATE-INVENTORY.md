@@ -600,15 +600,15 @@ stale name here.
 | `Save Edit access anyway` | Courses and access | `connector/extension/settings/settings.html:132` |
 | `Open Canvas` | Courses and access | `connector/extension/settings/settings.js:403` |
 | `Open Moodle` | Courses and access | `connector/extension/settings/settings.js:404` |
-| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1143` |
-| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1143` |
-| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1143` |
-| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:1143` |
-| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:1143` |
-| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:1164` |
-| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:1164` |
-| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:1124` |
-| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:1126` |
+| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1166` |
+| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1166` |
+| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1166` |
+| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:1166` |
+| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:1166` |
+| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:1184` |
+| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:1150` |
+| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:1147` |
+| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:1149` |
 
 Names a person reads as landmarks rather than presses:
 

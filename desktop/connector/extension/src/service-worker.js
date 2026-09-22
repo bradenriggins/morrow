@@ -6291,6 +6291,8 @@ async function cancelPairingAfterConsentWithdrawal() {
   });
 }
 
+// Registered before the worker's own message listener, which answers every other message.
+installReviewApproval();
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const fromPopup = POPUP_EDIT_POLICY_MESSAGES.has(message?.type) && popupSender(sender);
   const settingsAction = message?.type === "morrow_edit_policy_status" ? (authorityGeneration) => editPolicyStatus(authorityGeneration, { includePrivateChat: !fromPopup })
@@ -6389,7 +6391,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   void cancelPairingAfterConsentWithdrawal().catch(() => {});
   void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
 });
-installReviewApproval();
 chrome.runtime.onStartup.addListener(() => { void pollPairing(); void connectBridge(); });
 chrome.runtime.onInstalled.addListener((details) => {
   void connectBridge();
