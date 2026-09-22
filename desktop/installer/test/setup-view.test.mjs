@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { installerState } from "../shared/contract.cjs";
-import { actionView, blackboardSetupOffered, escapeHtml, progress, removalAnnouncement, retentionView, setupManagementView, setupUnavailableView, statusSummary, supportView } from "../shared/setup-view.mjs";
+import { actionView, awaitingBridgeFolder, blackboardSetupOffered, escapeHtml, progress, removalAnnouncement, retentionView, setupManagementView, setupUnavailableView, statusSummary, supportView } from "../shared/setup-view.mjs";
 
 const CHATGPT = Object.freeze({ id: "codex", title: "ChatGPT", tier: "primary", supported: true, needsWorkspace: true });
 const CLAUDE_DESKTOP = Object.freeze({ id: "claude-desktop", title: "Claude Desktop", tier: "primary", supported: true, needsWorkspace: true });
@@ -723,4 +723,44 @@ test("an assistant that still starts Morrow from where it was asks for the repai
   const view = actionView(state({ assistantsNeedRepoint: true, assistants: [{ ...CHATGPT, detected: true, configured: false, selected: true }] }));
   assert.equal(view.title, "Update your assistant settings.");
   assert.match(view.body, /data-action="repair"/);
+});
+
+function addBridgeState() {
+  return state({
+    lifecycle: "assistant_ready",
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }],
+    selectedAssistantId: "codex",
+    bridgeFolderReady: true,
+    bridgeFolderPath: "/Users/t/Library/Application Support/Morrow/Bridge",
+  });
+}
+
+test("the Chrome step shows the full Bridge folder path, a Copy button, and the way to reach a hidden folder", () => {
+  const mac = actionView(addBridgeState(), { platform: "darwin" });
+  assert.equal(mac.title, "Add Morrow Bridge.");
+  assert.match(mac.body, /\/Users\/t\/Library\/Application Support\/Morrow\/Bridge/);
+  assert.match(mac.body, /data-action="copy-example-prompt" data-prompt="\/Users\/t\/Library\/Application Support\/Morrow\/Bridge"/);
+  assert.match(mac.body, /Command\+Shift\+G/);
+  const windows = actionView(state({ ...addBridgeStateInput(), bridgeFolderPath: "C:\\Users\\t\\AppData\\Roaming\\Morrow\\Bridge" }), { platform: "win32" });
+  assert.match(windows.body, /address bar at the top of the folder picker/);
+  assert.doesNotMatch(windows.body, /Command\+Shift\+G/);
+  assert.doesNotMatch(mac.body, /Chrome has not loaded Morrow Bridge yet/);
+
+  const late = actionView(addBridgeState(), { platform: "darwin", bridgeWaitExpired: true });
+  assert.match(late.body, /Chrome has not loaded Morrow Bridge yet/);
+});
+
+function addBridgeStateInput() {
+  return {
+    lifecycle: "assistant_ready",
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }],
+    selectedAssistantId: "codex",
+    bridgeFolderReady: true,
+  };
+}
+
+test("the renderer can tell when the Chrome folder step is the one on screen", () => {
+  assert.equal(awaitingBridgeFolder(addBridgeState()), true);
+  assert.equal(awaitingBridgeFolder(state({ ...addBridgeStateInput(), bridgeLoadedInChrome: true })), false);
+  assert.equal(awaitingBridgeFolder(state({ lifecycle: "ready_for_assistant" })), false);
 });

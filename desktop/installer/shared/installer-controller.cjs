@@ -3097,6 +3097,7 @@ class InstallerController {
       runtimeStatus: currentRuntimeStatus,
       bridgeDelivery: this.bridgeDelivery,
       bridgeFolderReady: bridgeInstallation?.installed === true,
+      bridgeFolderPath: this.paths.bridgeDirectory,
       bridgeLoadedInChrome: await this.bridgeLoadedInChrome(bridgeInstallation, runtime),
       bridgeUpdateAvailable: await this.bridgeReleaseUpdateAvailable(bridgeInstallation),
       bridgeManualChromeReloadRequired: bridgeInstallation?.manualChromeReloadRequired === true,

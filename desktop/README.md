@@ -332,11 +332,15 @@ You need Chrome 116 or later and one supported assistant already installed on th
 
 ### What the app asks you to do
 
+On a Mac, Morrow first asks you to move it to Applications when it runs from the disk image, from Downloads, or from any folder other than Applications. Select **Move to Applications**; Morrow moves itself and opens again. Morrow writes its own location into your assistant's settings, so a copy that runs from a place that goes away would leave the assistant pointing at nothing.
+
 The app presents three stages and shows one next action at a time:
 
-1. **Choose your assistant.** Morrow lists the assistants it found on this computer and configures only the one you select. Claude Desktop receives a generated local extension and asks you to approve it in Claude Desktop. Each of the other three receives one Morrow entry in its own settings file. Morrow keeps a private copy of a settings file before it changes it.
-2. **Set up Morrow Bridge.** Select **Show Bridge folder**. Morrow opens the folder Chrome must load. In Chrome, open the three-dot menu, select **Extensions**, then **Manage Extensions**, turn on **Developer mode**, select **Load unpacked**, and select that folder. Open Morrow Bridge, select **Connect Morrow**, then select **Allow connection** on the Morrow page only if you started it. This temporary Chrome step stands until Morrow Bridge has a Chrome Web Store listing. A managed Chrome profile can block it, and Morrow does not work around that restriction.
+1. **Choose your assistant.** Morrow lists the assistants it found on this computer and configures only the one you select. Claude Desktop receives a generated local extension and asks you to approve it in Claude Desktop. Each of the other three receives one Morrow entry in its own settings file. Morrow keeps a copy of a settings file before it changes it, named after the file and the time, in the **Assistant settings backups** folder.
+2. **Set up Morrow Bridge.** Select **Show Bridge folder**. Morrow opens the folder Chrome must load and shows its full path with a **Copy path** button. In Chrome, open the three-dot menu, select **Extensions**, then **Manage Extensions**, turn on **Developer mode**, select **Load unpacked**, and select that folder. The folder is hidden by default: on a Mac, press Command+Shift+G in Chrome's folder picker and paste the path; on Windows, paste the path into the picker's address bar. Open Morrow Bridge, select **Connect Morrow**, then select **Allow connection** on the Morrow page only if you started it. This temporary Chrome step stands until Morrow Bridge has a Chrome Web Store listing. A managed Chrome profile can block it, and Morrow does not work around that restriction.
 3. **Open and connect your course.** Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge identifies the platform and shows **Connect this course**. Select that button and allow the exact platform address Chrome shows. In Morrow Bridge, select **Open Plan and Edit settings**, then select **Connect** next to a course under **Your courses**. Each course starts in Plan. Morrow then reads the course it names once to confirm the connection. That read changes nothing in the course.
+
+When the course is connected, Morrow asks you to quit and reopen the assistant you chose, because an assistant reads its settings only when it starts. Open it again, start a new chat, then select **Check** in Morrow. Morrow shows the final "Continue in your assistant" step only after that assistant's own Morrow session has connected once.
 
 Morrow creates a default materials folder. Choosing another folder is optional, and you can change it after setup.
 
@@ -346,8 +350,9 @@ Morrow does not ask you to open a terminal, type a path, install Node.js or pnpm
 
 The app keeps the same window for the rest of the installation's life. It carries:
 
-- **Repair Morrow**, which checks the files inside Morrow, replaces the Morrow Bridge folder from the copy Morrow ships when the folder does not match it, and writes your assistant setting again. It leaves a newer assistant setting alone and changes nothing in your course.
-- **What stays on this computer**, which names the exact path of every place this installation keeps data, marks which of them Morrow can remove, and states the step this computer uses to remove the application itself. **Remove Morrow's data** first shows a confirmation listing every path it will remove and every path it will keep, then reads each path again and reports which are gone and which are still there.
+- **Repair Morrow**, which checks the files inside Morrow, replaces the Morrow Bridge folder from the copy Morrow ships when the folder does not match it, and writes Morrow's entry again into every assistant it set up, so each one points at this copy of Morrow. Morrow finds its own entry by what it is, so an assistant that rewrote the rest of its settings file since is not a problem. It leaves a server of the same name that Morrow did not write alone and changes nothing in your course.
+- **What stays on this computer**, which names the exact path of every place this installation keeps data, marks which of them Morrow can remove, and states the step this computer uses to remove the application itself. **Remove Morrow's data** first shows a confirmation listing every path it will remove and every path it will keep. It then takes Morrow's own entry out of each assistant settings file, so no assistant keeps starting a Morrow that is gone, and stops without removing anything if it cannot. It keeps the **Assistant settings backups** folder. It then reads each path again and reports which are gone and which are still there.
+- To remove the application, select **Remove Morrow's data** first, then quit Morrow and move it to the Trash (Mac) or uninstall it from Settings, Apps (Windows).
 - Changing the materials folder and removing an assistant after setup.
 - Manual installation of a newer unsigned build. Automatic updates remain disabled in unsigned releases.
 
@@ -451,7 +456,7 @@ The generated client files are:
 - Claude desktop chat: `claude_desktop_config.json`;
 - Gemini CLI: `.gemini/settings.json`.
 
-Restart the selected client after configuration. The client then starts Morrow over stdio. The Morrow MCP starts its internal Chrome connector runtime. The Chrome extension connects to that runtime at `127.0.0.1:32147`.
+Quit and reopen the selected client after configuration; it reads its settings only when it starts. The client then starts Morrow over stdio. The Morrow MCP starts its internal Chrome connector runtime. The Chrome extension connects to that runtime at `127.0.0.1:32147`.
 
 #### ChatGPT desktop local MCP
 

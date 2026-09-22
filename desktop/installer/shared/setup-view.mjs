@@ -267,7 +267,38 @@ function homeStatusLines() {
   return `<ul class="home-status">${HOME_STATUS_ROWS.map((row) => `<li class="home-status-row"><span class="home-status-label">${escapeHtml(row.label)}</span><span class="home-status-word">${escapeHtml(row.word)}</span><button class="secondary-button" type="button" data-action="${row.action}">${row.actionLabel}</button></li>`).join("")}</ul>`;
 }
 
-function actionPanel(current, { chosenAssistantId = null } = {}) {
+/**
+ * Whether the action panel is asking the person to load the unpacked Bridge
+ * folder in Chrome. The renderer times this step so it can point at the exact
+ * folder when Chrome has not loaded it after a while.
+ */
+export function awaitingBridgeFolder(current) {
+  return Boolean(current) && current.appLocation !== "move_required" && current.assistantsNeedRepoint !== true
+    && current.lifecycle !== "repair_required" && current.runtime?.status === "ready"
+    && configuredAssistant(current) !== null && !deliveryBlocked(current)
+    && current.bridge?.manualChromeReloadRequired !== true && current.bridge?.updateAvailable !== true
+    && needsBridge(current) && current.bridge?.folderReady === true && current.bridge?.delivery === "developer_temporary";
+}
+
+/**
+ * The exact Bridge folder, a Copy button, and the way to reach it from Chrome's
+ * folder picker, which does not show this hidden folder by default.
+ */
+function bridgeFolderBlock(current, { platform = null, bridgeWaitExpired = false } = {}) {
+  const folder = current?.bridge?.folderPath;
+  if (typeof folder !== "string" || folder.length === 0) return "";
+  const reach = platform === "win32"
+    ? "In the folder picker Chrome opens, paste this path into the address bar at the top of the folder picker, press Enter, then select <strong>Select Folder</strong>."
+    : platform === "darwin"
+      ? "In the folder picker Chrome opens, press <strong>Command+Shift+G</strong>, paste this path, press Return, then select <strong>Select</strong>."
+      : "In the folder picker Chrome opens, go to this path.";
+  const late = bridgeWaitExpired
+    ? '<div class="blocked-box"><strong>Chrome has not loaded Morrow Bridge yet</strong><p>Check that you chose this exact folder in <strong>Load unpacked</strong>, not a folder inside it or a copy of it.</p></div>'
+    : "";
+  return `${late}<div class="materials-row"><div><h3>Bridge folder</h3><p>${escapeHtml(folder)}</p><p>${reach}</p></div><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="${escapeHtml(folder)}" aria-label="Copy the Bridge folder path">Copy path</button></div>`;
+}
+
+function actionPanel(current, { chosenAssistantId = null, platform = null, bridgeWaitExpired = false } = {}) {
   if (current.appLocation === "move_required") return movePanel();
   const bridge = current.bridge || {};
   const assistant = configuredAssistant(current);
@@ -340,7 +371,7 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
     return {
       title: "Add Morrow Bridge.",
       copy: "Use this temporary Chrome method until Morrow Bridge is available in the Chrome Web Store.",
-      body: '<ol class="instructions"><li>Select <strong>Show Bridge folder</strong>. Morrow opens the folder named <strong>Bridge</strong> and selects its manifest.json file.</li><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>.</li><li>On that page, turn on <strong>Developer mode</strong>.</li><li>Select <strong>Load unpacked</strong>, then select that <strong>Bridge</strong> folder.</li><li>Open <strong>Morrow Bridge</strong> in Chrome and select <strong>Connect Morrow</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="reveal-bridge-folder">Show Bridge folder</button><button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button><button class="secondary-button" type="button" data-action="repair">Repair Morrow</button></div>',
+      body: bridgeFolderBlock(current, { platform, bridgeWaitExpired }) + '<ol class="instructions"><li>Select <strong>Show Bridge folder</strong>. Morrow opens the folder named <strong>Bridge</strong> and selects its manifest.json file.</li><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>.</li><li>On that page, turn on <strong>Developer mode</strong>.</li><li>Select <strong>Load unpacked</strong>, then select that <strong>Bridge</strong> folder.</li><li>Open <strong>Morrow Bridge</strong> in Chrome and select <strong>Connect Morrow</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="reveal-bridge-folder">Show Bridge folder</button><button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button><button class="secondary-button" type="button" data-action="repair">Repair Morrow</button></div>',
     };
   }
   if (needsBridge(current) && bridge.delivery === "available") {

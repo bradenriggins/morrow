@@ -1294,3 +1294,11 @@ test("Check the assistant and Move to Applications each reach their own channel 
   await settle();
   assert.deepEqual(calls.at(-1), { method: "installer:move-to-applications", payload: undefined });
 });
+
+test("a copy of Morrow that does not update itself says where newer versions come from", async () => {
+  const current = state({ updates: { schema: "morrow.desktop-update.v1", status: "unavailable", reason: "updates_disabled", currentVersion: "1.0.4" } });
+  const dom = await load("updates-unavailable", async () => ok(current));
+  assert.equal(dom.element("#updates-panel").hidden, false);
+  assert.equal(dom.element("#updates-copy").textContent, "This copy of Morrow does not update itself. Get newer versions from meetmorrow.app/download.");
+  assert.equal(dom.element("#updates-actions").querySelectorAll("[data-action]").length, 0);
+});

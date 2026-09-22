@@ -1,6 +1,7 @@
 import {
   actionView,
   assistantFor,
+  awaitingBridgeFolder,
   blackboardSetupOffered,
   configuredAssistant,
   escapeHtml,
@@ -229,7 +230,13 @@ function setProblem(value) {
 
 function renderUpdates(current) {
   const updates = current?.updates;
-  if (!updates || updates.schema !== "morrow.desktop-update.v1" || updates.status === "unavailable") {
+  if (updates?.schema === "morrow.desktop-update.v1" && updates.status === "unavailable") {
+    updatesPanel.hidden = false;
+    updatesCopy.textContent = "This copy of Morrow does not update itself. Get newer versions from meetmorrow.app/download.";
+    renderUpdateActions("");
+    return;
+  }
+  if (!updates || updates.schema !== "morrow.desktop-update.v1") {
     updatesPanel.hidden = true;
     updatesCopy.textContent = "";
     renderUpdateActions("");
@@ -526,11 +533,31 @@ function setActiveView(next) {
   applyActiveView();
 }
 
+// How long the Chrome folder step may show before setup points at the exact
+// folder, since loading a folder inside it or a copy of it is the usual mistake.
+const BRIDGE_FOLDER_HINT_MS = 90_000;
+let bridgeStepShownAt = null;
+let bridgeHintTimer = null;
+
+function bridgeWaitExpired(current) {
+  if (!awaitingBridgeFolder(current)) {
+    bridgeStepShownAt = null;
+    return false;
+  }
+  bridgeStepShownAt ??= Date.now();
+  const remaining = bridgeStepShownAt + BRIDGE_FOLDER_HINT_MS - Date.now();
+  if (remaining > 0 && bridgeHintTimer === null) {
+    bridgeHintTimer = setTimeout(() => { bridgeHintTimer = null; render(state); }, remaining);
+    bridgeHintTimer?.unref?.();
+  }
+  return remaining <= 0;
+}
+
 function render(current) {
   current = stateWithNewestUpdates(current);
   state = current;
   if (!chosenAssistantId && current?.selectedAssistantId) chosenAssistantId = current.selectedAssistantId;
-  const view = current ? actionView(current, { chosenAssistantId }) : loadAttempted ? setupUnavailableView() : null;
+  const view = current ? actionView(current, { chosenAssistantId, platform: API?.platform || null, bridgeWaitExpired: bridgeWaitExpired(current) }) : loadAttempted ? setupUnavailableView() : null;
   headerStatus.textContent = current || !view ? statusSummary(current) : view.summary;
   loading.hidden = Boolean(view);
   actionContent.hidden = !view;

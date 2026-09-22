@@ -235,6 +235,10 @@ function installerState(input) {
       // when Morrow has no such proof. paired: the Bridge is connected to the
       // Morrow runtime. Writing the folder proves only folderReady.
       folderReady: input.bridgeFolderReady === true,
+      // The exact app-owned folder Chrome loads, so setup can show it and copy it.
+      folderPath: typeof input.bridgeFolderPath === "string" && input.bridgeFolderPath.length > 0 && input.bridgeFolderPath.length <= 4096
+        ? input.bridgeFolderPath
+        : null,
       loadedInChrome: input.bridgeLoadedInChrome === true ? true : input.bridgeLoadedInChrome === false ? false : "unknown",
       updateAvailable: input.bridgeUpdateAvailable === true,
       manualChromeReloadRequired: input.bridgeManualChromeReloadRequired === true,
