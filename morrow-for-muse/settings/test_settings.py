@@ -21,6 +21,10 @@ convention: never /tmp). MORROW_HOME is redirected there so the real
 
 Stdlib only. Run: python3 settings/test_settings.py
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import inspect
 import json
 import os
@@ -56,11 +60,9 @@ class SettingsTest(unittest.TestCase):
                                              "approval-signing.key")
         self.user = "educator-test-%d" % os.getpid()
         self.conv = "conv-%d" % os.getpid()
-        # Session-scoped state: conversation overrides are process-global
-        # in-memory; conversation grants are persisted and sealed.
+        # Conversation overrides and grants are persisted and sealed.
         # Reset both so each test starts clean.
-        with store._SESSION_LOCK:
-            store._CONVERSATION_MODES.clear()
+        store.clear_conversation_overrides(self.user)
         import modes.state as _mode_state
         _mode_state.revoke_edit_grant(self.user, reason="test reset")
 
@@ -332,8 +334,9 @@ class SettingsTest(unittest.TestCase):
         """A fresh interpreter process sees persisted changes.
 
         The standing edit default is persisted and survives a restart
-        with no expiry. Per-conversation overrides stay in-memory and
-        do NOT survive a restart.
+        with no expiry. A per-conversation plan override is persisted
+        too: every dispatch is a new process, so an in-memory override
+        never reached the write gate.
         """
         store.set_setting(self.user, "default_mode", "edit",
                           educator_confirmed=True, educator="braden")
@@ -345,11 +348,12 @@ class SettingsTest(unittest.TestCase):
             "from settings import store as s;"
             "assert s.get_setting(%r, 'default_mode') == 'edit';"
             "assert s.verify_audit(%r) == 2;"
-            "assert s.effective_mode(%r, %r) == 'edit';"  # standing edit
-            "assert s.get_conversation_mode(%r, %r) is None;"  # override gone
+            "assert s.effective_mode(%r, %r) == 'plan';"  # override kept
+            "assert s.get_conversation_mode(%r, %r) == 'plan';"
+            "assert s.effective_mode(%r, 'other-conv') == 'edit';"
             "print('restart-ok')"
             % (_TREE, self.user, self.user,
-               self.user, self.conv, self.user, self.conv))
+               self.user, self.conv, self.user, self.conv, self.user))
         proc = subprocess.run([sys.executable, "-c", snippet],
                               capture_output=True, text=True,
                               env=dict(os.environ),
@@ -393,16 +397,21 @@ class SettingsTest(unittest.TestCase):
         mode_state.switch_mode(self.user, "plan", conversation_id=self.conv,
                                educator="braden")
         records = store.read_audit(self.user)
-        self.assertEqual(len(records), 3)
+        self.assertEqual(len(records), 4)
         self.assertEqual(records[1]["kind"], "settings.conversation_mode")
         self.assertEqual(records[1]["new_value"], "plan")
         self.assertEqual(records[1]["educator"], "braden")
-        self.assertEqual(records[2]["kind"], "settings.change")
-        self.assertEqual(records[2]["key"], "default_mode")
-        self.assertEqual(records[2]["old_value"], "edit")
-        self.assertEqual(records[2]["new_value"], "plan")
+        self.assertEqual(records[1]["conversation_id"], self.conv)
+        self.assertEqual(records[2]["kind"],
+                         "settings.conversation_overrides_cleared")
+        self.assertIn(self.conv, records[2]["old_value"])
         self.assertEqual(records[2]["educator"], "braden")
-        self.assertEqual(store.verify_audit(self.user), 3)
+        self.assertEqual(records[3]["kind"], "settings.change")
+        self.assertEqual(records[3]["key"], "default_mode")
+        self.assertEqual(records[3]["old_value"], "edit")
+        self.assertEqual(records[3]["new_value"], "plan")
+        self.assertEqual(records[3]["educator"], "braden")
+        self.assertEqual(store.verify_audit(self.user), 4)
 
     def test_educator_defaults_to_user_id(self):
         store.set_setting(self.user, "read_confirmations", True,
@@ -443,7 +452,7 @@ class SettingsTest(unittest.TestCase):
     # -- safety ---------------------------------------------------------------------------
 
     def test_user_id_traversal_rejected(self):
-        for bad in ["../evil", "..\\evil", "/abs", "", "a" * 65,
+        for bad in ["../evil", "..\\evil", "/abs", "", "a" * 161,
                     "semi;colon", "sp ace"]:
             with self.assertRaises(store.SettingsError, msg=bad):
                 store.get_setting(bad, "default_mode")
@@ -510,11 +519,9 @@ class ParserTest(unittest.TestCase):
                                              "approval-signing.key")
         self.user = "parser-user"
         self.conv = "parser-conv"
-        # Session-scoped state: conversation overrides are process-global
-        # in-memory; conversation grants are persisted and sealed.
+        # Conversation overrides and grants are persisted and sealed.
         # Reset both so each test starts clean.
-        with store._SESSION_LOCK:
-            store._CONVERSATION_MODES.clear()
+        store.clear_conversation_overrides(self.user)
         import modes.state as _mode_state
         _mode_state.revoke_edit_grant(self.user, reason="test reset")
 
@@ -640,7 +647,9 @@ class ParserTest(unittest.TestCase):
         self.assertEqual(op["action"], "conversation")
         self.assertEqual(op["key"], "conversation_mode")
         self.assertEqual(op["value"], "plan")
-        self.assertTrue(op["needs_confirmation"])
+        # Plan is the safe direction: it applies at once, like turning
+        # edit mode off.
+        self.assertFalse(op["needs_confirmation"])
         self.assertIn("this conversation only", reply)
 
     def test_use_edit_mode_for_this_conversation(self):
@@ -775,8 +784,7 @@ class Lane4HardeningTest(unittest.TestCase):
                                              "approval-signing.key")
         self.user = "lane4-user-%d" % os.getpid()
         self.conv = "lane4-conv-%d" % os.getpid()
-        with store._SESSION_LOCK:
-            store._CONVERSATION_MODES.clear()
+        store.clear_conversation_overrides(self.user)
         import modes.state as _mode_state
         _mode_state.revoke_edit_grant(self.user, reason="test reset")
 
@@ -880,7 +888,8 @@ class Lane4HardeningTest(unittest.TestCase):
             op, reply = self._parse(utterance)
             self.assertEqual(op["action"], "conversation", msg=utterance)
             self.assertEqual(op["value"], mode, msg=utterance)
-            self.assertTrue(op["needs_confirmation"], msg=utterance)
+            self.assertEqual(op["needs_confirmation"], mode == "edit",
+                             msg=utterance)
 
     def test_conversation_override_never_becomes_standing_grant(self):
         # The over-granting defect: a conversation-scoped ask must never
@@ -891,8 +900,7 @@ class Lane4HardeningTest(unittest.TestCase):
     def test_turn_on_off_verbs(self):
         cases = [("turn on edit mode", "edit"),
                  ("enable edit mode", "edit"),
-                 ("activate edit mode", "edit"),
-                 ("disable plan mode", "edit")]
+                 ("activate edit mode", "edit")]
         for utterance, mode in cases:
             op, reply = self._parse(utterance)
             self.assertEqual(op["action"], "set", msg=utterance)
@@ -906,6 +914,11 @@ class Lane4HardeningTest(unittest.TestCase):
             op, reply = self._parse(utterance)
             self.assertEqual(op["action"], "end_edit", msg=utterance)
             self.assertFalse(op["needs_confirmation"], msg=utterance)
+        # Negating plan mode is not an edit request: ask, never propose
+        # edit (settings/test_mode_intent.py holds the full table).
+        op, reply = self._parse("disable plan mode")
+        self.assertEqual(op["action"], "invalid")
+        self.assertIsNone(op["value"])
 
     def test_what_is_default_mode(self):
         op, reply = self._parse("what is my default mode")

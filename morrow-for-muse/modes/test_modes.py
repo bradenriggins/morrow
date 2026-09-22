@@ -88,8 +88,8 @@ def fake_settings():
     pkg.__path__ = []
     # Save the real modules so teardown restores them: merely popping
     # would make the next "from settings.store import ..." re-import a
-    # FRESH copy of the real store.py, splitting its process-global
-    # _CONVERSATION_MODES in two for any later test in this process.
+    # FRESH copy of the real store.py, splitting its module state (and
+    # exception classes) in two for any later test in this process.
     saved = {}
     for name in ("settings", "settings.store"):
         if name in sys.modules:

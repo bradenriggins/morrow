@@ -21,6 +21,10 @@ Scratch lives under the wave's authorized worker-browser scratch area
 (never /tmp) and is removed at the end.
 Run: python3 transport/chromium_memory_selftest.py  (exit 0 = all pass)
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import os
 import shutil
 import socket

@@ -25,6 +25,10 @@ Covers:
 MORROW_HOME is redirected to scratch under .selftest-work/ so the real
 ~/.morrow is never touched. Stdlib only.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 
 import json
 import os
@@ -79,8 +83,7 @@ class IntegrationCase(unittest.TestCase):
                                              "approval-signing.key")
         self.user = "integ-educator-%d" % os.getpid()
         self.conv = "integ-conv-%d" % os.getpid()
-        with settings._SESSION_LOCK:
-            settings._CONVERSATION_MODES.clear()
+        settings.clear_conversation_overrides(self.user)
         mode_state.revoke_edit_grant(self.user, reason="test reset")
 
     def tearDown(self):

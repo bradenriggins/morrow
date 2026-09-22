@@ -24,6 +24,7 @@ Stdlib only.
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 _TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -117,6 +118,52 @@ def _require_live_proven(block):
                           "request": block}, journal=False)
 
 
+class InvalidCourseId(ValueError):
+    """The course the chain was given is not a Canvas course number."""
+
+
+# The course id is interpolated into request paths, so only a plain
+# Canvas course number is accepted.
+_COURSE_ID_RE = re.compile(r"[1-9][0-9]{0,15}")
+_ID_SEGMENT_RE = re.compile(r"/\d+(?=/|$)")
+
+
+def _checked_course_id(course_id):
+    if isinstance(course_id, int) and not isinstance(course_id, bool):
+        course_id = str(course_id)
+    if not isinstance(course_id, str) \
+            or not _COURSE_ID_RE.fullmatch(course_id):
+        raise InvalidCourseId(
+            "course id %r is not a Canvas course number; nothing was read"
+            % (course_id,))
+    return course_id
+
+
+class _GatedReader:
+    """Every read the chain makes passes the live-proven catalog gate
+    first, matched by its path template (numeric ids as slots)."""
+
+    def __init__(self, reader):
+        self._reader = reader
+
+    @staticmethod
+    def _gate(path):
+        template = _ID_SEGMENT_RE.sub("/{id}", str(path).split("?", 1)[0])
+        _require_live_proven({"method": "GET",
+                              "url": "{canvas_base}" + template})
+
+    def get_paginated(self, path):
+        self._gate(path)
+        return self._reader.get_paginated(path)
+
+    def get_json(self, path):
+        self._gate(path)
+        return self._reader.get_json(path)
+
+    def __getattr__(self, name):
+        return getattr(self._reader, name)
+
+
 def _translate(operation, exc):
     """Route a chain failure through failures/translator.py.
 
@@ -158,6 +205,10 @@ def run_query(text, course_id, reader=None, tenant_base=None,
     own_reader = False
     try:
         try:
+            course_id = _checked_course_id(course_id)
+        except InvalidCourseId as exc:
+            raise _translate(operation, exc)
+        try:
             parsed = _intent.parse(text)
         except _intent.IntentNotRecognized as exc:
             raise _translate(operation, exc)
@@ -184,6 +235,7 @@ def run_query(text, course_id, reader=None, tenant_base=None,
         else:
             tenant_base = tenant_base or _live_read.TENANT_BASE
         _prog("reader_ready")
+        reader = _GatedReader(reader)
         if not tenant_base:
             # Defensive: an injected reader with no configured tenant.
             raise _translate(

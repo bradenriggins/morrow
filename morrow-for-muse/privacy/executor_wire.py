@@ -63,6 +63,11 @@ _ROSTER_NAME_KEYS = ("name", "fullname", "display_name", "sortable_name",
 _ROSTER_PASSTHROUGH_KEYS = ("email", "login_id", "sis_user_id", "sis_login_id",
                             "sortable_name", "short_name", "display_name",
                             "pronouns")
+# Routes whose top-level items ARE people (the user-collection reads and
+# a single user under them), so even a bare {"id", "name"} is a person.
+_USER_COLLECTION_RE = re.compile(
+    r"/(?:users|students|search_users|recent_students|gradeable_students|"
+    r"potential_collaborators)(?:/\d+)?/?$", re.IGNORECASE)
 
 
 def _source_vault_path():
@@ -103,7 +108,21 @@ def _exact_origin(tenant_base, error_cls):
     return "%s://%s" % (parts.scheme, host)
 
 
-def _harvest_roster(receipt):
+def _is_user_collection(entry):
+    try:
+        urls = _admission.extract_urls(entry)
+    except Exception:
+        urls = []
+    for url in urls:
+        path = urllib.parse.urlsplit(str(url or "")).path
+        if "/users/self" in path:
+            continue
+        if _USER_COLLECTION_RE.search(path):
+            return True
+    return False
+
+
+def _harvest_roster(receipt, items_are_people=False):
     """Recursively harvest learner records from a receipt.
 
     A dict counts as a learner record when it carries a user_id, or when
@@ -150,7 +169,7 @@ def _harvest_roster(receipt):
             for value in node:
                 visit(value, in_user_key)
 
-    visit(receipt)
+    visit(receipt, items_are_people)
     return found
 
 
@@ -324,7 +343,9 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
         }
 
     receipt = result.get("receipt")
-    roster_entries = _harvest_roster(receipt)
+    # On a user-collection route the items are people, so even a bare
+    # {"id", "name"} joins the roster and is labeled.
+    roster_entries = _harvest_roster(receipt, _is_user_collection(entry))
     vault_path = _source_vault_path()
     if _privacy_core.AESGCM is None:
         # Fail closed AND actionable, before the boundary's invoke()

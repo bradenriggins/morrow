@@ -20,8 +20,9 @@ your laptop's logout does not touch it.
 
 ## Full disconnect (Morrow can no longer reach Canvas)
 
-Say "disconnect Morrow from Canvas". Muse runs `bin/morrow disconnect`
-and tells you the result. It:
+Say "disconnect Morrow from Canvas". Muse tells you what will be
+removed and asks you to confirm. After you say yes, Muse runs
+`bin/morrow disconnect --yes` and tells you the result. It:
 
 1. stops the helper and its browser,
 2. removes the helper's restart schedule (otherwise it would start the

@@ -5,6 +5,10 @@ session-dead, uncertain writes, fail-fast, and duplicate protection.
 
 No browser needed. Run: python3 transport/browser_backend_selftest.py
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import json
 import os
 import re
@@ -1013,10 +1017,12 @@ def main():
     # (kind="undo" with the DELETE report).
     op_id = str(uuid.uuid4())
     _up = {"course_id": "89585"}
+    _uentry, _uparams = ex.undo_approval_subject(
+        WRITE_ENTRY, _up, "orig-op-1", {"id": 99})
     uout = bb.dispatch_browser_undo(
         WRITE_ENTRY, _up, {"id": 99}, "orig-op-1",
         LANE_STATE, {}, brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
-        approval=_approve("test.create_assignment", _up))
+        approval=_approve(_uentry["name"], _uparams))
     check("undo dispatch renders fetch brief",
           uout["status"] == "awaiting_browser_task"
           and uout["kind"] == "undo"
@@ -1034,7 +1040,8 @@ def main():
         uout["op_id"], WRITE_ENTRY, _up, None,
         report((uout["ops"][0], 200, json.dumps({"id": 99}))),
         LANE_STATE, {}, kind="undo", of_op_id="orig-op-1",
-        brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR)
+        brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
+        undo_params=uout["undo_params"])
     check("undo completion journals the undo",
           urec["op_id"] == uout["op_id"] and urec["undo_of"] == "orig-op-1")
     _urec = ex.find_journal_op(uout["op_id"])

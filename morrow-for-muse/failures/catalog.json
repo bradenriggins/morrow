@@ -50,7 +50,12 @@
       "auto_action": "Verify the helper session is alive and the tenant tab is open, re-harvest _csrf_token from the live document.cookie, and resend the write through the canonical page-context path.",
       "escalate_when": "the helper session is healthy and the tenant tab is open but document.cookie still has no _csrf_token",
       "signature": {
-        "error_class": {"in": ["CsrfTokenMissing", "BrowserCsrfTokenMissing"]}
+        "error_class": {
+          "in": [
+            "CsrfTokenMissing",
+            "BrowserCsrfTokenMissing"
+          ]
+        }
       },
       "signature_notes": "fail-closed pre-send refusal raised by transport/local_chromium.py (CsrfTokenMissing) or transport/browser_backend.py (BrowserCsrfTokenMissing); no provider contact happened",
       "severity_hint_inventory": "config",
@@ -682,7 +687,7 @@
       "title": "Session expires with no warning (zero pre-expiry awareness)",
       "surface": "session",
       "severity_hint": "high",
-      "root_cause": "Verified gap: no code consumes session/capture.py's captured_at for horizon math or reads cookie expires for warnings. The docs are honest that expiry happens; they just promise no warning.",
+      "root_cause": "Verified gap: no code consumes the rig session capture's captured_at (session/capture.py, dev tree only, not shipped) for horizon math or reads cookie expires for warnings. The docs are honest that expiry happens; they just promise no warning.",
       "is_not": "This is not a monitoring failure on a specific day; the capability was never built.",
       "agent_message": "What was attempted: I tried {operation} and found the session had expired, with no warning beforehand. What the evidence showed: the system watches the helper's process health but never tracks the session's expiry horizon, so the first sign of expiry is always a failed operation. What this means: surprises at expiry time are expected, not a one-off glitch. What happens next: I am treating this as the standard re-sign-in flow: halt writes, quarantine in-flight ops, and ask you to sign in once through the helper page.",
       "auto_action": "Same as session-dead: halt, quarantine, require re-sign-in with principal re-verification.",
@@ -741,7 +746,7 @@
         "provider": "moodle",
         "moodle_kind": "login_failed"
       },
-      "signature_notes": "evidence: \"live-proof 2026-09-22: verified live, default updated, login re-verified OK\"; mechanism: \"moodle/login.py defaulted to 'moodle'; the provider's current published password differs\"; symptom: \"login rejects the defaulted password\"",
+      "signature_notes": "evidence: \"live-proof 2026-09-22: verified live, default updated, login re-verified OK\"; mechanism: \"moodle/login.py (dev tree only, not shipped) defaulted to 'moodle'; the provider's current published password differs\"; symptom: \"login rejects the defaulted password\"",
       "severity_hint_inventory": "config",
       "placeholders": []
     },
@@ -764,7 +769,7 @@
           "truthy": true
         }
       },
-      "signature_notes": "dead_route: \"grade/edit/tree/action.php?action=delete (silently fails on 5.2)\"; evidence: \"live-proof 2026-09-22 Moodle lane: fixed and documented in moodle/README.md\"; verify_rule: \"verify-gone required after delete\"; working_route: \"grade tree with action=delete&confirm=1&eid=igN\"",
+      "signature_notes": "dead_route: \"grade/edit/tree/action.php?action=delete (silently fails on 5.2)\"; evidence: \"live-proof 2026-09-22 Moodle lane: fixed and documented in moodle/README.md (dev tree only, not shipped)\"; verify_rule: \"verify-gone required after delete\"; working_route: \"grade tree with action=delete&confirm=1&eid=igN\"",
       "severity_hint_inventory": "provider",
       "placeholders": []
     },
@@ -1114,6 +1119,28 @@
       "severity_hint_inventory": "transient",
       "placeholders": [
         "operation"
+      ]
+    },
+    {
+      "id": "write-readback-unconfirmed",
+      "title": "Write returned success but its readback could not confirm it (UncertainWrite)",
+      "surface": "canvas",
+      "severity_hint": "medium",
+      "root_cause": "Verified mechanism: every write is read back with a fresh GET and compared field by field. When that GET itself fails (HTTP 429 or 5xx, a transport error, or an answer that is not an object) after Canvas answered the write with success, the executor cannot prove the stored values either way, so it journals the op as uncertain instead of failed.",
+      "is_not": "This is not a failed write and not a confirmed success. Canvas accepted the write; only the check afterward did not complete.",
+      "agent_message": "What was attempted: I tried {operation}. What the evidence showed: Canvas answered the write with success, but when I read the object back to check it, that read did not complete (reference {correlation_id}), so I could not confirm what was stored. What this means: the change most likely landed, but it is unconfirmed, not a failure, and sending it again could make a duplicate. What happens next: I will read the object again to confirm it, and I will not resend the write unless that read proves it did not land.",
+      "auto_action": "Journal as uncertain; reconcile with a fresh readback of the written object; never blind-retry the write.",
+      "escalate_when": "Escalate if repeated readbacks cannot confirm the object, so the educator can check it in the Canvas UI.",
+      "signature": {
+        "error_class": "UncertainWrite",
+        "error_text": {
+          "contains": "readback could not confirm"
+        }
+      },
+      "signature_notes": "exception: \"UncertainWrite\" raised by dispatch/executor.py dispatch_entry when run_write_readback's GET fails after a 2xx write; journal: verification \"uncertain\", uncertain=true.",
+      "placeholders": [
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -1682,7 +1709,7 @@
       "is_not": "This is not an auth failure. The call reached Moodle; the route itself is what changed.",
       "root_cause": "The Moodle webservice route answered with a shape the lane does not recognize, or the route is dead (for example a stale grade deletion route after a Moodle upgrade).",
       "severity_hint": "medium",
-      "surface": "moodle/session.py, moodle/probe.py",
+      "surface": "moodle/session.py, moodle/probe.py (dev tree only, not shipped)",
       "title": "Moodle webservice route returned an unexpected shape or is dead",
       "signature_notes": "moodle_route_shape: {\"in\": [\"unexpected\", \"dead\"]}; provider: \"moodle\"",
       "placeholders": [
@@ -1831,6 +1858,24 @@
         "operation",
         "evidence_summary",
         "correlation_id"
+      ]
+    },
+    {
+      "id": "query-course-id-invalid",
+      "title": "Query course is not a Canvas course number (InvalidCourseId)",
+      "surface": "query",
+      "severity_hint": "low",
+      "root_cause": "Verified mechanism: the failed-students chain puts the course id into Canvas request paths, so it accepts only a plain Canvas course number. Anything else (a path fragment, a query string, text, an empty value) is refused before any request is built.",
+      "is_not": "This is not a Canvas error and not a permissions problem: no request was sent.",
+      "agent_message": "What was attempted: I tried to {operation}. What the evidence showed: the course I was given is not a Canvas course number, so I did not send any request. What this means: nothing was read and nothing in your course changed. What happens next: tell me the course by name, or by the number in its Canvas address (for example 12345 in /courses/12345), and I will run the query again.",
+      "auto_action": "Refuse before any read; ask the educator which course they mean.",
+      "escalate_when": "Never: the educator names the course and the query runs again.",
+      "signature": {
+        "error_class": "InvalidCourseId"
+      },
+      "signature_notes": "exception: \"InvalidCourseId\" raised by query/chain.py before any read.",
+      "placeholders": [
+        "operation"
       ]
     },
     {

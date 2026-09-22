@@ -30,6 +30,10 @@ Hermetic: scratch journal under this file's directory (never /tmp, per
 the standing rule); no network, no provider. Signal state is saved and
 restored so the test runner's own handlers are untouched.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import contextlib
 import io
 import os
@@ -330,8 +334,11 @@ try:
         cs._auth_state = "ready"
         return cs
 
-    def _u_approve(entry, params):
-        rec = _ad.mint_approval(entry, params, "https://canvas.example.edu")
+    def _u_approve(entry, params, of_op_id):
+        u_entry, u_params = ex.undo_approval_subject(entry, params,
+                                                     of_op_id, {})
+        rec = _ad.mint_approval(u_entry, u_params,
+                                "https://canvas.example.edu")
         _ad.sign_approval(
             rec, "I, the educator, authorize this wave-5 selftest undo",
             channel="driver")
@@ -342,9 +349,10 @@ try:
     _u0 = _u_entry("w5-undo-ok")
     _s0 = _u_session([("ok", 200, '{"id": 112, "name": "Intended Course"}'),
                       ("ok", 200, '{"id": 5}')])
-    _out0 = ex.dispatch_undo(_u0, _u_params, {}, str(uuid.uuid4()),
+    _of0 = str(uuid.uuid4())
+    _out0 = ex.dispatch_undo(_u0, _u_params, {}, _of0,
                              _s0, {"max_body_bytes": 262144},
-                             approval=_u_approve(_u0, _u_params))
+                             approval=_u_approve(_u0, _u_params, _of0))
     check("undo harness baseline: dispatched and journaled",
           bool(_out0.get("op_id"))
           and [m for m, _u in _s0._fake_transport.calls] == ["GET", "DELETE"])
@@ -355,9 +363,10 @@ try:
     _s1 = _u_session([("ok", 200, '{"id": 112, "name": "Intended Course"}'),
                       ("ok", 200, '{"id": 5}')])
     try:
-        ex.dispatch_undo(_u1, _u_params, {}, str(uuid.uuid4()),
+        _of1 = str(uuid.uuid4())
+        ex.dispatch_undo(_u1, _u_params, {}, _of1,
                          _s1, {"max_body_bytes": 262144},
-                         approval=_u_approve(_u1, _u_params))
+                         approval=_u_approve(_u1, _u_params, _of1))
         check("undo with pending signal stops before provider I/O",
               False, "no exception")
     except ex.ExecutorShutdown:

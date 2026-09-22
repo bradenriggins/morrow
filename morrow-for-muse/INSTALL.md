@@ -42,7 +42,8 @@ python3 scripts/carve.py --zip
 # -> <repo>/dist/morrow-muse-connector-0.3.0.zip
 ```
 
-`scripts/carve.py` builds the installable tree from the files git tracks:
+`scripts/carve.py` (in the source repository only, not shipped in the
+release) builds the installable tree from the files git tracks:
 it leaves out the dev-only surface (live-test drivers, proof evidence,
 Moodle research code), writes `pack/carve-manifest.json` (the SHA-256
 of every shipped file, which install step 2 verifies), and refuses to
@@ -304,6 +305,10 @@ the live-proven Canvas core only.
 bin/morrow disconnect          # prompts before it deletes anything
 bin/morrow disconnect --yes
 ```
+
+Without a terminal (an agent run) there is no prompt to answer, so a
+run without `--yes` changes nothing and says to rerun with `--yes`.
+The agent asks the educator to confirm in chat first.
 
 Stops the helper and its Chromium (exact-PID signaling only), removes
 this tree's keepalive cron entry, and deletes the Canvas session

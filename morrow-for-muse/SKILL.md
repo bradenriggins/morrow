@@ -103,7 +103,10 @@ preemptively and never on every run: a healthy session needs no page.
    and confirm it is them before doing anything else. keepalive also
    runs this on its first healthy tick. The pin never changes silently:
    a different account signing in later is refused until the educator
-   disconnects (`bin/morrow disconnect`) and signs in fresh.
+   disconnects and signs in fresh. To disconnect, tell the educator
+   what will be removed, get their yes in chat, then run
+   `bin/morrow disconnect --yes` (without a terminal, a run without
+   `--yes` changes nothing and says so).
 
 ## Reading /status: the fields and what they mean
 
@@ -258,7 +261,13 @@ educator as part of the approval.
 
 Entry manifests: `execute --entry <manifest.json> --params '{...}'`
 dispatches a manifest entry the same way. `undo` runs an entry's undo
-block as a new, separately journaled operation.
+block as a new, separately journaled operation. An undo is its own
+write: in plan mode it needs its own educator approval, minted for
+`dispatch.executor.undo_approval_subject(entry, params, of_op_id,
+result)` (bound to the undo action and the object it targets). The
+forward write's approval never admits its undo, and a DELETE undo asks
+for deletion confirmation in edit mode when `confirm_destructive_writes`
+is on. `--dry-run` journals nothing, in either mode.
 
 ## Governance (not optional)
 
@@ -319,15 +328,23 @@ both modes.
   time limit. An old install's saved timed grant is not honored; it
   lapses to plan mode.
 - Turning edit off ("turn off edit mode", "stop edit mode", "use plan
-  mode", "back to plan mode") means plan everywhere: `default_mode`
-  goes back to plan and every grant and per-conversation override is
-  cleared (`modes.state.switch_mode(user_id, "plan")`). It applies at
-  once, with no confirmation round trip.
+  mode", "back to plan mode", "don't use edit mode", "no more edit
+  mode") means plan everywhere: `default_mode` goes back to plan and
+  every grant and per-conversation override is cleared
+  (`modes.state.switch_mode(user_id, "plan")`). It applies at once,
+  with no confirmation round trip. Any negated or off phrasing about
+  edit mode is plan; a negated plan phrasing ("turn off plan mode")
+  changes nothing and asks which mode the educator wants. The parser
+  never proposes edit mode from a negation.
 - Most recent explicit action wins between a per-conversation override
-  ("use edit mode for this conversation", never persisted) and the
-  persisted default. The default is tamper-sealed and survives a
-  restart; per-conversation overrides are in-memory, failing safe
-  toward plan mode on restart. Resolve with
+  ("use plan mode for this conversation", "use edit mode for this
+  conversation") and the persisted default. Both are tamper-sealed in
+  the settings file, journaled, and seen by every later dispatch
+  process. A plan override applies at once and stays until the
+  conversation ends. An edit override needs the educator's yes and
+  ends when the conversation ends (`settings.store.end_conversation`)
+  or when edit mode is turned off anywhere. An unreadable or tampered
+  override store resolves to plan. Resolve with
   `modes.state.current_mode(user_id, conversation_id)` (the single
   authoritative resolver; `settings.store.effective_mode` delegates to
   it); Agent A's contract `settings.store.get_setting(user_id, key)`

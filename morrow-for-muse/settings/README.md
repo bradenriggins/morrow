@@ -97,6 +97,9 @@ Your settings live at `~/.morrow/settings/<your-id>.json`, with the
 change journal alongside it. They survive restarts, reinstalls, and
 upgrades, and they are never inside the connector's own files. The
 file is tamper-sealed, like approval records. Per-conversation
-overrides are held in memory on purpose, so a restart always fails
-safe back toward plan mode. Timed edit grants saved by an older
+overrides ("use plan mode for this conversation") are saved in the same
+sealed file, so they hold for the whole conversation. A plan override
+stays until the conversation ends. An edit override ends when the
+conversation ends or when you turn edit mode off anywhere. If the file
+cannot be read or trusted, Morrow uses plan mode. Timed edit grants saved by an older
 install are not honored: they lapse to plan mode.

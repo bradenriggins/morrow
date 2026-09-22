@@ -448,7 +448,7 @@ Do not go looking for these files in the tree.
 | # | Tool | Method | Path | RO | Mechanism | Status | Evidence / notes |
 |---|------|--------|------|----|-----------|--------|------------------|
 | C-226 | canvas_bulk_fetch_user_tags_for_multiple_users_in_course | GET | /api/v1/courses/{course_id}/bulk_user_tags | R | canvas-batch | live-proven | 2026-09-21 Chromium GET battery: HTTP 200 verified live (in-page fetch, CDP); body object keys: . |
-| C-227 | canvas_list_groups_available_in_context_courses | GET | /api/v1/courses/{course_id}/groups | R | canvas-batch | live-proven | 2026-09-21 Chromium GET battery: HTTP 200 verified live (in-page fetch, CDP); body array[0]. |
+| C-227 | canvas_list_groups_available_in_context_courses | GET | /api/v1/courses/{course_id}/groups | R | canvas-batch | live-proven [LEARNER-DATA] | 2026-09-21 Chromium GET battery: HTTP 200 verified live (in-page fetch, CDP); body array[0]. |
 
 ### late_policy (3)
 

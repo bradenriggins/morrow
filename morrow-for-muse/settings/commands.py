@@ -18,14 +18,20 @@ Utterance mapping:
                                            standing edit grant, no
                                            time limit)
   "use plan mode" / "switch to plan mode" / "back to plan mode" /
-  "stop|end|exit edit mode" / "turn off edit mode"
-                                         -> end_edit: plan everywhere
+  "stop|end|exit edit mode" / "turn off edit mode" / "plan mode please"
+  / "don't use edit mode" / "no more edit mode" / "ask me before every
+  write"                                 -> end_edit: plan everywhere
                                            (default_mode = plan, every
                                            grant and override cleared)
+  "turn off plan mode" / "stop asking before writes"
+                                         -> invalid: asks which mode;
+                                           a negation never proposes edit
   "what is my default mode"              -> reports the saved default
   "switch to edit mode for this conversation" -> conversation override
                                            (any verb; "chat" also works)
-  "use plan mode for this conversation"  -> conversation override = plan
+  "use plan mode for this conversation" / "turn off edit mode for this
+  chat"                                  -> conversation override = plan
+                                           (applies at once)
   "use edit mode for this conversation"  -> conversation override = edit
   "edit for 30 minutes"                  -> explains edit is not timed
   "stop asking me to confirm deletions"  -> confirm_destructive_writes = off
@@ -80,7 +86,8 @@ from settings.store import (  # noqa: E402
 
 
 def _norm(text):
-    text = (text or "").strip().lower()
+    text = (text or "").replace("\u2019", "'").replace("\u2018", "'")
+    text = text.strip().lower()
     text = re.sub(r"[?!.,;:]+$", "", text)
     text = re.sub(r"\s+", " ", text)
     return text
@@ -128,8 +135,8 @@ def _echo_conversation(mode, user_id):
             "confirm, or 'cancel'." % default)
     return (
         "For this conversation only, switching to plan mode: writes will "
-        "surface approval here. Your saved default stays %s. Say 'yes' "
-        "to confirm, or 'cancel'." % default)
+        "ask for your approval here. Your saved default stays %s. I will "
+        "tell you the result as soon as it is done." % default)
 
 
 def _explain_not_timed():
@@ -325,7 +332,8 @@ def _show_sentence(user_id, conversation_id):
     override = get_conversation_mode(user_id, conversation_id) \
         if conversation_id else None
     if override:
-        lines.append("- this conversation: %s mode override (not saved)"
+        lines.append("- this conversation: %s mode override (until this "
+                     "conversation ends)"
                      % override)
     lines.append("Say 'use edit mode', 'turn off edit mode', or 'use plan "
                  "mode for this conversation' to change your mode, or name "
@@ -337,23 +345,105 @@ _TIME_LIMIT = re.compile(
     r"\b\d+\s*(?:minutes?|mins?|hours?|hrs?)\b|\ban?\s+hour\b|"
     r"\bedit\s+sessions?\b|\bedit\s+grant\s+(?:default\s+)?duration\b")
 
-# Phrases that mean "edit off". Every one of them lands in plan mode
-# everywhere; none of them may leave a standing edit default behind.
-_PLAN_DIRECTION = [
-    re.compile(r"\buse\s+plan\s+mode\b"),
-    re.compile(r"\b(end|stop|exit|leave|quit|cancel)\b.{0,12}\bedit\s+"
-               r"(mode|session)s?\b"),
-    re.compile(r"\bedit\s+(mode|session)s?\b.{0,12}\b(end|over|stop|off)\b"),
-    re.compile(r"\bback\s+to\s+plan\b"),
-    re.compile(r"\b(stop|quit)\s+editing\b"),
-    re.compile(r"\b(turn\s+off|disable|deactivate)\b.{0,24}\bedit\s+mode\b"),
-    re.compile(r"\b(switch|change|go|move|set|make|turn\s+on|enable|"
-               r"activate)\b.{0,24}\bplan\s+mode\b"),
-]
+# ---------------------------------------------------------------------------
+# Mode intent. Off-direction is decided BEFORE on-direction, and anything
+# negated or ambiguous lands in plan or asks. Nothing here can propose
+# edit mode from a phrase that says off, stop, leave, end, exit, no more,
+# don't, never, or not.
+# ---------------------------------------------------------------------------
+
+# "edit mode" / "edit session" (off-direction also accepts "editing").
+_EDIT_MODE_REF = re.compile(
+    r"\bedit\s+mode\b|\b(?:to|into)\s+(?:the\s+)?edit$")
+_EDIT_OFF_REF = re.compile(
+    r"\bedit(?:ing)?\s+(?:mode|session)s?\b|\bediting\b|"
+    r"\b(?:to|into)\s+(?:the\s+)?edit$")
+_PLAN_REF = re.compile(
+    r"\bplan(?:ning)?\s+mode\b|\b(?:to|into|in)\s+(?:the\s+)?plan$|^plan$")
+# "ask me before every write", "require approval again": plan direction.
+_ASK_FIRST = re.compile(
+    r"\bask(?:ing)?(?:\s+me)?(?:\s+first)?\s+before\s+(?:(?:every|each|any|"
+    r"all|making|doing)\s+)?(?:writes?|changes?|edits?|writing|changing)\b|"
+    r"\brequir(?:e|ing)\s+(?:my\s+)?approvals?\b|"
+    r"\b(?:need|want)\s+(?:my\s+)?approval\b")
+_WITHOUT_ASKING = re.compile(
+    r"\bwithout\s+(?:asking|approval|checking|permission)\b")
+_NEGATION = re.compile(
+    r"\b(?:don't|dont|do\s+not|doesn't|never|no|not|no\s+longer)\b")
+_OFF_WORD = re.compile(
+    r"\b(?:off|stop\w*|end|ends|ended|ending|exit\w*|leav\w*|quit\w*|"
+    r"cancel\w*|disabl\w*|deactivat\w*|kill\w*|drop\w*|revok\w*|out\s+of|"
+    r"done\s+with|finish\w*\s+with|enough|over)\b")
+_ON_WORD = re.compile(
+    r"\b(?:use|using|switch|change|go|move|set|make|turn\s+on|enable|"
+    r"activate|put|start|want|like|prefer|give|default|into|to|please|"
+    r"let's|lets|try|keep|stay)\b")
+_EXPLICIT_ON = re.compile(
+    r"\b(?:use|switch|change|set|make|turn\s+on|enable|activate|put|go)\b")
+_CONVERSATION_SCOPE = re.compile(
+    r"\b(?:for|in|during|within)\s+(?:this|the|our)\s+(?:current\s+)?"
+    r"(?:conversation|chat|thread)\b|\bthis\s+(?:conversation|chat)\s+only\b")
+_REQUEST_PREFIX = re.compile(
+    r"^(?:can|could|would|will)\s+you\s+(?:please\s+)?")
+_QUESTION = re.compile(
+    r"^(?:what|which|how|why|when|where|who|is|are|am|does|do\s+i|did|"
+    r"explain|tell\s+me\s+about)\b|\bknow\s+about\b|\bmeans?\b")
+
+_ASK = "ask"
 
 
-def _is_plan_direction(t):
-    return any(p.search(t) for p in _PLAN_DIRECTION)
+def _mode_intent(t):
+    """The educator's mode intent in normalized text t.
+
+    Returns None (not a mode command), _ASK (negated or ambiguous: ask,
+    never propose edit), or (mode, scope) with mode "plan"|"edit" and
+    scope "conversation"|"default". Checks run off-direction first.
+    """
+    t = _REQUEST_PREFIX.sub("", t)
+    edit_on = bool(_EDIT_MODE_REF.search(t))
+    edit_any = bool(_EDIT_OFF_REF.search(t))
+    plan = bool(_PLAN_REF.search(t))
+    ask_first = _ASK_FIRST.search(t)
+    without = bool(_WITHOUT_ASKING.search(t))
+    if not (edit_any or plan or ask_first or without):
+        return None
+    if _QUESTION.search(t):
+        return None
+    scope = "conversation" if _CONVERSATION_SCOPE.search(t) else "default"
+    negated = bool(_NEGATION.search(t))
+    off = bool(_OFF_WORD.search(t))
+    if ask_first:
+        before = t[:ask_first.start()]
+        if _NEGATION.search(before) or _OFF_WORD.search(before):
+            return _ASK
+        return ("plan", scope)
+    if without and (negated or off):
+        return ("plan", scope)
+    if edit_any and (negated or off):
+        return ("plan", scope)
+    if plan and (negated or off):
+        return _ASK
+    if plan and edit_on:
+        if re.search(r"\bto\s+(?:the\s+)?edit\b", t) \
+                and not re.search(r"\bto\s+(?:the\s+)?plan\b", t):
+            return ("edit", scope)
+        return ("plan", scope)
+    if plan:
+        return ("plan", scope)
+    if edit_on and _ON_WORD.search(t):
+        if _TIME_LIMIT.search(t) and not _EXPLICIT_ON.search(t):
+            # "give me edit mode for 2 hours" asks for a timed grant,
+            # which does not exist: explain instead of proposing one.
+            return None
+        return ("edit", scope)
+    return None
+
+
+def _ask_which_mode():
+    return ("I did not change anything, because I am not sure which way "
+            "you mean. Say 'use plan mode' to have every write ask for your "
+            "approval first, or 'use edit mode' to let writes run without "
+            "asking.")
 
 
 def _help_sentence():
@@ -388,51 +478,30 @@ def parse_command(text, user_id=None, conversation_id=None):
     return op, reply
 
 
-def _conversation_override_mode(t):
-    """A (plan|edit) mode the educator scoped to this conversation.
-
-    Accepts verb-first ("switch to edit mode for this conversation")
-    and scope-first ("for this conversation, use plan mode") orders,
-    and "chat" as well as "conversation".
-    """
-    m = re.search(r"\b(plan|edit)\s+mode\b.{0,40}\bfor\s+this\s+"
-                  r"(conversation|chat)\b", t)
-    if m:
-        return m.group(1)
-    m = re.search(r"\bfor\s+this\s+(conversation|chat)\b.{0,40}\b"
-                  r"(plan|edit)\s+mode\b", t)
-    if m:
-        return m.group(2)
-    return None
-
-
 def _parse_command_inner(text, user_id=None, conversation_id=None):
     t = _norm(text)
 
-    # --- per-conversation override (before bare "use edit mode") --------
-    # Guard, not just the "use X mode for this conversation" phrasing:
-    # "switch to edit mode for this conversation" must never fall
-    # through to the persisted default (that would over-grant a standing
-    # edit grant the educator did not ask for).
-    conv_mode = _conversation_override_mode(t)
-    if conv_mode:
-        op = {"action": "conversation", "key": "conversation_mode",
-              "value": conv_mode, "needs_confirmation": True}
-        return op, _echo_conversation(conv_mode, user_id)
-
-    # --- edit off: plan everywhere ---------------------------------------
-    if _is_plan_direction(t):
-        op = {"action": "end_edit", "key": "default_mode", "value": "plan",
-              "needs_confirmation": False}
-        return op, ("Turning edit mode off everywhere. I will tell you "
-                    "the result as soon as it is done.")
-
     timed_ask = bool(re.search(r"\bedit", t) and _TIME_LIMIT.search(t))
 
-    # --- standing edit grant: bare "use edit mode" ----------------------
-    # Braden's model: no time handcuffs. "use edit mode" grants the
-    # standing edit mode (default_mode="edit"), with no time limit.
-    if re.search(r"\buse\s+edit\s+mode\b", t):
+    intent = _mode_intent(t)
+    if intent == _ASK:
+        op = {"action": "invalid", "key": "default_mode", "value": None,
+              "needs_confirmation": False}
+        return op, _ask_which_mode()
+    if intent is not None:
+        mode, scope = intent
+        if scope == "conversation":
+            # Plan is the safe direction and applies at once; edit for
+            # this conversation needs the educator's yes.
+            op = {"action": "conversation", "key": "conversation_mode",
+                  "value": mode, "needs_confirmation": mode == "edit"}
+            return op, _echo_conversation(mode, user_id)
+        if mode == "plan":
+            op = {"action": "end_edit", "key": "default_mode",
+                  "value": "plan", "needs_confirmation": False}
+            return op, ("Turning edit mode off everywhere. I will tell you "
+                        "the result as soon as it is done.")
+        # The standing edit grant: no time limit.
         op = {"action": "set", "key": "default_mode", "value": "edit",
               "needs_confirmation": True}
         return op, _echo_default_mode("edit", user_id, timed_ask)
@@ -448,22 +517,6 @@ def _parse_command_inner(text, user_id=None, conversation_id=None):
         op = {"action": "status", "key": "default_mode", "value": None,
               "needs_confirmation": False}
         return op, ("Your saved default mode is %s." % default)
-
-    # --- persisted default mode: edit on ----------------------------------
-    # Plan-direction phrasings were handled above, so what reaches here
-    # names edit mode (or negates plan mode, "disable plan mode").
-    m = re.search(r"\b(switch|change|make|set|default|turn\s+on|turn\s+off|"
-                  r"enable|disable|activate|deactivate)\b.{0,24}\b"
-                  r"(plan|edit)\s+mode\b", t)
-    if m and re.search(r"\bmode\b", t):
-        verb = re.sub(r"\s+", " ", m.group(1))
-        mode = m.group(2)
-        if verb in ("turn off", "disable", "deactivate"):
-            mode = "plan" if mode == "edit" else "edit"
-        if mode == "edit":
-            op = {"action": "set", "key": "default_mode", "value": "edit",
-                  "needs_confirmation": True}
-            return op, _echo_default_mode("edit", user_id, timed_ask)
 
     # --- a time limit on edit mode: explain, never pretend -----------------
     if timed_ask:

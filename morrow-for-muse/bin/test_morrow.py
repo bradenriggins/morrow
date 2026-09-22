@@ -185,7 +185,7 @@ def test_version_output(cli, capsys):
     out = capsys.readouterr().out
     assert out.startswith("morrow %s" % _version_text())
     for cmd in ("dispatch", "audit", "plan", "query", "doctor",
-                "version", "failure"):
+                "version", "failure", "disconnect"):
         assert cmd in out
     assert "\u2014" not in out
 

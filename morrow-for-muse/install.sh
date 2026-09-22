@@ -661,9 +661,8 @@ if [ ! -f "${TREE_ENV_FILE}" ]; then
 # CANVAS_BASE=https://myschool.instructure.com
 # There is no default tenant; the login helper refuses to start without one.
 #
-# Tree-scoped: profile and ports come from this tree's location unless you
-# pin them here:
-# LOGIN_HELPER_PROFILE_DIR=/path/to/profile   (default: <tree>/helper/profile)
+# Tree-scoped: the helper profile is always <tree>/helper/profile
+# (keepalive pins it). The ports can be pinned here:
 # LOGIN_HELPER_PORT=8901                      (default 8901)
 # LOGIN_HELPER_CDP_PORT=19223                 (default 19223)
 # The legacy global ~/.morrow/env is honored for CANVAS_BASE only.

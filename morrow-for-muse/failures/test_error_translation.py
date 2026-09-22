@@ -2,7 +2,7 @@
 """Full test suite for the Morrow error translation layer.
 
 Covers failures/translator.py + failures/catalog.py + failures/catalog.json:
-  1. per-mode tests: every one of the 81 catalog modes gets a synthetic
+  1. per-mode tests: every one of the 83 catalog modes gets a synthetic
      raw error; asserts the right mode_id, the four message anchors, all
      placeholders filled, no em dashes, no shrug language, and the
      escalate flag matching the catalog.
@@ -23,6 +23,10 @@ list for the regression scan; it excludes itself from that scan.
 """
 
 from __future__ import annotations
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 
 import ast
 import io
@@ -46,6 +50,7 @@ from query import intent as _qintent  # noqa: E402
 from query import quiz_resolve as _qresolve  # noqa: E402
 from query import thresholds as _qthresholds  # noqa: E402
 from query import live_read as _qliveread  # noqa: E402
+from query import chain as _qchain  # noqa: E402
 
 
 def _student_ambiguous_case():
@@ -508,6 +513,11 @@ MODE_CASES = {
     "quarantine-op-id-collision": lambda: {"quarantine_id_collision": True},
     "journal-torn-fail-closed": lambda: {"journal_torn": True},
     "uncertain-write-ambiguous": lambda: UncertainWrite("ambiguous"),
+    "query-course-id-invalid": lambda: _qchain.InvalidCourseId(
+        "course id '1/../2' is not a Canvas course number"),
+    "write-readback-unconfirmed": lambda: UncertainWrite(
+        "write op x returned success, but the readback could not confirm "
+        "it: write readback GET /x failed HTTP 503"),
     "write-not-attempted": lambda: WriteNotAttempted("never dispatched"),
     "session-flapping-multi-uncertain": lambda: {
         "session_dead_signal": True, "uncertain_count": 3,
@@ -580,8 +590,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_81_modes(self):
-        self.assertEqual(81, len(CATALOG.entries))
+    def test_catalog_has_83_modes(self):
+        self.assertEqual(83, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):

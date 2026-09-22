@@ -57,6 +57,10 @@ test_shipped() {
     # inherits it; the memory-watch cases below assert against
     # ${TREE_STATE_DIR}, which the keepalive itself computes from this.
     export MORROW_TREE_STATE_DIR="${SCRATCH}/tree-state"
+    # Everything else under MORROW_HOME (the legacy env, lane state)
+    # resolves under scratch too, never the real ~/.morrow.
+    export MORROW_HOME="${SCRATCH}/morrow-home"
+    mkdir -p "${MORROW_HOME}"
     export KEEPALIVE_SOURCE_ONLY=1
     # shellcheck disable=SC1090
     . "${ka}"

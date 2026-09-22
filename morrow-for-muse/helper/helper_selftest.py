@@ -10,6 +10,10 @@ Covers the packaging contract, not live browser behavior:
 
 Run: python3 helper/helper_selftest.py  (from the connector tree root)
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import os
 import stat
 import subprocess

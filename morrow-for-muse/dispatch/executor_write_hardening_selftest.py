@@ -32,6 +32,10 @@ launched, no Canvas touched):
 
 No network, no Chromium, no session. Fakes only.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import json
 import os
 import shutil
@@ -586,12 +590,18 @@ except ex.WriteFieldMismatch as exc:
     check("readback 500 keeps the op uncertain", False,
           "hard failure on an unconfirmed readback: %s" % exc)
 except ex.VerificationFailed as exc:
+    check("readback 500 keeps the op uncertain", False,
+          "reported as a failed verification, not uncertain: %s" % exc)
+except ex.UncertainWrite as exc:
     check("readback 500 keeps the op uncertain", True)
     check("readback 500 is not reported as success", True)
     jrec = ex.find_journal_op(plan.op_id)
     check("readback 500 journals uncertain=True",
           jrec is not None and jrec.get("uncertain") is True,
           repr((jrec or {}).get("uncertain")))
+    check("readback 500 journals verification uncertain",
+          (jrec or {}).get("verification") == "uncertain",
+          repr((jrec or {}).get("verification")))
     check("readback 500 detail says unconfirmed",
           "unconfirmed" in str(exc), str(exc))
 except Exception as exc:  # noqa: BLE001

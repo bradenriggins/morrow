@@ -2129,10 +2129,14 @@ def dispatch_browser_undo(entry, params, result_payload, of_op_id, lane_state,
     ex.live_proven_gate({"name": "%s#undo" % entry_name, "request": undo})
     provider = entry.get("provider") or "canvas"
     _, base, _principal0 = _lane_for(provider, lane_state)
-    # Admission gate: undo is a write; it needs its own educator approval.
+    # Admission gate: undo is a write; it needs its own educator approval,
+    # bound to the undo action and its target (never the forward write's).
     ex._check_auxiliary_learner_data(entry, _vault.vault_available())
+    _admission.check_policy_gates(entry, _vault.vault_available())
+    undo_entry, undo_params = ex.undo_approval_subject(
+        entry, params, of_op_id, result_payload)
     _, _approval_record = admit(
-        entry, params, tenant_base=base, approval=approval,
+        undo_entry, undo_params, tenant_base=base, approval=approval,
         vault_ready=_vault.vault_available())
     undo_op_id = str(uuid.uuid4())
     op_id, claim_token = ex._check_write_gates(entry, params, None,
@@ -2174,6 +2178,9 @@ def dispatch_browser_undo(entry, params, result_payload, of_op_id, lane_state,
         "phase": "request",
         "op_id": op_id,
         "undo_of": str(of_op_id),
+        # The approval subject the undo was admitted under; the complete
+        # phase re-verifies the persisted approval against it.
+        "undo_params": undo_params,
         "entry_name": entry_name,
         "kind": "undo",
         "batch_id": "batch-%s-undo" % op_id[:8],
@@ -2332,7 +2339,8 @@ def complete_browser_request(op_id, entry, params, plan, report_text,
                              lane_state, pack, form_host=None, brief_dir=None,
                              pending_dir=None, kind="dispatch", of_op_id=None,
                              expected_generation=None,
-                             pinned_principal=None, claim_token=None):
+                             pinned_principal=None, claim_token=None,
+                             undo_params=None):
     """Ingest a request-phase browser report; journal or park for verify.
 
     Returns the executor receipt on completion, or an awaiting_browser_task
@@ -2350,6 +2358,9 @@ def complete_browser_request(op_id, entry, params, plan, report_text,
     claim_token: the journal claim token from the dispatch envelope. When
     given, the claim is re-validated (resume=True) instead of claimed
     twice; when absent, the op_id is claimed fresh (W2-P0-18).
+    undo_params: for kind="undo", the dispatch envelope's "undo_params"
+    (the undo's approval subject). An undo is approved as its own write,
+    so its persisted approval is re-verified against that subject.
     """
     entry_name = entry.get("name")
     effects = entry.get("effects", "read")
@@ -2363,7 +2374,17 @@ def complete_browser_request(op_id, entry, params, plan, report_text,
     # re-verified: the persisted record must match this complete's
     # entry/params/tenant and be in the consumed set.
     _admission_hard_checks(entry, params, base)
-    approval_audit = _admission.reverify_approval(entry, params, base, op_id)
+    if kind == "undo":
+        if not isinstance(undo_params, dict):
+            raise _admission.ApprovalMismatch(
+                "undo complete needs the dispatch envelope's undo_params: "
+                "an undo is approved as its own write, never under the "
+                "forward write's approval")
+        approval_audit = _admission.reverify_approval(
+            ex.undo_admission_entry(entry), undo_params, base, op_id)
+    else:
+        approval_audit = _admission.reverify_approval(entry, params, base,
+                                                      op_id)
     # De-id override, validated before any journaling: an explicit
     # educator-documented purpose reveals raw student PII and is journaled
     # with the op; a stub reason fails closed here.
@@ -2785,7 +2806,9 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
     """Finish a verify phase parked by complete_browser_request.
 
     Journals the op (pass or fail, mirroring the https backend) and returns
-    the receipt. Raises VerificationFailed on assertion failure.
+    the receipt. Raises VerificationFailed on assertion failure, and
+    UncertainWrite (journaled as uncertain) when the verify readback did
+    not complete.
 
     claim_token: the dispatch-time journal claim token, threaded through
     the orchestrator's own memory (W5-P0-1). The persisted envelope no
@@ -2900,15 +2923,16 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
 
     verify = entry.get("verify") or {}
     # P0-5: a redirect during the verify read is never followed. The write
-    # already returned 2xx, so this journals as failed verification (the
-    # write keeps uncertain=True and its conflict lock) rather than raising
-    # session-dead and leaving the op unjournaled.
+    # already returned 2xx, so a readback that did not complete (redirect,
+    # non-2xx, or missing from the report) journals as uncertain, never
+    # failed: the write keeps uncertain=True and its conflict lock, and
+    # UncertainWrite surfaces it for reconciliation by readback.
     vstatus = r["status"] if r else 0
     if r and 300 <= vstatus < 400:
         detail = ("verify op %s hit a login redirect during the readback; "
                   "redirects are never followed" % vop_id)
         verification = _project_verification_detail(
-            entry, {"status": "failed", "detail": detail}, last_payload,
+            entry, {"status": "uncertain", "detail": detail}, last_payload,
             _verify_lane.get("base"),
             {"principal": _verify_lane.get("principal"),
              "session_generation": pending.get("session_generation"),
@@ -2931,14 +2955,16 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
         _delete_pending_file(pending_file)
         _delete_brief_files(pending.get("brief_dir"), op_id)
         _shutdown_form_host()
-        raise ex.VerificationFailed(
-            "verify phase failed for op %s: %s (journaled as failed)" % (op_id, detail))
+        raise ex.UncertainWrite(
+            "write op %s returned success, but the readback could not "
+            "confirm it: %s (journaled as uncertain, not failed)"
+            % (op_id, detail))
     if not r or not (200 <= r["status"] < 300):
         detail = ("verify op %s %s" % (
             vop_id, "missing from report" if not r
             else "returned HTTP %d" % r["status"]))
         verification = _project_verification_detail(
-            entry, {"status": "failed", "detail": detail}, last_payload,
+            entry, {"status": "uncertain", "detail": detail}, last_payload,
             _verify_lane.get("base"),
             {"principal": _verify_lane.get("principal"),
              "session_generation": pending.get("session_generation"),
@@ -2961,8 +2987,10 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
         _delete_pending_file(pending_file)
         _delete_brief_files(pending.get("brief_dir"), op_id)
         _shutdown_form_host()
-        raise ex.VerificationFailed(
-            "verify phase failed for op %s: %s (journaled as failed)" % (op_id, detail))
+        raise ex.UncertainWrite(
+            "write op %s returned success, but the readback could not "
+            "confirm it: %s (journaled as uncertain, not failed)"
+            % (op_id, detail))
 
     vresult = ex.apply_result_block(entry, r["body"].encode("utf-8"), {})
     try:

@@ -113,6 +113,11 @@ _source_tree_env() {
 
 TREE_ENV_FILE="${HELPER_DIR}/env"
 _source_tree_env "${TREE_ENV_FILE}"
+if [ -n "${LOGIN_HELPER_PROFILE_DIR:-}" ] \
+    && [ "${LOGIN_HELPER_PROFILE_DIR}" != "${HELPER_DIR}/profile" ]; then
+  printf 'keepalive: WARNING: ignoring LOGIN_HELPER_PROFILE_DIR=%s; this tree'"'"'s helper profile is always %s\n' \
+    "${LOGIN_HELPER_PROFILE_DIR}" "${HELPER_DIR}/profile" >&2
+fi
 
 # Legacy global env: CANVAS_BASE only. MORROW_LEGACY_ENV is the test seam
 # (selftests point it at scratch); production reads <MORROW_HOME>/env
