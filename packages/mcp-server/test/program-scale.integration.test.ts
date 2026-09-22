@@ -301,6 +301,10 @@ async function connectSharedBridge(port: number, state: FixtureState): Promise<B
     bindings: selectedCourses.map((course) => bindingFor(course, catalogDigest)),
   });
   bridge.onCommand((command) => {
+    if (command.kind === "ui_state") {
+      bridge.respond(command, {});
+      return;
+    }
     state.commands.push(command);
     const course = courseForCommand(command, state);
     if (command.kind === "invoke_write") {

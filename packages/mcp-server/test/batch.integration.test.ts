@@ -201,6 +201,10 @@ async function connectAuditBridge(
     })),
   });
   bridge.onCommand((command) => {
+    if (command.kind === "ui_state") {
+      bridge.respond(command, {});
+      return;
+    }
     if (command.kind === "bridge_maintenance") {
       const problem = options.bridgeMaintenanceProblem?.(command);
       if (problem) {
@@ -1520,6 +1524,10 @@ describe("MorrowRuntime durable batches", () => {
       });
       socket = bridge.socket;
       bridge.onCommand((command) => {
+        if (command.kind === "ui_state") {
+          bridge.respond(command, {});
+          return;
+        }
         expect(command.kind).toBe("invoke_write");
         writeCommands += 1;
         bridge.respond(command, {
@@ -2171,6 +2179,10 @@ async function connectMoodleInventoryBridge(
     }],
   });
   bridge.onCommand((command) => {
+    if (command.kind === "ui_state") {
+      bridge.respond(command, {});
+      return;
+    }
     expect(command.kind).toBe("invoke_read");
     expect(command.sourceBindingId).toBe(sourceBindingId);
     expect(String(command.arguments.course_id)).toBe(String(courseId));

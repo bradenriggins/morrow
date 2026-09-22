@@ -1,6 +1,6 @@
-import { type McpServer, type CallToolResult } from "@modelcontextprotocol/server";
+import { type McpServer, type CallToolResult, type ServerContext } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
-import { sha256Text, type JsonObject } from "@morrow/contracts";
+import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 import { canonicalMorrowResult } from "@morrow/gateway-core";
 import type { GatewayRuntime } from "./runtime.js";
 
@@ -19,6 +19,66 @@ function failure(operationId: string, action: string, error: unknown): CallToolR
   };
 }
 
+/** A runtime that can also report a saved batch's approval status. GatewayRuntime does not carry this
+ * method itself (it lives on the wider MorrowRuntime, which wraps a GatewayRuntime); the wait tool reads
+ * it only when the server that registered it supplied one, so a caller polling a batch on a server that
+ * did not gets a clear "unavailable" failure instead of a crash. */
+interface BatchStatusCapableRuntime {
+  batchApprovalStatus?(batchId: string): JsonObject;
+}
+
+/** The states `morrow_operation_wait` keeps polling through. Any other reported state, known or not,
+ * ends the wait: the point of this tool is to sleep through the part of a change that a person must
+ * still act on, not to model every state an operation or a batch can reach. */
+const WAIT_CONTINUE_STATES: ReadonlySet<string> = new Set(["awaiting_approval", "approved", "dispatching", "running"]);
+
+const WAIT_POLL_INTERVAL_MS = 500;
+const WAIT_PROGRESS_INTERVAL_MS = 5000;
+
+/** Resolves after `ms`, or as soon as `signal` aborts, whichever comes first. Never rejects: an abort
+ * ends the wait loop through its own check of `signal.aborted`, not through a thrown error. */
+function waitDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted || ms <= 0) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+interface WaitSnapshot {
+  readonly record: JsonObject;
+  readonly state: string;
+}
+
+/** Reads the current state of the one id the caller named, from whichever store holds it. An
+ * operation id is read with `operationGet`, the same call `morrow_operation_get` makes. A batch id
+ * needs `batchApprovalStatus`, read from the batch's own `state` field, because a batch has no single
+ * outer operation record of its own. */
+function readWaitSnapshot(runtime: GatewayRuntime, operationId: string | undefined, batchId: string | undefined): WaitSnapshot {
+  if (operationId !== undefined) {
+    const record = runtime.operationGet(operationId);
+    return { record, state: typeof record.state === "string" ? record.state : "unknown" };
+  }
+  const batchRuntime = runtime as unknown as BatchStatusCapableRuntime;
+  if (typeof batchRuntime.batchApprovalStatus !== "function") {
+    throw new Error("this server cannot report a batch's approval status");
+  }
+  const record = batchRuntime.batchApprovalStatus(batchId as string);
+  const batch = record.batch;
+  const state = isJsonObject(batch) && typeof batch.state === "string" ? batch.state : "unknown";
+  return { record, state };
+}
+
 export function registerOperationTools(server: McpServer, runtime: GatewayRuntime): void {
   server.registerTool(
     "morrow_operation_list",
@@ -35,6 +95,70 @@ export function registerOperationTools(server: McpServer, runtime: GatewayRuntim
       content: [{ type: "text", text: "Here are the saved Morrow requests." }],
       structuredContent: runtime.operationList(limit, cursor),
     }),
+  );
+
+  server.registerTool(
+    "morrow_operation_wait",
+    {
+      title: "Wait for a review to be answered",
+      description: "Poll one saved operation or batch and return as soon as a person answers its review, or when the wait ends, whichever is first. Call this instead of asking the person whether they are done. It never sends a request to the source provider, and it never starts or changes the operation it watches.",
+      inputSchema: z.object({
+        operation_id: z.string().min(8).max(160).optional(),
+        batch_id: z.string().min(1).max(160).optional(),
+        max_wait_seconds: z.number().int().min(1).max(50).default(25),
+      }).refine((input) => (input.operation_id === undefined) !== (input.batch_id === undefined), {
+        message: "Name exactly one of operation_id or batch_id.",
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async ({ operation_id, batch_id, max_wait_seconds }, context: ServerContext) => {
+      const id = (operation_id ?? batch_id) as string;
+      try {
+        const startedAt = Date.now();
+        const deadlineAt = startedAt + max_wait_seconds * 1000;
+        const progressToken = context.mcpReq._meta?.progressToken;
+        let lastProgressAt = startedAt;
+        let snapshot = readWaitSnapshot(runtime, operation_id, batch_id);
+        while (WAIT_CONTINUE_STATES.has(snapshot.state) && Date.now() < deadlineAt && !context.mcpReq.signal.aborted) {
+          const now = Date.now();
+          if (progressToken !== undefined && now - lastProgressAt >= WAIT_PROGRESS_INTERVAL_MS) {
+            lastProgressAt = now;
+            context.mcpReq.notify({
+              method: "notifications/progress",
+              params: {
+                progressToken,
+                progress: Math.round((now - startedAt) / 1000),
+                total: max_wait_seconds,
+                message: `Still waiting for ${id}.`,
+              },
+            }).catch(() => undefined);
+          }
+          await waitDelay(Math.min(WAIT_POLL_INTERVAL_MS, Math.max(0, deadlineAt - Date.now())), context.mcpReq.signal);
+          if (context.mcpReq.signal.aborted) break;
+          snapshot = readWaitSnapshot(runtime, operation_id, batch_id);
+        }
+        const seconds = Math.round((Date.now() - startedAt) / 1000);
+        const timedOut = !context.mcpReq.signal.aborted && WAIT_CONTINUE_STATES.has(snapshot.state);
+        const attention = Array.isArray(snapshot.record.attention)
+          ? snapshot.record.attention.filter((entry): entry is string => typeof entry === "string")
+          : [];
+        if (timedOut) {
+          attention.push(
+            "The person has not approved yet. Say that the review is still open. Call morrow_operation_wait again when they are ready. Do not call it more than 6 times in a row.",
+          );
+        }
+        return {
+          content: [{ type: "text", text: `Here is saved request ${id}.` }],
+          structuredContent: {
+            ...snapshot.record,
+            ...(attention.length ? { attention } : {}),
+            waited: { seconds, timedOut },
+          },
+        };
+      } catch (error) {
+        return failure(id, "wait for", error);
+      }
+    },
   );
 
   server.registerTool(

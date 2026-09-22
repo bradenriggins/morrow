@@ -239,6 +239,10 @@ describe("Canvas connector gateway path", () => {
         bindings: [binding()],
       });
       bridge.onCommand((command) => {
+        if (command.kind === "ui_state") {
+          bridge?.respond(command, {});
+          return;
+        }
         if (command.kind === "edit_policy_options_get") {
           bridge?.respond(command, {
             schema: "morrow.bridge.edit-options.v1",
@@ -1585,6 +1589,10 @@ describe("Canvas connector gateway path", () => {
       let writeCommands = 0;
       let confirmed = true;
       bridge.onCommand((command) => {
+        if (command.kind === "ui_state") {
+          bridge?.respond(command, {});
+          return;
+        }
         if (command.kind === "edit_policy_options_get") {
           bridge?.respond(command, {
             schema: "morrow.bridge.edit-options.v1",
@@ -1858,6 +1866,10 @@ describe("Canvas connector gateway path", () => {
       });
 
       bridge.onCommand((command) => {
+        if (command.kind === "ui_state") {
+          bridge?.respond(command, {});
+          return;
+        }
         if (command.kind === "edit_policy_options_get") {
           bridge?.respond(command, {
             schema: "morrow.bridge.edit-options.v1",

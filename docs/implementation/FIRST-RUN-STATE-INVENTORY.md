@@ -425,7 +425,7 @@ Morrow saved and refuses to offer a repeat.
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
 | `approved` | "Changes not started" / "Your approval was saved, but this request is not running. Return to your assistant and ask Morrow to check this saved request before starting anything else." | Ask the assistant to check the saved request | `packages/mcp-server/src/approval-server.ts:594` |
-| `verified` | "Changes confirmed" / "Morrow checked Canvas and confirmed the requested result." | None. This is the end state | `packages/mcp-server/src/approval-server.ts:595` |
+| `verified` | "Canvas saved the change. Morrow checked the result." with the success mark, the item name, "Return to your assistant. It continues on its own." and "See recent changes" | None. This is the end state | `packages/mcp-server/src/approval-server.ts:595` |
 | `cancelled` | "Request cancelled" / "Morrow will not start more changes for this request. Changes already sent may still finish…" | Ask the assistant to check the result | `packages/mcp-server/src/approval-server.ts:596` |
 | `expired` | "Review expired" | Ask the assistant for a new review | `packages/mcp-server/src/approval-server.ts:597` |
 | `dispatching` | "Applying your changes" / "Morrow will check the saved result in Canvas. This page updates automatically." plus "Keep your assistant and Chrome open while Morrow works." | None. Wait | `packages/mcp-server/src/approval-server.ts:598`, instruction `packages/mcp-server/src/approval-server.ts:589` |
@@ -511,9 +511,9 @@ stale name here.
 | `Try again` | Morrow app | `installer/renderer/renderer.js:264` |
 | `Save Blackboard connection` | Morrow app | `installer/renderer/index.html:78` |
 | `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:429` |
-| `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:532` |
-| `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:532` |
-| `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:532` |
+| `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:535` |
+| `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:535` |
+| `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:535` |
 | `Connect Morrow` | Popup | `connector/extension/popup/popup.html:31`, `connector/extension/popup/popup-view.js:104` |
 | `Try again` | Popup | `connector/extension/popup/popup-view.js:100` |
 | `Waiting for approval` | Popup | `connector/extension/popup/popup-view.js:42` |
@@ -553,15 +553,15 @@ stale name here.
 | `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:157` |
 | `Open Canvas` | Plan and Edit settings | `connector/extension/settings/settings.js:287` |
 | `Open Moodle` | Plan and Edit settings | `connector/extension/settings/settings.js:288` |
-| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1023` |
-| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1023` |
-| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1023` |
-| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:1023` |
-| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:1023` |
-| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:1034` |
-| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:1013` |
-| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:1010` |
-| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:1012` |
+| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1050` |
+| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1050` |
+| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1050` |
+| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:1050` |
+| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:1050` |
+| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:1061` |
+| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:1040` |
+| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:1037` |
+| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:1039` |
 
 Names a person reads as landmarks rather than presses:
 

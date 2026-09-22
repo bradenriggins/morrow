@@ -8,6 +8,7 @@ import {
   matchesBridgeEditPermission,
   normalizeBridgeMaintenanceControl,
   normalizeBridgeEditOptionsResult,
+  normalizeBridgeUiState,
   normalizeBridgePrivateAttachment,
   normalizeBridgePrivateConversation,
   normalizeBridgeBindings,
@@ -341,6 +342,57 @@ describe("bridge protocol", () => {
     }, sourceBindingId);
     expect(details.options).toHaveLength(500);
     expect(details.editPermission?.rules).toHaveLength(1);
+  });
+
+  it("accepts the six option facts and refuses an unknown value for each", () => {
+    const baseOption = {
+      id: "action:canvas:operation1",
+      group: "Canvas course actions",
+      label: "Operation 1",
+      description: "A bounded course-scoped action.",
+      availability: "edit" as const,
+    };
+    const withFacts = {
+      ...baseOption,
+      area: "assignments" as const,
+      kind: "edit" as const,
+      reach: "course" as const,
+      learnerVisible: false,
+      routine: true,
+      rememberable: true,
+    };
+    const details = normalizeBridgeEditOptionsResult({
+      schema: "morrow.bridge.edit-options.v1",
+      sourceBindingId: "canvas:22",
+      provider: "canvas",
+      catalogDigest: digest,
+      policyRevision: 1,
+      runtimeVerified: true,
+      options: [withFacts],
+    }, "canvas:22");
+    expect(details.options[0]).toMatchObject({
+      area: "assignments",
+      kind: "edit",
+      reach: "course",
+      learnerVisible: false,
+      routine: true,
+      rememberable: true,
+    });
+    const resultWith = (option: Record<string, unknown>) => normalizeBridgeEditOptionsResult({
+      schema: "morrow.bridge.edit-options.v1",
+      sourceBindingId: "canvas:22",
+      provider: "canvas",
+      catalogDigest: digest,
+      policyRevision: 1,
+      runtimeVerified: true,
+      options: [option],
+    }, "canvas:22");
+    expect(() => resultWith({ ...baseOption, area: "modules" })).toThrow(/area is invalid/);
+    expect(() => resultWith({ ...baseOption, kind: "delete" })).toThrow(/kind is invalid/);
+    expect(() => resultWith({ ...baseOption, reach: "site" })).toThrow(/reach is invalid/);
+    expect(() => resultWith({ ...baseOption, learnerVisible: "yes" })).toThrow(/learnerVisible is invalid/);
+    expect(() => resultWith({ ...baseOption, routine: "yes" })).toThrow(/routine is invalid/);
+    expect(() => resultWith({ ...baseOption, rememberable: "yes" })).toThrow(/rememberable is invalid/);
   });
 
   it("accepts one exact Moodle binding without accepting a cross-site course", () => {
@@ -682,5 +734,37 @@ describe("bridge protocol", () => {
       toolName: "canvas_edit_assignment",
       arguments: { course_id: "42", id: "9", assignment_due_at: "2026-10-15T17:00:00Z" },
     })).toBe(false);
+  });
+
+  it("admits only loopback operations and batches addresses in the reviews-waiting list", () => {
+    expect(normalizeBridgeUiState({ reviews: [] })).toEqual({ reviews: [] });
+    const review = { url: "http://127.0.0.1:44300/operations/op-12345678", label: "Update the syllabus page in BIO 201" };
+    expect(normalizeBridgeUiState({ reviews: [review] })).toEqual({ reviews: [review] });
+    const batchReview = { url: "http://127.0.0.1:44300/batches/batch-12345678", label: "3 changes in BIO 201" };
+    expect(normalizeBridgeUiState({ reviews: [review, batchReview] })).toEqual({ reviews: [review, batchReview] });
+
+    expect(() => normalizeBridgeUiState({ reviews: [], path: "/tmp" })).toThrow("unsupported fields");
+    expect(() => normalizeBridgeUiState({ reviews: Array.from({ length: 21 }, () => review) })).toThrow("exceeds the bridge limit");
+    expect(() => normalizeBridgeUiState({ reviews: [{ ...review, extra: true }] })).toThrow("unsupported fields");
+    expect(() => normalizeBridgeUiState({ reviews: [{ ...review, label: "" }] })).toThrow("label must contain");
+    expect(() => normalizeBridgeUiState({ reviews: [{ ...review, label: "x".repeat(121) }] })).toThrow("label must contain");
+    expect(() => normalizeBridgeUiState({ reviews: [{ ...review, url: "https://127.0.0.1:44300/operations/op-12345678" }] }))
+      .toThrow("loopback operations or batches address");
+    expect(() => normalizeBridgeUiState({ reviews: [{ ...review, url: "http://localhost:44300/operations/op-12345678" }] }))
+      .toThrow("loopback operations or batches address");
+    expect(() => normalizeBridgeUiState({ reviews: [{ ...review, url: "http://127.1:44300/operations/op-12345678" }] }))
+      .toThrow("loopback operations or batches address");
+    expect(() => normalizeBridgeUiState({ reviews: [{ ...review, url: "http://127.0.0.1/operations/op-12345678" }] }))
+      .toThrow("loopback operations or batches address");
+    expect(() => normalizeBridgeUiState({ reviews: [{ ...review, url: "http://127.0.0.1:44300/operations/op-12345678?x=1" }] }))
+      .toThrow("loopback operations or batches address");
+    expect(() => normalizeBridgeUiState({ reviews: [{ ...review, url: "http://127.0.0.1:44300/operations/op-12345678#top" }] }))
+      .toThrow("loopback operations or batches address");
+    expect(() => normalizeBridgeUiState({ reviews: [{ ...review, url: "http://user:pass@127.0.0.1:44300/operations/op-12345678" }] }))
+      .toThrow("loopback operations or batches address");
+    expect(() => normalizeBridgeUiState({ reviews: [{ ...review, url: "http://127.0.0.1:44300/tasks/op-12345678" }] }))
+      .toThrow("loopback operations or batches address");
+    expect(() => normalizeBridgeUiState({ reviews: [{ ...review, url: "http://127.0.0.1:44300/operations/short" }] }))
+      .toThrow("loopback operations or batches address");
   });
 });

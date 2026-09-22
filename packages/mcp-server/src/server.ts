@@ -28,6 +28,7 @@ import { PrivateChatContinuationLedger, registerPrivateChatTool, type PrivateCha
 import { registerCourseAuditResource, registerCourseAuditTool } from "./course-audit.js";
 import { registerCourseInventoryTool } from "./course-inventory.js";
 import { registerProgramLedgerResource, registerProgramLedgerTool } from "./program-ledger.js";
+import { registerReviewLoopGuidanceResource } from "./review-loop-guidance.js";
 import { registerMoodleResourceFileTool } from "./moodle-resource-file.js";
 import { registerCanvasCourseFileUploadTool } from "./canvas-file-transfer.js";
 import { resultArtifactAudience } from "./result-artifacts.js";
@@ -336,6 +337,7 @@ export function createMorrowServer(
   registerCourseAuditResource(server);
   registerCourseAuditTool(server, runtime);
   registerCourseInventoryTool(server, runtime);
+  registerReviewLoopGuidanceResource(server);
   registerProgramLedgerResource(server);
   registerProgramLedgerTool(server, runtime);
   registerMoodleResourceFileTool(server, runtime, workspaceRoot);

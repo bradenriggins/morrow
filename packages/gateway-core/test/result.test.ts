@@ -124,7 +124,7 @@ describe("normalizeUpstreamResult", () => {
     });
     expect(awaitingApproval).toMatchObject({
       content: [{
-        text: "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
+        text: "Morrow prepared this change. It waits for the person's review. Give the person the one link in receipts.approvalUrl, named after the change. Then call morrow_operation_wait with this operationId. Do not ask the person to type anything.",
       }],
       structuredContent: { status: "awaiting_approval" },
     });

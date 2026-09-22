@@ -5,13 +5,17 @@ import { fileURLToPath } from "node:url";
 import { DomUtils, parseDocument } from "htmlparser2";
 import sanitizeHtml from "sanitize-html";
 import {
+  MAX_BRIDGE_UI_REVIEWS,
   STRUCTURAL_EDIT_FIELDS,
   normalizeBridgeBindings,
   normalizeBridgeEditOptionsResult,
   normalizeBridgePrivateConversation,
+  normalizeBridgeUiState,
   type BridgeBinding,
   type BridgePrivateAttachment,
   type BridgePrivateConversation,
+  type BridgeUiReview,
+  type BridgeUiState,
 } from "@morrow/bridge-protocol";
 import {
   isJsonObject,
@@ -2364,11 +2368,14 @@ export class GatewayRuntime {
   }
 
   approveOperation(operationId: string): JsonObject {
-    return effectOperationProjection(this.effects.approve(operationId));
+    const approved = this.effects.approve(operationId);
+    this.noteEffectState(approved);
+    return effectOperationProjection(approved);
   }
 
   cancelOperation(operationId: string): JsonObject {
     const cancelled = this.effects.cancel(operationId);
+    this.noteEffectState(cancelled);
     this.discardOperationFileStages(operationId);
     return effectOperationProjection(cancelled);
   }
@@ -3011,6 +3018,7 @@ export class GatewayRuntime {
     result?: JsonObject,
     additionalLimitations: readonly string[] = [],
   ): JsonObject {
+    this.noteEffectState(record);
     const verificationStatus = record.verificationStatus === "verified"
       ? "verified"
       : record.readback ? "unconfirmed" : "not_requested";
@@ -3023,16 +3031,23 @@ export class GatewayRuntime {
           : record.state === "closed_by_person"
             ? [PERSON_CLOSED_LIMITATION]
             : [];
+    const mapping = this.toolByPublicName.get(record.publicToolName);
+    const reviewAttention = record.state === "awaiting_approval"
+      ? [
+          `Review and approve: ${this.plainOperationLabel(record, mapping)} in ${this.operationCourseName(record)}`,
+          `Call morrow_operation_wait with operation_id "${record.operationId}".`,
+        ]
+      : [];
     return canonicalMorrowResult({
       ...(result ? { result } : {}),
       operationId: record.operationId,
       tool: record.publicToolName,
       backend: record.sourceId,
-      provider: this.toolByPublicName.get(record.publicToolName)?.capability?.provider,
+      provider: mapping?.capability?.provider,
       phase,
       effectState: record.state,
       verificationStatus,
-      attention: record.attention,
+      attention: [...reviewAttention, ...record.attention],
       limitations: [...stateLimitations, ...additionalLimitations].length
         ? [...stateLimitations, ...additionalLimitations]
         : undefined,
@@ -3050,6 +3065,22 @@ export class GatewayRuntime {
           : {}),
       },
     });
+  }
+
+  // A curated plainLabel (WI-3.5) does not exist yet. The catalog title is the
+  // best human name available today; this call site moves onto plainLabel once
+  // that work item lands.
+  private plainOperationLabel(record: EffectOperationRecord, mapping: CatalogTool | undefined): string {
+    return mapping?.title || record.publicToolName;
+  }
+
+  // No operation record carries a course name (only a course id, when the tool's
+  // own arguments have one). Name it the way item-bank-fan-out.ts and
+  // item-bank-repair.ts already do when only the id is known.
+  private operationCourseName(record: EffectOperationRecord): string {
+    const planArguments = isJsonObject(record.plan.arguments) ? record.plan.arguments : {};
+    const courseId = this.requestCourseId(planArguments);
+    return courseId ? `course ${courseId}` : "this course";
   }
 
   private planEffect(
@@ -3259,6 +3290,73 @@ export class GatewayRuntime {
       && candidate.annotations?.readOnlyHint === true
     ));
     return matches.length === 1 ? matches[0]! : null;
+  }
+
+  /**
+   * WI-2.4 (D1b): the operations for a browser course this runtime last told
+   * the Bridge popup were waiting for the person's review.
+   */
+  private readonly browserReviewWaiting = new Set<string>();
+
+  /**
+   * Tracks whether one operation just entered or left `awaiting_approval`. On
+   * a change, it pushes the present list to the Bridge popup so a person who
+   * lost the assistant's link can still find the review. A push that cannot
+   * be sent, or fails, never reaches the caller: the Bridge only ever shows a
+   * review it already has another way to open, and a failed push must never
+   * fail the plan that triggered it.
+   */
+  private noteEffectState(record: EffectOperationRecord): void {
+    const mapping = this.toolByPublicName.get(record.publicToolName);
+    if (!mapping || !isCanvasConnector(mapping)) return;
+    const waiting = record.state === "awaiting_approval";
+    const known = this.browserReviewWaiting.has(record.operationId);
+    if (waiting === known) return;
+    if (waiting) this.browserReviewWaiting.add(record.operationId);
+    else this.browserReviewWaiting.delete(record.operationId);
+    this.pushBrowserUiState();
+  }
+
+  private pushBrowserUiState(): void {
+    // Every step, including the call itself, is inside this one try: a source
+    // that rejects late and one that throws before returning a promise both
+    // land here, so a broken push can never reach the caller and fail the
+    // plan that triggered it (WI-2.4).
+    try {
+      const source = this.editAccessBindingsTool();
+      const upstream = source ? this.upstreams.get(source.upstreamId) : undefined;
+      if (!source || !upstream) return;
+      const command: BridgeUiState = normalizeBridgeUiState({ reviews: this.currentBrowserReviews() });
+      Promise.resolve(upstream.callTool("morrow_browser_ui_state", command as unknown as JsonObject, { safeToRetry: false }))
+        .catch(() => {});
+    } catch {
+      // Not supported, or unavailable: the runtime treats a refusal the same
+      // as silence and continues (WI-2.4, "Skew").
+    }
+  }
+
+  /** The present list of reviews waiting, newest first, one entry per browser-course operation. */
+  private currentBrowserReviews(): readonly BridgeUiReview[] {
+    if (!this.approvalBaseUrl) return [];
+    const reviews: BridgeUiReview[] = [];
+    for (const operationId of this.browserReviewWaiting) {
+      if (reviews.length >= MAX_BRIDGE_UI_REVIEWS) break;
+      let record: EffectOperationRecord;
+      try {
+        record = this.effects.get(operationId);
+      } catch {
+        continue;
+      }
+      if (record.state !== "awaiting_approval") continue;
+      const mapping = this.toolByPublicName.get(record.publicToolName);
+      if (!mapping) continue;
+      const label = `${this.plainOperationLabel(record, mapping)} in ${this.operationCourseName(record)}`;
+      reviews.push({
+        url: `${this.approvalBaseUrl}/operations/${record.operationId}`,
+        label: label.length > 120 ? label.slice(0, 120) : label,
+      });
+    }
+    return reviews;
   }
 
   private async browserEditOptions(

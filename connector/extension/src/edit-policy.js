@@ -177,7 +177,7 @@ const itemBankDestructive = (operation) => String(operation?.toolName || "").sta
   && destructiveOperation(operation);
 const CHECKED = Object.freeze({ verification: "checked" });
 
-const CURATED_CATEGORY_SPECS = Object.freeze([
+export const CURATED_CATEGORY_SPECS = Object.freeze([
   Object.freeze({
     id: "dates",
     group: "Common Moodle actions",
@@ -232,6 +232,8 @@ const CURATED_CATEGORY_SPECS = Object.freeze([
     label: "Add Canvas Page image alternative text",
     description: "Add alternative text to one selected image without alternative text in a Canvas Page. It does not change the Page title or other page content.",
     provider: "canvas",
+    // WI-3.2: kept for a saved permission's id check; `canvas_alt_text` carries this rule for the UI.
+    hiddenFromUi: true,
     rules: Object.freeze([
       Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses", toolName: "canvas_update_create_page_courses", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "page_image_alt" }),
     ]),
@@ -242,6 +244,7 @@ const CURATED_CATEGORY_SPECS = Object.freeze([
     label: "Add Canvas Assignment image alternative text",
     description: "Add alternative text to one selected image without alternative text in a Canvas Assignment description. It does not change the Assignment name, dates, points, publication, or other settings.",
     provider: "canvas",
+    hiddenFromUi: true,
     rules: Object.freeze([
       Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment", toolName: "canvas_edit_assignment", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "assignment_image_alt" }),
     ]),
@@ -252,6 +255,7 @@ const CURATED_CATEGORY_SPECS = Object.freeze([
     label: "Add Canvas Discussion image alternative text",
     description: "Add alternative text to one selected image without alternative text in a Canvas Discussion message. It does not change the Discussion title, availability, or other settings.",
     provider: "canvas",
+    hiddenFromUi: true,
     rules: Object.freeze([
       Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/discussion_topics/{topic_id}#update_topic_courses", toolName: "canvas_update_topic_courses", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "discussion_image_alt" }),
     ]),
@@ -262,6 +266,7 @@ const CURATED_CATEGORY_SPECS = Object.freeze([
     label: "Add Canvas Classic Quiz description image alternative text",
     description: "Add alternative text to one selected image without alternative text in a Canvas Classic Quiz description. It does not change questions, answers, points, availability, publication, or other settings.",
     provider: "canvas",
+    hiddenFromUi: true,
     rules: Object.freeze([
       Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz", toolName: "canvas_edit_quiz", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "classic_quiz_description_image_alt" }),
     ]),
@@ -272,6 +277,7 @@ const CURATED_CATEGORY_SPECS = Object.freeze([
     label: "Add Canvas Classic Quiz question image alternative text",
     description: "Add alternative text to one selected image without alternative text in one Canvas Classic Quiz question or one of its answers. It does not change the question wording, answers, correct answer, points, feedback, or position. Morrow refuses a question that comes from a question group or bank, and a question type it cannot rebuild in full.",
     provider: "canvas",
+    hiddenFromUi: true,
     // Canvas rebuilds a Classic Quiz question from the whole request through
     // AssessmentQuestion.parse_question, so the connector reads the question
     // again and resends every field it returned. Only a connected tenant can
@@ -290,6 +296,7 @@ const CURATED_CATEGORY_SPECS = Object.freeze([
     label: "Add Canvas New Quiz item image alternative text",
     description: "Add alternative text to one selected image without alternative text in one Canvas New Quiz item. It does not change the item question, answers, points, or settings.",
     provider: "canvas",
+    hiddenFromUi: true,
     rules: Object.freeze([
       Object.freeze({ provider: "canvas", operationKey: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item", toolName: "canvas_update_quiz_item", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "new_quiz_item_image_alt" }),
     ]),
@@ -300,6 +307,7 @@ const CURATED_CATEGORY_SPECS = Object.freeze([
     label: "Add Canvas New Quiz choice and feedback image alternative text",
     description: "Add alternative text to one selected image in a Canvas New Quiz answer choice or feedback field. It does not change the item question, answer choice, feedback text, points, or settings.",
     provider: "canvas",
+    hiddenFromUi: true,
     rules: Object.freeze([
       Object.freeze({ provider: "canvas", operationKey: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item", toolName: "canvas_update_quiz_item", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "new_quiz_choice_image_alt" }),
       Object.freeze({ provider: "canvas", operationKey: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item", toolName: "canvas_update_quiz_item", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "new_quiz_answer_feedback_image_alt" }),
@@ -324,6 +332,285 @@ const CURATED_CATEGORY_SPECS = Object.freeze([
     provider: "canvas",
     rules: Object.freeze([
       Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment", toolName: "canvas_edit_assignment", allowedChangedFields: Object.freeze(["assignment_due_at"]) }),
+    ]),
+  }),
+  // WI-3.2: the 19 curated Canvas task bundles from the bundle draft file in docs/implementation/ux
+  // (MORROW-UX-BUILD-SPEC.md, WI-3.2). A script checked each field name against inputSchema.properties in the catalog, each
+  // tool against today's Edit availability, and each routine bundle against the routine rule (D2a):
+  // result, no errors.
+  Object.freeze({
+    id: "canvas_pages_text",
+    group: "Canvas task bundles",
+    label: "Edit page text and titles",
+    description: "Change the title or body text of an existing Canvas Page or the course Front Page. It does not create, publish, or remove a page.",
+    provider: "canvas",
+    area: "pages",
+    routine: true,
+    rememberable: true,
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses", toolName: "canvas_update_create_page_courses", allowedChangedFields: Object.freeze(["wiki_page_body", "wiki_page_title"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/front_page#update_create_front_page_courses", toolName: "canvas_update_create_front_page_courses", allowedChangedFields: Object.freeze(["wiki_page_body", "wiki_page_title"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_modules_structure",
+    group: "Canvas task bundles",
+    label: "Rename and reorder modules and items",
+    description: "Rename an existing Canvas Module, reorder modules, or rename, reorder, indent, or relink an existing module item. It does not create, publish, or remove a module or an item.",
+    provider: "canvas",
+    area: "pages",
+    routine: true,
+    rememberable: true,
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/modules/{id}#update_module", toolName: "canvas_update_module", allowedChangedFields: Object.freeze(["module_name", "module_position"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/modules/{module_id}/items/{id}#update_module_item", toolName: "canvas_update_module_item", allowedChangedFields: Object.freeze(["module_item_external_url", "module_item_indent", "module_item_module_id", "module_item_new_tab", "module_item_position", "module_item_title"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_assignment_text",
+    group: "Canvas task bundles",
+    label: "Edit assignment titles and instructions",
+    description: "Change the title or description of an existing Canvas Assignment. It does not change dates, points, submission settings, or publication.",
+    provider: "canvas",
+    area: "assignments",
+    routine: true,
+    rememberable: true,
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment", toolName: "canvas_edit_assignment", allowedChangedFields: Object.freeze(["assignment_description", "assignment_name"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_discussion_text",
+    group: "Canvas task bundles",
+    label: "Edit discussion titles and prompts",
+    description: "Change the title or message of an existing Canvas Discussion. It does not change availability, publication, or other settings.",
+    provider: "canvas",
+    area: "discussions",
+    routine: true,
+    rememberable: true,
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/discussion_topics/{topic_id}#update_topic_courses", toolName: "canvas_update_topic_courses", allowedChangedFields: Object.freeze(["message", "title"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_classic_quiz_text",
+    group: "Canvas task bundles",
+    label: "Edit Classic Quiz title and instructions",
+    description: "Change the title or description of an existing Canvas Classic Quiz. It does not change questions, dates, or other settings.",
+    provider: "canvas",
+    area: "quizzes",
+    routine: true,
+    rememberable: true,
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz", toolName: "canvas_edit_quiz", allowedChangedFields: Object.freeze(["quiz_description", "quiz_title"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_files_organize",
+    group: "Canvas task bundles",
+    label: "Rename and move files, create folders",
+    description: "Rename or move an existing Canvas file, or create a new folder. It does not change file content or publication.",
+    provider: "canvas",
+    area: "files",
+    routine: true,
+    rememberable: true,
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/files/{id}#update_file", toolName: "canvas_update_file", allowedChangedFields: Object.freeze(["name", "parent_folder_id"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "POST /v1/courses/{course_id}/folders#create_folder_courses", toolName: "canvas_create_folder_courses", allowedChangedFields: Object.freeze(["name", "parent_folder_id", "parent_folder_path"]) }),
+    ]),
+  }),
+  // Alternative text (WI-3.2): the union of the seven present alternative-text specs below, with
+  // their guard kinds. Those seven ids stay, because a saved permission is checked again from its
+  // ids (`validEditPermission`); each one carries `hiddenFromUi` so `categoriesForBinding` shows
+  // only this merged bundle.
+  Object.freeze({
+    id: "canvas_alt_text",
+    group: "Canvas task bundles",
+    label: "Add alternative text to images",
+    description: "Add alternative text to one selected image without alternative text in a Canvas Page, Assignment, Discussion, Classic Quiz, or New Quiz item. It does not change other content.",
+    provider: "canvas",
+    area: "accessibility",
+    routine: true,
+    rememberable: true,
+    requiresOperations: Object.freeze(["canvas_update_existing_quiz_question", "canvas_get_single_quiz_question"]),
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses", toolName: "canvas_update_create_page_courses", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "page_image_alt" }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment", toolName: "canvas_edit_assignment", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "assignment_image_alt" }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/discussion_topics/{topic_id}#update_topic_courses", toolName: "canvas_update_topic_courses", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "discussion_image_alt" }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz", toolName: "canvas_edit_quiz", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "classic_quiz_description_image_alt" }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/quizzes/{quiz_id}/questions/{id}#update_existing_quiz_question", toolName: "canvas_update_existing_quiz_question", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "classic_quiz_question_image_alt" }),
+      Object.freeze({ provider: "canvas", operationKey: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item", toolName: "canvas_update_quiz_item", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "new_quiz_item_image_alt" }),
+      Object.freeze({ provider: "canvas", operationKey: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item", toolName: "canvas_update_quiz_item", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "new_quiz_choice_image_alt" }),
+      Object.freeze({ provider: "canvas", operationKey: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item", toolName: "canvas_update_quiz_item", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "new_quiz_answer_feedback_image_alt" }),
+      Object.freeze({ provider: "canvas", operationKey: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item", toolName: "canvas_update_quiz_item", allowedChangedFields: Object.freeze([]), requiresCanvasContentGuard: true, canvasContentGuardKind: "new_quiz_feedback_image_alt" }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_dates",
+    group: "Canvas task bundles",
+    label: "Change due dates and availability dates",
+    description: "Change due dates and availability dates for Canvas Assignments, Discussions, Files, Pages, and Quizzes, one at a time or in bulk. Each change is visible to learners as soon as Canvas saves it.",
+    provider: "canvas",
+    area: "assignments",
+    rememberable: true,
+    learnerVisible: true,
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment", toolName: "canvas_edit_assignment", allowedChangedFields: Object.freeze(["assignment_due_at", "assignment_lock_at", "assignment_unlock_at"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/assignments/bulk_update#bulk_update_assignment_dates", toolName: "canvas_bulk_update_assignment_dates", allowedChangedFields: Object.freeze(["assignment_dates"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/assignments/{assignment_id}/date_details#update_learning_object_s_date_information_assignments", toolName: "canvas_update_learning_object_s_date_information_assignments", allowedChangedFields: Object.freeze(["due_at", "lock_at", "unlock_at"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/discussion_topics/{discussion_topic_id}/date_details#update_learning_object_s_date_information_discussion_topics", toolName: "canvas_update_learning_object_s_date_information_discussion_topics", allowedChangedFields: Object.freeze(["due_at", "lock_at", "unlock_at"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/files/{attachment_id}/date_details#update_learning_object_s_date_information_files", toolName: "canvas_update_learning_object_s_date_information_files", allowedChangedFields: Object.freeze(["due_at", "lock_at", "unlock_at"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}/date_details#update_learning_object_s_date_information_pages", toolName: "canvas_update_learning_object_s_date_information_pages", allowedChangedFields: Object.freeze(["due_at", "lock_at", "unlock_at"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/quizzes/{quiz_id}/date_details#update_learning_object_s_date_information_quizzes", toolName: "canvas_update_learning_object_s_date_information_quizzes", allowedChangedFields: Object.freeze(["due_at", "lock_at", "unlock_at"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz", toolName: "canvas_edit_quiz", allowedChangedFields: Object.freeze(["quiz_due_at", "quiz_lock_at", "quiz_unlock_at"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/assignments/{assignment_id}/overrides/{id}#update_assignment_override", toolName: "canvas_update_assignment_override", allowedChangedFields: Object.freeze(["assignment_override_due_at", "assignment_override_lock_at", "assignment_override_unlock_at"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_pages_create",
+    group: "Canvas task bundles",
+    label: "Create and copy pages",
+    description: "Create a new Canvas Page or duplicate an existing one.",
+    provider: "canvas",
+    area: "pages",
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "POST /v1/courses/{course_id}/pages#create_page_courses", toolName: "canvas_create_page_courses", allowedChangedFields: Object.freeze(["wiki_page_body", "wiki_page_title"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "POST /v1/courses/{course_id}/pages/{url_or_id}/duplicate#duplicate_page", toolName: "canvas_duplicate_page", allowedChangedFields: Object.freeze([]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_modules_create",
+    group: "Canvas task bundles",
+    label: "Create modules and add items",
+    description: "Create a new Canvas Module or add a new item to an existing module.",
+    provider: "canvas",
+    area: "pages",
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "POST /v1/courses/{course_id}/modules#create_module", toolName: "canvas_create_module", allowedChangedFields: Object.freeze(["module_name", "module_position"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "POST /v1/courses/{course_id}/modules/{module_id}/items#create_module_item", toolName: "canvas_create_module_item", allowedChangedFields: Object.freeze(["module_item_content_id", "module_item_external_url", "module_item_indent", "module_item_new_tab", "module_item_page_url", "module_item_position", "module_item_title", "module_item_type"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_assignment_setup",
+    group: "Canvas task bundles",
+    label: "Change assignment points and settings",
+    description: "Change an existing Canvas Assignment's points, allowed attempts, submission types, or grading settings. It does not change the title, description, or dates.",
+    provider: "canvas",
+    area: "assignments",
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment", toolName: "canvas_edit_assignment", allowedChangedFields: Object.freeze(["assignment_allowed_attempts", "assignment_allowed_extensions", "assignment_assignment_group_id", "assignment_grading_type", "assignment_omit_from_final_grade", "assignment_peer_reviews", "assignment_points_possible", "assignment_position", "assignment_submission_types"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_assignment_create",
+    group: "Canvas task bundles",
+    label: "Create assignments",
+    description: "Create a new Canvas Assignment, with its title, description, dates, points, and submission settings.",
+    provider: "canvas",
+    area: "assignments",
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "POST /v1/courses/{course_id}/assignments#create_assignment", toolName: "canvas_create_assignment", allowedChangedFields: Object.freeze(["assignment_assignment_group_id", "assignment_description", "assignment_due_at", "assignment_grading_type", "assignment_lock_at", "assignment_name", "assignment_points_possible", "assignment_submission_types", "assignment_unlock_at"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_publish_state",
+    group: "Canvas task bundles",
+    label: "Publish and unpublish course content",
+    description: "Publish or unpublish an existing Canvas Page, Module, Module item, Assignment, Quiz, or Discussion. The change is visible to learners as soon as Canvas saves it.",
+    provider: "canvas",
+    area: "pages",
+    learnerVisible: true,
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses", toolName: "canvas_update_create_page_courses", allowedChangedFields: Object.freeze(["wiki_page_published"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/modules/{id}#update_module", toolName: "canvas_update_module", allowedChangedFields: Object.freeze(["module_published"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/modules/{module_id}/items/{id}#update_module_item", toolName: "canvas_update_module_item", allowedChangedFields: Object.freeze(["module_item_published"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment", toolName: "canvas_edit_assignment", allowedChangedFields: Object.freeze(["assignment_published"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz", toolName: "canvas_edit_quiz", allowedChangedFields: Object.freeze(["quiz_published"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/discussion_topics/{topic_id}#update_topic_courses", toolName: "canvas_update_topic_courses", allowedChangedFields: Object.freeze(["published"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_rubrics",
+    group: "Canvas task bundles",
+    label: "Create and edit rubrics",
+    description: "Create a new Canvas rubric or change the title or criteria of an existing one.",
+    provider: "canvas",
+    area: "assignments",
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "POST /v1/courses/{course_id}/rubrics#create_single_rubric", toolName: "canvas_create_single_rubric", allowedChangedFields: Object.freeze(["rubric_criteria", "rubric_free_form_criterion_comments", "rubric_title"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/rubrics/{id}#update_single_rubric", toolName: "canvas_update_single_rubric", allowedChangedFields: Object.freeze(["rubric_criteria", "rubric_free_form_criterion_comments", "rubric_title"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_classic_quiz_settings",
+    group: "Canvas task bundles",
+    label: "Change Classic Quiz settings",
+    description: "Change an existing Canvas Classic Quiz's timing, attempts, scoring, or answer-visibility settings. It does not change the title, description, or questions.",
+    provider: "canvas",
+    area: "quizzes",
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz", toolName: "canvas_edit_quiz", allowedChangedFields: Object.freeze(["quiz_allowed_attempts", "quiz_assignment_group_id", "quiz_cant_go_back", "quiz_hide_correct_answers_at", "quiz_hide_results", "quiz_one_question_at_a_time", "quiz_scoring_policy", "quiz_show_correct_answers", "quiz_show_correct_answers_at", "quiz_shuffle_answers", "quiz_time_limit"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_classic_quiz_questions",
+    group: "Canvas task bundles",
+    label: "Create and edit Classic Quiz questions",
+    description: "Create a new Classic Quiz question or change an existing one, with its answers, points, and feedback.",
+    provider: "canvas",
+    area: "quizzes",
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "POST /v1/courses/{course_id}/quizzes/{quiz_id}/questions#create_single_quiz_question", toolName: "canvas_create_single_quiz_question", allowedChangedFields: Object.freeze(["question_answers", "question_correct_comments", "question_incorrect_comments", "question_neutral_comments", "question_points_possible", "question_position", "question_question_name", "question_question_text", "question_question_type", "question_quiz_group_id", "question_text_after_answers"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/quizzes/{quiz_id}/questions/{id}#update_existing_quiz_question", toolName: "canvas_update_existing_quiz_question", allowedChangedFields: Object.freeze(["question_answers", "question_correct_comments", "question_incorrect_comments", "question_neutral_comments", "question_points_possible", "question_position", "question_question_name", "question_question_text", "question_question_type", "question_quiz_group_id", "question_text_after_answers"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_new_quiz_items",
+    group: "Canvas task bundles",
+    label: "Create and edit New Quiz questions",
+    description: "Create a new Canvas New Quiz item or change an existing one, with its content, scoring, and feedback.",
+    provider: "canvas",
+    area: "quizzes",
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "POST /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items#create_quiz_item", toolName: "canvas_create_quiz_item", allowedChangedFields: Object.freeze(["item_entry_answer_feedback", "item_entry_calculator_type", "item_entry_feedback_correct", "item_entry_feedback_incorrect", "item_entry_feedback_neutral", "item_entry_interaction_data", "item_entry_interaction_type_slug", "item_entry_item_body", "item_entry_properties", "item_entry_scoring_algorithm", "item_entry_scoring_data", "item_entry_title", "item_entry_type"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item", toolName: "canvas_update_quiz_item", allowedChangedFields: Object.freeze(["item_entry_answer_feedback", "item_entry_calculator_type", "item_entry_feedback_correct", "item_entry_feedback_incorrect", "item_entry_feedback_neutral", "item_entry_interaction_data", "item_entry_interaction_type_slug", "item_entry_item_body", "item_entry_properties", "item_entry_scoring_algorithm", "item_entry_scoring_data", "item_entry_title", "item_entry_type"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_calendar",
+    group: "Canvas task bundles",
+    label: "Create and edit calendar events",
+    description: "Create a new Canvas calendar event or change an existing one. The event is on the calendar of everyone enrolled in the course as soon as Canvas saves it.",
+    provider: "canvas",
+    area: "calendar",
+    learnerVisible: true,
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "POST /v1/calendar_events#create_calendar_event", toolName: "canvas_create_calendar_event", allowedChangedFields: Object.freeze(["calendar_event_all_day", "calendar_event_context_code", "calendar_event_description", "calendar_event_end_at", "calendar_event_location_address", "calendar_event_location_name", "calendar_event_start_at", "calendar_event_title"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/calendar_events/{id}#update_calendar_event", toolName: "canvas_update_calendar_event", allowedChangedFields: Object.freeze(["calendar_event_all_day", "calendar_event_description", "calendar_event_end_at", "calendar_event_location_address", "calendar_event_location_name", "calendar_event_start_at", "calendar_event_title"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_gradebook_setup",
+    group: "Canvas task bundles",
+    label: "Change assignment groups and weights",
+    description: "Create a new Canvas assignment group or change an existing one's weight, position, or rules.",
+    provider: "canvas",
+    area: "assignments",
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "POST /v1/courses/{course_id}/assignment_groups#create_assignment_group", toolName: "canvas_create_assignment_group", allowedChangedFields: Object.freeze(["group_weight", "name", "position"]) }),
+      Object.freeze({ provider: "canvas", operationKey: "PUT /v1/courses/{course_id}/assignment_groups/{assignment_group_id}#edit_assignment_group", toolName: "canvas_edit_assignment_group", allowedChangedFields: Object.freeze(["group_weight", "name", "position", "rules"]) }),
+    ]),
+  }),
+  Object.freeze({
+    id: "canvas_discussion_create",
+    group: "Canvas task bundles",
+    label: "Create discussions",
+    description: "Create a new Canvas Discussion, with its title, message, and type. It is visible to learners as soon as Canvas saves it.",
+    provider: "canvas",
+    area: "discussions",
+    learnerVisible: true,
+    rules: Object.freeze([
+      Object.freeze({ provider: "canvas", operationKey: "POST /v1/courses/{course_id}/discussion_topics#create_new_discussion_topic_courses", toolName: "canvas_create_new_discussion_topic_courses", allowedChangedFields: Object.freeze(["discussion_type", "message", "title"]) }),
     ]),
   }),
 ]);
@@ -415,7 +702,7 @@ function operationAvailability(operation, canvasReads) {
 
 // A Canvas API entry carries a risk annotation, a browser-catalog entry carries a destructive
 // annotation, and any DELETE route removes what it names.
-function destructiveOperation(operation) {
+export function destructiveOperation(operation) {
   return operation?.risk === "destructive" || operation?.destructive === true
     || String(operation?.method || "").toUpperCase() === "DELETE";
 }
@@ -488,6 +775,64 @@ function canvasSiteOperation(operation) {
     && canvasOperationAdmission(operation).authority === "site";
 }
 
+// WI-3.1: facts computed for every generated catalog option, from the operation alone, so no
+// person is needed for them. A curated bundle (WI-3.2, WI-3.3) may carry `routine` and
+// `rememberable` directly on its own spec object; a generated option never does, because only a
+// hand-curated bundle can promise the routine rule (D2a) or that "do not ask again" applies to it.
+const AREA_BY_RESOURCE = new Map([
+  ["Pages", "pages"], ["Modules", "pages"], ["Tabs", "pages"], ["Courses", "pages"],
+  ["Assignments", "assignments"], ["Assignment Groups", "assignments"], ["Rubrics", "assignments"],
+  ["Late Policy", "assignments"], ["Grading Standards", "assignments"], ["Learning Object Dates", "assignments"],
+  ["Blackout Dates", "assignments"], ["Course Pace", "assignments"],
+  ["Quizzes", "quizzes"], ["Quiz Questions", "quizzes"], ["Quiz Question Groups", "quizzes"], ["New Quizzes", "quizzes"],
+  ["New Quiz Items", "quizzes"], ["New Quizzes Item Banks", "quizzes"], ["New Quizzes Accommodations", "quizzes"],
+  ["Discussion Topics", "discussions"],
+  ["Files", "files"],
+  ["Calendar Events", "calendar"], ["Appointment Groups", "calendar"],
+  ["Sections", "people"], ["Enrollments", "people"], ["Group Categories", "people"],
+]);
+
+// A tool with reach "beyond" always lands in "beyond_course" first. Every other tool is placed by
+// its catalog resource. A resource this table does not name stays "other": the build's own
+// analysis (MORROW-UX-BUILD-SPEC.md, WI-3.1) found dozens of Canvas options this keyword pass
+// cannot place, and placing them is a person's judgment call, not a fact this function can derive.
+function operationArea(operation) {
+  if (canvasSiteOperation(operation)) return "beyond_course";
+  return AREA_BY_RESOURCE.get(String(operation?.resource || "")) || "other";
+}
+
+// A Moodle tool that only shows or hides existing content changes whether it is seen, not what it
+// says, so it is its own kind (WI-3.3: "that is a publish change") rather than an ordinary edit.
+// Canvas has no route with the same single purpose: a Canvas publish state travels as one field on
+// a wider update (see `learnerVisible` below), so no Canvas tool is classified "publish" here.
+const VISIBILITY_TOGGLE_TOOL = /^moodle_(?:show|hide)_/;
+
+function operationKind(operation) {
+  if (destructiveOperation(operation)) return "remove";
+  return VISIBILITY_TOGGLE_TOOL.test(String(operation?.toolName || "")) ? "publish" : "edit";
+}
+
+export function operationReach(operation) {
+  return canvasSiteOperation(operation) ? "beyond" : "course";
+}
+
+// A tool whose catalog resource is one of these, or whose name holds one of these parts, reaches a
+// learner as soon as it runs. A changed field with this shape does too, whatever the tool's
+// resource. Both checks need no person: they are the fixed rule WI-3.1 gives (F, "learnerVisible").
+const LEARNER_VISIBLE_RESOURCES = new Set([
+  "Conversations", "Announcements", "Announcement External Feeds", "Calendar Events",
+  "Appointment Groups", "Discussion Entries", "Planner",
+]);
+const LEARNER_VISIBLE_NAME_PARTS = ["post_reply", "post_entry", "enroll", "notify"];
+const LEARNER_VISIBLE_FIELD = /(^|_)published$|notify|is_announcement|delayed_post_at|publish_at|(^|_)(due|lock|unlock)_at$/;
+
+export function operationLearnerVisible(operation, fields) {
+  if (LEARNER_VISIBLE_RESOURCES.has(String(operation?.resource || ""))) return true;
+  const toolName = String(operation?.toolName || "");
+  if (LEARNER_VISIBLE_NAME_PARTS.some((part) => toolName.includes(part))) return true;
+  return fields.some((field) => LEARNER_VISIBLE_FIELD.test(field));
+}
+
 function operationSpec(operation, canvasReads) {
   const provider = operationProvider(operation);
   const availability = operationAvailability(operation, canvasReads);
@@ -516,6 +861,10 @@ function operationSpec(operation, canvasReads) {
     description: note ? `${description} ${note}` : description,
     provider,
     destructive: destructiveOperation(operation),
+    area: operationArea(operation),
+    kind: operationKind(operation),
+    reach: operationReach(operation),
+    learnerVisible: operationLearnerVisible(operation, fields),
     ...(requiresFieldSelection ? { requiresFieldSelection: true } : {}),
     ...availability,
     ...(availability.availability === "edit" ? CHECKED : {}),
@@ -580,6 +929,12 @@ function publicCategory(spec) {
     availability: spec.availability,
     tier: spec.destructive === true ? "destructive" : "standard",
     destructive: spec.destructive === true,
+    ...(spec.area ? { area: spec.area } : {}),
+    ...(spec.kind ? { kind: spec.kind } : {}),
+    ...(spec.reach ? { reach: spec.reach } : {}),
+    ...(typeof spec.learnerVisible === "boolean" ? { learnerVisible: spec.learnerVisible } : {}),
+    ...(spec.routine ? { routine: true } : {}),
+    ...(spec.rememberable ? { rememberable: true } : {}),
     ...(spec.requiresFieldSelection ? { requiresFieldSelection: true } : {}),
     ...(spec.reviewReason ? { reviewReason: spec.reviewReason } : {}),
     ...(spec.verification ? { verification: spec.verification } : {}),
@@ -588,6 +943,9 @@ function publicCategory(spec) {
 }
 
 export function categoriesForBinding(binding, operations) {
+  // Every curated id stays in this list: the runtime plans repairs by these ids, and a saved
+  // permission validates against them. The seven alternative-text specs that `canvas_alt_text`
+  // joins carry `hiddenFromUi`, and the Customize view (WI-5.5) is the place that folds them.
   return categorySpecsForBinding(binding, operations).map(publicCategory);
 }
 

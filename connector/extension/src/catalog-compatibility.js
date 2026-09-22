@@ -298,7 +298,12 @@ export async function admitCanvasApiCatalog(catalog) {
   const names = new Set();
   const keys = new Set();
   for (const operation of catalog.operations) {
-    exactKeys(operation, CANVAS_OPERATION_KEYS, "Canvas API catalog operation");
+    // A write operation carries a plain label for the review page and the Edit list. Reads carry none.
+    const { plainLabel, ...operationFields } = jsonObject(operation) ? operation : {};
+    if (plainLabel !== undefined && (typeof plainLabel !== "string" || !plainLabel.trim() || plainLabel.length > 60)) {
+      throw new TypeError("Canvas API catalog operation is invalid");
+    }
+    exactKeys(operationFields, CANVAS_OPERATION_KEYS, "Canvas API catalog operation");
     if (!/^[A-Za-z0-9_.-]{1,128}$/.test(operation.toolName || "") || typeof operation.key !== "string"
       || !Array.isArray(operation.parameters) || !jsonObject(operation.inputSchema)) {
       throw new TypeError("Canvas API catalog operation is invalid");

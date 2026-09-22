@@ -17,6 +17,7 @@ import {
   normalizeBridgePrivateAttachment,
   normalizeBridgePrivateAttachments,
   normalizeBridgePrivateConversation,
+  normalizeBridgeUiState,
   parseBridgeClientMessage,
   parseBridgeAuthenticate,
   parseBridgeHello,
@@ -35,6 +36,7 @@ import {
   type BridgeOuterGrant,
   type BridgePrivateAttachment,
   type BridgePrivateConversation,
+  type BridgeUiState,
   type BridgeHello,
   type BridgePing,
   type BridgeReady,
@@ -123,6 +125,7 @@ export interface BridgeInvocation {
   readonly taskId?: string;
   readonly editPolicySet?: BridgeEditPolicySet;
   readonly maintenance?: BridgeMaintenanceControl;
+  readonly uiState?: BridgeUiState;
   readonly operationId?: string;
   readonly outerGrant?: BridgeOuterGrant;
   readonly timeoutMs?: number;
@@ -922,6 +925,9 @@ export class LoopbackBridgeServer {
     const maintenance = invocation.kind === "bridge_maintenance"
       ? normalizeBridgeMaintenanceControl(invocation.maintenance)
       : undefined;
+    const uiState = invocation.kind === "ui_state"
+      ? normalizeBridgeUiState(invocation.uiState)
+      : undefined;
     const requiresKnownBinding = ["invoke_read", "invoke_write", "edit_policy_options_get"].includes(invocation.kind);
     const requiresCurrentBinding = ["invoke_read", "invoke_write"].includes(invocation.kind);
     const selectedBinding = invocation.sourceBindingId
@@ -1040,6 +1046,9 @@ export class LoopbackBridgeServer {
     if (invocation.kind === "bridge_maintenance" && !maintenance) {
       throw new TypeError("bridge_maintenance requires one exact maintenance control");
     }
+    if (invocation.kind === "ui_state" && !uiState) {
+      throw new TypeError("ui_state requires an exact review list");
+    }
     if (invocation.kind === "edit_policy_options_get" && !invocation.sourceBindingId) {
       throw new TypeError("edit_policy_options_get requires one exact sourceBindingId");
     }
@@ -1124,6 +1133,7 @@ export class LoopbackBridgeServer {
       ...(invocation.taskId ? { taskId: invocation.taskId } : {}),
       ...(editPolicySet ? { editPolicySet } : {}),
       ...(maintenance ? { maintenance } : {}),
+      ...(uiState ? { uiState } : {}),
       ...(invocation.outerGrant ? { outerGrant: structuredClone(invocation.outerGrant) } : {}),
       generation: active.generation,
       createdAt: now,

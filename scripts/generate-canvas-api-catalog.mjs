@@ -16,6 +16,10 @@ const DEFAULT_OUTPUT = resolve(
 const DEFAULT_MIRRORS = [
   resolve(dirname(fileURLToPath(import.meta.url)), "../connector/extension/generated/canvas-api-catalog.json"),
 ];
+const PLAIN_LABEL_OVERRIDES_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../packages/canvas-api-catalog/plain-labels.json",
+);
 
 function canonicalize(value) {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
@@ -1064,6 +1068,170 @@ export function withoutLtiServiceWrites(operations) {
   return operations.filter((operation) => operation.readOnly || !String(operation.path).startsWith("/lti/"));
 }
 
+// A plain label names one write operation the way a person reads it, not the way Canvas names its
+// route. The rule is method and resource: a verb read from the operation's own nickname (falling
+// back to its HTTP method when the nickname names no clear action) plus the object the nickname or
+// the resource names. `plain-labels.json` overrides the ones this rule cannot say well.
+const PLAIN_LABEL_VERB_TABLE = [
+  [/^un_share_/, "Unshare"],
+  [/^unflagging_/, "Unflag"],
+  [/^unmark_/, "Unmark"],
+  [/^unlink_/, "Unlink"],
+  [/^unsubscribe_/, "Unsubscribe"],
+  [/^update_create_/, "Edit"],
+  [/^create_update_/, "Edit"],
+  [/^get_or_create_/, "Add"],
+  [/^duplicate_/, "Duplicate"],
+  [/^clone_/, "Duplicate"],
+  [/^copy_/, "Copy"],
+  [/^move_/, "Move"],
+  [/^merge_/, "Merge"],
+  [/^split_/, "Split"],
+  [/^reorder_/, "Reorder"],
+  [/^reset_/, "Reset"],
+  [/^revert_to_revision/, "Restore"],
+  [/^restore_/, "Restore"],
+  [/^conclude_/, "Conclude"],
+  [/^archive_/, "Archive"],
+  [/^unpublish_/, "Unpublish"],
+  [/^publish_/, "Publish"],
+  [/^cancel_/, "Cancel"],
+  [/^accept_/, "Accept"],
+  [/^decline_/, "Decline"],
+  [/^approve_/, "Approve"],
+  [/^reject_/, "Reject"],
+  [/^unassign_/, "Unassign"],
+  [/^assign_/, "Assign"],
+  [/^unenroll_/, "Unenroll"],
+  [/^enroll_/, "Enroll"],
+  [/^invite_/, "Invite"],
+  [/^unshare_/, "Unshare"],
+  [/^share_/, "Share"],
+  [/^import_/, "Import"],
+  [/^export_/, "Export"],
+  [/^upload_/, "Upload"],
+  [/^bind_/, "Connect"],
+  [/^uninstall_/, "Uninstall"],
+  [/^install_/, "Install"],
+  [/^activate_/, "Activate"],
+  [/^deactivate_/, "Deactivate"],
+  [/^disable_/, "Disable"],
+  [/^enable_/, "Enable"],
+  [/^unlock_/, "Unlock"],
+  [/^lock_/, "Lock"],
+  [/^hide_/, "Hide"],
+  [/^show_/, "Show"],
+  [/^unmute_/, "Unmute"],
+  [/^mute_/, "Mute"],
+  [/^remind_/, "Remind"],
+  [/^send_/, "Send"],
+  [/^regrade_/, "Regrade"],
+  [/^recalculate_/, "Recalculate"],
+  [/^reactivate_/, "Reactivate"],
+  [/^resubmit_/, "Resubmit"],
+  [/^grade_or_comment_/, "Grade"],
+  [/^mark_/, "Mark"],
+  [/^destroy_/, "Remove"],
+  [/^remove_/, "Remove"],
+  [/^delete_/, "Remove"],
+  [/^bulk_update_/, "Update"],
+  [/^batch_update_/, "Update"],
+  [/^bulk_create_/, "Create"],
+  [/^batch_create_/, "Create"],
+  [/^create_/, "Create"],
+  [/^new_/, "Create"],
+  [/^add_/, "Add"],
+  [/^update_/, "Edit"],
+  [/^edit_/, "Edit"],
+  [/^set_/, "Set"],
+  [/^change_/, "Change"],
+];
+
+const PLAIN_LABEL_CONTAINER_SUFFIX = {
+  courses: "in a course",
+  groups: "in a group",
+  accounts: "in an account",
+  sections: "in a section",
+  users: "for a user",
+  root_accounts: "for a root account",
+  appointment_groups: "for an appointment group",
+};
+
+// A few common English words start with a vowel letter but a consonant sound, so "an" reads wrong
+// before them ("an user"). These are the ones this catalog's nicknames and resources use.
+const PLAIN_LABEL_CONSONANT_SOUND_WORDS = /^(user|users|usage|unique|unit|units|union|useful|utility|uniform|universal|one|once)\b/;
+
+function plainLabelArticle(word) {
+  if (PLAIN_LABEL_CONSONANT_SOUND_WORDS.test(word)) return "a";
+  return /^[aeiou]/.test(word) ? "an" : "a";
+}
+
+function plainLabelSingularWord(word) {
+  if (/ies$/.test(word)) return `${word.slice(0, -3)}y`;
+  if (/(?:ses|xes|zes|ches|shes)$/.test(word)) return word.slice(0, -2);
+  if (/[^s]s$/.test(word)) return word.slice(0, -1);
+  return word;
+}
+
+function plainLabelSingularResource(resource) {
+  const words = String(resource).split(" ");
+  const last = plainLabelSingularWord(words[words.length - 1]);
+  return [...words.slice(0, -1), last].join(" ").toLowerCase();
+}
+
+function plainLabelVerb(method, nickname) {
+  for (const [pattern, verb] of PLAIN_LABEL_VERB_TABLE) {
+    if (pattern.test(nickname)) return { verb, pattern };
+  }
+  if (method === "DELETE") return { verb: "Remove", pattern: null };
+  if (method === "POST") return { verb: "Create", pattern: null };
+  return { verb: "Edit", pattern: null };
+}
+
+/** The default plain label for one write operation: a verb read from its nickname, and the object
+ * that nickname (or, failing that, the resource) names. Exported for the label test. */
+export function defaultPlainLabel(operation) {
+  const { verb, pattern } = plainLabelVerb(operation.method, operation.nickname);
+  const leftover = pattern ? operation.nickname.replace(pattern, "") : operation.nickname;
+  const tokens = leftover.split("_").filter(Boolean);
+  let containerClause = "";
+  if (tokens.length > 1 && PLAIN_LABEL_CONTAINER_SUFFIX[tokens[tokens.length - 1]]) {
+    containerClause = PLAIN_LABEL_CONTAINER_SUFFIX[tokens.pop()];
+  }
+  const objectWords = tokens.join(" ").trim() || plainLabelSingularResource(operation.resource);
+  return `${verb} ${plainLabelArticle(objectWords)} ${objectWords}${containerClause ? ` ${containerClause}` : ""}`;
+}
+
+/** Adds `plainLabel` to each write operation, from the curated override file when it names that
+ * tool, else from the method-and-resource rule. Mutates and returns `operations`. */
+export function applyPlainLabels(operations, overrides) {
+  const usedToolNames = new Set(operations.map((operation) => operation.toolName));
+  for (const toolName of Object.keys(overrides)) {
+    if (!usedToolNames.has(toolName)) {
+      throw new Error(`plain-labels.json names a tool the catalog no longer has: ${toolName}`);
+    }
+  }
+  const labelsByResource = new Map();
+  for (const operation of operations) {
+    if (operation.readOnly) continue;
+    const label = Object.hasOwn(overrides, operation.toolName)
+      ? overrides[operation.toolName]
+      : defaultPlainLabel(operation);
+    if (label.length > 60) {
+      throw new Error(`Plain label for ${operation.toolName} is longer than 60 characters: "${label}". Add it to plain-labels.json.`);
+    }
+    const seen = labelsByResource.get(operation.resource) || new Map();
+    const owner = seen.get(label);
+    if (owner && owner !== operation.toolName) {
+      throw new Error(`Plain label "${label}" for ${operation.resource} is shared by ${owner} and ${operation.toolName}. Add an override to plain-labels.json.`);
+    }
+    seen.set(label, operation.toolName);
+    labelsByResource.set(operation.resource, seen);
+    operation.plainLabel = label;
+  }
+  return operations;
+}
+
 /** The catalog envelope and digest for one operation list, the same way every catalog is written. */
 export function catalogFromOperations(source, operations, browserCount, itemBankCount, courseFileContentCount) {
   const catalogBase = {
@@ -1117,6 +1285,8 @@ async function buildCatalog() {
   const courseFileContent = [courseFileTextOperation()];
   const browser = [...itemBank, ...courseFileContent];
   const operations = withoutLtiServiceWrites([...official, ...browser]).sort((left, right) => ascii(left.toolName, right.toolName));
+  const overrides = JSON.parse(await readFile(PLAIN_LABEL_OVERRIDES_PATH, "utf8"));
+  applyPlainLabels(operations, overrides);
   const sourceDigest = sha256(canonicalJson({
     index: indexResult.value,
     resources: documents.map((document) => ({ path: document.resource.path, value: document.value })),
