@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { installerState } from "../shared/contract.cjs";
+import { errorDetails, installerState } from "../shared/contract.cjs";
 import { actionView, awaitingBridgeFolder, blackboardSetupOffered, escapeHtml, progress, removalAnnouncement, retentionView, setupManagementView, setupUnavailableView, statusSummary, supportView } from "../shared/setup-view.mjs";
 
 const CHATGPT = Object.freeze({ id: "codex", title: "ChatGPT", tier: "primary", supported: true, needsWorkspace: true });
@@ -682,6 +682,21 @@ test("an assistant card says Claude Desktop is not installed and where to get it
   assert.match(button, /disabled/);
 });
 
+function connectedCourseFields() {
+  return {
+    lifecycle: "ready",
+    selectedAssistantId: "codex",
+    bridgeFolderReady: true,
+    bridgeLoadedInChrome: true,
+    bridgePaired: true,
+    courseSite: true,
+    runtimeVerifiedCourseCount: 1,
+    selectedCourseName: "BIO 101",
+    firstPreviewCourseName: "BIO 101",
+    firstPreview: { available: true, completed: true },
+  };
+}
+
 function connectedCourse(overrides = {}) {
   return state({
     lifecycle: "ready",
@@ -709,6 +724,44 @@ test("setup asks the teacher to quit and reopen the assistant before it says to 
   const connected = actionView(connectedCourse({ connected: true }));
   assert.equal(connected.title, "Your course is connected.");
   assert.match(connected.copy, /Continue in ChatGPT/);
+});
+
+test("a failed assistant check names the button the panel shows, not a Check again button it does not have", () => {
+  const panel = actionView(connectedCourse());
+  const button = panel.body.match(/data-action="check-assistant-connection">([^<]+)</)[1];
+  assert.equal(button, "Check ChatGPT");
+  assert.doesNotMatch(panel.body, />Check again</);
+  for (const code of ["assistant_not_connected", "assistant_connection_unconfirmed"]) {
+    const { recovery } = errorDetails(code);
+    assert.doesNotMatch(recovery, /Check again/, code);
+    assert.match(recovery, /select the Check button that names your assistant\.$/, code);
+  }
+});
+
+test("with more than one assistant set up, the reopen panel says Morrow cannot tell which one reopened", () => {
+  const CLAUDE_CODE = { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, detected: true, configured: true, connected: false };
+  const one = actionView(connectedCourse());
+  assert.doesNotMatch(one.body, /cannot tell which/);
+  const two = actionView(state({
+    ...connectedCourseFields(),
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: false, selected: true }, CLAUDE_CODE],
+  }));
+  assert.equal(two.title, "Quit and reopen your assistant.");
+  assert.match(two.body, /Morrow can tell that an assistant opened Morrow, but it cannot tell which one\. Quit and reopen each assistant you set up: ChatGPT and Claude Code\./);
+});
+
+test("while the panel says to quit and reopen the assistant, the rail shows the Assistant step as the current one", () => {
+  const waiting = connectedCourse();
+  assert.equal(step(waiting, "Assistant").status, "current");
+  assert.equal(step(waiting, "Assistant").current, true);
+  assert.equal(step(waiting, "Assistant").detail, "Quit and reopen ChatGPT");
+  assert.deepEqual(progress(waiting).filter((entry) => entry.current).map((entry) => entry.label), ["Assistant"]);
+  assert.equal(step(waiting, "Morrow Bridge").status, "done");
+  assert.equal(step(waiting, "Course").status, "done");
+
+  const connected = connectedCourse({ connected: true });
+  assert.equal(step(connected, "Assistant").status, "done");
+  assert.deepEqual(progress(connected).filter((entry) => entry.current), []);
 });
 
 test("a Mac Morrow outside Applications offers only the move", () => {
