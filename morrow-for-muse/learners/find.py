@@ -162,11 +162,56 @@ def _resolved(tenant_base, course_id, conversation_id, label, typed,
     return out
 
 
+def _journal_lookup(tenant_base, course_id, conversation_id, typed, out):
+    """Every lookup leaves an audit record (final muse audit M5): a
+    guessed name confirms roster membership, so lookups must be
+    reviewable. The record holds the course, the conversation, the
+    outcome, and a keyed digest of the typed name, never the name."""
+    from privacy import name_echo
+    from modes.state import journal_event
+    journal_event("privacy.students_find", {
+        "course_id": str(course_id),
+        "conversation_id": (str(conversation_id) if conversation_id
+                            else None),
+        "outcome": out.get("status"),
+        "match": out.get("match"),
+        "candidates": len(out.get("candidates") or ()),
+        "query_digest": name_echo.lookup_digest(tenant_base, course_id,
+                                                typed),
+        "tenant": rs.check_tenant_base(tenant_base)})
+
+
 def find_student(fetcher, tenant_base, course_id, query, *,
                  conversation_id=None, choose=None, section_id=None,
                  include_inactive=False, include_concluded=False,
                  include_test_student=False):
-    """Resolve the name the educator typed to a course label (JSON dict)."""
+    """Resolve the name the educator typed to a course label (JSON dict).
+
+    Every lookup that reads the roster is journaled (_journal_lookup);
+    when that record cannot be written, nothing is shown."""
+    out = _find_student(fetcher, tenant_base, course_id, query,
+                        conversation_id=conversation_id, choose=choose,
+                        section_id=section_id,
+                        include_inactive=include_inactive,
+                        include_concluded=include_concluded,
+                        include_test_student=include_test_student)
+    if out.get("status") in ("resolved", "confirm", "not_found", "refused"):
+        typed = rs._collapse_ws(query) if isinstance(query, str) else ""
+        try:
+            _journal_lookup(tenant_base, course_id, conversation_id, typed,
+                            out)
+        except Exception as exc:
+            return {"ok": False, "status": "error",
+                    "message": "The lookup could not be recorded in the "
+                               "journal (%s), so no student is shown."
+                               % type(exc).__name__}
+    return out
+
+
+def _find_student(fetcher, tenant_base, course_id, query, *,
+                  conversation_id=None, choose=None, section_id=None,
+                  include_inactive=False, include_concluded=False,
+                  include_test_student=False):
     course_id = str(course_id)
     try:
         rs.check_tenant_base(tenant_base)
