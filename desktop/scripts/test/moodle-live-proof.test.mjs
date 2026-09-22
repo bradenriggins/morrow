@@ -62,6 +62,7 @@ test("the harness proves one Moodle write against the local fixture and reaches 
 
     assert.equal(receipt.requestReview.effectState, "awaiting_approval");
     assert.equal(receipt.requestReview.dispatchBeforeApprovalRefused, true);
+    assert.equal(receipt.requestReview.unsignedApprovalRefused, true);
     assert.equal(receipt.requestReview.reviewPageStatus, 200);
     assert.equal(receipt.requestReview.reviewPageNamesCourse, true);
     assert.deepEqual(receipt.requestReview.authorization, { kind: "review" });

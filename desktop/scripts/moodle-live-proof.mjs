@@ -33,6 +33,7 @@ import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { executeMoodleInPage } from "../connector/extension/src/moodle-executor.js";
 import { collectMoodleCourseParticipantRoster } from "../connector/extension/src/moodle-privacy.js";
+import { parseReviewApprovalPresence, reviewApprovalProof } from "../connector/extension/src/review-approval.js";
 import { bridgeWriteFailureCode } from "../connector/extension/src/canvas-write-outcome.js";
 import {
   PRIVATE_BRIDGE_OPERATION_CONTRACTS,
@@ -384,6 +385,9 @@ async function connectHarnessConnector({ port, binding, page, expiresAt, command
     });
   });
   const answered = new Map();
+  // The key Morrow sends the paired Bridge to sign a person's approval click, kept the way the
+  // Bridge keeps it: only as it arrived over this connection.
+  let approvalPresence = null;
   const result = (command, ok, value, problem) => {
     if (!ok) Object.assign(answered.get(command.requestId) || {}, { problem: problem.code, detail: problem.message });
     send({
@@ -405,6 +409,15 @@ async function connectHarnessConnector({ port, binding, page, expiresAt, command
     commands.push(record);
     if (command.kind === "bindings_get") {
       send({ schema: "morrow.bridge.bindings.v1", protocolVersion: BRIDGE_PROTOCOL_VERSION, generation: ready.generation, bindings: [binding], sentAt: Date.now() });
+      return;
+    }
+    if (command.kind === "ui_state") {
+      try {
+        if (command.uiState?.presence !== undefined) approvalPresence = parseReviewApprovalPresence(command.uiState.presence);
+        result(command, true, { schema: "morrow.bridge.ui-state.v1", accepted: Array.isArray(command.uiState?.reviews) ? command.uiState.reviews.length : 0 });
+      } catch {
+        result(command, false, null, { schema: "morrow.bridge.problem.v1", code: "ui_state_invalid", message: "The review list or approval key is not valid.", recoverable: false });
+      }
       return;
     }
     if (command.kind === "edit_policy_options_get") {
@@ -484,6 +497,7 @@ async function connectHarnessConnector({ port, binding, page, expiresAt, command
   });
   return {
     generation: ready.generation,
+    approvalPresence: () => approvalPresence,
     close: () => new Promise((done) => {
       if (socket.readyState !== 1) return done();
       socket.once("close", () => done());
@@ -517,19 +531,40 @@ async function waitFor(probe, description, timeoutMs = 30_000) {
   throw new Error(`timed out waiting for ${description}`);
 }
 
-/** The approval a person gives in the review page: read the page, then post its own nonce back. */
-async function approveThroughReviewPage(url) {
-  const page = await fetch(url);
-  const html = await page.text();
-  const nonce = /name="nonce" value="([^"]+)"/.exec(html)?.[1];
-  const cookie = page.headers.get("set-cookie")?.split(";", 1)[0];
-  assert.ok(page.status === 200 && nonce && cookie, `the review page did not offer an approval (HTTP ${page.status})`);
-  const confirmed = await fetch(`${url}/approve`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", cookie, origin: new URL(url).origin, referer: url },
-    body: new URLSearchParams({ nonce }),
-  });
-  return { reviewStatus: page.status, approveStatus: confirmed.status, html };
+/**
+ * The approval a person gives in the review page. The review server accepts an approval only with
+ * the Bridge's signature over that exact form, which the Bridge adds after a real click in the
+ * review tab. This harness plays the Bridge, so it holds the key only as Morrow sent it over the
+ * paired connection, and it signs only the form that a click on the Approve button in Chrome sends.
+ * It first proves that the same form posted by a program, without that signature, is refused.
+ */
+async function approveThroughReviewPage(url, context, connector) {
+  const reviewPage = await context.newPage();
+  try {
+    const loaded = await reviewPage.goto(url);
+    const form = reviewPage.locator('form[action$="/approve"]');
+    await form.waitFor();
+    const html = await reviewPage.content();
+    const nonce = await form.locator('input[name="nonce"]').inputValue();
+    const unsigned = await reviewPage.request.post(`${url}/approve`, {
+      form: { nonce },
+      headers: { origin: new URL(url).origin, referer: url },
+    });
+    await waitFor(() => connector.approvalPresence(), "the approval key from Morrow over the paired connection");
+    const presence = connector.approvalPresence();
+    assert.equal(presence.origin, new URL(url).origin, "Morrow sent the approval key for a different review server");
+    const approvePath = new URL(`${url}/approve`).pathname;
+    await reviewPage.route(`${url}/approve`, async (route) => {
+      const body = new URLSearchParams(route.request().postData() || "");
+      body.set("presence", await reviewApprovalProof(presence.key, approvePath, body.get("nonce") || ""));
+      await route.continue({ postData: body.toString() });
+    }, { times: 1 });
+    const response = reviewPage.waitForResponse((candidate) => candidate.url() === `${url}/approve` && candidate.request().method() === "POST");
+    await form.getByRole("button").first().click();
+    return { reviewStatus: loaded?.status() ?? 0, unsignedApproveStatus: unsigned.status(), approveStatus: (await response).status(), html };
+  } finally {
+    await reviewPage.close().catch(() => undefined);
+  }
 }
 
 function capabilitiesIn(description) {
@@ -754,8 +789,10 @@ async function runProof(options) {
     save("awaiting_approval");
     assert.equal(notDispatched.isError, true, "an unapproved change was dispatched");
 
-    const approved = await approveThroughReviewPage(approvalUrl);
-    assert.equal(approved.approveStatus, 200, `the approval was refused (HTTP ${approved.approveStatus})`);
+    const approved = await approveThroughReviewPage(approvalUrl, context, connector);
+    assert.equal(approved.unsignedApproveStatus, 403, `an approval without the Bridge signature was not refused (HTTP ${approved.unsignedApproveStatus})`);
+    assert.ok(approved.approveStatus >= 200 && approved.approveStatus < 400, `the approval was refused (HTTP ${approved.approveStatus})`);
+    receipt.requestReview.unsignedApprovalRefused = approved.unsignedApproveStatus === 403;
     receipt.requestReview.reviewPageStatus = approved.reviewStatus;
     receipt.requestReview.reviewPageNamesCourse = approved.html.includes(courseName);
     const settled = await waitFor(() => {
@@ -884,7 +921,7 @@ function buildChecklist() {
     "| --- | --- |",
     "| `target` | The exact site, installation subpath, signed-in principal and course the write bound to. |",
     "| `exactTargetBeforeChange` | The fresh read of the exact target, with the snapshot digest the change was bound to. |",
-    "| `requestReview` | The frozen request a person approved, its authorization, and the refusal of a dispatch before approval. |",
+    "| `requestReview` | The frozen request a person approved, its authorization, the refusal of a dispatch before approval, and the refusal of an approval posted without the Bridge signature. |",
     "| `dispatch` | One dispatch: `dispatchAttempt: 1`, one bridge write command, and one provider POST or AJAX call. |",
     "| `authoritativeSavedResult` | The fresh read after the change, from Moodle's own saved state, and the fields that changed. |",
     "| `replay` | The refusal of the repeated dispatch, and the unchanged dispatch count after it. |",
