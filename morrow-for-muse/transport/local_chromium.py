@@ -619,6 +619,18 @@ def is_tenant_url(url, base_url):
     return want is not None and _origin_of(url) == want
 
 
+def _is_unauthenticated(body):
+    """True for Canvas's 401 session-expiry body ({"status":
+    "unauthenticated"}). A 401 {"status": "unauthorized"} is a
+    permission refusal on a live session and returns False."""
+    try:
+        doc = json.loads(body or "")
+    except (ValueError, TypeError):
+        return False
+    return isinstance(doc, dict) and \
+        str(doc.get("status") or "").lower() == "unauthenticated"
+
+
 def _looks_like_login_page(body):
     """True when body is an HTML login page, even with HTTP 200.
 
@@ -2472,6 +2484,11 @@ class LocalChromiumTransport:
                 "Canvas served a login page (HTTP %s) for the API call; "
                 "the browser session is dead (sign in again through the "
                 "login helper)." % (resp.get("status"),))
+        if resp.get("status") == 401 and _is_unauthenticated(resp.get("body")):
+            raise SessionRejected(
+                "Canvas answered HTTP 401 unauthenticated for the API "
+                "call; the browser session expired or was revoked (sign "
+                "in again through the login helper).")
         headers = {}
         if resp.get("link"):
             headers["link"] = resp["link"]
@@ -2486,6 +2503,12 @@ class LocalChromiumTransport:
 class SessionDead(RuntimeError):
     """The local browser has no live Canvas session; re-authentication is
     required (educator signs in again through the connector's browser)."""
+
+
+class SessionRejected(SessionDead):
+    """Canvas answered 401 with status "unauthenticated": the session
+    expired or was revoked. The provider answered, so the request was
+    NOT applied (unlike a session that died mid-call)."""
 
 
 class CDPError(RuntimeError):

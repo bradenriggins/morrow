@@ -938,7 +938,7 @@ class ChromiumSession:
                 # W4-P2-2: sticky -- mark before raising so a retry of
                 # THIS session never touches the provider again.
                 self._mark_session_dead(exc)
-                if is_write:
+                if is_write and not isinstance(exc, lc.SessionRejected):
                     raise ex.UncertainWrite(
                         "chromium write hit a dead session (%s); the write "
                         "may have executed before the session died; not "
