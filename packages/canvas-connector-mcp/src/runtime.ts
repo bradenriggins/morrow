@@ -7,6 +7,7 @@ import {
   normalizeBridgePrivateAttachment,
   normalizeBridgePrivateAttachments,
   normalizeBridgePrivateConversation,
+  normalizeBridgeUiState,
   splitBridgeCallArguments,
   type BridgeBinding,
   type BridgeEditPolicySet,
@@ -15,6 +16,7 @@ import {
   type BridgePrivateConversation,
   type BridgeProblem,
   type BridgeProvider,
+  type BridgeUiState,
 } from "@morrow/bridge-protocol";
 import { canvasAdmissionReason, canvasContextCodeCourseId, canvasOperationAdmission, canvasOperationMap, canvasReviewedUploadPath, loadCanvasApiCatalog, type CanvasApiCatalog, type CanvasApiOperation, type CanvasSemanticCourseTarget } from "@morrow/canvas-api-catalog";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
@@ -513,6 +515,61 @@ export class CanvasConnectorRuntime {
     } catch (error) {
       return {
         schema: "morrow.browser-edit-policy-set.v1",
+        ok: false,
+        problem: bridgeFailureResult(error),
+        ...(error instanceof BridgeOutcomeUnknownError ? { resultState: "unknown" } : {}),
+        ...(error instanceof BridgeUnavailableError ? { resultState: "not_sent" } : {}),
+      };
+    }
+  }
+
+  /**
+   * Pushes the present list of reviews waiting for the person to the Bridge
+   * popup (D1b). The Bridge never opens one of these by itself.
+   */
+  async uiState(input: BridgeUiState): Promise<JsonObject> {
+    let uiState: BridgeUiState;
+    try {
+      uiState = normalizeBridgeUiState(input);
+    } catch {
+      return {
+        schema: "morrow.browser-ui-state.v1",
+        ok: false,
+        problem: {
+          schema: "morrow.bridge.problem.v1",
+          code: "ui_state_invalid",
+          message: "Morrow could not validate the current list of reviews waiting for the person.",
+          recoverable: false,
+        },
+      };
+    }
+    try {
+      const response = await this.bridge.invoke({
+        kind: "ui_state",
+        uiState,
+        operationId: `ui-state:${randomUUID()}`,
+      });
+      if (!response.ok || !isJsonObject(response.result)) {
+        return {
+          schema: "morrow.browser-ui-state.v1",
+          ok: false,
+          problem: response.problem || {
+            schema: "morrow.bridge.problem.v1",
+            code: "ui_state_result_missing",
+            message: "Morrow did not receive the current review-list result.",
+            recoverable: false,
+          },
+        };
+      }
+      return {
+        schema: "morrow.browser-ui-state.v1",
+        ok: true,
+        reviews: uiState.reviews,
+        result: response.result,
+      };
+    } catch (error) {
+      return {
+        schema: "morrow.browser-ui-state.v1",
         ok: false,
         problem: bridgeFailureResult(error),
         ...(error instanceof BridgeOutcomeUnknownError ? { resultState: "unknown" } : {}),

@@ -231,7 +231,7 @@ export class SourceMcpPrivacyBoundary {
         return { content: [{ type: "text", text: "Morrow checked the course connections." }], structuredContent: { ok: true, bindings, count: bindings.length } };
       }
       // These controls take raw private payloads or manage more than one course.
-      if (/^(?:morrow_private_|canvas_send_private_|canvas_transfer_course_file|canvas_create_new_quiz_hot_spot|morrow_bridge_maintenance|morrow_browser_edit_policy_set)/.test(toolName)) return failure();
+      if (/^(?:morrow_private_|canvas_send_private_|canvas_transfer_course_file|canvas_create_new_quiz_hot_spot|morrow_bridge_maintenance|morrow_browser_edit_policy_set|morrow_browser_ui_state)/.test(toolName)) return failure();
       const controls = isJsonObject(args._morrow) ? args._morrow : {};
       const bindingId = controls.source_binding_id ?? args.source_binding_id;
       const matches = this.options.bindings().filter((binding) => binding.sourceBindingId === bindingId);

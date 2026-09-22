@@ -241,6 +241,42 @@ describe("CanvasConnectorRuntime", () => {
       .resolves.toMatchObject({ ok: false, problem: { code: "bridge_maintenance_control_invalid" } });
   });
 
+  it("sends the present review list to the Bridge popup with no course binding (D1b)", async () => {
+    const runtime = await start([]);
+    const socket = sockets.at(-1)!;
+    socket.on("message", (raw) => {
+      const value = parseBridgeJson(raw.toString()) as { schema?: string };
+      if (value.schema !== BRIDGE_SCHEMAS.command) return;
+      const command = value as BridgeCommand;
+      expect(command.kind).toBe("ui_state");
+      expect(command.toolName).toBeUndefined();
+      expect(command.sourceBindingId).toBeUndefined();
+      expect(command.uiState).toEqual({
+        reviews: [{ url: "http://127.0.0.1:44200/operations/operation-42", label: "Review: Update syllabus in Intro to Biology" }],
+      });
+      socket.send(serializeBridgeMessage({
+        schema: BRIDGE_SCHEMAS.result,
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        requestId: command.requestId,
+        operationId: command.operationId,
+        generation: command.generation,
+        ok: true,
+        result: { schema: "morrow.bridge.ui-state-set.v1" },
+        completedAt: Date.now(),
+      }));
+    });
+    await expect(runtime.uiState({
+      reviews: [{ url: "http://127.0.0.1:44200/operations/operation-42", label: "Review: Update syllabus in Intro to Biology" }],
+    })).resolves.toMatchObject({
+      schema: "morrow.browser-ui-state.v1",
+      ok: true,
+      reviews: [{ url: "http://127.0.0.1:44200/operations/operation-42", label: "Review: Update syllabus in Intro to Biology" }],
+      result: { schema: "morrow.bridge.ui-state-set.v1" },
+    });
+    await expect(runtime.uiState({ reviews: [{ url: "not-a-url", label: "Review" }] } as never))
+      .resolves.toMatchObject({ ok: false, problem: { code: "ui_state_invalid" } });
+  });
+
   it("reads individual Edit options only for one exact current browser binding", async () => {
     const runtime = await start();
     const socket = sockets.at(-1)!;

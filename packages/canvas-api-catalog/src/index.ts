@@ -53,6 +53,8 @@ export interface CanvasApiOperation {
   readonly parameters: readonly CanvasApiParameter[];
   readonly inputSchema: JsonSchema;
   readonly responseType: string;
+  /** A plain-English label for this write operation, the same on every surface. Read operations carry none. */
+  readonly plainLabel?: string;
 }
 
 export interface CanvasApiCatalog {

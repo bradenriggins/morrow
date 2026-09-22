@@ -1640,6 +1640,10 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
     }
 
     async function answer(command: BridgeCommand): Promise<void> {
+      if (command.kind === "ui_state") {
+        bridge?.respond(command, {});
+        return;
+      }
       bridgeCommands.push(command);
       if (command.kind === "edit_policy_options_get") {
         bridge?.respond(command, {

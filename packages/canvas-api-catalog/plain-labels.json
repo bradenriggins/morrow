@@ -1,0 +1,14 @@
+{
+  "canvas_abort_generation_of_report_or_remove_previously_generated_one": "Cancel a quiz report",
+  "canvas_lock_or_unlock_current_csp_settings_for_sub_accounts_and_courses": "Lock or unlock CSP settings",
+  "canvas_apply_lti_registration_update_requst_lti_registrations": "Apply an LTI registration update",
+  "canvas_get_pandata_events_jwt_token_and_its_expiration_date": "Create a Pandata Events token",
+  "canvas_bulk_delete_memberships_bulk_deletes_memberships_by_providing_array_of_user_ids_or_for_different": "Remove group memberships in bulk",
+  "canvas_mark_rubric_assessments_as_read_courses_rubric_assessments": "Mark rubric assessments as read in a course",
+  "canvas_mark_rubric_assessments_as_read_courses_rubric_comments": "Mark rubric comments as read in a course",
+  "canvas_mark_rubric_assessments_as_read_sections_rubric_assessments": "Mark rubric assessments as read in a section",
+  "canvas_mark_rubric_assessments_as_read_sections_rubric_comments": "Mark rubric comments as read in a section",
+  "canvas_close_notification_for_user_destroy_notification_for_admin": "Close a notification",
+  "canvas_disable_assignments_currently_enabled_for_grade_export_to_sis": "Disable assignments enabled for SIS export",
+  "canvas_reset_what_if_scores_for_current_user_for_entire_course_and_recalculate_grades": "Reset what-if scores for a course"
+}

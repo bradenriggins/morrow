@@ -273,7 +273,10 @@ describe("outer provider effects", () => {
         completeness: "complete",
         effectState: "awaiting_approval",
         verification: { status: "unconfirmed", evidence: [] },
-        attention: [],
+        attention: [
+          "Review and approve: morrow_legacy_only in course 101",
+          `Call morrow_operation_wait with operation_id "${id}".`,
+        ],
         limitations: [],
       });
       expect(runtime.operationGet(id)).toMatchObject({
@@ -442,7 +445,7 @@ describe("outer provider effects", () => {
       await expect.poll(() => runtime.gateway.operationGet(id).state).toBe("verified");
       const settled = await fetch(url as string);
       const settledBody = await settled.text();
-      expect(settledBody).toContain("Changes confirmed");
+      expect(settledBody).toContain("Canvas saved the change. Morrow checked the result.");
       expect(settledBody).not.toContain('<button class="approve"');
       expect(settledBody).not.toContain('name="nonce"');
       expect(settled.headers.get("set-cookie")).toBeNull();

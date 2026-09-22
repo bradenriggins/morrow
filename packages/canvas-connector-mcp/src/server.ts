@@ -335,6 +335,17 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
     ]),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async (input) => toolResult(await runtime.editPolicySet(input)));
+  registerTool("morrow_browser_ui_state", {
+    title: "Show reviews waiting in the Bridge popup",
+    description: "Internal Morrow control that pushes the present list of reviews waiting for the person to the Bridge popup (D1b). The Bridge never opens one of these by itself. This tool is not a catalog capability.",
+    inputSchema: z.strictObject({
+      reviews: z.array(z.strictObject({
+        url: z.string().min(1).max(300),
+        label: z.string().min(1).max(120),
+      })).max(20),
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async (input) => toolResult(await runtime.uiState(input)));
   registerTool("morrow_bridge_maintenance", {
     title: "Maintain paired Morrow Bridge",
     description: "Internal Morrow control for authenticated paired-Bridge status, quiescence, recovery, and reload readback. This tool is not a catalog capability.",

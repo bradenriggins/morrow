@@ -549,7 +549,7 @@ const CANVAS_CONTENT_GUARD_OPERATIONS = Object.freeze([
   Object.freeze({ kind: "new_quiz_answer_feedback_image_alt", toolName: "canvas_update_quiz_item", key: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item" }),
   Object.freeze({ kind: "new_quiz_feedback_image_alt", toolName: "canvas_update_quiz_item", key: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item" }),
 ]);
-const state = { socket: null, generation: 0, courseDataAuthorityGeneration: 0, accepted: null, authenticationProblem: null, catalog: null, operations: new Map(), handshakeDeadline: null, reconnectTimer: null, reconnectAttempt: 0, writeQueues: new Map(), storageQueue: Promise.resolve(), pairingFetchControllers: new Set(), bridgeCommands: new Map(), privateChat: null, privateChatClosed: null };
+const state = { socket: null, generation: 0, courseDataAuthorityGeneration: 0, accepted: null, authenticationProblem: null, catalog: null, operations: new Map(), handshakeDeadline: null, reconnectTimer: null, reconnectAttempt: 0, writeQueues: new Map(), storageQueue: Promise.resolve(), pairingFetchControllers: new Set(), bridgeCommands: new Map(), privateChat: null, privateChatClosed: null, reviewsWaiting: 0, reviews: [] };
 const canvasUploadObservers = new Map();
 // siteAnchorId -> the last course-site match, or the probe that is finding one now.
 const anchorVerifications = new Map();
@@ -2078,6 +2078,59 @@ function bridgePolicyOptionsGet(command) {
     throw new Error("edit_policy_options_invalid");
   }
   return command.sourceBindingId;
+}
+
+const MAX_BRIDGE_UI_REVIEWS = 20;
+const BRIDGE_UI_REVIEW_PATH = /^\/(operations|batches)\/[A-Za-z0-9_.:@-]{8,160}$/;
+
+/**
+ * The reviews waiting for the person, pushed by the runtime after an operation or a batch enters
+ * or leaves `awaiting_approval` (D1b, WI-2.4). Checked again here, the same as
+ * `normalizeBridgeUiState` in packages/bridge-protocol, because a command reaches this worker
+ * straight from the socket.
+ */
+function bridgeUiState(command) {
+  if (!command || command.protocolVersion !== PROTOCOL_VERSION || command.kind !== "ui_state"
+    || Object.keys(command).some((key) => !["schema", "protocolVersion", "requestId", "operationId", "kind", "uiState", "generation", "createdAt", "expiresAt"].includes(key))) {
+    throw new Error("ui_state_invalid");
+  }
+  if (command.generation !== state.generation || !Number.isSafeInteger(command.expiresAt) || Date.now() > command.expiresAt) {
+    throw new Error("ui_state_stale");
+  }
+  const value = command.uiState;
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["reviews"].includes(key))) {
+    throw new Error("ui_state_invalid");
+  }
+  if (!Array.isArray(value.reviews) || value.reviews.length > MAX_BRIDGE_UI_REVIEWS) {
+    throw new Error("ui_state_invalid");
+  }
+  const reviews = value.reviews.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry) || Object.keys(entry).some((key) => !["url", "label"].includes(key))) {
+      throw new Error("ui_state_invalid");
+    }
+    if (typeof entry.url !== "string" || !entry.url.length || entry.url.length > 300) throw new Error("ui_state_invalid");
+    let parsed;
+    try {
+      parsed = new URL(entry.url);
+    } catch {
+      throw new Error("ui_state_invalid");
+    }
+    if (parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1" || !parsed.port || parsed.search || parsed.hash
+      || parsed.username || parsed.password || parsed.href !== entry.url || !BRIDGE_UI_REVIEW_PATH.test(parsed.pathname)) {
+      throw new Error("ui_state_invalid");
+    }
+    if (typeof entry.label !== "string" || !entry.label.length || entry.label.length > 120) throw new Error("ui_state_invalid");
+    return { url: entry.url, label: entry.label };
+  });
+  return { reviews };
+}
+
+/** Stores the checked list in memory only, and lets the badge reflect the new count (WI-1.3). */
+async function applyBridgeUiState(uiState) {
+  state.reviews = uiState.reviews;
+  state.reviewsWaiting = uiState.reviews.length;
+  await refreshBadge();
+  return { schema: "morrow.bridge.ui-state.v1", accepted: uiState.reviews.length };
 }
 
 async function editPolicyOptions(sourceBindingId, authorityGeneration = state.courseDataAuthorityGeneration) {
@@ -5496,6 +5549,18 @@ async function handleEditPolicyOptionsGet(command) {
   }
 }
 
+async function handleUiState(command) {
+  try {
+    const uiState = bridgeUiState(command);
+    if (await bridgeCommandCancelled(command)) return;
+    const result = await applyBridgeUiState(uiState);
+    return sendResult(command, true, result, null);
+  } catch (error) {
+    const code = error?.message === "ui_state_stale" ? "ui_state_stale" : "ui_state_invalid";
+    return sendResult(command, false, null, problem(code, "Morrow Bridge could not accept the list of reviews that wait.", code !== "ui_state_stale"));
+  }
+}
+
 async function handleBridgeMaintenance(command) {
   try {
     const beforeMutation = async () => {
@@ -5554,6 +5619,7 @@ async function handleBridgeMessage(message, owner) {
       if (await bridgeCommandCancelled(message)) return;
       if (message.kind === "edit_policy_set") await handleEditPolicySet(message);
       else if (message.kind === "edit_policy_options_get") await handleEditPolicyOptionsGet(message);
+      else if (message.kind === "ui_state") await handleUiState(message);
       else if (message.kind === "private_chat_exchange") await handlePrivateChatExchange(message);
       else if (message.kind === "bridge_maintenance") await handleBridgeMaintenance(message);
       else await handleCommand(message);

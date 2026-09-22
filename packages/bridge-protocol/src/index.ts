@@ -22,6 +22,7 @@ export const MAX_BRIDGE_PRIVATE_FILE_BYTES = 1024 * 1024;
 export const MAX_BRIDGE_PRIVATE_FILE_BASE64_BYTES = 4 * Math.ceil(MAX_BRIDGE_PRIVATE_FILE_BYTES / 3);
 export const MAX_BRIDGE_PRIVATE_FILE_ATTACHMENTS = 8;
 export const MAX_BRIDGE_PRIVATE_CONVERSATION_RECIPIENTS = 5_000;
+export const MAX_BRIDGE_UI_REVIEWS = 20;
 
 export const BRIDGE_SCHEMAS = Object.freeze({
   authenticate: "morrow.bridge.authenticate.v1",
@@ -44,6 +45,8 @@ export type BridgeCommandKind =
   | "bindings_get"
   | "edit_policy_set"
   | "edit_policy_options_get"
+  /** Server-pushed list of reviews waiting for the person (D1b). Never a catalog capability. */
+  | "ui_state"
   /** Private, local-only assistant relay. Never a catalog capability. */
   | "private_chat_exchange"
   /** Private desktop-to-Bridge maintenance control. Never a catalog capability. */
@@ -102,6 +105,12 @@ export interface BridgeEditOption {
   readonly verification?: "checked" | "unchecked";
   readonly verificationReason?: string;
   readonly requiresFieldSelection?: boolean;
+  readonly area?: "pages" | "assignments" | "quizzes" | "discussions" | "files" | "calendar" | "people" | "accessibility" | "beyond_course" | "other";
+  readonly kind?: "edit" | "publish" | "remove";
+  readonly reach?: "course" | "beyond";
+  readonly learnerVisible?: boolean;
+  readonly routine?: boolean;
+  readonly rememberable?: boolean;
 }
 
 export interface BridgeEditOptionsResult {
@@ -137,6 +146,19 @@ export type BridgeMaintenanceControl =
   | { readonly action: "resume"; readonly quiesceEpoch: string; readonly fileLayerRestored: true }
   | { readonly action: "reload"; readonly quiesceEpoch: string }
   | { readonly action: "readback" };
+
+/**
+ * The reviews waiting for the person, pushed to the Bridge popup by the
+ * runtime. The Bridge never opens one of these by itself (D1b).
+ */
+export interface BridgeUiReview {
+  readonly url: string;
+  readonly label: string;
+}
+
+export interface BridgeUiState {
+  readonly reviews: readonly BridgeUiReview[];
+}
 
 export interface BridgePrivateFileManifest {
   readonly filename: string;
@@ -257,6 +279,7 @@ export interface BridgeCommand {
   readonly sourceBindingId?: string;
   readonly taskId?: string;
   readonly editPolicySet?: BridgeEditPolicySet;
+  readonly uiState?: BridgeUiState;
   readonly maintenance?: BridgeMaintenanceControl;
   /** Gateway-owned evidence for a dispatched outer effect. */
   readonly outerGrant?: BridgeOuterGrant;
@@ -939,9 +962,13 @@ function parseEditPermissionSummary(value: unknown, sourceBindingId: string): Br
   };
 }
 
+const BRIDGE_EDIT_OPTION_AREAS = ["pages", "assignments", "quizzes", "discussions", "files", "calendar", "people", "accessibility", "beyond_course", "other"] as const;
+const BRIDGE_EDIT_OPTION_KINDS = ["edit", "publish", "remove"] as const;
+const BRIDGE_EDIT_OPTION_REACHES = ["course", "beyond"] as const;
+
 function parseEditOption(value: unknown, index: number): BridgeEditOption {
   const label = `editOptions[${index}]`;
-  if (!isJsonObject(value) || Object.keys(value).some((key) => !["id", "group", "label", "description", "availability", "reviewReason", "tier", "destructive", "verification", "verificationReason", "requiresFieldSelection"].includes(key))) {
+  if (!isJsonObject(value) || Object.keys(value).some((key) => !["id", "group", "label", "description", "availability", "reviewReason", "tier", "destructive", "verification", "verificationReason", "requiresFieldSelection", "area", "kind", "reach", "learnerVisible", "routine", "rememberable"].includes(key))) {
     throw new TypeError(`${label} has unsupported fields`);
   }
   const id = requiredString(value.id, `${label}.id`, 160);
@@ -958,6 +985,18 @@ function parseEditOption(value: unknown, index: number): BridgeEditOption {
   const verificationReason = value.verificationReason === undefined ? undefined : requiredString(value.verificationReason, `${label}.verificationReason`, 1_000);
   if ((verification === "unchecked") !== Boolean(verificationReason)) throw new TypeError(`${label} unchecked verification requires one reason`);
   if (value.requiresFieldSelection !== undefined && value.requiresFieldSelection !== true) throw new TypeError(`${label}.requiresFieldSelection is invalid`);
+  const area = value.area;
+  if (area !== undefined && !BRIDGE_EDIT_OPTION_AREAS.includes(area as (typeof BRIDGE_EDIT_OPTION_AREAS)[number])) throw new TypeError(`${label}.area is invalid`);
+  const kind = value.kind;
+  if (kind !== undefined && !BRIDGE_EDIT_OPTION_KINDS.includes(kind as (typeof BRIDGE_EDIT_OPTION_KINDS)[number])) throw new TypeError(`${label}.kind is invalid`);
+  const reach = value.reach;
+  if (reach !== undefined && !BRIDGE_EDIT_OPTION_REACHES.includes(reach as (typeof BRIDGE_EDIT_OPTION_REACHES)[number])) throw new TypeError(`${label}.reach is invalid`);
+  const learnerVisible = value.learnerVisible;
+  if (learnerVisible !== undefined && typeof learnerVisible !== "boolean") throw new TypeError(`${label}.learnerVisible is invalid`);
+  const routine = value.routine;
+  if (routine !== undefined && typeof routine !== "boolean") throw new TypeError(`${label}.routine is invalid`);
+  const rememberable = value.rememberable;
+  if (rememberable !== undefined && typeof rememberable !== "boolean") throw new TypeError(`${label}.rememberable is invalid`);
   return {
     id,
     group: requiredString(value.group, `${label}.group`, 300),
@@ -970,6 +1009,12 @@ function parseEditOption(value: unknown, index: number): BridgeEditOption {
     ...(verification === undefined ? {} : { verification }),
     ...(verificationReason ? { verificationReason } : {}),
     ...(value.requiresFieldSelection === true ? { requiresFieldSelection: true } : {}),
+    ...(area === undefined ? {} : { area: area as (typeof BRIDGE_EDIT_OPTION_AREAS)[number] }),
+    ...(kind === undefined ? {} : { kind: kind as (typeof BRIDGE_EDIT_OPTION_KINDS)[number] }),
+    ...(reach === undefined ? {} : { reach: reach as (typeof BRIDGE_EDIT_OPTION_REACHES)[number] }),
+    ...(learnerVisible === undefined ? {} : { learnerVisible }),
+    ...(routine === undefined ? {} : { routine }),
+    ...(rememberable === undefined ? {} : { rememberable }),
   };
 }
 
@@ -1064,6 +1109,45 @@ export function normalizeBridgeEditPolicySet(value: unknown): BridgeEditPolicySe
     throw new TypeError("editPolicySet.selections must be sorted and unique");
   }
   return { mode, selections };
+}
+
+const BRIDGE_UI_REVIEW_PATH = /^\/(operations|batches)\/[A-Za-z0-9_.:@-]{8,160}$/;
+
+export function normalizeBridgeUiState(value: unknown): BridgeUiState {
+  if (!isJsonObject(value) || Object.keys(value).some((key) => !["reviews"].includes(key))) {
+    throw new TypeError("uiState has unsupported fields");
+  }
+  if (!Array.isArray(value.reviews) || value.reviews.length > MAX_BRIDGE_UI_REVIEWS) {
+    throw new TypeError("uiState.reviews exceeds the bridge limit");
+  }
+  const reviews = value.reviews.map((entry, index) => {
+    const label = `uiState.reviews[${index}]`;
+    if (!isJsonObject(entry) || Object.keys(entry).some((key) => !["url", "label"].includes(key))) {
+      throw new TypeError(`${label} has unsupported fields`);
+    }
+    const url = requiredString(entry.url, `${label}.url`, 300);
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new TypeError(`${label}.url must be a loopback operations or batches address`);
+    }
+    if (
+      parsed.protocol !== "http:"
+      || parsed.hostname !== "127.0.0.1"
+      || !parsed.port
+      || parsed.search
+      || parsed.hash
+      || parsed.username
+      || parsed.password
+      || parsed.href !== url
+      || !BRIDGE_UI_REVIEW_PATH.test(parsed.pathname)
+    ) {
+      throw new TypeError(`${label}.url must be a loopback operations or batches address`);
+    }
+    return { url, label: requiredString(entry.label, `${label}.label`, 120) };
+  });
+  return { reviews };
 }
 
 function parseBinding(value: unknown): BridgeBinding {

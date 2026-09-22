@@ -468,6 +468,38 @@ describe("LoopbackBridgeServer", () => {
     })).resolves.toMatchObject({ ok: true, result: { schema: "morrow.bridge.edit-policy-set.v1" } });
   });
 
+  it("sends a ui_state command with no course binding and refuses an invalid review list", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+    });
+    servers.push(server);
+    const socket = await connect(server, []);
+    commandHandler(socket, (command) => {
+      expect(command.kind).toBe("ui_state");
+      expect(command.sourceBindingId).toBeUndefined();
+      expect(command.toolName).toBeUndefined();
+      expect(command.uiState).toEqual({
+        reviews: [{ url: "http://127.0.0.1:44200/operations/operation-42", label: "Review: Update syllabus in Intro to Biology" }],
+      });
+      return { schema: "morrow.bridge.ui-state-set.v1" };
+    });
+    await expect(server.invoke({
+      kind: "ui_state",
+      uiState: { reviews: [{ url: "http://127.0.0.1:44200/operations/operation-42", label: "Review: Update syllabus in Intro to Biology" }] },
+      operationId: "ui-state:operation-42",
+    })).resolves.toMatchObject({ ok: true, result: { schema: "morrow.bridge.ui-state-set.v1" } });
+    await expect(server.invoke({
+      kind: "ui_state",
+      uiState: { reviews: [{ url: "https://127.0.0.1:44200/operations/operation-42", label: "Review" }] },
+      operationId: "ui-state:bad-scheme",
+    })).rejects.toThrow("loopback operations or batches address");
+    await expect(server.invoke({ kind: "ui_state" })).rejects.toThrow("uiState has unsupported fields");
+  });
+
   it("sends a private file attachment only with exact Moodle staged-file commands", async () => {
     const server = new LoopbackBridgeServer({
       token,
