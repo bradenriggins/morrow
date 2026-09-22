@@ -11,6 +11,7 @@ const { createElectronUpdaterAdapter } = require("./shared/electron-updater-adap
 const { createUpdateAttemptStore, createUpdateController } = require("./shared/updates.cjs");
 const { UPDATE_FEED } = require("./shared/update-feed.cjs");
 const { createInstallerController, detectAssistant, errorDetails, repairRequiredState } = require("./shared/installer-controller.cjs");
+const { appLocationStatus } = require("./shared/app-location.cjs");
 const { canonicalDirectory, exists, isComplete, mkdirPrivate, payloadLayout } = require("./shared/runtime.cjs");
 
 /**
@@ -322,6 +323,18 @@ function fixedPayloadRoot() {
     : process.env.MORROW_INSTALLER_PAYLOAD;
   if (!seed || !path.isAbsolute(seed)) throw new Error("Morrow bundled files are unavailable.");
   return seed;
+}
+
+/**
+ * Where this copy runs, for the rule in shared/app-location.cjs. The payload an
+ * assistant starts lives inside the app bundle, so its place must last.
+ */
+function currentAppLocation() {
+  let inApplicationsFolder = null;
+  try {
+    inApplicationsFolder = typeof app.isInApplicationsFolder === "function" ? app.isInApplicationsFolder() : null;
+  } catch { /* An unreadable answer is not proof; see appLocationStatus. */ }
+  return appLocationStatus({ platform: process.platform, isPackaged: app.isPackaged, executablePath: process.execPath, inApplicationsFolder });
 }
 
 function requestedArgument(name) {
@@ -706,6 +719,9 @@ async function startMorrow(lifecycle) {
     // value keeps the temporary unpacked route; see bridgeDeliveryMode().
     bridgeDelivery: BUILD_METADATA.bridgeDelivery,
     detectAssistant,
+    appLocation: currentAppLocation,
+    // On success Electron quits this copy and opens the moved one.
+    moveToApplications: async () => typeof app.moveToApplicationsFolder === "function" && app.moveToApplicationsFolder() === true,
     updateSnapshot: () => updateController?.snapshot()
   });
   await installer.initializeBridgeAtStartup().catch(() => {});
@@ -927,6 +943,26 @@ async function startMorrow(lifecycle) {
     try {
       noInput(input);
       return envelope(await installer.restorePreviousBridge(), null);
+    } catch (error) {
+      return failed(error);
+    }
+  });
+  ipcMain.handle("installer:check-assistant-connection", async (event, ...input) => {
+    trusted(event);
+    try {
+      noInput(input);
+      await installer.checkAssistantConnection();
+      return respond();
+    } catch (error) {
+      return failed(error);
+    }
+  });
+  ipcMain.handle("installer:move-to-applications", async (event, ...input) => {
+    trusted(event);
+    try {
+      noInput(input);
+      await installer.moveToApplications();
+      return respond();
     } catch (error) {
       return failed(error);
     }

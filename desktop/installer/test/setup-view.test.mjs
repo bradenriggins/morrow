@@ -38,7 +38,7 @@ function step(current, label) {
 // The state fields, not a built state, so a case can spread and extend them.
 const READY_ASSISTANT = Object.freeze({
   lifecycle: "assistant_ready",
-  assistants: [{ ...CHATGPT, detected: true, configured: true, selected: true }],
+  assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }],
   selectedAssistantId: "codex",
   bridgeFolderReady: true
 });
@@ -401,7 +401,7 @@ test("the repair state offers the repair alone, with no setup to change", () => 
   const current = state({
     lifecycle: "repair_required",
     runtimeStatus: "repair_required",
-    assistants: [{ ...CHATGPT, detected: true, configured: true, selected: true }],
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }],
     materialsFolder: MATERIALS
   });
   const view = actionView(current, { chosenAssistantId: null });
@@ -415,8 +415,8 @@ test("the repair state offers the repair alone, with no setup to change", () => 
 const TWO_ASSISTANTS = Object.freeze({
   lifecycle: "ready",
   assistants: [
-    { ...CHATGPT, detected: true, configured: true },
-    { ...CLAUDE_DESKTOP, detected: true, configured: true, selected: true }
+    { ...CHATGPT, detected: true, configured: true, connected: true },
+    { ...CLAUDE_DESKTOP, detected: true, configured: true, connected: true, selected: true }
   ],
   selectedAssistantId: "claude-desktop",
   bridgeFolderReady: true,
@@ -452,9 +452,9 @@ test("the folder row names every assistant the change writes to, in one sentence
   const settings = setupManagementView(state({
     ...CONNECTED_COURSE,
     assistants: [
-      { ...CHATGPT, detected: true, configured: true, selected: true },
-      { ...CLAUDE_DESKTOP, detected: true, configured: true },
-      { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, needsWorkspace: true, detected: true, configured: true }
+      { ...CHATGPT, detected: true, configured: true, connected: true, selected: true },
+      { ...CLAUDE_DESKTOP, detected: true, configured: true, connected: true },
+      { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, needsWorkspace: true, detected: true, configured: true, connected: true }
     ],
     materialsFolder: MATERIALS
   }));
@@ -468,7 +468,7 @@ test("a second assistant waiting for approval keeps the first assistant's steps"
     ...CONNECTED_COURSE,
     lifecycle: "ready",
     assistants: [
-      { ...CHATGPT, detected: true, configured: true },
+      { ...CHATGPT, detected: true, configured: true, connected: true },
       { ...CLAUDE_DESKTOP, detected: true, pending: true, selected: true }
     ],
     selectedAssistantId: "claude-desktop",
@@ -499,7 +499,7 @@ test("an assistant on this computer that is not set up can be set up after setup
   const current = state({
     ...CONNECTED_COURSE,
     assistants: [
-      { ...CHATGPT, detected: true, configured: true, selected: true },
+      { ...CHATGPT, detected: true, configured: true, connected: true, selected: true },
       { ...CLAUDE_DESKTOP, detected: true },
       { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, needsWorkspace: true, detected: false }
     ],
@@ -680,4 +680,47 @@ test("an assistant card says Claude Desktop is not installed and where to get it
   assert.match(view.body, /Claude Desktop is not installed on this computer\. Get it from claude\.ai\/download, then select Check status\./);
   const button = view.body.match(/<button class="assistant-card"[^>]*data-assistant-id="claude-desktop"[^>]*>/)[0];
   assert.match(button, /disabled/);
+});
+
+function connectedCourse(overrides = {}) {
+  return state({
+    lifecycle: "ready",
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true, connected: false, ...overrides }],
+    selectedAssistantId: "codex",
+    bridgeFolderReady: true,
+    bridgeLoadedInChrome: true,
+    bridgePaired: true,
+    courseSite: true,
+    runtimeVerifiedCourseCount: 1,
+    selectedCourseName: "BIO 101",
+    firstPreviewCourseName: "BIO 101",
+    firstPreview: { available: true, completed: true },
+  });
+}
+
+test("setup asks the teacher to quit and reopen the assistant before it says to continue there", () => {
+  const waiting = actionView(connectedCourse());
+  assert.equal(waiting.title, "Quit and reopen your assistant.");
+  assert.match(waiting.body, /data-action="check-assistant-connection"/);
+  assert.match(waiting.body, /Check ChatGPT/);
+  assert.doesNotMatch(waiting.copy, /Continue in ChatGPT/);
+  assert.equal(statusSummary(connectedCourse()), "Quit and reopen ChatGPT");
+
+  const connected = actionView(connectedCourse({ connected: true }));
+  assert.equal(connected.title, "Your course is connected.");
+  assert.match(connected.copy, /Continue in ChatGPT/);
+});
+
+test("a Mac Morrow outside Applications offers only the move", () => {
+  const view = actionView(state({ lifecycle: "move_required", appLocation: "move_required", assistants: [{ ...CHATGPT, detected: true }] }));
+  assert.equal(view.title, "Move Morrow to Applications.");
+  assert.match(view.body, /data-action="move-to-applications"/);
+  assert.doesNotMatch(view.body, /install-assistant/);
+  assert.equal(statusSummary(state({ lifecycle: "move_required", appLocation: "move_required" })), "Move Morrow to Applications");
+});
+
+test("an assistant that still starts Morrow from where it was asks for the repair that re-points it", () => {
+  const view = actionView(state({ assistantsNeedRepoint: true, assistants: [{ ...CHATGPT, detected: true, configured: false, selected: true }] }));
+  assert.equal(view.title, "Update your assistant settings.");
+  assert.match(view.body, /data-action="repair"/);
 });

@@ -10,6 +10,7 @@ import {
   isMorrowServerEntry,
   MorrowClientConfigWriteRefusal,
   morrowClientConfigurationStatus,
+  morrowServerEntryArguments,
   withoutMorrowClientJson,
   withoutMorrowCodexTable,
 } from "../src/index.js";
@@ -284,5 +285,17 @@ describe("assistant files setup can read, and the reasons it gives when it canno
       code: "config_invalid",
       path: target,
     });
+  });
+});
+
+describe("where Morrow's entry says Morrow is", () => {
+  it("reads the arguments of Morrow's own entry, and nothing from an entry someone else wrote", () => {
+    const codex = "[mcp_servers.morrow]\ncommand = \"/Volumes/M/node\"\nargs = [\"/Volumes/M/index.js\"]\nenv = { MORROW_UPSTREAMS_FILE = \"/s.json\" }\n";
+    expect(morrowServerEntryArguments("codex", codex)).toEqual(["/Volumes/M/index.js"]);
+    expect(morrowServerEntryArguments("codex", "[mcp_servers.morrow]\ncommand = \"x\"\nargs = [\"/a\"]\n")).toBeNull();
+    expect(morrowServerEntryArguments("codex", "model = \"gpt-6\"\n")).toBeNull();
+    const json = JSON.stringify({ mcpServers: { morrow: { command: "n", args: ["/Old/index.js"], env: { MORROW_UPSTREAMS_FILE: "/s.json" } } } });
+    expect(morrowServerEntryArguments("gemini-cli", json)).toEqual(["/Old/index.js"]);
+    expect(morrowServerEntryArguments("claude-code", "{ broken")).toBeNull();
   });
 });

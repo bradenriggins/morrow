@@ -102,6 +102,8 @@ async function startedMorrow(options = {}) {
     repair: answer("repair", setupState),
     restorePreviousBridge: answer("restorePreviousBridge", setupState),
     removeData: answer("removeData", undefined),
+    checkAssistantConnection: answer("checkAssistantConnection", true),
+    moveToApplications: answer("moveToApplications", false),
     acquireRestartLease: answer("acquireRestartLease", { status: "uncertain" }),
     releaseRestartLease: answer("releaseRestartLease", undefined),
     commitRestartLease: answer("commitRestartLease", undefined),
@@ -436,7 +438,9 @@ test("every action that takes no input refuses one, and performs its step only w
     ["installer:open-claude-desktop", "openClaudeDesktop", null],
     ["installer:repair", "repair", null],
     ["installer:restore-bridge", "restorePreviousBridge", null],
-    ["installer:remove-data", "removeData", null]
+    ["installer:remove-data", "removeData", null],
+    ["installer:check-assistant-connection", "checkAssistantConnection", null],
+    ["installer:move-to-applications", "moveToApplications", null]
   ];
   for (const [channel, method, updateMethod] of inputFree) {
     const handler = started.handlers.get(channel);

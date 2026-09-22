@@ -35,7 +35,7 @@ const TYPES = {
 const WIDTHS = [1180, 1000, 900, 760, 700, 440, 320];
 const BASE = {
   lifecycle: "assistant_ready",
-  assistants: [{ id: "codex", title: "ChatGPT", tier: "primary", supported: true, detected: true, configured: true, selected: true }],
+  assistants: [{ id: "codex", title: "ChatGPT", tier: "primary", supported: true, detected: true, configured: true, connected: true, selected: true }],
   selectedAssistantId: "codex",
   workspaceSelected: true,
   runtimeStatus: "ready",

@@ -130,6 +130,7 @@ const ASSISTANT_CONFIG_READ_LIMIT = 4 * 1024 * 1024;
 const INSTALLER_RECORD_READ_LIMIT = 64 * 1024;
 const ASSISTANT_REMOVAL_READ_LIMIT = 16 * 1024;
 const ASSISTANT_REMOVAL_SCHEMA = "morrow.assistant-removal.v1";
+const ASSISTANT_CONNECTION_SCHEMA = "morrow.assistant-connections.v1";
 const CLAUDE_GENERATION_TRANSITION_READ_LIMIT = 64 * 1024;
 const CLAUDE_GENERATION_TRANSITION_SCHEMA = "morrow.claude-generation-transition.v1";
 const CLAUDE_SETUP_ROOT_LIMIT = 128;
@@ -542,6 +543,10 @@ class InstallerController {
     this.trustedMcpRuntimeManifestSha256 = deps.trustedMcpRuntimeManifestSha256;
     this.trustedMcpRuntimeNodeSha256 = deps.trustedMcpRuntimeNodeSha256 || (() => null);
     this.detectAssistant = deps.detectAssistant;
+    // "ok", or "move_required" for a Mac app that runs from a disk image, a
+    // translocated copy, or anywhere outside Applications. See app-location.cjs.
+    this.appLocation = typeof deps.appLocation === "function" ? deps.appLocation : () => "ok";
+    this.moveApplication = typeof deps.moveToApplications === "function" ? deps.moveToApplications : async () => false;
     this.runCli = deps.runCli || runBoundedCommand;
     this.updateSnapshot = deps.updateSnapshot || (() => null);
     this.userData = this.app.getPath("userData");
@@ -549,6 +554,7 @@ class InstallerController {
     this.home = deps.homeDirectory;
     this.recordPath = path.join(this.paths.state, "installer.json");
     this.assistantRemovalPath = path.join(this.paths.state, "assistant-removal.json");
+    this.assistantConnectionPath = path.join(this.paths.state, "assistant-connections.json");
     this.claudeGenerationTransitionPath = path.join(this.paths.state, "claude-generation-transition.json");
     this.isCurrentClaudeDesktopSetup = deps.isCurrentClaudeDesktopSetup || isCurrentClaudeDesktopSetup;
     this.workspace = null;
@@ -1073,7 +1079,7 @@ class InstallerController {
    * the runtime, under the same fence repair and the data removal use.
    */
   async configureWorkspace(parent) {
-    const refused = this.maintenanceAdmission();
+    const refused = this.locationAdmission() || this.maintenanceAdmission();
     if (refused) throw errorDetails(refused);
     const result = await this.dialog.showOpenDialog(parent, {
       title: "Choose Morrow materials",
@@ -1495,7 +1501,7 @@ class InstallerController {
   }
 
   async installAssistant(assistantId, parent) {
-    const refused = this.maintenanceAdmission();
+    const refused = this.locationAdmission() || this.maintenanceAdmission();
     if (refused) throw errorDetails(refused);
     const assistant = ASSISTANTS.find((candidate) => candidate.id === assistantId);
     // Setting up an assistant is an explicit step, so it reads this computer
@@ -1553,6 +1559,7 @@ class InstallerController {
       const target = clientConfigTarget(assistant, this.home, project);
       if (!target) throw errorDetails("setup_failed");
       await this.installClientConfiguration(assistant, target, project, materials);
+      await this.forgetAssistantConnection(assistant.id);
       return null;
     });
 
@@ -2140,6 +2147,23 @@ class InstallerController {
    * may begin while another operation holds a restart lease, and neither may
    * interrupt work in flight that Morrow cannot confirm is safe to stop.
    */
+  /**
+   * Moves this Mac app into Applications. On success the app quits and opens
+   * again from there, so this answers only when it could not move.
+   */
+  async moveToApplications() {
+    if (this.appLocation() === "ok") return false;
+    let moved = false;
+    try { moved = await this.moveApplication() === true; } catch { moved = false; }
+    if (!moved) throw errorDetails("app_location_move_failed");
+    return true;
+  }
+
+  /** The refusal for a step that would write this copy's location somewhere lasting. */
+  locationAdmission() {
+    return this.appLocation() === "ok" ? null : "app_location_unsupported";
+  }
+
   maintenanceAdmission({ pendingBridgeUpdate = false } = {}) {
     // A staged Bridge update keeps its own lease until Chrome reloads the Bridge. Finishing that
     // update is the one step that lease exists for, so it does not count as other work here.
@@ -2165,6 +2189,8 @@ class InstallerController {
    */
   async repair() {
     try {
+      const misplaced = this.locationAdmission();
+      if (misplaced) throw errorDetails(misplaced);
       const bridge = await this.readBridgeInstallation().catch(() => null);
       if (bridge?.manualChromeReloadRequired === true) return this.restorePreviousBridge();
       const record = await this.withDesktopMutation(async (transaction) => {
@@ -2888,6 +2914,91 @@ class InstallerController {
   }
 
   /**
+   * The assistants whose own Morrow session has reached the runtime since they
+   * were last set up. A file Morrow cannot read counts as none observed, so the
+   * restart step is shown again rather than skipped.
+   */
+  async connectedAssistantIds() {
+    try {
+      const content = await readPrivateRegularFile(this.assistantConnectionPath, {
+        maxBytes: 4 * 1024,
+        trustedRoot: this.paths.state,
+      });
+      const parsed = parseStrictJson(content, "assistant connection record");
+      if (!exactObject(parsed, ["schema", "assistants"]) || parsed.schema !== ASSISTANT_CONNECTION_SCHEMA
+        || !Array.isArray(parsed.assistants)) return new Set();
+      return new Set(parsed.assistants.filter((id) => ASSISTANTS.some((assistant) => assistant.id === id)));
+    } catch {
+      return new Set();
+    }
+  }
+
+  async writeConnectedAssistantIds(ids) {
+    await this.ensureInstallerStateDirectory();
+    const assistants = ASSISTANTS.map((assistant) => assistant.id).filter((id) => ids.has(id));
+    const temporary = `${this.assistantConnectionPath}.tmp-${crypto.randomUUID()}`;
+    try {
+      await fs.writeFile(temporary, `${JSON.stringify({ schema: ASSISTANT_CONNECTION_SCHEMA, assistants })}\n`, { mode: 0o600, flag: "wx" });
+      if (this.platform !== "win32") await fs.chmod(temporary, 0o600);
+      await fs.rename(temporary, this.assistantConnectionPath);
+    } finally {
+      await fs.rm(temporary, { force: true }).catch(() => {});
+    }
+  }
+
+  /** Setting an assistant up again means it must be restarted again. */
+  async forgetAssistantConnection(assistantId) {
+    const ids = await this.connectedAssistantIds();
+    if (!ids.delete(assistantId)) return;
+    await this.writeConnectedAssistantIds(ids);
+  }
+
+  /**
+   * Checks whether an assistant's own Morrow session is connected. The runtime
+   * grants its maintenance lease only while Morrow's own monitor is its sole
+   * client, so a refusal naming another client, or a request from one, is that
+   * session. A granted lease is released at once and means none is connected.
+   * The runtime cannot say which assistant it is, so every assistant configured
+   * now is recorded.
+   */
+  async checkAssistantConnection() {
+    const refused = this.maintenanceAdmission();
+    if (refused) throw errorDetails(refused);
+    const lease = await this.acquireRestartLease();
+    if (lease?.status === "granted") {
+      await this.releaseRestartLease(lease.leaseId);
+      throw errorDetails("assistant_not_connected");
+    }
+    if (lease?.reason !== "local_owner_other_client_connected" && lease?.reason !== "local_owner_request_in_flight") {
+      throw errorDetails("assistant_connection_unconfirmed");
+    }
+    const record = await this.record();
+    const ids = await this.connectedAssistantIds();
+    for (const id of Object.keys(record.configured || {})) ids.add(id);
+    await this.writeConnectedAssistantIds(ids);
+    return true;
+  }
+
+  /**
+   * Whether this assistant's file still starts Morrow from another place, the
+   * way it does after Morrow moved, for example from a disk image into
+   * Applications. A different materials folder alone is not a move.
+   */
+  async assistantEntryMoved(assistant, entry) {
+    if (!entry || typeof entry.target !== "string" || assistant.id === "claude-desktop") return false;
+    const content = await readConfigurationFile(entry.target).catch(() => null);
+    if (content === null) return false;
+    try {
+      const module = await this.clientConfigModule();
+      if (typeof module.morrowServerEntryArguments !== "function") return false;
+      const args = module.morrowServerEntryArguments(assistant.id, content.toString("utf8"), MORROW_SERVER_NAME);
+      return Array.isArray(args) && typeof args[0] === "string" && args[0] !== this.paths.server;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Everything setup shows. `recheckAssistants` is the person selecting Check
    * status: it drops the cached detection answers so this read looks at the
    * computer again. Every other read, including the one on window focus, uses
@@ -2901,6 +3012,7 @@ class InstallerController {
     const materials = await this.effectiveWorkspace(record);
     const complete = await this.ensureRuntime().then(() => true, () => false);
     const configured = record.configured && typeof record.configured === "object" ? record.configured : {};
+    const connectedIds = await this.connectedAssistantIds();
     const assistants = await Promise.all(ASSISTANTS.map(async (assistant) => {
       const entry = configured[assistant.id];
       // Claude Desktop is configured once its connection receipt is present and
@@ -2911,10 +3023,14 @@ class InstallerController {
         ? await inspectClaudeDesktopConnection(entry, { platform: this.platform, homeDirectory: this.home })
         : null;
       const present = claude ? claude.installed === true : await this.assistantConfigurationPresent(assistant, entry, materials);
+      const moved = !claude && present !== true && await this.assistantEntryMoved(assistant, entry);
       return {
+        moved,
         ...assistant,
         detected: await this.detectedAssistant(assistant),
         configured: present,
+        // Claude Desktop counts as configured only after its session connected.
+        connected: present === true && (assistant.id === "claude-desktop" || connectedIds.has(assistant.id)),
         pending: assistant.id === "claude-desktop" && entry && present !== true,
         selected: record.selectedAssistantId === assistant.id,
         needsWorkspace: true
@@ -2961,7 +3077,9 @@ class InstallerController {
       && bridgeInstallation?.installed !== true
       && (this.bridgeStartupAttempted || this.bridgeVerificationFailed)
       && (bridge.paired === true || bridge.count > 0 || runtime.firstPreview.completed === true);
-    const lifecycle = currentRuntimeStatus === "repair_required" || bridgeRepairRequired ? "repair_required"
+    const appLocation = this.appLocation() === "ok" ? "ok" : "move_required";
+    const lifecycle = appLocation === "move_required" ? "move_required"
+      : currentRuntimeStatus === "repair_required" || bridgeRepairRequired ? "repair_required"
       : requestedAssistant?.pending && !ready ? "assistant_pending"
       : bridge.count > 0 && ready ? "ready"
       : bridge.paired === true && ready ? "course_not_connected"
@@ -2970,6 +3088,8 @@ class InstallerController {
     const updates = this.updateSnapshot();
     const current = installerState({
       lifecycle,
+      appLocation,
+      assistantsNeedRepoint: assistants.some((assistant) => assistant.moved === true),
       assistants,
       selectedAssistantId: requestedAssistant?.id || null,
       workspaceSelected: record.materialsFolder !== undefined,

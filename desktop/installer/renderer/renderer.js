@@ -677,6 +677,12 @@ async function handleAction(event) {
     else render(state);
     return;
   }
+  if (action === "check-assistant-connection" || action === "move-to-applications") {
+    const next = await invoke(action === "move-to-applications" ? "installer:move-to-applications" : "installer:check-assistant-connection");
+    if (next) render(next);
+    else render(state);
+    return;
+  }
   if (action === "reveal-bridge-folder") {
     const next = await invoke("installer:reveal-bridge-folder");
     if (next) render(next);

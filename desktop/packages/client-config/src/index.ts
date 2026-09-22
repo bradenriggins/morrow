@@ -2047,6 +2047,30 @@ function installedClientDigest(
 }
 
 /**
+ * The arguments of Morrow's own entry in one client file, or null when the file has no entry
+ * carrying Morrow's marker or cannot be read. Setup uses the first argument to see whether an
+ * assistant still starts Morrow from a place Morrow has since moved away from.
+ */
+export function morrowServerEntryArguments(
+  clientValue: SupportedMorrowClient,
+  content: string,
+  serverName = "morrow",
+): readonly string[] | null {
+  const client = exactClient(clientValue);
+  let entry: unknown;
+  try {
+    entry = client === "codex"
+      ? codexMcpServer(parseCodexToml("assistant configuration", content), serverName, "assistant configuration")
+      : clientJsonServers("assistant configuration", parseClientJson("assistant configuration", content), CLIENT_JSON[client].container)[serverName];
+  } catch {
+    return null;
+  }
+  if (!isMorrowServerEntry(entry)) return null;
+  const args = (entry as Record<string, unknown>).args;
+  return Array.isArray(args) && args.every((value) => typeof value === "string") ? [...args] as string[] : null;
+}
+
+/**
  * Reads one supported client configuration without changing it and verifies
  * the exact Morrow server entry. Unrelated client settings do not affect the
  * result. The complete-file digest remains available for later guarded writes.

@@ -257,7 +257,7 @@ function failed(state, error) {
 
 const BASE = {
   lifecycle: "assistant_ready",
-  assistants: [{ id: "codex", title: "ChatGPT", tier: "primary", supported: true, detected: true, configured: true, selected: true }],
+  assistants: [{ id: "codex", title: "ChatGPT", tier: "primary", supported: true, detected: true, configured: true, connected: true, selected: true }],
   selectedAssistantId: "codex",
   workspaceSelected: true,
   runtimeStatus: "ready",
@@ -1261,4 +1261,36 @@ test("the data-retention panel names every path and shows the removal Morrow rep
   // claiming an empty list.
   const empty = await load("retention-empty", async () => ok(state()));
   assert.equal(empty.element("#retention-panel").hidden, true);
+});
+
+test("Check the assistant and Move to Applications each reach their own channel with no input", async () => {
+  const calls = [];
+  const waiting = state({
+    bridgePaired: true,
+    runtimeVerifiedCourseCount: 1,
+    selectedCourseName: "BIOL 101",
+    firstPreview: { available: true, completed: true }
+  });
+  waiting.assistants = waiting.assistants.map((assistant) => ({ ...assistant, connected: false }));
+  const dom = await load("restart-assistant", async (method, payload) => {
+    calls.push({ method, payload });
+    return ok(waiting);
+  });
+  assert.equal(dom.element("#action-title").textContent, "Quit and reopen your assistant.");
+  const check = dom.element("#action-body").querySelectorAll("[data-action]")
+    .find((element) => element.dataset.action === "check-assistant-connection");
+  await dom.element("#action-body").dispatch("click", { target: check });
+  await settle();
+  assert.deepEqual(calls.at(-1), { method: "installer:check-assistant-connection", payload: undefined });
+
+  const misplaced = state({ lifecycle: "move_required", appLocation: "move_required" });
+  const moving = await load("move-app", async (method, payload) => {
+    calls.push({ method, payload });
+    return ok(misplaced);
+  });
+  const move = moving.element("#action-body").querySelectorAll("[data-action]")
+    .find((element) => element.dataset.action === "move-to-applications");
+  await moving.element("#action-body").dispatch("click", { target: move });
+  await settle();
+  assert.deepEqual(calls.at(-1), { method: "installer:move-to-applications", payload: undefined });
 });

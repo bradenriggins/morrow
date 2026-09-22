@@ -78,6 +78,18 @@ const PUBLIC_ERRORS = Object.freeze({
     recovery: "Quit the assistant, then try again. Morrow changed nothing.",
     fileRecovery: "Quit the assistant, then try again. Morrow changed nothing in {file}."
   },
+  assistant_not_connected: {
+    message: "Morrow has not heard from your assistant yet.",
+    recovery: "Quit the assistant completely, open it again, and start a new chat. Then select Check again."
+  },
+  assistant_connection_unconfirmed: {
+    message: "Morrow could not check your assistant yet.",
+    recovery: "Keep Morrow open until it is ready, then select Check again."
+  },
+  app_location_move_failed: {
+    message: "Morrow could not move itself to Applications.",
+    recovery: "Quit Morrow. In Finder, drag Morrow into your Applications folder, then open it from there."
+  },
   app_location_unsupported: {
     message: "Morrow must run from your Applications folder.",
     recovery: "Select Move to Applications. Morrow moves itself there and opens again."
@@ -190,6 +202,9 @@ function installerState(input) {
     detected: assistant.detected === true,
     configured: assistant.configured === true,
     pending: assistant.pending === true,
+    // The assistant's own Morrow session reached the runtime at least once since
+    // it was set up. Until then the assistant has not reloaded its settings.
+    connected: assistant.connected === true,
     selected: assistant.selected === true,
     needsWorkspace: assistant.needsWorkspace === true,
     supported: assistant.supported === true,
@@ -197,6 +212,11 @@ function installerState(input) {
   return {
     schema: "morrow.installer-state.v1",
     lifecycle: input.lifecycle,
+    // "move_required" when this Mac copy of Morrow runs outside Applications and
+    // must move before it writes its location into any assistant.
+    appLocation: input.appLocation === "move_required" ? "move_required" : "ok",
+    // An assistant still starts Morrow from where Morrow used to be; repair re-points it.
+    assistantsNeedRepoint: input.assistantsNeedRepoint === true,
     assistants,
     selectedAssistantId: typeof input.selectedAssistantId === "string" ? input.selectedAssistantId : null,
     workspaceSelected: input.workspaceSelected === true,

@@ -2351,3 +2351,101 @@ test("Claude Desktop is reported as installed only when this computer has it, an
   const found = (await installer.state({ recheckAssistants: true })).assistants.find((assistant) => assistant.id === "claude-desktop");
   assert.equal(found.detected, true);
 });
+
+test("a Mac Morrow that must move to Applications says so and writes no assistant, folder, or repair", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root, { detectAssistant: async () => true, appLocation: () => "move_required" });
+  installer.ensureRuntime = async () => { throw new Error("no payload"); };
+  const current = await installer.state();
+  assert.equal(current.appLocation, "move_required");
+  assert.equal(current.lifecycle, "move_required");
+  for (const attempt of [
+    () => installer.installAssistant("codex", null),
+    () => installer.configureWorkspace(null),
+    () => installer.repair(),
+  ]) {
+    await assert.rejects(attempt, (error) => error.code === "app_location_unsupported");
+  }
+});
+
+test("an assistant whose Morrow entry points at a Morrow that moved asks for the repair that re-points it", async () => {
+  const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const installer = controller(root, { detectAssistant: async () => true });
+  installer.ensureRuntime = async () => installer.paths;
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, "[mcp_servers.morrow]\ncommand = \"/Volumes/Morrow/node\"\n");
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: sha256("recorded earlier") } } });
+  installer.clientConfigModule = async () => ({
+    morrowClientConfigurationStatus: () => ({ path: target, configured: false, sha256: sha256("now") }),
+    morrowServerEntryArguments: () => ["/Volumes/Morrow/Morrow.app/Contents/Resources/MorrowPayload/app/packages/mcp-server/dist/index.js"],
+  });
+  const current = await installer.state();
+  assert.equal(current.assistantsNeedRepoint, true);
+
+  installer.clientConfigModule = async () => ({
+    morrowClientConfigurationStatus: () => ({ path: target, configured: false, sha256: sha256("now") }),
+    morrowServerEntryArguments: () => [installer.paths.server],
+  });
+  assert.equal((await installer.state()).assistantsNeedRepoint, false, "a different materials folder alone is not a move");
+});
+
+test("Morrow records that an assistant connected only when its own session holds the runtime", async () => {
+  const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const installer = controller(root, { detectAssistant: async () => true });
+  installer.ensureRuntime = async () => installer.paths;
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, "[mcp_servers.morrow]\n");
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: sha256(await fs.readFile(target)) } } });
+  const codex = async (current) => (await current.state()).assistants.find((assistant) => assistant.id === "codex");
+  assert.equal((await codex(installer)).connected, false, "a configured assistant has not connected yet");
+
+  // No other client: the monitor alone holds the runtime, so the lease is granted and released.
+  const events = [];
+  installer.acquireRestartLease = async () => { events.push("acquire"); return { status: "granted", leaseId: "probe" }; };
+  installer.releaseRestartLease = async (leaseId) => { events.push(`release ${leaseId}`); return { status: "released" }; };
+  await assert.rejects(() => installer.checkAssistantConnection(), (error) => error.code === "assistant_not_connected");
+  assert.deepEqual(events, ["acquire", "release probe"]);
+  assert.equal((await codex(installer)).connected, false);
+
+  // The runtime cannot tell, so Morrow says so instead of guessing.
+  installer.acquireRestartLease = async () => ({ status: "uncertain" });
+  await assert.rejects(() => installer.checkAssistantConnection(), (error) => error.code === "assistant_connection_unconfirmed");
+
+  // The assistant's own Morrow session is connected.
+  installer.acquireRestartLease = async () => ({ status: "uncertain", reason: "local_owner_other_client_connected" });
+  await installer.checkAssistantConnection();
+  assert.equal((await codex(installer)).connected, true);
+
+  // The observation outlives this window.
+  const { installer: reopened } = { installer: controller(root, { detectAssistant: async () => true }) };
+  reopened.ensureRuntime = async () => reopened.paths;
+  assert.equal((await codex(reopened)).connected, true);
+
+  // Setting the assistant up again asks for the restart again.
+  await reopened.forgetAssistantConnection("codex");
+  assert.equal((await codex(reopened)).connected, false);
+});
+
+test("Move to Applications asks the app to move itself, and says how to move it by hand when it cannot", async () => {
+  const root = await temporaryRoot();
+  let answer = true;
+  const moves = [];
+  const installer = controller(root, {
+    appLocation: () => "move_required",
+    moveToApplications: async () => { moves.push("move"); if (answer instanceof Error) throw answer; return answer; },
+  });
+  assert.equal(await installer.moveToApplications(), true);
+  answer = false;
+  await assert.rejects(() => installer.moveToApplications(), (error) => error.code === "app_location_move_failed");
+  answer = new Error("the person cancelled the password prompt");
+  await assert.rejects(() => installer.moveToApplications(), (error) => error.code === "app_location_move_failed");
+  assert.deepEqual(moves, ["move", "move", "move"]);
+
+  const settled = controller(root, { appLocation: () => "ok", moveToApplications: async () => { moves.push("unexpected"); return true; } });
+  assert.equal(await settled.moveToApplications(), false);
+  assert.deepEqual(moves, ["move", "move", "move"]);
+});

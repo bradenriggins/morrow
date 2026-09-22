@@ -83,6 +83,7 @@ function needsBridge(current) {
 // region never announces a later step than the one on screen.
 export function statusSummary(current) {
   if (!current) return "Checking setup";
+  if (current.appLocation === "move_required") return "Move Morrow to Applications";
   if (current.lifecycle === "repair_required" || current.runtime?.status === "repair_required") return "Morrow needs repair";
   if (pendingAssistant(current) && !configuredAssistant(current)) return "Finish setting up Claude Desktop";
   if (configuredAssistant(current) && current.runtime?.status !== "ready") return "Morrow is getting ready";
@@ -90,6 +91,7 @@ export function statusSummary(current) {
   if (current.bridge?.manualChromeReloadRequired === true) return "Reload Morrow Bridge in Chrome";
   if (current.bridge?.updateAvailable === true) return "Update Morrow Bridge";
   if (configuredAssistant(current) && needsBridge(current)) return "Set up Morrow Bridge in Chrome";
+  if (previewCompleted(current) && restartAssistant(current)) return `Quit and reopen ${restartAssistant(current).title}`;
   if (previewCompleted(current)) return "First read complete";
   if (previewReady(current)) return "First read is ready";
   if (verifiedCourse(current)) return "Selected course is ready";
@@ -266,6 +268,7 @@ function homeStatusLines() {
 }
 
 function actionPanel(current, { chosenAssistantId = null } = {}) {
+  if (current.appLocation === "move_required") return movePanel();
   const bridge = current.bridge || {};
   const assistant = configuredAssistant(current);
   const selected = assistantFor(current);
@@ -277,6 +280,7 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
       body: '<div class="blocked-box"><strong>Setup needs repair</strong><p>Repair checks the files inside Morrow and restores what it can. It replaces the Morrow Bridge folder from the copy Morrow ships when the folder on this computer does not match it, and it writes your assistant setting again. It leaves a newer assistant setting alone, and it changes nothing in your course.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
     };
   }
+  if (current.assistantsNeedRepoint === true) return repointPanel();
   const pending = pendingAssistant(current);
   // A second assistant waiting for approval must not take the steps of the
   // assistant that is already set up away, so this is the panel only while no
@@ -362,6 +366,7 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
     };
   }
   const course = bridge.firstPreviewCourseName || bridge.selectedCourseName || "your selected course";
+  if (previewCompleted(current) && restartAssistant(current)) return restartPanel(restartAssistant(current));
   if (previewCompleted(current)) {
     return {
       title: "Your course is connected.",
@@ -380,6 +385,42 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
     title: "Your selected course is connected.",
     copy: `${course} is connected. Morrow will show when its first read is available.`,
     body: '<div class="info-box"><strong>First read is still preparing</strong><p>Check status again before you ask Morrow to inspect the course.</p></div>',
+  };
+}
+
+/**
+ * The configured assistant whose own Morrow session has not connected yet. An
+ * assistant reads its settings when it starts, so it must be quit and opened
+ * again before it can use Morrow. Claude Desktop is configured only once its
+ * session connected, so it never needs this step.
+ */
+function restartAssistant(current) {
+  const assistant = configuredAssistant(current);
+  return assistant && assistant.id !== "claude-desktop" && assistant.connected !== true ? assistant : null;
+}
+
+function restartPanel(assistant) {
+  const title = escapeHtml(assistant.title);
+  return {
+    title: "Quit and reopen your assistant.",
+    copy: `${assistant.title} reads its settings only when it starts. It cannot use Morrow until you open it again.`,
+    body: `<ol class="instructions"><li>Quit <strong>${title}</strong> completely. Closing its window is not enough.</li><li>Open <strong>${title}</strong> again and start a new chat.</li><li>Return here and select <strong>Check ${title}</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
+  };
+}
+
+function movePanel() {
+  return {
+    title: "Move Morrow to Applications.",
+    copy: "Morrow is running from the disk image or a download folder. An assistant set up from here would lose Morrow when that place goes away.",
+    body: '<div class="info-box"><strong>Morrow moves itself</strong><p>Morrow moves to your Applications folder and opens again from there. Then continue setup.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="move-to-applications">Move to Applications</button></div>',
+  };
+}
+
+function repointPanel() {
+  return {
+    title: "Update your assistant settings.",
+    copy: "Your assistant still starts Morrow from the place Morrow was before it moved.",
+    body: '<div class="info-box"><strong>Repair writes the new place</strong><p>Repair changes only Morrow&#39;s own entry in each assistant&#39;s settings file and leaves the rest of that file as it is.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
   };
 }
 
