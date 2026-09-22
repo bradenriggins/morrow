@@ -657,8 +657,9 @@ function startCanvas(directory) {
         assert.deepEqual([...url.searchParams.keys()], ["bookmark", "signature"]);
       } else {
         assert.equal(url.searchParams.get("enrollment_state"), "active");
+        assert.deepEqual(url.searchParams.getAll("include[]"), ["term", "favorites"]);
         assert.equal(url.searchParams.get("per_page"), "100");
-        assert.deepEqual([...url.searchParams.keys()], ["enrollment_state", "per_page", "page"]);
+        assert.deepEqual([...url.searchParams.keys()], ["enrollment_state", "include[]", "include[]", "per_page", "page"]);
       }
       const start = (page - 1) * 100;
       const nextPage = start + 100 < courses.length ? page + 1 : null;
@@ -1291,7 +1292,7 @@ try {
   assert.doesNotMatch(await operationApprovalPage.locator("body").innerText(), /Continue/);
   await captureThemes(operationApprovalPage, "approval-running");
   finishApproval();
-  await operationApprovalPage.getByRole("heading", { name: "Changes confirmed" }).waitFor();
+  await operationApprovalPage.getByRole("heading", { name: "Canvas saved the change. Morrow checked the result." }).waitFor();
   await captureThemes(operationApprovalPage, "approval-confirmed");
   await captureThemes(operationApprovalPage, "approval-confirmed-narrow", 320);
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/batches/batch-ui-test`);
@@ -1305,7 +1306,7 @@ try {
   await operationApprovalPage.getByRole("heading", { name: "Applying your changes" }).waitFor();
   await operationApprovalPage.getByText("0 of 2 changes confirmed in Canvas.", { exact: true }).waitFor();
   finishBatchApproval();
-  await operationApprovalPage.getByRole("heading", { name: "Changes confirmed" }).waitFor();
+  await operationApprovalPage.getByRole("heading", { name: "Canvas saved the change. Morrow checked the result." }).waitFor();
   assert.deepEqual(await operationApprovalPage.locator("[data-operation-status]").allTextContents(), ["Confirmed in Canvas", "Confirmed in Canvas"]);
   assert.equal(await operationApprovalPage.getByRole("button", { name: "Stop remaining changes" }).count(), 0);
   await captureThemes(operationApprovalPage, "approval-batch-confirmed");
@@ -1391,7 +1392,7 @@ try {
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Aexpired-on-submit`);
   await operationApprovalPage.getByRole("button", { name: "Add this question" }).click();
   await operationApprovalPage.getByRole("heading", { name: "Request cancelled" }).waitFor();
-  assert.equal(await operationApprovalPage.getByRole("heading", { name: "Changes confirmed" }).count(), 0);
+  assert.equal(await operationApprovalPage.getByRole("heading", { name: "Canvas saved the change. Morrow checked the result." }).count(), 0);
   process.stderr.write("[browser-test] operation approval UI ready\n");
 
   const worker = await waitFor(

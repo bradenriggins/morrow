@@ -1775,7 +1775,7 @@ describe("Canvas connector gateway path", () => {
       expect(uncertainView).toContain("0 of 2 changes confirmed in Canvas");
       expect(uncertainView).toContain("<span data-operation-status>Needs checking</span>");
       expect(uncertainView).toContain("<span data-operation-status>Not started</span>");
-      expect(uncertainView).not.toContain("Changes confirmed");
+      expect(uncertainView).not.toContain("Canvas saved the change. Morrow checked the result.");
       expect(writeCommands).toBe(5);
 
       const queued = await runtime.batchCreate({
