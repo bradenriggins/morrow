@@ -51,6 +51,14 @@ PEOPLE_BEARING = {
     "C-327": "page revisions: edited_by user object for each revision",
     "C-331": "page revision: edited_by user object",
     "C-332": "page revision: edited_by user object",
+    "C-231": "assignment date_details: overrides carry student_ids and "
+             "students [{id, name}]",
+    "C-234": "module date_details: overrides carry student_ids and "
+             "students [{id, name}]",
+    "C-235": "page date_details: overrides carry student_ids and "
+             "students [{id, name}]",
+    "C-236": "quiz date_details: overrides carry student_ids and "
+             "students [{id, name}]",
     "C-227": "course groups: group names are free text that often name "
              "the students in them, and include[]=users returns user "
              "objects",
@@ -204,3 +212,46 @@ def test_auxiliary_blocks_are_scanned(block):
     listed[block] = [{"method": "GET", "url": "{canvas_base}/api/v1/"
                       "courses/{course_id}/enrollments"}]
     assert admission.touches_learner_data(listed), block
+
+
+# Documented response keys that name a person but are NOT learner data,
+# reviewed 2026-09-22. Anything else a live-proven row documents that
+# names a person, a people collection, a person id, or an override set
+# must be classified.
+PERSON_KEY_EXCEPTIONS = {
+    ("C-82", "user_id"): "content export: the educator who started it",
+    ("C-85", "user_id"): "content migration: the educator who started it",
+    ("C-329", "last_edited_by"): "front page is course content an educator "
+                                 "may save back (see CONTENT_ONLY); its "
+                                 "last editor is a documented residual",
+    ("C-329", "hide_from_students"): "boolean page setting",
+    ("C-111", "filter_speed_grader_by_student_group"): "boolean setting",
+}
+
+
+def test_every_live_proven_row_with_person_keys_is_learner_data():
+    import re
+    from privacy import executor_wire
+    catalog = os.path.join(_TREE, "proof-battery", "OPERATION_CATALOG.md")
+    missed = []
+    scanned = 0
+    for line in open(catalog, encoding="utf-8"):
+        if not line.startswith("| ") or "live-proven" not in line:
+            continue
+        match = re.search(r"keys: ([^|]*)", line)
+        if not match:
+            continue
+        row_id = line.split("|")[1].strip()
+        keys = [k.strip(" .") for k in match.group(1).split(",")]
+        people = [k for k in keys
+                  if executor_wire.person_key_kind(k) is not None
+                  or re.search(r"(?:^|_)overrides$", k)]
+        people = [k for k in people
+                  if (row_id, k) not in PERSON_KEY_EXCEPTIONS]
+        if not people:
+            continue
+        scanned += 1
+        if not admission.touches_learner_data(_entry(row_id)):
+            missed.append((row_id, people))
+    assert scanned >= 4
+    assert not missed, "unclassified rows with person keys: %s" % missed
