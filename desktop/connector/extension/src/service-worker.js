@@ -1719,8 +1719,13 @@ async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityG
   const published = new Map((await publicBindings()).map((binding) => [binding.sourceBindingId, binding]));
   const siteAnchors = await publicSiteAnchors(stored);
   const bindings = await Promise.all((stored.bindings || []).map(async (binding) => {
-    const staleEditPermission = stalePermissionSummary(storedPolicies(stored.editPolicies)[binding.sourceBindingId], binding, api.catalogDigest, [...state.operations.values()]);
+    const storedPermission = storedPolicies(stored.editPolicies)[binding.sourceBindingId];
+    const staleEditPermission = stalePermissionSummary(storedPermission, binding, api.catalogDigest, [...state.operations.values()]);
     const current = published.get(binding.sourceBindingId);
+    // The binding Morrow receives names its grant by digest only. Settings and the popup show which
+    // actions the grant allows, so this status adds them from the stored grant that digest names.
+    const enabledCategories = current?.editPermission && storedPermission?.scopeDigest === current.editPermission.scopeDigest
+      && Array.isArray(storedPermission.enabledCategories) ? [...storedPermission.enabledCategories] : null;
     return {
       sourceBindingId: binding.sourceBindingId,
       provider: binding.provider,
@@ -1733,7 +1738,7 @@ async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityG
       runtimeVerified: current?.runtimeVerified === true,
       editPolicyRevision: current?.editPolicyRevision || 0,
       editOptionsAvailable: current?.editOptionsAvailable === true,
-      ...(current?.editPermission ? { editPermission: current.editPermission } : {}),
+      ...(current?.editPermission ? { editPermission: { ...current.editPermission, ...(enabledCategories ? { enabledCategories } : {}) } } : {}),
       ...(staleEditPermission ? { staleEditPermission: editPermissionSummary(staleEditPermission) } : {}),
     };
   }));
