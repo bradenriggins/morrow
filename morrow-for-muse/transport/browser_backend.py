@@ -2806,7 +2806,9 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
     """Finish a verify phase parked by complete_browser_request.
 
     Journals the op (pass or fail, mirroring the https backend) and returns
-    the receipt. Raises VerificationFailed on assertion failure.
+    the receipt. Raises VerificationFailed on assertion failure, and
+    UncertainWrite (journaled as uncertain) when the verify readback did
+    not complete.
 
     claim_token: the dispatch-time journal claim token, threaded through
     the orchestrator's own memory (W5-P0-1). The persisted envelope no
@@ -2921,15 +2923,16 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
 
     verify = entry.get("verify") or {}
     # P0-5: a redirect during the verify read is never followed. The write
-    # already returned 2xx, so this journals as failed verification (the
-    # write keeps uncertain=True and its conflict lock) rather than raising
-    # session-dead and leaving the op unjournaled.
+    # already returned 2xx, so a readback that did not complete (redirect,
+    # non-2xx, or missing from the report) journals as uncertain, never
+    # failed: the write keeps uncertain=True and its conflict lock, and
+    # UncertainWrite surfaces it for reconciliation by readback.
     vstatus = r["status"] if r else 0
     if r and 300 <= vstatus < 400:
         detail = ("verify op %s hit a login redirect during the readback; "
                   "redirects are never followed" % vop_id)
         verification = _project_verification_detail(
-            entry, {"status": "failed", "detail": detail}, last_payload,
+            entry, {"status": "uncertain", "detail": detail}, last_payload,
             _verify_lane.get("base"),
             {"principal": _verify_lane.get("principal"),
              "session_generation": pending.get("session_generation"),
@@ -2952,14 +2955,16 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
         _delete_pending_file(pending_file)
         _delete_brief_files(pending.get("brief_dir"), op_id)
         _shutdown_form_host()
-        raise ex.VerificationFailed(
-            "verify phase failed for op %s: %s (journaled as failed)" % (op_id, detail))
+        raise ex.UncertainWrite(
+            "write op %s returned success, but the readback could not "
+            "confirm it: %s (journaled as uncertain, not failed)"
+            % (op_id, detail))
     if not r or not (200 <= r["status"] < 300):
         detail = ("verify op %s %s" % (
             vop_id, "missing from report" if not r
             else "returned HTTP %d" % r["status"]))
         verification = _project_verification_detail(
-            entry, {"status": "failed", "detail": detail}, last_payload,
+            entry, {"status": "uncertain", "detail": detail}, last_payload,
             _verify_lane.get("base"),
             {"principal": _verify_lane.get("principal"),
              "session_generation": pending.get("session_generation"),
@@ -2982,8 +2987,10 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
         _delete_pending_file(pending_file)
         _delete_brief_files(pending.get("brief_dir"), op_id)
         _shutdown_form_host()
-        raise ex.VerificationFailed(
-            "verify phase failed for op %s: %s (journaled as failed)" % (op_id, detail))
+        raise ex.UncertainWrite(
+            "write op %s returned success, but the readback could not "
+            "confirm it: %s (journaled as uncertain, not failed)"
+            % (op_id, detail))
 
     vresult = ex.apply_result_block(entry, r["body"].encode("utf-8"), {})
     try:
