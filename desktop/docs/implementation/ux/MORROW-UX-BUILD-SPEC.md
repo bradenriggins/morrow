@@ -616,7 +616,7 @@ This part is for an agent that has none of the earlier conversation. Read it bef
 
 ### Commit and the hook
 
-- The hook `.githooks/pre-commit` runs the full gate, `pnpm test`, which takes about 10 minutes. Braden decided on 21 Sep 2026 that this gate does not run on each commit of this build.
+- The hook `desktop/.githooks/pre-commit` runs the full desktop gate, `pnpm test` in `desktop/`, when a commit changes `desktop/` or `.github/`. That takes about 10 minutes. Braden decided on 21 Sep 2026 that this gate does not run on each commit of this build.
 - **Checkpoint commits.** Only the integrator commits. On the branch `ux/build-20260921` it commits a checkpoint with `git commit --no-verify`, and the message starts with `WIP(ux):` and ends with `[gate not run]`. This permission is for checkpoint commits on that branch only.
 - **The gate still decides.** The full gate runs one time at the end of the build. The last commit goes through the hook, with no `--no-verify`. The build is not done until that commit exists.
 - **The sealed Bridge release is done one time, at the end.** Until then, a test that names the release ledger, or the message "source changed without a new sealed release ledger entry", is an expected failure. Report it. Do not repair it.
