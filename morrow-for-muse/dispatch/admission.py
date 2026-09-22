@@ -1119,8 +1119,8 @@ def mint_pii_reveal(tenant_base: str, course_id, authorization: str,
                     channel: str, minutes: int = 15) -> dict:
     """Seal an educator reveal for ONE course on ONE tenant.
 
-    authorization is the educator's verbatim request (at least
-    APPROVAL_AUTH_MIN_LEN characters); channel is "educator-chat" when
+    authorization is the educator's verbatim request (any non-empty
+    reply); channel is "educator-chat" when
     it was captured from the educator's own reply, "driver" otherwise
     (driver records are refused at use). minutes is 1 to
     PII_REVEAL_MAX_MINUTES. The mint is journaled (who, which course,

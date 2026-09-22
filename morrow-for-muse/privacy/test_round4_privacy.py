@@ -185,7 +185,7 @@ def test_sealed_educator_reveal_is_course_scoped(signing):
 def test_reveal_refuses_driver_channel_expired_and_tampered(signing):
     import datetime
     with pytest.raises(ValueError):
-        signing.mint_pii_reveal(BASE, "1", "too short", "educator-chat")
+        signing.mint_pii_reveal(BASE, "1", "   ", "educator-chat")
     with pytest.raises(ValueError):
         signing.mint_pii_reveal(BASE, "1", REVEAL_WORDS, "educator-chat",
                                 minutes=24 * 60)
