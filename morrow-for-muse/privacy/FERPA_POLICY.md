@@ -228,9 +228,15 @@ the wired vault file above.
   row whose path names a people resource is not classified. Course
   content (pages, quizzes, assignments, modules) is deliberately not
   classified, because projecting it would rewrite names inside content
-  an educator may save back. The consequence: a page body, or the
-  `last_edited_by` field of a page read, can carry a person's name
-  unprojected. Additions go through admission-policy review.
+  an educator may save back. The consequence: a page body can carry a
+  person's name unprojected. Person fields on content (a page's
+  `last_edited_by`, any `created_by`/`updated_by`/`editor`) are replaced
+  field by field: a learner the vault already labeled in that course
+  gets their label, anyone else becomes "a Canvas user Morrow has not
+  labeled". Course search (`smartsearch`) is learner data: result text
+  naming a learner the receipt or the vault knows for that course is
+  labeled, but a learner Morrow has never seen in that course stays raw
+  in result text. Additions go through admission-policy review.
 - Small cohorts: labels are stable across ops and restarts, so in a
   cohort of 1-3 anyone who knows the roster can re-identify students
   by elimination (matching scores or distinctive work to known
@@ -240,9 +246,19 @@ the wired vault file above.
   roster never mentions (for example "Bobby" for rostered "Robert J.
   Smith") survives redaction in free text.
 - The roster is receipt-derived: the boundary redacts the
-  identities the receipt carries. A learner the receipt never
-  mentions (no record, no id, no name) cannot be redacted from
-  free text.
+  identities the receipt carries (any key naming a person or a people
+  collection, and every id under a person-id key such as
+  `student_ids` or `participating_user_ids`), plus every learner the
+  encrypted vault already labeled for the same course. A learner the
+  receipt never mentions and the vault has never seen (no record, no
+  id, no name) cannot be redacted from free text. Concretely: a
+  collaboration title or description naming its own owner is
+  redacted, and a group name is redacted for any learner a roster
+  read of that course labeled before; a group name that names a
+  learner Morrow has not yet seen in that course stays raw until a
+  roster read labels them. An ad hoc override title (an override
+  that lists student ids) is always replaced by its student count
+  ("1 student"), because its students may appear nowhere else.
 - Bare numeric ids in arbitrary prose or CSV text are not always
   recognized. Contextual forms are redacted: `user_id=912345`,
   `/users/912345`, whole-string ids, structured identity fields,

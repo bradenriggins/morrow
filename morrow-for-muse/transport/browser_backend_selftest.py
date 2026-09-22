@@ -47,6 +47,21 @@ import browser_backend as bb  # noqa: E402
 import batch  # noqa: E402
 
 
+
+def _journal_forward_write(ex, entry, params, receipt):
+    """Journal a completed forward write for entry: an undo binds its
+    target ONLY to a journaled forward op (H1)."""
+    import uuid as _uuid
+    op_id = str(_uuid.uuid4())
+    token = ex.claim_op_id(op_id, "dispatch", entry["name"], "write",
+                           ex.digest_of(params))
+    ex.journal_claimed_outcome(op_id, {
+        "op_id": op_id, "entry_name": entry["name"], "kind": "dispatch",
+        "effect": "write", "wal": "complete",
+        "params_digest": ex.digest_of(params), "receipt": receipt,
+        "verification": "pass", "uncertain": False}, token)
+    return op_id
+
 def _approve(name, params):
     """Test-only educator approval for a write fixture (v2 record)."""
     entry = {"name": name, "provider": "canvas"}
@@ -1017,16 +1032,17 @@ def main():
     # (kind="undo" with the DELETE report).
     op_id = str(uuid.uuid4())
     _up = {"course_id": "89585"}
+    _orig = _journal_forward_write(ex, WRITE_ENTRY, _up, {"id": 99})
     _uentry, _uparams = ex.undo_approval_subject(
-        WRITE_ENTRY, _up, "orig-op-1", {"id": 99})
+        WRITE_ENTRY, _up, _orig, {"id": 99})
     uout = bb.dispatch_browser_undo(
-        WRITE_ENTRY, _up, {"id": 99}, "orig-op-1",
+        WRITE_ENTRY, _up, {"id": 99}, _orig,
         LANE_STATE, {}, brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
         approval=_approve(_uentry["name"], _uparams))
     check("undo dispatch renders fetch brief",
           uout["status"] == "awaiting_browser_task"
           and uout["kind"] == "undo"
-          and uout["undo_of"] == "orig-op-1")
+          and uout["undo_of"] == _orig)
     with open(uout["brief_file"], encoding="utf-8") as fh:
         _ubrief = fh.read()
     check("undo brief routes the DELETE through page-context fetch with "
@@ -1039,15 +1055,15 @@ def main():
     urec = bb.complete_browser_request(
         uout["op_id"], WRITE_ENTRY, _up, None,
         report((uout["ops"][0], 200, json.dumps({"id": 99}))),
-        LANE_STATE, {}, kind="undo", of_op_id="orig-op-1",
+        LANE_STATE, {}, kind="undo", of_op_id=_orig,
         brief_dir=BRIEF_DIR, pending_dir=PENDING_DIR,
         undo_params=uout["undo_params"])
     check("undo completion journals the undo",
-          urec["op_id"] == uout["op_id"] and urec["undo_of"] == "orig-op-1")
+          urec["op_id"] == uout["op_id"] and urec["undo_of"] == _orig)
     _urec = ex.find_journal_op(uout["op_id"])
     check("undo outcome journaled as kind=undo",
           _urec is not None and _urec["kind"] == "undo"
-          and _urec["undo_of"] == "orig-op-1")
+          and _urec["undo_of"] == _orig)
 
     no_undo = {"name": "test.noundo", "provider": "canvas", "effects": "write",
                "request": {"method": "POST", "url": "{canvas_base}/api/v1/x",

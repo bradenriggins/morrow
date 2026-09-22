@@ -27,7 +27,7 @@ from dispatch import executor as ex  # noqa: E402
 from query import chain as C  # noqa: E402
 
 NOW = datetime(2026, 9, 22, 15, 0, tzinfo=timezone.utc)
-TEXT = "show me all the students that failed last week's quiz"
+QUIZ = "last_week"
 TENANT = "https://school.example.edu"
 SYNTHETIC = [{"user_id": 1, "score": 2, "name": "Fixture One"}]
 
@@ -67,7 +67,7 @@ class _Reader:
 def test_bad_course_id_refused_before_any_read(course):
     reader = _Reader()
     with pytest.raises(C.ChainFailure) as info:
-        C.run_query(TEXT, course, reader=reader, now_utc=NOW,
+        C.run_query(course, QUIZ, reader=reader, now_utc=NOW,
                     tenant_base=TENANT, synthetic_rows=SYNTHETIC)
     assert reader.paths == []
     assert info.value.translated.mode_id == "query-course-id-invalid"
@@ -78,13 +78,14 @@ def test_cli_refuses_bad_course_before_any_read(monkeypatch, capsys):
     def boom(*a, **k):
         raise AssertionError("no reader may start for a bad course id")
     monkeypatch.setattr(C._live_read, "LiveReader", boom)
-    assert C.main([TEXT, "--course", "1/../2", "--tenant", TENANT]) == 2
+    assert C.main(["--quiz", "last-week", "--course", "1/../2",
+                   "--tenant", TENANT]) == 2
     assert "course" in capsys.readouterr().out.lower()
 
 
 def test_good_course_runs_the_chain():
     reader = _Reader()
-    result = C.run_query(TEXT, "89585", reader=reader, now_utc=NOW,
+    result = C.run_query("89585", QUIZ, reader=reader, now_utc=NOW,
                          tenant_base=TENANT, synthetic_rows=SYNTHETIC)
     assert "Quiz 1" in result.text
     assert any("/courses/89585/quizzes" in p for p in reader.paths)
@@ -117,7 +118,7 @@ def test_every_chain_read_is_gated(monkeypatch, template, required):
     monkeypatch.setattr(ex, "_catalog_rows_by_key", without_row)
     reader = _Reader()
     try:
-        C.run_query(TEXT, "89585", reader=reader, now_utc=NOW,
+        C.run_query("89585", QUIZ, reader=reader, now_utc=NOW,
                     tenant_base=TENANT, synthetic_rows=SYNTHETIC)
         refused = False
     except C.ChainFailure:

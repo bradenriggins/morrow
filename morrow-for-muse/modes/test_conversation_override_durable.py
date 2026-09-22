@@ -16,6 +16,16 @@ reaudit/override_a.py + override_b.py):
   4. A tampered override store fails closed to plan, never to edit.
   5. Every override change is journaled in the settings audit, and the
      audit chain still verifies.
+  6. (third-pass re-audit) An edit override's lifetime depended on the
+     harness calling end_conversation, which only a proof script did.
+     It now ends when Morrow sees a different conversation for the
+     educator, with no external call.
+  7. (third-pass re-audit) With no conversation id, a plan override
+     the educator set was ignored at the write gate. Now any plan
+     override makes an unscoped write plan.
+
+The steps call the typed mode commands (settings.commands.mode_set);
+no free text decides a mode.
 
 Each step runs in a fresh interpreter, exactly like a dispatch.
 Scratch lives under .selftest-work/ (never /tmp); MORROW_HOME and the
@@ -51,10 +61,10 @@ PRELUDE = textwrap.dedent("""
              "request": {"method": "POST",
                          "url": "{canvas_base}/api/v1/courses/{course_id}/pages"}}
 
-    def say(text, conv=CONV, confirmed=False):
-        op, _ = commands.parse_command(text, USER, conv)
-        return commands.apply_command(op, USER, conv,
-                                      educator_confirmed=confirmed)
+    def mode(value, conv=CONV, this=False):
+        out = commands.mode_set(USER, value, conv, this_conversation=this)
+        assert out["ok"], out
+        return out["mode"]
 
     def gate(conv):
         try:
@@ -92,32 +102,31 @@ def _run(home, body):
 
 
 def test_plan_override_reaches_the_next_process(home):
-    _run(home, "say('use edit mode', confirmed=True); print('ok')")
-    _run(home, "print(say('use plan mode for this conversation'))")
+    _run(home, "mode('edit'); print('ok')")
+    _run(home, "print(mode('plan', this=True))")
     out = _run(home, "print(json.dumps([ms.current_mode(USER, CONV), "
                      "gate(CONV), gate(OTHER)]))")
     assert json.loads(out) == ["plan", "needs-approval", "admitted-edit"]
 
 
 def test_edit_override_reaches_the_next_process(home):
-    _run(home, "print(say('use edit mode for this conversation', "
-               "confirmed=True))")
+    _run(home, "print(mode('edit', this=True))")
     out = _run(home, "print(json.dumps([ms.current_mode(USER, CONV), "
                      "gate(CONV), gate(OTHER)]))")
     assert json.loads(out) == ["edit", "admitted-edit", "needs-approval"]
 
 
 def test_edit_override_ends_when_edit_is_turned_off(home):
-    _run(home, "say('use edit mode for this conversation', confirmed=True);"
+    _run(home, "mode('edit', this=True);"
                "print('ok')")
-    _run(home, "print(say('turn off edit mode', conv=OTHER))")
+    _run(home, "print(mode('plan', conv=OTHER))")
     out = _run(home, "print(json.dumps([ms.current_mode(USER, CONV), "
                      "gate(CONV)]))")
     assert json.loads(out) == ["plan", "needs-approval"]
 
 
 def test_edit_override_ends_with_the_conversation(home):
-    _run(home, "say('use edit mode for this conversation', confirmed=True);"
+    _run(home, "mode('edit', this=True);"
                "print('ok')")
     _run(home, "store.end_conversation(USER, CONV); print('ok')")
     out = _run(home, "print(json.dumps([ms.current_mode(USER, CONV), "
@@ -126,15 +135,15 @@ def test_edit_override_ends_with_the_conversation(home):
 
 
 def test_plan_override_survives_later_edit_default_elsewhere(home):
-    _run(home, "say('use plan mode for this conversation'); print('ok')")
-    _run(home, "say('use edit mode', conv=OTHER, confirmed=True); "
+    _run(home, "mode('plan', this=True); print('ok')")
+    _run(home, "mode('edit', conv=OTHER); "
                "print('ok')")
     out = _run(home, "print(json.dumps([gate(CONV), gate(OTHER)]))")
     assert json.loads(out) == ["needs-approval", "admitted-edit"]
 
 
 def test_tampered_override_store_fails_closed_to_plan(home):
-    _run(home, "say('use plan mode for this conversation'); print('ok')")
+    _run(home, "mode('plan', this=True); print('ok')")
     settings_dir = os.path.join(home, "settings")
     [name] = [n for n in os.listdir(settings_dir) if n.endswith(".json")]
     path = os.path.join(settings_dir, name)
@@ -151,9 +160,9 @@ def test_tampered_override_store_fails_closed_to_plan(home):
 
 
 def test_override_store_is_private_and_journaled(home):
-    _run(home, "say('use edit mode for this conversation', confirmed=True);"
+    _run(home, "mode('edit', this=True);"
                "print('ok')")
-    _run(home, "say('use plan mode for this conversation'); print('ok')")
+    _run(home, "mode('plan', this=True); print('ok')")
     _run(home, "store.end_conversation(USER, CONV); print('ok')")
     out = _run(home, "print(json.dumps([r['kind'] for r in "
                      "store.read_audit(USER)] + [store.verify_audit(USER)]))")
@@ -167,3 +176,37 @@ def test_override_store_is_private_and_journaled(home):
         if name.endswith((".json", ".jsonl")):
             mode = os.stat(os.path.join(settings_dir, name)).st_mode & 0o777
             assert mode == 0o600, (name, oct(mode))
+
+
+def test_edit_override_ends_when_another_conversation_is_seen(home):
+    _run(home, "mode('edit', this=True); print('ok')")
+    # A write gate (or any mode command) in a different conversation is
+    # the only signal needed: no end_conversation call.
+    _run(home, "print(gate(OTHER))")
+    out = _run(home, "print(json.dumps([ms.current_mode(USER, CONV), "
+                     "gate(CONV), store.get_conversation_mode(USER, CONV)]))")
+    assert json.loads(out) == ["plan", "needs-approval", None]
+    kinds = json.loads(_run(home, "print(json.dumps([r['kind'] for r in "
+                                  "store.read_audit(USER)]))"))
+    assert "settings.conversation_superseded" in kinds
+
+
+def test_edit_override_survives_its_own_conversation(home):
+    _run(home, "mode('edit', this=True); print('ok')")
+    out = _run(home, "print(json.dumps([gate(CONV), gate(CONV), "
+                     "commands.mode_status(USER, CONV)['mode']]))")
+    assert json.loads(out) == ["admitted-edit", "admitted-edit", "edit"]
+
+
+def test_unscoped_write_is_plan_while_a_plan_override_exists(home):
+    _run(home, "mode('edit'); print('ok')")
+    _run(home, "mode('plan', this=True); print('ok')")
+    out = _run(home, "print(json.dumps([gate(None), gate(OTHER), "
+                     "gate(CONV)]))")
+    assert json.loads(out) == ["needs-approval", "admitted-edit",
+                               "needs-approval"]
+
+
+def test_unscoped_write_uses_default_without_plan_overrides(home):
+    _run(home, "mode('edit'); print('ok')")
+    assert _run(home, "print(gate(None))") == "admitted-edit"

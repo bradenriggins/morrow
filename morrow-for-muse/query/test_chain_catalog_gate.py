@@ -52,8 +52,7 @@ class _Reader:
 def test_live_submissions_read_refused_until_live_proven():
     reader = _Reader()
     with pytest.raises(C.ChainFailure):
-        C.run_query("show me all the students that failed last week's quiz",
-                    "89585", reader=reader, now_utc=NOW,
+        C.run_query("89585", "last_week", reader=reader, now_utc=NOW,
                     tenant_base="https://school.example.edu")
     assert not any("/submissions" in p for p in reader.paths)
 

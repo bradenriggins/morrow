@@ -113,7 +113,7 @@ import urllib.request
 import urllib.error
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 try:
     from dispatch.admission import (
@@ -506,6 +506,14 @@ class EffectClassMismatch(ExecutorError):
     Same semantics as the W3-P0-6 catalog fix: the dispatch is refused,
     loudly, before any admission or write gate runs, so a write can
     never be dispatched as "read" (or "plan") to dodge write approval."""
+
+
+class UndoTargetMismatch(ExecutorError):
+    """An undo's target could not be bound to the op it claims to undo:
+    no completed write is journaled under --of-op-id, it was a different
+    entry or ran with different params, or the caller's result payload
+    disagrees with that op's journaled receipt. The undo target comes
+    ONLY from the journal; nothing was sent."""
 
 
 class TargetIdentityMismatch(ExecutorError):
@@ -5528,9 +5536,26 @@ def run_verify(entry: dict, session: SessionStore, pack: dict, config: dict,
     _assert_read_only_block(entry, verify, "verify")
     method, url, headers, body_bytes = build_request(
         entry, verify, params, session, pack, config, transients, result_payload)
-    status, resp_headers, raw, attempts = session.raw_request(
-        method, url, headers, body_bytes, is_write=False, max_bytes=max_bytes)
-    result = apply_result_block(entry, raw, resp_headers)
+    # A verify GET that cannot complete after the write succeeded proves
+    # nothing either way: the effect is unconfirmed, like a failed
+    # write readback GET, never a failed write.
+    try:
+        status, resp_headers, raw, attempts = session.raw_request(
+            method, url, headers, body_bytes, is_write=False,
+            max_bytes=max_bytes)
+        result = apply_result_block(entry, raw, resp_headers)
+    except ProviderHttpError as exc:
+        raise UncertainWrite(
+            "declared verify GET %s failed HTTP %s; the write effect is "
+            "unconfirmed, not a proven mismatch" % (url, exc.status))
+    except UncertainWrite:
+        raise
+    except ExecutorError as exc:
+        if _is_session_dead(exc) or _is_stale_command(exc):
+            raise
+        raise UncertainWrite(
+            "declared verify GET %s failed (%s); the write effect is "
+            "unconfirmed, not a proven mismatch" % (url, type(exc).__name__))
     return _assert_verify_expect(entry, verify, result["payload"], params,
                                  result_payload, transients)
 
@@ -5544,6 +5569,7 @@ def _assert_verify_expect(entry: dict, verify: dict, payload, params: dict,
     """
     response_path = verify.get("response_path")
     failures = []
+    unconfirmed = []
     for field, ref in (verify.get("expect") or {}).items():
         # actual always comes from the verify readback payload; expected
         # comes from the reference (params, the write's result, a
@@ -5562,11 +5588,21 @@ def _assert_verify_expect(entry: dict, verify: dict, payload, params: dict,
             failures.append("%s: %s" % (field, exc))
             continue
         expected = resolve_ref(ref, params, result_payload, transients)
-        if str(actual) != str(expected):
+        # The same field verdict as the write readback, on every lane.
+        verdict = _write_field_verdict(expected, actual)
+        if verdict == "mismatch":
             failures.append("%s: expected %r, read back %r" % (field, expected, actual))
+        elif verdict == "uncertain":
+            unconfirmed.append("%s: expected %r, read back %r (may be the "
+                               "LMS's own normalization)"
+                               % (field, expected, actual))
     if failures:
         raise VerificationFailed(
             "verify block assertions failed for %r: %s" % (entry.get("name"), "; ".join(failures)))
+    if unconfirmed:
+        return {"status": "unverified",
+                "detail": "verify block could not confirm: %s"
+                          % "; ".join(unconfirmed)}
     return {"status": "pass", "detail": "all %d expect assertions held" % len(verify.get("expect") or {})}
 
 
@@ -6392,16 +6428,119 @@ def _html_text(tokens):
     return " ".join(t[1] for t in tokens if t[0] == "text")
 
 
+# Attributes whose value is what the content points at: a changed or
+# missing value is a different page, never a sanitizer normalization.
+_HTML_TARGET_ATTRS = ("href", "src", "data", "action", "poster", "srcset",
+                      "cite", "formaction")
+# Tags a body-fragment sanitizer removes: the stripped elements above plus
+# document-head elements that never belong in a fragment.
+_HTML_SANITIZER_REMOVABLE = _HTML_STRIPPED_ELEMENTS | frozenset({
+    "meta", "link", "base"})
+# Query parameters Canvas adds to rewritten file links.
+_CANVAS_LINK_PARAMS = frozenset({"wrap", "verifier", "download_frd"})
+
+
+def _html_link_equivalent(want, got):
+    """True when two link targets name the same resource after the
+    rewriting Canvas does to course links: an absolute same-course URL
+    becomes a relative path, and file links gain wrap/verifier params."""
+    if want == got:
+        return True
+    w, g = urllib.parse.urlsplit(want), urllib.parse.urlsplit(got)
+    if w.scheme and g.scheme and (w.scheme, w.netloc) != (g.scheme, g.netloc):
+        return False
+    if w.path.rstrip("/") != g.path.rstrip("/"):
+        return False
+
+    def params(parts):
+        return sorted((k, v) for k, v in urllib.parse.parse_qsl(parts.query)
+                      if k not in _CANVAS_LINK_PARAMS)
+    return params(w) == params(g) and w.fragment == g.fragment
+
+
 def _html_verdict(want, got):
+    """match, uncertain (only differences a sanitizer can cause), or
+    mismatch. Text must agree (content inside stripped elements aside);
+    every requested tag must survive unless a sanitizer removes that
+    tag; a surviving tag's link target (href, src, ...) must be the same
+    resource; other attribute differences and tags the LMS adds are
+    uncertain."""
     want_tokens, got_tokens = _html_tokens(want), _html_tokens(got)
     if want_tokens == got_tokens:
         return "match"
-    if _html_text(want_tokens) == _html_text(got_tokens):
-        return "uncertain"
-    if _html_text(_html_tokens(want, drop_stripped=True)) \
-            == _html_text(got_tokens):
-        return "uncertain"
-    return "mismatch"
+    if _html_text(want_tokens) != _html_text(got_tokens) and \
+            _html_text(_html_tokens(want, drop_stripped=True)) \
+            != _html_text(got_tokens):
+        return "mismatch"
+    want_tags = [t for t in _html_tokens(want, drop_stripped=True)
+                 if t[0] == "tag"]
+    got_tags = [t for t in got_tokens if t[0] == "tag"]
+    cursor = 0
+    for _kind, name, attrs in want_tags:
+        for index in range(cursor, len(got_tags)):
+            if got_tags[index][1] == name:
+                break
+        else:
+            if name in _HTML_SANITIZER_REMOVABLE:
+                continue
+            return "mismatch"
+        got_attrs = dict(got_tags[index][2])
+        cursor = index + 1
+        for key, value in attrs:
+            if key in _HTML_TARGET_ATTRS:
+                if key not in got_attrs or not _html_link_equivalent(
+                        value, got_attrs[key]):
+                    return "mismatch"
+    return "uncertain"
+
+
+_MAX_ZONE_SPREAD = timedelta(hours=26)
+
+
+def _datetime_verdict(want_d, got_d):
+    """Verdict for two parsed ISO values (kind, datetime).
+
+    aware vs aware: the same instant is a match, and so is one side
+    being the other with its fractional seconds truncated (Canvas stores
+    whole seconds). A requested local midnight read back
+    as 23:59:59 or 23:59:00 of that day or the day before is uncertain:
+    this repo has no evidence for that Canvas adjustment, so it is never
+    called verified. Any other difference is proven.
+
+    A naive or date-only value is read in a zone Morrow does not know,
+    so it is uncertain only while the difference fits some real zone
+    offset (26 hours spans UTC-12 to UTC+14; a date-only value may land
+    on the day before or after). Anything further is proven."""
+    (wk, wv), (gk, gv) = want_d, got_d
+    if wk == "aware" and gk == "aware":
+        if wv == gv:
+            return "match"
+        if wv.replace(microsecond=0) == gv or \
+                gv.replace(microsecond=0) == wv:
+            return "match"
+        local_want = wv
+        local_got = gv.astimezone(wv.tzinfo)
+        if (local_want.hour, local_want.minute, local_want.second) \
+                == (0, 0, 0) and (local_got.hour, local_got.minute) \
+                == (23, 59) and local_got.second in (0, 59) and \
+                (local_got.date() - local_want.date()).days in (0, -1):
+            return "uncertain"
+        return "mismatch"
+
+    def naive(kind, value):
+        if kind == "aware":
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+    if wk == "date" and gk == "date":
+        return "match" if wv == gv else "mismatch"
+    if wk == "date" or gk == "date":
+        wdate, gdate = naive(wk, wv).date(), naive(gk, gv).date()
+        return "uncertain" if abs((wdate - gdate).days) <= 1 else "mismatch"
+    diff = abs(naive(wk, wv) - naive(gk, gv))
+    if wk == "naive" and gk == "naive":
+        return "match" if diff == timedelta(0) else (
+            "uncertain" if diff <= _MAX_ZONE_SPREAD else "mismatch")
+    return "uncertain" if diff <= _MAX_ZONE_SPREAD else "mismatch"
 
 
 def _write_field_verdict(want, got):
@@ -6411,10 +6550,10 @@ def _write_field_verdict(want, got):
 
     Empty equivalents match each other: a cleared field sent as "" (or
     an empty list) may be stored and echoed as null. Booleans compare in
-    canonical form (True, 1, "1", "true", "on"); numbers compare
-    numerically ("10" vs 10.0); ISO-8601 datetimes with an offset compare
-    as instants; HTML compares after tag/attribute/whitespace
-    canonicalization."""
+    canonical form (True, 1, "1", "true", "on"), and a value that is not
+    a canonical bool on either side is a proven difference; numbers
+    compare numerically ("10" vs 10.0); ISO-8601 values compare by
+    _datetime_verdict; HTML compares by _html_verdict."""
     if _is_empty_value(want) or _is_empty_value(got):
         return "match" if (_is_empty_value(want)
                            and _is_empty_value(got)) else "mismatch"
@@ -6423,19 +6562,16 @@ def _write_field_verdict(want, got):
     if isinstance(want, bool) or isinstance(got, bool):
         want_b, got_b = _as_bool(want), _as_bool(got)
         if want_b is None or got_b is None:
-            return "uncertain"
+            return "mismatch"
         return "match" if want_b == got_b else "mismatch"
     want_n, got_n = _as_number(want), _as_number(got)
     if want_n is not None and got_n is not None:
         return "match" if want_n == got_n else "mismatch"
     want_d, got_d = _as_datetime(want), _as_datetime(got)
     if want_d is not None and got_d is not None:
-        if want_d[0] == "aware" and got_d[0] == "aware":
-            return "match" if want_d[1] == got_d[1] else "mismatch"
         if str(want).strip() == str(got).strip():
             return "match"
-        # A naive or date-only time is read in the educator's Canvas zone.
-        return "uncertain"
+        return _datetime_verdict(want_d, got_d)
     if isinstance(want, str) and isinstance(got, str):
         if want == got:
             return "match"
@@ -7781,7 +7917,8 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                                       max_bytes=entry_max_bytes)
                 # A declared verify block with at least one expect
                 # assertion is itself a provider readback that held.
-                declared_proves = bool((entry["verify"] or {}).get("expect"))
+                declared_proves = bool((entry["verify"] or {}).get("expect")) \
+                    and declared.get("status") == "pass"
                 verification = {
                     "status": ("pass" if readback.get("status") == "pass"
                                or declared_proves else "unverified"),
@@ -7848,7 +7985,12 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                 % (op_id, exc), evidence=exc.evidence,
                 attempts=exc.attempts) from exc
         except (VerificationFailed, UncertainWrite, ExecutorError) as exc:
-            verification = {"status": "fail", "detail": _provider_detail(exc)}
+            # Only a proven verify mismatch is a failed write. Anything
+            # else here (a dead session, a stale command, another lane
+            # error) left the write's effect unconfirmed: uncertain.
+            proven = isinstance(exc, VerificationFailed)
+            verification = {"status": "fail" if proven else "uncertain",
+                            "detail": _provider_detail(exc)}
             # W3-P2-5: the failure detail can carry raw readback values;
             # project it through the learner boundary before journaling.
             verification = _project_verification_detail(
@@ -7857,13 +7999,13 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
             after_digest = digest_of(result["receipt"])
             record = _journal_record(entry_name, kind, effects, params, plan,
                                      op_id, after_digest, verification,
-                                     result, attempts, uncertain=True,
-                                                                  approval_audit=approval_audit,
-                                                                  unproven_override=override_audit,
-                                                                  catalog_status=catalog_status,
-                                                                  target=target_identity_verified,
-                                                                  before_state=before_state_check,
-                                                                  undo_available=bool(entry.get("undo")))
+                                     result, attempts, uncertain=not proven,
+                                     approval_audit=approval_audit,
+                                     unproven_override=override_audit,
+                                     catalog_status=catalog_status,
+                                     target=target_identity_verified,
+                                     before_state=before_state_check,
+                                     undo_available=bool(entry.get("undo")))
             journal_append(record)
             # W4-P2-1: a dead session during the verify readback arms the
             # re-auth machinery (halt + quarantine + notify) before
@@ -7882,11 +8024,18 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                 _on_stale_verify(op_id, entry_name,
                                  "stale verify command after lane "
                                  "re-authentication: %s" % type(exc).__name__)
-            # W5-P2-1: the failure outcome is journaled (drained); a
-            # pending shutdown now stops the run instead of continuing.
+            # W5-P2-1: the outcome is journaled (drained); a pending
+            # shutdown now stops the run instead of continuing.
             _raise_if_shutdown_requested()
-            raise VerificationFailed(
-                "verify block failed for op %s: %s (journaled as failed)" % (op_id, exc))
+            if proven:
+                raise VerificationFailed(
+                    "verify block failed for op %s: %s (journaled as failed)"
+                    % (op_id, exc))
+            raise UncertainWrite(
+                "write op %s returned success, but the readback could not "
+                "confirm it: %s (journaled as uncertain, not failed)"
+                % (op_id, exc), evidence=getattr(exc, "evidence", None),
+                attempts=getattr(exc, "attempts", None)) from exc
 
     # Learner-data privacy boundary: project the receipt through the
     # ported SourceMcpPrivacyBoundary before it is journaled or
@@ -8237,6 +8386,12 @@ def _journal_catalog_refusal(name, method, path_template, params, status,
               file=sys.stderr)
 
 
+# Catalog statuses the educator-signed --allow-unproven override may
+# reach: rows never tried live. failed, unsupported, excluded, and
+# evidence-hold rows are refused with or without it.
+_UNPROVEN_OVERRIDABLE = frozenset({"pending"})
+
+
 def _catalog_provenance_gate(entry: dict, name: str, method: str,
                              path_template: str, params: dict,
                              provider: str, approval, allow_unproven: bool,
@@ -8255,9 +8410,11 @@ def _catalog_provenance_gate(entry: dict, name: str, method: str,
       - a supplied method/path that does not match the catalog row raises
         CatalogNotProven (a proven name cannot be paired with arbitrary
         CLI arguments);
-      - any status other than live-proven raises CatalogNotProven unless
-        allow_unproven is set AND the educator-signed approval record
-        carries allow_unproven: true (sealed by sign_approval).
+      - a failed, unsupported, or excluded row raises CatalogNotProven
+        and cannot be overridden;
+      - a pending row raises CatalogNotProven unless allow_unproven is
+        set AND the educator-signed approval record carries
+        allow_unproven: true (sealed by sign_approval).
 
     Every refusal is journaled under its own refusal event id.
     """
@@ -8299,6 +8456,17 @@ def _catalog_provenance_gate(entry: dict, name: str, method: str,
     status = descriptor["status"]
     if status == "live-proven":
         return status, (None, None)
+    if status not in _UNPROVEN_OVERRIDABLE:
+        # A row the live battery proved failed, or marked unsupported or
+        # excluded, has no working route: no override reaches it.
+        detail = ("operation %r is marked %r in the catalog; only "
+                  "live-proven operations run, and the educator-signed "
+                  "--allow-unproven override reaches only rows marked "
+                  "pending (never tried live). Refusing."
+                  % (name, status or "unmarked"))
+        _journal_catalog_refusal(name, method, path_template, params,
+                                 status or "unmarked", detail)
+        raise CatalogNotProven(detail)
     if not allow_unproven:
         detail = ("operation %r is marked %r in the catalog, not "
                   "live-proven; dispatch needs --allow-unproven plus an "
@@ -8536,23 +8704,105 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
 # Undo: an entry's undo block as a new, separately journaled operation
 # --------------------------------------------------------------------------
 
+_RESULT_REF_RE = re.compile(r"\{result\.([^{}]+)\}|\"?result\.([A-Za-z0-9_.\[\]]+)")
+
+
+def _undo_result_refs(undo) -> list:
+    """The result.<path> references an undo block resolves, sorted."""
+    refs = set()
+    for match in _RESULT_REF_RE.finditer(json.dumps(undo, sort_keys=True)):
+        refs.add(match.group(1) or match.group(2))
+    return sorted(refs)
+
+
+def journaled_undo_result(entry: dict, params: dict, of_op_id: str,
+                          caller_result=None):
+    """The result payload an undo resolves against: ONLY the journaled
+    receipt of of_op_id.
+
+    Refuses (UndoTargetMismatch) unless a completed write outcome is
+    journaled under of_op_id for this same entry with these same params,
+    and unless every result field the undo block references agrees with
+    caller_result when the caller passed one. An empty caller_result is
+    fine: the journal alone decides the target."""
+    original = find_journal_op(str(of_op_id))
+    if not isinstance(original, dict) or original.get("wal") != "complete":
+        raise UndoTargetMismatch(
+            "no completed write is journaled under op id %r, so there is "
+            "nothing this undo can be bound to; nothing was sent"
+            % str(of_op_id))
+    if original.get("kind") == "undo" or original.get("effect") != "write":
+        raise UndoTargetMismatch(
+            "op %r is not a forward write (kind %r, effect %r); only a "
+            "forward write can be undone" % (str(of_op_id),
+                                           original.get("kind"),
+                                           original.get("effect")))
+    if original.get("entry_name") != entry.get("name"):
+        raise UndoTargetMismatch(
+            "op %r ran entry %r, not %r; an undo must use the undo block of "
+            "the entry that made the change" % (
+                str(of_op_id), original.get("entry_name"), entry.get("name")))
+    if original.get("params_digest") != digest_of(params or {}):
+        raise UndoTargetMismatch(
+            "the params for this undo differ from the params op %r ran "
+            "with; pass the original op's params" % str(of_op_id))
+    journaled = original.get("receipt")
+    if caller_result:
+        for ref in _undo_result_refs(entry.get("undo")):
+            try:
+                theirs = resolve_path(caller_result, ref)
+            except Exception:
+                theirs = None
+            try:
+                ours = resolve_path(journaled, ref)
+            except Exception:
+                ours = None
+            if theirs != ours:
+                raise UndoTargetMismatch(
+                    "the result payload passed for this undo says "
+                    "result.%s is %r, but op %r journaled %r; the undo "
+                    "target comes only from the journal" % (
+                        ref, theirs, str(of_op_id), ours))
+    return journaled
+
+
 def undo_approval_subject(entry: dict, params: dict, of_op_id: str,
-                          result_payload) -> tuple:
+                          result_payload=None) -> tuple:
     """(undo_entry, undo_params): what an undo is approved and admitted as.
 
     An undo is its own write, so its approval must never be the forward
     write's: the entry is "<name>#undo" with the undo block as its
     request (so destructiveness and learner-data checks see the request
-    that is actually sent), and the params bind the original op and the
-    undo target (the result payload the undo block resolves against).
-    Mint the educator's undo approval with
+    that is actually sent), and the params bind the original op, the
+    exact undo request (method and path, rendered from the original op's
+    JOURNALED receipt), and the target fields it resolves. The approval
+    display therefore shows the educator exactly what will be undone.
+    result_payload, when given, must agree with the journal
+    (journaled_undo_result). Mint the educator's undo approval with
     admission.mint_approval(undo_entry, undo_params, tenant_base)."""
     undo = entry.get("undo")
     undo_entry = undo_admission_entry(entry)
+    journaled = journaled_undo_result(entry, params, of_op_id,
+                                      result_payload)
     undo_params = dict(params or {})
     undo_params["_undo_of"] = str(of_op_id)
-    undo_params["_undo_target"] = digest_of({"undo": undo,
-                                             "result": result_payload})
+    target = {}
+    for ref in _undo_result_refs(undo):
+        try:
+            target[ref] = resolve_path(journaled, ref)
+        except Exception:
+            target[ref] = None
+    undo_params["_undo_target"] = target
+    url_template = str(undo.get("url") or "")
+    try:
+        path = render_template(url_template, {"canvas_base": ""},
+                               params or {}, journaled)
+    except ExecutorError:
+        path = url_template
+    undo_params["_undo_request"] = {
+        "method": str(undo.get("method") or "").upper(),
+        "path": path,
+    }
     return undo_entry, undo_params
 
 
@@ -8621,6 +8871,10 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
     _check_auxiliary_learner_data(entry, vault_ready=False)
     # The forward entry's own policy gates still apply to its undo.
     check_policy_gates(entry)
+    # The undo target comes ONLY from the original op's journaled
+    # receipt; a caller payload that disagrees is refused.
+    result_payload = journaled_undo_result(entry, params, of_op_id,
+                                           result_payload)
     undo_entry, undo_params = undo_approval_subject(entry, params, of_op_id,
                                                     result_payload)
     approval_audit, approval_record = admit(
@@ -9036,7 +9290,12 @@ def main(argv=None):
     p_undo.add_argument("--entry", required=True)
     p_undo.add_argument("--of-op-id", required=True, help="original op id being undone")
     p_undo.add_argument("--params", default="{}", help="original params as a JSON object string")
-    p_undo.add_argument("--result", default="{}", help="original result payload as a JSON object string")
+    p_undo.add_argument("--result", default="{}",
+                        help="optional: the original result payload as a "
+                             "JSON object string. The undo target comes "
+                             "ONLY from the journaled receipt of "
+                             "--of-op-id; a payload that disagrees with it "
+                             "is refused")
     p_undo.add_argument("--approval", default=None,
                         help="path to an educator-signed v2 approval record JSON (undo is a write); "
                              "must be digest-bound to this exact undo, unexpired, category-scoped, "

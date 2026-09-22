@@ -255,16 +255,28 @@ Writes need three things or they are refused:
 3. No write halt: if `~/.morrow/write_halt` exists, all writes refuse.
 
 Only operations marked `live-proven` in
-`proof-battery/OPERATION_CATALOG.md` dispatch. The one exception is an
-educator-signed `--allow-unproven` override for edge cases, signed by the
-educator as part of the approval.
+`proof-battery/OPERATION_CATALOG.md` dispatch, with one exception, the
+`--allow-unproven` exception: a catalog row marked `pending` (never
+tried live) dispatches only when the caller passes `--allow-unproven`
+AND the approval is an educator-signed v2 approval carrying
+`allow_unproven: true`, bound to that exact operation and its
+parameters, single use. The educator must sign it; the agent cannot.
+It reaches `pending` rows only: rows marked `failed`, `unsupported`,
+`excluded`, or `evidence-hold`, unknown operations, never-dispatch
+routes, and learner-data rows are refused with or without it. It does
+not skip write approval, the frozen plan, or any other gate.
 
 Entry manifests: `execute --entry <manifest.json> --params '{...}'`
 dispatches a manifest entry the same way. `undo` runs an entry's undo
 block as a new, separately journaled operation. An undo is its own
 write: in plan mode it needs its own educator approval, minted for
-`dispatch.executor.undo_approval_subject(entry, params, of_op_id,
-result)` (bound to the undo action and the object it targets). The
+`dispatch.executor.undo_approval_subject(entry, params, of_op_id)`
+(bound to the undo action and the object it targets). The undo target
+comes ONLY from the journaled receipt of `--of-op-id`: that op must be
+a completed write of the same entry with the same params, and a
+`--result` that disagrees with its journaled receipt is refused
+(`UndoTargetMismatch`). The approval display shows the exact undo
+method, path, and target. The
 forward write's approval never admits its undo, and a DELETE undo asks
 for deletion confirmation in edit mode when `confirm_destructive_writes`
 is on. `--dry-run` journals nothing, in either mode.
@@ -274,9 +286,9 @@ is on. `--dry-run` journals nothing, in either mode.
 - Frozen plans: a write's plan digest must match the action exactly.
 - Admission: `dispatch/admission.py` enforces the live-proven catalog.
   Only operations marked `live-proven` in
-  `proof-battery/OPERATION_CATALOG.md` dispatch. The only override is an
-  educator-signed `--allow-unproven` flag for edge cases, signed by the
-  educator as part of the approval. Learner-data operations (any
+  `proof-battery/OPERATION_CATALOG.md` dispatch; the only exception is
+  the educator-signed `--allow-unproven` override for `pending` rows
+  described above. Learner-data operations (any
   operation whose response carries people; see SCOPE.md) are refused
   (`LearnerDataGated`) by `executor.py catalog` on every lane, and
   `--allow-unproven` cannot override that. Manifest entries
@@ -320,31 +332,37 @@ edit mode, they do not. Reads are unrestricted, with no approval, in
 both modes.
 
 - `default_mode` (plan | edit, default plan): the educator's saved
-  mode. Setting it to edit IS the standing edit grant: journaled,
-  educator-confirmed, and stated plainly as such. There is no separate
+  mode. Setting it to edit IS the standing edit grant: journaled, and
+  stated plainly as such in the command's result. There is no separate
   grant standing between the educator and edit mode.
 - Edit mode is ONE blanket grant and it is NOT timed: it stays on
   until the educator turns it off. Never offer, promise, or imply a
   time limit. An old install's saved timed grant is not honored; it
   lapses to plan mode.
-- Turning edit off ("turn off edit mode", "stop edit mode", "use plan
-  mode", "back to plan mode", "don't use edit mode", "no more edit
-  mode") means plan everywhere: `default_mode` goes back to plan and
-  every grant and per-conversation override is cleared
-  (`modes.state.switch_mode(user_id, "plan")`). It applies at once,
-  with no confirmation round trip. Any negated or off phrasing about
-  edit mode is plan; a negated plan phrasing ("turn off plan mode")
-  changes nothing and asks which mode the educator wants. The parser
-  never proposes edit mode from a negation.
+- Turning edit off means plan everywhere: `default_mode` goes back to
+  plan and every grant and per-conversation override is cleared
+  (`morrow mode set plan`, which runs
+  `modes.state.switch_mode(user_id, "plan")`). It applies at once, with
+  no confirmation round trip.
+- You decide what the educator means; no Morrow code reads the
+  educator's words. When the educator asks, in any words, to turn edit
+  mode on or off, to check the mode, to change a setting, or to stop
+  (or start) being asked before deletions, call the matching command
+  below. If you are not sure what they want, ask them; never guess, and
+  never turn edit mode on from an unclear, negated, or questioning
+  request. Relay the command's `message`: it states the true resulting
+  mode, read back after the change.
 - Most recent explicit action wins between a per-conversation override
   ("use plan mode for this conversation", "use edit mode for this
   conversation") and the persisted default. Both are tamper-sealed in
   the settings file, journaled, and seen by every later dispatch
-  process. A plan override applies at once and stays until the
-  conversation ends. An edit override needs the educator's yes and
-  ends when the conversation ends (`settings.store.end_conversation`)
-  or when edit mode is turned off anywhere. An unreadable or tampered
-  override store resolves to plan. Resolve with
+  process. Both apply at once. An edit override ends when edit mode is
+  turned off anywhere, when
+  the conversation ends (`settings.store.end_conversation`), or as soon
+  as Morrow sees a different conversation id for the educator (any mode
+  command or write gate). An unreadable or tampered override store
+  resolves to plan, and a write with no conversation id is plan while
+  any plan override exists. Resolve with
   `modes.state.current_mode(user_id, conversation_id)` (the single
   authoritative resolver; `settings.store.effective_mode` delegates to
   it); Agent A's contract `settings.store.get_setting(user_id, key)`
@@ -355,24 +373,52 @@ both modes.
   need approval in either mode, and edit never surfaces per-write
   approval, including for destructive writes. `confirm_destructive_writes`
   is an opt-in guardrail (default off, matching the model; the
-  educator can turn it on with "always confirm deletions").
-- The agent can never grant itself edit mode or change a
-  consequential setting: consequential changes require
-  educator_confirmed=True (SettingsTamperRefused otherwise), echoed in
-  plain language before applying.
+  educator can turn it on: `morrow settings set
+  confirm_destructive_writes true`).
+- You change the mode or a setting only because the educator asked
+  for it. The command takes effect when you call it (there is no
+  second confirmation call); relay its `message`, which says what the
+  change means. If the educator's request is unclear, ask them before
+  calling anything.
 - Every change is journaled to `~/.morrow/settings/<user_id>.changes.jsonl`
   with old value, new value, and educator identity (hash-chained,
   tamper-evident). Settings live under `~/.morrow/settings/`, never in
   the tree, and survive restarts and reinstalls.
-- Conversational control: "use edit mode", "turn off edit mode",
-  "use plan mode for this conversation", "stop asking me to confirm
-  deletions", "show me my settings", "what mode am I in", "be more
-  concise". Parse with `settings.commands.parse_command`; consequential
-  utterances return needs_confirmation=True and the agent echoes before
-  applying. Carry out an op with `settings.commands.apply_command(op,
-  user_id, conversation_id, educator_confirmed=<educator said yes>)`
-  and speak the sentence it returns: it is built from the mode actually
-  in force after the change.
+- Commands (the CLI prints one JSON object with `ok`, `status`, `mode`,
+  and `message`; the Python API in `settings/commands.py` returns the
+  same dict). `--user-id` defaults to `MORROW_USER_ID` and
+  `--conversation-id` to `MORROW_CONVERSATION_ID`:
+  - `morrow mode status --user-id U --conversation-id C`: the mode in
+    force and where it comes from.
+  - `morrow mode set plan --user-id U --conversation-id C`: edit off,
+    plan everywhere.
+  - `morrow mode set plan --this-conversation ...`: plan for this
+    conversation only.
+  - `morrow mode set edit ...` (add `--this-conversation` for this
+    conversation only): edit mode takes effect at once. The result says
+    that writes now apply without asking until edit mode is turned off;
+    relay it.
+  - `morrow settings show|get KEY|set KEY VALUE`: booleans are `true`
+    or `false`. A set takes effect at once and is journaled. "Stop
+    asking me to confirm deletions" is `settings set
+    confirm_destructive_writes false`; "always confirm deletions" is
+    `... true`.
+  - If a result has `settings_untrusted: true`, the settings file failed
+    its integrity check: tell the educator they are in plan mode and
+    relay the repair steps in `message`.
+- Failed-students question ("who failed last week's quiz", "which
+  students scored under 70%"): run `morrow query --course C --quiz
+  last-week|this-week`, with at most one of `--below-percent N`,
+  `--below-points N`, or `--letter-f` when the educator named a
+  threshold. You choose the arguments from what the educator said; if
+  they mean a quiz that is not last week's or this week's, ask which
+  quiz first. Names in the result are de-identified.
+- Every dispatch must carry the educator's identity for the mode gate:
+  pass `--user-id` and `--conversation-id` to `dispatch/executor.py`
+  (or set `MORROW_USER_ID` and `MORROW_CONVERSATION_ID`). Without a
+  user id the write gate is plan (every write needs approval). Without
+  a conversation id, per-conversation edit overrides cannot apply and
+  any plan override makes the write plan.
 - Other knobs, all user-settable: `verbosity` (concise | balanced |
   detailed, default balanced), `write_approval_style` (per_write |
   batched, default per_write), `failure_verbosity` (concise | detailed,
@@ -413,10 +459,10 @@ relay, and every row not marked live-proven. Full declaration:
 - `transport/`: the Chromium lane (`local_chromium.py`, `chromium_session.py`,
   `egress.py`, `proxy_forwarder.py`) and its selftests.
 - `dispatch/`: the governed executor, the admission gate, the policy, selftests.
-- `settings/`: the conversational settings system (`store.py`,
+- `settings/`: the settings system (`store.py`, the typed commands in
   `commands.py`, `test_settings.py`, `README.md`): modes,
-  per-conversation overrides, and every behavioral knob, all
-  educator-settable in plain language.
+  per-conversation overrides, and every behavioral knob. The educator
+  asks in plain language; the agent calls the typed command.
 - `helper/`: the Canvas Login Helper server, UI, and keepalive, plus
   `live_behavior_check.py` (the manual live proof: session persistence
   across restarts, single-Chromium, dead-session redirect, and the

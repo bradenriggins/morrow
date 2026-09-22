@@ -15,6 +15,8 @@ Subcommands:
   doctor    read-only health check: helper status, tree sanity
   version   read-only: print the tree version and command inventory
   failure   read-only: look up one failure-catalog entry by id or fragment
+  mode      show or set Plan/Edit mode (settings/commands.py mode ...)
+  settings  show, get, or set a setting (settings/commands.py settings ...)
   disconnect  end the Canvas connection: stop the helper, remove keepalive,
             delete the sign-in (scripts/uninstall.sh --disconnect)
 
@@ -41,7 +43,7 @@ _COMMANDS = {
     "plan": ("catalog/a11y/runner.py",
              "accessibility repair planning (validates, never writes)"),
     "query": ("query/chain.py",
-              "natural-language learner query chain, e.g. failed students"),
+              "failed-students query (typed: --course, --quiz, one threshold)"),
 }
 
 # audit/plan need their runner subcommand prepended.
@@ -63,6 +65,10 @@ def _print_help():
     lines.append("  %-10s %s" % ("doctor", "read-only health check"))
     lines.append("  %-10s %s" % ("version", "read-only: version and command inventory"))
     lines.append("  %-10s %s" % ("failure", "read-only: failure-catalog lookup"))
+    lines.append("  %-10s %s" % ("mode", "show or set Plan/Edit mode "
+                                  "(status | set plan|edit)"))
+    lines.append("  %-10s %s" % ("settings", "show, get, or set a setting "
+                                  "(show | get KEY | set KEY VALUE)"))
     lines.append("  %-10s %s" % ("disconnect", "end the Canvas connection "
                                   "(stop helper, remove keepalive, delete "
                                   "the sign-in); --yes to skip the prompt"))
@@ -262,6 +268,9 @@ def main(argv=None):
         return _version()
     if name == "failure":
         return _failure(rest)
+    if name in ("mode", "settings"):
+        from settings import commands as _settings_commands
+        return _settings_commands.main([name] + rest)
     if name == "disconnect":
         if rest not in ([], ["--yes"]):
             print("usage: morrow disconnect [--yes]", file=sys.stderr)

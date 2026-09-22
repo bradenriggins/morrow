@@ -81,19 +81,24 @@ marked `live-proven` is not a v1 claim.
   data, so they are refused like every other learner-data row (see
   "Out for v1"): C-78 potential collaborators, C-105/C-106 activity
   stream, C-112 effective due dates, C-274/C-343/C-344 assignment
-  overrides, and C-327/C-331/C-332 page revisions. The live-proven
+  overrides, C-327/C-331/C-332 page revisions, C-231/C-234/C-235/C-236
+  date details (override student lists), C-403 course search, and
+  C-322 outcome alignments for a student. The live-proven
   override writes (C-34, C-36, C-39, C-41, C-51, C-284) and the page
   revision revert (C-328) are refused for the same reason.
 - The governance layer that makes it safe: frozen plans, the admission
   gate (`dispatch/admission.py`) enforcing the live-proven catalog,
   educator-signed approvals, per-category never-dispatch lists,
-  journaled dispatches, and undo entries for undoable writes. A
-  non-live-proven operation dispatches only with `--allow-unproven`
+  journaled dispatches, and undo entries for undoable writes. Only
+  live-proven operations run, with one exception: a catalog row marked
+  `pending` (never tried live) dispatches only with `--allow-unproven`
   plus an educator-signed v2 approval carrying `allow_unproven: true`,
-  bound to the exact operation and parameters, for that known catalog
-  row only. It does not bypass write approval, frozen-plan
-  requirements, never-dispatch, unsupported, evidence-hold,
-  learner-data refusal, or unknown-operation refusal.
+  bound to that exact operation and its parameters, single use. The
+  educator must sign it; the agent cannot. Rows marked `failed`,
+  `unsupported`, `excluded`, or `evidence-hold` are refused with or
+  without it, and it does not bypass write approval, frozen-plan
+  requirements, never-dispatch, learner-data refusal, or
+  unknown-operation refusal.
 - The Canvas Login Helper (`helper/`): educator self-sign-in,
   SSO/MFA-capable, with keepalive.
 

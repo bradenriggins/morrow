@@ -32,7 +32,8 @@ flag, scope_type, conversation_id, source_utterance}`.
 
 - `"conversation"` is the only grantable `scope_type`: "use edit mode
   for this conversation". No expiry; lives until revoked
-  (`switch_mode(user, "plan")`, or `settings.end_conversation`).
+  (`switch_mode(user, "plan")`, `settings.end_conversation`, or Morrow
+  seeing a different conversation for the educator).
 - Standing edit mode is not a grant record: the educator set
   `default_mode` to `"edit"` in settings ("use edit mode"). It stays on
   until they turn it off.
@@ -82,8 +83,13 @@ Conversation overrides are persisted in the educator's sealed settings
 file, per (user, conversation), so every dispatch process sees them.
 They are cleared (journaled) by `settings.end_conversation(user_id,
 conversation_id)`, which also revokes grants bound to that
-conversation, and by `switch_mode(user, "plan")`. An unreadable or
-tampered override store resolves to plan.
+conversation, and by `switch_mode(user, "plan")`. Edit overrides and
+conversation-bound grants also end, with no external call, as soon as
+Morrow sees a different conversation id for the educator
+(`settings.observe_conversation`, run by every mode command and by the
+write gate). An unreadable or tampered override store resolves to
+plan, and a write with no conversation id is plan while any plan
+override exists.
 
 ## Write authority
 
@@ -214,7 +220,10 @@ lives inside the deploy tree. `user_id` is restricted to
   standing `default_mode` of `"edit"` back to `"plan"` (journaled in
   the settings audit; the safe direction needs no confirmation). It
   returns the re-resolved mode, so callers report what is in force.
-  `settings.commands.apply_command` is the conversational entry point.
+  The typed commands in `settings/commands.py` (`mode_set`,
+  `mode_status`, `setting_set`; CLI `morrow mode ...` and `morrow
+  settings ...`) are the agent's entry point. No code parses the
+  educator's words: the agent decides what the educator means.
 
 ## Failure modes (Workstream C maps these by name)
 

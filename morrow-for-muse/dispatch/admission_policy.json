@@ -70,6 +70,9 @@
    "overrides",
    "assignment_overrides",
    "effective_due_dates",
+   "date_details",
+   "smartsearch",
+   "outcome_alignments",
    "revisions",
    "audit",
    "audit_events",
@@ -77,7 +80,7 @@
    "logins",
    "avatars"
   ],
-  "url_segments_note": "Structural rule: a URL path segment (placeholders such as {id} ignored) equal to an entry in url_segments, or ending with an entry in url_segment_suffixes, names a resource whose response carries people: user objects, student ids, or per-student data. It catches endpoints no substring anticipated (potential_collaborators, activity_stream, effective_due_dates, assignment overrides, page revisions). url_substrings stay as a second net. Course content (pages, quizzes, assignments, modules) is deliberately not matched: projecting it would rewrite names inside content an educator may save back.",
+  "url_segments_note": "Structural rule: a URL path segment (placeholders such as {id} ignored) equal to an entry in url_segments, or ending with an entry in url_segment_suffixes, names a resource whose response carries people: user objects, student ids, or per-student data. It catches endpoints no substring anticipated (potential_collaborators, activity_stream, effective_due_dates, assignment overrides, date_details override lists, page revisions). url_substrings stay as a second net. Course content (pages, quizzes, assignments, modules) is deliberately not matched: projecting it would rewrite names inside content an educator may save back.",
   "url_substrings": [
    "/users",
    "/enrollments",

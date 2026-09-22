@@ -46,7 +46,6 @@ from learners.resolve_student import (  # noqa: E402
     build_candidate as _build_candidate,
     match_query as _match_query,
 )
-from query import intent as _qintent  # noqa: E402
 from query import quiz_resolve as _qresolve  # noqa: E402
 from query import thresholds as _qthresholds  # noqa: E402
 from query import live_read as _qliveread  # noqa: E402
@@ -335,8 +334,9 @@ def _quiz_ambiguous_case():
 
 
 MODE_CASES = {
-    "query-intent-unrecognized":
-        lambda: _qintent.IntentNotRecognized("what is the weather"),
+    "query-arguments-invalid":
+        lambda: _qchain.QueryArgumentsInvalid(
+            "quiz must be one of last_week, this_week, got 'yesterday'"),
     "query-threshold-undefined":
         lambda: _qthresholds.ThresholdUndefined("points_possible is None"),
     "quiz-reference-unsupported":

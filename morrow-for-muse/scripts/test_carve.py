@@ -105,7 +105,9 @@ def test_dev_only_surface_does_not_ship(carved):
                 "proof-battery/evidence", "dispatch/live_proof_modes.py",
                 "session/capture.py", "requirements-dev.txt",
                 "scripts/carve.py", "bin/keepalive-moodle.sh",
-                "bin/keepalive-canvas.sh", "bin/scheduler.py", "DEPLOY.md"):
+                "bin/keepalive-canvas.sh", "bin/scheduler.py", "DEPLOY.md",
+                # pytest-only: the suite's HOME isolation and its check
+                "conftest.py", "test_suite_isolation.py"):
         assert not os.path.exists(os.path.join(carved, rel)), rel
     for rel in ("install.sh", "proof-battery/OPERATION_CATALOG.md",
                 "scripts/uninstall.sh", "dispatch/executor.py",

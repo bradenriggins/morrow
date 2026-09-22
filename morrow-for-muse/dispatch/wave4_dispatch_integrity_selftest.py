@@ -817,7 +817,7 @@ def main():
                           op_id=_oid("w4-gw"), approval=w_approval)
         # G2: undo whose provider target disagrees -> refused, approval
         # reusable, nothing sent.
-        u_entry = _entry("w4-gu2", "POST",
+        u_entry = _entry("w4-gw", "POST",
                          "/api/v1/courses/112/assignment_groups")
         u_entry["undo"] = {"method": "DELETE",
                            "url": "{canvas_base}/api/v1/courses/112/"
@@ -847,7 +847,7 @@ def main():
             _check(False, "refused undo: approval reusable; got %r" % e,
                    failures)
         # G3: undo with agreeing target -> dispatches and journals.
-        u_entry3 = _entry("w4-gu3", "POST",
+        u_entry3 = _entry("w4-gw", "POST",
                           "/api/v1/courses/112/assignment_groups")
         u_entry3["undo"] = {"method": "DELETE",
                             "url": "{canvas_base}/api/v1/courses/112/"

@@ -53,6 +53,21 @@ from dispatch import executor as ex  # noqa: E402
 # Selftest harness: the approvals here are minted on the driver
 # channel, so dispatch runs with require_educator_channel=False (the
 # production default is True).
+
+def _journal_forward_write(ex, entry, params, receipt):
+    """Journal a completed forward write for entry: an undo binds its
+    target ONLY to a journaled forward op (H1)."""
+    import uuid as _uuid
+    op_id = str(_uuid.uuid4())
+    token = ex.claim_op_id(op_id, "dispatch", entry["name"], "write",
+                           ex.digest_of(params))
+    ex.journal_claimed_outcome(op_id, {
+        "op_id": op_id, "entry_name": entry["name"], "kind": "dispatch",
+        "effect": "write", "wal": "complete",
+        "params_digest": ex.digest_of(params), "receipt": receipt,
+        "verification": "pass", "uncertain": False}, token)
+    return op_id
+
 def _driver_channel(fn):
     def call(*a, **k):
         k.setdefault("require_educator_channel", False)
@@ -349,7 +364,7 @@ try:
     _u0 = _u_entry("w5-undo-ok")
     _s0 = _u_session([("ok", 200, '{"id": 112, "name": "Intended Course"}'),
                       ("ok", 200, '{"id": 5}')])
-    _of0 = str(uuid.uuid4())
+    _of0 = _journal_forward_write(ex, _u0, _u_params, {"id": 7})
     _out0 = ex.dispatch_undo(_u0, _u_params, {}, _of0,
                              _s0, {"max_body_bytes": 262144},
                              approval=_u_approve(_u0, _u_params, _of0))
@@ -363,7 +378,7 @@ try:
     _s1 = _u_session([("ok", 200, '{"id": 112, "name": "Intended Course"}'),
                       ("ok", 200, '{"id": 5}')])
     try:
-        _of1 = str(uuid.uuid4())
+        _of1 = _journal_forward_write(ex, _u1, _u_params, {"id": 7})
         ex.dispatch_undo(_u1, _u_params, {}, _of1,
                          _s1, {"max_body_bytes": 262144},
                          approval=_u_approve(_u1, _u_params, _of1))

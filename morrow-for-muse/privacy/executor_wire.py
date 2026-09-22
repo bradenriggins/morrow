@@ -57,7 +57,24 @@ _ROSTER_IDENTITY_FIELDS = frozenset({
     "email", "login_id", "sis_user_id", "sis_login_id",
     "sortable_name", "short_name",
 })
-_ROSTER_USER_KEYS = frozenset({"user", "student", "author"})
+# Structural person-key rule: a key naming a person or a people
+# collection ("students", "participants", "context_user") marks its value
+# as person records; a key naming a person's id or ids ("student_ids",
+# "participating_user_ids", "author_id") marks its scalars as person ids.
+_PERSON_NOUNS = ("user", "student", "author", "participant", "member",
+                 "learner", "observer", "observee", "recipient", "submitter",
+                 "collaborator", "assessor", "attendee", "enrollee",
+                 "person")
+_PERSON_NOUN_RE = "(?:%s)" % "|".join(_PERSON_NOUNS)
+_PERSON_RECORD_KEY_RE = re.compile(
+    r"^(?:[a-z0-9]+_)?(?:%s)s?$|^people$" % _PERSON_NOUN_RE)
+_PERSON_ID_KEY_RE = re.compile(
+    r"^(?:[a-z0-9]+_)*%s_?ids?$" % _PERSON_NOUN_RE)
+# Leading words that make a person-noun key a setting, not a person.
+_PERSON_KEY_SETTING_PREFIX = re.compile(
+    r"^(?:allow|hide|show|filter|can|is|has|max|min|num|only|visible)_")
+_ROSTER_PERSON_NAME_KEYS = ("user_name", "student_name", "author_name",
+                            "display_name")
 _ROSTER_NAME_KEYS = ("name", "fullname", "display_name", "sortable_name",
                      "short_name")
 _ROSTER_PASSTHROUGH_KEYS = ("email", "login_id", "sis_user_id", "sis_login_id",
@@ -122,17 +139,169 @@ def _is_user_collection(entry):
     return False
 
 
+def person_key_kind(key):
+    """"record" for a key naming a person or people collection, "ids" for
+    a key naming a person's id or ids, else None."""
+    k = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", str(key or "")).lower()
+    if _PERSON_KEY_SETTING_PREFIX.match(k) or k.startswith("sis_"):
+        return None
+    if _PERSON_ID_KEY_RE.match(k):
+        return "ids"
+    if _PERSON_RECORD_KEY_RE.match(k):
+        return "record"
+    return None
+
+
+_ADHOC_TITLE_RE = re.compile(r"^\s*\d+\s+students?\s*$", re.IGNORECASE)
+
+
+def _neutralize_adhoc_override_titles(node):
+    """Copy of node where an ad hoc override's title is its student count.
+
+    An override that lists student ids is an ad hoc (per-student)
+    override, and its title is free text that commonly names the
+    students. Its students may not appear anywhere else in the receipt,
+    so the name cannot be learned and redacted: the title is replaced by
+    the neutral count Canvas itself uses ("1 student", "3 students").
+    """
+    if isinstance(node, list):
+        return [_neutralize_adhoc_override_titles(v) for v in node]
+    if not isinstance(node, dict):
+        return node
+    out = {k: _neutralize_adhoc_override_titles(v) for k, v in node.items()}
+    ids = out.get("student_ids")
+    title = out.get("title")
+    if isinstance(ids, list) and isinstance(title, str) \
+            and not _ADHOC_TITLE_RE.match(title):
+        out["title"] = "%d student%s" % (len(ids), "" if len(ids) == 1
+                                          else "s")
+    return out
+
+
+# Fields on course content (a page's last_edited_by, a record's
+# created_by) that hold the person who edited it. The content itself is
+# not learner data (it is course material an educator may save back),
+# so only these person fields are replaced.
+_EDITOR_KEY_RE = re.compile(
+    r"^(?:last_)?(?:edited|created|updated|modified|deleted)_by$|"
+    r"^(?:last_)?(?:editor|modifier)$")
+UNLABELED_PERSON = "a Canvas user Morrow has not labeled"
+
+
+def _editor_slots(node, out):
+    """(container, key) for every person record under an editor key."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if _EDITOR_KEY_RE.match(str(key).lower()) and \
+                    isinstance(value, dict) and value:
+                out.append((node, key))
+            else:
+                _editor_slots(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            _editor_slots(value, out)
+    return out
+
+
+def _vault_labels_for(entry, tenant_base, lane_context):
+    """{learner id: label} for learners the vault already labeled in this
+    entry's course scope, or {} when there is no vault to ask."""
+    if _privacy_core.AESGCM is None:
+        return {}
+    course_id = _entry_course_id(entry)
+    path = _source_vault_path()
+    if not course_id or not os.path.exists(path):
+        return {}
+    try:
+        origin = _exact_origin(tenant_base, ValueError)
+    except ValueError:
+        return {}
+    provider = entry.get("provider") or "canvas"
+    principal = (lane_context or {}).get("principal") or "local-educator"
+    scope = {"canvasOrigin": origin,
+             "account": "%s:%s:%s" % (provider, provider, origin),
+             "course": str(course_id), "principal": principal,
+             "profile": "source:%s" % provider}
+    try:
+        vault = _privacy_core.LearnerVault(path)
+        known = vault.identities_for_scope(scope)
+        labels = vault.tokenize_many(scope, known) if known else []
+    except Exception:
+        return {}
+    return {str(identity["id"]): label
+            for identity, label in zip(known, labels)}
+
+
+def _label_editor_records(entry, result, tenant_base, lane_context,
+                          error_cls):
+    """Replace person records under editor keys on a non-learner read.
+
+    A learner the vault already labeled in this course becomes
+    {"learnerToken": <their label>}; anyone else becomes
+    {"person": UNLABELED_PERSON}. Nothing else in the receipt changes.
+    The educator's consent file (pii_reveal_audit) leaves them raw."""
+    receipt = result.get("receipt") if isinstance(result, dict) else None
+    if not _editor_slots(receipt, []):
+        return result
+    if pii_reveal_audit(error_cls) is not None:
+        return result
+    import copy
+    receipt = copy.deepcopy(receipt)
+    labels = _vault_labels_for(entry, tenant_base, lane_context)
+    for container, key in _editor_slots(receipt, []):
+        label = labels.get(str(container[key].get("id")))
+        container[key] = {"learnerToken": label} if label else \
+            {"person": UNLABELED_PERSON}
+    out = dict(result)
+    out["receipt"] = receipt
+    return out
+
+
 def _harvest_roster(receipt, items_are_people=False):
     """Recursively harvest learner records from a receipt.
 
     A dict counts as a learner record when it carries a user_id, or when
-    it sits under a user-ish key (user/student/author) or carries one of
-    the identity fields and has an id. Records with an id but no name get
-    a synthesized "Learner <id>" name: the id itself is still PII and
-    must tokenize, and the synthesized name can never leak real PII.
+    it sits under a person key (person_key_kind "record": students,
+    participants, members, ...) or carries one of the identity fields and
+    has an id. Every scalar under a person-id key (student_ids, user_ids,
+    author_id, ...) is a learner id too. Records with an id but no name
+    get a synthesized "Learner <id>" name: the id itself is still PII and
+    must tokenize, and the synthesized name can never leak real PII. A
+    later record with a real name for the same id replaces the
+    synthesized one, so free-text mentions of that name are redacted.
     """
     found = []
-    seen = set()
+    by_id = {}
+    synthesized = set()
+
+    def add(lid, raw_id, name, node=None):
+        if lid in by_id:
+            entry = by_id[lid]
+            if name and lid in synthesized:
+                entry["name"] = name
+                synthesized.discard(lid)
+            else:
+                return
+        else:
+            entry = {"id": raw_id, "name": name or "Learner %s" % lid}
+            if not name:
+                synthesized.add(lid)
+            by_id[lid] = entry
+            found.append(entry)
+        for key in _ROSTER_PASSTHROUGH_KEYS:
+            value = (node or {}).get(key)
+            if isinstance(value, str) and value.strip() != "" \
+                    and key not in entry:
+                entry[key] = value
+
+    def add_ids(value):
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            if isinstance(item, bool) or not isinstance(item, (int, str)):
+                continue
+            if str(item).strip() == "":
+                continue
+            add(str(item), item, None)
 
     def learner_id_of(node, in_user_key):
         uid = node.get("user_id")
@@ -147,24 +316,24 @@ def _harvest_roster(receipt, items_are_people=False):
     def visit(node, in_user_key=False):
         if isinstance(node, dict):
             lid = learner_id_of(node, in_user_key)
-            if lid is not None and lid not in seen:
-                entry = {"id": node.get("user_id", node.get("id"))}
+            if lid is not None:
                 name = None
-                for key in _ROSTER_NAME_KEYS:
+                # A record keyed by user_id names its person in user_name
+                # and the like; its own "name" may be the object's name.
+                keys = (_ROSTER_PERSON_NAME_KEYS + _ROSTER_NAME_KEYS) \
+                    if "user_id" in node else _ROSTER_NAME_KEYS
+                for key in keys:
                     value = node.get(key)
                     if isinstance(value, str) and value.strip() != "":
                         name = value
                         break
-                entry["name"] = name if name else "Learner %s" % lid
-                for key in _ROSTER_PASSTHROUGH_KEYS:
-                    value = node.get(key)
-                    if isinstance(value, str) and value.strip() != "" \
-                            and key not in entry:
-                        entry[key] = value
-                seen.add(lid)
-                found.append(entry)
+                add(lid, node.get("user_id", node.get("id")), name, node)
             for key, value in node.items():
-                visit(value, str(key).lower() in _ROSTER_USER_KEYS)
+                kind = person_key_kind(key)
+                if kind == "ids":
+                    add_ids(value)
+                    continue
+                visit(value, kind == "record")
         elif isinstance(node, list):
             for value in node:
                 visit(value, in_user_key)
@@ -294,7 +463,8 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
     (projected_result, reveal_audit_or_None).
     """
     if not _admission.touches_learner_data(entry):
-        return result, None
+        return _label_editor_records(entry, result, tenant_base,
+                                     lane_context, error_cls), None
     reveal = pii_reveal_audit(error_cls)
     if reveal is not None:
         revealed = dict(result)
@@ -342,7 +512,7 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
             "catalogDigest": catalog_digest,
         }
 
-    receipt = result.get("receipt")
+    receipt = _neutralize_adhoc_override_titles(result.get("receipt"))
     # On a user-collection route the items are people, so even a bare
     # {"id", "name"} joins the roster and is labeled.
     roster_entries = _harvest_roster(receipt, _is_user_collection(entry))
