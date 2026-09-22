@@ -276,28 +276,45 @@ educator-signed approval (`--approval`); see `SKILL.md` for the
 governance rules. The v1 capability scope is declared in `SCOPE.md`:
 the live-proven Canvas core only.
 
+## Disconnect (keep the install)
+
+```
+bin/morrow disconnect          # prompts before it deletes anything
+bin/morrow disconnect --yes
+```
+
+Stops the helper and its Chromium (exact-PID signaling only), removes
+this tree's keepalive cron entry, and deletes the Canvas session
+material: `<tree>/helper/profile/` (or `LOGIN_HELPER_PROFILE_DIR`), the
+pinned account (`MORROW_HOME/browser_lane.json`), the rig session
+record, and the browser transient state. It verifies each removal and
+exits non-zero if anything survived. The tree, settings, audit journal,
+and learner vault stay. Reconnect by rerunning `install.sh` and signing
+in again.
+
 ## Clean uninstall
 
 ```
-cd ~/workspace/skills/morrow-canvas
-bash scripts/uninstall.sh
+bash scripts/uninstall.sh      # from the tree root
 ```
 
 The uninstall script stops the helper (exact-PID signaling only, never
 `pkill`), removes the keepalive cron entry, and deletes the tree, the
-effective `MORROW_HOME` state, the upgrade backups (`<tree>.bak-*`,
-including partial `.PARTIAL` backups), and any failed-upgrade trees
-(`<tree>.failed-*`). It verifies each step and reports what was
-actually removed.
+effective `MORROW_HOME` state, the browser profile, the learner source
+vault, the upgrade backups (`<tree>.bak-*`, including partial
+`.PARTIAL` backups), and any failed-upgrade trees (`<tree>.failed-*`).
+It verifies each step and reports what was actually removed.
 
 Cron removal is mandatory: if the keepalive entry survives, it will
 relaunch the helper (and its Chromium) within five minutes, resurrecting
-the "uninstalled" connector. The script refuses to finish until the cron
-entry is gone.
+the "uninstalled" connector. Both disconnect and uninstall refuse to
+finish until the cron entry is gone.
 
-To revoke access on the Canvas side: log out of Canvas on all your
-devices. That kills the session in `helper/profile/` immediately.
-Deleting files alone does not revoke a live session.
+Deleting the profile removes the session from this machine. Canvas may
+still consider that session valid on its side until it expires. To end
+it on the Canvas side too, change your Canvas password or ask your
+Canvas admin to end your sessions. Signing out on your laptop does not
+reliably end the helper's separate session.
 
 ## Upgrading
 

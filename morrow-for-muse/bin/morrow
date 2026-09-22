@@ -15,6 +15,8 @@ Subcommands:
   doctor    read-only health check: helper status, tree sanity
   version   read-only: print the tree version and command inventory
   failure   read-only: look up one failure-catalog entry by id or fragment
+  disconnect  end the Canvas connection: stop the helper, remove keepalive,
+            delete the sign-in (scripts/uninstall.sh --disconnect)
 
 Stdlib only.
 """
@@ -61,6 +63,9 @@ def _print_help():
     lines.append("  %-10s %s" % ("doctor", "read-only health check"))
     lines.append("  %-10s %s" % ("version", "read-only: version and command inventory"))
     lines.append("  %-10s %s" % ("failure", "read-only: failure-catalog lookup"))
+    lines.append("  %-10s %s" % ("disconnect", "end the Canvas connection "
+                                  "(stop helper, remove keepalive, delete "
+                                  "the sign-in); --yes to skip the prompt"))
     lines.append("")
     lines.append("Each command passes its arguments through to the underlying")
     lines.append("entry point; run `morrow <command> --help` for details.")
@@ -256,6 +261,18 @@ def main(argv=None):
         return _version()
     if name == "failure":
         return _failure(rest)
+    if name == "disconnect":
+        if rest not in ([], ["--yes"]):
+            print("usage: morrow disconnect [--yes]", file=sys.stderr)
+            return 2
+        script = os.path.join(DEPLOY_DIR, "scripts", "uninstall.sh")
+        try:
+            return subprocess.run(["bash", script, "--disconnect"]
+                                  + rest).returncode
+        except OSError as exc:
+            print("morrow: cannot launch %s: %s" % (script, exc),
+                  file=sys.stderr)
+            return 127
     if name not in _COMMANDS:
         print("morrow: unknown command %r" % name, file=sys.stderr)
         _print_help()

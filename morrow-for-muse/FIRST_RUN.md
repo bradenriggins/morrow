@@ -95,9 +95,12 @@ every setup state above has a classified mode with a regression test.
 
 - Rerunning `install.sh` revalidates everything, migrates keepalive
   entries, and never wipes an existing helper profile.
-- Revocation: signing out in the helper browser ends the session;
-  removing the tree state directory disconnects fully. Reconnecting
-  repeats steps 2 to 4.
+- Revocation: signing out in the helper browser ends the session.
+  `bin/morrow disconnect --yes` disconnects fully: it stops the helper,
+  removes the keepalive cron entry (which would otherwise relaunch the
+  signed-in helper within 5 minutes), deletes `<tree>/helper/profile/`
+  and the pinned account, and verifies each step. Reconnecting is
+  rerunning `install.sh`, then steps 2 to 4.
 
 ## Regression coverage
 
