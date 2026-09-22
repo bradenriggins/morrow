@@ -99,7 +99,19 @@ export async function clearReviewApprovalPresence() {
   await chrome.storage.session.remove(PRESENCE_STORAGE_KEY).catch(() => undefined);
 }
 
-/** Registers the worker's listeners. Called once, when the worker module first runs. */
+/**
+ * Answers one sign request from the review-tab content script. The worker's own message listener
+ * calls this, so the worker keeps one listener for every message.
+ */
+export function handleReviewApprovalMessage(message, sender, sendResponse) {
+  if (message?.type !== REVIEW_APPROVAL_SIGN_MESSAGE) return false;
+  storedPresence()
+    .then((presence) => signReviewApproval(message, sender, presence, chrome.runtime.id))
+    .then(sendResponse, () => sendResponse({ ok: false, code: "review_approval_failed" }));
+  return true;
+}
+
+/** Registers the worker's navigation listener. Called once, when the worker module first runs. */
 export function installReviewApproval() {
   chrome.webNavigation?.onCompleted?.addListener((details) => {
     if (details?.frameId !== 0 || !Number.isInteger(details.tabId) || details.tabId < 0) return;
@@ -108,11 +120,4 @@ export function installReviewApproval() {
       return undefined;
     });
   }, { url: [{ schemes: ["http"], hostEquals: "127.0.0.1" }] });
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message?.type !== REVIEW_APPROVAL_SIGN_MESSAGE) return false;
-    storedPresence()
-      .then((presence) => signReviewApproval(message, sender, presence, chrome.runtime.id))
-      .then(sendResponse, () => sendResponse({ ok: false, code: "review_approval_failed" }));
-    return true;
-  });
 }

@@ -2,8 +2,19 @@
 // artifact handle, changes that go through the same approval page a person sees, and a log.
 // Ported from the live BT2 sweep that proved these paths, so the harness keeps the machinery
 // that already worked instead of a second copy that has to be proven again.
+import { execFile } from "node:child_process";
 import { appendFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import { SOURCE_BINDING as SB } from "../connect.mjs";
+
+/** How long one change waits for the person to approve it in Chrome. */
+const APPROVAL_WAIT_MS = Number(process.env.MORROW_PROOF_APPROVAL_WAIT_MS) || 10 * 60_000;
+
+/** Opens a review in the Chrome where Morrow Bridge is paired. Elsewhere the person opens the logged link. */
+async function openInChrome(url) {
+  if (process.platform !== "darwin") return;
+  await promisify(execFile)("open", ["-a", process.env.MORROW_PROOF_BROWSER || "Google Chrome", url]).catch(() => undefined);
+}
 
 export function makeTools(client, logPath) {
   const log = async (text) => { const line = `${new Date().toISOString()} ${text}\n`; process.stdout.write(line); if (logPath) await appendFile(logPath, line).catch(() => {}); };
@@ -26,49 +37,40 @@ export function makeTools(client, logPath) {
 
   const callTool = async (name, args, timeout = 240000) => resolveArtifact(await client.callTool({ name, arguments: args }, { timeout }));
 
-  // Morrow's approval page issues one session cookie and a nonce bound to it. A later page keeps the
-  // same session, so the cookie is carried like a browser would.
-  // Morrow names each approval's cookie after its own nonce and scopes it to that
-  // review's own path, so only the cookie this page issued belongs on this
-  // approval. Sending every cookie ever issued grows one header without bound and
-  // the review is refused for a reason that has nothing to do with the change.
-  async function approve(approvalUrl, attempt = 0) {
+  // Morrow accepts an approval only from a person's click on the review page in Chrome, signed by
+  // the paired Morrow Bridge. A program that posts the page's form itself is refused, and this
+  // harness is such a program, so it opens the review in Chrome and waits for the person's decision.
+  // The page is read first only to report a review that offers no approval at all.
+  async function approve(approvalUrl, operationId) {
     // Morrow offers the Approve control only once it has named everything the change addresses,
     // and naming it is a fresh Canvas read that can take a few seconds. A person would open the
     // page again; giving up on the first load reports a change as withheld that was only not
     // ready yet.
-    let page; let body; let cookie; let nonce;
+    let page; let body = "";
     for (let load = 0; load < 5; load += 1) {
       page = await fetch(approvalUrl);
       body = await page.text();
-      const issued = page.headers.getSetCookie?.() ?? [page.headers.get("set-cookie")].filter(Boolean);
-      cookie = issued.map((value) => String(value).split(";", 1)[0].trim()).filter(Boolean).join("; ");
-      nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1];
-      if (nonce && cookie) break;
+      if (/<form method="post" action="[^"]*\/approve"/.test(body)) break;
       await new Promise((resolve) => setTimeout(resolve, 4000));
     }
-    if (!nonce || !cookie) throw new Error(`approval page had no form (${page?.status})`);
-    const response = await fetch(`${approvalUrl}/approve`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", cookie, origin: new URL(approvalUrl).origin, referer: approvalUrl },
-      body: new URLSearchParams({ nonce }),
-    });
-    if (!response.ok) {
-      // Morrow withholds the approval control when it cannot name what the change
-      // points at, and naming it is a fresh Canvas read that can fail on its own.
-      // A person would open the page again, so this does too, once.
-      if (attempt === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-        return approve(approvalUrl, 1);
-      }
-      const text = (await response.text()).slice(0, 200);
-      const reason = /"code":"([a-z_]+)"/.exec(text)?.[1] || `http_${response.status}`;
+    if (!/<form method="post" action="[^"]*\/approve"/.test(body)) {
       const shown = body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
       const sentence = /(Morrow [^.]{10,200}\.)/.exec(shown)?.[1] || "";
-      const error = new Error(`approval_withheld:${reason}`);
-      error.approvalWithheld = { reason, sentence };
+      const error = new Error(`approval_withheld:http_${page?.status ?? 0}`);
+      error.approvalWithheld = { reason: `http_${page?.status ?? 0}`, sentence };
       throw error;
     }
+    await openInChrome(approvalUrl);
+    await log(`approve in Chrome: ${approvalUrl}`);
+    const deadline = Date.now() + APPROVAL_WAIT_MS;
+    while (Date.now() < deadline) {
+      const record = (await callTool("morrow_operation_get", { operation_id: operationId }, 60000))?.structuredContent ?? {};
+      if (record.state && record.state !== "awaiting_approval" && record.state !== "planned") return;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    const error = new Error("approval_withheld:approval_not_given");
+    error.approvalWithheld = { reason: "approval_not_given", sentence: `No approval was given in Chrome within ${Math.round(APPROVAL_WAIT_MS / 1000)} seconds.` };
+    throw error;
   }
 
   /** Reads one artifact handle Morrow returns in place of a large result. */
@@ -170,7 +172,7 @@ export function makeTools(client, logPath) {
         return entry;
       }
       entry.operationId = plan.operationId;
-      await approve(plan.receipts.approvalUrl);
+      await approve(plan.receipts.approvalUrl, plan.operationId);
       let state = "";
       for (let attempt = 0; attempt < 90; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 2000));

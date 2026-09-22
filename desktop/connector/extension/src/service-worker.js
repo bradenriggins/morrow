@@ -66,7 +66,7 @@ import { serializeBridgeResult } from "./bridge-transport.js";
 import { canvasProtectedRoster, protectLocalRequest, sourceProtectedRoster } from "./protected-request.js";
 import { MAX_RENDER_CHECK_SOURCE_CHARS, RENDER_CHECK_MESSAGE_TYPE, RENDER_CHECK_SCHEMA, renderCheckField } from "../render-check/render-check.js";
 import { PRIVATE_BRIDGE_OPERATION_CONTRACTS, bridgeCatalogCompatibilityContract, browserCatalogCompatibilityContract, canvasApiCompatibilityContract, fetchBoundedCatalogText, parseBrowserCatalogText, parseCanvasApiCatalogText, privateBridgeCompatibilityContract, stableJson } from "./catalog-compatibility.js";
-import { clearReviewApprovalPresence, installReviewApproval, parseReviewApprovalPresence, storeReviewApprovalPresence } from "./review-approval.js";
+import { clearReviewApprovalPresence, handleReviewApprovalMessage, installReviewApproval, parseReviewApprovalPresence, storeReviewApprovalPresence } from "./review-approval.js";
 
 const PORT = 32147;
 const BRIDGE_PATH = "/morrow-bridge/v1";
@@ -1719,8 +1719,13 @@ async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityG
   const published = new Map((await publicBindings()).map((binding) => [binding.sourceBindingId, binding]));
   const siteAnchors = await publicSiteAnchors(stored);
   const bindings = await Promise.all((stored.bindings || []).map(async (binding) => {
-    const staleEditPermission = stalePermissionSummary(storedPolicies(stored.editPolicies)[binding.sourceBindingId], binding, api.catalogDigest, [...state.operations.values()]);
+    const storedPermission = storedPolicies(stored.editPolicies)[binding.sourceBindingId];
+    const staleEditPermission = stalePermissionSummary(storedPermission, binding, api.catalogDigest, [...state.operations.values()]);
     const current = published.get(binding.sourceBindingId);
+    // The binding Morrow receives names its grant by digest only. Settings and the popup show which
+    // actions the grant allows, so this status adds them from the stored grant that digest names.
+    const enabledCategories = current?.editPermission && storedPermission?.scopeDigest === current.editPermission.scopeDigest
+      && Array.isArray(storedPermission.enabledCategories) ? [...storedPermission.enabledCategories] : null;
     return {
       sourceBindingId: binding.sourceBindingId,
       provider: binding.provider,
@@ -1733,7 +1738,7 @@ async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityG
       runtimeVerified: current?.runtimeVerified === true,
       editPolicyRevision: current?.editPolicyRevision || 0,
       editOptionsAvailable: current?.editOptionsAvailable === true,
-      ...(current?.editPermission ? { editPermission: current.editPermission } : {}),
+      ...(current?.editPermission ? { editPermission: { ...current.editPermission, ...(enabledCategories ? { enabledCategories } : {}) } } : {}),
       ...(staleEditPermission ? { staleEditPermission: editPermissionSummary(staleEditPermission) } : {}),
     };
   }));
@@ -6286,7 +6291,9 @@ async function cancelPairingAfterConsentWithdrawal() {
   });
 }
 
+installReviewApproval();
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "morrow_review_approval_sign") return handleReviewApprovalMessage(message, sender, sendResponse);
   const fromPopup = POPUP_EDIT_POLICY_MESSAGES.has(message?.type) && popupSender(sender);
   const settingsAction = message?.type === "morrow_edit_policy_status" ? (authorityGeneration) => editPolicyStatus(authorityGeneration, { includePrivateChat: !fromPopup })
     : message?.type === "morrow_edit_policy_options" ? (authorityGeneration) => editPolicyOptions(message.sourceBindingId, authorityGeneration)
@@ -6384,7 +6391,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   void cancelPairingAfterConsentWithdrawal().catch(() => {});
   void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
 });
-installReviewApproval();
 chrome.runtime.onStartup.addListener(() => { void pollPairing(); void connectBridge(); });
 chrome.runtime.onInstalled.addListener((details) => {
   void connectBridge();

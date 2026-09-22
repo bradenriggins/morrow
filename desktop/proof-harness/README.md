@@ -30,6 +30,12 @@ carries its mark and is removed before the run reports.
 Run one at a time. They share one gateway and one browser connection, and running two at once
 makes both slower and the results less trustworthy.
 
+A change that needs approval is attended. Morrow accepts an approval only from a person's click on
+the review page in Chrome, signed by the paired Morrow Bridge, and refuses a program that posts the
+form itself. The harness opens each review in Chrome and waits for your decision, up to
+`MORROW_PROOF_APPROVAL_WAIT_MS` (default 10 minutes). A review with no decision is recorded as
+`approval_withheld`. Set `MORROW_PROOF_BROWSER` if Morrow Bridge is in another Chrome build.
+
 ## Files
 
 | File | What it holds |
