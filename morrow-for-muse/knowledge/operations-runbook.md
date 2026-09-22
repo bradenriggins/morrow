@@ -135,8 +135,9 @@ readback and cleanup:
 
 Not v1 claims at all: Moodle (proven in a sandbox, not packaged),
 Blackboard (no implementation exists), learner-data operations
-(refused by the admission gate as learner-data until the tokenization
-boundary is proven), the form relay (retired and excluded), classic
+(dispatched de-identified only on the Chromium lane with the encrypted
+vault, refused elsewhere; the by-name flow is fixture-proven, not yet
+live-proven), the form relay (retired and excluded), classic
 question banks (never tested), and the remainder of the 457-row
 for-muse catalog.
 

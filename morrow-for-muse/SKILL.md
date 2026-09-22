@@ -288,13 +288,11 @@ is on. `--dry-run` journals nothing, in either mode.
   Only operations marked `live-proven` in
   `proof-battery/OPERATION_CATALOG.md` dispatch; the only exception is
   the educator-signed `--allow-unproven` override for `pending` rows
-  described above. Learner-data operations (any
-  operation whose response carries people; see SCOPE.md) are refused
-  (`LearnerDataGated`) by `executor.py catalog` on every lane, and
-  `--allow-unproven` cannot override that. Manifest entries
-  (`execute --entry`) on the Chromium lane are admitted and their
-  receipts projected through the de-identification boundary instead,
-  but v1 ships no manifest entries.
+  described above. Learner-data operations (any operation whose
+  response carries people; see SCOPE.md) dispatch only on the Chromium
+  lane with the encrypted learner vault, where every receipt is
+  de-identified (see "Privacy" below); anywhere else they are refused
+  (`LearnerDataGated`), and `--allow-unproven` cannot override that.
 - Journaling: a dispatch journals more than one record. Reads journal a
   `wal="claimed"` record before provider work, then a completion record;
   writes journal an fsynced `wal="pending"` claim, then a `wal="complete"`
@@ -412,7 +410,9 @@ both modes.
   `--below-points N`, or `--letter-f` when the educator named a
   threshold. You choose the arguments from what the educator said; if
   they mean a quiz that is not last week's or this week's, ask which
-  quiz first. Names in the result are de-identified.
+  quiz first. Names in the result are de-identified (a student the
+  educator named in this conversation shows by that name next to the
+  label).
 - Every dispatch must carry the educator's identity for the mode gate:
   pass `--user-id` and `--conversation-id` to `dispatch/executor.py`
   (or set `MORROW_USER_ID` and `MORROW_CONVERSATION_ID`). Without a
@@ -442,8 +442,11 @@ tenant, with no override flag: never-dispatch routes (the standing
 exclusions: announcements, messages to people, support tickets,
 subaccount-affecting operations), catalog-unsupported rows, failed
 rows, evidence-hold rows (including New Quiz create, C-286), and
-learner-data rows (people-bearing responses; `executor.py catalog`
-refuses them on every lane). Item Bank IB- rows marked live-proven
+learner-data rows on any lane that cannot de-identify them (the raw
+HTTPS lane, or no `cryptography`); on the Chromium lane with the
+encrypted vault, live-proven learner-data rows dispatch de-identified
+(see "Privacy" below; fixture-proven, not yet live-proven end to end).
+Item Bank IB- rows marked live-proven
 dispatch through the executor's Item Banks SDK lane (see SCOPE.md for
 which ones). Out for v1: Moodle, Blackboard (an
 honestly-disclosed roadmap item, not a ship criterion), the retired form
@@ -531,67 +534,110 @@ beyond the examples above:
 
 For the educator, in plain English: whenever the connector reads
 student data (rosters, enrollments, submissions, grades, analytics),
-what the agent sees and what gets written to the journal never
-includes student names, emails, logins, or ID numbers. Each student
-appears as a stable label (like `Student A1`) that is the same every
-time you look, so you can still follow one student's work across
-reads, but the name behind it stays on your machine only. The key
-that makes the labels lives at
-`~/.morrow/morrow_source_vault.json.key` on your VM and is never part
-of any download or update.
+what comes back from Canvas is de-identified before the agent or the
+journal sees it: names, emails, logins, SIS ids, and Canvas user ids
+(including the ones inside links) become a stable label like
+`Student A1`. The label is the same every time, so you can follow one
+student's work across reads. You can still work with a student BY
+NAME: when you name a student ("extend Jane Doe's due date by two
+days"), the agent looks that name up and, for the rest of this
+conversation, shows that student as "Jane Doe (Student A3)". The agent
+only ever learns the names you type yourself. The key that makes the
+labels lives at `~/.morrow/morrow_source_vault.json.key` on your VM
+and is never part of any download or update.
 
-For the agent: in v1, `executor.py catalog` refuses learner-data rows
-outright, so you get no student data through it. Where learner data
-is dispatched (manifest entries on the Chromium lane), de-identification
-applies automatically to every learner-data read. Every receipt is projected
-through the source privacy boundary (`privacy/boundary.py`,
-`SourceMcpPrivacyBoundary`) before it becomes agent-visible or
-journaled. The wired choke point is `dispatch/executor.py` in
-`dispatch_entry`'s success path, delegating to
-`privacy/executor_wire.py:project_learner_result`. The boundary:
+What de-identification does and does not cover (say this plainly if
+the educator asks): Morrow cannot intercept what the educator types to
+Muse, so names the educator types reach the Muse model, because the
+educator typed them. Morrow keeps every other student identifier from
+the LMS (every name the educator did not type, every email, login, SIS
+id, and Canvas id) out of what the model and the journal see.
+
+For the agent: people-bearing catalog rows (the `[LEARNER-DATA]` rows
+and every route whose response carries people) dispatch only on the
+Chromium lane with the encrypted learner vault (the optional
+`cryptography` package). There every receipt is projected through the
+source privacy boundary (`privacy/boundary.py`) in `dispatch_entry`'s
+success path, delegating to
+`privacy/executor_wire.py:project_learner_result`, before it becomes
+agent-visible or journaled. Anywhere else (the raw HTTPS lane, or no
+`cryptography`) they are refused (`LearnerDataGated`). Only
+`live-proven` rows dispatch, as always. The boundary:
 
 - Harvests the receipt's learner records into a roster, then replaces
-  names, emails, login ids, SIS ids, contextual numeric ids, and
-  identity URLs with stable course-local labels (`Student A1`,
-  `Student A2`, ...). Write-direction calls resolve a label back to
-  the real identity through a one-time `learner_<uuid>` token before
-  provider dispatch.
+  names, emails, login ids, SIS ids, contextual numeric ids, and any
+  URL path segment or query value equal to a learner's Canvas id with
+  stable course-local labels (`Student A1`, `Student A2`, ...). Labels
+  are issued in a keyed order inside the course, so a label number
+  says nothing about the student.
+- Keeps an id array's meaning: an override's `student_ids` reads back
+  as the students' labels.
 - Persists labels in a file-backed AES-GCM vault at
   `~/.morrow/morrow_source_vault.json` (0600, with the 32-byte key in
   the sibling `.key` file), so labels stay stable across processes
-  and restarts for a course scope. Accumulated vault identities also
-  seed later-page redaction: a learner registered on page 1 still
-  projects to her label when named in page 2's free text.
-- Decodes bare base64 blobs in ordinary text fields, masks roster
-  identities inside, and re-encodes, so identifiers cannot hide in
-  blobs. A named author the roster cannot resolve (an educator on a
-  submission comment, someone not enrolled) projects to the generic
-  `Staff` label instead of leaking the name or refusing the read.
-  Spec-typed LTI identity fields (`lis_person_name_full` and family)
-  are redacted even for people absent from the roster.
-- On the entry path it projects rather than refuses: learner-data
-  entries are refused (`LearnerDataGated`) there only on the raw lane,
-  which has no projection point.
+  and restarts for a course scope.
+- Replaces a person record under an editor key (`edited_by`,
+  `last_edited_by`) with that person's label when the vault knows them
+  in that course, else with "a Canvas user Morrow has not labeled". A
+  named author the roster cannot resolve (a teacher on a submission
+  comment) projects to `Staff`.
 
-You do not need to ask for it and must not work
-around it. The ONLY override is explicit and educator-driven: the
-educator creates the `<tree-state-dir>/educator_pii_reveal` consent
-file (a regular file, mode 0600, not a symlink) carrying a documented
-instructional purpose (at least 12 characters, for example "grading
-review with the course TA before posting final grades"). The reason
-is journaled verbatim with the op
-(`revealed_by: "educator-consent-file"`); a stub reason, a wrong mode,
-or a nonregular file fails closed. The legacy
-`MORROW_REVEAL_STUDENT_PII_REASON` environment variable is ignored:
-the environment is not a consent channel. Never create the consent
-file yourself to bypass de-identification. Never call
-`vault.lookup()` or `Deidentifier.lookup()` from an agent path; those
-are educator-initiated reversal tools only. Deletion is the
-educator's, and it is complete: `python3 -c "from privacy import
-executor_wire; print(executor_wire.purge_tenant('<tenant base>'))"`
-drops one tenant's vault records (issued labels for that tenant stop
-resolving; other tenants untouched), and `purge_all()` additionally
-deletes the vault file and `.key`. Every purge/wipe path also purges
+### Working by name (the flow you run)
+
+The educator names students; you never guess which one they mean.
+
+1. The educator names a student. Run
+   `morrow students find --course C "<the name exactly as the educator
+   typed it>"` (pass `--conversation-id`, or set
+   `MORROW_CONVERSATION_ID`; add `--canvas-base` or `CANVAS_BASE`).
+   It reads the course roster through the login helper and prints one
+   JSON object.
+2. `status: resolved`: one student matched. Use `student` (the
+   label) or `shown_as` ("Jane Doe (Student A3)") wherever a write
+   needs that student. From now on in this conversation, outputs show
+   that student as `shown_as`.
+3. `status: confirm`: more than one student could match, or the name
+   was only a close spelling. `candidates` lists each one as a label
+   with its section, enrollment state, and last activity date. Ask the
+   educator which student they mean, using those details. Never pick
+   one yourself. Then run the same command again with
+   `--choose "Student A5"`; a label that was not offered is refused.
+4. `status: not_found`: no student matched. Tell the educator, and ask
+   them to check the spelling or say whether to include inactive or
+   concluded enrollments (`--include-inactive`, `--include-concluded`).
+5. Write by label: put the label (or the `shown_as` form) where the
+   operation takes a student, as a path parameter (`--params
+   '{"user_id": "Student A3", ...}'`) or in the body (`--body
+   '{"assignment_override": {"student_ids": ["Student A3"], ...}}'`).
+   After the mode gate, the executor turns the label into the
+   student's real Canvas id at the LMS boundary, only for the course
+   the write targets. A label that course never issued is refused
+   (`LearnerLabelUnresolved`), and so is a `shown_as` form whose name
+   does not match what the educator typed in this conversation. Labels
+   belong to one course: run `students find` again for another course.
+   The journal and everything you see keep the label, never the id.
+6. Relay the result using the names as shown (`shown_as` for students
+   the educator named, labels for everyone else). Never try to learn
+   or state the real name behind a label the educator did not name.
+
+Names the educator did not type are never shown to you. The only other
+way to see real names is an educator reveal: a sealed record
+(`dispatch.admission.mint_pii_reveal(tenant, course_id,
+"<educator's verbatim words>", channel="educator-chat")`), for ONE
+course, lasting at most 30 minutes, journaled with the educator's
+words, passed to the executor with `--pii-reveal <file>`. Mint it only
+when the educator asks, in their own words, to see real student names
+for that course; never on your own initiative and never for a driver
+channel. A file, an environment variable, or a setting reveals nothing
+(the old consent file is retired). Never call
+`vault.lookup()` or `Deidentifier.lookup()` from an agent path.
+
+Deletion is the educator's, and it is complete: `python3 -c "from
+privacy import executor_wire; print(executor_wire.purge_tenant('<tenant
+base>'))"` drops one tenant's vault records and name-echo records
+(issued labels for that tenant stop resolving; other tenants
+untouched), and `purge_all()` additionally deletes the vault file,
+its `.key`, and the name-echo file. Every purge/wipe path also purges
 the browser transient state: `~/.morrow/browser-pending/` envelopes
 (they hold raw provider payloads) and `~/.morrow/browser-briefs/`
 (nothing learner-bearing survives them). The Chromium profile's

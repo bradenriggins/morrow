@@ -204,11 +204,17 @@ class LadderTests(unittest.TestCase):
         self.assertEqual(res.user_id, 8)
         self.assertEqual(res.match_kind, "name_exact")
 
-    def test_fuzzy_typo_single_match_resolves(self):
+    def test_fuzzy_typo_single_match_asks_the_educator(self):
+        # Round-4 privacy audit H3: a close spelling is never
+        # auto-picked; the one fuzzy candidate goes back to the
+        # educator for confirmation.
         cands = _cands(_user(1, "John Smith"), _user(2, "Zara Khan"))
-        res = match_query(cands, "Jonh Smith")
-        self.assertEqual(res.user_id, 1)
-        self.assertEqual(res.match_kind, "name_fuzzy")
+        with self.assertRaises(StudentAmbiguous) as ctx:
+            match_query(cands, "Jonh Smith")
+        self.assertEqual(ctx.exception.resolution_evidence["match_kind"],
+                         "name_fuzzy")
+        self.assertEqual(ctx.exception.resolution_evidence["match_count"],
+                         1)
 
     def test_fuzzy_multiple_matches_ambiguous(self):
         # CORRECT: a typo near two similar names is ambiguous.

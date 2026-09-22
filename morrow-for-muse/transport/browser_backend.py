@@ -283,20 +283,16 @@ def _project_verification_detail(entry, verification, raw_payload,
 
 
 def _pii_reveal_audit():
-    """The explicit educator override for learner-data de-identification.
+    """The educator reveal for this lane: always None.
 
-    W3-P1-44: single implementation lives in privacy/executor_wire.py
-    (shared with the live executor lane); this is a thin delegate so both
-    lanes stay in lockstep. Reveal consent comes only from the
-    educator's hand-created consent file
-    <tree-state-dir>/educator_pii_reveal (regular file, mode 0600,
-    documented instructional purpose of at least 12 characters); a bare
-    MORROW_REVEAL_STUDENT_PII_REASON environment variable is ignored.
-    Returns None when de-identification applies, or an audit dict with
-    revealed_by "educator-consent-file" when the consent file validates.
+    Round-4 privacy audit H2: real names are shown only under a sealed
+    educator reveal record for one course (dispatch/admission
+    mint_pii_reveal), passed to the executor lane. The proof-battery
+    browser lane takes no reveal record, so it always de-identifies. No
+    file and no environment variable reveals names.
     """
     from privacy import executor_wire as _wire
-    return _wire.pii_reveal_audit(ex.ExecutorError)
+    return _wire.pii_reveal_audit(ex.ExecutorError, None)
 
 
 def _admission_hard_checks(entry, params, tenant_base):
@@ -2391,9 +2387,8 @@ def complete_browser_request(op_id, entry, params, plan, report_text,
     else:
         approval_audit = _admission.reverify_approval(entry, params, base,
                                                       op_id)
-    # De-id override, validated before any journaling: an explicit
-    # educator-documented purpose reveals raw student PII and is journaled
-    # with the op; a stub reason fails closed here.
+    # De-id override: this lane takes no educator reveal record, so the
+    # audit is always None (journaled as such with the op).
     reveal_audit = _pii_reveal_audit()
     # W2-P0-18: the complete phase never claims twice. With the
     # dispatch envelope's claim token it re-validates ownership
@@ -2873,8 +2868,7 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
     # entry/params/tenant before anything is journaled.
     approval_audit = _admission.reverify_approval(
         entry, params, pending.get("lane", {}).get("base"), op_id)
-    # De-id override, validated before any journaling (same rule as the
-    # request phase; the two phases may run as separate processes).
+    # De-id override: none on this lane (same rule as the request phase).
     reveal_audit = _pii_reveal_audit()
     # P0-5: guarded write stage. The verify phase also requires the pinned
     # principal, refuses a lane that reconnected since dispatch, and fails

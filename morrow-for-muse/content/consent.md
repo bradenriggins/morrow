@@ -57,13 +57,28 @@ to confirm the course instead of guessing, in either mode.
 
 Student data is de-identified by default. When Morrow reads rosters,
 submissions, or grades, the agent sees stable labels like "Student
-A1" instead of names, emails, or ID numbers, and the journal records
-the same labels, never the names. The labels stay consistent across
-sessions on this computer. You can reveal real names for a documented
-instructional purpose only, by creating a consent file on this
-computer (`<tree-state-dir>/educator_pii_reveal`): the reason you
-give is recorded in the journal. There is no other way to lift
-de-identification.
+A1" instead of names, emails, logins, or Canvas ID numbers (including
+the ones inside links), and the journal records the same labels,
+never the names. The labels stay consistent across sessions on this
+computer.
+
+You can still work with a student by name. When you name a student
+("extend Jane Doe's due date by two days"), the agent looks that name
+up in your course roster and, for the rest of that conversation,
+shows that student as "Jane Doe (Student A3)". If more than one
+student could match, the agent asks you which one you mean. It never
+guesses.
+
+One thing Morrow cannot do: it cannot intercept what you type to
+Muse. The names you type reach the Muse model, because you typed
+them. Morrow keeps every other student identifier from Canvas (the
+names you did not type, emails, logins, and ID numbers) away from the
+model.
+
+To see real names from a Canvas read for one course, ask the agent in
+your own words. It records your request, sealed, for that one course
+only, for at most 30 minutes, and your words are kept in the journal.
+There is no other way to lift de-identification.
 
 ## Where your sign-in lives
 

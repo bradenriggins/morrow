@@ -112,6 +112,7 @@ import urllib.parse
 import urllib.request
 import urllib.error
 import uuid
+import contextvars
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -280,6 +281,12 @@ class LocalProcedureRefused(ExecutorError):
 
 class VerificationFailed(ExecutorError):
     pass
+
+
+class LearnerLabelUnresolved(ExecutorError):
+    """A write named a student by a label this course never issued, or by
+    an echoed name that does not match the educator's record. Nothing
+    was sent (round-4 privacy audit H3c)."""
 
 
 class RedirectDowngradeRefused(ExecutorError):
@@ -2647,6 +2654,23 @@ def _index_note_append_locked(op_id, wal, size_before, size_after):
                   "locations": locations})
 
 
+# Round-4 privacy audit H3c: while a dispatch runs with learner labels
+# resolved to real LMS ids, every journal record is relabeled before it
+# is sealed, so the journal never holds the raw id a label stood for.
+# The value is the dispatch's holder dict; its "map" is {real id: label}.
+_ACTIVE_ID_LABELS = contextvars.ContextVar("morrow_active_id_labels",
+                                           default=None)
+
+
+def _relabel_for_journal(record):
+    holder = _ACTIVE_ID_LABELS.get()
+    mapping = holder.get("map") if isinstance(holder, dict) else None
+    if not mapping:
+        return record
+    from privacy import executor_wire as _wire
+    return _wire.relabel_learner_ids(record, mapping)
+
+
 def _append_record_locked(record):
     """Append one record with O_APPEND plus fsync, under the caller's
     exclusive journal lock.
@@ -2667,6 +2691,7 @@ def _append_record_locked(record):
     advisory, never a security boundary); the seal is the tamper
     boundary, verified on every read path, failing closed with
     JournalIntegrityError."""
+    record = _relabel_for_journal(record)
     # W6-P2-7: use-then-zero; the buffer is overwritten on exit.
     with _journal_secret_ctx() as _s:
         record = _seal_record(dict(record), _s.view())
@@ -5640,8 +5665,8 @@ def _project_verification_detail(entry: dict, verification: dict,
             "learner privacy boundary failed for verification detail of "
             "entry %r: %s" % (entry_name, exc))
     if reveal is not None:
-        # W3-P1-44: the educator consented through the consent file, so
-        # the detail passes through raw. The reveal audit rides with the
+        # Round-4 H2: a sealed educator reveal for this course, so the
+        # detail passes through raw. The reveal audit rides with the
         # verification dict so the journal records exactly who revealed
         # and why, the same as it does for receipts.
         out = dict(verification)
@@ -5711,13 +5736,25 @@ def _scrub_residual_identifiers(entry_name: str, raw_payload,
                         break
             if label:
                 tokens.append(label)
-            for value in node.values():
+            for key, value in node.items():
+                # A person-id array (student_ids, user_ids) projects to
+                # labels in place; the harvester reads it the same way.
+                if _wire.person_key_kind(key) == "ids":
+                    for item in (value if isinstance(value, list)
+                                 else [value]):
+                        if isinstance(item, str) and _label_re.match(item):
+                            tokens.append(item)
+                    continue
                 _collect(value)
         elif isinstance(node, list):
             for value in node:
                 _collect(value)
 
     _collect((projected_receipt or {}).get("provider_payload"))
+    # The harvester keeps the first sighting of each learner; so does
+    # this pairing (one learner, one label).
+    seen = set()
+    tokens = [t for t in tokens if not (t in seen or seen.add(t))]
     if len(tokens) != len(raw_roster):
         raise ExecutorError(
             "learner privacy boundary returned an unpairable roster for "
@@ -7458,6 +7495,59 @@ def _burn_write_approval(approval_record, override_record, op_id) -> None:
         consume_approval(override_record)
 
 
+def _learner_vault_ready(session) -> bool:
+    """True on a lane that can de-identify learner receipts: the
+    Chromium lane (browser_owned_auth: the projection point in
+    dispatch_entry) with the encrypted learner vault (the optional
+    'cryptography' package). Anything else fails closed."""
+    from privacy import core as _privacy_core
+    return bool(getattr(session, "browser_owned_auth", False)) and \
+        _privacy_core.AESGCM is not None
+
+
+def _projected_failure(exc, verification):
+    """Re-raise a write-verification failure carrying only the projected
+    detail (round-4 privacy audit M2: the raw exception text reached the
+    agent through the failure funnel's engineering_detail). Same class,
+    same scalar attributes; the raw readback payload is dropped."""
+    detail = verification.get("detail") if isinstance(verification, dict) \
+        else None
+    if not isinstance(detail, str):
+        return exc
+    if detail.startswith(_UNTRUSTED_PROVIDER_LABEL):
+        detail = detail[len(_UNTRUSTED_PROVIDER_LABEL):]
+    try:
+        new = type(exc)(detail)
+    except Exception:
+        return exc
+    for key, value in vars(exc).items():
+        if key != "readback_payload":
+            setattr(new, key, value)
+    return new
+
+
+def _journalable_result(projection_entry: dict, result: dict, tenant_base,
+                        lane_context=None) -> dict:
+    """The result with its receipt projected for a failure journal record.
+
+    The verify-failure paths journal before the success-path projection
+    runs; journaling the raw receipt there put learner names and ids in
+    the journal (round-4 privacy audit). When the boundary itself refuses
+    the receipt, the journal keeps a withheld marker instead."""
+    from privacy import executor_wire as _wire
+    try:
+        projected, _reveal = _wire.project_learner_result(
+            projection_entry, result, tenant_base, lane_context=lane_context,
+            error_cls=ExecutorError)
+        return projected
+    except Exception:
+        out = dict(result)
+        out["receipt"] = {"withheld": "the receipt could not be "
+                                      "de-identified, so it is not "
+                                      "journaled"}
+        return out
+
+
 def _projection_entry(entry: dict, url, raw_payload) -> dict:
     """The entry view the learner privacy boundary decides on.
 
@@ -7523,7 +7613,107 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                    kind: str = "dispatch", approval: dict = None,
                    unproven_override=None, catalog_status=None,
                    dry_run=False, require_educator_channel: bool = True,
-                   mode_ctx: dict = None) -> dict:
+                   mode_ctx: dict = None, pii_reveal: dict = None) -> dict:
+    """Execute one manifest entry; see _dispatch_entry_inner.
+
+    Working by name (round-4 privacy audit H3): learner labels in params
+    or the request body ("Student A3", or the echoed "Jane Doe (Student
+    A3)") are resolved to real LMS ids after the mode gate, for the
+    course the write targets only. While the dispatch runs, every
+    journal record is relabeled (_ACTIVE_ID_LABELS); the result and any
+    raised error are relabeled before the agent sees them, and labels
+    the educator introduced by name in this conversation are echoed as
+    "<typed name> (label)" (privacy/name_echo).
+
+    pii_reveal: a sealed educator reveal record
+    (dispatch/admission.mint_pii_reveal) for one course; see
+    privacy/executor_wire.pii_reveal_audit.
+    """
+    holder = {}
+    token = _ACTIVE_ID_LABELS.set(holder)
+    try:
+        out = _dispatch_entry_inner(
+            entry, params, session, pack, plan=plan, op_id=op_id, kind=kind,
+            approval=approval, unproven_override=unproven_override,
+            catalog_status=catalog_status, dry_run=dry_run,
+            require_educator_channel=require_educator_channel,
+            mode_ctx=mode_ctx, pii_reveal=pii_reveal, _labels=holder)
+    except Exception as exc:
+        _relabel_exception(exc, holder.get("map"))
+        raise
+    finally:
+        _ACTIVE_ID_LABELS.reset(token)
+    from privacy import executor_wire as _wire
+    if holder.get("map"):
+        out = _wire.relabel_learner_ids(out, holder["map"])
+    conversation_id = mode_ctx.get("conversation_id") \
+        if isinstance(mode_ctx, dict) else None
+    course_id = _write_target_course_id(entry, params)
+    if conversation_id and course_id:
+        try:
+            tenant_base = session.base_for(entry.get("provider") or "canvas")
+        except Exception:
+            tenant_base = None
+        if tenant_base:
+            out = _wire.apply_name_echo(out, tenant_base, course_id,
+                                        conversation_id)
+    return out
+
+
+def _relabel_exception(exc, mapping):
+    """Replace resolved real ids with their labels in an escaping error."""
+    if not mapping:
+        return
+    from privacy import executor_wire as _wire
+
+    def fix(value):
+        if isinstance(value, bytes):
+            try:
+                return _wire.relabel_learner_ids(
+                    value.decode("utf-8"), mapping).encode("utf-8")
+            except UnicodeDecodeError:
+                return value
+        if isinstance(value, (str, list, dict, tuple)):
+            fixed = _wire.relabel_learner_ids(
+                list(value) if isinstance(value, tuple) else value, mapping)
+            return tuple(fixed) if isinstance(value, tuple) else fixed
+        return value
+    try:
+        exc.args = tuple(fix(a) for a in exc.args)
+        for key, value in list(vars(exc).items()):
+            setattr(exc, key, fix(value))
+    except Exception:
+        pass
+
+
+def _resolve_dispatch_labels(entry, params, tenant_base, mode_ctx):
+    """(entry, params, {real id: label}) with learner labels resolved for
+    the course this dispatch targets. No labels: inputs unchanged."""
+    from privacy import executor_wire as _wire
+    course_id = _write_target_course_id(entry, params)
+    conversation_id = mode_ctx.get("conversation_id") \
+        if isinstance(mode_ctx, dict) else None
+    resolved, mapping = _wire.resolve_learner_labels(
+        {"entry": entry, "params": params}, tenant_base, course_id,
+        conversation_id, error_cls=LearnerLabelUnresolved,
+        provider=entry.get("provider"))
+    if not mapping:
+        return entry, params, {}
+    if not course_id:
+        raise LearnerLabelUnresolved(
+            "this dispatch names a student by label but targets no course; "
+            "labels belong to one course. Nothing was sent.")
+    return resolved["entry"], resolved["params"], mapping
+
+
+def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
+                          pack: dict, plan: FrozenPlan = None,
+                          op_id: str = None, kind: str = "dispatch",
+                          approval: dict = None, unproven_override=None,
+                          catalog_status=None, dry_run=False,
+                          require_educator_channel: bool = True,
+                          mode_ctx: dict = None, pii_reveal: dict = None,
+                          _labels: dict = None) -> dict:
     """Execute one manifest entry through the full pipeline and journal it.
 
     unproven_override is the F-2 (audit, signed_record) pair from the
@@ -7579,8 +7769,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
         # signed into) and refuses loudly when they differ, so a
         # globally-wrong tenant cannot sail through.
         _chromium_session_mod().verify_helper_tenant_binding(tenant_base)
-    _check_auxiliary_learner_data(
-        entry, bool(getattr(session, "browser_owned_auth", False)))
+    _check_auxiliary_learner_data(entry, _learner_vault_ready(session))
     approval_audit, approval_record = admit(
         entry, params, tenant_base=tenant_base, approval=approval, op_id=op_id,
         require_educator_channel=require_educator_channel,
@@ -7589,8 +7778,16 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
         # learner receipts are de-identified through the ported
         # SourceMcpPrivacyBoundary in dispatch_entry's success path
         # (privacy/executor_wire.py). The raw lane has no projection
-        # point, so it keeps refusing learner-bearing entries.
-        vault_ready=bool(getattr(session, "browser_owned_auth", False)))
+        # point, and no lane can project without the encrypted vault
+        # ('cryptography'), so those keep refusing learner-bearing entries.
+        vault_ready=_learner_vault_ready(session))
+    # Working by name: resolve learner labels to real ids AFTER the mode
+    # gate and BEFORE the write gates claim the op (a refusal here leaves
+    # nothing claimed). The gates and every journal record keep the
+    # label params; provider calls get the resolved ones.
+    wire_entry, wire_params, id_labels = _resolve_dispatch_labels(
+        entry, params, tenant_base, mode_ctx)
+    lane_context = {"pii_reveal": pii_reveal} if pii_reveal else None
     # Learner-data decision 2026-09-20: the raw lane passes no vault_ready,
     # so learner-bearing entries are refused here (LearnerDataGated) rather
     # than projected. Projection runs in dispatch_entry's success path
@@ -7613,6 +7810,10 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
     op_id, claim_token = _check_write_gates(entry, params, plan, op_id, kind,
                                             dry_run=dry_run,
                                             plan_not_required=mode_edit_write)
+    journal_params = params
+    entry, params = wire_entry, wire_params
+    if id_labels and isinstance(_labels, dict):
+        _labels["map"] = id_labels
     if dry_run:
         return _render_dry_run(entry, params, session, pack, plan, op_id,
                                 approval_audit, tenant_base, _derived,
@@ -7780,7 +7981,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                                         "steps": steps},
                             "truncated": False, "bytes_received": 0}
         verification = {"status": "uncertain", "detail": _provider_detail(exc)}
-        record = _journal_record(entry_name, kind, effects, params, plan,
+        record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                  op_id, None, verification,
                                  uncertain_result, exc.attempts or 0,
                                  uncertain=True,
@@ -7819,8 +8020,8 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
         verification = _project_verification_detail(
             _projection_entry(entry, url, getattr(exc, "readback_payload", None)),
             verification, getattr(exc, "readback_payload", None),
-            tenant_base, entry_name)
-        record = _journal_record(entry_name, kind, effects, params, plan,
+            tenant_base, entry_name, lane_context=lane_context)
+        record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                  op_id, None, verification,
                                  failed_result, 0, uncertain=False,
                                  approval_audit=approval_audit,
@@ -7833,7 +8034,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
         # W5-P2-1: the failure outcome is journaled (drained); a pending
         # shutdown now stops the run instead of continuing.
         _raise_if_shutdown_requested()
-        raise
+        raise _projected_failure(exc, verification) from None
     except ExecutorError as exc:
         # Request-phase failure classification (W2-P0-4: an ambiguous write
         # must never escape unjournaled with a reusable op_id).
@@ -7885,7 +8086,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
         # refusal) with the evidence, keep the claim (the op_id stays
         # reserved for reconciliation), and re-raise.
         _journal_write_failure_audit(
-            entry_name, kind, effects, params, plan, op_id, exc,
+            entry_name, kind, effects, journal_params, plan, op_id, exc,
             attempt_state, approval_audit, override_audit, catalog_status)
         # W5-P2-1: the audit record is journaled (drained); a pending
         # shutdown now stops the run instead of continuing.
@@ -7936,11 +8137,14 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
             # journaled, same as the success path below.
             verification = _project_verification_detail(
                 projection_entry, verification, result.get("payload"), tenant_base,
-                entry_name)
+                entry_name, lane_context=lane_context)
             after_digest = digest_of(result["receipt"])
-            record = _journal_record(entry_name, kind, effects, params, plan,
+            record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                      op_id, after_digest, verification,
-                                     result, attempts, uncertain=False,
+                                     _journalable_result(
+                                         projection_entry, result,
+                                         tenant_base, lane_context),
+                                     attempts, uncertain=False,
                                                                   approval_audit=approval_audit,
                                                                   unproven_override=override_audit,
                                                                   catalog_status=catalog_status,
@@ -7951,7 +8155,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
             # W5-P2-1: the failure outcome is journaled (drained); a
             # pending shutdown now stops the run instead of continuing.
             _raise_if_shutdown_requested()
-            raise
+            raise _projected_failure(exc, verification) from None
         except UncertainWrite as exc:
             # The write returned 2xx but its readback GET failed: the
             # effect is unconfirmed, not failed. Journal it as uncertain
@@ -7961,11 +8165,14 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                             "detail": _provider_detail(exc)}
             verification = _project_verification_detail(
                 projection_entry, verification, result.get("payload"),
-                tenant_base, entry_name)
+                tenant_base, entry_name, lane_context=lane_context)
             after_digest = digest_of(result["receipt"])
-            record = _journal_record(entry_name, kind, effects, params, plan,
+            record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                      op_id, after_digest, verification,
-                                     result, attempts, uncertain=True,
+                                     _journalable_result(
+                                         projection_entry, result,
+                                         tenant_base, lane_context),
+                                     attempts, uncertain=True,
                                      approval_audit=approval_audit,
                                      unproven_override=override_audit,
                                      catalog_status=catalog_status,
@@ -7982,8 +8189,8 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
             raise UncertainWrite(
                 "write op %s returned success, but the readback could not "
                 "confirm it: %s (journaled as uncertain, not failed)"
-                % (op_id, exc), evidence=exc.evidence,
-                attempts=exc.attempts) from exc
+                % (op_id, _projected_failure(exc, verification)),
+                evidence=exc.evidence, attempts=exc.attempts) from None
         except (VerificationFailed, UncertainWrite, ExecutorError) as exc:
             # Only a proven verify mismatch is a failed write. Anything
             # else here (a dead session, a stale command, another lane
@@ -7995,11 +8202,14 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
             # project it through the learner boundary before journaling.
             verification = _project_verification_detail(
                 projection_entry, verification, result.get("payload"), tenant_base,
-                entry_name)
+                entry_name, lane_context=lane_context)
             after_digest = digest_of(result["receipt"])
-            record = _journal_record(entry_name, kind, effects, params, plan,
+            record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                      op_id, after_digest, verification,
-                                     result, attempts, uncertain=not proven,
+                                     _journalable_result(
+                                         projection_entry, result,
+                                         tenant_base, lane_context),
+                                     attempts, uncertain=not proven,
                                      approval_audit=approval_audit,
                                      unproven_override=override_audit,
                                      catalog_status=catalog_status,
@@ -8030,12 +8240,14 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
             if proven:
                 raise VerificationFailed(
                     "verify block failed for op %s: %s (journaled as failed)"
-                    % (op_id, exc))
+                    % (op_id, _projected_failure(exc, verification))) \
+                    from None
             raise UncertainWrite(
                 "write op %s returned success, but the readback could not "
                 "confirm it: %s (journaled as uncertain, not failed)"
-                % (op_id, exc), evidence=getattr(exc, "evidence", None),
-                attempts=getattr(exc, "attempts", None)) from exc
+                % (op_id, _projected_failure(exc, verification)),
+                evidence=getattr(exc, "evidence", None),
+                attempts=getattr(exc, "attempts", None)) from None
 
     # Learner-data privacy boundary: project the receipt through the
     # ported SourceMcpPrivacyBoundary before it is journaled or
@@ -8051,12 +8263,13 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
     # projection uses, so the journal never carries learner names or
     # identifiers in verification_detail.
     verification = _project_verification_detail(
-        projection_entry, verification, result.get("payload"), tenant_base, entry_name)
+        projection_entry, verification, result.get("payload"), tenant_base,
+        entry_name, lane_context=lane_context)
     pii_reveal = None
     try:
         from privacy import executor_wire as _wire
         result, pii_reveal = _wire.project_learner_result(
-            projection_entry, result, tenant_base, lane_context=None,
+            projection_entry, result, tenant_base, lane_context=lane_context,
             error_cls=ExecutorError)
     except ExecutorError:
         raise
@@ -8066,7 +8279,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
             % (entry_name, exc))
 
     after_digest = digest_of(result["receipt"])
-    record = _journal_record(entry_name, kind, effects, params, plan, op_id,
+    record = _journal_record(entry_name, kind, effects, journal_params, plan, op_id,
                              after_digest, verification, result, attempts,
                                                           approval_audit=approval_audit,
                                                           unproven_override=override_audit,
@@ -8195,15 +8408,15 @@ def _journal_record(entry_name, kind, effects, params, plan, op_id,
         # was used (None for manifest entries and live-proven catalog ops).
         "unproven_override": unproven_override,
         "catalog_status": catalog_status,
-        # Learner-data de-id override audit: None when de-identification
-        # applied (the default); the educator-consent-file audit
-        # (revealed_by "educator-consent-file" plus the documented
-        # instructional purpose) when the consent file revealed raw PII.
+        # Learner-data reveal audit: None when de-identification applied
+        # (the default); the sealed educator reveal audit (revealed_by
+        # "educator-sealed-record" plus the educator's verbatim words)
+        # when a reveal record for this course showed real names.
         # The verification dict carries the reveal audit for the
         # verification detail itself (W3-P2-5): when the record-level
         # audit was not supplied (verification failure paths journal
         # before the receipt projection runs), fall back to it so a
-        # consent-revealed detail is never journaled without its audit.
+        # revealed detail is never journaled without its audit.
         "pii_reveal": (pii_reveal if pii_reveal is not None
                        else (verification.get("pii_reveal")
                              if isinstance(verification, dict) else None)),
@@ -8424,7 +8637,8 @@ def _catalog_provenance_gate(entry: dict, name: str, method: str,
         ("unsupported", check_unsupported),
         ("evidence_hold", check_evidence_holds),
         ("learner_data",
-         lambda e, p: check_learner_data(e, p, vault_ready=False)),
+         lambda e, p: check_learner_data(
+             e, p, vault_ready=_learner_vault_ready(session))),
     )
     for label, check in absolute:
         try:
@@ -8665,10 +8879,14 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
                         approval: dict = None, session=None,
                         allow_unproven: bool = False, dry_run=False,
                         require_educator_channel: bool = True,
-                        mode_ctx: dict = None) -> dict:
+                        mode_ctx: dict = None,
+                        pii_reveal: dict = None) -> dict:
     """Dispatch one generated-catalog operation through the full pipeline.
 
-    mode_ctx is passed through to dispatch_entry: see its docstring.
+    mode_ctx and pii_reveal are passed through to dispatch_entry: see its
+    docstring. People-bearing rows (learner data) dispatch only on the
+    Chromium lane with the encrypted learner vault, where every receipt
+    is de-identified; elsewhere they are refused (LearnerDataGated).
 
     F-2: the catalog provenance gate runs first. The op must be marked
     live-proven in proof-battery/OPERATION_CATALOG.md, or the caller must
@@ -8697,7 +8915,7 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
                           unproven_override=unproven_override,
                           catalog_status=status, dry_run=dry_run,
                           require_educator_channel=require_educator_channel,
-                          mode_ctx=mode_ctx)
+                          mode_ctx=mode_ctx, pii_reveal=pii_reveal)
 
 
 # --------------------------------------------------------------------------
@@ -8883,8 +9101,8 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
         mode_ctx=mode_ctx, journal=not dry_run)
     mode_edit_undo = (isinstance(approval_audit, dict)
                       and approval_audit.get("mode") == "edit")
-    # Same learner-data decision as execute: no vault_ready, so the raw lane
-    # refuses learner-bearing undo rather than projecting it.
+    # Undo passes no vault_ready: a learner-bearing undo is refused on
+    # every lane (undo has no working-by-name or projection path yet).
     # Undo is a write: claim a fresh op_id atomically under the journal
     # lock (W2-P0-18), then run the standard write gates.
     undo_op_id = str(uuid.uuid4())
@@ -9062,6 +9280,21 @@ def _load_params(text: str) -> dict:
     return obj
 
 
+def _load_reveal(path: str | None) -> dict | None:
+    """Load a sealed educator reveal record (the seal, channel, course,
+    and expiry are checked at projection time)."""
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            record = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise ExecutorError("reveal file is not readable JSON") from exc
+    if not isinstance(record, dict):
+        raise ExecutorError("reveal file must contain a JSON object")
+    return record
+
+
 def _load_approval(path: str | None) -> dict | None:
     """Load an educator-signed approval record from a JSON file.
 
@@ -9236,6 +9469,11 @@ def main(argv=None):
                        help="mode gate: the educator's verbatim yes for "
                             "this destructive write (required in edit mode "
                             "while confirm_destructive_writes is on)")
+        p.add_argument("--pii-reveal", default=None,
+                       help="path to a sealed educator reveal record "
+                            "(dispatch/admission.mint_pii_reveal): real "
+                            "student names for ONE course, educator-chat "
+                            "channel, expires within 30 minutes")
 
     p_exec = sub.add_parser("execute", help="execute one manifest entry")
     p_exec.add_argument("--entry", required=True, help="path to the manifest entry JSON")
@@ -9443,7 +9681,8 @@ def main(argv=None):
                                      approval=approval,
                                      dry_run=args.dry_run,
                                      require_educator_channel=not args.allow_driver_channel,
-                                     mode_ctx=mode_ctx)
+                                     mode_ctx=mode_ctx,
+                                     pii_reveal=_load_reveal(args.pii_reveal))
             finally:
                 close_chromium_session(session)
         else:
@@ -9452,7 +9691,8 @@ def main(argv=None):
                                  op_id=args.op_id, approval=approval,
                                  dry_run=args.dry_run,
                                  require_educator_channel=not args.allow_driver_channel,
-                                 mode_ctx=mode_ctx)
+                                 mode_ctx=mode_ctx,
+                                 pii_reveal=_load_reveal(args.pii_reveal))
         print(canonical(out))
     elif args.command == "catalog":
         params = _load_params(args.params)
@@ -9480,7 +9720,9 @@ def main(argv=None):
                                           session=session,
                                           dry_run=args.dry_run,
                                           require_educator_channel=not args.allow_driver_channel,
-                                          mode_ctx=mode_ctx)
+                                          mode_ctx=mode_ctx,
+                                          pii_reveal=_load_reveal(
+                                              args.pii_reveal))
             finally:
                 close_chromium_session(session)
         else:
@@ -9492,7 +9734,8 @@ def main(argv=None):
                                       allow_unproven=args.allow_unproven,
                                       dry_run=args.dry_run,
                                       require_educator_channel=not args.allow_driver_channel,
-                                      mode_ctx=mode_ctx)
+                                      mode_ctx=mode_ctx,
+                                      pii_reveal=_load_reveal(args.pii_reveal))
         print(canonical(out))
     elif args.command == "undo":
         entry = load_manifest_entry(args.entry, pack)

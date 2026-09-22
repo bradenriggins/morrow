@@ -135,26 +135,29 @@ live battery marks them live-proven in
   people (rosters, enrollments, submissions, grades, collaborators,
   activity, per-student dates and overrides, edit history). The
   classification is structural (`dispatch/admission_policy.json`
-  `learner_data`) plus the catalog `[LEARNER-DATA]` flag. The product
-  dispatch path, `executor.py catalog`, refuses them on every lane and
-  every tenant (`LearnerDataGated`; `--allow-unproven` cannot override
-  it). This is a learner-data refusal, not an evidence-hold. The
-  de-identification boundary itself is built and tested
-  (`privacy/`, wired in `dispatch_entry`: on the Chromium lane a
-  learner receipt is replaced with course-scoped labels such as
-  `Student A1` before the agent or the journal sees it), but it is
-  reached only through manifest entries, and v1 ships no manifest
-  entries (`pack/pack.json` `entries` is empty). So no learner data is
-  a v1 claim.
-- Discussions: discussion writes are proven but not v1 claims.
-  C-139 (create), C-141 (delete), and C-167 (update) are catalog
-  live-proven on 2026-09-20 (discussion 1241942 lifecycle) but carry
-  the learner-data flag, so the admission gate refuses them by
-  default. C-238 (discussion date_details PUT) is live-proven through
-  the 2026-09-21 Chromium write battery (PUT 204). No discussion
-  reads are among the 113 verified GETs (all discussion reads are
-  pending, learner-data gated). Discussion writes are not a v1
-  claim.
+  `learner_data`) plus the catalog `[LEARNER-DATA]` flag. `executor.py
+  catalog` dispatches the `live-proven` ones only on the Chromium lane
+  with the encrypted learner vault (the optional `cryptography`
+  package), where every receipt is de-identified in `dispatch_entry`
+  (course-scoped labels such as `Student A1`) before the agent or the
+  journal sees it. Everywhere else (the raw HTTPS lane, or no
+  `cryptography`) they are refused (`LearnerDataGated`;
+  `--allow-unproven` cannot override it). The educator works by name
+  through `morrow students find` and writes by label (SKILL.md
+  "Working by name"). Proof status: the by-name flow and the opened
+  people-bearing rows are proven against synthetic Canvas fixtures in
+  the source tree's end-to-end tests; they have not yet been exercised
+  end to end against a live Canvas
+  course with real students, so treat them as fixture-proven, not
+  live-proven, until that battery runs.
+- Discussions: C-139 (create), C-141 (delete), and C-167 (update) are
+  catalog live-proven on 2026-09-20 (discussion 1241942 lifecycle) and
+  carry the learner-data flag, so they dispatch only on the Chromium
+  lane with the encrypted vault (receipts de-identified), and are
+  refused elsewhere. C-238 (discussion date_details PUT) is live-proven
+  through the 2026-09-21 Chromium write battery (PUT 204). No
+  discussion reads are among the 113 verified GETs (all discussion
+  reads are pending).
 - Classic question banks: never tested. Not a v1 claim.
 - The remainder of the 457-row for-muse catalog (437 Canvas rows
   plus 20 Item Bank rows): only rows marked `live-proven` are v1

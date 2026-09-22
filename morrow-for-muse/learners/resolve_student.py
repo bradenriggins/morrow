@@ -28,8 +28,11 @@ Resolution contract (fail-closed, never a silent wrong pick):
     6. name (fuzzy: diacritics stripped, punctuation dropped, tokens
        sorted; SequenceMatcher ratio >= 0.85)
   The first ladder rung with at least one candidate wins. One
-  candidate -> resolve. More than one -> StudentAmbiguous. None at
-  any rung -> StudentNotFound.
+  candidate -> resolve, except at the fuzzy rung: a close spelling is
+  never auto-picked, so even one fuzzy candidate is StudentAmbiguous
+  (the educator confirms). More than one -> StudentAmbiguous. None at
+  any rung -> StudentNotFound. The query itself is never put into the
+  agent-visible evidence.
 * State filtering (applied before matching, so stale records never
   shadow live ones): default pool is enrollment_state == "active".
   include_inactive adds "inactive"; include_concluded adds
@@ -215,6 +218,8 @@ def build_candidate(user):
             "role": str(enr.get("role") or enr.get("type") or ""),
             "enrollment_state": str(enr.get("enrollment_state") or ""),
             "section_id": enr.get("course_section_id"),
+            "last_activity_at": enr.get("last_activity_at")
+            if isinstance(enr.get("last_activity_at"), str) else None,
         })
     return {
         "user_id": uid,
@@ -423,7 +428,7 @@ def match_query(candidates, query, *, label_for=None, fuzzy_threshold=None):
         raise StudentNotFound(
             "empty student query matches no roster entry",
             query=query,
-            evidence={"query": "", "match_count": 0,
+            evidence={"match_count": 0,
                       "candidates_examined": len(candidates)})
     global FUZZY_THRESHOLD
     saved_threshold = FUZZY_THRESHOLD
@@ -434,10 +439,12 @@ def match_query(candidates, query, *, label_for=None, fuzzy_threshold=None):
             hits = _match_rung(candidates, query, rung)
             if not hits:
                 continue
-            if len(hits) == 1:
+            # A fuzzy (typo) match is never auto-picked, even when only
+            # one student is close: the educator confirms which student
+            # they mean (round-4 privacy audit H3).
+            if len(hits) == 1 and rung != RUNG_NAME_FUZZY:
                 cand = hits[0]
                 evidence = {
-                    "query": query,
                     "match_kind": rung,
                     "match_count": 1,
                     "candidates_examined": len(candidates),
@@ -447,14 +454,17 @@ def match_query(candidates, query, *, label_for=None, fuzzy_threshold=None):
                     "test_student": candidate_is_test_student(cand),
                 }
                 return Resolution(cand["user_id"], cand, rung, evidence)
-            # More than one hit at the winning rung: ambiguous, ask.
+            # More than one hit at the winning rung, or a fuzzy hit:
+            # ambiguous, ask. The educator's query is never echoed into
+            # the evidence (it is agent-visible).
             public = public_candidate_summary(hits, label_for=label_for)
             raise StudentAmbiguous(
-                "student query matched %d roster entries; "
-                "asking the educator to disambiguate" % len(hits),
+                "student query matched %d roster entries%s; "
+                "asking the educator to disambiguate"
+                % (len(hits), " by a close spelling only"
+                   if rung == RUNG_NAME_FUZZY else ""),
                 query=query,
-                evidence={"query": query,
-                          "match_kind": rung,
+                evidence={"match_kind": rung,
                           "match_count": len(hits),
                           "candidates_examined": len(candidates),
                           "candidates_public": public})
@@ -463,7 +473,7 @@ def match_query(candidates, query, *, label_for=None, fuzzy_threshold=None):
     raise StudentNotFound(
         "student query matched no roster entry",
         query=query,
-        evidence={"query": query, "match_count": 0,
+        evidence={"match_count": 0,
                   "candidates_examined": len(candidates)})
 
 
@@ -779,25 +789,29 @@ def vault_label_for(tenant_base, course_id, candidates):
     if repo not in sys.path:
         sys.path.insert(0, repo)
     from privacy import executor_wire
-    roster = [{"id": c["user_id"], "name": c.get("name") or "",
-               "sortable_name": c.get("sortable_name") or "",
-               "short_name": c.get("short_name") or ""}
-              for c in candidates]
-    entry = {"name": "resolve_student_roster", "provider": "canvas",
-             "request": {"method": "GET", "url": "%s/api/v1/courses/%s/users"
-                         % (tenant_base.rstrip("/"), course_id)}}
-    projected, reveal = executor_wire.project_learner_result(
-        entry, {"receipt": roster, "truncated": False, "bytes_received": 0},
-        tenant_base, error_cls=RuntimeError)
-    if reveal is not None:
-        raise RuntimeError("the educator PII-reveal consent is active; this "
-                           "probe prints labels only")
+    # Every identifier the roster knows goes into the vault record, so a
+    # later read that mentions this student's email or login in free
+    # text still projects it to the label.
+    identities = []
+    for c in candidates:
+        identity = {"id": str(c["user_id"])}
+        for src, dst in (("name", "name"), ("email", "email"),
+                         ("login_id", "loginId"),
+                         ("sis_user_id", "sisUserId")):
+            if c.get(src):
+                identity[dst] = c[src]
+        aliases = [c[k] for k in ("sortable_name", "short_name",
+                                  "sis_login_id")
+                   if c.get(k) and c.get(k) != c.get("name")]
+        if aliases:
+            identity["aliases"] = aliases
+        identities.append(identity)
+    issued = executor_wire.issue_labels(tenant_base, course_id, identities)
     labels = {}
-    for raw, out in zip(roster, projected.get("receipt") or []):
-        label = out.get("id") if isinstance(out, dict) else None
-        if not isinstance(label, str) or str(raw["id"]) in label:
+    for c, label in zip(candidates, issued):
+        if not isinstance(label, str) or not label.startswith("Student A"):
             raise RuntimeError("the privacy boundary returned no label")
-        labels[raw["id"]] = label
+        labels[c["user_id"]] = label
     return lambda uid: labels[int(uid)]
 
 

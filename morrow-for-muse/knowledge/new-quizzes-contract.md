@@ -98,11 +98,12 @@ A quiz-entry has no PATCH/PUT. Changing a draw in place is absent by
 design: remove the row and add the wanted one as two separately
 reviewed changes. New Quiz delete requires no student work (the
 desktop planner demands `has_submitted_submissions=false` and
-`graded_submissions_exist=false`; this package has no such gate and
-you cannot read submissions yourself (the admission gate refuses
-submission reads as learner-data, `LearnerDataGated`), so **ask the
-educator whether submissions exist and
-disclose that the delete is irreversible before offering it**).
+`graded_submissions_exist=false`; this package has no such gate, and
+submission reads are learner data, which dispatch only on the
+Chromium lane with the encrypted vault and come back de-identified,
+and only for live-proven rows), so **ask the educator whether
+submissions exist and disclose that the delete is irreversible before
+offering it**).
 
 ## The /api/quiz/v1 401 trap: LTI provisioning, not the token
 

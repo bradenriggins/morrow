@@ -761,8 +761,9 @@ def clear_conversation_overrides(user_id, educator=None):
 def end_conversation(user_id, conversation_id):
     """Tear down conversation-scoped state.
 
-    Removes the persisted override (journaled) and revokes every live
-    grant bound to the conversation (journaled in the modes audit).
+    Removes the persisted override (journaled), revokes every live
+    grant bound to the conversation (journaled in the modes audit), and
+    ends the name echo of every student the educator named in it.
     This is the harness's explicit duty when a Muse conversation ends:
     without it, a conversation-bound override or grant could outlive
     the conversation it was granted for.
@@ -781,6 +782,11 @@ def end_conversation(user_id, conversation_id):
                   extra={"conversation_id": key})
     _modes_revoke_grant(user_id, reason="conversation ended",
                         conversation_id=key)
+    # Names the educator introduced in this conversation stop echoing
+    # (privacy/name_echo): the echo lives exactly as long as the
+    # conversation the educator typed the name in.
+    from privacy import name_echo as _name_echo
+    _name_echo.end_conversation(key)
 
 
 def observe_conversation(user_id, conversation_id):

@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Privacy round 4: working by name, de-identified everywhere else (2026-09-22)
+
+- Working by name (design chosen by the integrator): `morrow students
+  find --course C "<name>"` (`learners/find.py`) resolves the name the
+  educator typed to a course label; ambiguous or close-spelling
+  matches list every candidate as a label with section, enrollment
+  state, and last activity date, and are never auto-picked. A resolved
+  name is echoed as "<typed name> (Student A3)" in that conversation
+  only (`privacy/name_echo.py`, encrypted, ends with the conversation).
+  Writes carry labels; the executor resolves them to real ids at the
+  LMS boundary after the mode gate, only for the course the write
+  targets, and relabels every journal record, result, and error.
+- Live-proven people-bearing catalog rows now dispatch on the Chromium
+  lane with the encrypted vault (receipts de-identified); they stay
+  refused on the raw lane and without `cryptography`.
+- The `educator_pii_reveal` consent file is retired (an agent could
+  write it). The only reveal is a sealed educator record for one
+  course, at most 30 minutes, journaled (`mint_pii_reveal`,
+  `--pii-reveal`).
+- Any URL path segment or query value equal to a rostered learner id
+  is labeled (`/grades/<id>`, `/submissions/<id>`, `?student_id=`).
+  `student_ids` arrays read back as labels. New labels follow a keyed
+  order, not first-read (alphabetical) order.
+- Page revisions with a teacher editor and assignment reads with an
+  embedded submission project instead of failing closed.
+- Write-verification failures carry only the projected detail to the
+  agent, and failure journal records carry the projected receipt.
+- Student-resolution errors no longer echo the educator's query; a
+  fuzzy match is never auto-picked.
+- Docs: SKILL.md teaches the by-name flow; FERPA_POLICY.md,
+  privacy/README.md, knowledge/privacy-ferpa.md, SCOPE.md, and
+  content/consent.md state plainly that names the educator types
+  reach the Muse model and Morrow keeps every other identifier from
+  the LMS out.
+
 ### Installer, carve, and packaging (Worker 4, 2026-09-21)
 
 - `install.sh` rewritten (10 steps): integrity verification against

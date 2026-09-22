@@ -24,26 +24,33 @@ read-only sources; nothing was modified there.
   private and multi-course tool refusal, stable failure envelopes,
   metadata-only internal capability.
 - `source_privacy_selftest.py`: the test suite (see below).
-- `FERPA_POLICY.md`: the plain-language policy, the two-halves
-  doctrine, the adapted deployment gate ladder, honest limitations.
+- `executor_wire.py`: the executor's projection point, the educator
+  reveal check, working-by-name helpers (`issue_labels`,
+  `apply_name_echo`, `resolve_learner_labels`, `relabel_learner_ids`),
+  and the shipped purge commands.
+- `name_echo.py`: the encrypted per-conversation record of students
+  the educator named (the name echo).
+- `FERPA_POLICY.md`: the plain-language policy, working by name, what
+  Morrow can and cannot protect, the adapted deployment gate ladder,
+  honest limitations.
 
 Legacy lanes (`learner_vault.py`, `pseudonym.py`) are kept for
 compatibility but are not the wired boundary.
 
-## Two halves of one boundary
+## Egress only
 
-This package is pseudonymization on EGRESS: learner identities
-become stable course-local `Student A<n>` labels before anything
-is agent-visible or journaled. It is one half of the boundary
-doctrine borrowed from the production Meridian JS privacy
-boundary (`privacy_boundary.js` on the team kit). The other half
-is PII detection / spoof-gating on INGRESS: blocking raw student
-PII before it reaches a model, rejecting forged "sanitized" stamps
-and tokens. The halves are complements, not duplicates. The
-selftest's Part 3 ports the reusable ingress-detection patterns
-(course-title preservation, education-record facts, email in
-gradebook context, label spoof-gating, routine-course-copy
-byte-identity) as adversarial pins on this egress half.
+This package is pseudonymization on EGRESS: learner identities from
+the LMS become stable course-local `Student A<n>` labels before
+anything is agent-visible or journaled. The production Meridian JS
+privacy boundary (`privacy_boundary.js` on the team kit) also has an
+INGRESS half (PII detection on what a person types). Morrow for Muse
+has no ingress half: it cannot intercept the educator's messages to
+Muse, so names the educator types reach the Muse model. Morrow keeps
+every other student identifier from the LMS out. The selftest's Part
+3 ports the reusable ingress-detection patterns (course-title
+preservation, education-record facts, email in gradebook context,
+label spoof-gating, routine-course-copy byte-identity) as adversarial
+pins on this egress half.
 
 ## STRONG-context gating (design reflection)
 
@@ -67,11 +74,18 @@ byte-identical; the selftest pins both directions.
 
 ## Wiring
 
-`transport/browser_backend.py::_project_learner_result`, called on
-both the request and verify completion phases for learner-data
-entries. The synchronous executor path refuses learner-data
-operations outright (`LearnerDataGated`) instead of projecting
-them. See FERPA_POLICY.md for the honest scope.
+`dispatch/executor.py` projects every learner receipt in
+`dispatch_entry`'s success path (and every verification detail and
+failure-journal receipt) through
+`executor_wire.project_learner_result`. People-bearing operations
+dispatch only on the Chromium lane with the encrypted vault; the raw
+HTTPS lane, and any lane without `cryptography`, refuses them
+(`LearnerDataGated`). `transport/browser_backend.py::_project_learner_result`
+delegates to the same function for the proof-battery lane. Working by
+name: `learners/find.py` (`morrow students find`) issues labels and
+records the name echo; `dispatch_entry` resolves labels in a write to
+real ids after the mode gate and relabels everything afterwards. See
+FERPA_POLICY.md for the honest scope.
 
 ## Semantic divergences (port decisions)
 
@@ -131,7 +145,7 @@ them. See FERPA_POLICY.md for the honest scope.
   zero-width full and reversed names, bare surname, partial-name
   surname leakage, URL percent-encoding, mailto tokens, surgical
   soft-secret redaction, hard-credential refusal).
-- Part 5: 11 wave-3 adversarial regressions (2026-09-21).
+- Part 5 onward: wave-3 and later adversarial regressions.
 
-69/69 PASS as of 2026-09-21. Fixtures are synthetic; vault scratch
+78/78 PASS as of 2026-09-22. Fixtures are synthetic; vault scratch
 lives under `privacy/.selftest-work/`.

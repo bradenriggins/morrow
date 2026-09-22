@@ -993,12 +993,12 @@
     },
     {
       "id": "learner-data-gated",
-      "title": "Learner-data operation refused (vault not ready / LearnerDataGated)",
+      "title": "Learner-data operation refused (no de-identification point / LearnerDataGated)",
       "surface": "canvas",
       "severity_hint": "medium",
-      "root_cause": "Verified mechanism: operations touching learner data are gated until the privacy vault is ready; the projection choke anonymizes roster data before anything reaches the agent.",
+      "root_cause": "Verified mechanism: operations touching learner data dispatch only on the Chromium lane with the encrypted learner vault (the optional 'cryptography' package), where the projection choke de-identifies every receipt before anything reaches the agent; on any other lane, or without the vault, they are refused.",
       "is_not": "This is not an evidence hold and not a provider refusal; it is the privacy boundary doing its job.",
-      "agent_message": "What was attempted: I did not run {operation} because it touches student data and the privacy protection is not ready. What the evidence showed: the student-data safety check fired on this operation, which exists to protect your students' information by design. What this means: the refusal is protecting your students, not a broken feature. What happens next: I need the privacy protection ready (or your explicit, informed consent path) before this kind of read can go through; I will not fetch raw rosters around it.",
+      "agent_message": "What was attempted: I did not run {operation} because it touches student data and this connection cannot de-identify it. What the evidence showed: the student-data safety check fired on this operation, which exists to protect your students' information by design. What this means: the refusal is protecting your students, not a broken feature. What happens next: student data runs only through the signed-in browser lane with the encrypted student vault installed (the optional 'cryptography' package); I will not fetch raw rosters around it.",
       "auto_action": "Refuse by default; do not bypass the privacy boundary.",
       "escalate_when": "Surface to the educator with a plain-language explanation of why the data is protected and what would let it proceed.",
       "signature": {
@@ -1011,7 +1011,7 @@
           }
         ]
       },
-      "signature_notes": "evidence: \"admission_policy.json learner-data URL segments and substrings plus the catalog [LEARNER-DATA] flag; projection choke in dispatch/executor.py\"; gate: \"LearnerDataGated\"; signal: \"touches_learner_data=True with the privacy vault not ready\"",
+      "signature_notes": "evidence: \"admission_policy.json learner-data URL segments and substrings plus the catalog [LEARNER-DATA] flag; projection choke in dispatch/executor.py\"; gate: \"LearnerDataGated\"; signal: \"touches_learner_data=True on a lane without a projection point or without the encrypted vault\"",
       "severity_hint_inventory": "user-action",
       "placeholders": [
         "operation"
@@ -1323,7 +1323,7 @@
       "placeholders": []
     },
     {
-      "agent_message": "What was attempted: {operation} for the student query {query}. What the evidence showed: the query matched {match_count} roster entries at the {match_kind} identifier level, so no single student can be picked without guessing (reference {correlation_id}). What this means: I am not choosing one for you, because a silent wrong pick would attach the wrong student's data to this operation. What happens next: please tell me which student you meant: {candidates_public}.",
+      "agent_message": "What was attempted: {operation} for the student the educator named. What the evidence showed: that name matched {match_count} roster entries at the {match_kind} identifier level, so no single student can be picked without guessing (reference {correlation_id}). What this means: I am not choosing one for you, because a silent wrong pick would attach the wrong student's data to this operation. What happens next: please tell me which student you meant: {candidates_public}.",
       "auto_action": "Ask the educator to disambiguate using the listed candidates; re-run resolution only with an explicit choice (name plus section, login id, SIS id, or user id).",
       "escalate_when": "if the educator cannot distinguish the candidates either, or the same query keeps coming back ambiguous (roster data quality issue to fix in Canvas)",
       "id": "student-resolution-ambiguous",
@@ -1340,15 +1340,14 @@
         "correlation_id",
         "match_count",
         "match_kind",
-        "operation",
-        "query"
+        "operation"
       ],
       "signature": {
         "error_class": "StudentAmbiguous"
       }
     },
     {
-      "agent_message": "What was attempted: {operation} for the student query {query}. What the evidence showed: the query matched no active student enrollment in course {course_id} at any identifier level (reference {correlation_id}); filters skipped: {excluded_summary}. What this means: there is no student I can safely resolve this to, so nothing was looked up and nothing was changed. What happens next: check the spelling, or give me a stronger identifier (login id, SIS id, or email). If the student should be there, they may be inactive, concluded, in another section, or enrolled under a different name.",
+      "agent_message": "What was attempted: {operation} for the student the educator named. What the evidence showed: that name matched no active student enrollment in course {course_id} at any identifier level (reference {correlation_id}); filters skipped: {excluded_summary}. What this means: there is no student I can safely resolve this to, so nothing was looked up and nothing was changed. What happens next: check the spelling, or give me a stronger identifier (login id, SIS id, or email). If the student should be there, they may be inactive, concluded, in another section, or enrolled under a different name.",
       "auto_action": "Ask the educator for a stronger identifier or confirm whether to include inactive/concluded enrollments or another section; re-run resolution with the confirmed scope.",
       "escalate_when": "if the educator confirms the student is actively enrolled and the query still matches nothing (roster read or data issue)",
       "id": "student-resolution-no-match",
@@ -1364,8 +1363,7 @@
         "correlation_id",
         "course_id",
         "excluded_summary",
-        "operation",
-        "query"
+        "operation"
       ],
       "signature": {
         "error_class": "StudentNotFound"
