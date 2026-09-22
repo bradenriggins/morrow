@@ -8,8 +8,8 @@ and genuinely unknown errors get the structured fallback (never a shrug).
 Exits 0 on success, non-zero with a loud reason on failure. The sibling
 test lane owns the full suite; this is the smoke check only.
 
-Catalog under test: the merged 82-entry catalog (53 canonical inventory
-modes + 3 kept seeded modes + 4 query-chain modes + 4 edit/plan-mode
+Catalog under test: the merged 83-entry catalog (53 canonical inventory
+modes + 3 kept seeded modes + 5 query-chain modes + 4 edit/plan-mode
 modes + 1 destructive-confirmation mode + 2 CSRF/422-tier modes + 8
 newer workstream modes + 2 query-chain read/ref-resolution modes + 5 dispatch-outcome modes),
 at failures/catalog.json.
@@ -36,8 +36,8 @@ def _check(cond, reason):
 
 def main():
     catalog = load_catalog()
-    _check(len(catalog.entries) == 82,
-           "expected 82 merged entries, got %d" % len(catalog.entries))
+    _check(len(catalog.entries) == 83,
+           "expected 83 merged entries, got %d" % len(catalog.entries))
     _check(catalog.by_id["unknown"].get("fallback") is True,
            "unknown entry must be the fallback")
 

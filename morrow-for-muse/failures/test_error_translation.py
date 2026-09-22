@@ -2,7 +2,7 @@
 """Full test suite for the Morrow error translation layer.
 
 Covers failures/translator.py + failures/catalog.py + failures/catalog.json:
-  1. per-mode tests: every one of the 82 catalog modes gets a synthetic
+  1. per-mode tests: every one of the 83 catalog modes gets a synthetic
      raw error; asserts the right mode_id, the four message anchors, all
      placeholders filled, no em dashes, no shrug language, and the
      escalate flag matching the catalog.
@@ -46,6 +46,7 @@ from query import intent as _qintent  # noqa: E402
 from query import quiz_resolve as _qresolve  # noqa: E402
 from query import thresholds as _qthresholds  # noqa: E402
 from query import live_read as _qliveread  # noqa: E402
+from query import chain as _qchain  # noqa: E402
 
 
 def _student_ambiguous_case():
@@ -508,6 +509,8 @@ MODE_CASES = {
     "quarantine-op-id-collision": lambda: {"quarantine_id_collision": True},
     "journal-torn-fail-closed": lambda: {"journal_torn": True},
     "uncertain-write-ambiguous": lambda: UncertainWrite("ambiguous"),
+    "query-course-id-invalid": lambda: _qchain.InvalidCourseId(
+        "course id '1/../2' is not a Canvas course number"),
     "write-readback-unconfirmed": lambda: UncertainWrite(
         "write op x returned success, but the readback could not confirm "
         "it: write readback GET /x failed HTTP 503"),
@@ -583,8 +586,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_82_modes(self):
-        self.assertEqual(82, len(CATALOG.entries))
+    def test_catalog_has_83_modes(self):
+        self.assertEqual(83, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):
