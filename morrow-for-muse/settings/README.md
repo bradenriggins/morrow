@@ -24,9 +24,8 @@ oversight.
 In edit mode writes do not surface approval. The agent does the work
 and reports what it did. Edit mode is one blanket grant, and it is not
 timed: it stays on until you turn it off. Say "use edit mode" (or "make
-edit mode my default"); the agent tells you plainly what it means, and
-it applies only after you say yes. It is recorded in your settings
-journal.
+edit mode my default"); it takes effect at once, the agent tells you
+plainly what it means, and it is recorded in your settings journal.
 
 To turn it off, say any of "turn off edit mode", "stop edit mode",
 "use plan mode", or "back to plan mode". That takes effect at once and
@@ -62,15 +61,13 @@ matter the mode:
    writes to ask first while in edit mode, say "always confirm
    deletions" (off by default: edit mode does not ask per write). Say
    "stop asking me to confirm deletions" to turn it back off. Either
-   change needs your explicit confirmation and is journaled.
+   change is journaled.
 
 And three rules about the agent itself:
 
-- The agent can never grant itself edit mode or change a
-  consequential setting on its own. Anything that changes
-  whether writes surface approval needs your explicit "yes" after the
-  agent echoes the exact change back to you. An agent-side attempt
-  without your confirmation is refused outright.
+- The agent changes your mode or a setting only because you asked,
+  and it tells you what the change means right after it is made. If
+  your request is unclear, it asks you first.
 - Every settings change is journaled with the old value, the new
   value, and your identity, including turning edit mode off and
   conversation overrides.

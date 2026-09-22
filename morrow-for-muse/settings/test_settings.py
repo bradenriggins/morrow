@@ -559,20 +559,21 @@ class CommandTest(unittest.TestCase):
             self.assertNotIn("text", params, msg=name)
             self.assertNotIn("utterance", params, msg=name)
 
-    def test_edit_default_needs_educator_yes(self):
-        out = commands.mode_set(self.user, "edit", self.conv)
-        self.assertEqual(out["status"], "needs_confirmation")
-        self.assertEqual(out["mode"], "plan")
-        self.assertEqual(store.get_setting(self.user, "default_mode"),
-                         "plan")
-        self.assertIn("standing edit grant", out["confirm_question"])
-        self.assertIn("no time limit", out["confirm_question"])
-        self.assertEqual(store.read_audit(self.user), [])
+    def test_no_command_forces_a_confirmation_round_trip(self):
+        # The agent acts on what the educator said; no command holds a
+        # change back for a second "confirmed" call.
+        for name in ("mode_set", "setting_set"):
+            params = inspect.signature(getattr(commands, name)).parameters
+            self.assertNotIn("educator_confirmed", params, msg=name)
+        with self.assertRaises(SystemExit):
+            commands.main(["mode", "set", "edit", "--user-id", self.user,
+                           "--educator-confirmed"])
 
-    def test_edit_default_with_yes_is_the_standing_grant(self):
-        out = commands.mode_set(self.user, "edit", self.conv,
-                                educator_confirmed=True)
+    def test_edit_default_takes_effect_and_says_what_it_means(self):
+        out = commands.mode_set(self.user, "edit", self.conv)
         self.assertEqual((out["status"], out["mode"]), ("done", "edit"))
+        self.assertIn("apply without asking", out["message"])
+        self.assertIn("no time limit", out["message"])
         self.assertEqual(store.get_setting(self.user, "default_mode"), "edit")
         self.assertIn("edit mode", out["message"])
         self.assertIn("until you turn it off", out["message"])
@@ -629,28 +630,22 @@ class CommandTest(unittest.TestCase):
         self.assertIn("plan override for this conversation", out["message"])
         self.assertEqual(store.effective_mode(self.user, "another"), "edit")
 
-    def test_edit_for_this_conversation_needs_yes_and_stays_scoped(self):
+    def test_edit_for_this_conversation_takes_effect_and_stays_scoped(self):
         out = commands.mode_set(self.user, "edit", self.conv,
                                 this_conversation=True)
-        self.assertEqual(out["status"], "needs_confirmation")
-        self.assertIsNone(store.get_conversation_mode(self.user, self.conv))
-        out = commands.mode_set(self.user, "edit", self.conv,
-                                this_conversation=True,
-                                educator_confirmed=True)
         self.assertEqual((out["status"], out["mode"]), ("done", "edit"))
+        self.assertIn("apply without asking", out["message"])
         self.assertEqual(store.get_setting(self.user, "default_mode"), "plan")
         self.assertIn("edit override for this conversation", out["message"])
 
     def test_this_conversation_requires_an_id(self):
         out = commands.mode_set(self.user, "edit", None,
-                                this_conversation=True,
-                                educator_confirmed=True)
+                                this_conversation=True)
         self.assertEqual(out["status"], "error")
         self.assertEqual(out["mode"], "plan")
 
     def test_bad_mode_changes_nothing(self):
-        out = commands.mode_set(self.user, "turbo", self.conv,
-                                educator_confirmed=True)
+        out = commands.mode_set(self.user, "turbo", self.conv)
         self.assertEqual((out["status"], out["mode"]), ("error", "plan"))
         self.assertEqual(store.read_audit(self.user), [])
 
@@ -669,34 +664,30 @@ class CommandTest(unittest.TestCase):
     def test_destructive_note_is_true_for_a_new_educator(self):
         # The default is off, and a new educator never turned it off.
         out = commands.mode_set(self.user, "edit", self.conv)
-        self.assertNotIn("You have turned off", out["confirm_question"])
-        self.assertIn("that is the default", out["confirm_question"])
+        self.assertNotIn("You have turned off", out["message"])
+        self.assertIn("that is the default", out["message"])
         store.set_setting(self.user, "confirm_destructive_writes", True,
                           educator_confirmed=True)
         out = commands.mode_set(self.user, "edit", self.conv)
-        self.assertIn("will still ask you first", out["confirm_question"])
+        self.assertIn("will still ask you first", out["message"])
         store.set_setting(self.user, "confirm_destructive_writes", False,
                           educator_confirmed=True)
         out = commands.mode_set(self.user, "edit", self.conv)
-        self.assertIn("you turned them off", out["confirm_question"])
+        self.assertIn("you turned them off", out["message"])
 
     def test_deletion_confirmations_setting(self):
         out = commands.setting_set(self.user, "confirm_destructive_writes",
                                    True)
-        self.assertEqual(out["status"], "needs_confirmation")
-        self.assertFalse(store.destructive_confirmation_required(self.user))
-        out = commands.setting_set(self.user, "confirm_destructive_writes",
-                                   True, educator_confirmed=True)
         self.assertEqual(out["status"], "done")
         self.assertTrue(store.destructive_confirmation_required(self.user))
         out = commands.setting_set(self.user, "confirm_destructive_writes",
-                                   False, educator_confirmed=True)
+                                   False)
         self.assertFalse(store.destructive_confirmation_required(self.user))
         self.assertIn("Deletion confirmations is now off", out["message"])
         # Turning deletion confirmations off never touches the mode.
         self.assertEqual(store.get_setting(self.user, "default_mode"), "plan")
 
-    def test_every_setting_confirmation_matches_schema(self):
+    def test_every_setting_applies_in_one_call_and_is_journaled(self):
         values = {
             "verbosity": "concise", "confirm_destructive_writes": True,
             "write_approval_style": "batched", "failure_verbosity": "concise",
@@ -709,31 +700,27 @@ class CommandTest(unittest.TestCase):
                          set(store.SETTINGS_SCHEMA))
         for key, value in values.items():
             out = commands.setting_set(self.user, key, value)
-            want = "needs_confirmation" \
-                if store.SETTINGS_SCHEMA[key]["consequential"] else "done"
-            self.assertEqual(out["status"], want, msg=key)
-            out = commands.setting_set(self.user, key, value,
-                                       educator_confirmed=True)
             self.assertEqual(out["status"], "done", msg=key)
             self.assertEqual(store.get_setting(self.user, key), value,
                              msg=key)
+            rec = store.read_audit(self.user)[-1]
+            self.assertEqual((rec["key"], rec["new_value"]), (key, value))
+        self.assertEqual(store.verify_audit(self.user), len(values))
 
     def test_invalid_setting_values_change_nothing(self):
         for key, value in (("timezone", "Mars/Olympus"),
                            ("default_course_id", "12 345"),
                            ("verbosity", "loud"),
                            ("confirm_bulk_actions", "yes")):
-            out = commands.setting_set(self.user, key, value,
-                                       educator_confirmed=True)
+            out = commands.setting_set(self.user, key, value)
             self.assertEqual(out["status"], "error", msg=key)
-        out = commands.setting_set(self.user, "no_such_key", 1,
-                                   educator_confirmed=True)
+        out = commands.setting_set(self.user, "no_such_key", 1)
         self.assertEqual(out["status"], "error")
         self.assertEqual(store.read_audit(self.user), [])
 
     def test_default_mode_setting_routes_through_mode_set(self):
         out = commands.setting_set(self.user, "default_mode", "edit")
-        self.assertEqual(out["status"], "needs_confirmation")
+        self.assertEqual((out["status"], out["mode"]), ("done", "edit"))
         out = commands.setting_set(self.user, "default_mode", "plan")
         self.assertEqual((out["status"], out["mode"]), ("done", "plan"))
 
@@ -784,7 +771,6 @@ class CommandTest(unittest.TestCase):
                 commands.setting_get(self.user, "timezone")]
         for out in outs:
             self.assertNotIn("—", out["message"])
-            self.assertNotIn("—", out.get("confirm_question", ""))
 
     def test_cli_mode_and_settings(self):
         env = dict(os.environ)
@@ -800,19 +786,15 @@ class CommandTest(unittest.TestCase):
                                                .splitlines()[-1])
 
         code, out = run("mode", "set", "edit", "--user-id", self.user)
-        self.assertEqual((code, out["status"]), (0, "needs_confirmation"))
-        code, out = run("mode", "set", "edit", "--user-id", self.user,
-                        "--educator-confirmed")
-        self.assertEqual((code, out["mode"]), (0, "edit"))
+        self.assertEqual((code, out["status"], out["mode"]),
+                         (0, "done", "edit"))
         code, out = run("mode", "status", "--user-id", self.user)
         self.assertEqual(out["mode"], "edit")
         code, out = run("settings", "set", "confirm_destructive_writes",
-                        "true", "--user-id", self.user,
-                        "--educator-confirmed")
+                        "true", "--user-id", self.user)
         self.assertEqual((code, out["value"]), (0, True))
         code, out = run("settings", "set", "confirm_destructive_writes",
-                        "yes please", "--user-id", self.user,
-                        "--educator-confirmed")
+                        "yes please", "--user-id", self.user)
         self.assertEqual((code, out["status"]), (1, "error"))
         code, out = run("mode", "set", "plan", "--user-id", self.user)
         self.assertEqual((code, out["mode"]), (0, "plan"))

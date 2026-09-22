@@ -332,8 +332,8 @@ edit mode, they do not. Reads are unrestricted, with no approval, in
 both modes.
 
 - `default_mode` (plan | edit, default plan): the educator's saved
-  mode. Setting it to edit IS the standing edit grant: journaled,
-  educator-confirmed, and stated plainly as such. There is no separate
+  mode. Setting it to edit IS the standing edit grant: journaled, and
+  stated plainly as such in the command's result. There is no separate
   grant standing between the educator and edit mode.
 - Edit mode is ONE blanket grant and it is NOT timed: it stays on
   until the educator turns it off. Never offer, promise, or imply a
@@ -356,8 +356,8 @@ both modes.
   ("use plan mode for this conversation", "use edit mode for this
   conversation") and the persisted default. Both are tamper-sealed in
   the settings file, journaled, and seen by every later dispatch
-  process. A plan override applies at once. An edit override needs the
-  educator's yes and ends when edit mode is turned off anywhere, when
+  process. Both apply at once. An edit override ends when edit mode is
+  turned off anywhere, when
   the conversation ends (`settings.store.end_conversation`), or as soon
   as Morrow sees a different conversation id for the educator (any mode
   command or write gate). An unreadable or tampered override store
@@ -375,10 +375,11 @@ both modes.
   is an opt-in guardrail (default off, matching the model; the
   educator can turn it on: `morrow settings set
   confirm_destructive_writes true`).
-- The agent can never grant itself edit mode or change a
-  consequential setting: consequential changes require the educator's
-  yes (`--educator-confirmed`, educator_confirmed=True in Python;
-  SettingsTamperRefused otherwise), asked in plain language first.
+- You change the mode or a setting only because the educator asked
+  for it. The command takes effect when you call it (there is no
+  second confirmation call); relay its `message`, which says what the
+  change means. If the educator's request is unclear, ask them before
+  calling anything.
 - Every change is journaled to `~/.morrow/settings/<user_id>.changes.jsonl`
   with old value, new value, and educator identity (hash-chained,
   tamper-evident). Settings live under `~/.morrow/settings/`, never in
@@ -394,17 +395,14 @@ both modes.
   - `morrow mode set plan --this-conversation ...`: plan for this
     conversation only.
   - `morrow mode set edit ...` (add `--this-conversation` for this
-    conversation only): first run it WITHOUT `--educator-confirmed`.
-    Nothing changes; the result has status `needs_confirmation` and a
-    `confirm_question`. Ask the educator that question. Only after the
-    educator says yes, run it again with `--educator-confirmed`.
+    conversation only): edit mode takes effect at once. The result says
+    that writes now apply without asking until edit mode is turned off;
+    relay it.
   - `morrow settings show|get KEY|set KEY VALUE`: booleans are `true`
-    or `false`. Consequential settings (`confirm_destructive_writes`,
-    `confirm_bulk_actions`, `default_course_id`,
-    `write_approval_style`) follow the same `needs_confirmation`, ask,
-    then `--educator-confirmed` flow. "Stop asking me to confirm
-    deletions" is `settings set confirm_destructive_writes false`;
-    "always confirm deletions" is `... true`.
+    or `false`. A set takes effect at once and is journaled. "Stop
+    asking me to confirm deletions" is `settings set
+    confirm_destructive_writes false`; "always confirm deletions" is
+    `... true`.
   - If a result has `settings_untrusted: true`, the settings file failed
     its integrity check: tell the educator they are in plan mode and
     relay the repair steps in `message`.

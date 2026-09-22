@@ -4,8 +4,10 @@
 The Muse agent reads what the educator said, decides what they mean, and
 calls one of these commands. No free text reaches this module: every
 input is a typed argument (a mode name, a setting key, a value, a
-conversation id, and whether the educator confirmed). If the educator's
-request is unclear, the agent asks the educator; it never guesses.
+conversation id). A command takes effect when it is called; there is
+no confirmation round trip, because the agent calls it only when the
+educator asked for the change. Every change is journaled, and the
+result states the true resulting state for the agent to relay.
 
 The mode model is simple: the ONLY difference between plan and edit mode
 is whether writes surface approval. Plan mode: writes require approval.
@@ -22,34 +24,30 @@ Commands (Python API, and the same shapes on the CLI below):
       per-conversation override cleared. Applies at once.
   mode_set(user_id, "plan", conversation_id, this_conversation=True)
       A plan override for this conversation only. Applies at once.
-  mode_set(user_id, "edit", educator_confirmed=True)
-      The standing edit grant (default_mode edit). Needs the educator's
-      yes; without it nothing changes and the result says what to ask.
-  mode_set(user_id, "edit", conversation_id, this_conversation=True,
-           educator_confirmed=True)
-      An edit override for this conversation only. Needs the educator's
-      yes, and ends when the educator turns edit off, when the
+  mode_set(user_id, "edit")
+      The standing edit grant (default_mode edit): writes apply without
+      asking until edit mode is turned off.
+  mode_set(user_id, "edit", conversation_id, this_conversation=True)
+      An edit override for this conversation only. It ends when the
+      educator turns edit off, when the
       conversation ends, or when Morrow sees a different conversation
       for this educator.
   settings_show(user_id, conversation_id)
   setting_get(user_id, key)
-  setting_set(user_id, key, value, educator_confirmed=...)
-      Consequential settings (SETTINGS_SCHEMA) need the educator's yes.
+  setting_set(user_id, key, value)
 
 Every command returns a dict:
-  {"ok": bool, "status": "done" | "needs_confirmation" | "unchanged" |
-   "error", "mode": <effective mode after the command>, "message": <a
+  {"ok": bool, "status": "done" | "error", "mode": <effective mode after the command>, "message": <a
    sentence for the agent to relay, built from the state AFTER the
    change, never assumed>, ...}
 
 CLI:
   python3 settings/commands.py mode status --user-id U [--conversation-id C]
   python3 settings/commands.py mode set plan|edit --user-id U
-          [--conversation-id C] [--this-conversation] [--educator-confirmed]
+          [--conversation-id C] [--this-conversation]
   python3 settings/commands.py settings show --user-id U [--conversation-id C]
   python3 settings/commands.py settings get KEY --user-id U
   python3 settings/commands.py settings set KEY VALUE --user-id U
-          [--educator-confirmed]
   (bin/morrow mode ... and bin/morrow settings ... run the same thing.)
   --user-id defaults to MORROW_USER_ID and --conversation-id to
   MORROW_CONVERSATION_ID. Output is one JSON object; exit 0 when ok.
@@ -283,7 +281,7 @@ def _plan_everywhere(user_id, conversation_id, educator):
 
 
 def mode_set(user_id, mode, conversation_id=None, this_conversation=False,
-             educator_confirmed=False, educator=None):
+             educator=None):
     """Set the educator's mode. See the module docstring for the table."""
     if mode not in ("plan", "edit"):
         return _error(user_id, conversation_id,
@@ -309,23 +307,7 @@ def mode_set(user_id, mode, conversation_id=None, this_conversation=False,
             % (_safe_mode(user_id, conversation_id),
                _status_message(user_id, conversation_id,
                                _safe_mode(user_id, conversation_id))))
-    # Edit: the educator's yes is required.
-    if not educator_confirmed:
-        if this_conversation:
-            question = (
-                "For this conversation only, edit mode means writes will not "
-                "ask for your approval here. It ends when you turn edit mode "
-                "off, when this conversation ends, or when you start a "
-                "different conversation. Do you want that?")
-        else:
-            question = (
-                "Edit mode as your default means writes will not ask for "
-                "your approval, in every conversation. This is a standing "
-                "edit grant, and it is journaled. %s %s Do you want that?"
-                % (_NOT_TIMED, _destructive_note(user_id)))
-        return _result("needs_confirmation", user_id, conversation_id,
-                       "Nothing changed yet. Ask the educator: " + question,
-                       confirm_question=question)
+    # The agent calls this because the educator asked for edit mode.
     try:
         if this_conversation:
             set_conversation_mode(user_id, conversation_id, "edit",
@@ -338,9 +320,20 @@ def mode_set(user_id, mode, conversation_id=None, this_conversation=False,
                       "Edit mode was not turned on. " + _repair_hint(user_id),
                       settings_untrusted=True)
     now = _safe_mode(user_id, conversation_id)
-    return _result("done" if now == "edit" else "error", user_id,
-                   conversation_id,
-                   "Done. " + _status_message(user_id, conversation_id, now))
+    if now != "edit":
+        return _error(user_id, conversation_id,
+                      "Edit mode did not take effect: " + _status_message(
+                          user_id, conversation_id, now))
+    where = ("in this conversation, until you turn edit mode off, this "
+             "conversation ends, or you start a different conversation"
+             if this_conversation else
+             "in every conversation, until you turn edit mode off")
+    return _result(
+        "done", user_id, conversation_id,
+        "Done: you are in edit mode now. Writes apply without asking you "
+        "first %s. %s %s Reads never need approval. This change is "
+        "journaled. %s" % (where, _NOT_TIMED, _destructive_note(user_id),
+                           _status_message(user_id, conversation_id, now)))
 
 
 # ---------------------------------------------------------------------------
@@ -385,32 +378,22 @@ def setting_get(user_id, key):
                       _friendly_value(key, value)), key=key, value=value)
 
 
-def setting_set(user_id, key, value, educator_confirmed=False,
-                educator=None, conversation_id=None):
+def setting_set(user_id, key, value, educator=None, conversation_id=None):
     """Set one setting. default_mode goes through mode_set."""
     if key not in SETTINGS_SCHEMA:
         return _error(user_id, conversation_id,
                       "There is no setting named %r; nothing changed." % key)
     if key == "default_mode":
-        return mode_set(user_id, value, conversation_id,
-                        educator_confirmed=educator_confirmed,
-                        educator=educator)
+        return mode_set(user_id, value, conversation_id, educator=educator)
     label = _SETTING_LABELS.get(key, key)
     try:
         SETTINGS_SCHEMA[key]["validate"](value)
     except SettingsValidationError as exc:
         return _error(user_id, conversation_id,
                       "%s was not changed: %s." % (label, exc))
-    if SETTINGS_SCHEMA[key]["consequential"] and not educator_confirmed:
-        question = ("Change %s to %s? %s" % (
-            label, _friendly_value(key, value),
-            SETTINGS_SCHEMA[key]["description"]))
-        return _result("needs_confirmation", user_id, conversation_id,
-                       "Nothing changed yet. Ask the educator: " + question,
-                       confirm_question=question, key=key, value=value)
     try:
-        set_setting(user_id, key, value,
-                    educator_confirmed=educator_confirmed,
+        # The agent calls this because the educator asked for the change.
+        set_setting(user_id, key, value, educator_confirmed=True,
                     educator=educator)
         now = get_setting(user_id, key)
     except SettingsCorrupt:
@@ -422,7 +405,9 @@ def setting_set(user_id, key, value, educator_confirmed=False,
         return _error(user_id, conversation_id,
                       "%s was not changed: %s" % (label, exc))
     return _result("done", user_id, conversation_id,
-                   "Done: %s is now %s." % (label, _friendly_value(key, now)),
+                   "Done: %s is now %s. %s" % (
+                       label, _friendly_value(key, now),
+                       SETTINGS_SCHEMA[key]["description"]),
                    key=key, value=now)
 
 
@@ -466,8 +451,6 @@ def _parser():
     mset.add_argument("mode", choices=("plan", "edit"))
     mset.add_argument("--this-conversation", action="store_true",
                       help="only this conversation (needs --conversation-id)")
-    mset.add_argument("--educator-confirmed", action="store_true",
-                      help="the educator said yes to this exact change")
     ids(mset)
 
     st = sub.add_parser("settings", help="show, get, or set a setting")
@@ -479,8 +462,6 @@ def _parser():
     sset = ssub.add_parser("set", help="change one setting")
     sset.add_argument("key")
     sset.add_argument("value")
-    sset.add_argument("--educator-confirmed", action="store_true",
-                      help="the educator said yes to this exact change")
     ids(sset)
     return p
 
@@ -497,8 +478,7 @@ def main(argv=None):
             out = mode_status(args.user_id, args.conversation_id)
         elif args.group == "mode":
             out = mode_set(args.user_id, args.mode, args.conversation_id,
-                           this_conversation=args.this_conversation,
-                           educator_confirmed=args.educator_confirmed)
+                           this_conversation=args.this_conversation)
         elif args.action == "show":
             out = settings_show(args.user_id, args.conversation_id)
         elif args.action == "get":
@@ -511,7 +491,6 @@ def main(argv=None):
                              "Nothing changed: %s." % exc)
             else:
                 out = setting_set(args.user_id, args.key, value,
-                                  educator_confirmed=args.educator_confirmed,
                                   conversation_id=args.conversation_id)
     except SettingsError as exc:
         out = _error(args.user_id, args.conversation_id,
