@@ -12,6 +12,12 @@ Failure modes this suite pins down (written before the fix; re-audit
      sanitizing, whitespace, a naive or date-only time Canvas reads in
      the user's zone) must be "unverified", never a definite failure.
   3. Real differences must still be proven failures.
+  5. (third-pass re-audit, probe reaudit3/verdict3.py) Proven
+     differences were softened to "uncertain": a naive or date-only
+     value days or months off, an <img> removed, an href changed, an
+     allowed tag (<strong>) lost, a bool read back as "banana" or 2.
+     Only differences an LMS normalization could cause may be
+     uncertain; sub-second truncation of an aware time is a match.
   4. A failed readback GET after a 2xx write became VerificationFailed
      "journaled as failed", which the failure catalog could not
      classify. It must surface as uncertain (the write may have
@@ -72,6 +78,11 @@ SAME_VALUE = [
     ({"description": "<p>Hi\n  there</p>"},
      {"description": "<p>Hi there</p>"}),
     ({"submission_types": ["1", "2"]}, {"submission_types": [2, 1]}),
+    # Canvas stores whole seconds: dropped milliseconds are the same time.
+    ({"due_at": "2026-10-02T04:59:00.123Z"},
+     {"due_at": "2026-10-02T04:59:00Z"}),
+    ({"due_at": "2026-10-01T23:59:00.999-05:00"},
+     {"due_at": "2026-10-02T04:59:00Z"}),
 ]
 
 MAY_BE_NORMALIZATION = [
@@ -86,6 +97,23 @@ MAY_BE_NORMALIZATION = [
     ({"due_at": "2026-10-01"}, {"due_at": "2026-10-02T04:59:59Z"}),
     # Canvas trims surrounding whitespace.
     ({"title": "Unit 1 "}, {"title": "Unit 1"}),
+    # Naive and date-only values within any possible zone offset.
+    ({"due_at": "2026-10-01T23:59:00"}, {"due_at": "2026-10-02T13:00:00Z"}),
+    ({"due_at": "2026-10-01"}, {"due_at": "2026-09-30T23:00:00Z"}),
+    # A midnight due time may be stored as 23:59:59 (not cited in this
+    # repo's evidence, so it is unconfirmed, never verified).
+    ({"due_at": "2026-10-01T00:00:00-05:00"},
+     {"due_at": "2026-10-02T04:59:59Z"}),
+    ({"due_at": "2026-10-01T00:00:00-05:00"},
+     {"due_at": "2026-10-01T04:59:59Z"}),
+    # Canvas rewrites same-course file links to relative paths.
+    ({"description": '<a href="https://school.instructure.com/courses/7/'
+                     'files/3">f</a>'},
+     {"description": '<a href="/courses/7/files/3?wrap=1" '
+                     'data-api-returntype="File">f</a>'}),
+    # Event-handler attributes are stripped by the sanitizer.
+    ({"description": '<img src="a.png" alt="x" onerror="y()">'},
+     {"description": '<img src="a.png" alt="x">'}),
 ]
 
 REAL_MISMATCH = [
@@ -99,6 +127,25 @@ REAL_MISMATCH = [
     ({"description": "<p>Hello</p>"}, {"description": "<p>Goodbye</p>"}),
     ({"submission_types": ["a"]}, {"submission_types": ["b"]}),
     ({"points_possible": 10}, {"points_possible": None}),
+    # Beyond any timezone offset: a proven difference.
+    ({"due_at": "2026-10-01T23:59:00"}, {"due_at": "2026-10-05T04:59:00Z"}),
+    ({"due_at": "2026-10-01"}, {"due_at": "2027-01-01T05:59:00Z"}),
+    ({"due_at": "2026-10-01T23:59"}, {"due_at": "2026-12-01T23:59"}),
+    ({"due_at": "2026-10-01"}, {"due_at": "2026-10-03"}),
+    ({"due_at": "2026-10-01"}, {"due_at": "2026-10-03T12:00:00Z"}),
+    # HTML: removed media, changed links, and a lost allowed tag.
+    ({"description": '<a href="https://good.edu/x">Syllabus</a>'},
+     {"description": '<a href="https://other.example/x">Syllabus</a>'}),
+    ({"description": '<p>See</p><img src="a.png" alt="chart">'},
+     {"description": "<p>See</p>"}),
+    ({"description": '<p>See</p><img src="a.png" alt="chart">'},
+     {"description": '<p>See</p><img src="b.png" alt="chart">'}),
+    ({"description": "<p>Due <strong>Friday</strong></p>"},
+     {"description": "<p>Due Friday</p>"}),
+    # A bool read back as something that is not a bool.
+    ({"published": True}, {"published": "banana"}),
+    ({"published": True}, {"published": 2}),
+    ({"published": False}, {"published": "maybe"}),
 ]
 
 
@@ -153,3 +200,22 @@ def test_failed_readback_get_is_uncertain_not_failed():
     assert "could not confirm" in message
     assert "not a failure" in message
     assert "—" not in message
+
+
+@pytest.mark.parametrize("want,got,verdict", [
+    ("2026-10-01T23:59:00", "2026-10-05T04:59:00Z", "mismatch"),
+    ("2026-10-01", "2027-01-01T05:59:00Z", "mismatch"),
+    ("2026-10-01T23:59", "2026-12-01T23:59", "mismatch"),
+    ("2026-10-01T23:59:00-05:00", "2026-10-02T04:58:00Z", "mismatch"),
+    ("2026-10-02T04:59:00.500Z", "2026-10-02T04:59:00Z", "match"),
+    ("2026-10-02T04:59:00.500Z", "2026-10-02T04:59:01Z", "mismatch"),
+    ('<a href="https://good.edu/x">S</a>',
+     '<a href="https://other.example/x">S</a>', "mismatch"),
+    ("<p>Due <strong>Friday</strong></p>", "<p>Due Friday</p>", "mismatch"),
+    ('<p>See</p><img src="a.png" alt="chart">', "<p>See</p>", "mismatch"),
+    (True, "banana", "mismatch"),
+    (True, 2, "mismatch"),
+    (True, "yes", "match"),
+])
+def test_field_verdict_table(want, got, verdict):
+    assert ex._write_field_verdict(want, got) == verdict

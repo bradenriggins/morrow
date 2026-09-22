@@ -113,7 +113,7 @@ import urllib.request
 import urllib.error
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 try:
     from dispatch.admission import (
@@ -6400,16 +6400,119 @@ def _html_text(tokens):
     return " ".join(t[1] for t in tokens if t[0] == "text")
 
 
+# Attributes whose value is what the content points at: a changed or
+# missing value is a different page, never a sanitizer normalization.
+_HTML_TARGET_ATTRS = ("href", "src", "data", "action", "poster", "srcset",
+                      "cite", "formaction")
+# Tags a body-fragment sanitizer removes: the stripped elements above plus
+# document-head elements that never belong in a fragment.
+_HTML_SANITIZER_REMOVABLE = _HTML_STRIPPED_ELEMENTS | frozenset({
+    "meta", "link", "base"})
+# Query parameters Canvas adds to rewritten file links.
+_CANVAS_LINK_PARAMS = frozenset({"wrap", "verifier", "download_frd"})
+
+
+def _html_link_equivalent(want, got):
+    """True when two link targets name the same resource after the
+    rewriting Canvas does to course links: an absolute same-course URL
+    becomes a relative path, and file links gain wrap/verifier params."""
+    if want == got:
+        return True
+    w, g = urllib.parse.urlsplit(want), urllib.parse.urlsplit(got)
+    if w.scheme and g.scheme and (w.scheme, w.netloc) != (g.scheme, g.netloc):
+        return False
+    if w.path.rstrip("/") != g.path.rstrip("/"):
+        return False
+
+    def params(parts):
+        return sorted((k, v) for k, v in urllib.parse.parse_qsl(parts.query)
+                      if k not in _CANVAS_LINK_PARAMS)
+    return params(w) == params(g) and w.fragment == g.fragment
+
+
 def _html_verdict(want, got):
+    """match, uncertain (only differences a sanitizer can cause), or
+    mismatch. Text must agree (content inside stripped elements aside);
+    every requested tag must survive unless a sanitizer removes that
+    tag; a surviving tag's link target (href, src, ...) must be the same
+    resource; other attribute differences and tags the LMS adds are
+    uncertain."""
     want_tokens, got_tokens = _html_tokens(want), _html_tokens(got)
     if want_tokens == got_tokens:
         return "match"
-    if _html_text(want_tokens) == _html_text(got_tokens):
-        return "uncertain"
-    if _html_text(_html_tokens(want, drop_stripped=True)) \
-            == _html_text(got_tokens):
-        return "uncertain"
-    return "mismatch"
+    if _html_text(want_tokens) != _html_text(got_tokens) and \
+            _html_text(_html_tokens(want, drop_stripped=True)) \
+            != _html_text(got_tokens):
+        return "mismatch"
+    want_tags = [t for t in _html_tokens(want, drop_stripped=True)
+                 if t[0] == "tag"]
+    got_tags = [t for t in got_tokens if t[0] == "tag"]
+    cursor = 0
+    for _kind, name, attrs in want_tags:
+        for index in range(cursor, len(got_tags)):
+            if got_tags[index][1] == name:
+                break
+        else:
+            if name in _HTML_SANITIZER_REMOVABLE:
+                continue
+            return "mismatch"
+        got_attrs = dict(got_tags[index][2])
+        cursor = index + 1
+        for key, value in attrs:
+            if key in _HTML_TARGET_ATTRS:
+                if key not in got_attrs or not _html_link_equivalent(
+                        value, got_attrs[key]):
+                    return "mismatch"
+    return "uncertain"
+
+
+_MAX_ZONE_SPREAD = timedelta(hours=26)
+
+
+def _datetime_verdict(want_d, got_d):
+    """Verdict for two parsed ISO values (kind, datetime).
+
+    aware vs aware: the same instant is a match, and so is one side
+    being the other with its fractional seconds truncated (Canvas stores
+    whole seconds). A requested local midnight read back
+    as 23:59:59 or 23:59:00 of that day or the day before is uncertain:
+    this repo has no evidence for that Canvas adjustment, so it is never
+    called verified. Any other difference is proven.
+
+    A naive or date-only value is read in a zone Morrow does not know,
+    so it is uncertain only while the difference fits some real zone
+    offset (26 hours spans UTC-12 to UTC+14; a date-only value may land
+    on the day before or after). Anything further is proven."""
+    (wk, wv), (gk, gv) = want_d, got_d
+    if wk == "aware" and gk == "aware":
+        if wv == gv:
+            return "match"
+        if wv.replace(microsecond=0) == gv or \
+                gv.replace(microsecond=0) == wv:
+            return "match"
+        local_want = wv
+        local_got = gv.astimezone(wv.tzinfo)
+        if (local_want.hour, local_want.minute, local_want.second) \
+                == (0, 0, 0) and (local_got.hour, local_got.minute) \
+                == (23, 59) and local_got.second in (0, 59) and \
+                (local_got.date() - local_want.date()).days in (0, -1):
+            return "uncertain"
+        return "mismatch"
+
+    def naive(kind, value):
+        if kind == "aware":
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+    if wk == "date" and gk == "date":
+        return "match" if wv == gv else "mismatch"
+    if wk == "date" or gk == "date":
+        wdate, gdate = naive(wk, wv).date(), naive(gk, gv).date()
+        return "uncertain" if abs((wdate - gdate).days) <= 1 else "mismatch"
+    diff = abs(naive(wk, wv) - naive(gk, gv))
+    if wk == "naive" and gk == "naive":
+        return "match" if diff == timedelta(0) else (
+            "uncertain" if diff <= _MAX_ZONE_SPREAD else "mismatch")
+    return "uncertain" if diff <= _MAX_ZONE_SPREAD else "mismatch"
 
 
 def _write_field_verdict(want, got):
@@ -6419,10 +6522,10 @@ def _write_field_verdict(want, got):
 
     Empty equivalents match each other: a cleared field sent as "" (or
     an empty list) may be stored and echoed as null. Booleans compare in
-    canonical form (True, 1, "1", "true", "on"); numbers compare
-    numerically ("10" vs 10.0); ISO-8601 datetimes with an offset compare
-    as instants; HTML compares after tag/attribute/whitespace
-    canonicalization."""
+    canonical form (True, 1, "1", "true", "on"), and a value that is not
+    a canonical bool on either side is a proven difference; numbers
+    compare numerically ("10" vs 10.0); ISO-8601 values compare by
+    _datetime_verdict; HTML compares by _html_verdict."""
     if _is_empty_value(want) or _is_empty_value(got):
         return "match" if (_is_empty_value(want)
                            and _is_empty_value(got)) else "mismatch"
@@ -6431,19 +6534,16 @@ def _write_field_verdict(want, got):
     if isinstance(want, bool) or isinstance(got, bool):
         want_b, got_b = _as_bool(want), _as_bool(got)
         if want_b is None or got_b is None:
-            return "uncertain"
+            return "mismatch"
         return "match" if want_b == got_b else "mismatch"
     want_n, got_n = _as_number(want), _as_number(got)
     if want_n is not None and got_n is not None:
         return "match" if want_n == got_n else "mismatch"
     want_d, got_d = _as_datetime(want), _as_datetime(got)
     if want_d is not None and got_d is not None:
-        if want_d[0] == "aware" and got_d[0] == "aware":
-            return "match" if want_d[1] == got_d[1] else "mismatch"
         if str(want).strip() == str(got).strip():
             return "match"
-        # A naive or date-only time is read in the educator's Canvas zone.
-        return "uncertain"
+        return _datetime_verdict(want_d, got_d)
     if isinstance(want, str) and isinstance(got, str):
         if want == got:
             return "match"
