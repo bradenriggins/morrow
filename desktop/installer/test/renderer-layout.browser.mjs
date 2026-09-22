@@ -269,10 +269,9 @@ try {
       };
     });
     assert.equal(heading.fits, true, `the setup heading must fit its box at ${width}px`);
-    // Ordinary prose is capped to one readable measure (`--measure`, 68ch), so
-    // it uses the available width only up to that cap and never past it: the
-    // two match only while the box itself is narrower than the cap.
-    assert.ok(heading.copyWidth <= heading.introWidth + 0.5, `the intro copy must not overflow its box at ${width}px`);
+    // Supporting text fills its box at every width, aligned with the heading
+    // above it: no per-paragraph cap wraps it early (docs/brand/MORROW-BRAND.md).
+    assert.ok(Math.abs(heading.copyWidth - heading.introWidth) <= 0.5, `the intro copy must fill its box at ${width}px, not stop at ${heading.copyWidth}px of ${heading.introWidth}px`);
     assert.equal(heading.copyWrap, "break-word", `ordinary intro prose must wrap at word boundaries at ${width}px`);
     assert.ok(heading.copyLines >= 1, `the intro copy must render at least one line at ${width}px`);
     assert.equal(heading.sideways, true, `the welcome screen must not scroll sideways at ${width}px`);
