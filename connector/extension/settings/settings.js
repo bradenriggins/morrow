@@ -1,6 +1,7 @@
 import { problemCode, problemText } from "../src/bridge-problem-copy.js";
 import { CURATED_CATEGORY_SPECS } from "../src/edit-policy.js";
 
+const modePanel = document.querySelector("#mode-panel");
 const modePlan = document.querySelector("#mode-plan");
 const modeEdit = document.querySelector("#mode-edit");
 const categoryFieldset = document.querySelector("#category-fieldset");
@@ -1418,8 +1419,14 @@ function renderSummaryBar(selected, ids) {
   return `${plural(categories.length, "action")} in ${plural(areas.size, "area")}, ${removals ? `${plural(removals, "action")} remove content` : "no removal"}, ${plural(selected.length, "course")}, until ${until}`;
 }
 
+/** WI-5.2: the Course access panel sits between "Your courses" and "Browser permissions and
+ * rules" only while a Customize flow is actually active (a bulk selection made, or a row's
+ * "Customize"/"Custom" chip clicked, both of which populate state.selected). At rest, with no
+ * course selected, the page's order is exactly banner, Your courses, Browser permissions and
+ * rules, Private Chat. */
 function renderSelection() {
   const selected = selectedBindings();
+  modePanel.hidden = !selected.length;
   const needsSite = selectedBindingsNeedSite(selected);
   if (needsSite && state.mode === "edit") {
     state.mode = "plan";
@@ -1975,10 +1982,10 @@ async function changeCourseEnds(binding, expiresInMs) {
 }
 
 /**
- * WI-5.4: "Customize" and the "Custom" chip both lead to the existing Course access panel below,
- * selecting only this course so a Customize visit cannot change any other course's Edit access.
- * WI-5.5 gives that panel the Customize view's own areas, kinds and actions; until then it keeps
- * the picker it already has.
+ * WI-5.4: "Customize" and the "Custom" chip both lead to the Course access panel below (hidden at
+ * rest, WI-5.2), selecting only this course so a Customize visit cannot change any other course's
+ * Edit access. WI-5.5's areas, kinds and bundles (renderCustomize/renderArea/renderKind) already
+ * render into that same panel's #category-list.
  */
 function openCustomizeFor(binding) {
   state.selected = new Set([binding.sourceBindingId]);

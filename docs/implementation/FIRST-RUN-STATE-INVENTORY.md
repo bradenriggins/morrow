@@ -590,16 +590,16 @@ stale name here.
 | `Load more available courses` | Courses and access | `connector/extension/settings/settings.html:60` |
 | `Plan. Ask first.` | Courses and access | `connector/extension/settings/settings.html:65` |
 | `Edit. Routine edits for 4 hours.` | Courses and access | `connector/extension/settings/settings.html:66` |
-| `Enable course file access` | Courses and access | `connector/extension/settings/settings.html:166`, `connector/extension/settings/settings.js:1508` |
-| `Turn on course file access` | Courses and access | `connector/extension/settings/settings.js:1508` |
+| `Enable course file access` | Courses and access | `connector/extension/settings/settings.html:166`, `connector/extension/settings/settings.js:1515` |
+| `Turn on course file access` | Courses and access | `connector/extension/settings/settings.js:1515` |
 | `Remove HTTPS file access` | Courses and access | `connector/extension/settings/settings.html:167` |
 | `Return selected courses to Plan` | Courses and access | `connector/extension/settings/settings.html:125` |
-| `Save Edit access` | Courses and access | `connector/extension/settings/settings.html:126`, `connector/extension/settings/settings.js:1482` |
-| `Review and save` | Courses and access (WI-5.5 Customize view summary bar) | `connector/extension/settings/settings.js:1482` |
+| `Save Edit access` | Courses and access | `connector/extension/settings/settings.html:126`, `connector/extension/settings/settings.js:1489` |
+| `Review and save` | Courses and access (WI-5.5 Customize view summary bar) | `connector/extension/settings/settings.js:1489` |
 | `Keep reviewing` | Courses and access | `connector/extension/settings/settings.html:135` |
 | `Save Edit access anyway` | Courses and access | `connector/extension/settings/settings.html:136` |
-| `Open Canvas` | Courses and access | `connector/extension/settings/settings.js:402` |
-| `Open Moodle` | Courses and access | `connector/extension/settings/settings.js:403` |
+| `Open Canvas` | Courses and access | `connector/extension/settings/settings.js:403` |
+| `Open Moodle` | Courses and access | `connector/extension/settings/settings.js:404` |
 | `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1140` |
 | `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1140` |
 | `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1140` |
