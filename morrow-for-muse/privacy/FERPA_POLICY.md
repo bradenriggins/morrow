@@ -240,9 +240,19 @@ the wired vault file above.
   roster never mentions (for example "Bobby" for rostered "Robert J.
   Smith") survives redaction in free text.
 - The roster is receipt-derived: the boundary redacts the
-  identities the receipt carries. A learner the receipt never
-  mentions (no record, no id, no name) cannot be redacted from
-  free text.
+  identities the receipt carries (any key naming a person or a people
+  collection, and every id under a person-id key such as
+  `student_ids` or `participating_user_ids`), plus every learner the
+  encrypted vault already labeled for the same course. A learner the
+  receipt never mentions and the vault has never seen (no record, no
+  id, no name) cannot be redacted from free text. Concretely: a
+  collaboration title or description naming its own owner is
+  redacted, and a group name is redacted for any learner a roster
+  read of that course labeled before; a group name that names a
+  learner Morrow has not yet seen in that course stays raw until a
+  roster read labels them. An ad hoc override title (an override
+  that lists student ids) is always replaced by its student count
+  ("1 student"), because its students may appear nowhere else.
 - Bare numeric ids in arbitrary prose or CSV text are not always
   recognized. Contextual forms are redacted: `user_id=912345`,
   `/users/912345`, whole-string ids, structured identity fields,

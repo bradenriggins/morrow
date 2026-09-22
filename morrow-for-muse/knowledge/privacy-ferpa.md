@@ -51,6 +51,10 @@ they become agent-visible or journaled:
   re-identifiable by the data holder.
 - Nicknames: aliases derive from roster fields only. A nickname the
   roster never mentions survives redaction in free text.
+- Unseen learners: free text (a group name, a collaboration title) is
+  redacted for learners the receipt carries or the vault already
+  labeled for that course. A name Morrow has never seen in that course
+  stays raw until a roster read labels it.
 
 ## When de-id applies
 
