@@ -101,7 +101,7 @@ def test_main_progress_flag_wires_callback(monkeypatch, capsys):
         return SimpleNamespace(text="ok")
 
     monkeypatch.setattr(C, "run_query", fake_run_query)
-    assert C.main(["--progress", "some query"]) == 0
+    assert C.main(["--progress", "some query", "--course", "89585"]) == 0
     assert callable(captured["progress"])
     captured["progress"]("intent_parsed", "x")
     assert "[query] intent_parsed: x" in capsys.readouterr().err
@@ -115,6 +115,6 @@ def test_main_default_no_progress(monkeypatch, capsys):
         return SimpleNamespace(text="ok")
 
     monkeypatch.setattr(C, "run_query", fake_run_query)
-    assert C.main(["some query"]) == 0
+    assert C.main(["some query", "--course", "89585"]) == 0
     assert captured["progress"] is None
     assert capsys.readouterr().err == ""
