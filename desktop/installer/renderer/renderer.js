@@ -64,6 +64,11 @@ const retentionTitle = document.querySelector("#retention-title");
 const retentionCopy = document.querySelector("#retention-copy");
 const retentionBody = document.querySelector("#retention-body");
 const removalStatus = document.querySelector("#removal-status");
+const copyStatus = document.querySelector("#copy-status");
+const COPIED_MS = 2_000;
+// The text of the Copy button that just copied, while it says Copied.
+let copiedText = null;
+let copiedTimer = null;
 const support = document.querySelector("#support");
 
 // Moving between windows can raise focus several times, and a state read looks
@@ -580,6 +585,7 @@ function render(current) {
   }
   renderSupport(current, Boolean(view));
   announceRemoval(current);
+  if (copiedText !== null) markCopied();
   setProblem(latestProblem);
   applyActiveView();
   applyBusy();
@@ -589,6 +595,32 @@ function render(current) {
     userActionFocusPending = false;
   }
   heldFocusKey = busy && !restored ? restoreKey : null;
+}
+
+/** Says Copied on the Copy button that copied, and once to a screen reader, for about 2 seconds. */
+function showCopied(text) {
+  if (copiedTimer !== null) clearTimeout(copiedTimer);
+  copiedText = text;
+  copyStatus.textContent = "Copied to the clipboard.";
+  copiedTimer = setTimeout(() => {
+    copiedTimer = null;
+    copiedText = null;
+    copyStatus.textContent = "";
+    markCopied();
+  }, COPIED_MS);
+}
+
+function markCopied() {
+  for (const button of actionBody.querySelectorAll("[data-action]")) {
+    if (button.dataset.action !== "copy-example-prompt") continue;
+    if (button.dataset.prompt === copiedText) {
+      button.dataset.copyLabel ??= button.textContent;
+      button.textContent = "Copied";
+    } else if (button.dataset.copyLabel !== undefined) {
+      button.textContent = button.dataset.copyLabel;
+      delete button.dataset.copyLabel;
+    }
+  }
 }
 
 async function invoke(method, payload) {
@@ -720,6 +752,7 @@ async function handleAction(event) {
     const text = target.dataset.prompt;
     if (!text) return;
     const next = await invoke("installer:copy-to-clipboard", { text });
+    if (next && latestProblem === null) showCopied(text);
     if (next) render(next);
     else render(state);
     return;

@@ -192,6 +192,8 @@ h3 { margin: 0; font-size: 0.875rem; font-weight: 700; letter-spacing: -.015em; 
 .materials-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); }
 .materials-row > :first-child { flex: 1 1 240px; min-width: 0; }
 .materials-row p { margin-top: 3px; font-size: 0.8125rem; line-height: 1.45; }
+/* A folder path can be one unbroken word longer than the window, so it may break at any character. */
+.path-text { overflow-wrap: anywhere; }
 .optional-setup { margin-top: 0; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-sunken); }
 .optional-setup summary { display: flex; align-items: center; min-height: 44px; padding: var(--space-3) var(--space-4); color: var(--text-secondary); cursor: pointer; font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
 .optional-setup .materials-row { margin: 0 var(--space-3) var(--space-3); background: var(--surface); }
