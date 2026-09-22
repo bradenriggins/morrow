@@ -95,8 +95,15 @@ preemptively and never on every run: a healthy session needs no page.
    SSO can re-authenticate, and cookies can be evicted. Treat the
    session as durable-but-expirable, and re-sign-in as a normal
    recovery step. You never see their credentials.
-4. Verify with a readback through the executor (below). Confirm the
-   principal is the educator before doing anything else.
+4. Pin the signed-in account:
+   `PYTHONDONTWRITEBYTECODE=1 python3 reauth/state_machine.py pin --first-signin`.
+   It verifies the helper session is live, reads GET
+   /api/v1/users/self, and pins that principal (id and name) in
+   `~/.morrow/browser_lane.json`. Tell the educator the name it printed
+   and confirm it is them before doing anything else. keepalive also
+   runs this on its first healthy tick. The pin never changes silently:
+   a different account signing in later is refused until the educator
+   disconnects (`bin/morrow disconnect`) and signs in fresh.
 
 ## Reading /status: the fields and what they mean
 
@@ -165,11 +172,17 @@ run stops loudly instead of writing through a half-dead session:
    The educator is notified with the true paused-op count.
 4. **Verified resume.** The educator signs in again through the login
    helper's own browser tab (never the agent, never credentials to the
-   agent). The agent verifies the helper `/status` shows a live session
-   and pins the live principal id against the stored one, then runs
-   `reauth/state_machine.py resume --principal-id <id>`. Quarantined ops
-   move to `awaiting_approval` and the halt lifts. On principal mismatch
-   the halt stays and the situation escalates; nothing resumes.
+   agent). The agent runs `reauth/state_machine.py resume`: it reads
+   the live account itself (helper `/status` live, then GET
+   /api/v1/users/self) and requires it to match the account pinned at
+   first sign-in. Quarantined ops move to `awaiting_approval` and the
+   halt lifts. On mismatch the halt stays and the situation escalates;
+   nothing resumes. With no pinned account (an install from before
+   pinning), resume refuses and names the recovery: the educator
+   confirms in their own words that the signed-in account is theirs,
+   then `state_machine.py pin --confirm-account "<their words>"`, then
+   `resume` again. A pin record that is unreadable or loosely
+   permissioned also refuses; it is never read as "no pin".
 5. **Per-op re-approval.** Each quarantined op needs the educator's
    explicit approval (`reauth/state_machine.py approve --op-id <id>
    --authorization "<educator's verbatim approval words>"`; the

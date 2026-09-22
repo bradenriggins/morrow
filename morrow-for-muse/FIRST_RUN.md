@@ -41,10 +41,16 @@ Run `install.sh` from the dist root. Expected:
 
 1. The educator signs in on the login helper page, exactly as they
    normally would, including MFA. The agent never sees the password.
-2. Agent verifies immediately: GET /api/v1/users/self must return the
-   educator's profile. The principal id and name are pinned into the
-   lane state. A login page here means the sign-in did not stick: ask
-   once more, then stop and report.
+2. Agent verifies immediately and pins the account:
+   `python3 reauth/state_machine.py pin --first-signin`. It checks the
+   helper `/status` shows a live session, reads GET
+   /api/v1/users/self, and pins that principal id and name into the
+   lane state (`~/.morrow/browser_lane.json`). Confirm the printed
+   name with the educator. (keepalive also runs this on its first
+   healthy tick, so a pin exists even if this step is skipped.) A
+   failure here means the sign-in did not stick: ask once more, then
+   stop and report. Later re-sign-ins resume paused work only for
+   this pinned account.
 3. The one-time notice stops repeating only when a genuinely
    authenticated session with stored cookies is confirmed
    (`logged_in=true`, `profile_has_cookies=true`).

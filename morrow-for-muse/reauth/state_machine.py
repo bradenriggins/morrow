@@ -43,11 +43,19 @@ Usage:
   state_machine.py check                      # dispatch executor pre-check
   state_machine.py quarantine --op-id X --action create_page [--summary ...]
   state_machine.py reauth                     # guided re-sign-in + verified resume
-  state_machine.py resume --principal-id <id>  # production recovery after
+  state_machine.py pin --first-signin         # pin the signed-in account
+                                               # at first sign-in (keepalive
+                                               # runs this; refused during a
+                                               # re-auth halt)
+  state_machine.py pin --confirm-account "..." # educator-confirmed pin for
+                                               # an install with no pin
+  state_machine.py resume [--principal-id <id>]  # production recovery after
                                                # manual re-sign-in via the
-                                               # login helper; pins the
-                                               # principal, re-arms per-op
-                                               # approval, lifts the halt
+                                               # login helper; reads the live
+                                               # account, requires it to match
+                                               # the pinned one, re-arms
+                                               # per-op approval, lifts the
+                                               # halt
   state_machine.py approve --op-id X --authorization "..."  # educator per-op
                                                # re-approval; the educator's
                                                # verbatim words are REQUIRED
@@ -902,37 +910,205 @@ def approve_op(op_id, authorization=None):
     return changed
 
 
+class PrincipalPinError(Exception):
+    """The pinned Canvas principal cannot be trusted or changed.
+
+    Raised when the pin store is unreadable, loosely permissioned, or
+    corrupt, when a different account tries to replace the pin, and
+    when a pin would be taken during a re-auth halt without the
+    educator's own confirmation. Always fails closed.
+    """
+
+
+PIN_AUDIT_PATH_NAME = "principal_pin.json"
+PIN_CONFIRM_MIN_LEN = 20
+
+
+def _lane_state_module():
+    from transport import state as _lane_state
+    return _lane_state
+
+
+def pinned_principal():
+    """The pinned principal {"id", "name", "base"}, or None when none.
+
+    Production pin store: the browser lane state (browser_lane.json,
+    metadata only, 0600), written on the educator's first sign-in.
+    Rig/drill fallback: session.json. A store that exists but cannot be
+    read, is loosely permissioned, or is corrupt raises
+    PrincipalPinError: it is never read as "no pin".
+    """
+    lane = _lane_state_module()
+    try:
+        rec = lane.load()
+    except (OSError, ValueError) as exc:
+        raise PrincipalPinError(
+            "the pinned-account record %s cannot be trusted (%s)"
+            % (lane.STATE_PATH, exc))
+    canvas = (rec or {}).get("canvas") if isinstance(rec, dict) else None
+    principal = (canvas or {}).get("principal") if isinstance(
+        canvas, dict) else None
+    if rec is not None and (not isinstance(principal, dict)
+                            or principal.get("id") in (None, "")):
+        raise PrincipalPinError(
+            "the pinned-account record %s has no principal id"
+            % lane.STATE_PATH)
+    if isinstance(principal, dict):
+        return {"id": principal.get("id"), "name": principal.get("name"),
+                "base": (canvas or {}).get("base")}
+    try:
+        with open(SESSION_PATH) as f:
+            sess = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        raise PrincipalPinError(
+            "the session record %s cannot be trusted (%s)"
+            % (SESSION_PATH, exc))
+    principal = ((sess or {}).get("canvas") or {}).get("principal") \
+        if isinstance(sess, dict) else None
+    if not isinstance(principal, dict) or principal.get("id") in (None, ""):
+        return None
+    return {"id": principal.get("id"), "name": principal.get("name"),
+            "base": (sess.get("canvas") or {}).get("base")}
+
+
+def pin_principal(base, principal_id, principal_name, first_signin=False,
+                  confirmation=None):
+    """Pin the signed-in Canvas principal. Returns the pinned record.
+
+    - Same id already pinned: refreshes the display name, nothing else.
+    - A different id already pinned: refused. Switching accounts is a
+      disconnect followed by a fresh first sign-in, never a silent swap.
+    - No pin and no write halt (first_signin=True): the first sign-in
+      is the educator's own onboarding, so it is pinned.
+    - No pin during a write halt: pinning whoever signed back in would
+      defeat the check, so it needs the educator's verbatim confirming
+      words (confirmation, at least 20 characters).
+    """
+    if principal_id in (None, ""):
+        raise PrincipalPinError("no principal id to pin")
+    current = pinned_principal()
+    lane = _lane_state_module()
+    if current is not None:
+        if str(current["id"]) != str(principal_id):
+            raise PrincipalPinError(
+                "this connector is pinned to Canvas account id %s; the "
+                "signed-in account is id %s. Refusing to replace the pin. "
+                "To connect a different account, disconnect first "
+                "(bin/morrow disconnect), then sign in again."
+                % (current["id"], principal_id))
+        name = str(principal_name or current.get("name") or "").strip()
+        lane.save(current.get("base") or base, current["id"], name)
+        return pinned_principal()
+    confirmed = (isinstance(confirmation, str)
+                 and len(confirmation.strip()) >= PIN_CONFIRM_MIN_LEN)
+    if is_write_halted() and not confirmed:
+        raise PrincipalPinError(
+            "no Canvas account is pinned and paused work is waiting on a "
+            "re-sign-in, so the signed-in account cannot be pinned "
+            "automatically. The educator must confirm it is their own "
+            "account: state_machine.py pin --confirm-account \"<their "
+            "own words>\"")
+    if not first_signin and not confirmed:
+        raise PrincipalPinError(
+            "pinning needs either the first sign-in (--first-signin) or "
+            "the educator's confirming words (--confirm-account, at least "
+            "%d characters)" % PIN_CONFIRM_MIN_LEN)
+    if not base:
+        raise PrincipalPinError("no Canvas base URL to pin against")
+    lane.save(base, principal_id, str(principal_name or "").strip())
+    _write_json(os.path.join(STORE_DIR, PIN_AUDIT_PATH_NAME), {
+        "pinned_at": _now(),
+        "principal_id": str(principal_id),
+        "base": base.rstrip("/"),
+        "how": "educator-confirmed" if confirmed else "first-signin",
+        "educator_confirmation": confirmation.strip() if confirmed else None,
+    })
+    return pinned_principal()
+
+
+def read_live_principal(base=None):
+    """(id, name, base) of the account signed in to the login helper.
+
+    Requires the helper /status to report a live signed-in session, then
+    reads GET /api/v1/users/self through the Chromium lane (the
+    educator's own record; a read, no approval). Raises
+    PrincipalPinError when the session is not live or the read fails.
+    """
+    from transport import local_chromium as lc
+    try:
+        st = lc.helper_status(timeout=10)
+    except Exception as exc:
+        raise PrincipalPinError(
+            "the login helper is not reachable (%s); start it with "
+            "helper/keepalive.sh and sign in first" % type(exc).__name__)
+    if not (st or {}).get("logged_in"):
+        raise PrincipalPinError(
+            "the login helper reports no signed-in Canvas session; sign "
+            "in through the helper page first")
+    base = (base or os.environ.get("CANVAS_BASE") or "").rstrip("/")
+    if not base:
+        raise PrincipalPinError(
+            "CANVAS_BASE is not set; pass --base or set it in helper/env")
+    from dispatch import executor as ex
+    from transport import chromium_session as cs
+    sess = cs.ChromiumSession(base)
+    entry = ex.catalog_descriptor_to_entry(
+        "users_self", "GET", "/api/v1/users/self", provider="canvas")
+    method, url, headers, body = ex.build_request(
+        entry, entry["request"], {}, sess, ex.load_pack(ex.DEFAULT_PACK),
+        {"canvas_base": base}, {})
+    try:
+        status, _rh, raw, _attempts = sess.raw_request(
+            method, url, headers, body, is_write=False)
+        me = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise PrincipalPinError(
+            "could not read the signed-in account (GET /api/v1/users/self: "
+            "%s)" % type(exc).__name__)
+    if status != 200 or not isinstance(me, dict) or me.get("id") is None:
+        raise PrincipalPinError(
+            "GET /api/v1/users/self did not return the signed-in account "
+            "(HTTP %s)" % status)
+    return me.get("id"), me.get("name") or "", base
+
+
+_NO_PIN_RECOVERY = (
+    "REFUSED: no Canvas account is pinned for this connector, so there is "
+    "no way to prove the account that signed back in is the educator's. "
+    "The write halt stays and paused work stays paused. Recovery: the "
+    "educator confirms, in their own words, that the signed-in account "
+    "is theirs; then run state_machine.py pin --confirm-account "
+    "\"<their words>\" and run resume again.")
+
+
 def verified_resume_after_manual_signin(principal_id, principal_name="",
                                         base=""):
     """Production recovery after the educator re-signs in manually.
 
     The production flow never re-runs capture.py (rig-only). Instead:
     the educator signs in again through the login helper's own browser
-    tab; the agent verifies the session is live (helper /status
-    logged_in) and that the principal id matches the stored one; only
-    then is this called, which re-arms quarantined ops as
-    awaiting_approval (each still needs the educator's explicit
-    per-op approval via approve_op before re-dispatch) and lifts the
-    halt. Returns the number of ops moved to awaiting_approval, or -1
-    on principal mismatch (halt stays, escalation written).
+    tab; the live principal is read and must match the PINNED principal
+    (pinned at first sign-in, see pin_principal). Only then are
+    quarantined ops re-armed as awaiting_approval (each still needs the
+    educator's explicit per-op approval via approve_op before
+    re-dispatch) and the halt lifted. Returns the number of ops moved
+    to awaiting_approval, or -1 on refusal (halt stays): a principal
+    mismatch (escalation written), no pinned principal, or a pin store
+    that cannot be trusted.
     """
-    stored_id = None
-    # Production pinning source: the browser lane state (metadata only,
-    # never credential material). Rig/drill fallback: session.json.
     try:
-        from transport import state as _lane_state
-        rec = _lane_state.load()
-        stored_id = ((rec or {}).get("canvas") or {}).get(
-            "principal", {}).get("id")
-    except Exception:
-        stored_id = None
-    if stored_id is None:
-        try:
-            with open(SESSION_PATH) as f:
-                stored_id = json.load(f)["canvas"]["principal"].get("id")
-        except (FileNotFoundError, ValueError, KeyError):
-            stored_id = None
-    if stored_id is not None and str(principal_id) != str(stored_id):
+        stored = pinned_principal()
+    except PrincipalPinError as exc:
+        write_notify_escalation("pinned-account record unusable: %s" % exc)
+        print("REFUSED: %s; halt stays, escalated" % exc)
+        return -1
+    if stored is None:
+        print(_NO_PIN_RECOVERY)
+        return -1
+    stored_id = stored["id"]
+    if str(principal_id) != str(stored_id):
         write_notify_escalation(
             "principal mismatch on manual re-sign-in: expected id %s, "
             "saw id %s" % (stored_id, principal_id))
@@ -942,16 +1118,21 @@ def verified_resume_after_manual_signin(principal_id, principal_name="",
     # W6-P2-A4: the id matched, so this is the same account; refresh the
     # stored display name from the fresh verification so the helper UI
     # ("signed in as ...") does not lag a Canvas display-name change.
-    # An account SWITCH never reaches here: id mismatch refuses above.
     if principal_name and str(principal_name).strip():
         try:
-            with open(SESSION_PATH) as f:
-                sess = json.load(f)
-            sess.setdefault("canvas", {}).setdefault("principal", {})["name"] \
-                = str(principal_name).strip()
-            _write_json(SESSION_PATH, sess)
-        except (OSError, ValueError):
+            pin_principal(stored.get("base") or base, stored_id,
+                          principal_name)
+        except PrincipalPinError:
             pass
+        if os.path.exists(SESSION_PATH):
+            try:
+                with open(SESSION_PATH) as f:
+                    sess = json.load(f)
+                sess.setdefault("canvas", {}).setdefault(
+                    "principal", {})["name"] = str(principal_name).strip()
+                _write_json(SESSION_PATH, sess)
+            except (OSError, ValueError):
+                pass
     moved = mark_ops_awaiting_approval()
     _write_json(APPROVAL_PATH,
                 {"re_armed_at": _now(),
@@ -965,9 +1146,9 @@ def verified_resume_after_manual_signin(principal_id, principal_name="",
     # recovery is the right moment to sweep it.
     age_out_stale_prev()
     write_notify_resumed(len(quarantined_ops()))
-    print("verified resume (manual sign-in): principal id=%s pinned, "
-          "halt lifted, %d op(s) awaiting fresh per-op approval"
-          % (principal_id, moved))
+    print("verified resume (manual sign-in): principal id=%s matches the "
+          "pinned account, halt lifted, %d op(s) awaiting fresh per-op "
+          "approval" % (principal_id, moved))
     return moved
 
 
@@ -1016,12 +1197,13 @@ def expiry_horizon_warning():
 
 def _session_summary():
     try:
-        with open(SESSION_PATH) as f:
-            c = json.load(f)["canvas"]
-        p = c.get("principal", {})
-        return c.get("base", "?"), p.get("name", "?"), p.get("id", "?")
-    except (FileNotFoundError, ValueError, KeyError):
+        pin = pinned_principal()
+    except PrincipalPinError:
+        pin = None
+    if not pin:
         return "?", "?", "?"
+    return (pin.get("base") or "?", pin.get("name") or "?",
+            pin.get("id") if pin.get("id") is not None else "?")
 
 
 def write_notify_expired(n_quarantined):
@@ -1343,26 +1525,55 @@ def cmd_resume():
     """W4-P2-1: the concrete production recovery caller.
 
     Run AFTER the educator re-signs in through the login helper's own
-    browser tab: the agent first verifies the helper's /status shows a
-    live logged-in session and reads the live principal id from it, then
-    invokes:
-      state_machine.py resume --principal-id <id> [--principal-name N]
-                              [--base B]
-    which pins the live principal against the stored one and, on match,
-    re-arms quarantined ops as awaiting_approval and lifts the halt.
-    On principal mismatch the halt stays and escalation is written.
+    browser tab:
+      state_machine.py resume [--principal-id <id>] [--base B]
+    It reads the live principal itself (helper /status must show a live
+    session, then GET /api/v1/users/self). A --principal-id that
+    disagrees with the live account is refused. The live account must
+    match the pinned one; on match, quarantined ops are re-armed as
+    awaiting_approval and the halt lifts. On mismatch, or with no
+    pinned account, the halt stays.
     """
-    principal_id = _arg("--principal-id", None)
-    if not principal_id:
-        print("usage: state_machine.py resume --principal-id <id> "
-              "[--principal-name <name>] [--base <base>]")
-        print("run only after verifying the login helper's /status shows "
-              "a live logged-in session for the educator")
+    claimed = _arg("--principal-id", None)
+    try:
+        live_id, live_name, live_base = read_live_principal(
+            _arg("--base", "") or None)
+    except PrincipalPinError as exc:
+        print("REFUSED: %s; halt stays" % exc)
+        return False
+    if claimed is not None and str(claimed) != str(live_id):
+        print("REFUSED: --principal-id %s is not the signed-in account "
+              "(live id %s); halt stays" % (claimed, live_id))
         return False
     moved = verified_resume_after_manual_signin(
-        principal_id, principal_name=_arg("--principal-name", "") or "",
-        base=_arg("--base", "") or "")
+        live_id, principal_name=live_name, base=live_base)
     return moved >= 0
+
+
+def cmd_pin():
+    """Pin the signed-in Canvas account (first sign-in, or recovery).
+
+      state_machine.py pin --first-signin      # keepalive / FIRST_RUN step 4
+      state_machine.py pin --confirm-account "<educator's own words>"
+
+    --first-signin is quiet and succeeds when the same account is
+    already pinned. It refuses during a re-auth halt (it would pin
+    whoever signed back in). --confirm-account records the educator's
+    verbatim confirmation that the signed-in account is theirs.
+    """
+    first = "--first-signin" in sys.argv
+    confirmation = _arg("--confirm-account", None)
+    try:
+        live_id, live_name, live_base = read_live_principal(
+            _arg("--base", "") or None)
+        rec = pin_principal(live_base, live_id, live_name,
+                            first_signin=first, confirmation=confirmation)
+    except PrincipalPinError as exc:
+        print("NOT PINNED: %s" % exc)
+        return False
+    print("pinned Canvas account: %s (id %s) on %s"
+          % (rec.get("name") or "?", rec.get("id"), rec.get("base")))
+    return True
 
 
 def cmd_status():
@@ -1489,6 +1700,8 @@ def main():
         sys.exit(0 if cmd_notify() else 1)
     elif cmd == "resume":
         sys.exit(0 if cmd_resume() else 1)
+    elif cmd == "pin":
+        sys.exit(0 if cmd_pin() else 1)
     elif cmd == "status":
         sys.exit(0 if cmd_status() else 1)
     elif cmd == "selftest":

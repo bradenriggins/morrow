@@ -298,23 +298,32 @@ def _educator_write_halt_active():
 
 
 def _educator_principal_name():
-    # W6-P2-A4: who the pinned session belongs to, so the helper UI
-    # can show WHO is signed in (not just that someone is). Reads the
-    # session.json principal pinned at re-sign-in; name only, never
-    # secrets. None when no session is pinned yet.
+    # W6-P2-A4: who the pinned account is, so the helper UI can show
+    # WHO is signed in (not just that someone is). Reads the principal
+    # pinned at first sign-in (browser_lane.json), with the rig
+    # session.json as fallback; name only, never secrets. None when no
+    # account is pinned yet.
     try:
         _root = os.path.normpath(os.path.join(_HERE, ".."))
         if _root not in sys.path:
             sys.path.insert(0, _root)
         from config.paths import morrow_home  # noqa: E402
-        with open(os.path.join(morrow_home(), "session.json"),
-                  encoding="utf-8") as fh:
-            principal = (json.load(fh) or {}).get("canvas", {}) \
-                .get("principal", {})
-        name = principal.get("name")
-        return name if isinstance(name, str) and name.strip() else None
-    except (OSError, ValueError, AttributeError):
+        home = morrow_home()
+    except (ImportError, OSError):
         return None
+    for fname in ("browser_lane.json", "session.json"):
+        try:
+            with open(os.path.join(home, fname), encoding="utf-8") as fh:
+                principal = (json.load(fh) or {}).get("canvas", {}) \
+                    .get("principal", {})
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError, AttributeError):
+            return None
+        name = principal.get("name") if isinstance(principal, dict) else None
+        if isinstance(name, str) and name.strip():
+            return name
+    return None
 
 
 _source_morrow_env()
