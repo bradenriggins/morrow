@@ -187,6 +187,8 @@ const state = {
   selectMode: false,
   // WI-5.4: sourceBindingId values whose detail is open in place under their row.
   openCourses: new Set(),
+  // The one course whose Disconnect is waiting for the person to confirm it, or null.
+  confirmingDisconnect: null,
   // WI-5.5: area ids, and "${areaId}/${kind}" keys, currently open in the Customize view.
   openAreas: new Set(),
   openKinds: new Set(),
@@ -1192,8 +1194,16 @@ function renderCourseDetail(binding, isOpen) {
       ${listHtml}
       <div class="course-detail-links">
         <button type="button" class="secondary" data-open-customize="1">Customize</button>
-        <button type="button" class="secondary danger-action" data-disconnect="1">Disconnect</button>
+        <button type="button" class="secondary danger-action" data-disconnect="1" ${state.busy ? "disabled" : ""}>Disconnect</button>
       </div>
+      ${state.confirmingDisconnect === binding.sourceBindingId ? `
+      <div class="course-disconnect-confirm" role="group" aria-label="Confirm disconnecting ${escapeHtml(courseName(binding))}">
+        <p>Disconnect ${escapeHtml(courseName(binding))}? Morrow stops reading and changing this course, and its Edit access is removed. Your course in ${escapeHtml(providerName(binding))} is not changed. You can connect it again from this list.</p>
+        <div class="action-buttons">
+          <button type="button" class="secondary" data-disconnect-cancel="1" ${state.busy ? "disabled" : ""}>Keep course</button>
+          <button type="button" class="secondary danger-action" data-disconnect-confirm="1" ${state.busy ? "disabled" : ""}>Disconnect course</button>
+        </div>
+      </div>` : ""}
     </div>
   `;
 }
@@ -1895,6 +1905,30 @@ async function removeCourseCategory(binding, categoryId) {
   await saveCourseCategories(binding, ids, `Removed. Morrow asks again before it changes ${label.toLowerCase()} in ${courseName(binding)}.`);
 }
 
+/** WI-5.4: the detail's own confirmed Disconnect. Only this course, and its Edit access, go. */
+async function disconnectCourse(binding) {
+  if (state.busy) return;
+  setBusy(true);
+  clearError();
+  clearNotice();
+  let failure = null;
+  try {
+    const result = await request("morrow_course_disconnect", { sourceBindingId: binding.sourceBindingId });
+    if (result?.disconnected !== true || result.sourceBindingId !== binding.sourceBindingId) throw new Error("edit_policy_failed");
+    state.openCourses.delete(binding.sourceBindingId);
+    state.selected.delete(binding.sourceBindingId);
+    showNotice(`${courseName(binding)} is disconnected. Its Edit access was removed.`);
+  } catch (cause) {
+    failure = cause;
+  } finally {
+    state.confirmingDisconnect = null;
+    setBusy(false);
+    await refresh();
+  }
+  // Shown after the read that follows, because a successful read clears the error region.
+  if (failure) showError(failure);
+}
+
 /**
  * WI-5.4: "Customize" and the "Custom" chip both lead to the Course access panel below (hidden at
  * rest, WI-5.2), selecting only this course so a Customize visit cannot change any other course's
@@ -2327,9 +2361,17 @@ courseList.addEventListener("click", (event) => {
     if (binding) void removeCourseCategory(binding, removeButton.dataset.removeCategory);
     return;
   }
-  const disconnectButton = event.target.closest("[data-disconnect]");
+  const disconnectButton = event.target.closest("[data-disconnect], [data-disconnect-cancel], [data-disconnect-confirm]");
   if (disconnectButton) {
-    showNotice("Disconnecting a course here is not available yet.");
+    const binding = bindingById(disconnectButton.closest("[data-binding-id]")?.dataset.bindingId);
+    if (!binding) return;
+    if (disconnectButton.hasAttribute("data-disconnect-confirm")) void disconnectCourse(binding);
+    else {
+      state.confirmingDisconnect = disconnectButton.hasAttribute("data-disconnect") ? binding.sourceBindingId : null;
+      renderCourseList();
+      const detail = courseList.querySelector(`#${courseDetailDomId(binding.sourceBindingId)}`);
+      detail?.querySelector(state.confirmingDisconnect ? "[data-disconnect-cancel]" : "[data-disconnect]")?.focus();
+    }
     return;
   }
   if (event.target.closest("input, button, a, summary, details")) return;

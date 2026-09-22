@@ -857,6 +857,41 @@ async function reviewsFollowConnectionScenario(ending) {
   }
 }
 
+// One course can be disconnected on its own from Plan and Edit settings. Its connection, its Edit
+// access and its first-read record go; the site, the other courses and Chrome site access stay, and
+// the runtime learns the new course list at once.
+async function courseDisconnectScenario() {
+  const initial = connectedState();
+  const other = { ...initial.bindings[0], sourceBindingId: `${anchorId}:c43`, courseId: "43", courseName: "Chemistry" };
+  initial.bindings.push(other);
+  const value = fixture({ initialLocal: initial });
+  await importWorker("course-disconnect");
+  const socket = await authenticate(value);
+  const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
+  const category = options.result.options.find((candidate) => candidate.availability === "edit");
+  assert.equal((await sendRuntime(value, { type: "morrow_edit_policy_save", sourceBindingId: bindingId, enabledCategories: [category.id] }, settingsSender())).ok, true);
+  const revisionBefore = value.local.values.editPolicyRevisions[bindingId];
+
+  const refused = await sendRuntime(value, { type: "morrow_course_disconnect", sourceBindingId: bindingId }, popupSender());
+  assert.deepEqual(refused, { ok: false, code: "edit_policy_sender_refused", error: "edit_policy_sender_refused" });
+  assert.equal(value.local.values.bindings.length, 2);
+
+  const sentBefore = socket.sent.length;
+  const result = await sendRuntime(value, { type: "morrow_course_disconnect", sourceBindingId: bindingId }, settingsSender());
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.result, { disconnected: true, sourceBindingId: bindingId });
+  assert.deepEqual(value.local.values.bindings.map((binding) => binding.sourceBindingId), [other.sourceBindingId]);
+  assert.equal(Object.hasOwn(value.local.values.editPolicies, bindingId), false);
+  assert.ok(value.local.values.editPolicyRevisions[bindingId] > revisionBefore, "a change prepared under the old access must not apply later");
+  assert.equal(value.local.values.siteAnchors.length, 1, "the site stays connected for its other courses");
+  assert.deepEqual(value.permissionRemovals, [], "Chrome site access stays for the other courses");
+  const published = socket.sent.slice(sentBefore).filter((message) => message.schema === "morrow.bridge.bindings.v1").at(-1);
+  assert.deepEqual(published.bindings.map((binding) => binding.sourceBindingId), [other.sourceBindingId]);
+
+  const missing = await sendRuntime(value, { type: "morrow_course_disconnect", sourceBindingId: bindingId }, settingsSender());
+  assert.deepEqual(missing, { ok: false, code: "edit_policy_binding_missing", error: "edit_policy_binding_missing" });
+}
+
 // Plan and Edit settings saves Edit access with no duration, and the saved grant has no end time.
 async function settingsSaveUntimedScenario() {
   const value = fixture();
@@ -1542,6 +1577,7 @@ const scenarios = {
   "policy-merge-legacy": policySetMergeLegacyTimedScenario,
   "settings-save-untimed": settingsSaveUntimedScenario,
   "popup-edit-status": popupEditStatusScenario,
+  "course-disconnect": courseDisconnectScenario,
   "reviews-socket": () => reviewsFollowConnectionScenario("socket"),
   "reviews-disconnect": () => reviewsFollowConnectionScenario("disconnect"),
   "reviews-consent": () => reviewsFollowConnectionScenario("consent"),
@@ -1669,6 +1705,10 @@ test("Disconnect Morrow clears the reviews that wait and their badge", async () 
 
 test("withdrawing course data consent clears the reviews that wait and their badge", async () => {
   await isolatedScenario("reviews-consent");
+});
+
+test("Plan and Edit settings disconnects one course, its Edit access, and nothing else", async () => {
+  await isolatedScenario("course-disconnect");
 });
 
 test("a Settings save creates Edit access with no end time", async () => {

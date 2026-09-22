@@ -1099,16 +1099,49 @@ test("Customize selects only that course and switches to Edit in Course access b
   assert.equal(page.text("#notice"), "Choose the changes for Anatomy in Course access, below.");
 });
 
-// WI-5.4: there is no per-course disconnect primitive yet (only the whole-Bridge "morrow_disconnect"
-// exists), so "Disconnect" states that plainly and changes nothing rather than claiming an action it
-// cannot perform.
-test("Disconnect states it is not available yet, and changes nothing", async () => {
-  const page = await openSettings({ status: () => statusFixture([ANATOMY]) });
+// WI-5.4: Disconnect removes this one course, with its Edit access, after the person confirms it
+// in place. Keeping the course changes nothing.
+test("Disconnect asks once in place, then disconnects just that course", async () => {
+  const routine = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1"), enabledCategories: CANVAS_ROUTINE_IDS } });
+  let bindings = [routine, PHYSIOLOGY];
+  const page = await openSettings({
+    status: () => statusFixture(bindings),
+    handlers: {
+      morrow_course_disconnect: ({ sourceBindingId }) => {
+        bindings = bindings.filter((binding) => binding.sourceBindingId !== sourceBindingId);
+        return { disconnected: true, sourceBindingId };
+      },
+    },
+  });
+  const detail = await openCourseDetail(page, routine.sourceBindingId);
+  const detailId = detail.getAttribute("id");
+  await page.click(`#${detailId} [data-disconnect="1"]`);
+  assert.equal(page.messages("morrow_course_disconnect").length, 0, "one click must not disconnect");
+  assert.equal(page.text(`#${detailId} .course-disconnect-confirm p`), "Disconnect Anatomy? Morrow stops reading and changing this course, and its Edit access is removed. Your course in Canvas is not changed. You can connect it again from this list.");
+  await page.click(`#${detailId} [data-disconnect-cancel="1"]`);
+  assert.equal(page.queryAll(`#${detailId} .course-disconnect-confirm`).length, 0);
+  assert.equal(page.messages("morrow_course_disconnect").length, 0);
+
+  await page.click(`#${detailId} [data-disconnect="1"]`);
+  await page.click(`#${detailId} [data-disconnect-confirm="1"]`);
+  await page.waitFor(() => page.text("#notice") !== "", "the page never reported the disconnected course");
+  assert.deepEqual(page.messages("morrow_course_disconnect"), [{ type: "morrow_course_disconnect", sourceBindingId: routine.sourceBindingId }]);
+  assert.equal(page.text("#notice"), "Anatomy is disconnected. Its Edit access was removed.");
+  await page.waitFor(() => page.queryAll(`[data-binding-id="${routine.sourceBindingId}"]`).length === 0, "the disconnected course still shows as connected");
+  assert.equal(page.queryAll(`[data-binding-id="${PHYSIOLOGY.sourceBindingId}"]`).length, 1);
+});
+
+test("a refused Disconnect names the problem and leaves the course connected", async () => {
+  const page = await openSettings({
+    status: () => statusFixture([ANATOMY]),
+    handlers: { morrow_course_disconnect: () => ({ ok: false, code: "edit_policy_binding_missing", error: "edit_policy_binding_missing" }) },
+  });
   const detail = await openCourseDetail(page, ANATOMY.sourceBindingId);
   await page.click(`#${detail.getAttribute("id")} [data-disconnect="1"]`);
-  assert.equal(page.text("#notice"), "Disconnecting a course here is not available yet.");
-  assert.equal(page.messages("morrow_edit_policy_revoke").length, 0);
-  assert.equal(page.messages("morrow_disconnect").length, 0);
+  await page.click(`#${detail.getAttribute("id")} [data-disconnect-confirm="1"]`);
+  await page.waitFor(() => !page.hidden("#error"), "the refused disconnect was not reported");
+  assert.equal(page.text("#error"), problemText("edit_policy_binding_missing"));
+  assert.equal(page.queryAll(`[data-binding-id="${ANATOMY.sourceBindingId}"][data-row-kind="connected"]`).length, 1);
 });
 
 test("returning courses to Plan removes each access, and says how far it got when one is refused", async () => {

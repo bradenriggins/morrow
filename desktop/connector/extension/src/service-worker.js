@@ -2031,6 +2031,36 @@ async function revokeEditPolicy(sourceBindingId, authorityGeneration = state.cou
   return { revoked: true, revision: result };
 }
 
+/**
+ * Disconnects one course. Its connection, its Edit access and its first-read record are removed,
+ * and its policy revision still rises, so a change prepared under the old access cannot apply if
+ * the course is connected again. The site, the other courses and Chrome site access stay.
+ */
+async function disconnectCourse(sourceBindingId, authorityGeneration = state.courseDataAuthorityGeneration) {
+  if (typeof sourceBindingId !== "string" || !sourceBindingId) throw new Error("edit_policy_binding_missing");
+  await queueStorageMutation(async () => {
+    await requireCourseDataAuthority(authorityGeneration);
+    const stored = await storage();
+    const binding = (stored.bindings || []).find((candidate) => candidate.sourceBindingId === sourceBindingId);
+    if (!binding) throw new Error("edit_policy_binding_missing");
+    const policies = storedPolicies(stored.editPolicies);
+    const revisions = storedPolicyRevisions(stored.editPolicyRevisions);
+    const priorRevision = Math.max(Number.isSafeInteger(revisions[sourceBindingId]) ? revisions[sourceBindingId] : 0, Number.isSafeInteger(policies[sourceBindingId]?.revision) ? policies[sourceBindingId].revision : 0);
+    const nextPolicies = { ...policies };
+    delete nextPolicies[sourceBindingId];
+    await setCourseDataBoundFields(chrome.storage.local, {
+      bindings: (stored.bindings || []).filter((candidate) => candidate.sourceBindingId !== sourceBindingId),
+      editPolicies: nextPolicies,
+      editPolicyRevisions: { ...revisions, [sourceBindingId]: priorRevision + 1 },
+      ...(stored.firstCourseRead?.sourceBindingId === sourceBindingId ? { firstCourseRead: null } : {}),
+    }, stored, authorityGeneration);
+  });
+  await requireCourseDataAuthority(authorityGeneration);
+  await publishBindings();
+  await requireCourseDataAuthority(authorityGeneration);
+  return { disconnected: true, sourceBindingId };
+}
+
 function bridgePolicySet(command) {
   if (!command || command.protocolVersion !== PROTOCOL_VERSION || command.kind !== "edit_policy_set"
     || Object.keys(command).some((key) => !["schema", "protocolVersion", "requestId", "operationId", "kind", "editPolicySet", "generation", "createdAt", "expiresAt"].includes(key))) {
@@ -6258,6 +6288,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     : message?.type === "morrow_edit_policy_options" ? (authorityGeneration) => editPolicyOptions(message.sourceBindingId, authorityGeneration)
       : message?.type === "morrow_edit_policy_save" ? (authorityGeneration) => saveEditPolicy(message.sourceBindingId, message.enabledCategories, authorityGeneration)
         : message?.type === "morrow_edit_policy_revoke" ? (authorityGeneration) => revokeEditPolicy(message.sourceBindingId, authorityGeneration)
+          : message?.type === "morrow_course_disconnect" ? (authorityGeneration) => disconnectCourse(message.sourceBindingId, authorityGeneration)
           : message?.type === "morrow_course_discovery_start" ? (authorityGeneration) => startCourseDiscovery(message.siteAnchorId, authorityGeneration)
             : message?.type === "morrow_course_discovery_more" ? (authorityGeneration) => continueCourseDiscovery(message.siteAnchorId, message.discoveryReceiptId, authorityGeneration)
               : message?.type === "morrow_course_selection_save" ? (authorityGeneration) => saveCourseSelection(message.siteAnchorId, message.discoveryReceiptId, message.courseIds, authorityGeneration)
@@ -6266,7 +6297,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         : null;
   if (settingsAction) {
     if (!settingsSender(sender) && !fromPopup) {
-      const code = String(message?.type || "").startsWith("morrow_course_") ? "course_discovery_sender_refused" : "edit_policy_sender_refused";
+      const code = /^morrow_course_(?:discovery|selection)_/.test(String(message?.type || "")) ? "course_discovery_sender_refused" : "edit_policy_sender_refused";
       sendResponse({ ok: false, code, error: code });
       return false;
     }

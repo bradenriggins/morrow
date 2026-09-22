@@ -211,7 +211,7 @@ const COPY = {
   binding_limit_reached: {
     title: "Morrow has reached its 500-course limit",
     detail: "This Chrome session already holds the largest number of connected courses Morrow keeps, so it did not connect another.",
-    action: "Work with the courses already connected, or select Disconnect Morrow in the Morrow popup and connect only the courses you need.",
+    action: "Open a course you no longer need in Plan and Edit settings and select Disconnect, then connect this course again.",
   },
   course_file_access_change_failed: {
     title: "Morrow could not turn on course file access",
