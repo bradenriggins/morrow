@@ -7,11 +7,12 @@ Edit: they do not. Reads are unrestricted in both modes.
 
 Covers: schema validation (bad values refused), defaults, persistence
 across a simulated restart (fresh interpreter process), tamper refusal
-(consequential sets, edit sessions, and conversation overrides without
-educator confirmation), effective-mode resolution (session, then
-override, then persisted default), the conversational parser cases,
-audit journaling with old/new/educator (including session and override
-records), user_id sanitization, fail-closed corrupt files, and the
+(consequential sets and conversation overrides without educator
+confirmation), effective-mode resolution (override, then persisted
+default), edit mode not being timed (legacy timed grants lapse to
+plan), every "edit off" phrase landing in plan mode everywhere, the
+conversational parser cases, audit journaling with old/new/educator
+(including override and edit-off records), user_id sanitization, fail-closed corrupt files, and the
 Agent A contract (get_setting(user_id, key) exact signature).
 
 Test scratch lives under .selftest-work/ next to this test (tree
@@ -56,7 +57,7 @@ class SettingsTest(unittest.TestCase):
         self.user = "educator-test-%d" % os.getpid()
         self.conv = "conv-%d" % os.getpid()
         # Session-scoped state: conversation overrides are process-global
-        # in-memory; timed sessions are modes grants (persisted, sealed).
+        # in-memory; conversation grants are persisted and sealed.
         # Reset both so each test starts clean.
         with store._SESSION_LOCK:
             store._CONVERSATION_MODES.clear()
@@ -100,15 +101,11 @@ class SettingsTest(unittest.TestCase):
         sig = inspect.signature(store.get_setting)
         self.assertEqual(list(sig.parameters), ["user_id", "key"])
         self.assertEqual(store.get_setting(self.user, "default_mode"), "plan")
-        self.assertEqual(
-            store.get_setting(self.user, "edit_grant_duration_min"), 30)
 
     # -- defaults ------------------------------------------------------------
 
     def test_defaults_for_new_user(self):
         self.assertEqual(store.get_setting(self.user, "default_mode"), "plan")
-        self.assertEqual(
-            store.get_setting(self.user, "edit_grant_duration_min"), 30)
         self.assertEqual(store.get_setting(self.user, "verbosity"), "balanced")
         self.assertEqual(
             store.get_setting(self.user, "confirm_destructive_writes"), False)
@@ -145,10 +142,6 @@ class SettingsTest(unittest.TestCase):
         bad = [
             ("default_mode", "turbo"),
             ("default_mode", 1),
-            ("edit_grant_duration_min", 4),
-            ("edit_grant_duration_min", 481),
-            ("edit_grant_duration_min", "30"),
-            ("edit_grant_duration_min", True),  # bool is not int
             ("verbosity", "verbose"),
             ("verbosity", "BALANCED"),
             ("confirm_destructive_writes", "yes"),
@@ -164,21 +157,39 @@ class SettingsTest(unittest.TestCase):
                 store.set_setting(self.user, key, value,
                                   educator_confirmed=True)
 
-    def test_boundary_values_accepted(self):
-        store.set_setting(self.user, "edit_grant_duration_min", 5,
-                          educator_confirmed=True)
-        self.assertEqual(
-            store.get_setting(self.user, "edit_grant_duration_min"), 5)
-        store.set_setting(self.user, "edit_grant_duration_min", 480,
-                          educator_confirmed=True)
-        self.assertEqual(
-            store.get_setting(self.user, "edit_grant_duration_min"), 480)
+    def test_edit_mode_is_not_timed(self):
+        # Edit is one blanket grant that stays on until the educator
+        # turns it off: there is no session length to set and no timed
+        # session API to call.
+        self.assertNotIn("edit_grant_duration_min", store.SETTINGS_SCHEMA)
+        with self.assertRaises(store.SettingsUnknownKey):
+            store.set_setting(self.user, "edit_grant_duration_min", 60,
+                              educator_confirmed=True)
+        for name in ("start_edit_session", "end_edit_session",
+                     "edit_session_active", "edit_session_remaining",
+                     "EDIT_GRANT_DURATION_MIN", "EDIT_GRANT_DURATION_MAX"):
+            self.assertFalse(hasattr(store, name), msg=name)
+
+    def test_legacy_stored_duration_setting_is_ignored(self):
+        # An older install sealed edit_grant_duration_min into the
+        # settings file. It must not break reads or reappear as a knob.
+        store.set_setting(self.user, "verbosity", "concise",
+                          educator_confirmed=False)
+        path = store._settings_path(self.user)
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        doc.pop("sig", None)
+        doc["settings"]["edit_grant_duration_min"] = 60
+        store._write_doc_atomic(path, doc)
+        self.assertEqual(store.get_setting(self.user, "verbosity"),
+                         "concise")
+        self.assertNotIn("edit_grant_duration_min",
+                         store.list_settings(self.user))
 
     # -- tamper refusal ----------------------------------------------------------
 
     def test_consequential_requires_educator_confirmation(self):
         for key, value in [("default_mode", "edit"),
-                           ("edit_grant_duration_min", 60),
                            ("confirm_destructive_writes", False),
                            ("write_approval_style", "batched")]:
             with self.assertRaises(store.SettingsTamperRefused,
@@ -206,13 +217,6 @@ class SettingsTest(unittest.TestCase):
                           educator_confirmed=False)
         self.assertEqual(store.get_setting(self.user, "failure_verbosity"),
                          "concise")
-
-    def test_edit_session_requires_educator_confirmation(self):
-        with self.assertRaises(store.SettingsTamperRefused):
-            store.start_edit_session(self.user, self.conv,
-                                     educator_confirmed=False)
-        self.assertFalse(store.edit_session_active(self.user, self.conv))
-        self.assertEqual(store.effective_mode(self.user, self.conv), "plan")
 
     def test_conversation_mode_requires_educator_confirmation(self):
         with self.assertRaises(store.SettingsTamperRefused):
@@ -242,55 +246,78 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(store.effective_mode(self.user, "other-conv"),
                          "plan")
 
-    def test_edit_session_wins_while_active(self):
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=30)
-        self.assertTrue(store.edit_session_active(self.user, self.conv))
-        self.assertEqual(store.effective_mode(self.user, self.conv), "edit")
-        self.assertGreater(store.edit_session_remaining(self.user, self.conv),
-                           0)
+    def _conversation_grant(self):
+        import modes.state as mode_state
+        return mode_state.request_edit_grant(
+            self.user, scope_type="conversation",
+            conversation_id=self.conv,
+            educator_confirmation={
+                "by": "educator", "channel": "educator-chat",
+                "authorization": "yes, use edit mode for this conversation"})
+
+    def _legacy_timed_grant(self, expires_at):
+        """Plant a timed grant the way an older install persisted it."""
+        import modes.state as mode_state
+        state = mode_state._load_state(self.user)
+        state["revision"] = int(state.get("revision", 0)) + 1
+        state["grants"].append({
+            "grant_id": "legacy-timed-%d" % state["revision"],
+            "revision": state["revision"],
+            "scope_type": "timed",
+            "conversation_id": None,
+            "educator_identity": {"by": "educator", "channel": "driver",
+                                  "authorization": "edit for 60 minutes "
+                                                   "please, thanks"},
+            "source_utterance": "edit for 60 minutes please, thanks",
+            "granted_at": store.utc_now_iso(),
+            "expires_at": expires_at,
+            "duration_min": 60,
+            "revoked": False, "revoked_at": None, "revoke_reason": None,
+        })
+        state.pop("sig", None)
+        mode_state._save_state(self.user, state)
 
     def test_most_recent_action_wins(self):
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=30)
+        self._conversation_grant()
         self.assertEqual(store.effective_mode(self.user, self.conv), "edit")
         # A later explicit plan override for the conversation wins.
         store.set_conversation_mode(self.user, self.conv, "plan",
                                     educator_confirmed=True)
         self.assertEqual(store.effective_mode(self.user, self.conv), "plan")
 
-    def test_expired_session_falls_back(self):
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=5)
-        self.assertTrue(store.edit_session_active(self.user, self.conv))
-        # Sessions are modes timed grants (sealed files); force expiry by
-        # moving the modes clock past the grant's expiry.
-        import modes.state as mode_state
-        real_utcnow = mode_state._utcnow
-        mode_state._utcnow = lambda: real_utcnow() + timedelta(minutes=6)
-        try:
-            self.assertFalse(store.edit_session_active(self.user, self.conv))
-            self.assertEqual(store.effective_mode(self.user, self.conv),
-                             "plan")
-        finally:
-            mode_state._utcnow = real_utcnow
-
-    def test_end_edit_session_returns_to_default(self):
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=30)
-        self.assertTrue(store.end_edit_session(self.user, self.conv))
-        self.assertFalse(store.edit_session_active(self.user, self.conv))
+    def test_legacy_timed_grant_lapses_to_plan(self):
+        # A still-unexpired timed grant from an older install must not
+        # keep edit on, and must never become a standing grant.
+        future = (store.utc_now() + timedelta(hours=2)).isoformat()
+        self._legacy_timed_grant(future)
         self.assertEqual(store.effective_mode(self.user, self.conv), "plan")
-        self.assertFalse(store.end_edit_session(self.user, self.conv))
+        self.assertEqual(store.effective_mode(self.user), "plan")
+        self.assertEqual(store.get_setting(self.user, "default_mode"),
+                         "plan")
+
+    def test_end_edit_mode_turns_edit_off_everywhere(self):
+        from modes import state as mode_state
+        store.set_setting(self.user, "default_mode", "edit",
+                          educator_confirmed=True)
+        self._conversation_grant()
+        store.set_conversation_mode(self.user, "other-conv", "edit",
+                                    educator_confirmed=True)
+        result = mode_state.switch_mode(self.user, "plan",
+                                        conversation_id=self.conv)
+        self.assertEqual(result["mode"], "plan")
+        self.assertTrue(result["default_mode_changed"])
+        self.assertEqual(store.get_setting(self.user, "default_mode"),
+                         "plan")
+        for conv in (self.conv, "other-conv", None):
+            self.assertEqual(store.effective_mode(self.user, conv), "plan",
+                             msg=conv)
 
     def test_end_conversation_clears_scoped_state(self):
         store.set_conversation_mode(self.user, self.conv, "edit",
                                     educator_confirmed=True)
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=30)
+        self._conversation_grant()
         store.end_conversation(self.user, self.conv)
         self.assertIsNone(store.get_conversation_mode(self.user, self.conv))
-        self.assertFalse(store.edit_session_active(self.user, self.conv))
         self.assertEqual(store.effective_mode(self.user, self.conv), "plan")
 
     def test_destructive_confirmation_helper(self):
@@ -304,30 +331,25 @@ class SettingsTest(unittest.TestCase):
     def test_persistence_across_simulated_restart(self):
         """A fresh interpreter process sees persisted changes.
 
-        Timed edit sessions ARE modes grants: sealed and persisted, so
-        a restart inside the granted window keeps the session live
-        (expiry still bounds it). Per-conversation overrides stay
-        in-memory and do NOT survive a restart.
+        The standing edit default is persisted and survives a restart
+        with no expiry. Per-conversation overrides stay in-memory and
+        do NOT survive a restart.
         """
-        store.set_setting(self.user, "edit_grant_duration_min", 60,
+        store.set_setting(self.user, "default_mode", "edit",
                           educator_confirmed=True, educator="braden")
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=60)
-        store.set_conversation_mode(self.user, self.conv, "edit",
+        store.set_conversation_mode(self.user, self.conv, "plan",
                                     educator_confirmed=True)
+        self.assertEqual(store.effective_mode(self.user, self.conv), "plan")
         snippet = (
             "import sys; sys.path.insert(0, %r);"
             "from settings import store as s;"
-            "assert s.get_setting(%r, 'edit_grant_duration_min') == 60;"
-            "assert s.get_setting(%r, 'default_mode') == 'plan';"
-            "assert s.verify_audit(%r) == 3;"
-            "assert s.effective_mode(%r, %r) == 'edit';"  # grant persists
-            "assert s.edit_session_active(%r, %r);"
+            "assert s.get_setting(%r, 'default_mode') == 'edit';"
+            "assert s.verify_audit(%r) == 2;"
+            "assert s.effective_mode(%r, %r) == 'edit';"  # standing edit
             "assert s.get_conversation_mode(%r, %r) is None;"  # override gone
             "print('restart-ok')"
-            % (_TREE, self.user, self.user, self.user,
-               self.user, self.conv, self.user, self.conv,
-               self.user, self.conv))
+            % (_TREE, self.user, self.user,
+               self.user, self.conv, self.user, self.conv))
         proc = subprocess.run([sys.executable, "-c", snippet],
                               capture_output=True, text=True,
                               env=dict(os.environ),
@@ -361,22 +383,26 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(rec["old_value"], "plan")
         self.assertEqual(rec["new_value"], "edit")
 
-    def test_session_and_override_are_journaled(self):
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 educator="braden", duration_min=30)
+    def test_override_and_end_edit_are_journaled(self):
+        from modes import state as mode_state
+        store.set_setting(self.user, "default_mode", "edit",
+                          educator_confirmed=True, educator="braden")
         store.set_conversation_mode(self.user, self.conv, "plan",
                                     educator_confirmed=True,
                                     educator="braden")
+        mode_state.switch_mode(self.user, "plan", conversation_id=self.conv,
+                               educator="braden")
         records = store.read_audit(self.user)
-        self.assertEqual(len(records), 2)
-        self.assertEqual(records[0]["kind"], "settings.edit_session")
-        self.assertEqual(records[0]["old_value"], "plan")
-        self.assertEqual(records[0]["new_value"], "edit")
-        self.assertIn("expires_at", records[0])
+        self.assertEqual(len(records), 3)
         self.assertEqual(records[1]["kind"], "settings.conversation_mode")
         self.assertEqual(records[1]["new_value"], "plan")
         self.assertEqual(records[1]["educator"], "braden")
-        self.assertEqual(store.verify_audit(self.user), 2)
+        self.assertEqual(records[2]["kind"], "settings.change")
+        self.assertEqual(records[2]["key"], "default_mode")
+        self.assertEqual(records[2]["old_value"], "edit")
+        self.assertEqual(records[2]["new_value"], "plan")
+        self.assertEqual(records[2]["educator"], "braden")
+        self.assertEqual(store.verify_audit(self.user), 3)
 
     def test_educator_defaults_to_user_id(self):
         store.set_setting(self.user, "read_confirmations", True,
@@ -435,11 +461,11 @@ class SettingsTest(unittest.TestCase):
     def test_invalid_stored_value_fails_closed(self):
         path = store._settings_path(self.user)
         doc = {"version": 1, "change_count": 0,
-               "settings": {"edit_grant_duration_min": 9999}}
+               "settings": {"verbosity": "garbage"}}
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
         with self.assertRaises(store.SettingsCorrupt):
-            store.get_setting(self.user, "edit_grant_duration_min")
+            store.get_setting(self.user, "verbosity")
 
     def test_settings_file_is_private(self):
         store.set_setting(self.user, "verbosity", "concise",
@@ -485,7 +511,7 @@ class ParserTest(unittest.TestCase):
         self.user = "parser-user"
         self.conv = "parser-conv"
         # Session-scoped state: conversation overrides are process-global
-        # in-memory; timed sessions are modes grants (persisted, sealed).
+        # in-memory; conversation grants are persisted and sealed.
         # Reset both so each test starts clean.
         with store._SESSION_LOCK:
             store._CONVERSATION_MODES.clear()
@@ -535,10 +561,79 @@ class ParserTest(unittest.TestCase):
 
     def test_switch_to_plan_mode(self):
         op, reply = self._parse("switch to plan mode")
-        self.assertEqual(op["action"], "set")
-        self.assertEqual(op["key"], "default_mode")
+        self.assertEqual(op["action"], "end_edit")
         self.assertEqual(op["value"], "plan")
-        self.assertTrue(op["needs_confirmation"])
+        self.assertFalse(op["needs_confirmation"])
+        self.assertNotIn("Done", reply)
+
+    PLAN_PHRASES = [
+        "use plan mode", "stop edit mode", "end edit mode",
+        "exit edit mode", "leave edit mode", "back to plan mode",
+        "go back to plan mode", "turn off edit mode", "disable edit mode",
+        "deactivate edit mode", "switch to plan mode", "turn on plan mode",
+        "make plan mode my default", "stop editing without asking",
+    ]
+
+    def _enter_edit_everywhere(self):
+        from modes import state as mode_state
+        store.set_setting(self.user, "default_mode", "edit",
+                          educator_confirmed=True)
+        mode_state.request_edit_grant(
+            self.user, scope_type="conversation", conversation_id=self.conv,
+            educator_confirmation={
+                "by": "educator", "channel": "educator-chat",
+                "authorization": "yes, use edit mode for this conversation"})
+        store.set_conversation_mode(self.user, "other-conv", "edit",
+                                    educator_confirmed=True)
+
+    def test_plan_phrases_actually_put_educator_in_plan(self):
+        # The defect: these phrases used to end only timed sessions,
+        # leaving default_mode "edit" while the reply said "back on your
+        # saved default". Writes then ran unapproved.
+        from dispatch.admission import check_mode_authority
+        from modes import errors as mode_errors
+        entry = {"name": "canvas_create_page", "effects": "write",
+                 "provider": "canvas",
+                 "request": {"method": "POST", "url": "{canvas_base}"
+                             "/api/v1/courses/{course_id}/pages"}}
+        for phrase in self.PLAN_PHRASES:
+            self._enter_edit_everywhere()
+            self.assertEqual(store.effective_mode(self.user, self.conv),
+                             "edit", msg=phrase)
+            op, _ = self._parse(phrase)
+            self.assertEqual(op["action"], "end_edit", msg=phrase)
+            self.assertFalse(op["needs_confirmation"], msg=phrase)
+            reply = commands.apply_command(op, self.user, self.conv,
+                                           educator=self.user)
+            self.assertEqual(store.get_setting(self.user, "default_mode"),
+                             "plan", msg=phrase)
+            for conv in (self.conv, "other-conv", None):
+                self.assertEqual(store.effective_mode(self.user, conv),
+                                 "plan", msg="%s / %s" % (phrase, conv))
+            with self.assertRaises(mode_errors.PlanModeWriteWithoutApproval,
+                                   msg=phrase):
+                check_mode_authority(entry, {"course_id": "1"}, None,
+                                     {"user_id": self.user,
+                                      "conversation_id": self.conv})
+            self.assertIn("plan mode", reply, msg=phrase)
+            self.assertIn("ask for your approval", reply, msg=phrase)
+            self.assertNotIn("saved default", reply, msg=phrase)
+            self.assertNotIn("\u2014", reply, msg=phrase)
+
+    def test_apply_reports_the_true_mode(self):
+        # If something still holds edit on after the switch, the reply
+        # must say so instead of claiming plan mode.
+        from modes import state as mode_state
+        self._enter_edit_everywhere()
+        op, _ = self._parse("use plan mode")
+        real = mode_state.current_mode
+        mode_state.current_mode = lambda *a, **k: "edit"
+        try:
+            reply = commands.apply_command(op, self.user, self.conv)
+        finally:
+            mode_state.current_mode = real
+        self.assertIn("still in edit mode", reply)
+        self.assertNotIn("You are in plan mode", reply)
 
     def test_use_plan_mode_for_this_conversation(self):
         op, reply = self._parse("use plan mode for this conversation")
@@ -554,18 +649,23 @@ class ParserTest(unittest.TestCase):
         self.assertEqual(op["value"], "edit")
         self.assertTrue(op["needs_confirmation"])
 
-    def test_edit_sessions_duration(self):
-        op, reply = self._parse("set my edit sessions to 60 minutes")
-        self.assertEqual(op["action"], "set")
-        self.assertEqual(op["key"], "edit_grant_duration_min")
-        self.assertEqual(op["value"], 60)
-        self.assertTrue(op["needs_confirmation"])
-        self.assertIn("60 minutes", reply)
+    def test_edit_sessions_duration_explains_edit_is_not_timed(self):
+        for utterance in ("set my edit sessions to 60 minutes",
+                          "set my edit sessions to 500 minutes",
+                          "edit for 30 minutes",
+                          "give me edit mode for 2 hours"):
+            op, reply = self._parse(utterance)
+            self.assertEqual(op["action"], "invalid", msg=utterance)
+            self.assertFalse(op["needs_confirmation"], msg=utterance)
+            self.assertIn("no time limit", reply, msg=utterance)
+            self.assertIn("turn off edit mode", reply, msg=utterance)
 
-    def test_edit_sessions_duration_out_of_range(self):
-        op, reply = self._parse("set my edit sessions to 500 minutes")
-        self.assertEqual(op["action"], "invalid")
-        self.assertIn("5 and 480", reply)
+    def test_use_edit_mode_with_duration_says_it_is_not_timed(self):
+        op, reply = self._parse("use edit mode for 30 minutes")
+        self.assertEqual(op["key"], "default_mode")
+        self.assertEqual(op["value"], "edit")
+        self.assertTrue(op["needs_confirmation"])
+        self.assertIn("no time limit", reply)
 
     def test_stop_confirming_deletions(self):
         op, reply = self._parse("stop asking me to confirm deletions")
@@ -593,12 +693,14 @@ class ParserTest(unittest.TestCase):
         self.assertFalse(op["needs_confirmation"])
         self.assertIn("plan mode", reply)
 
-    def test_what_mode_am_i_in_during_session(self):
-        store.start_edit_session(self.user, self.conv, educator_confirmed=True,
-                                 duration_min=30)
+    def test_what_mode_am_i_in_standing_edit(self):
+        store.set_setting(self.user, "default_mode", "edit",
+                          educator_confirmed=True)
         op, reply = self._parse("what mode am I in")
         self.assertIn("edit mode", reply)
-        self.assertIn("timed edit session", reply)
+        self.assertIn("until you turn it off", reply)
+        self.assertNotIn("timed", reply)
+        self.assertNotIn(" left", reply)
 
     def test_be_more_concise(self):
         op, reply = self._parse("be more concise")
@@ -609,7 +711,7 @@ class ParserTest(unittest.TestCase):
 
     def test_end_edit_mode(self):
         op, reply = self._parse("end edit mode")
-        self.assertEqual(op["action"], "end_session")
+        self.assertEqual(op["action"], "end_edit")
         self.assertFalse(op["needs_confirmation"])
 
     def test_unknown_utterance(self):
@@ -790,10 +892,6 @@ class Lane4HardeningTest(unittest.TestCase):
         cases = [("turn on edit mode", "edit"),
                  ("enable edit mode", "edit"),
                  ("activate edit mode", "edit"),
-                 ("turn off edit mode", "plan"),
-                 ("disable edit mode", "plan"),
-                 ("deactivate edit mode", "plan"),
-                 ("turn on plan mode", "plan"),
                  ("disable plan mode", "edit")]
         for utterance, mode in cases:
             op, reply = self._parse(utterance)
@@ -801,6 +899,13 @@ class Lane4HardeningTest(unittest.TestCase):
             self.assertEqual(op["key"], "default_mode", msg=utterance)
             self.assertEqual(op["value"], mode, msg=utterance)
             self.assertTrue(op["needs_confirmation"], msg=utterance)
+        # Turning edit off is the safe direction: it applies at once,
+        # everywhere, with no confirmation round trip.
+        for utterance in ("turn off edit mode", "disable edit mode",
+                          "deactivate edit mode", "turn on plan mode"):
+            op, reply = self._parse(utterance)
+            self.assertEqual(op["action"], "end_edit", msg=utterance)
+            self.assertFalse(op["needs_confirmation"], msg=utterance)
 
     def test_what_is_default_mode(self):
         op, reply = self._parse("what is my default mode")
@@ -830,7 +935,6 @@ class Lane4HardeningTest(unittest.TestCase):
     def test_parser_confirmation_matches_schema(self):
         utterances = {
             "default_mode": "make edit mode my default",
-            "edit_grant_duration_min": "set my edit sessions to 60 minutes",
             "verbosity": "be more concise",
             "confirm_destructive_writes":
                 "stop asking me to confirm deletions",

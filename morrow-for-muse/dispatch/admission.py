@@ -1829,8 +1829,8 @@ def check_mode_authority(entry: dict, params: dict,
       - effective mode "plan": delegates to check_write_approval, so
         the existing frozen-plan + educator-signed v2 approval path is
         unchanged.
-      - edit mode with an expired grant: ModeGrantExpired.
-      - edit mode with a revoked grant: ModeGrantRevoked.
+      - a grant that ended (revoked, or a legacy timed grant from an
+        older install) is plan mode: the approval path above applies.
       - course resolution below confidence 0.9 without user
         confirmation: AmbiguousCourseWriteRefused (never write on a
         guessed course).
@@ -1890,16 +1890,6 @@ def check_mode_authority(entry: dict, params: dict,
             user_id, entry_name, course_id, op_id, code,
             "mode authority refused this write", auth=auth,
             resolution=resolution)
-        if code == "grant_expired":
-            raise mode_errors.ModeGrantExpired(
-                "edit grant %s expired before this write; the educator "
-                "must re-grant edit mode" % (auth.get("grant_id"),),
-                grant_id=auth.get("grant_id"), course_id=course_id)
-        if code == "grant_revoked":
-            raise mode_errors.ModeGrantRevoked(
-                "edit grant %s was revoked before this write"
-                % (auth.get("grant_id"),),
-                grant_id=auth.get("grant_id"), course_id=course_id)
         if code == "ambiguous_course":
             res = resolution if isinstance(resolution, dict) else {}
             raise mode_errors.AmbiguousCourseWriteRefused(

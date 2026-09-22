@@ -9,24 +9,25 @@ The mode model is simple: the ONLY difference between plan and edit mode
 is whether writes surface approval. Plan mode: writes require approval.
 Edit mode: they do not. Reads are unrestricted in both modes.
 
+Edit mode is ONE blanket grant with no time limit: it stays on until
+the educator turns it off. Turning it off means plan everywhere.
+
 Utterance mapping:
-  "switch to plan mode"                  -> default_mode = plan (persisted)
-  "switch to edit mode"                  -> default_mode = edit (persisted,
-                                           the standing edit grant)
-  "turn on edit mode" / "enable edit mode" -> default_mode = edit
-  "turn off edit mode" / "disable edit mode" -> default_mode = plan
-  "make edit mode my default"            -> default_mode = edit (persisted)
+  "use edit mode" / "switch to edit mode" / "turn on edit mode" /
+  "make edit mode my default"            -> default_mode = edit (the
+                                           standing edit grant, no
+                                           time limit)
+  "use plan mode" / "switch to plan mode" / "back to plan mode" /
+  "stop|end|exit edit mode" / "turn off edit mode"
+                                         -> end_edit: plan everywhere
+                                           (default_mode = plan, every
+                                           grant and override cleared)
   "what is my default mode"              -> reports the saved default
-  "use edit mode"                        -> default_mode = edit (standing,
-                                           no time limit; Braden's model)
   "switch to edit mode for this conversation" -> conversation override
                                            (any verb; "chat" also works)
   "use plan mode for this conversation"  -> conversation override = plan
   "use edit mode for this conversation"  -> conversation override = edit
-  "use plan mode" (bare)                 -> end session/override, back to
-                                           default
-  "end edit mode"                        -> end the edit session
-  "set my edit sessions to 60 minutes"   -> edit_grant_duration_min = 60
+  "edit for 30 minutes"                  -> explains edit is not timed
   "stop asking me to confirm deletions"  -> confirm_destructive_writes = off
   "ask me before bulk actions"           -> confirm_bulk_actions = on
   "don't ask before bulk actions"        -> confirm_bulk_actions = off
@@ -48,7 +49,11 @@ Consequential changes (anything that changes whether writes surface
 approval, plus the destructive-writes guardrail) come back with
 needs_confirmation=True: the agent must echo the confirmation sentence
 to the educator and only proceed with educator_confirmed=True after the
-educator says yes. is_confirmation() recognizes that yes.
+educator says yes. is_confirmation() recognizes that yes. Turning edit
+mode off is the safe direction and applies at once.
+
+apply_command(op, ...) carries out a parsed op and returns the sentence
+to speak, built from the state AFTER the change (never assumed).
 
 No em dashes anywhere in spoken text: commas, colons, or parentheses
 only.
@@ -62,15 +67,15 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 ".."))
+from modes import state as mode_state  # noqa: E402
 from settings.store import (  # noqa: E402
-    EDIT_GRANT_DURATION_MAX,
-    EDIT_GRANT_DURATION_MIN,
     SETTINGS_SCHEMA,
-    edit_session_remaining,
     effective_mode,
     get_conversation_mode,
     get_setting,
     list_settings,
+    set_conversation_mode,
+    set_setting,
 )
 
 
@@ -81,15 +86,8 @@ def _norm(text):
     return text
 
 
-def _minutes_sentence(minutes):
-    return "1 minute" if minutes == 1 else "%d minutes" % minutes
-
-
-def _session_duration_for(user_id):
-    try:
-        return get_setting(user_id, "edit_grant_duration_min")
-    except Exception:
-        return 30
+_NOT_TIMED = ("Edit mode has no time limit: it stays on until you say "
+              "'turn off edit mode'.")
 
 
 def _destructive_note(user_id):
@@ -105,25 +103,16 @@ def _destructive_note(user_id):
             "writes will not ask either.")
 
 
-def _echo_default_mode(mode, user_id):
-    if mode == "plan":
-        return (
-            "Switching your default mode to plan. Writes will surface "
-            "approval again. Say 'yes' to confirm, or 'cancel'.")
+def _echo_default_mode(mode, user_id, timed_ask=False):
+    lead = ""
+    if timed_ask:
+        lead = ("You mentioned a time limit, but edit mode is not "
+                "timed. ")
     return (
-        "Making edit mode your default. This is a standing edit grant, "
+        "%sMaking edit mode your default. This is a standing edit grant, "
         "and it is journaled: from now on, writes will not surface "
-        "approval. %s Say 'yes' to confirm, or 'cancel'."
-        % _destructive_note(user_id))
-
-
-def _echo_session(user_id):
-    minutes = _session_duration_for(user_id)
-    return (
-        "Starting an edit session for the next %s: writes will not "
-        "surface approval until it ends. %s Say 'yes' to confirm, or "
-        "'cancel'." % (_minutes_sentence(minutes),
-                       _destructive_note(user_id)))
+        "approval. %s %s Say 'yes' to confirm, or 'cancel'."
+        % (lead, _NOT_TIMED, _destructive_note(user_id)))
 
 
 def _echo_conversation(mode, user_id):
@@ -143,13 +132,12 @@ def _echo_conversation(mode, user_id):
         "to confirm, or 'cancel'." % default)
 
 
-def _echo_duration(user_id, minutes):
+def _explain_not_timed():
     return (
-        "Setting your timed edit sessions to %s. This only affects "
-        "explicitly requested timed sessions (e.g. 'edit for 30 "
-        "minutes'); saying 'use edit mode' gives you the standing edit "
-        "mode with no time limit. Say 'yes' to confirm, or "
-        "'cancel'." % _minutes_sentence(minutes))
+        "Edit mode has no time limit, so there is no session length to "
+        "set. Say 'use edit mode' to turn it on; it stays on until you "
+        "say 'turn off edit mode', and then every write asks for your "
+        "approval again.")
 
 
 def _echo_destructive_off():
@@ -238,6 +226,28 @@ def _extract_timezone(text):
     return _canonical_timezone(m.group(1))
 
 
+def _edit_sources(user_id, conversation_id):
+    """Plain-language list of what currently holds edit mode on."""
+    why = []
+    override = get_conversation_mode(user_id, conversation_id) \
+        if conversation_id else None
+    if override == "edit":
+        why.append("your edit override for this conversation")
+    try:
+        grant = mode_state._live_grant(user_id,
+                                       conversation_id=conversation_id)
+    except Exception:
+        grant = None
+    if grant is not None:
+        why.append("the edit grant you gave for this conversation")
+    try:
+        if get_setting(user_id, "default_mode") == "edit":
+            why.append("your saved default")
+    except Exception:
+        pass
+    return why
+
+
 def _status_sentence(user_id, conversation_id):
     try:
         mode = effective_mode(user_id, conversation_id)
@@ -248,33 +258,26 @@ def _status_sentence(user_id, conversation_id):
         default = get_setting(user_id, "default_mode")
     except Exception:
         default = "plan"
-    left = edit_session_remaining(user_id, conversation_id)
     override = get_conversation_mode(user_id, conversation_id) \
         if conversation_id else None
     if mode == "plan":
-        base = ("You are in plan mode right now: writes surface approval, "
-                "reads never need it.")
-    else:
-        base = ("You are in edit mode right now: writes do not surface "
-                "approval, reads never need it.")
-    why = []
-    if left > 0:
-        mins = max(1, int(round(left / 60.0)))
-        why.append("a timed edit session with about %s left"
-                   % _minutes_sentence(mins))
-    if override:
-        why.append("your per-conversation override")
-    if not why:
-        why.append("your saved default")
-    sentence = "%s That comes from %s." % (base, " and ".join(why))
-    if mode != default or left > 0 or override:
-        sentence += " Your saved default is %s mode." % default
-    return sentence
+        sentence = ("You are in plan mode right now: writes ask for your "
+                    "approval, reads never need it.")
+        if override == "plan":
+            sentence += (" That comes from your plan override for this "
+                         "conversation. Your saved default is %s mode."
+                         % default)
+        return sentence
+    why = _edit_sources(user_id, conversation_id) or ["your saved default"]
+    return ("You are in edit mode right now: writes do not ask for "
+            "approval, reads never need it. That comes from %s, and it "
+            "stays on until you turn it off. Say 'turn off edit mode' "
+            "whenever you want every write to ask first."
+            % " and ".join(why))
 
 
 _SETTING_LABELS = {
     "default_mode": "Default mode",
-    "edit_grant_duration_min": "Edit session length",
     "verbosity": "Verbosity",
     "confirm_destructive_writes": "Deletion confirmations",
     "write_approval_style": "Write approval style",
@@ -290,8 +293,6 @@ _SETTING_LABELS = {
 
 
 def _friendly_value(key, value):
-    if key == "edit_grant_duration_min":
-        return _minutes_sentence(value) if isinstance(value, int) else value
     if key == "write_approval_style":
         return {"per_write": "one per write",
                 "batched": "batched"}.get(value, value)
@@ -321,46 +322,44 @@ def _show_sentence(user_id, conversation_id):
         label = _SETTING_LABELS.get(key, key)
         value = _friendly_value(key, info["value"])
         lines.append("- %s: %s%s" % (label, value, marker))
-    left = edit_session_remaining(user_id, conversation_id)
-    if left > 0:
-        lines.append("- edit session: active, about %s left (not a saved "
-                     "setting)" % _minutes_sentence(max(1, int(round(left / 60.0)))))
     override = get_conversation_mode(user_id, conversation_id) \
         if conversation_id else None
     if override:
         lines.append("- this conversation: %s mode override (not saved)"
                      % override)
-    lines.append("Say 'use edit mode', 'switch to plan mode', or 'set my "
-                 "edit sessions to 60 minutes' to change anything.")
+    lines.append("Say 'use edit mode', 'turn off edit mode', or 'use plan "
+                 "mode for this conversation' to change your mode, or name "
+                 "any other setting to change it.")
     return " ".join(lines)
 
 
-_DURATION_PATTERNS = [
-    # "set my edit sessions to 60 minutes"
-    re.compile(r"edit\s+sessions?.*?(\d+)\s*(?:minutes?|mins?)\b"),
-    # "set my edit grant duration to 45 minutes" (legacy phrasing)
-    re.compile(r"edit\s+grant\s+(?:default\s+)?duration.*?(\d+)\s*"
-               r"(?:minutes?|mins?)\b"),
+_TIME_LIMIT = re.compile(
+    r"\b\d+\s*(?:minutes?|mins?|hours?|hrs?)\b|\ban?\s+hour\b|"
+    r"\bedit\s+sessions?\b|\bedit\s+grant\s+(?:default\s+)?duration\b")
+
+# Phrases that mean "edit off". Every one of them lands in plan mode
+# everywhere; none of them may leave a standing edit default behind.
+_PLAN_DIRECTION = [
+    re.compile(r"\buse\s+plan\s+mode\b"),
+    re.compile(r"\b(end|stop|exit|leave|quit|cancel)\b.{0,12}\bedit\s+"
+               r"(mode|session)s?\b"),
+    re.compile(r"\bedit\s+(mode|session)s?\b.{0,12}\b(end|over|stop|off)\b"),
+    re.compile(r"\bback\s+to\s+plan\b"),
+    re.compile(r"\b(stop|quit)\s+editing\b"),
+    re.compile(r"\b(turn\s+off|disable|deactivate)\b.{0,24}\bedit\s+mode\b"),
+    re.compile(r"\b(switch|change|go|move|set|make|turn\s+on|enable|"
+               r"activate)\b.{0,24}\bplan\s+mode\b"),
 ]
 
-# Bounds come from the store schema constants so the two can never drift.
-_DURATION_MIN = EDIT_GRANT_DURATION_MIN
-_DURATION_MAX = EDIT_GRANT_DURATION_MAX
 
-
-def _parse_duration(text):
-    for pat in _DURATION_PATTERNS:
-        m = pat.search(text)
-        if m:
-            return int(m.group(1))
-    return None
+def _is_plan_direction(t):
+    return any(p.search(t) for p in _PLAN_DIRECTION)
 
 
 def _help_sentence():
     return (
-        "Here is what you can ask me to change: 'use edit mode', 'make "
-        "edit mode my default', 'switch to plan mode', 'use plan mode "
-        "for this conversation', 'set my edit sessions to 60 minutes', "
+        "Here is what you can ask me to change: 'use edit mode', 'turn "
+        "off edit mode', 'use plan mode for this conversation', "
         "'stop asking me to confirm deletions', 'my default course is "
         "12345', 'my timezone is Eastern', 'ask me before bulk actions', "
         "'clean up test objects when done', 'keep work summaries brief', "
@@ -374,9 +373,10 @@ def parse_command(text, user_id=None, conversation_id=None):
     Returns (op, reply) where op is
     {"action", "key", "value", "needs_confirmation"} and reply is the
     plain-language sentence the agent speaks back. Actions: "set" (a
-    persisted setting), "session" (start a timed edit session),
-    "conversation" (per-conversation override), "end_session" (back to
-    default), "show", "status", "invalid", "unknown".
+    persisted setting), "conversation" (per-conversation override),
+    "end_edit" (edit off: plan everywhere), "show", "status",
+    "invalid", "unknown". Carry out "set", "conversation", and
+    "end_edit" with apply_command, and speak the sentence it returns.
 
     needs_confirmation for "set" actions always comes from the schema's
     consequential flag, so the parser can never drift from it.
@@ -420,26 +420,22 @@ def _parse_command_inner(text, user_id=None, conversation_id=None):
               "value": conv_mode, "needs_confirmation": True}
         return op, _echo_conversation(conv_mode, user_id)
 
+    # --- edit off: plan everywhere ---------------------------------------
+    if _is_plan_direction(t):
+        op = {"action": "end_edit", "key": "default_mode", "value": "plan",
+              "needs_confirmation": False}
+        return op, ("Turning edit mode off everywhere. I will tell you "
+                    "the result as soon as it is done.")
+
+    timed_ask = bool(re.search(r"\bedit", t) and _TIME_LIMIT.search(t))
+
     # --- standing edit grant: bare "use edit mode" ----------------------
     # Braden's model: no time handcuffs. "use edit mode" grants the
-    # standing edit mode (default_mode="edit"), not a timed session.
-    # Timed sessions remain available via explicit duration settings.
+    # standing edit mode (default_mode="edit"), with no time limit.
     if re.search(r"\buse\s+edit\s+mode\b", t):
         op = {"action": "set", "key": "default_mode", "value": "edit",
               "needs_confirmation": True}
-        return op, _echo_default_mode("edit", user_id)
-
-    # --- back to default: "use plan mode" bare / "end edit mode" ---------
-    if re.search(r"\buse\s+plan\s+mode\b", t) or \
-            re.search(r"\b(end|stop|exit|leave)\b.{0,12}\bedit\s+"
-                      r"(mode|session)\b", t) or \
-            re.search(r"\bedit\s+session\b.{0,12}\b(end|over|stop)\b", t) or \
-            re.search(r"\bback\s+to\s+plan\s+mode\b", t):
-        op = {"action": "end_session", "key": "edit_session",
-              "value": None, "needs_confirmation": False}
-        reply = ("Done: any edit session or conversation override is "
-                 "ended. You are back on your saved default.")
-        return op, reply
+        return op, _echo_default_mode("edit", user_id, timed_ask)
 
     # --- "what is my default mode" --------------------------------------
     if re.search(r"\bdefault\s+mode\b", t) and \
@@ -453,36 +449,27 @@ def _parse_command_inner(text, user_id=None, conversation_id=None):
               "needs_confirmation": False}
         return op, ("Your saved default mode is %s." % default)
 
-    # --- persisted default mode ------------------------------------------
+    # --- persisted default mode: edit on ----------------------------------
+    # Plan-direction phrasings were handled above, so what reaches here
+    # names edit mode (or negates plan mode, "disable plan mode").
     m = re.search(r"\b(switch|change|make|set|default|turn\s+on|turn\s+off|"
                   r"enable|disable|activate|deactivate)\b.{0,24}\b"
                   r"(plan|edit)\s+mode\b", t)
     if m and re.search(r"\bmode\b", t):
         verb = re.sub(r"\s+", " ", m.group(1))
         mode = m.group(2)
-        # Negating verbs flip the named mode: "turn off edit mode"
-        # means plan, "disable plan mode" means edit.
         if verb in ("turn off", "disable", "deactivate"):
             mode = "plan" if mode == "edit" else "edit"
-        op = {"action": "set", "key": "default_mode", "value": mode,
-              "needs_confirmation": True}
-        return op, _echo_default_mode(mode, user_id)
+        if mode == "edit":
+            op = {"action": "set", "key": "default_mode", "value": "edit",
+                  "needs_confirmation": True}
+            return op, _echo_default_mode("edit", user_id, timed_ask)
 
-    # --- edit session duration --------------------------------------------
-    minutes = _parse_duration(t)
-    if minutes is not None:
-        if minutes < _DURATION_MIN or minutes > _DURATION_MAX:
-            op = {"action": "invalid",
-                  "key": "edit_grant_duration_min",
-                  "value": minutes, "needs_confirmation": False}
-            reply = (
-                "I cannot set that: edit sessions must last between 5 "
-                "and 480 minutes. You asked for %s."
-                % _minutes_sentence(minutes))
-            return op, reply
-        op = {"action": "set", "key": "edit_grant_duration_min",
-              "value": minutes, "needs_confirmation": True}
-        return op, _echo_duration(user_id, minutes)
+    # --- a time limit on edit mode: explain, never pretend -----------------
+    if timed_ask:
+        op = {"action": "invalid", "key": "default_mode", "value": None,
+              "needs_confirmation": False}
+        return op, _explain_not_timed()
 
     # --- destructive-writes guardrail --------------------------------------
     if re.search(r"\bdelet", t) or re.search(r"\bdestructive", t):
@@ -689,6 +676,59 @@ def _parse_command_inner(text, user_id=None, conversation_id=None):
     reply = (
         "I did not catch a settings change in that. " + _help_sentence())
     return op, reply
+
+
+def _plan_result_sentence(result, user_id, conversation_id):
+    if result.get("mode") == "plan":
+        return ("Done: you are in plan mode now. Edit mode is off in "
+                "every conversation and as your default, so every write "
+                "will ask for your approval before it runs. Reads still "
+                "never need approval. Say 'use edit mode' to turn it back "
+                "on.")
+    why = _edit_sources(user_id, conversation_id)
+    held = (" by %s" % " and ".join(why)) if why else ""
+    return ("I turned off every edit grant I could, but you are still in "
+            "edit mode, held on%s. Writes will not ask for approval until "
+            "that is cleared. Say 'show me my settings' and I will show "
+            "you exactly what is set." % held)
+
+
+def apply_command(op, user_id, conversation_id=None,
+                  educator_confirmed=False, educator=None):
+    """Carry out a parsed op and return the sentence to speak.
+
+    The sentence is built from the state after the change, so it never
+    claims a mode that is not in force. "set" and "conversation" ops
+    with needs_confirmation=True need educator_confirmed=True (the
+    educator's yes), or the store raises SettingsTamperRefused.
+    "end_edit" is the safe direction and applies at once. Ops with
+    nothing to apply (show, status, invalid, unknown) return None:
+    speak the parse reply.
+    """
+    action = op.get("action")
+    if action == "end_edit":
+        result = mode_state.switch_mode(user_id, "plan",
+                                        conversation_id=conversation_id,
+                                        educator=educator)
+        return _plan_result_sentence(result, user_id, conversation_id)
+    if action == "conversation":
+        set_conversation_mode(user_id, conversation_id, op["value"],
+                              educator_confirmed=educator_confirmed,
+                              educator=educator)
+        mode = effective_mode(user_id, conversation_id)
+        return ("Done: for this conversation you are in %s mode. %s"
+                % (mode, _status_sentence(user_id, conversation_id)))
+    if action == "set":
+        key, value = op["key"], op["value"]
+        set_setting(user_id, key, value,
+                    educator_confirmed=educator_confirmed,
+                    educator=educator)
+        if key == "default_mode":
+            return "Done. " + _status_sentence(user_id, conversation_id)
+        return ("Done: %s is now %s."
+                % (_SETTING_LABELS.get(key, key),
+                   _friendly_value(key, get_setting(user_id, key))))
+    return None
 
 
 YES_PATTERNS = re.compile(

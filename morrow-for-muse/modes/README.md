@@ -24,19 +24,21 @@ is refused as ambiguous, in every mode path that carries a resolution.
 
 ## Grant model
 
-Grant = `{grant_id, educator_identity (bound), granted_at, expires_at,
-revoked flag, scope_type, source_utterance}`.
+Edit mode is NOT timed (Braden's rule): it stays on until the educator
+turns it off. Nothing about it expires on a clock.
 
-`scope_type`:
-- `"timed"`: an explicit timed session request (e.g., "give me a 60-minute
-  edit session"). Expires after `duration_min` (explicit, else the
-  `edit_grant_duration_min` setting, else 30 minutes; capped at 24 hours).
-  Bare "use edit mode" is now a standing grant, not a timed session.
-- `"conversation"`: "use edit mode for this conversation". No time
-  expiry (`expires_at` is null); lives until revoked. The session
-  owner revokes on session end (e.g. `switch_mode(user, "plan")`).
-- `"standing"`: not a grant record. The educator set `default_mode`
-  to `"edit"` in settings themselves. Persistent until changed.
+Grant = `{grant_id, educator_identity (bound), granted_at, revoked
+flag, scope_type, conversation_id, source_utterance}`.
+
+- `"conversation"` is the only grantable `scope_type`: "use edit mode
+  for this conversation". No expiry; lives until revoked
+  (`switch_mode(user, "plan")`, or `settings.end_conversation`).
+- Standing edit mode is not a grant record: the educator set
+  `default_mode` to `"edit"` in settings ("use edit mode"). It stays on
+  until they turn it off.
+- Legacy `"timed"` grants persisted by older installs are never live:
+  they lapse to plan mode (writes ask for approval). They are not
+  honored and never converted into a standing grant.
 
 The grant STILL requires an educator-issued confirmation:
 `{"by": "educator", "authorization": "<verbatim educator utterance,
@@ -66,11 +68,10 @@ there is no second resolver). Most-recent-wins among the educator's
 explicit actions:
 
 1. A settings conversation override for this conversation.
-2. A live timed grant.
-3. A live conversation grant applying to this conversation.
-4. Else the educator's standing `default_mode == "edit"` -> `"edit"`
+2. A live conversation grant applying to this conversation.
+3. Else the educator's standing `default_mode == "edit"` -> `"edit"`
    (standing).
-5. Else `"plan"`.
+4. Else `"plan"`.
 
 On equal timestamps the explicit per-conversation override wins (the
 safe direction when it says "plan"). `current_mode` raises
@@ -79,9 +80,7 @@ does not verify or a stored setting value is invalid.
 
 Conversation overrides are in-memory, per (user, conversation), and
 are cleared by `settings.end_conversation(user_id, conversation_id)`,
-which also revokes grants bound to that conversation. Timed grants
-created through settings (`start_edit_session`) are real persisted
-mode grants, optionally bound to a conversation id.
+which also revokes grants bound to that conversation.
 
 ## Write authority
 
@@ -91,8 +90,6 @@ mode grants, optionally bound to a conversation id.
 | decision | reason_code | meaning |
 |---|---|---|
 | `allow` | `ok` | edit mode (live grant or standing), course unambiguous |
-| `refuse` | `grant_expired` | the latest grant lapsed |
-| `refuse` | `grant_revoked` | the latest grant was revoked |
 | `refuse` | `ambiguous_course` | resolution confidence < 0.9 without user confirmation |
 | `defer` | `plan_mode_approval_required` | plan mode: run the frozen-plan + educator-signed v2 approval path |
 
@@ -104,15 +101,14 @@ duty stays with the agent.
 
 `authorize_write(...)` honors the same most-recent-action result as
 `current_mode(...)`: a later conversation override of plan defeats an
-earlier live timed grant, and a later educator-issued grant defeats an
+earlier live grant, and a later educator-issued grant defeats an
 older override only in the conversation it applies to. Both go
 through `_newest_authority(...)`; there is no grant-alone path. An
 educator-confirmed edit override with no live grant admits with
 override-sourced auth context (`scope_type="conversation_override"`).
-A newer plan override also supersedes a stale grant's expiry or
-revocation: the educator explicitly chose the plan path, so the stale
-refusal does not apply (without an override, expiry and revocation
-still refuse).
+A grant that ended (revoked, or a legacy timed grant) is plain plan
+mode: the write defers to the approval path, and an educator-signed
+approval lands. It is never refused because of the ended grant.
 
 `authorize_write(...)` is the same decision plus the auth context
 (grant id, revision, scope type, educator identity) that the admission
@@ -155,8 +151,7 @@ plan-mode approval path.
   requirement for edit-mode writes (the frozen plan is the plan-mode
   ceremony's artifact); every other write gate (halt, quarantine,
   op-id claim, concurrency) still applies.
-- Edit mode, expired/revoked grant, or ambiguous course: raises
-  `ModeGrantExpired`, `ModeGrantRevoked`, or
+- Edit mode with an ambiguous course: raises
   `AmbiguousCourseWriteRefused`.
 - Destructive writes (HTTP DELETE, or entries explicitly marked
   destructive) in edit mode: when the educator's
@@ -182,51 +177,53 @@ lives inside the deploy tree. `user_id` is restricted to
 ## Journal events (tree journal, educator identity bound)
 
 - `mode.grant_issued`: grant_id, revision, scope_type, educator
-  identity, granted_at, expires_at, source utterance.
+  identity, granted_at, source utterance.
 - `mode.grant_revoked`: grant_id, revision, scope_type, educator
   identity, reason (explicit revoke, `switch_mode:plan`, or
   `superseded by grant <id>`).
-- `mode.grant_expired`: journaled once, on first observation of the
-  lapse.
 - `mode.write_admitted`: one per edit-mode write admitted under a
   grant (or standing): entry, course_id, op_id, grant id/revision,
   educator identity, resolution confidence when supplied.
 - `mode.write_refused`: one per mode refusal with the reason code.
-- `mode.switched_to_plan`: switch events with the revoked count.
+- `mode.switched_to_plan`: switch events with the revoked-grant count,
+  the cleared-override count, and whether the standing default changed.
 
 ## Settings contract (`settings/store.py`)
 
-- `get_setting(user_id, key)` -> stored value, or `None` when unset.
+- `get_setting(user_id, key)` -> stored value, or the schema default.
   Raises only on backend failure.
-- `set_setting(user_id, key, value)` persists the value (consequential
-  keys require `educator_confirmed=True`, else `SettingsTamperRefused`).
-  Raises on failure.
+- `set_setting(user_id, key, value, educator_confirmed, educator=None)`
+  persists the value (consequential keys require
+  `educator_confirmed=True`, else `SettingsTamperRefused`). Raises on
+  failure.
 - Keys: `"default_mode"` (`"plan"` | `"edit"`; standing default),
-  `"edit_grant_duration_min"` (int minutes; timed-grant default),
   `"verbosity"`, `"confirm_destructive_writes"` (bool; destructive
   writes in edit mode need explicit confirmation),
   `"write_approval_style"`, `"failure_verbosity"`, `"proactivity"`,
   `"read_confirmations"`.
 - `settings.effective_mode(user_id, conversation_id)` delegates to
   `modes.state.current_mode`: one resolver, no second authority.
-- `start_edit_session(...)` with educator confirmation creates a real
-  persisted mode grant (optionally conversation-bound), not a separate
-  session record. `end_conversation(...)` clears the in-memory
-  override and revokes conversation-bound grants.
-- `switch_mode(user, "plan")` revokes live grants for the session but
-  does NOT rewrite the educator's persisted `default_mode`: changing
-  the saved default is a separate educator-confirmed settings
-  ceremony.
+- `end_conversation(...)` clears the in-memory override and revokes
+  conversation-bound grants. `clear_conversation_overrides(user_id)`
+  clears every override for the educator.
+- `switch_mode(user, "plan")` turns edit off everywhere: it revokes
+  every live grant, clears every per-conversation override, and sets a
+  standing `default_mode` of `"edit"` back to `"plan"` (journaled in
+  the settings audit; the safe direction needs no confirmation). It
+  returns the re-resolved mode, so callers report what is in force.
+  `settings.commands.apply_command` is the conversational entry point.
 
 ## Failure modes (Workstream C maps these by name)
 
-`modes/errors.py`: `ModeSelfGrantRefused`, `ModeGrantExpired`,
-`ModeGrantRevoked`, `AmbiguousCourseWriteRefused`, `ModeSettingsTamper`,
+`modes/errors.py`: `ModeSelfGrantRefused`,
+`AmbiguousCourseWriteRefused`, `ModeSettingsTamper`,
 `DestructiveConfirmationRequired`, `PlanModeWriteWithoutApproval`
 (all under the `ModeError` base). Scalar constructor/attribute
 evidence (`grant_id`, `course_id`, `query`, `candidates_public`,
 `setting_name`, `mode`) is merged by the translator. `ModeOutOfScope`
 and `ModeCategoryDenied` were dropped: no scopes exist in this model.
+`ModeGrantExpired` and `ModeGrantRevoked` were dropped: edit mode is
+not timed, and an ended grant is plan mode, not a refusal.
 Plan mode keeps the existing `WriteApprovalMissing` /
 `ApprovalMismatch` path underneath; the mode gate wraps the missing
 case in `PlanModeWriteWithoutApproval` so the educator sees the

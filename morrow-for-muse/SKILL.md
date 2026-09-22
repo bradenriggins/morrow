@@ -294,13 +294,20 @@ both modes.
   mode. Setting it to edit IS the standing edit grant: journaled,
   educator-confirmed, and stated plainly as such. There is no separate
   grant standing between the educator and edit mode.
-- Layered overrides, most recent explicit action wins: a standing edit
-  grant ("use edit mode", sets `default_mode` to edit, no time limit),
-  then a per-conversation override ("use edit mode for
-  this conversation", never persisted), then the persisted default.
-  Standing grants are persisted tamper-sealed mode grants (they survive
-  a restart); only per-conversation overrides are in-memory, failing
-  safe toward plan mode on restart. Resolve with
+- Edit mode is ONE blanket grant and it is NOT timed: it stays on
+  until the educator turns it off. Never offer, promise, or imply a
+  time limit. An old install's saved timed grant is not honored; it
+  lapses to plan mode.
+- Turning edit off ("turn off edit mode", "stop edit mode", "use plan
+  mode", "back to plan mode") means plan everywhere: `default_mode`
+  goes back to plan and every grant and per-conversation override is
+  cleared (`modes.state.switch_mode(user_id, "plan")`). It applies at
+  once, with no confirmation round trip.
+- Most recent explicit action wins between a per-conversation override
+  ("use edit mode for this conversation", never persisted) and the
+  persisted default. The default is tamper-sealed and survives a
+  restart; per-conversation overrides are in-memory, failing safe
+  toward plan mode on restart. Resolve with
   `modes.state.current_mode(user_id, conversation_id)` (the single
   authoritative resolver; `settings.store.effective_mode` delegates to
   it); Agent A's contract `settings.store.get_setting(user_id, key)`
@@ -310,27 +317,25 @@ both modes.
   and edit differ ONLY in whether writes surface approval. Reads never
   need approval in either mode, and edit never surfaces per-write
   approval, including for destructive writes. `confirm_destructive_writes`
-  is now an opt-in guardrail (default off, matching the model; the
-  educator can turn it on with "ask me to confirm deletions"). The two
-  stale tests still asserting the old default-on behavior
-  (modes/test_modes_integration.py::test_destructive_write_needs_confirmation,
-  settings/test_settings.py::test_destructive_confirmation_helper) belong
-  to the lane that flipped the default; they need updating there, not
-  here.
-- The agent can never grant itself edit mode, start an edit session,
-  or change a consequential setting: consequential changes require
+  is an opt-in guardrail (default off, matching the model; the
+  educator can turn it on with "always confirm deletions").
+- The agent can never grant itself edit mode or change a
+  consequential setting: consequential changes require
   educator_confirmed=True (SettingsTamperRefused otherwise), echoed in
   plain language before applying.
 - Every change is journaled to `~/.morrow/settings/<user_id>.changes.jsonl`
   with old value, new value, and educator identity (hash-chained,
   tamper-evident). Settings live under `~/.morrow/settings/`, never in
   the tree, and survive restarts and reinstalls.
-- Conversational control: "use edit mode", "make edit mode my default",
-  "switch to plan mode", "use plan mode for this conversation", "set my
-  edit sessions to 60 minutes", "stop asking me to confirm deletions",
-  "show me my settings", "what mode am I in", "be more concise". Parsed
-  by `settings/commands.py`; consequential utterances return
-  needs_confirmation=True and the agent echoes before applying.
+- Conversational control: "use edit mode", "turn off edit mode",
+  "use plan mode for this conversation", "stop asking me to confirm
+  deletions", "show me my settings", "what mode am I in", "be more
+  concise". Parse with `settings.commands.parse_command`; consequential
+  utterances return needs_confirmation=True and the agent echoes before
+  applying. Carry out an op with `settings.commands.apply_command(op,
+  user_id, conversation_id, educator_confirmed=<educator said yes>)`
+  and speak the sentence it returns: it is built from the mode actually
+  in force after the change.
 - Other knobs, all user-settable: `verbosity` (concise | balanced |
   detailed, default balanced), `write_approval_style` (per_write |
   batched, default per_write), `failure_verbosity` (concise | detailed,
@@ -373,7 +378,7 @@ relay, and every row not marked live-proven. Full declaration:
   `egress.py`, `proxy_forwarder.py`) and its selftests.
 - `dispatch/`: the governed executor, the admission gate, the policy, selftests.
 - `settings/`: the conversational settings system (`store.py`,
-  `commands.py`, `test_settings.py`, `README.md`): modes, edit sessions,
+  `commands.py`, `test_settings.py`, `README.md`): modes,
   per-conversation overrides, and every behavioral knob, all
   educator-settable in plain language.
 - `helper/`: the Canvas Login Helper server, UI, and keepalive, plus

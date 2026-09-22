@@ -23,17 +23,12 @@ module's effective_mode delegates to):
   1. Per-conversation override ("use plan/edit mode for this
      conversation"): lasts for that conversation only, never persisted.
      Held in memory; modes consults it via get_conversation_override.
-  2. Timed edit session (explicit duration request, e.g. "edit for
-     30 minutes"): a modes timed grant, sealed
-     and persisted under MORROW_HOME, journaled, bound to the
-     conversation when one is given. Survives restarts inside its
-     granted window; expiry still bounds it. Started only with educator
-     confirmation; the agent can never grant itself a session.
-     (Bare "use edit mode" is NOT timed; it sets default_mode="edit",
-     standing with no expiry.)
-  3. default_mode: the persisted default. Setting it to "edit" IS the
+     A modes conversation grant plays the same role, persisted.
+  2. default_mode: the persisted default. Setting it to "edit" IS the
      standing edit grant: journaled, educator-confirmed, plainly
-     documented.
+     documented. It is NOT timed: it stays on until the educator turns
+     edit mode off (modes.state.switch_mode("plan"), which also clears
+     every grant and override).
 
 Contract (modes/state.py, the mode authority):
     from modes.state import current_mode, check_write_authority
@@ -61,10 +56,9 @@ closed in verify_audit().
 
 Conventions:
 - Consequential changes (marked in SETTINGS_SCHEMA, plus conversation
-  overrides and edit sessions) require educator_confirmed=True;
-  otherwise SettingsTamperRefused is raised. The agent can never grant
-  itself edit mode, start an edit session, or flip a consequential
-  setting on its own.
+  overrides) require educator_confirmed=True; otherwise
+  SettingsTamperRefused is raised. The agent can never grant itself
+  edit mode or flip a consequential setting on its own.
 - Fail closed: an unreadable or corrupt settings file raises
   SettingsCorrupt rather than silently resetting to defaults.
 - Atomic writes: tmp file + fsync + os.replace, 0600. A crash
@@ -84,15 +78,13 @@ import re
 import sys
 import threading
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 ".."))
 from config.paths import morrow_home  # noqa: E402
 from modes.state import (  # noqa: E402
     current_mode as _modes_current_mode,
-    edit_session_remaining as _modes_session_remaining,
-    request_edit_grant as _modes_request_grant,
     revoke_edit_grant as _modes_revoke_grant,
 )
 
@@ -145,32 +137,11 @@ class SettingsAuditError(SettingsError):
 # the dispatch layer, not in settings.
 # ---------------------------------------------------------------------------
 
-# Duration bounds for explicitly requested timed edit sessions, in
-# minutes. Kept as module constants (not inline literals) so the
-# schema validator and the conversational parser can never drift apart.
-# (Bare "use edit mode" is standing, not timed; these bounds apply only
-# when the educator explicitly asks for a timed session.)
-EDIT_GRANT_DURATION_MIN = 5
-EDIT_GRANT_DURATION_MAX = 480
-
-
 def _enum_validator(choices):
     def check(value):
         if not isinstance(value, str) or value not in choices:
             raise SettingsValidationError(
                 "must be one of %s, got %r" % (sorted(choices), value))
-    return check
-
-
-def _int_range_validator(lo, hi):
-    def check(value):
-        # bool is a subclass of int; reject it explicitly.
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise SettingsValidationError(
-                "must be an integer, got %r" % (value,))
-        if value < lo or value > hi:
-            raise SettingsValidationError(
-                "must be between %d and %d, got %r" % (lo, hi, value))
     return check
 
 
@@ -216,19 +187,9 @@ SETTINGS_SCHEMA = {
             "The educator's default mode. 'plan': writes surface approval. "
             "'edit': writes do not surface approval. Setting this to "
             "'edit' IS the standing edit grant: journaled, "
-            "educator-confirmed, and plainly stated as such. Reads are "
-            "unrestricted in both modes."),
-    },
-    "edit_grant_duration_min": {
-        "default": 30,
-        "validate": _int_range_validator(EDIT_GRANT_DURATION_MIN,
-                                         EDIT_GRANT_DURATION_MAX),
-        "consequential": True,
-        "description": (
-            "How long, in minutes, an explicitly requested timed edit "
-            "session (e.g. 'edit for 30 minutes') lasts. Bare 'use edit "
-            "mode' is standing with no time limit; this setting only "
-            "affects explicit timed requests. Range 5 to 480."),
+            "educator-confirmed, and plainly stated as such. Edit mode "
+            "has no time limit: it stays on until the educator turns it "
+            "off. Reads are unrestricted in both modes."),
     },
     "verbosity": {
         "default": "balanced",
@@ -675,149 +636,15 @@ def _transact(user_id, doc_mutator, kind, key, educator, extra=None):
 # ---------------------------------------------------------------------------
 # Session-scoped state.
 #
-# Mode authority lives in modes/state.py; this module keeps NO grant or
-# session store of its own. Timed edit sessions ARE modes timed grants:
-# sealed, persisted under MORROW_HOME, journaled, and visible to the
-# admission gate through the single resolver modes.current_mode (which
-# settings.effective_mode delegates to). A session started with a
-# conversation_id is bound to that conversation: it authorizes writes
-# only there, and end_conversation revokes it.
-#
-# Per-conversation overrides stay in-memory here (never persisted) and
-# are consulted by modes.current_mode via get_conversation_override,
-# most-recent-wins against grants.
+# Mode authority lives in modes/state.py; this module keeps NO grant
+# store of its own. Per-conversation overrides stay in-memory here
+# (never persisted) and are consulted by modes.current_mode via
+# get_conversation_override, most-recent-wins against grants.
 # ---------------------------------------------------------------------------
 
 _SESSION_LOCK = threading.Lock()
 # (user_id, conversation_id) -> {"mode", "set_at"}
 _CONVERSATION_MODES = {}
-
-
-def _modes_educator_confirmation(educator_confirmed, educator, utterance,
-                                 action_desc):
-    """Build the educator-confirmation record modes.request_edit_grant
-    requires. educator_confirmed must be True (the educator said yes in
-    the conversation); utterance should be their verbatim words when the
-    harness has them, else a synthesized attestation naming the
-    educator and the UTC time. Raises SettingsTamperRefused without
-    educator confirmation: the agent can never start a session alone."""
-    if not educator_confirmed:
-        raise SettingsTamperRefused(
-            "an edit session changes whether writes surface approval; the "
-            "educator must be told and confirm it first "
-            "(educator_confirmed=True)")
-    if isinstance(educator, dict):
-        who = educator.get("id") or educator.get("name") or "educator"
-    elif educator:
-        who = str(educator)
-    else:
-        who = "educator"
-    authz = None
-    if isinstance(utterance, str) and len(utterance.strip()) >= 20:
-        authz = utterance.strip()
-    if authz is None:
-        authz = ("educator %s confirmed: %s (%s UTC)"
-                 % (who, action_desc, utc_now().isoformat()))
-    return {"by": "educator", "authorization": authz,
-            "channel": "educator-chat"}
-
-
-def start_edit_session(user_id, conversation_id=None,
-                       educator_confirmed=False, educator=None,
-                       duration_min=None, utterance=None):
-    """Start an explicitly requested timed edit session.
-
-    (Bare "use edit mode" is NOT timed; it sets default_mode="edit",
-    standing with no expiry. This starts a timed session only when the
-    educator explicitly asks for one, e.g. "edit for 30 minutes".)
-
-    Delegates to modes.request_edit_grant: the session is a sealed,
-    persisted, journaled timed grant, visible to the admission gate
-    through the same resolver the conversational layer reports. While
-    active, effective_mode() resolves to "edit": writes do not surface
-    approval. Requires educator_confirmed=True; the agent can never
-    start a session on its own. duration_min defaults to the
-    educator's edit_grant_duration_min setting; an explicit value must
-    be within 5-480 like the setting. utterance should be the
-    educator's verbatim confirming words when the harness has them.
-
-    The grant is minted first (it carries its own modes-journal
-    record), then the settings audit is journaled with the grant's
-    actual expiry; a settings-journal failure rolls the grant back, so
-    a grant never goes live with no settings audit record. Returns
-    {"mode": "edit", "expires_at", "duration_min", "grant_id"}.
-    """
-    _slug_user_id(user_id)
-    if duration_min is None:
-        duration_min = get_setting(user_id, "edit_grant_duration_min")
-    SETTINGS_SCHEMA["edit_grant_duration_min"]["validate"](duration_min)
-    confirmation = _modes_educator_confirmation(
-        educator_confirmed, educator, utterance, "start edit session")
-    old_mode = effective_mode(user_id, conversation_id)
-    grant = _modes_request_grant(
-        user_id, scope_type="timed", duration_min=duration_min,
-        educator_confirmation=confirmation, conversation_id=conversation_id)
-    try:
-        # The grant mints its own modes-journal record; the settings
-        # audit follows with the grant's actual expiry. On journal
-        # failure the grant is rolled back rather than left active with
-        # no settings audit record.
-        _transact(user_id, lambda doc: (old_mode, "edit"),
-                  "settings.edit_session", "edit_session", educator,
-                  extra={"expires_at": grant["expires_at"],
-                         "duration_min": grant["duration_min"],
-                         "conversation_id": conversation_id,
-                         "grant_id": grant["grant_id"]})
-    except BaseException:
-        _modes_revoke_grant(
-            user_id, reason="settings audit journal failed; rolling back",
-            grant_id=grant["grant_id"])
-        raise
-    return {"mode": "edit", "expires_at": grant["expires_at"],
-            "duration_min": grant["duration_min"],
-            "grant_id": grant["grant_id"]}
-
-
-def end_edit_session(user_id, conversation_id=None, educator=None):
-    """End the edit session covering this conversation scope, if live.
-
-    Revokes the timed grant(s) bound to the conversation (or the
-    unbound user-global timed grant when conversation_id is None).
-    Safe direction (edit -> plan), so no confirmation is required.
-    Returns True when a grant was actually revoked. Journaled.
-    """
-    _slug_user_id(user_id)
-    if conversation_id is not None:
-        revoked = _modes_revoke_grant(
-            user_id, reason="settings.end_edit_session",
-            conversation_id=conversation_id, scope_type="timed")
-    else:
-        revoked = _modes_revoke_grant(
-            user_id, reason="settings.end_edit_session",
-            scope_type="timed", unbound_only=True)
-    if not revoked:
-        return False
-    new_mode = effective_mode(user_id, conversation_id)
-    _transact(user_id, lambda doc: ("edit", new_mode),
-               "settings.edit_session", "edit_session", educator,
-               extra={"conversation_id": conversation_id,
-                      "ended_early": True,
-                      "revoked_grants": revoked})
-    return True
-
-
-def edit_session_active(user_id, conversation_id=None):
-    """True when an unexpired timed edit grant covers this scope."""
-    return edit_session_remaining(user_id, conversation_id) > 0
-
-
-def edit_session_remaining(user_id, conversation_id=None):
-    """Seconds left on the covering timed edit grant, or 0."""
-    _slug_user_id(user_id)
-    remaining = _modes_session_remaining(user_id, conversation_id)
-    if remaining is None:
-        return 0
-    return max(0, int(remaining))
 
 
 def set_conversation_mode(user_id, conversation_id, mode,
@@ -841,7 +668,7 @@ def set_conversation_mode(user_id, conversation_id, mode,
             "surface approval; the educator must be told and confirm it "
             "first (educator_confirmed=True)")
     old_mode = effective_mode(user_id, conversation_id)
-    # Journal BEFORE activating, as in start_edit_session.
+    # Journal BEFORE activating: an override never goes live unaudited.
     _transact(user_id, lambda doc: (old_mode, mode),
               "settings.conversation_mode", "conversation_mode", educator,
               extra={"conversation_id": conversation_id})
@@ -871,11 +698,26 @@ def get_conversation_override(user_id, conversation_id):
         return dict(entry) if entry else None
 
 
+def clear_conversation_overrides(user_id):
+    """Drop every per-conversation override for user_id.
+
+    Part of turning edit mode off everywhere (modes.switch_mode("plan")).
+    Returns the number of overrides removed. In-memory state only; the
+    mode switch journals the change.
+    """
+    _slug_user_id(user_id)
+    with _SESSION_LOCK:
+        keys = [k for k in _CONVERSATION_MODES if k[0] == user_id]
+        for key in keys:
+            _CONVERSATION_MODES.pop(key, None)
+    return len(keys)
+
+
 def end_conversation(user_id, conversation_id):
     """Tear down conversation-scoped state.
 
     Pops the in-memory override and revokes every live grant bound to
-    the conversation (timed sessions and conversation grants). This is
+    the conversation. This is
     the harness's explicit duty when a Muse conversation ends: without
     it, a conversation-bound grant could outlive the conversation it
     was granted for. Session teardown, not an educator choice: not
@@ -896,8 +738,7 @@ def effective_mode(user_id, conversation_id=None):
 
     Delegates to the single authoritative resolver
     modes.state.current_mode: the most recent explicit educator action
-    among the conversation override, live timed grants, and live
-    conversation grants wins; otherwise the persisted default_mode
+    among the conversation override and live conversation grants wins; otherwise the persisted default_mode
     ("edit" only when the educator set it as their standing default).
     The admission gate uses the same resolver, so the conversational
     layer and the write gate can never disagree.
