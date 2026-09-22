@@ -11,6 +11,15 @@
         ],
         "createdAt": "2026-09-22T00:43:21.614Z",
         "reason": "false positive: popup.html has no shadow declarations; popup.css's .connection-status box-shadow is a neutral low-opacity navy elevation shadow (rgb 23 33 60), not a colored glow halo; unrelated to this card's WI-2.4e change"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "installer/renderer/index.html"
+        ],
+        "createdAt": "2026-09-22T11:48:27.735Z",
+        "reason": "The busy stripe across the top of the action panel is a progress indicator, not a decorative side tab"
       }
     ]
   }
