@@ -1346,3 +1346,23 @@ test("a saved configuration is not ready while its assistant is unavailable", as
   assert.equal(assistant.detected, false);
   assert.equal(state.lifecycle, "ready_for_assistant");
 });
+
+test("removing Morrow keeps the settings file's own mode, and refuses a read-only file", { skip: process.platform === "win32" }, async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const recorded = await writeFile(target, `model = "gpt-6"\n\n${codexTable(path.join(root, "Materials"))}`);
+  await fs.chmod(target, 0o644);
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: recorded } } });
+  await installer.removeAssistant("codex");
+  assert.equal((await fs.stat(target)).mode & 0o777, 0o644);
+
+  const locked = `model = "gpt-6"\n\n${codexTable(path.join(root, "Materials"))}`;
+  const lockedSha256 = await writeFile(target, locked);
+  await fs.chmod(target, 0o444);
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: lockedSha256 } } });
+  await assert.rejects(() => installer.removeAssistant("codex"), (error) => error.code === "assistant_config_read_only" && error.file === target);
+  assert.equal(await fs.readFile(target, "utf8"), locked);
+  assert.equal((await fs.stat(target)).mode & 0o777, 0o444);
+  await fs.chmod(target, 0o644);
+});

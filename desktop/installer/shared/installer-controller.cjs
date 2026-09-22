@@ -1690,6 +1690,8 @@ class InstallerController {
     // it. Morrow's entry is found by what it is, and this exact generation is
     // what the replacement below admits.
     const beforeSha256 = fileHash(content);
+    const info = await fs.lstat(target).catch(() => null);
+    if (info && (info.mode & 0o200) === 0) throw errorDetails("assistant_config_read_only", target);
     const next = await this.configurationWithoutMorrow(assistant, content.toString("utf8"), target);
     if (next === null) return null;
     const afterSha256 = fileHash(Buffer.from(next, "utf8"));
@@ -1749,6 +1751,9 @@ class InstallerController {
     let published = false;
     try {
       await fs.writeFile(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      // The file keeps the mode its owner gave it; other accounts never gain write access.
+      const current = await fs.lstat(target).catch(() => null);
+      if (this.platform !== "win32" && current?.isFile()) await fs.chmod(temporary, current.mode & 0o755);
       // The file this replaces was restricted to this Windows account when it
       // was written. The replacement carries the person's other configuration
       // entries, so it is restricted the same way before publication, by the
