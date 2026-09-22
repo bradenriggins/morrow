@@ -837,7 +837,7 @@ test("pnpm test:browser runs the harnesses pnpm check cannot, and names the rest
 
   const unattended = planHarnesses({ attended: false });
   assert.deepEqual(unattended.filter((planned) => planned.run).map((planned) => planned.harness.id),
-    ["canvas_connector_browser", "bridge_maintenance_cft"]);
+    ["canvas_connector_browser", "bridge_maintenance_cft", "installer_renderer_layout"]);
   for (const planned of unattended.filter((entry) => !entry.run)) {
     assert.ok(BROWSER_HARNESS_NOT_RUN_STATUSES.includes(planned.status), `${planned.harness.id} needs a not-run status`);
     assert.match(planned.reason, /\S/, `${planned.harness.id} must say why it did not run`);
