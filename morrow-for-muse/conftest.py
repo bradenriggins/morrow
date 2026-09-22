@@ -8,6 +8,7 @@ home. Scratch lives under .selftest-work/ (never /tmp) and is removed
 when the session ends.
 """
 
+import importlib.util
 import os
 import shutil
 import tempfile
@@ -32,3 +33,23 @@ for _name in ("MORROW_TREE_STATE_DIR", "MORROW_SOURCE_VAULT_PATH",
 
 def pytest_unconfigure(config):
     shutil.rmtree(_SESSION_HOME, ignore_errors=True)
+
+
+def missing_cryptography_warning():
+    """The end-of-run warning when 'cryptography' is not installed, else
+    None. Without it every learner-privacy test skips, and a bare
+    "skipped" count is easy to miss (final muse audit M4)."""
+    if importlib.util.find_spec("cryptography") is not None:
+        return None
+    return ("WARNING: the optional 'cryptography' package is not installed, "
+            "so the learner-privacy tests were SKIPPED, not run. Install "
+            "it with 'pip install -r requirements-optional.txt' (or point "
+            "MORROW_MUSE_PYTHON at a python that has it) and run again.")
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    warning = missing_cryptography_warning()
+    if warning:
+        terminalreporter.write_sep("!", "learner-privacy tests skipped")
+        terminalreporter.write_line(warning)
+

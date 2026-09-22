@@ -14,5 +14,9 @@ if printf '%s\n' "$STAGED" | grep -Eq '^(desktop|\.github)/'; then
 fi
 
 if printf '%s\n' "$STAGED" | grep -q '^morrow-for-muse/'; then
-  (cd "$REPO_ROOT/morrow-for-muse" && python3 -m pytest -q)
+  # The Muse learner-privacy tests need 'cryptography' and skip without
+  # it; the suite then ends with a loud warning. MORROW_MUSE_PYTHON picks
+  # a python that has it (pip install -r morrow-for-muse/requirements-optional.txt).
+  MUSE_PYTHON=${MORROW_MUSE_PYTHON:-python3}
+  (cd "$REPO_ROOT/morrow-for-muse" && "$MUSE_PYTHON" -m pytest -q)
 fi
