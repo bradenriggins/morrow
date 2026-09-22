@@ -777,6 +777,14 @@ def _live_overrides(user_id, doc):
             if not _override_ended(entry, default_set_at)}
 
 
+def live_conversation_overrides(user_id):
+    """{conversation_id: {"mode", "set_at"}} for every override still in
+    force (older than the newest saved-default change means ended)."""
+    _slug_user_id(user_id)
+    doc = _read_doc_locked(user_id)
+    return {k: dict(v) for k, v in _live_overrides(user_id, doc).items()}
+
+
 def ended_conversation_override(user_id, conversation_id):
     """The stored override for conversation_id that ended because the
     educator changed the saved default after it, or None. For status

@@ -67,10 +67,17 @@ def test_edit_everywhere_after_a_plan_override_applies_everywhere():
     assert out["ok"] is True, out["message"]
     assert out["mode"] == "edit"
     assert "every conversation" in out["message"]
+    assert "1 conversation has ended" in out["message"]
     assert (_mode("c1"), _mode("c2"), _mode()) == ("edit", "edit", "edit")
     from modes import state as ms
     assert ms.authorize_write(USER)[0] == "allow"
     assert ms.authorize_write(USER, conversation_id="c1")[0] == "allow"
+
+
+def test_edit_everywhere_without_overrides_claims_none_ended():
+    out = _cmd().mode_set(USER, "edit")
+    assert out["ok"] is True
+    assert "has ended" not in out["message"]
 
 
 def test_edit_everywhere_with_no_conversation_id_applies_everywhere():

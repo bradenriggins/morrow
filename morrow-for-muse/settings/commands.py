@@ -78,6 +78,7 @@ from settings.store import (  # noqa: E402
     ended_conversation_override,
     get_conversation_mode,
     has_plan_override,
+    live_conversation_overrides,
     get_setting,
     list_settings,
     observe_conversation,
@@ -334,6 +335,11 @@ def mode_set(user_id, mode, conversation_id=None, this_conversation=False,
                                _safe_mode(user_id, conversation_id))))
     # The agent calls this because the educator asked for edit mode.
     try:
+        ended = [] if this_conversation else sorted(
+            live_conversation_overrides(user_id))
+    except Exception:
+        ended = []
+    try:
         if this_conversation:
             set_conversation_mode(user_id, conversation_id, "edit",
                                   educator_confirmed=True, educator=educator)
@@ -352,8 +358,11 @@ def mode_set(user_id, mode, conversation_id=None, this_conversation=False,
     where = ("in this conversation, until you turn edit mode off, this "
              "conversation ends, or you start a different conversation"
              if this_conversation else
-             "in every conversation, until you turn edit mode off (any "
-             "per-conversation mode you set earlier has ended)")
+             "in every conversation, until you turn edit mode off%s"
+             % (" (the per-conversation mode you had set in %d "
+                "conversation%s has ended)"
+                % (len(ended), "" if len(ended) == 1 else "s")
+                if ended else ""))
     return _result(
         "done", user_id, conversation_id,
         "Done: you are in edit mode now. Writes apply without asking you "
