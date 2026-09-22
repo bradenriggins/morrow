@@ -1069,7 +1069,7 @@ test("assistant detection is read once for each assistant until Check status or 
   await installer.state();
   await installer.state();
   const first = [...detections];
-  assert.deepEqual(first, ["codex", "claude-code", "gemini-cli"],
+  assert.deepEqual(first, ["codex", "claude-desktop", "claude-code", "gemini-cli"],
     "three state reads inside the time limit read this computer once for each assistant");
 
   // Check status is the person asking Morrow to look again.
@@ -1119,14 +1119,14 @@ test("setting up an assistant reads this computer again instead of reusing an an
   });
 
   await installer.state();
-  assert.equal(reads, 3);
+  assert.equal(reads, 4);
   // The assistant was installed after that state read. Setting it up must not
   // refuse on the answer Morrow already had.
   detected = true;
   // The payload in this fixture is incomplete, so setup stops at the runtime.
   // What this case proves is the read that happened before that.
   await assert.rejects(() => installer.installAssistant("codex"), (error) => error.code === "runtime_repair_required");
-  assert.equal(reads, 4, "the setup step read this computer again");
+  assert.equal(reads, 5, "the setup step read this computer again");
   assert.equal((await installer.state()).assistants.find((assistant) => assistant.id === "codex").detected, true,
     "the state read after it shows what that fresh read found");
 });
@@ -2335,4 +2335,19 @@ test("a data removal that cannot take Morrow's entry out of an assistant removes
 
   assert.equal(await fs.readFile(paths.assistantConfiguration, "utf8"), foreign);
   assert.deepEqual(await treeDigest(paths.userData), before, "nothing was removed");
+});
+
+test("Claude Desktop is reported as installed only when this computer has it, and cannot be set up otherwise", async () => {
+  const root = await temporaryRoot();
+  let present = false;
+  const installer = controller(root, { detectAssistant: async (assistant) => assistant.id === "claude-desktop" ? present : false });
+  installer.ensureRuntime = async () => { throw new Error("no payload"); };
+
+  const absent = (await installer.state()).assistants.find((assistant) => assistant.id === "claude-desktop");
+  assert.equal(absent.detected, false);
+  await assert.rejects(() => installer.installAssistant("claude-desktop", null), (error) => error.code === "assistant_not_found");
+
+  present = true;
+  const found = (await installer.state({ recheckAssistants: true })).assistants.find((assistant) => assistant.id === "claude-desktop");
+  assert.equal(found.detected, true);
 });

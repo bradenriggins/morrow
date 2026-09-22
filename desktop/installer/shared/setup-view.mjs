@@ -144,6 +144,12 @@ export function progress(current) {
   ].map((step, index) => ({ ...step, current: index === active && step.status !== "done" }));
 }
 
+/** What an assistant card says when this computer does not have that assistant. */
+function notFoundDetail(assistant) {
+  if (assistant?.id === "claude-desktop") return "Claude Desktop is not installed on this computer. Get it from claude.ai/download, then select Check status.";
+  return "Not found on this computer.";
+}
+
 function assistantCards(current, chosenAssistantId) {
   const assistants = Array.isArray(current?.assistants) ? current.assistants : [];
   if (!assistants.length) return '<div class="blocked-box"><strong>No supported assistant was found</strong><p>Install a supported assistant, then check status again.</p></div>';
@@ -152,7 +158,7 @@ function assistantCards(current, chosenAssistantId) {
     const available = assistant.detected === true && assistant.supported !== false;
     const configured = assistant.configured === true;
     const pending = assistant.pending === true;
-    const detail = configured ? "Morrow is set up here." : pending ? "Finish approval in Claude Desktop." : available ? assistant.id === "claude-desktop" ? "Ready to set up. You approve it in Claude Desktop." : "Ready to set up." : assistant.detected === true ? "Not available in this Morrow version." : "Not found on this computer.";
+    const detail = configured ? "Morrow is set up here." : pending ? "Finish approval in Claude Desktop." : available ? assistant.id === "claude-desktop" ? "Ready to set up. You approve it in Claude Desktop." : "Ready to set up." : assistant.detected === true ? "Not available in this Morrow version." : notFoundDetail(assistant);
     return `<button class="assistant-card" type="button" data-action="choose-assistant" data-assistant-id="${escapeHtml(assistant.id)}" aria-pressed="${selected}"${available ? "" : " disabled"}>
       <span class="assistant-title">${escapeHtml(assistant.title)}</span>
       ${configured ? '<span class="assistant-badge">Ready</span>' : ""}

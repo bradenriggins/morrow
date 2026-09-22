@@ -42,6 +42,7 @@ const { completeBridgeUpdate, stageBridgeSwap } = require("./bridge-coordination
 const BRIDGE_RELOAD_WAIT_MS = 30_000;
 const BRIDGE_RELOAD_POLL_MS = 1_000;
 const {
+  detectClaudeDesktop,
   inspectClaudeDesktopConnection,
   isCurrentClaudeDesktopSetup,
   prepareClaudeDesktopBundle,
@@ -317,7 +318,25 @@ async function commandFound(command) {
   });
 }
 
+async function findMacApplicationsByBundleIdentifier(identifier) {
+  if (process.platform !== "darwin" || !/^[A-Za-z0-9.-]{1,155}$/.test(identifier)) return [];
+  const output = await readCommandOutput("/usr/bin/mdfind", [`kMDItemCFBundleIdentifier == '${identifier}'`], {
+    timeoutMs: 3_000,
+    maxBytes: 16 * 1024
+  });
+  return String(output || "").split("\n").map((line) => line.trim()).filter((line) => path.isAbsolute(line));
+}
+
 async function detectAssistant(assistant) {
+  if (assistant.id === "claude-desktop") {
+    return detectClaudeDesktop({
+      platform: process.platform,
+      homeDirectory: os.homedir(),
+      exists,
+      readBundleIdentifier: readMacApplicationBundleIdentifier,
+      findByBundleIdentifier: findMacApplicationsByBundleIdentifier
+    });
+  }
   if (process.platform === "win32" && assistant.id === "codex") {
     return detectWindowsCodexPackage({ assistantId: assistant.id, runPowerShell: runWindowsPowerShell });
   }
@@ -1481,7 +1500,7 @@ class InstallerController {
     const assistant = ASSISTANTS.find((candidate) => candidate.id === assistantId);
     // Setting up an assistant is an explicit step, so it reads this computer
     // again rather than trusting a cached answer from up to a minute ago.
-    if (!assistant || (assistant.id !== "claude-desktop" && !(await this.freshlyDetectedAssistant(assistant)))) throw errorDetails("assistant_not_found");
+    if (!assistant || !(await this.freshlyDetectedAssistant(assistant))) throw errorDetails("assistant_not_found");
     if (!assistant.supported) throw errorDetails("setup_failed");
     let project = null;
     if (assistant.needsProject) {
@@ -2894,7 +2913,7 @@ class InstallerController {
       const present = claude ? claude.installed === true : await this.assistantConfigurationPresent(assistant, entry, materials);
       return {
         ...assistant,
-        detected: assistant.id === "claude-desktop" ? true : await this.detectedAssistant(assistant),
+        detected: await this.detectedAssistant(assistant),
         configured: present,
         pending: assistant.id === "claude-desktop" && entry && present !== true,
         selected: record.selectedAssistantId === assistant.id,

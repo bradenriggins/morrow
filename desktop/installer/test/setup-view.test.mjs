@@ -674,3 +674,10 @@ test("kept copies of assistant settings, and the entry a data removal takes out,
   assert.match(view.body, /Remove Morrow&#39;s data takes only Morrow&#39;s own entry out of it/);
   assert.match(view.body, /first select Remove Morrow&#39;s data/);
 });
+
+test("an assistant card says Claude Desktop is not installed and where to get it", () => {
+  const view = actionView(state({ assistants: [{ ...CHATGPT, detected: true }, { ...CLAUDE_DESKTOP, detected: false }] }));
+  assert.match(view.body, /Claude Desktop is not installed on this computer\. Get it from claude\.ai\/download, then select Check status\./);
+  const button = view.body.match(/<button class="assistant-card"[^>]*data-assistant-id="claude-desktop"[^>]*>/)[0];
+  assert.match(button, /disabled/);
+});
