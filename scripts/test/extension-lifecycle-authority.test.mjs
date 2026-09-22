@@ -613,6 +613,112 @@ async function editPolicyCancellationScenario(mode) {
   assert.equal(socket.sent.some((message) => message.schema === "morrow.bridge.result.v1" && message.requestId === command.requestId && message.ok === true), false);
 }
 
+// WI-4.2 (F7, D3): a policy-set merge unions the sent categories into an active grant and keeps
+// that grant's own end time, even when the command also carries a later expiresInMs.
+async function policySetMergeUnionScenario() {
+  const value = fixture();
+  await importWorker("policy-merge-union");
+  const socket = await authenticate(value);
+  const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
+  assert.equal(options.ok, true);
+  const editable = options.result.options.filter((candidate) => candidate.availability === "edit");
+  assert.ok(editable.length >= 2, "fixture catalog must offer at least two editable categories");
+  const [first, second] = editable;
+  const initial = policySetCommand({
+    requestId: "request-policy-merge-initial",
+    operationId: "operation-policy-merge-initial",
+    editPolicySet: { mode: "edit", selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: 0, enabledCategories: [first.id] }] },
+  });
+  socket.receive(initial);
+  const initialResult = await eventually(() => socket.sent.find((message) => message.requestId === initial.requestId));
+  assert.equal(initialResult.ok, true);
+  assert.equal(initialResult.result.entries[0].code, undefined);
+  const grantedExpiresAt = value.local.values.editPolicies[bindingId].expiresAt;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const merge = policySetCommand({
+    requestId: "request-policy-merge-apply",
+    operationId: "operation-policy-merge-apply",
+    editPolicySet: {
+      mode: "edit",
+      merge: true,
+      expiresInMs: 60 * 60 * 1_000,
+      selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: 1, enabledCategories: [second.id] }],
+    },
+  });
+  socket.receive(merge);
+  const mergeResult = await eventually(() => socket.sent.find((message) => message.requestId === merge.requestId));
+  assert.equal(mergeResult.ok, true);
+  assert.equal(mergeResult.result.entries[0].code, undefined);
+  const merged = value.local.values.editPolicies[bindingId];
+  assert.deepEqual(merged.enabledCategories, [first.id, second.id].sort());
+  assert.equal(merged.expiresAt, grantedExpiresAt, "a merge must keep the active grant's end time, not the later expiresInMs it carried");
+  assert.equal(merged.revision, 2);
+}
+
+// WI-4.2 (D3): with no active grant to merge into, a merge command starts a fresh grant at the
+// duration it chose.
+async function policySetMergeFreshGrantScenario() {
+  const value = fixture();
+  await importWorker("policy-merge-fresh");
+  const socket = await authenticate(value);
+  const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
+  const category = options.result.options.find((candidate) => candidate.availability === "edit");
+  assert.ok(category);
+  const chosenDurationMs = 4 * 60 * 60 * 1_000;
+  const before = Date.now();
+  const merge = policySetCommand({
+    requestId: "request-policy-merge-fresh",
+    operationId: "operation-policy-merge-fresh",
+    editPolicySet: {
+      mode: "edit",
+      merge: true,
+      expiresInMs: chosenDurationMs,
+      selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: 0, enabledCategories: [category.id] }],
+    },
+  });
+  socket.receive(merge);
+  const result = await eventually(() => socket.sent.find((message) => message.requestId === merge.requestId));
+  assert.equal(result.ok, true);
+  const granted = value.local.values.editPolicies[bindingId];
+  assert.deepEqual(granted.enabledCategories, [category.id]);
+  assert.ok(granted.expiresAt >= before + chosenDurationMs && granted.expiresAt <= Date.now() + chosenDurationMs);
+}
+
+// WI-4.2: a merge is still refused, like any other selection, when the sender's expected
+// revision is stale, and it leaves the active grant untouched.
+async function policySetMergeStaleRevisionScenario() {
+  const value = fixture();
+  await importWorker("policy-merge-stale-revision");
+  const socket = await authenticate(value);
+  const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
+  const editable = options.result.options.filter((candidate) => candidate.availability === "edit");
+  assert.ok(editable.length >= 2);
+  const [first, second] = editable;
+  const initial = policySetCommand({
+    requestId: "request-policy-merge-stale-initial",
+    operationId: "operation-policy-merge-stale-initial",
+    editPolicySet: { mode: "edit", selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: 0, enabledCategories: [first.id] }] },
+  });
+  socket.receive(initial);
+  await eventually(() => socket.sent.find((message) => message.requestId === initial.requestId));
+  const before = value.local.values.editPolicies[bindingId];
+  const merge = policySetCommand({
+    requestId: "request-policy-merge-stale-apply",
+    operationId: "operation-policy-merge-stale-apply",
+    editPolicySet: {
+      mode: "edit",
+      merge: true,
+      expiresInMs: 60 * 60 * 1_000,
+      selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: 0, enabledCategories: [second.id] }],
+    },
+  });
+  socket.receive(merge);
+  const result = await eventually(() => socket.sent.find((message) => message.requestId === merge.requestId));
+  assert.equal(result.ok, true);
+  assert.equal(result.result.entries[0].code, "edit_policy_revision_stale");
+  assert.deepEqual(value.local.values.editPolicies[bindingId], before);
+}
+
 async function maintenanceMutationScenario(mode) {
   const value = fixture();
   await importWorker(`maintenance-${mode}`);
@@ -855,6 +961,58 @@ async function settingsDiscoveryConsentScenario() {
   assert.equal(value.session.values.courseDiscoveries, undefined);
 }
 
+async function discoveryOptionalFieldsScenario() {
+  const value = fixture({
+    tabMessage: async ({ message }) => {
+      if (message?.type === "morrow_canvas_probe") return { ok: true, profile: { origin: courseOrigin, id: "7" } };
+      if (message?.type === "morrow_canvas_list_courses") {
+        return {
+          ok: true,
+          profile: { origin: courseOrigin, id: "7" },
+          courses: [{ id: "55", name: "Biology", code: "BIO-101", term: "Fall 2026", role: "TeacherEnrollment", favorite: true, published: true }],
+          pageUrl: `${courseOrigin}/api/v1/courses?per_page=100`,
+          nextUrl: null,
+          complete: true,
+        };
+      }
+      return null;
+    },
+  });
+  await importWorker("discovery-optional-fields");
+  const result = await sendRuntime(value, { type: "morrow_course_discovery_start", siteAnchorId: anchorId }, settingsSender());
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.result.courses, [
+    { id: "55", name: "Biology", code: "BIO-101", term: "Fall 2026", role: "TeacherEnrollment", favorite: true, published: true },
+  ]);
+  assert.deepEqual(value.local.values.courseMeta, {
+    [`${courseOrigin}|55`]: { name: "Biology", code: "BIO-101", term: "Fall 2026", role: "TeacherEnrollment", favorite: true, published: true },
+  });
+}
+
+async function discoveryUnknownFieldRefusedScenario() {
+  const value = fixture({
+    tabMessage: async ({ message }) => {
+      if (message?.type === "morrow_canvas_probe") return { ok: true, profile: { origin: courseOrigin, id: "7" } };
+      if (message?.type === "morrow_canvas_list_courses") {
+        return {
+          ok: true,
+          profile: { origin: courseOrigin, id: "7" },
+          courses: [{ id: "55", name: "Biology", grade: "A" }],
+          pageUrl: `${courseOrigin}/api/v1/courses?per_page=100`,
+          nextUrl: null,
+          complete: true,
+        };
+      }
+      return null;
+    },
+  });
+  await importWorker("discovery-unknown-field-refused");
+  const result = await sendRuntime(value, { type: "morrow_course_discovery_start", siteAnchorId: anchorId }, settingsSender());
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "course_discovery_failed");
+  assert.equal(value.local.values.courseMeta, undefined);
+}
+
 async function settingsSelectionConsentScenario() {
   let checkStarted = false;
   let releaseCheck;
@@ -903,6 +1061,48 @@ async function settingsSelectionConsentScenario() {
   assert.equal(result.ok, false);
   assert.equal(result.code, "course_data_consent_required");
   assert.deepEqual(value.local.values.bindings, initialBindings);
+}
+
+async function connectionWritesCourseMetaScenario() {
+  const value = fixture({
+    tabMessage: async ({ message }) => {
+      if (message?.type === "morrow_canvas_probe") return { ok: true, profile: { origin: courseOrigin, id: "7" } };
+      if (message?.type === "morrow_canvas_check_course") {
+        return { ok: true, profile: { origin: courseOrigin, id: "7" }, course: { id: "43", name: "Chemistry", code: "CHEM-201", favorite: false, published: true } };
+      }
+      return null;
+    },
+  });
+  const receiptId = "discovery:connection-writes-course-meta";
+  const receipt = {
+    schema: "morrow.course-discovery.v1",
+    discoveryReceiptId: receiptId,
+    siteAnchorId: anchorId,
+    provider: "canvas",
+    origin: courseOrigin,
+    principalFingerprint: "f".repeat(64),
+    sessionGeneration: 1,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 60_000,
+    snapshotDigest: "d".repeat(64),
+    courses: [{ id: "43", name: "Chemistry" }],
+    pageNumber: 1,
+    visited: [`${courseOrigin}/api/v1/courses?per_page=100`],
+    complete: true,
+    next: null,
+  };
+  value.session.values.courseDiscoveries = { [receiptId]: receipt };
+  await importWorker("connection-writes-course-meta");
+  const result = await sendRuntime(value, {
+    type: "morrow_course_selection_save",
+    siteAnchorId: anchorId,
+    discoveryReceiptId: receiptId,
+    courseIds: ["43"],
+  }, settingsSender());
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(value.local.values.courseMeta, {
+    [`${courseOrigin}|43`]: { name: "Chemistry", code: "CHEM-201", favorite: false, published: true },
+  });
 }
 
 async function settingsPolicyConsentScenario() {
@@ -1149,6 +1349,9 @@ const scenarios = {
   "command-admission-cancel": commandAdmissionCancellationScenario,
   "edit-policy-cancel": () => editPolicyCancellationScenario("cancel"),
   "edit-policy-expiry": () => editPolicyCancellationScenario("expiry"),
+  "policy-merge-union": policySetMergeUnionScenario,
+  "policy-merge-fresh": policySetMergeFreshGrantScenario,
+  "policy-merge-stale-revision": policySetMergeStaleRevisionScenario,
   "maintenance-cancel": () => maintenanceMutationScenario("cancel"),
   "maintenance-expiry": () => maintenanceMutationScenario("expiry"),
   "permission-removal-publication": permissionRemovalPublicationScenario,
@@ -1158,6 +1361,9 @@ const scenarios = {
   "unscoped-canvas-read": unscopedCanvasReadScenario,
   "course-file-deadline": courseFileDeadlineScenario,
   "settings-discovery-consent": settingsDiscoveryConsentScenario,
+  "discovery-optional-fields": discoveryOptionalFieldsScenario,
+  "discovery-unknown-field-refused": discoveryUnknownFieldRefusedScenario,
+  "connection-writes-course-meta": connectionWritesCourseMetaScenario,
   "settings-selection-consent": settingsSelectionConsentScenario,
   "settings-policy-consent": settingsPolicyConsentScenario,
   "pairing-offer-consent": pairingOfferConsentScenario,
@@ -1239,6 +1445,18 @@ test("expiresAt fences a queued Edit-policy mutation", async () => {
   await isolatedScenario("edit-policy-expiry");
 });
 
+test("a policy-set merge unions new categories into an active grant and keeps its end time", async () => {
+  await isolatedScenario("policy-merge-union");
+});
+
+test("a policy-set merge with no active grant starts a fresh grant at its chosen duration", async () => {
+  await isolatedScenario("policy-merge-fresh");
+});
+
+test("a policy-set merge is refused, and leaves the active grant untouched, on a stale revision", async () => {
+  await isolatedScenario("policy-merge-stale-revision");
+});
+
 test("expiresAt fences a Bridge maintenance mutation", async () => {
   await isolatedScenario("maintenance-expiry");
 });
@@ -1277,6 +1495,18 @@ test("an expired private file read starts no provider execution after its permis
 
 test("consent withdrawal fences a late Settings course discovery", async () => {
   await isolatedScenario("settings-discovery-consent");
+});
+
+test("discovery passes through code, term, role, favorite and published, and writes courseMeta keyed by origin and course id", async () => {
+  await isolatedScenario("discovery-optional-fields");
+});
+
+test("discovery refuses a course carrying a key outside the optional-field allow list", async () => {
+  await isolatedScenario("discovery-unknown-field-refused");
+});
+
+test("connecting a course writes its optional fields into courseMeta keyed by origin and course id", async () => {
+  await isolatedScenario("connection-writes-course-meta");
 });
 
 test("consent withdrawal fences a late Settings course selection", async () => {

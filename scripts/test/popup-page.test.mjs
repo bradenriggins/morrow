@@ -65,6 +65,10 @@ test("the popup requires one clear agreement before it reads connection or cours
   assert.equal(page.text("#consent-action"), "Agree and continue");
   assert.match(page.text("#consent-detail"), /will not connect to Morrow or read course data before you agree/);
   assert.deepEqual(page.messages().map((message) => message.type), ["morrow_status"]);
+  // WI-5.8: the full data-use text shows in full until the person accepts it.
+  assert.equal(page.hidden("#data-disclosure"), false);
+  assert.match(page.text("#data-disclosure"), /Morrow Bridge reads the Canvas or Moodle pages/);
+  assert.equal(page.hidden("#privacy-link"), true);
 
   await page.click("#consent-action");
   assert.deepEqual(page.messages().map((message) => message.type), [
@@ -76,6 +80,10 @@ test("the popup requires one clear agreement before it reads connection or cours
   assert.equal(page.hidden("#connection-content"), false);
   assert.equal(page.text("#status-value"), "Not connected");
   assert.equal(page.document.activeElement?.getAttribute("id"), "primary");
+  // WI-5.8: after acceptance the full text is gone; one link keeps its own name.
+  assert.equal(page.hidden("#data-disclosure"), true);
+  assert.equal(page.hidden("#privacy-link"), false);
+  assert.equal(page.text("#privacy-link"), "What Morrow Bridge can read");
 });
 
 test("before a course site is connected the popup names the state it is in", async () => {
@@ -115,16 +123,18 @@ test("once Morrow is connected the popup names the course state and the one step
   const states = [
     ["a signed-in Canvas course is detected", () => connection({ paired: true, connected: true }), {
       connection: "Connected", courseLabel: "Course", course: "Not connected",
-      primary: "Connect Canvas", primaryDisabled: false, primaryBusy: "false",
+      primary: "Connect this course", primaryDisabled: false, primaryBusy: "false",
       secondary: null, openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: true, account: null,
-      detail: "Morrow Bridge detected Canvas. Select Connect Canvas to allow access to this signed-in course.",
+      detail: "Morrow Bridge detected Canvas. Select Connect this course to allow access to this signed-in course.",
     }],
+    // WI-5.8: one primary action for the present tab. The saved course's own tab is closed, so
+    // "Open Canvas" is that one action; the generic "Connect this course" stays hidden here.
     ["the saved Canvas connection is closed", () => connection({ paired: true, connected: true, siteAnchors: [anchor({ runtimeVerified: false })] }), {
       connection: "Connected", courseLabel: "Learning platform", course: "Canvas is closed",
-      primary: "Connect Canvas", primaryDisabled: false, primaryBusy: "false",
+      primary: null, primaryDisabled: false, primaryBusy: "false",
       secondary: null, openPlatform: "Open Canvas", disconnect: "Disconnect Morrow", planAndEdit: true, online: true,
       account: "Saved platform: Canvas",
-      detail: "The saved Canvas connection is no longer open. Open a Canvas course in Chrome, sign in, then select Connect Canvas.",
+      detail: "The saved Canvas connection is no longer open. Select Open Canvas to reopen it.",
     }],
     ["a signed-in site is connected and no course is chosen", () => connection({ paired: true, connected: true, siteAnchors: [anchor()] }), {
       connection: "Connected", courseLabel: "Course selection", course: "Ready",
@@ -135,10 +145,10 @@ test("once Morrow is connected the popup names the course state and the one step
     }],
     ["a selected course has no open tab", () => connection({ paired: true, connected: true, bindings: [binding({ runtimeVerified: false })], bindingCount: 1, siteAnchors: [anchor()] }), {
       connection: "Connected", courseLabel: "Connection", course: "Canvas is closed",
-      primary: "Connect Canvas", primaryDisabled: false, primaryBusy: "false",
+      primary: null, primaryDisabled: false, primaryBusy: "false",
       secondary: null, openPlatform: "Open Canvas", disconnect: "Disconnect Morrow", planAndEdit: true, online: true,
       account: "Course: Anatomy",
-      detail: "This selected course is connected, but its Canvas tab is no longer open. Open the course in Chrome, sign in, then select Connect Canvas.",
+      detail: "This selected course is connected, but its Canvas tab is no longer open. Select Open Canvas to reopen it.",
     }],
     ["two courses are selected and one site is open", () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 2, siteAnchors: [anchor()] }), {
       connection: "Connected", courseLabel: "Connection", course: "Connected",
@@ -212,9 +222,9 @@ test("the popup uses the platform detected in the active course tab", async () =
     tabs: [{ id: 24, url: "https://moodle.example.edu/course/view.php?id=42" }],
     handlers: { morrow_detect_course_platform: () => ({ provider: "moodle" }) },
   });
-  assert.equal(page.text("#primary"), "Connect Moodle");
+  assert.equal(page.text("#primary"), "Connect this course");
   assert.equal(page.query("#primary").disabled, false);
-  assert.equal(page.text("#detail"), "Morrow Bridge detected Moodle. Select Connect Moodle to allow access to this signed-in course.");
+  assert.equal(page.text("#detail"), "Morrow Bridge detected Moodle. Select Connect this course to allow access to this signed-in course.");
   assert.deepEqual(page.messages("morrow_detect_course_platform"), [{ type: "morrow_detect_course_platform", tabId: 24 }]);
 });
 
@@ -246,7 +256,7 @@ test("the popup states when it last saw the course site, or that it cannot say",
   assert.equal(undated.query("#account-last-checked").getAttribute("datetime"), null);
 });
 
-test("Connect Canvas asks Chrome for that one address, then opens course selection", async () => {
+test("Connect this course asks Chrome for that one address, then opens course selection", async () => {
   const page = await openPopup({
     status: () => connection({ paired: true, connected: true }),
     tabs: [{ id: 12, url: `${COURSE_ORIGIN}/courses/1` }],
@@ -287,7 +297,8 @@ test("a Canvas address Chrome refuses is cancelled, named, and never reported as
     tabs: [],
     handlers: { morrow_detect_course_platform: () => ({ provider: null }) },
   });
-  assert.equal(noTab.text("#primary"), "Open Canvas or Moodle");
+  // WI-5.8: nothing detected on the present tab, so the one primary action is none at all.
+  assert.equal(noTab.hidden("#primary"), true);
   assert.equal(noTab.query("#primary").disabled, true);
   assert.deepEqual(noTab.messages("morrow_connect_course_prepare"), []);
   assert.deepEqual(noTab.permissionCalls, []);
@@ -431,6 +442,38 @@ test("the popup's banner offers to ask first in all courses, and the result is a
   assert.deepEqual(revoked, ["canvas:course-1"]);
   assert.equal(page.text("#notice"), "Done. Morrow asks first in all courses.");
   assert.equal(page.hidden("#edit-access-banner"), true);
+});
+
+// WI-5.8: the popup as home. Up to 5 connected courses with their own D7 state, then "All courses",
+// which opens the same Plan and Edit settings page Options does.
+test("the popup lists up to 5 connected courses with their own state, then All courses", async () => {
+  const expiresAt = Date.now() + 60 * 60 * 1_000;
+  const bindings = Array.from({ length: 7 }, (_, index) => ({
+    sourceBindingId: `canvas:course-${index}`,
+    courseName: `Course ${index}`,
+    provider: "canvas",
+    ...(index === 0 ? { editPermission: { enabledCategories: ["canvas_page_content"], expiresAt } } : {}),
+  }));
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
+    handlers: { morrow_edit_policy_status: () => ({ bindings }) },
+  });
+  assert.equal(page.hidden("#courses"), false);
+  const rows = page.queryAll("#courses-list .course-row-name").map((node) => node.textContent);
+  assert.deepEqual(rows, ["Course 0", "Course 1", "Course 2", "Course 3", "Course 4"]);
+  const states = page.queryAll("#courses-list .course-row-state").map((node) => node.textContent);
+  assert.equal(states[0], `Edit until ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(expiresAt)}. 1 kind of edit.`);
+  assert.equal(states[1], "Plan. Asks first.");
+  assert.equal(page.hidden("#all-courses"), false);
+
+  await page.click("#all-courses");
+  assert.equal(page.optionsPageOpens, 1);
+});
+
+test("with no connected courses the popup shows no course list", async () => {
+  const page = await openPopup({ status: () => connection({ paired: true, connected: true, siteAnchors: [anchor()] }) });
+  assert.equal(page.hidden("#courses"), true);
+  assert.equal(page.hidden("#all-courses"), true);
 });
 
 // WI-2.4 (D1b): the popup lists the reviews the runtime pushed through ui_state; it never opens one

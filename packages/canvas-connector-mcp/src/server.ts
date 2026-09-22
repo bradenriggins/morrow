@@ -324,6 +324,8 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
           expectedPolicyRevision: z.number().int().min(0),
           enabledCategories: z.array(z.string().min(1).max(160)).min(1).max(500),
         })).min(1).max(500),
+        merge: z.literal(true).optional(),
+        expiresInMs: z.number().int().positive().optional(),
       }),
       z.strictObject({
         mode: z.literal("plan"),

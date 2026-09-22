@@ -1,9 +1,11 @@
 import { problemText } from "../src/bridge-problem-copy.js";
-import { activeEditBindings, canChooseCourses, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, editBannerText, nextError, openPlatformLabel, pendingReviews, platformClosed, primaryLabel, reviewButtonLabel, runtimeNeedsReload, statusAnnouncement, statusValue } from "./popup-view.js";
+import { activeEditBindings, canChooseCourses, connectedCourseRows, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, editBannerText, nextError, openPlatformLabel, pendingReviews, platformClosed, primaryLabel, reviewButtonLabel, runtimeNeedsReload, statusAnnouncement, statusValue } from "./popup-view.js";
 
 const primary = document.querySelector("#primary");
 const consentAction = document.querySelector("#consent-action");
 const consentDetail = document.querySelector("#consent-detail");
+const dataDisclosure = document.querySelector("#data-disclosure");
+const privacyLink = document.querySelector("#privacy-link");
 const connectionContent = document.querySelector("#connection-content");
 const canvasAction = document.querySelector("#canvas-action");
 const openPlatformAction = document.querySelector("#open-platform-action");
@@ -29,12 +31,16 @@ const editAccessBannerText = document.querySelector("#edit-access-banner-text");
 const askFirstAllCoursesButton = document.querySelector("#ask-first-all-courses");
 const reviewsWaiting = document.querySelector("#reviews-waiting");
 const reviewsList = document.querySelector("#reviews-list");
+const coursesSection = document.querySelector("#courses");
+const coursesList = document.querySelector("#courses-list");
+const allCoursesButton = document.querySelector("#all-courses");
 let current = null;
 let actionInFlight = false;
 let banner = null;
 let readGeneration = 0;
 let detectedProvider = null;
 let editActive = [];
+let editBindings = [];
 let openPlatformProgressVisible = false;
 
 // Every failure the service worker answers carries its own code, and the popup keeps that code as
@@ -81,6 +87,19 @@ function renderEditBanner() {
   if (text !== null) editAccessBannerText.textContent = text;
 }
 
+// WI-5.8: the popup as home. Up to 5 connected courses with their own D7 state text, then "All
+// courses", which opens the same Plan and Edit settings page as "Open Plan and Edit settings"
+// below. The list needs no per-row action: opening or switching a course belongs to the primary
+// action and to Plan and Edit settings, not to this glance.
+function renderCourses() {
+  const { shown } = connectedCourseRows(editBindings);
+  coursesSection.hidden = shown.length === 0;
+  coursesList.innerHTML = shown
+    .map((row) => `<li class="course-row"><span class="course-row-name">${escapeHtml(row.name)}</span><span class="course-row-state">${escapeHtml(row.state)}</span></li>`)
+    .join("");
+  allCoursesButton.hidden = shown.length === 0;
+}
+
 function render(status) {
   current = status;
   const nextAnnouncement = statusAnnouncement(status);
@@ -90,10 +109,16 @@ function render(status) {
   consentDetail.hidden = !consentRequired;
   connectionContent.hidden = consentRequired;
   consentAction.disabled = actionInFlight;
+  // WI-5.8: the full data-use text shows only until the person accepts it. After that this popup
+  // keeps one link to it, "What Morrow Bridge can read", instead of repeating the paragraph.
+  dataDisclosure.hidden = !consentRequired;
+  privacyLink.hidden = consentRequired;
   if (consentRequired) {
     pulse.classList.remove("online");
     editAccessBanner.hidden = true;
     reviewsWaiting.hidden = true;
+    coursesSection.hidden = true;
+    allCoursesButton.hidden = true;
     return;
   }
   renderReviews(status);
@@ -116,8 +141,9 @@ function render(status) {
   courseLabel.textContent = binding ? "Connection" : anchor?.runtimeVerified === true ? "Course selection" : anchor ? "Learning platform" : "Course";
   canvasValue.textContent = courseValue(status);
   disconnect.hidden = status?.paired !== true;
-  primary.hidden = Boolean(runtimeReady && binding?.runtimeVerified === true);
-  canvasAction.hidden = !(runtimeReady && binding?.runtimeVerified === true);
+  renderCourses();
+  const alreadyConnected = Boolean(runtimeReady && binding?.runtimeVerified === true);
+  canvasAction.hidden = !alreadyConnected;
   // WI-1.1: the saved site's own open action. It needs no active matching tab, unlike Connect,
   // because the Bridge already holds the permission and the session it needs (D1a).
   const closed = platformClosed(status, binding, anchor);
@@ -128,7 +154,12 @@ function render(status) {
   }
   editAccess.hidden = status?.paired !== true || !runtimeReady || chooseCourses || (!binding && !anchor);
   setupGuide.hidden = runtimeNeedsReload(status);
-  primary.textContent = primaryLabel(status, detectedProvider);
+  // WI-5.8: one primary action for the present tab. Reopening the saved course (closed) already has
+  // its own control above, and an already-connected course needs none, so primary is hidden in both,
+  // leaving "Connect this course" as the only text it ever shows.
+  const primaryText = primaryLabel(status, detectedProvider);
+  primary.hidden = alreadyConnected || closed || primaryText === "";
+  primary.textContent = primaryText;
   detail.textContent = detailText(status, detectedProvider);
   updateControls(status);
 }
@@ -172,13 +203,17 @@ async function refresh() {
     if (generation !== readGeneration) return;
     detectedProvider = null;
     editActive = [];
+    editBindings = [];
     // WI-1.4: morrow_status carries no editPermission per binding, so the popup reads the same
     // command the settings page uses to learn which connections can act with no review. Skipped
-    // while choosing courses: no course is selected yet, so no Edit access can exist.
+    // while choosing courses: no course is selected yet, so no Edit access can exist. WI-5.8: the
+    // same read also gives the course list its own name and D7 state, so the popup fetches nothing
+    // extra to show it.
     if (status?.consentRequired !== true && status?.paired === true && status?.connected === true && !canChooseCourses(status)) {
       const editStatus = await message("morrow_edit_policy_status").catch(() => null);
       if (generation !== readGeneration) return;
       editActive = activeEditBindings(editStatus?.bindings);
+      editBindings = Array.isArray(editStatus?.bindings) ? editStatus.bindings : [];
     }
     if (status?.consentRequired !== true && status?.paired === true && status?.connected === true && !canChooseCourses(status)
       && currentBinding(status)?.runtimeVerified !== true) {
@@ -192,6 +227,7 @@ async function refresh() {
   } catch (cause) {
     if (generation !== readGeneration) return;
     editActive = [];
+    editBindings = [];
     render(null);
     reportError("status", cause);
   }
@@ -381,6 +417,11 @@ askFirstAllCoursesButton.addEventListener("click", async () => {
 
 editingSettings.addEventListener("click", () => {
   void chrome.runtime.openOptionsPage();
+});
+
+// WI-5.8: "All courses" opens the same Courses and access page as "Open Plan and Edit settings".
+allCoursesButton.addEventListener("click", () => {
+  openCourseSelection();
 });
 
 setupGuide.addEventListener("click", () => {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Morrow Bridge: Plan and Edit settings</title>
+  <title>Morrow Bridge: Courses and access</title>
   <link rel="stylesheet" href="../brand/theme.css">
   <link rel="stylesheet" href="settings.css">
 </head>
@@ -12,7 +12,7 @@
     <header class="page-header">
       <span class="brand-wordmark"><img class="brand-mark" src="../brand/morrow-knot.svg" alt=""><span>morrow</span></span>
       <div>
-        <h1>Plan and Edit settings</h1>
+        <h1>Courses and access</h1>
         <p class="lede">Plan is the default. Choose specific courses and individual Edit actions only when Morrow should apply changes for you.</p>
       </div>
       <button id="private-chat-open" class="private-chat-open secondary" type="button" aria-haspopup="dialog" aria-controls="private-chat-drawer" aria-expanded="false">Private Chat</button>
@@ -29,73 +29,41 @@
     <section class="panel connections-panel" aria-labelledby="courses-title">
       <div class="section-heading courses-heading">
         <div>
-          <h2 id="courses-title">Connected courses</h2>
+          <h2 id="courses-title">Your courses</h2>
           <p id="connection-status" class="field-help">Checking connected courses…</p>
         </div>
         <button id="refresh" class="secondary" type="button">Refresh connected courses</button>
       </div>
-      <section class="site-discovery" aria-labelledby="site-discovery-title">
-        <div>
-          <h3 id="site-discovery-title">Find courses</h3>
-          <p id="site-discovery-help" class="field-help">Keep one signed-in learning platform open. You do not need to open every course.</p>
-        </div>
-        <div class="site-discovery-controls">
-          <label for="site-anchor">Signed-in site
-            <select id="site-anchor" disabled></select>
-          </label>
-          <button id="discover-courses" type="button" disabled>Find available courses</button>
-        </div>
-        <p id="site-anchor-details" class="anchor-details"></p>
-      </section>
       <div class="course-tools">
         <label class="search-field" for="course-filter">
           <span>Search courses, accounts, or sites</span>
           <input id="course-filter" type="search" autocomplete="off">
         </label>
-        <div class="visible-actions">
-          <button id="select-visible" class="secondary" type="button" disabled>Select this page</button>
-          <p id="visible-scope" class="visible-scope"></p>
-        </div>
+        <label class="platform-field" for="course-platform-filter" hidden>
+          <span>Platform</span>
+          <select id="course-platform-filter"><option value="all">All platforms</option></select>
+        </label>
+        <label class="term-field" for="course-term-filter" hidden>
+          <span>Term</span>
+          <select id="course-term-filter"><option value="all">All terms</option></select>
+        </label>
+        <button id="course-select-mode" class="secondary" type="button" aria-pressed="false">Select</button>
       </div>
+      <div id="course-scope" class="course-scope-tabs" role="group" aria-label="Show" hidden></div>
       <div id="course-list" class="course-list" aria-busy="true">
         <p class="state-message">Loading connected courses…</p>
       </div>
-      <nav id="course-pages" class="course-pages" aria-label="Connected course pages" hidden>
-        <button id="previous-page" class="secondary" type="button">Previous page</button>
-        <p id="page-status"></p>
-        <button id="next-page" class="secondary" type="button">Next page</button>
-      </nav>
-      <div id="discovery-progress" class="discovery-progress" hidden>
-        <p id="discovery-progress-text" class="field-help"></p>
-        <button id="load-more-courses" class="secondary" type="button" hidden>Load more available courses</button>
+      <div id="course-show-more-row" class="course-show-more-row" hidden>
+        <button id="course-show-more" class="secondary" type="button">Show more</button>
       </div>
-      <div id="available-actions" class="available-actions" hidden>
-        <div>
-          <p class="actions-title">Connect selected courses</p>
-          <p id="available-selection-summary" class="field-help">Available courses are not connected yet. Connecting them gives Plan access only.</p>
-        </div>
+      <div id="discovery-more-row" class="course-show-more-row" hidden>
+        <button id="discovery-more" class="secondary" type="button">Load more available courses</button>
+      </div>
+      <div id="course-bulk-bar" class="course-bulk-bar" hidden>
+        <p id="course-bulk-count"></p>
         <div class="action-buttons">
-          <button id="show-connected" class="secondary" type="button">View connected courses</button>
-          <button id="connect-selected" type="button" disabled>Connect selected courses in Plan</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel file-storage-panel" aria-labelledby="file-storage-title">
-      <div class="section-heading">
-        <div>
-          <h2 id="file-storage-title">Course file access</h2>
-          <p class="field-help">Turn this on when Morrow needs to review a course file, transfer reviewed material, or send the image for a reviewed Hot Spot quiz question.</p>
-        </div>
-      </div>
-      <div class="file-storage-card">
-        <div>
-          <p id="file-storage-status" class="file-storage-status">Checking Chrome permission…</p>
-          <p class="field-help">Chrome grants this permission across HTTPS sites because Canvas can store course files on different domains. During one reviewed upload, Morrow observes only that Canvas-issued upload response until it gets a Canvas confirmation. It does not block or change requests. Morrow reads or transfers only files it confirms belong to selected Canvas courses. The same permission covers the image bytes for a Hot Spot question you approved, sent once to the upload address Canvas's own response names for that upload.</p>
-        </div>
-        <div class="file-storage-actions">
-          <button id="enable-file-storage" type="button">Enable course file access</button>
-          <button id="revoke-file-storage" class="secondary danger-action" type="button" hidden>Remove HTTPS file access</button>
+          <button id="course-bulk-plan" class="secondary" type="button">Plan. Ask first.</button>
+          <button id="course-bulk-routine" type="button">Edit. Routine edits for 4 hours.</button>
         </div>
       </div>
     </section>
@@ -121,19 +89,30 @@
       <fieldset id="category-fieldset" class="categories" disabled hidden>
         <legend>Edit actions</legend>
         <p class="field-help">Only checked Edit actions can be applied. Review-only actions stay in Plan because Morrow cannot prove the required course scope or dependency evidence.</p>
-        <div class="edit-controls">
-          <label class="search-field" for="action-filter">
-            <span>Search actions, groups, or details</span>
-            <input id="action-filter" type="search" autocomplete="off">
+        <div id="routine-switch" class="routine-switch" hidden>
+          <label class="mode-option routine-toggle" for="routine-edits">
+            <input id="routine-edits" type="checkbox">
+            <span><strong>Routine edits</strong><small>Morrow edits text, titles, the order of modules and items, file names and alternative text without another approval. It always asks before it creates, publishes, removes, posts, or changes a date, points or a setting.</small></span>
           </label>
+          <div id="routine-bundle-list" class="routine-bundle-list"></div>
+        </div>
+        <div class="edit-controls">
+          <div id="action-filter-field">
+            <label class="search-field" for="action-filter">
+              <span>Search actions, groups, or details</span>
+              <input id="action-filter" type="search" autocomplete="off">
+            </label>
+          </div>
           <label class="duration-field" for="edit-duration">
             <span>Edit access ends after</span>
             <select id="edit-duration"></select>
           </label>
-          <label class="checked-only-field" for="action-checked-only">
-            <input id="action-checked-only" type="checkbox">
-            <span>Only actions Morrow can check</span>
-          </label>
+          <div id="action-checked-only-field">
+            <label class="checked-only-field" for="action-checked-only">
+              <input id="action-checked-only" type="checkbox">
+              <span>Only actions Morrow can check</span>
+            </label>
+          </div>
         </div>
         <div id="category-list" class="category-list"></div>
       </fieldset>
@@ -159,16 +138,48 @@
       </div>
     </section>
 
-    <section class="limits" aria-labelledby="limits-title">
-      <h2 id="limits-title">Access rules</h2>
-      <ul>
-        <li>Plan keeps changes ready for your review.</li>
-        <li>Edit applies only to the selected courses and checked actions.</li>
-        <li>Return a course to Plan to remove saved Edit access immediately.</li>
-        <li>Edit access saved here ends after the duration you choose. The default is one hour. Edit access requested in a Morrow conversation ends after 30 minutes.</li>
-        <li>Some actions cannot be checked after they are saved. Morrow marks them here and reports the saved result as unconfirmed.</li>
-        <li>If a course needs sign-in again, open its site in Chrome and reconnect it from the Morrow popup.</li>
-      </ul>
+    <section class="panel browser-permissions-panel" aria-labelledby="browser-permissions-title">
+      <div class="section-heading">
+        <div>
+          <h2 id="browser-permissions-title">Browser permissions and rules</h2>
+        </div>
+      </div>
+
+      <div class="permissions-group">
+        <h3>Open the learning platform</h3>
+        <label class="checked-only-field" for="open-platform-when-needed">
+          <input id="open-platform-when-needed" type="checkbox">
+          <span>Open Canvas or Moodle when Morrow needs it.</span>
+        </label>
+        <p class="field-help">Morrow Bridge opens the site in a background tab. It uses the sign-in that Chrome already has.</p>
+      </div>
+
+      <div class="permissions-group">
+        <h3 id="file-storage-title">Course file access</h3>
+        <p class="field-help">Turn this on when Morrow needs to review a course file, transfer reviewed material, or send the image for a reviewed Hot Spot quiz question.</p>
+        <div class="file-storage-card">
+          <div>
+            <p id="file-storage-status" class="file-storage-status">Checking Chrome permission…</p>
+            <p class="field-help">Chrome grants this permission across HTTPS sites because Canvas can store course files on different domains. During one reviewed upload, Morrow observes only that Canvas-issued upload response until it gets a Canvas confirmation. It does not block or change requests. Morrow reads or transfers only files it confirms belong to selected Canvas courses. The same permission covers the image bytes for a Hot Spot question you approved, sent once to the upload address Canvas's own response names for that upload.</p>
+          </div>
+          <div class="file-storage-actions">
+            <button id="enable-file-storage" type="button">Enable course file access</button>
+            <button id="revoke-file-storage" class="secondary danger-action" type="button" hidden>Remove HTTPS file access</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="permissions-group">
+        <h3 id="limits-title">Access rules</h3>
+        <ul class="access-rules-list">
+          <li>Plan keeps changes ready for your review.</li>
+          <li>Edit applies only to the selected courses and checked actions.</li>
+          <li>Return a course to Plan to remove saved Edit access immediately.</li>
+          <li>Edit access saved here ends after the duration you choose. The default is one hour. Edit access requested in a Morrow conversation ends after 30 minutes.</li>
+          <li>Some actions cannot be checked after they are saved. Morrow marks them here and reports the saved result as unconfirmed.</li>
+          <li>If a course needs sign-in again, open its site in Chrome and reconnect it from the Morrow popup.</li>
+        </ul>
+      </div>
     </section>
   </main>
   <div id="private-chat-scrim" class="private-chat-scrim" aria-hidden="true" hidden></div>

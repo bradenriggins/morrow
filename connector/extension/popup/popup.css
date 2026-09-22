@@ -11,6 +11,17 @@ header .brand-wordmark { flex-basis: auto; margin: 0; }
 .status + .status { border-top: 1px solid var(--border); }
 .status span { color: var(--text-subtle); font-size: 0.8125rem; line-height: 1.4; }
 .status strong { font-size: 0.8125rem; font-weight: 600; line-height: 1.4; text-align: right; }
+/* WI-5.8: the popup's own course list, up to 5 connected courses with their D7 state, then "All
+   courses". Name and state only: switching or opening a course stays with the primary action and
+   Plan and Edit settings below, so a row carries no button of its own. */
+.courses { margin-bottom: var(--space-3); }
+.courses h2 { margin: 0 0 var(--space-2); color: var(--text-subtle); font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
+.courses-list { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.course-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); min-height: 44px; padding: var(--space-2) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.course-row-name { min-width: 0; overflow-wrap: anywhere; font-size: 0.8125rem; font-weight: 600; line-height: 1.4; }
+.course-row-state { flex: 0 0 auto; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.4; text-align: right; white-space: nowrap; }
+#all-courses { margin-top: var(--space-2); }
+#privacy-link { margin-top: 0; margin-bottom: var(--space-3); }
 .account { margin-bottom: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); background: var(--surface-sunken); border-radius: var(--radius-card); }
 .account span { display: block; color: var(--text-subtle); font-size: 0.8125rem; line-height: 1.4; }
 .account strong { display: block; margin-top: var(--space-1); font-size: 0.8125rem; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
@@ -46,4 +57,4 @@ footer { margin-top: var(--space-4); border-top: 1px solid var(--border); paddin
 .edit-access p { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
 .edit-access p strong { color: var(--text); font-weight: 700; }
 .edit-access button { margin-top: var(--space-2); min-height: 44px; padding: var(--space-2) var(--space-4); }
-@media (max-width: 340px) { main { padding: var(--space-3); } .connection-status, .account, .data-disclosure, .edit-access, .edit-access-banner, .reviews-waiting { padding-left: var(--space-3); padding-right: var(--space-3); } }
+@media (max-width: 340px) { main { padding: var(--space-3); } .connection-status, .account, .data-disclosure, .edit-access, .edit-access-banner, .reviews-waiting { padding-left: var(--space-3); padding-right: var(--space-3); } .course-row { padding-left: var(--space-3); padding-right: var(--space-3); } }

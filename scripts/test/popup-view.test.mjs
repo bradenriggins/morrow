@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { PROBLEM_CODES, problemCopy, problemText } from "../../connector/extension/src/bridge-problem-copy.js";
+import { CURATED_CATEGORY_SPECS } from "../../connector/extension/src/edit-policy.js";
 import {
   canChooseCourses,
+  connectedCourseRows,
   controlState,
+  courseStateText,
   courseValue,
   detailText,
   nextError,
@@ -108,6 +111,51 @@ test("pendingReviews keeps only well-formed entries, and reviewButtonLabel names
   assert.equal(reviewButtonLabel(good), "Review: Update due date in Anatomy");
 });
 
+// WI-5.8: the popup's own course list keeps D7's exact wording ("Plan. Asks first.", "Edit until
+// <clock>. Routine edits.", and so on), the same text the Courses and access page shows, from
+// nothing but morrow_edit_policy_status's own bindings array.
+test("courseStateText keeps D7's own wording, from the edit permission alone", () => {
+  const canvasRoutineIds = CURATED_CATEGORY_SPECS.filter((spec) => spec.provider === "canvas" && spec.routine === true).map((spec) => spec.id);
+  assert.ok(canvasRoutineIds.length > 1, "the catalog fixture needs more than one routine Canvas id for this test to mean anything");
+  const future = Date.now() + 60 * 60 * 1_000;
+
+  assert.equal(courseStateText({ provider: "canvas" }), "Plan. Asks first.", "no permission at all");
+  assert.equal(courseStateText({ provider: "canvas", editPermission: { enabledCategories: [], expiresAt: future } }), "Plan. Asks first.", "an empty selection");
+  assert.equal(
+    courseStateText({ provider: "canvas", editPermission: { enabledCategories: canvasRoutineIds, expiresAt: Date.now() - 1 } }),
+    "Plan. Asks first.",
+    "an expired grant",
+  );
+  assert.equal(
+    courseStateText({ provider: "canvas", editPermission: { enabledCategories: [canvasRoutineIds[0]], expiresAt: future } }),
+    `Edit until ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(future)}. 1 kind of edit.`,
+  );
+  assert.equal(
+    courseStateText({ provider: "canvas", editPermission: { enabledCategories: canvasRoutineIds, expiresAt: future } }),
+    `Edit until ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(future)}. Routine edits.`,
+  );
+  assert.equal(
+    courseStateText({ provider: "canvas", editPermission: { enabledCategories: [...canvasRoutineIds, "canvas_page_content"], expiresAt: future } }),
+    `Edit until ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(future)}. Custom.`,
+    "more than the routine set, so it is Custom even though it carries every routine id",
+  );
+});
+
+// WI-5.8: "up to 5, then All courses". A binding with no name or id is dropped rather than shown
+// blank, because morrow_status can carry a binding the Bridge has not yet named.
+test("connectedCourseRows keeps up to 5 named courses and counts the rest", () => {
+  assert.deepEqual(connectedCourseRows(null), { shown: [], more: 0 });
+  assert.deepEqual(connectedCourseRows([]), { shown: [], more: 0 });
+  assert.deepEqual(connectedCourseRows([{ sourceBindingId: "a", provider: "canvas" }]), { shown: [], more: 0 }, "no course name");
+  assert.deepEqual(connectedCourseRows([{ courseName: "Anatomy", provider: "canvas" }]), { shown: [], more: 0 }, "no sourceBindingId");
+  const seven = Array.from({ length: 7 }, (_, index) => ({ sourceBindingId: `c${index}`, courseName: `Course ${index}`, provider: "canvas" }));
+  const { shown, more } = connectedCourseRows(seven);
+  assert.equal(shown.length, 5);
+  assert.deepEqual(shown.map((row) => row.name), ["Course 0", "Course 1", "Course 2", "Course 3", "Course 4"]);
+  assert.deepEqual(shown.map((row) => row.state), Array(5).fill("Plan. Asks first."));
+  assert.equal(more, 2);
+});
+
 test("a missing Chrome permission prompt reads differently from a refused one", () => {
   const missing = problemText("course_permission_prompt_missing");
   const denied = problemText("course_permission_denied");
@@ -141,12 +189,12 @@ test("known connection states keep their own value, label, and detail", () => {
   assert.equal(primaryLabel(statuses[4]), "Waiting for your assistant");
   assert.equal(controlState(statuses[4]).primaryDisabled, true);
   assert.equal(courseValue(statuses[6]), "Not connected");
-  assert.equal(primaryLabel(statuses[6]), "Open Canvas or Moodle");
+  assert.equal(primaryLabel(statuses[6]), "", "no platform detected: no primary action at all (WI-5.8)");
   assert.equal(controlState(statuses[6]).primaryDisabled, true);
-  assert.equal(primaryLabel(statuses[6], "canvas"), "Connect Canvas");
+  assert.equal(primaryLabel(statuses[6], "canvas"), "Connect this course", "the wording never names a platform (WI-5.8)");
   assert.equal(controlState(statuses[6], { detectedProvider: "canvas" }).primaryDisabled, false);
-  assert.equal(primaryLabel(statuses[6], "moodle"), "Connect Moodle");
-  assert.match(detailText(statuses[6], "moodle"), /detected Moodle.*Connect Moodle/);
+  assert.equal(primaryLabel(statuses[6], "moodle"), "Connect this course");
+  assert.match(detailText(statuses[6], "moodle"), /detected Moodle.*Connect this course/);
   assert.equal(canChooseCourses(statuses[7]), true);
   assert.equal(courseValue(statuses[7]), "Ready");
   assert.equal(primaryLabel(statuses[7]), "Choose courses");
@@ -156,7 +204,7 @@ test("known connection states keep their own value, label, and detail", () => {
   assert.match(detailText(statuses[9]), /Keep one signed-in Canvas course tab open/);
   assert.equal(courseValue(statuses[10]), "Canvas is closed");
   assert.match(detailText(statuses[10]), /its Canvas tab is no longer open/);
-  assert.match(detailText(statuses[10], "moodle"), /selected Canvas course is not open.*detected Moodle.*Connect Moodle/);
+  assert.match(detailText(statuses[10], "moodle"), /selected Canvas course is not open.*detected Moodle.*Open Canvas/);
 });
 
 test("the background status announcement names Morrow and course readiness together", () => {
@@ -233,6 +281,11 @@ test("the popup answers a failed first status read with a retry, then clears it 
     "#ask-first-all-courses": stubElement("Ask first in all courses"),
     "#reviews-waiting": stubElement("", true),
     "#reviews-list": stubElement(),
+    "#data-disclosure": stubElement(),
+    "#privacy-link": stubElement("What Morrow Bridge can read", true),
+    "#courses": stubElement("", true),
+    "#courses-list": stubElement(),
+    "#all-courses": stubElement("All courses", true),
   };
   nodes["#primary"].disabled = true;
   let respond = async () => { throw new Error("Could not establish connection. Receiving end does not exist."); };

@@ -111,6 +111,45 @@ function trackedApprovalServer(approvals: { count: number }): LoopbackApprovalSe
   });
 }
 
+/**
+ * One approval server for the WI-4.4 "do not ask again" button and grant. `offer` stands in for
+ * `runtime.ts`'s `rememberOffer` (null when the change is not rememberable, for example a
+ * removal); `grant` stands in for `rememberKind`, called only after approval succeeds.
+ */
+function rememberApprovalServer(
+  offer: { categoryId: string; label: string; until: number } | null,
+  grant: () => Promise<"saved" | "failed">,
+  base: JsonObject = moodleSnapshot("awaiting_approval"),
+): LoopbackApprovalServer {
+  let state = String(base.state);
+  return new LoopbackApprovalServer({
+    operationGet: () => ({ ...base, state }),
+    operationList: () => ({ schema: "morrow.operations.list.v1", returned: 1, operations: [{ ...base, state }] }),
+    operationReviewContext: async () => ({ targets: [
+      { field: "course_id", label: "Course", name: "Biology 101" },
+      { field: "module_id", label: "Page", name: "Week 2 overview" },
+    ] }),
+    approveOperation: () => { state = "approved"; return { ...base, state }; },
+    runApprovedOperation: async () => undefined,
+    cancelOperation: () => { state = "cancelled"; return { ...base, state }; },
+    setApprovalBaseUrl: () => undefined,
+    rememberOffer: async () => offer,
+    rememberKind: grant,
+  });
+}
+
+/** Polls a review's page for `text`, without hammering the loopback server. */
+async function pollForText(url: string, text: string, timeoutMs = 2_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let html = "";
+  do {
+    html = await (await fetch(url)).text();
+    if (html.includes(text)) return html;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  } while (Date.now() < deadline);
+  return html;
+}
+
 describe("approval page copy", () => {
   it("bounds a stalled status request and schedules an automatic recovery read", async () => {
     const server = approvalServer(moodleSnapshot("applied_or_unknown"));
@@ -504,6 +543,116 @@ describe("approval page copy", () => {
       expect(body).toContain("<dt>New Course ID</dt><dd>COURSE-101-COPY</dd>");
       expect(body).toContain('class="approve"');
       expect(body).not.toContain(internalHash);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe("WI-4.4: the review page's second button", () => {
+  it("offers 'do not ask again' with the bundle label and the clock time, in the same form as approve", async () => {
+    const until = Date.now() + 4 * 60 * 60_000;
+    const clock = new Date(until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles", until }, async () => "saved");
+    try {
+      const baseUrl = await server.start();
+      const { body } = await reviewPage(baseUrl);
+      expect(body).toContain(`<form method="post" action="/operations/${encodedId}/approve">`);
+      expect(body).toContain(`<button name="remember" value="1" class="approve secondary" type="submit">Apply this change, and do not ask again for text and titles in this course until ${clock}</button>`);
+      // The remember button is inside the same <form> as the primary approve button, not a
+      // second form, so one submit sends both the approval and the remembered choice.
+      const form = /<form method="post" action="\/operations\/[^"]+\/approve">.*?<\/form>/s.exec(body)?.[0] ?? "";
+      expect(form).toContain('<button class="approve" type="submit">Apply this change</button>');
+      expect(form).toContain('name="remember" value="1"');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("shows no second button for a removal, because rememberOffer never offers one", async () => {
+    const snapshot: JsonObject = {
+      ...moodleSnapshot("awaiting_approval"),
+      plan: {
+        tool: "canvas_delete_page_courses",
+        arguments: { course_id: "42", url_or_id: "old-syllabus-draft" },
+        risk: { approvalClass: "destructive" },
+      },
+    };
+    const server = rememberApprovalServer(null, async () => "failed", snapshot);
+    try {
+      const baseUrl = await server.start();
+      const { body } = await reviewPage(baseUrl);
+      expect(body).not.toContain('name="remember"');
+      expect(body).not.toContain("do not ask again");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("remembers the kind after approval and shows the saved sentence, without delaying the change", async () => {
+    const until = Date.now() + 4 * 60 * 60_000;
+    const clock = new Date(until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    let grantCalled = false;
+    const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles", until }, async () => {
+      grantCalled = true;
+      return "saved";
+    });
+    try {
+      const baseUrl = await server.start();
+      const { nonce, cookie } = await reviewPage(baseUrl);
+      const approve = await fetch(`${baseUrl}/operations/${encodedId}/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", accept: "text/html", cookie, origin: baseUrl, referer: `${baseUrl}/operations/${encodedId}` },
+        body: new URLSearchParams({ nonce, remember: "1" }),
+        redirect: "manual",
+      });
+      // Approve first: the redirect that starts the change does not wait on the grant.
+      expect(approve.status).toBe(303);
+      const html = await pollForText(`${baseUrl}/operations/${encodedId}`, "does not ask again");
+      expect(grantCalled).toBe(true);
+      expect(html).toContain(`Morrow does not ask again for text and titles in this course until ${clock}.`);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("runs the change even when the remembered grant fails, and says so", async () => {
+    const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles", until: Date.now() + 4 * 60 * 60_000 }, async () => "failed");
+    try {
+      const baseUrl = await server.start();
+      const { nonce, cookie } = await reviewPage(baseUrl);
+      const approve = await fetch(`${baseUrl}/operations/${encodedId}/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", accept: "text/html", cookie, origin: baseUrl, referer: `${baseUrl}/operations/${encodedId}` },
+        body: new URLSearchParams({ nonce, remember: "1" }),
+        redirect: "manual",
+      });
+      expect(approve.status).toBe(303);
+      const html = await pollForText(`${baseUrl}/operations/${encodedId}`, "could not save that choice");
+      expect(html).toContain("Morrow could not save that choice. It asks again next time.");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("refuses remember=1 with a wrong nonce the same way an ordinary approval is refused", async () => {
+    let grantCalled = false;
+    const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles", until: Date.now() + 4 * 60 * 60_000 }, async () => {
+      grantCalled = true;
+      return "saved";
+    });
+    try {
+      const baseUrl = await server.start();
+      const { cookie } = await reviewPage(baseUrl);
+      const refused = await fetch(`${baseUrl}/operations/${encodedId}/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", accept: "text/html", cookie, origin: baseUrl, referer: `${baseUrl}/operations/${encodedId}` },
+        body: new URLSearchParams({ nonce: "not-the-nonce", remember: "1" }),
+        redirect: "manual",
+      });
+      expect(refused.status).toBe(409);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(grantCalled).toBe(false);
     } finally {
       await server.close();
     }

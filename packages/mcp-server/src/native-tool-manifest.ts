@@ -64,6 +64,7 @@ const fullNames = [
   "morrow_operation_undo",
   "morrow_operation_verify",
   "morrow_operation_wait",
+  "morrow_recent_changes",
   "morrow_plan_assignment_image_alt_repair",
   "morrow_plan_canvas_conversation",
   "morrow_plan_classic_quiz_description_image_alt_repair",

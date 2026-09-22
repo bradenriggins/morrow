@@ -830,6 +830,73 @@ test("Moodle discovery includes a fresh verified current course without dropping
   }
 });
 
+test("Moodle discovery maps shortname, favourite, visible and category name to code, favorite, published and term", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "morrow-discovery-fields-browser-"));
+  const key = join(directory, "key.pem");
+  const certificate = join(directory, "certificate.pem");
+  execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", key, "-out", certificate], { stdio: "ignore" });
+  let origin = "";
+  const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, (request, response) => {
+    const url = new URL(request.url || "/", origin || "https://127.0.0.1");
+    if (url.pathname === "/course/view.php") {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><body class="path-course course-99"><h1>Open administration course</h1><script>var M = {}; M.cfg = ${JSON.stringify({ wwwroot: origin, sesskey: "synthetic-session", userId: 3 })};</script></body>`);
+      return;
+    }
+    if (url.pathname === "/lib/ajax/service.php") {
+      const chunks = [];
+      request.on("data", (chunk) => chunks.push(chunk));
+      request.on("end", () => {
+        const call = JSON.parse(Buffer.concat(chunks).toString("utf8"))[0];
+        if (call?.methodname === "core_course_get_enrolled_courses_by_timeline_classification") {
+          const courses = [
+            { id: 1, fullname: " Biology 101 ", shortname: " BIO-101 ", isfavourite: true, visible: true, coursecategory: " Sciences " },
+            { id: 2, fullname: "Chemistry", isfavourite: false, visible: false },
+          ].slice(call.args.offset, call.args.offset + call.args.limit);
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify([{ data: { courses } }]));
+          return;
+        }
+        if (call?.methodname === "core_courseformat_get_state") {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify([{ exception: { errorcode: "nopermissions" } }]));
+          return;
+        }
+        response.writeHead(404).end();
+      });
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  let browser;
+  let context;
+  try {
+    await new Promise((resolve, reject) => server.listen(0, "127.0.0.1", (error) => error ? reject(error) : resolve()));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Discovery fields test server did not bind a port");
+    origin = `https://127.0.0.1:${address.port}`;
+    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    await page.goto(`${origin}/course/view.php?id=99`);
+    await page.evaluate((wwwroot) => { globalThis.M = { cfg: { wwwroot, sesskey: "synthetic-session", userId: 3, courseId: 99 } }; }, origin);
+    const discovered = await executeInBrowser(page, { mode: "discover_courses", limit: 3, offset: 0, expiresAt: Date.now() + 60_000 });
+    assert.equal(discovered.ok, true, JSON.stringify(discovered));
+    assert.deepEqual(discovered.data, {
+      courses: [
+        { id: "1", name: "Biology 101", code: "BIO-101", term: "Sciences", favorite: true, published: true },
+        { id: "2", name: "Chemistry", favorite: false, published: false },
+      ],
+      offset: 0, limit: 3, next_offset: null, complete: true,
+    });
+  } finally {
+    await context?.close();
+    await browser?.close();
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 const imscpReadOperation = { key: "moodle.form.course.modedit.imscp.read.v1", toolName: "moodle_get_imscp", provider: "moodle", readOnly: true };
 const imscpCreationReadOperation = { key: "moodle.form.course.modedit.imscp.package.create.read.v1", toolName: "moodle_get_imscp_package_creation_form", provider: "moodle", readOnly: true };
 const imscpCreationWriteOperation = { key: "moodle.form.course.modedit.imscp.package.create.write.v1", toolName: "moodle_create_imscp_package", provider: "moodle", readOnly: false };

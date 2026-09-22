@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import {
+  BRIDGE_EDIT_DURATIONS_MS,
   BRIDGE_PROTOCOL_VERSION,
   BRIDGE_SCHEMAS,
   MAX_BRIDGE_MESSAGE_BYTES,
@@ -8,6 +9,7 @@ import {
   matchesBridgeEditPermission,
   normalizeBridgeMaintenanceControl,
   normalizeBridgeEditOptionsResult,
+  normalizeBridgeEditPolicySet,
   normalizeBridgeUiState,
   normalizeBridgePrivateAttachment,
   normalizeBridgePrivateConversation,
@@ -18,6 +20,9 @@ import {
   serializeBridgeMessage,
   splitBridgeCallArguments,
 } from "../src/index.js";
+// The five "do not ask again" durations (D3) are kept by hand in this package and in the
+// extension's own settings list. A test below proves the two lists still agree.
+import { SETTINGS_EDIT_DURATIONS } from "../../../connector/extension/src/edit-policy.js";
 
 const digest = "a".repeat(64);
 const assignmentOperationKey = "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment";
@@ -766,5 +771,31 @@ describe("bridge protocol", () => {
       .toThrow("loopback operations or batches address");
     expect(() => normalizeBridgeUiState({ reviews: [{ ...review, url: "http://127.0.0.1:44300/operations/short" }] }))
       .toThrow("loopback operations or batches address");
+  });
+
+  it("accepts an editPolicySet merge with a chosen duration (WI-4.1)", () => {
+    const selection = { sourceBindingId: "canvas-101", expectedPolicyRevision: 3, enabledCategories: ["canvas_edit_page_content"] };
+    expect(normalizeBridgeEditPolicySet({ mode: "edit", selections: [selection], merge: true, expiresInMs: 4 * 60 * 60 * 1_000 }))
+      .toEqual({ mode: "edit", selections: [selection], merge: true, expiresInMs: 4 * 60 * 60 * 1_000 });
+    expect(normalizeBridgeEditPolicySet({ mode: "edit", selections: [selection] }))
+      .toEqual({ mode: "edit", selections: [selection] });
+  });
+
+  it("refuses an editPolicySet duration outside the five fixed Edit durations", () => {
+    const selection = { sourceBindingId: "canvas-101", expectedPolicyRevision: 3, enabledCategories: ["canvas_edit_page_content"] };
+    expect(() => normalizeBridgeEditPolicySet({ mode: "edit", selections: [selection], expiresInMs: 90 * 60 * 1_000 }))
+      .toThrow("expiresInMs must be one of the fixed Edit durations");
+    expect(() => normalizeBridgeEditPolicySet({ mode: "edit", selections: [selection], expiresInMs: "4h" }))
+      .toThrow("expiresInMs must be one of the fixed Edit durations");
+  });
+
+  it("refuses an editPolicySet merge with mode Plan", () => {
+    const planSelection = { sourceBindingId: "canvas-101", expectedPolicyRevision: 3 };
+    expect(() => normalizeBridgeEditPolicySet({ mode: "plan", selections: [planSelection], merge: true }))
+      .toThrow("merge is invalid for Plan");
+  });
+
+  it("keeps BRIDGE_EDIT_DURATIONS_MS equal to SETTINGS_EDIT_DURATIONS in the extension", () => {
+    expect(BRIDGE_EDIT_DURATIONS_MS).toEqual(SETTINGS_EDIT_DURATIONS.map((duration) => duration.value));
   });
 });

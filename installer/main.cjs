@@ -5,13 +5,26 @@ const path = require("node:path");
 const os = require("node:os");
 const { spawnSync } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
-const { app, BrowserWindow, dialog, ipcMain, session, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell } = require("electron");
 const { assertAssistantId, envelope } = require("./shared/contract.cjs");
 const { createElectronUpdaterAdapter } = require("./shared/electron-updater-adapter.cjs");
 const { createUpdateAttemptStore, createUpdateController } = require("./shared/updates.cjs");
 const { UPDATE_FEED } = require("./shared/update-feed.cjs");
 const { createInstallerController, detectAssistant, errorDetails, repairRequiredState } = require("./shared/installer-controller.cjs");
 const { canonicalDirectory, exists, isComplete, mkdirPrivate, payloadLayout } = require("./shared/runtime.cjs");
+
+/**
+ * The only web addresses Morrow may ever open, and only from this fixed list
+ * (D5). No address comes from the renderer: a step asks by name
+ * ("support"), never by URL, and main.cjs is the only place that resolves a
+ * name to an address. The Chrome Web Store listing does not exist yet, so it
+ * stays null until Morrow publishes one; the setup steps that would open it
+ * are unchanged while it does.
+ */
+const EXTERNAL_ADDRESSES = Object.freeze({
+  storeListing: null,
+  support: "https://meetmorrow.app/support"
+});
 
 const PRODUCT_VERSION = app.getVersion();
 const BUILD_METADATA = require("./package.json").morrow || Object.freeze({});
@@ -788,6 +801,40 @@ async function startMorrow(lifecycle) {
     trusted(event);
     try { await installer.revealBridgeFolder(); return respond(); }
     catch { return failed(errorDetails("bridge_folder_unavailable")); }
+  });
+  // Copies one example request to the system clipboard. Morrow writes nothing
+  // else there, and this step changes no setup state, so it answers with the
+  // state that already exists.
+  ipcMain.handle("installer:copy-to-clipboard", async (event, input) => {
+    trusted(event);
+    try {
+      if (!input || typeof input !== "object" || typeof input.text !== "string" || input.text.length === 0 || Object.keys(input).length !== 1) throw new TypeError("invalid input");
+    } catch (error) {
+      return failed(error);
+    }
+    try {
+      clipboard.writeText(input.text);
+      return respond();
+    } catch {
+      return failed(errorDetails("clipboard_write_failed"));
+    }
+  });
+  // Opens the support page in the person's default browser. The address
+  // comes only from the fixed allow list above, never from the renderer, and
+  // this is the one entry of it Morrow can open today (D5).
+  ipcMain.handle("installer:open-support", async (event, ...input) => {
+    trusted(event);
+    try {
+      noInput(input);
+    } catch (error) {
+      return failed(error);
+    }
+    try {
+      await shell.openExternal(EXTERNAL_ADDRESSES.support);
+      return respond();
+    } catch {
+      return failed(errorDetails("external_open_failed"));
+    }
   });
   ipcMain.handle("installer:reconcile-bridge", async (event, ...input) => {
     trusted(event);

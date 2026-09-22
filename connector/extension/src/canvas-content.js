@@ -1167,10 +1167,30 @@
     return pageId(value);
   }
 
+  function trimmedCourseField(value, max = 120) {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim().slice(0, max);
+    return trimmed ? trimmed : undefined;
+  }
+
   function courseSummary(value) {
     const id = courseId(value?.id);
     const name = typeof value?.name === "string" ? value.name.trim().slice(0, 300) : "";
-    return id && name ? { id, name } : null;
+    if (!id || !name) return null;
+    const code = trimmedCourseField(value?.course_code);
+    const term = trimmedCourseField(value?.term?.name);
+    const role = trimmedCourseField(value?.enrollments?.[0]?.type);
+    const favorite = typeof value?.is_favorite === "boolean" ? value.is_favorite : undefined;
+    const published = typeof value?.workflow_state === "string" ? value.workflow_state === "available" : undefined;
+    return {
+      id,
+      name,
+      ...(code !== undefined ? { code } : {}),
+      ...(term !== undefined ? { term } : {}),
+      ...(role !== undefined ? { role } : {}),
+      ...(favorite !== undefined ? { favorite } : {}),
+      ...(published !== undefined ? { published } : {}),
+    };
   }
 
   async function courseJson(id, expiresAt) {
@@ -1206,7 +1226,7 @@
 
   async function listCourses(nextValue, expiresAt) {
     const url = nextValue === undefined
-      ? new URL(`/api/v1/courses?enrollment_state=active&per_page=${MAX_DISCOVERED_COURSES}&page=1`, location.origin)
+      ? new URL(`/api/v1/courses?enrollment_state=active&include[]=term&include[]=favorites&per_page=${MAX_DISCOVERED_COURSES}&page=1`, location.origin)
       : discoveryUrl(nextValue);
     if (!url) throw new Error("canvas_courses_next_invalid");
     const response = await fetch(url, {

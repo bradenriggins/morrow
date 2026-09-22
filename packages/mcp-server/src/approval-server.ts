@@ -18,6 +18,16 @@ const HTTP_HEADERS_TIMEOUT_MS = 10_000;
 const HTTP_REQUEST_TIMEOUT_MS = 30_000;
 const HTTP_KEEP_ALIVE_TIMEOUT_MS = 1_000;
 const HTTP_SHUTDOWN_GRACE_MS = 250;
+// WI-6.4: "Recent changes" (`/recent`) carries no operation id in its address, so nothing in the
+// URL gates who can read it. The one-time entry code and the session it exchanges for are its
+// only gate, sized and timed like the review page's own nonce and cookie (F19).
+const RECENT_COOKIE_NAME = "morrow_recent";
+const RECENT_ENTRY_TTL_MS = 900_000;
+const RECENT_SESSION_TTL_MS = 900_000;
+const MAX_RECENT_ENTRIES = 16;
+const MAX_RECENT_SESSIONS = 16;
+const RECENT_OPERATIONS_READ = 200;
+const RECENT_CHANGES_SHOWN = 50;
 
 /**
  * Fields that identify which item a change reaches, not what changes about it.
@@ -117,6 +127,15 @@ export class BoundedHttpServerLifecycle {
   }
 }
 
+// WI-4.4: the "do not ask again" bundle a review may offer, mirroring runtime.ts's own
+// `RememberOfferResult` shape by value rather than by import, so this file stays free of a
+// dependency on the runtime module the way its other controller methods already are.
+export interface RememberOffer {
+  readonly categoryId: string;
+  readonly label: string;
+  readonly until: number;
+}
+
 export interface ApprovalOperationController {
   operationGet(operationId: string): JsonObject;
   operationList(limit?: number): JsonObject;
@@ -129,7 +148,22 @@ export interface ApprovalOperationController {
   batchApprovalStatus?(batchId: string): JsonObject;
   approveBatch?(batchId: string): JsonObject;
   runApprovedBatch?(batchId: string, signal: AbortSignal): Promise<unknown>;
+  // WI-4.3/WI-4.4: only a single operation's review page offers "do not ask again" (a batch id
+  // is never in the runtime's operation-record store, so an absent method or a lookup miss both
+  // read the same way here: no offer). Optional so every existing test double, and any future
+  // controller that never grants Edit access, still satisfies this interface unchanged.
+  rememberOffer?(operationId: string): Promise<RememberOffer | null>;
+  rememberKind?(operationId: string): Promise<"saved" | "failed">;
   cancelBatchApproval?(batchId: string): JsonObject;
+  /**
+   * WI-6.4: the name of the course or site a change reached, keyed by the operation's
+   * `sourceBindingId`, for the "Recent changes" list. A cheap, already-known lookup, the
+   * connections a person has open now, never a fresh platform read: the spec forbids reading
+   * titles from the platform for 50 old operations, and a course name must cost no more than
+   * that. Optional so every existing test double, and a controller with no open connections,
+   * still satisfies this interface unchanged; a miss just leaves the course name off the row.
+   */
+  connectionName?(sourceBindingId: string | null): string | null | undefined;
 }
 
 interface ApprovalTarget {
@@ -199,6 +233,14 @@ if (changeList) {
   document.querySelector(".change-pagination").hidden = false;
   render();
 }
+document.querySelectorAll(".recent-reverse-copy").forEach((button) => {
+  const text = button.dataset.copyText || "";
+  button.addEventListener("click", () => {
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+      .then(() => { button.textContent = "Copied"; })
+      .catch(() => { button.textContent = "Copy the text above instead"; });
+  });
+});
 document.querySelectorAll(".question-preview").forEach((preview) => {
   const modes = preview.querySelector(".preview-modes");
   if (!modes) return;
@@ -936,7 +978,7 @@ async function reviewContexts(
   return contexts;
 }
 
-function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boolean, contexts?: ReadonlyMap<string, ApprovalReviewContext>): string {
+function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boolean, contexts?: ReadonlyMap<string, ApprovalReviewContext>, rememberText?: string): string {
   let state = reviewState(target, snapshot);
   if (active && state === "approved") state = "running";
   if (!active && ["running", "dispatching"].includes(state)) state = "interrupted";
@@ -946,12 +988,22 @@ function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boo
   const platform = snapshotPlatform(snapshot);
   const attention = Array.isArray(snapshot.attention) ? snapshot.attention : [];
   const item = state === "verified" ? resultItem(target, snapshot, contexts) : undefined;
-  return stateContent(state, platform, attention, item) + (total ? `<section class="section"><p>${confirmed} of ${total} changes confirmed in ${platform}.</p></section>` : "");
+  return stateContent(state, platform, attention, item)
+    + (total ? `<section class="section"><p>${confirmed} of ${total} changes confirmed in ${platform}.</p></section>` : "")
+    + (rememberText ? `<section class="section remember-result"><p>${escapeHtml(rememberText)}</p></section>` : "");
 }
 
 // The nonce is issued on demand so a page that renders no form never takes a
 // grant slot or sets a cookie the reader cannot use.
-function html(target: ApprovalTarget, snapshot: JsonObject, grant: () => string, contexts: ReadonlyMap<string, ApprovalReviewContext>, active: boolean): string {
+function html(
+  target: ApprovalTarget,
+  snapshot: JsonObject,
+  grant: () => string,
+  contexts: ReadonlyMap<string, ApprovalReviewContext>,
+  active: boolean,
+  rememberOffer: RememberOffer | null,
+  rememberText: string | undefined,
+): string {
   let issued: string | null = null;
   const nonce = (): string => (issued ??= grant());
   const summary = escapeHtml(JSON.stringify(technicalDetails(target, snapshot), null, 2));
@@ -1069,7 +1121,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, grant: () => string,
   const reviewContent = batch ? `<section class="batch-review"><div class="change-list-controls" hidden><label for="change-search">Find a change</label><input id="change-search" type="search" placeholder="Search titles or courses" autocomplete="off"></div><div class="change-list">${changed}</div><nav class="change-pagination" aria-label="Review pages" hidden><p id="changes-count" role="status" aria-live="polite"></p><div><button id="changes-previous" type="button" class="secondary">Previous</button><button id="changes-next" type="button" class="secondary">Next</button></div></nav></section>` : changed;
   if (state !== "awaiting_approval") {
     const stop = batch && active ? `<div class="actions" id="stop-work"><form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="cancel" type="submit">Stop remaining changes</button></form></div>` : "";
-    return pageShell("Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active, contexts)}</div>${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
+    return pageShell("Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active, contexts, rememberText)}</div>${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
   }
   const addingQuestion = !batch && plan.tool === "canvas_create_quiz_item";
   const planRouting = object(object(plan.arguments)._morrow);
@@ -1095,8 +1147,75 @@ function html(target: ApprovalTarget, snapshot: JsonObject, grant: () => string,
       ? '<p class="warning">Canvas does not have the item this change names. It may have been renamed, moved, or removed since this change was prepared.</p><p>Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review. This page has not changed anything.</p>'
       : '<p class="warning">Morrow could not identify the course or a selected item in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
     : `<p>${batch ? `Morrow will apply all ${plans.length} changes and check each result in Canvas. Searching does not change what you approve.` : addingQuestion ? "Morrow will add this question and check it in Canvas." : "Morrow applies these changes and checks them in Canvas."}</p><p class="keep-open">${keepOpenInstruction(platform)}</p>`).replaceAll("Canvas", platform);
-  const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="approve${destructive ? " danger" : ""}" type="submit">${approveLabel}</button></form>`;
+  // WI-4.4 (D2b, D3): only a single, rememberable change offers "do not ask again", never a
+  // batch or a removal (`rememberOffer` already returns null for both). It rides in the same
+  // form as the primary approve button, behind its own submit value, so one POST both approves
+  // the change and asks the runtime to remember the bundle.
+  const rememberClock = rememberOffer
+    ? new Date(rememberOffer.until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+    : "";
+  const rememberButton = !batch && !missingNames && rememberOffer
+    ? `<button name="remember" value="1" class="approve secondary" type="submit">${approveLabel}, and do not ask again for ${escapeHtml(rememberOffer.label.toLocaleLowerCase())} in this course until ${escapeHtml(rememberClock)}</button>`
+    : "";
+  const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="approve${destructive ? " danger" : ""}" type="submit">${approveLabel}</button>${rememberButton}</form>`;
   return pageShell(title, `<header class="hero${destructive ? " danger" : ""}"><h1>${escapeHtml(title)}</h1>${requestedByLine(snapshot, plans)}${batchSummary}${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${reviewContent}<footer class="decision"><div class="next-step">${next}</div><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="cancel" type="submit">Cancel</button></form></div><details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></footer>`);
+}
+
+/**
+ * WI-6.4: the item a finished change reached, read from the frozen plan arguments already on
+ * the operation record, never a fresh platform read (F28: the record has no item title, and the
+ * status page linked from each row is where a title appears). `course_id` and `connection_id`
+ * name the container, not the item, so they are skipped here the way the review page already
+ * moves them to Technical details.
+ */
+function recentItemReference(request: JsonObject): string | null {
+  for (const field of STRUCTURAL_EDIT_FIELDS) {
+    if (field === "course_id" || field === "connection_id") continue;
+    const value = request[field];
+    if (typeof value === "string" && value.trim()) return `${readableName(field)}: ${value.trim()}`;
+    if (typeof value === "number" && Number.isFinite(value)) return `${readableName(field)}: ${value}`;
+  }
+  return null;
+}
+
+function recentChangeTime(operation: JsonObject): string {
+  const stamp = operation.terminalAt || operation.updatedAt || operation.createdAt;
+  const time = typeof stamp === "string" ? Date.parse(stamp) : NaN;
+  return Number.isFinite(time) ? new Date(time).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "";
+}
+
+function recentChangeRow(operation: JsonObject, index: number, controller: ApprovalOperationController): string {
+  const plan = object(operation.plan);
+  const tool = String(plan.tool || "");
+  const platform = platformName(tool);
+  const sourceBindingId = typeof operation.sourceBindingId === "string" ? operation.sourceBindingId : null;
+  const courseName = controller.connectionName?.(sourceBindingId) || "";
+  const itemReference = recentItemReference(object(plan.arguments));
+  const context = [courseName, itemReference].filter((part): part is string => Boolean(part)).join(" · ") || platform;
+  const operationId = String(operation.operationId || "");
+  const statusUrl = `/operations/${encodeURIComponent(operationId)}`;
+  const reverseRequest = `Reverse change ${operationId}.`;
+  return `<li class="recent-row"><span class="recent-number">${index + 1}</span><span class="recent-heading"><strong>${escapeHtml(reviewTitle(tool))}</strong><span class="recent-context">${escapeHtml(context)}</span></span><span class="recent-meta"><span class="recent-time">${escapeHtml(recentChangeTime(operation))}</span><span class="recent-state">${escapeHtml(operationStatus(String(operation.state || ""), platform))}</span></span><span class="recent-links"><a href="${escapeHtml(statusUrl)}">See this change</a><span class="recent-reverse"><p>To undo this, ask your assistant: <code>${escapeHtml(reverseRequest)}</code></p><button type="button" class="recent-reverse-copy" data-copy-text="${escapeHtml(reverseRequest)}">Copy the request</button></span></span></li>`;
+}
+
+/**
+ * WI-6.4: the content of `/recent`. `operationList` already exists on the controller (F20), so
+ * this reads a page of it, keeps only what reached a final state (`terminalAt` set), and shows
+ * the newest 50. It calls no read method on the controller, so it never risks the live reads
+ * `operationReviewContext` would make; a row names its item from the plan it already has.
+ */
+function recentChangesContent(controller: ApprovalOperationController): string {
+  const snapshot = controller.operationList(RECENT_OPERATIONS_READ);
+  const operations = Array.isArray(snapshot.operations) ? snapshot.operations.map(object) : [];
+  const finished = operations.filter((operation) => typeof operation.terminalAt === "string").slice(0, RECENT_CHANGES_SHOWN);
+  const list = finished.length
+    ? `<ul class="recent-list">${finished.map((operation, index) => recentChangeRow(operation, index, controller)).join("")}</ul>`
+    : `<p class="recent-empty">Morrow has not finished any changes yet.</p>`;
+  return `<header class="hero"><h1>Recent changes</h1><p>Changes Morrow finished, most recent first.</p></header><section class="section recent-section">${list}</section>`;
+}
+
+function recentChangesRefusal(title: string, detail: string): string {
+  return pageShell(title, `<section class="outcome"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(detail)}</p></section>`);
 }
 
 function cookieValue(request: IncomingMessage, name: string): string | null {
@@ -1118,9 +1237,9 @@ function approvalCookieName(nonce: string): string {
   return `morrow_approval_${nonce}`;
 }
 
-async function readFormNonce(request: IncomingMessage): Promise<string | null> {
+async function readFormNonce(request: IncomingMessage): Promise<{ nonce: string | null; remember: boolean }> {
   if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/x-www-form-urlencoded")) {
-    return null;
+    return { nonce: null, remember: false };
   }
   const chunks: Buffer[] = [];
   let bytes = 0;
@@ -1130,7 +1249,8 @@ async function readFormNonce(request: IncomingMessage): Promise<string | null> {
     if (bytes > 8_192) throw new Error("approval request is too large");
     chunks.push(buffer);
   }
-  return new URLSearchParams(Buffer.concat(chunks).toString("utf8")).get("nonce");
+  const form = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+  return { nonce: form.get("nonce"), remember: form.get("remember") === "1" };
 }
 
 export class LoopbackApprovalServer {
@@ -1138,6 +1258,15 @@ export class LoopbackApprovalServer {
   private readonly httpLifecycle: BoundedHttpServerLifecycle;
   private readonly nonces = new Map<string, { targetKey: string; expiresAt: number; canApprove: boolean }>();
   private readonly work = new Map<string, Promise<unknown>>();
+  // WI-4.4: the sentence the "do not ask again" grant left for one operation, read by both the
+  // full result page and the status poll. Bounded the same way `nonces` is: a server that runs
+  // for a long time must not grow this without limit from reviews nobody ever reopens.
+  private readonly rememberResults = new Map<string, string>();
+  // WI-6.4: `/recent` names no operation, so it needs its own gate. `recentEntries` holds each
+  // one-time code, minted for the `morrow_recent_changes` tool, until it is exchanged once for a
+  // `recentSessions` token, which the cookie then carries for its own 900-second lifetime.
+  private readonly recentEntries = new Map<string, number>();
+  private readonly recentSessions = new Map<string, number>();
   private readonly stopping = new AbortController();
   private port: number | null = null;
   private approvalAdmissionOpen = true;
@@ -1205,6 +1334,68 @@ export class LoopbackApprovalServer {
     for (const [nonce, grant] of this.nonces) if (grant.targetKey === targetKey) this.nonces.delete(nonce);
   }
 
+  private rememberText(target: ApprovalTarget): string | undefined {
+    return target.kind === "operations" ? this.rememberResults.get(target.id) : undefined;
+  }
+
+  /**
+   * WI-6.4: mints the one-time code the `morrow_recent_changes` tool sends as
+   * `${baseUrl}/recent?entry=<code>`. Public because the tool calls it directly, the way it reads
+   * `baseUrl` directly; `/recent` itself only ever consumes a code, never issues one.
+   */
+  issueRecentChangesEntry(): string {
+    const now = Date.now();
+    for (const [code, expiresAt] of this.recentEntries) if (expiresAt <= now) this.recentEntries.delete(code);
+    while (this.recentEntries.size >= MAX_RECENT_ENTRIES) {
+      const oldest = this.recentEntries.keys().next().value;
+      if (oldest === undefined) break;
+      this.recentEntries.delete(oldest);
+    }
+    let code: string;
+    do code = randomBytes(32).toString("base64url"); while (this.recentEntries.has(code));
+    this.recentEntries.set(code, now + RECENT_ENTRY_TTL_MS);
+    return code;
+  }
+
+  /** The one-time entry code is spent for a 900-second session, held as the `/recent` cookie's value. */
+  private issueRecentSession(): string {
+    const now = Date.now();
+    for (const [token, expiresAt] of this.recentSessions) if (expiresAt <= now) this.recentSessions.delete(token);
+    while (this.recentSessions.size >= MAX_RECENT_SESSIONS) {
+      const oldest = this.recentSessions.keys().next().value;
+      if (oldest === undefined) break;
+      this.recentSessions.delete(oldest);
+    }
+    let token: string;
+    do token = randomBytes(32).toString("base64url"); while (this.recentSessions.has(token));
+    this.recentSessions.set(token, now + RECENT_SESSION_TTL_MS);
+    return token;
+  }
+
+  /**
+   * WI-4.4: runs after `approveOperation` already succeeded and the change's own work has
+   * started, never awaited by the request that approved it ("Approve first. A failed grant must
+   * not stop the change."). `rememberOffer` is read again here, not carried from the
+   * page load that showed the button: the bundle and its end time are decoration on top of an
+   * approval the person already made, so reading them fresh is no less correct than the page's
+   * own copy, and never risks approving on stale data.
+   */
+  private async rememberChoice(operationId: string): Promise<void> {
+    let text = "Morrow could not save that choice. It asks again next time.";
+    try {
+      const offer = await this.controller.rememberOffer?.(operationId);
+      if (offer && (await this.controller.rememberKind?.(operationId)) === "saved") {
+        const clock = new Date(offer.until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+        text = `Morrow does not ask again for ${offer.label.toLocaleLowerCase()} in this course until ${clock}.`;
+      }
+    } catch { /* the sentence already defaults to the failure case */ }
+    if (this.rememberResults.size >= MAX_APPROVAL_NONCES && !this.rememberResults.has(operationId)) {
+      const oldest = this.rememberResults.keys().next().value;
+      if (oldest !== undefined) this.rememberResults.delete(oldest);
+    }
+    this.rememberResults.set(operationId, text);
+  }
+
   async start(): Promise<string> {
     if (this.baseUrl) return this.baseUrl;
     await new Promise<void>((resolve, reject) => {
@@ -1241,6 +1432,40 @@ export class LoopbackApprovalServer {
         sendJson(response, 200, operationsList(this.controller.operationList()));
         return;
       }
+      if (method === "GET" && url.pathname === "/recent") {
+        const entry = url.searchParams.get("entry");
+        if (entry) {
+          const expiresAt = this.recentEntries.get(entry);
+          this.recentEntries.delete(entry);
+          if (!expiresAt || expiresAt <= Date.now()) {
+            sendHtml(response, 409, recentChangesRefusal(
+              "This link already opened, or it expired",
+              "Ask your assistant for a new link to recent changes.",
+            ));
+            return;
+          }
+          const token = this.issueRecentSession();
+          response.writeHead(303, {
+            location: "/recent",
+            "cache-control": "no-store",
+            "set-cookie": `${RECENT_COOKIE_NAME}=${token}; HttpOnly; SameSite=Strict; Path=/recent; Max-Age=900`,
+          });
+          response.end();
+          return;
+        }
+        const sessionToken = cookieValue(request, RECENT_COOKIE_NAME);
+        const sessionExpiresAt = sessionToken ? this.recentSessions.get(sessionToken) : undefined;
+        if (!sessionToken || !sessionExpiresAt || sessionExpiresAt <= Date.now()) {
+          if (sessionToken) this.recentSessions.delete(sessionToken);
+          sendHtml(response, 403, recentChangesRefusal(
+            "Ask your assistant for this link",
+            "This page needs a current link from your assistant. Ask your assistant for recent changes.",
+          ));
+          return;
+        }
+        sendHtml(response, 200, pageShell("Recent changes", recentChangesContent(this.controller)));
+        return;
+      }
       const target = approvalPath(url.pathname);
       if (!target) {
         if (String(request.headers.accept || "").includes("text/html")) sendHtml(response, 404, statePage("unavailable"));
@@ -1262,18 +1487,22 @@ export class LoopbackApprovalServer {
           const contexts = reviewState(target, snapshot) === "verified"
             ? await reviewContexts(this.controller, operations, signal)
             : undefined;
-          sendJson(response, 200, { html: statusContent(target, snapshot, active, contexts), active, states });
+          sendJson(response, 200, { html: statusContent(target, snapshot, active, contexts, this.rememberText(target)), active, states });
           return;
         }
         const expiry = Date.parse(String(snapshot.approvalExpiresAt || snapshot.expiresAt || ""));
-        const contexts = reviewState(target, snapshot) !== "awaiting_approval" || !Number.isFinite(expiry) || expiry > Date.now()
+        const state = reviewState(target, snapshot);
+        const contexts = state !== "awaiting_approval" || !Number.isFinite(expiry) || expiry > Date.now()
           ? await reviewContexts(this.controller, operations, signal)
           : new Map<string, ApprovalReviewContext>();
         const nonceKey = `${target.kind}:${target.id}`;
         const canApprove = !namedTargetsMissing(operations, contexts);
         const cookiePath = `/${target.kind}/${encodeURIComponent(target.id)}`;
         let nonce: string | null = null;
-        const body = html(target, snapshot, () => (nonce = this.issueNonce(nonceKey, canApprove)), contexts, active);
+        const rememberOffer = target.kind === "operations" && state === "awaiting_approval" && this.controller.rememberOffer
+          ? await this.controller.rememberOffer(target.id).catch(() => null)
+          : null;
+        const body = html(target, snapshot, () => (nonce = this.issueNonce(nonceKey, canApprove)), contexts, active, rememberOffer, this.rememberText(target));
         sendHtml(
           response,
           200,
@@ -1295,7 +1524,7 @@ export class LoopbackApprovalServer {
         const baseUrl = this.baseUrl;
         const originValid = requestOrigin === baseUrl;
         const refererValid = requestReferer === `${baseUrl}/${target.kind}/${encodeURIComponent(target.id)}`;
-        const formNonce = await readFormNonce(request);
+        const { nonce: formNonce, remember } = await readFormNonce(request);
         signal.throwIfAborted();
         const expected = formNonce ? this.nonces.get(formNonce) : undefined;
         const cookieNonce = formNonce && expected ? cookieValue(request, approvalCookieName(formNonce)) : null;
@@ -1335,6 +1564,9 @@ export class LoopbackApprovalServer {
             ? this.controller.runApprovedBatch!(target.id, this.stopping.signal)
             : this.controller.runApprovedOperation(target.id, this.stopping.signal));
           this.work.set(nonceKey, work.catch(() => undefined).finally(() => this.work.delete(nonceKey)));
+          // WI-4.4: approve first, remember second, and never let the grant hold up this
+          // response. "A failed grant must not stop the change" (spec, WI-4.4 notes).
+          if (remember && target.kind === "operations") void this.rememberChoice(target.id);
         }
         response.writeHead(303, {
           location: `/${target.kind}/${encodeURIComponent(target.id)}`,
@@ -1364,5 +1596,7 @@ export class LoopbackApprovalServer {
     await Promise.all(this.work.values());
     this.port = null;
     this.nonces.clear();
+    this.recentEntries.clear();
+    this.recentSessions.clear();
   }
 }
