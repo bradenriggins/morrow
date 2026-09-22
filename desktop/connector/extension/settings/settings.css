@@ -164,7 +164,7 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
   .selection-summary { max-width: none; text-align: left; }
   .mode-choice, .edit-controls, .category-list { grid-template-columns: 1fr; }
   .course-tools { flex-direction: column; align-items: stretch; }
-  .platform-field, .term-field { flex-basis: auto; }
+  .search-field, .platform-field, .term-field { flex-basis: auto; }
   #course-select-mode { width: 100%; }
   .course-row { grid-template-columns: auto minmax(0, 1fr); }
   .course-row:not(:has(.course-select)) { grid-template-columns: minmax(0, 1fr); }

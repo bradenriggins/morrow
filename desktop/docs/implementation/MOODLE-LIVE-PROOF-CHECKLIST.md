@@ -27,7 +27,7 @@ A receipt is complete when it carries all of these. The harness writes each one:
 | --- | --- |
 | `target` | The exact site, installation subpath, signed-in principal and course the write bound to. |
 | `exactTargetBeforeChange` | The fresh read of the exact target, with the snapshot digest the change was bound to. |
-| `requestReview` | The frozen request a person approved, its authorization, the refusal of a dispatch before approval, and the refusal of an approval posted without the Bridge signature. |
+| `requestReview` | The frozen request, its approval (a Playwright click on Approve, signed by the harness in the Bridge role), its authorization, the refusal of a dispatch before approval, and the refusal of an approval posted without the Bridge signature. |
 | `dispatch` | One dispatch: `dispatchAttempt: 1`, one bridge write command, and one provider POST or AJAX call. |
 | `authoritativeSavedResult` | The fresh read after the change, from Moodle's own saved state, and the fields that changed. |
 | `replay` | The refusal of the repeated dispatch, and the unchanged dispatch count after it. |

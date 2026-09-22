@@ -19,7 +19,10 @@ test("the exact pull-request CI command rejects stale generated provider artifac
   assert.match(job("check-desktop"), /^\s*- run: pnpm check\s*$/m);
   assert.match(job("check-desktop"), /^ {4}defaults:\n {6}run:\n {8}working-directory: desktop$/m, "the desktop suite runs in the desktop product directory");
   assert.match(job("changes"), /^ {14}- 'desktop\/\*\*'$/m, "a change anywhere under desktop/ runs the desktop suite");
-  assert.match(job("check"), /needs: \[check-desktop, check-muse\]/, "the required check aggregates the desktop suite");
+  assert.match(job("check"), /needs: \[changes, check-desktop, check-muse\]/, "the required check aggregates change detection and both suites");
+  assert.match(job("check"), /if \[ "\$CHANGES" != "success" \]; then[\s\S]*?exit 1/, "a failed change detection cannot pass as skipped suites");
+  assert.match(job("check"), /if \[ "\$changed" = "true" \] && \[ "\$result" != "success" \]/, "a changed product passes only when its suite succeeded");
+  assert.match(job("changes"), /^ {12}desktop:\n {14}- 'desktop\/\*\*'\n {14}- '\.github\/\*\*'$/m, "a workflow change runs the desktop suite");
   assert.equal(manifest.scripts.check, "pnpm audit:dependencies && pnpm generated:check && pnpm test");
   assert.equal(
     manifest.scripts["generated:check"],

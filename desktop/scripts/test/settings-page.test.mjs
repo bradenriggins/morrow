@@ -1422,6 +1422,36 @@ test("every signed-in site lists its own available courses, and Connect uses tha
   assert.deepEqual(saved[0], { siteAnchorId: moodle.siteAnchorId, discoveryReceiptId: "discovery-moodle", courseIds: ["8"] });
 });
 
+test("available courses sort by number within a name, not character by character", async () => {
+  const site = discoverySite("canvas-site-numbered");
+  const page = await openSettings({
+    status: () => statusFixture([], { siteAnchors: [site] }),
+    handlers: {
+      morrow_course_discovery_start: () => discoveryResult(site, "discovery-numbered",
+        ["Course 10", "Course 2", "Course 100", "Course 1", "Course 11"].map((name, index) => ({ id: String(index + 1), name }))),
+    },
+  });
+  await page.waitFor(() => page.queryAll("[data-connect-row]").length === 5, "the available courses never showed");
+  assert.deepEqual(page.queryAll('.course-row[data-row-kind="available"] .course-row-name').map((el) => el.textContent),
+    ["Course 1", "Course 2", "Course 10", "Course 11", "Course 100"]);
+});
+
+test("a section heading counts every course in that section, not only the rows shown", async () => {
+  const canvas = discoverySite("canvas-site-large");
+  const moodle = discoverySite("moodle-site-large", "moodle");
+  const courses = (prefix) => Array.from({ length: 60 }, (_, index) => ({ id: String(index + 1), name: `${prefix} ${index + 1}` }));
+  const page = await openSettings({
+    status: () => statusFixture([], { siteAnchors: [canvas, moodle] }),
+    handlers: {
+      morrow_course_discovery_start: ({ siteAnchorId }) => siteAnchorId === canvas.siteAnchorId
+        ? discoveryResult(canvas, "discovery-canvas-large", courses("Anatomy"))
+        : discoveryResult(moodle, "discovery-moodle-large", courses("Chemistry")),
+    },
+  });
+  await page.waitFor(() => page.queryAll("[data-connect-row]").length === 100, "the first 100 available courses never showed");
+  assert.deepEqual(page.queryAll(".listhead").map((el) => el.textContent), ["Not connected · 120"]);
+});
+
 // A list of available courses is good for a few minutes only. The rows stay, and Connect reads
 // the list again first, so a person never has to find the courses again by hand.
 test("Connect on a list that expired reads that site's list again, then connects from the new list", async () => {

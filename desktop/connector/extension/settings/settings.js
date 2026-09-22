@@ -558,7 +558,7 @@ function scopeCounts(rows) {
 /** WI-5.3 order: needs attention, then connected, then not connected; favorites first, then name. */
 function orderedMatches(rows) {
   return rows.filter((row) => rowMatchesFilters(row))
-    .sort((left, right) => (SCOPE_RANK[left.scope] - SCOPE_RANK[right.scope]) || (Number(right.favorite) - Number(left.favorite)) || left.name.localeCompare(right.name));
+    .sort((left, right) => (SCOPE_RANK[left.scope] - SCOPE_RANK[right.scope]) || (Number(right.favorite) - Number(left.favorite)) || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }));
 }
 
 function distinctValues(rows, key) {
@@ -1185,9 +1185,9 @@ function renderCourseDetail(binding, isOpen) {
     <div class="course-detail morrow-panel is-open" id="${escapeHtml(detailId)}" data-binding-id="${escapeHtml(binding.sourceBindingId)}">
       <div class="course-detail-top">
         <div class="course-level-control" role="group" aria-label="Level for ${escapeHtml(courseName(binding))}">
-          <button type="button" data-set-level="plan" aria-pressed="${level === "plan"}" ${state.busy ? "disabled" : ""}>Plan. Morrow asks first.</button>
-          <button type="button" data-set-level="routine" aria-pressed="${level === "routine"}" ${state.busy ? "disabled" : ""}>Edit. Routine edits.</button>
-          ${level === "custom" ? `<button type="button" aria-pressed="true" data-open-customize="1">Custom</button>` : ""}
+          <button type="button" class="secondary" data-set-level="plan" aria-pressed="${level === "plan"}" ${state.busy ? "disabled" : ""}>Plan. Morrow asks first.</button>
+          <button type="button" class="secondary" data-set-level="routine" aria-pressed="${level === "routine"}" ${state.busy ? "disabled" : ""}>Edit. Routine edits.</button>
+          ${level === "custom" ? `<button type="button" class="secondary" aria-pressed="true" data-open-customize="1">Custom</button>` : ""}
         </div>
       </div>
       <p class="field-help">${lead}</p>
@@ -1281,7 +1281,7 @@ function renderCourseList(focus = focusedCourseControl()) {
     for (const row of limited) {
       if (row.scope !== lastScope) {
         lastScope = row.scope;
-        const sectionCount = limited.filter((candidate) => candidate.scope === row.scope).length;
+        const sectionCount = matches.filter((candidate) => candidate.scope === row.scope).length;
         html += `<div class="listhead">${escapeHtml(headings[row.scope])} · ${sectionCount}</div>`;
       }
       html += renderCourseRow(row);

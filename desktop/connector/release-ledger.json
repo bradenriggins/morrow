@@ -440,6 +440,10 @@
     {
       "version": "1.0.115",
       "releaseManifestSha256": "671582e16c9afe16717b0ef78107af4a8c089086394b63d51ca7afaaf33535fb"
+    },
+    {
+      "version": "1.0.116",
+      "releaseManifestSha256": "7535aa08b8a401604c248385f343e9ccf2c0ff8f93fdd112b7248f67fdc54b84"
     }
   ]
 }
