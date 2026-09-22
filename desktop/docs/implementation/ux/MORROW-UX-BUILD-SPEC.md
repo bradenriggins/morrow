@@ -125,7 +125,7 @@ Other measured facts: `--border` has a contrast of 1.34 to 1 on the page, so an 
 - **Headings.** One `h1` in each view. Sizes descend with level. Today an `h3` (16 px) is larger than an `h2` (15 px) on the settings page.
 - **Space tokens.** `--space-1` to `--space-7`: 4, 8, 12, 16, 24, 32, 48 px. The brand document already requires these values. Values such as 5, 7, 9, 13, 17, 22, 26 and 28 px go away.
 - **Radius tokens.** `--radius-control: 10px`, `--radius-card: 14px`, `--radius-panel: 18px`, `--radius-pill: 999px`. A radius inside a padded container equals the outer radius minus the padding, and never less than `--radius-control`. Values 8, 9, 11, 12 and 16 px go away.
-- **Measure.** `--measure: 68ch`.
+- **Measure.** No per-text cap. Reading text fills its container; only a surface shell bounds a line (superseded 2026-09-22: the former `--measure: 68ch` cap wrapped supporting text early; see `docs/brand/MORROW-BRAND.md`).
 - **Desktop app.** `installer/renderer/styles.css` copies the same token names and values, as `.better-web-ui.md` requires.
 - **Tests.** Extend `extension-theme-contract.test.mjs`: in each Morrow stylesheet (`brand/*.css`, `popup`, `settings`, `onboarding`, `installer/renderer/styles.css`), each `font`, `font-size`, `font-weight`, `gap`, `padding`, `margin` and `border-radius` value is a token, `0`, `auto`, `inherit`, a percentage, or a value on this allow list: `1px` and `2px` (lines and the focus outline), `3px` (focus offset), `5px` (focus halo), `44px` (the control floor), `50%`. The focus ring values come from the brand document and do not change. Add a rendered check to the two browser tests the project has: each visible text is 13 px or more, and one page has 7 font sizes or fewer.
 

@@ -345,22 +345,22 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
     return {
       title: "Connect Morrow Bridge.",
       copy: `${title} is configured. Open Morrow Bridge in Chrome to complete the connection you start.`,
-      body: '<ol class="instructions"><li>Open <strong>Morrow Bridge</strong> in Chrome.</li><li>Select <strong>Connect Morrow</strong>.</li><li>On the Morrow page that opens, select <strong>Allow connection</strong> only if you started it.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
+      body: '<ol class="instructions"><li>Open <strong>Morrow Bridge</strong> in Chrome.</li><li>Select <strong>Connect Morrow</strong>.</li><li>On the Morrow page that opens, select <strong>Allow connection</strong> only if you started it.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
     };
   }
   if (!verifiedCourse(current)) {
     return {
       title: "Open your course in Chrome.",
       copy: "Morrow Bridge identifies Canvas or Moodle after you open a signed-in course.",
-      body: '<ol class="instructions"><li>Open a Canvas or Moodle course you can access in <strong>Chrome</strong> and sign in.</li><li>Open <strong>Morrow Bridge</strong>. It identifies the platform and shows <strong>Connect this course</strong>.</li><li>Select that button and allow access to the exact platform address Chrome shows.</li><li>In Morrow Bridge, select <strong>Open Plan and Edit settings</strong>. Under <strong>Your courses</strong>, select <strong>Connect</strong> next to each course Morrow may use. Each course starts in Plan.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
+      body: '<ol class="instructions"><li>Open a Canvas or Moodle course you can access in <strong>Chrome</strong> and sign in.</li><li>Open <strong>Morrow Bridge</strong>. It identifies the platform and shows <strong>Connect this course</strong>.</li><li>Select that button and allow access to the exact platform address Chrome shows.</li><li>In Morrow Bridge, select <strong>Open Plan and Edit settings</strong>. Under <strong>Your courses</strong>, select <strong>Connect</strong> next to each course Morrow may use. Each course starts in Plan.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
     };
   }
   const course = bridge.firstPreviewCourseName || bridge.selectedCourseName || "your selected course";
   if (previewCompleted(current)) {
     return {
       title: "Your course is connected.",
-      copy: `Morrow read ${course} successfully. Continue in ${assistant.title} and ask what you want to do, for example:`,
-      body: `${homeStatusLines()}<div class="prompt">Find images with no alternative text in this course.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Find images with no alternative text in this course.">Copy</button></div></div><div class="prompt">Move the due date of the first assignment one week later.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Move the due date of the first assignment one week later.">Copy</button></div></div><div class="prompt">Summarize the modules in this course and flag anything that needs review.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Summarize the modules in this course and flag anything that needs review.">Copy</button></div></div>`,
+      copy: `Morrow read ${course} successfully. Continue in ${assistant.title} and ask what you want to do.`,
+      body: `${homeStatusLines()}<h3>Try asking</h3><div class="prompt">Find images with no alternative text in this course.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Find images with no alternative text in this course.">Copy</button></div></div><div class="prompt">Move the due date of the first assignment one week later.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Move the due date of the first assignment one week later.">Copy</button></div></div><div class="prompt">Summarize the modules in this course and flag anything that needs review.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Summarize the modules in this course and flag anything that needs review.">Copy</button></div></div>`,
     };
   }
   if (previewReady(current)) {

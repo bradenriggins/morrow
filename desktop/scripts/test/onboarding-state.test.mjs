@@ -43,7 +43,6 @@ const textOf = (state, id) => state.checks.find((check) => check.id === id).text
 test("setup guide prioritizes a live pairing approval over an unpaired state", () => {
   const state = setupGuideState({ pairing: true, paired: false, connected: false, bindings: [], siteAnchors: [] });
   assert.equal(state.title, "Allow connection");
-  assert.equal(state.showAssistantGuide, false);
   assert.equal(textOf(state, "assistant"), "An assistant approval is waiting on the Morrow page that opened");
   assert.equal(textOf(state, "connection"), "Morrow Bridge connects after you allow this connection");
 });
@@ -51,7 +50,6 @@ test("setup guide prioritizes a live pairing approval over an unpaired state", (
 test("setup guide directs an unpaired Bridge to the graphical Morrow app", () => {
   const state = setupGuideState({ pairing: false, paired: false, connecting: false, connected: false, bindings: [], siteAnchors: [] });
   assert.equal(state.title, "Open Morrow");
-  assert.equal(state.showAssistantGuide, true);
   assert.match(state.detail, /choose your assistant/i);
   assert.match(state.detail, /select Connect Morrow/i);
 });
@@ -203,7 +201,6 @@ test("a status the guide could not read states that, instead of keeping the last
   assert.equal(unread.ready, false);
   assert.equal(unread.readyCourses, 0);
   assert.equal(unread.canOpenSettings, false);
-  assert.equal(unread.showAssistantGuide, false);
   for (const line of [unread.heading, unread.summary, unread.title, unread.detail, ...unread.checks.map((check) => check.text)]) {
     assert.doesNotMatch(line, /\bis ready\b|\bare ready\b|Ready to use|completed/, line);
   }
@@ -341,7 +338,7 @@ test("the setup guide answers a failed status read with an unknown checklist, th
     "#next-title": stubElement("Open Morrow"),
     "#next-detail": stubElement("Open Morrow, choose your assistant, then return to Morrow Bridge."),
     "#open-settings": stubElement("Open Plan and Edit settings", true),
-    "#guide-assistant": stubElement(),
+    "#data-disclosure": stubElement(),
     "#quick-open-settings": stubElement("Open Plan and Edit settings"),
     "#error": stubElement("", true),
   };
