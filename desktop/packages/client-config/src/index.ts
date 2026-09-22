@@ -444,8 +444,8 @@ function verificationText(serverName: string): string {
     "6. Call morrow_catalog with a narrow query before choosing a tool.",
     "7. Run one read-only operation.",
     "8. For a write, inspect the frozen plan and open its local approval URL.",
-    "9. Approve only on the separate loopback approval page.",
-    "10. Dispatch once and require connector-owned fresh readback before stating success.",
+    "9. Approve on the separate loopback approval page in Chrome with Morrow Bridge connected. A request sent to that page by another program cannot approve.",
+    "10. The approval page starts the change once. Require connector-owned fresh readback before stating success.",
     "11. Never repeat a write whose operation state is source_unknown or inspection_required.",
     "",
   ].join("\n");
