@@ -243,7 +243,7 @@ const GUIDE_STATES = new Map([
 ]);
 const GUIDE_SECTION = "5. Morrow Bridge setup guide";
 const GUIDE_SOURCE_NEEDLES = new Map([
-  ["site-saved-not-verified", "Open the saved ${platform"],
+  ["site-saved-not-verified", "or open the saved ${platform"],
 ]);
 
 test("the inventory carries what every setup guide state renders", () => {
