@@ -1006,7 +1006,7 @@
           }
         ]
       },
-      "signature_notes": "evidence: \"admission_policy.json learner-data URL substrings plus the catalog [LEARNER-DATA] flag; projection choke in dispatch/executor.py\"; gate: \"LearnerDataGated\"; signal: \"touches_learner_data=True with the privacy vault not ready\"",
+      "signature_notes": "evidence: \"admission_policy.json learner-data URL segments and substrings plus the catalog [LEARNER-DATA] flag; projection choke in dispatch/executor.py\"; gate: \"LearnerDataGated\"; signal: \"touches_learner_data=True with the privacy vault not ready\"",
       "severity_hint_inventory": "user-action",
       "placeholders": [
         "operation"

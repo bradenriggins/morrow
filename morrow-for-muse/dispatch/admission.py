@@ -323,13 +323,33 @@ def _payload_signal_texts(entry: dict) -> list:
     return [t for t in texts if t]
 
 
+def _url_segment_hit(url: str, segments: list, suffixes: list) -> str | None:
+    """Learner resource named by a literal path segment of url, or None.
+
+    Placeholders ("{course_id}", "{canvas_base}") and the query string
+    are ignored; the match is on whole segments, so "bank_entries" is
+    not "entries" and "/users/self" is handled by the caller's
+    exception list, not here.
+    """
+    path = (url or "").split("?", 1)[0].split("#", 1)[0]
+    wanted = {s.lower() for s in segments}
+    tails = tuple(s.lower() for s in suffixes)
+    for seg in path.lower().split("/"):
+        if not seg or "{" in seg or "}" in seg:
+            continue
+        if seg in wanted or (tails and seg.endswith(tails)):
+            return "segment %r" % seg
+    return None
+
+
 def _learner_signal_hit(entry: dict, policy: dict) -> str | None:
     """First learner-data signal hit for the entry, or None.
 
     Scans, in order: the catalog row's own [LEARNER-DATA] flag
     (W3-P0-5/W3-P0-9: authoritative per-row classification, fires even
     when no URL substring matches); the URL templates with their query
-    templates appended; and the canonical request/multi-step query/body
+    templates appended (whole path segments naming a people resource
+    first, then the substring net); and the canonical request/multi-step query/body
     texts (W3-P1-45). The /users/self educator exception still exempts
     the educator's own record from URL-derived signals.
     """
@@ -340,11 +360,17 @@ def _learner_signal_hit(entry: dict, policy: dict) -> str | None:
     ld = policy.get("learner_data", {})
     exceptions = ld.get("url_exceptions", [])
     substrings = ld.get("url_substrings", [])
+    segments = ld.get("url_segments", [])
+    suffixes = ld.get("url_segment_suffixes", [])
 
-    def scan(text):
+    def scan(text, is_url=False):
         lowered = (text or "").lower()
         if any(exc.lower() in lowered for exc in exceptions):
             return None
+        if is_url:
+            hit = _url_segment_hit(text, segments, suffixes)
+            if hit:
+                return hit
         hit = _url_hits_any(text, substrings)
         if hit:
             return hit
@@ -356,7 +382,7 @@ def _learner_signal_hit(entry: dict, policy: dict) -> str | None:
         return None
 
     for url in extract_urls(entry):
-        hit = scan(url)
+        hit = scan(url, is_url=True)
         if hit:
             return hit
     for text in _payload_signal_texts(entry):

@@ -24,6 +24,60 @@
   "url_exceptions": [
    "/users/self"
   ],
+  "url_segment_suffixes": [
+   "_users",
+   "_students",
+   "_submissions",
+   "_collaborators",
+   "_participants",
+   "_memberships",
+   "_enrollments",
+   "_grades",
+   "_overrides"
+  ],
+  "url_segments": [
+   "users",
+   "students",
+   "enrollments",
+   "submission",
+   "submissions",
+   "anonymous_submissions",
+   "quiz_submissions",
+   "gradebook_history",
+   "custom_gradebook_columns",
+   "grades",
+   "analytics",
+   "activity_stream",
+   "potential_collaborators",
+   "collaborators",
+   "collaborations",
+   "conferences",
+   "conversations",
+   "memberships",
+   "entries",
+   "entry_list",
+   "replies",
+   "view",
+   "participants",
+   "page_views",
+   "observees",
+   "observers",
+   "rubric_assessments",
+   "peer_reviews",
+   "outcome_results",
+   "outcome_rollups",
+   "provisional_grades",
+   "overrides",
+   "assignment_overrides",
+   "effective_due_dates",
+   "revisions",
+   "audit",
+   "audit_events",
+   "communication_channels",
+   "logins",
+   "avatars"
+  ],
+  "url_segments_note": "Structural rule: a URL path segment (placeholders such as {id} ignored) equal to an entry in url_segments, or ending with an entry in url_segment_suffixes, names a resource whose response carries people: user objects, student ids, or per-student data. It catches endpoints no substring anticipated (potential_collaborators, activity_stream, effective_due_dates, assignment overrides, page revisions). url_substrings stay as a second net. Course content (pages, quizzes, assignments, modules) is deliberately not matched: projecting it would rewrite names inside content an educator may save back.",
   "url_substrings": [
    "/users",
    "/enrollments",
@@ -95,5 +149,5 @@
   ]
  },
  "updated": "2026-09-22",
- "version": "1.2.0"
+ "version": "1.3.0"
 }
