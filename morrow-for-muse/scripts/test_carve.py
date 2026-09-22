@@ -104,7 +104,8 @@ def test_dev_only_surface_does_not_ship(carved):
     for rel in ("moodle", "lanes", "qr-proof", "learners/evidence",
                 "proof-battery/evidence", "dispatch/live_proof_modes.py",
                 "session/capture.py", "requirements-dev.txt",
-                "scripts/carve.py"):
+                "scripts/carve.py", "bin/keepalive-moodle.sh",
+                "bin/keepalive-canvas.sh", "bin/scheduler.py", "DEPLOY.md"):
         assert not os.path.exists(os.path.join(carved, rel)), rel
     for rel in ("install.sh", "proof-battery/OPERATION_CATALOG.md",
                 "scripts/uninstall.sh", "dispatch/executor.py",
@@ -124,3 +125,62 @@ def test_carve_refuses_output_inside_source():
     with pytest.raises(SystemExit):
         carve.carve(os.path.join(TREE, "dist-inside"))
     assert not os.path.exists(os.path.join(TREE, "dist-inside"))
+
+
+def test_shipped_docs_name_no_missing_file_as_shipped(carved):
+    # A shipped doc may mention dev-only code (moodle/, session/capture.py)
+    # only while saying it is not shipped; otherwise the educator (or the
+    # agent) is sent to a file the release does not contain.
+    import re
+    path_re = re.compile(r"(?<![\w/.-])((?:[a-z_]+/)+[a-z_.-]+\.(?:py|sh))\b")
+    stale = []
+    for rel in ("failures/catalog.json", "SCOPE.md", "SKILL.md",
+                "INSTALL.md", "FIRST_RUN.md"):
+        with open(os.path.join(carved, rel), encoding="utf-8") as fh:
+            text = fh.read()
+        for match in path_re.finditer(text):
+            name = match.group(1)
+            if name.startswith(("~/", "/")) or "<" in name:
+                continue
+            if os.path.exists(os.path.join(carved, name)):
+                continue
+            window = text[max(0, match.start() - 200):match.end() + 200]
+            if "not shipped" in window or "not in the release" in window:
+                continue
+            stale.append("%s: %s" % (rel, name))
+    assert not stale, stale
+
+
+def test_no_shipped_file_invokes_a_dev_only_script(carved):
+    # Nothing in the release may call a script the carve leaves out.
+    missing = []
+    for root, _dirs, files in os.walk(carved):
+        for name in files:
+            if not name.endswith((".py", ".sh")):
+                continue
+            path = os.path.join(root, name)
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+            for script in ("keepalive-moodle.sh", "keepalive-canvas.sh",
+                           "bin/scheduler.py"):
+                if script in text:
+                    missing.append("%s -> %s"
+                                   % (os.path.relpath(path, carved), script))
+    assert not missing, missing
+
+
+def test_env_template_promises_only_what_keepalive_honors():
+    # keepalive.sh always pins the helper profile to <tree>/helper/profile,
+    # so the tree env template must not offer LOGIN_HELPER_PROFILE_DIR as
+    # a setting (it would be silently overridden).
+    with open(os.path.join(TREE, "install.sh"), encoding="utf-8") as fh:
+        text = fh.read()
+    template = text.split('cat > "${TREE_ENV_FILE}" <<\'EOF\'', 1)[1]
+    template = template.split("\nEOF\n", 1)[0]
+    assert "LOGIN_HELPER_PROFILE_DIR=" not in template
+    assert "helper/profile" in template
+    with open(os.path.join(TREE, "helper", "keepalive.sh"),
+              encoding="utf-8") as fh:
+        keepalive = fh.read()
+    assert 'export LOGIN_HELPER_PROFILE_DIR="${HELPER_DIR}/profile"' \
+        in keepalive

@@ -52,6 +52,11 @@ DEV_ONLY = (
     "scripts/test_carve.py", "scripts/install-e2e.sh",
     # rig-only session capture; production never runs it (SKILL.md)
     "session/capture.py",
+    # the 2026-09-20 VM deployment record and its userspace scheduler
+    # (no cron on that VM); the product's keepalive is helper/keepalive.sh
+    # from cron, and Moodle is out for v1 (SCOPE.md)
+    "DEPLOY.md", "bin/scheduler.py", "bin/scheduler_selftest.py",
+    "bin/keepalive-canvas.sh", "bin/keepalive-moodle.sh",
     # live-test drivers: they need a real tenant and name it
     "dispatch/live_proof_modes.py", "dispatch/live_proof_new_quiz.py",
     "dispatch/live_proof_write_hardening.py", "failures/live_verify.py",

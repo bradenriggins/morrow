@@ -687,7 +687,7 @@
       "title": "Session expires with no warning (zero pre-expiry awareness)",
       "surface": "session",
       "severity_hint": "high",
-      "root_cause": "Verified gap: no code consumes session/capture.py's captured_at for horizon math or reads cookie expires for warnings. The docs are honest that expiry happens; they just promise no warning.",
+      "root_cause": "Verified gap: no code consumes the rig session capture's captured_at (session/capture.py, dev tree only, not shipped) for horizon math or reads cookie expires for warnings. The docs are honest that expiry happens; they just promise no warning.",
       "is_not": "This is not a monitoring failure on a specific day; the capability was never built.",
       "agent_message": "What was attempted: I tried {operation} and found the session had expired, with no warning beforehand. What the evidence showed: the system watches the helper's process health but never tracks the session's expiry horizon, so the first sign of expiry is always a failed operation. What this means: surprises at expiry time are expected, not a one-off glitch. What happens next: I am treating this as the standard re-sign-in flow: halt writes, quarantine in-flight ops, and ask you to sign in once through the helper page.",
       "auto_action": "Same as session-dead: halt, quarantine, require re-sign-in with principal re-verification.",
@@ -746,7 +746,7 @@
         "provider": "moodle",
         "moodle_kind": "login_failed"
       },
-      "signature_notes": "evidence: \"live-proof 2026-09-22: verified live, default updated, login re-verified OK\"; mechanism: \"moodle/login.py defaulted to 'moodle'; the provider's current published password differs\"; symptom: \"login rejects the defaulted password\"",
+      "signature_notes": "evidence: \"live-proof 2026-09-22: verified live, default updated, login re-verified OK\"; mechanism: \"moodle/login.py (dev tree only, not shipped) defaulted to 'moodle'; the provider's current published password differs\"; symptom: \"login rejects the defaulted password\"",
       "severity_hint_inventory": "config",
       "placeholders": []
     },
@@ -769,7 +769,7 @@
           "truthy": true
         }
       },
-      "signature_notes": "dead_route: \"grade/edit/tree/action.php?action=delete (silently fails on 5.2)\"; evidence: \"live-proof 2026-09-22 Moodle lane: fixed and documented in moodle/README.md\"; verify_rule: \"verify-gone required after delete\"; working_route: \"grade tree with action=delete&confirm=1&eid=igN\"",
+      "signature_notes": "dead_route: \"grade/edit/tree/action.php?action=delete (silently fails on 5.2)\"; evidence: \"live-proof 2026-09-22 Moodle lane: fixed and documented in moodle/README.md (dev tree only, not shipped)\"; verify_rule: \"verify-gone required after delete\"; working_route: \"grade tree with action=delete&confirm=1&eid=igN\"",
       "severity_hint_inventory": "provider",
       "placeholders": []
     },
@@ -1709,7 +1709,7 @@
       "is_not": "This is not an auth failure. The call reached Moodle; the route itself is what changed.",
       "root_cause": "The Moodle webservice route answered with a shape the lane does not recognize, or the route is dead (for example a stale grade deletion route after a Moodle upgrade).",
       "severity_hint": "medium",
-      "surface": "moodle/session.py, moodle/probe.py",
+      "surface": "moodle/session.py, moodle/probe.py (dev tree only, not shipped)",
       "title": "Moodle webservice route returned an unexpected shape or is dead",
       "signature_notes": "moodle_route_shape: {\"in\": [\"unexpected\", \"dead\"]}; provider: \"moodle\"",
       "placeholders": [

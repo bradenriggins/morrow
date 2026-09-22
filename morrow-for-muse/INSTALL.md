@@ -42,7 +42,8 @@ python3 scripts/carve.py --zip
 # -> <repo>/dist/morrow-muse-connector-0.3.0.zip
 ```
 
-`scripts/carve.py` builds the installable tree from the files git tracks:
+`scripts/carve.py` (in the source repository only, not shipped in the
+release) builds the installable tree from the files git tracks:
 it leaves out the dev-only surface (live-test drivers, proof evidence,
 Moodle research code), writes `pack/carve-manifest.json` (the SHA-256
 of every shipped file, which install step 2 verifies), and refuses to

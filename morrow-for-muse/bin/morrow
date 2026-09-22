@@ -94,7 +94,8 @@ def _version():
             version = fh.read().strip() or "unknown"
     except OSError:
         pass
-    commands = sorted(list(_COMMANDS) + ["doctor", "version", "failure"])
+    commands = sorted(list(_COMMANDS) + ["doctor", "version", "failure",
+                                         "disconnect"])
     lines = [
         "morrow %s" % version,
         "tree: %s" % DEPLOY_DIR,
