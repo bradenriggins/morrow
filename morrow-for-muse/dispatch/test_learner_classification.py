@@ -51,11 +51,14 @@ PEOPLE_BEARING = {
     "C-327": "page revisions: edited_by user object for each revision",
     "C-331": "page revision: edited_by user object",
     "C-332": "page revision: edited_by user object",
+    "C-227": "course groups: group names are free text that often name "
+             "the students in them, and include[]=users returns user "
+             "objects",
 }
 
 # Course content an educator reads and may write back; must stay raw.
 CONTENT_ONLY = ["C-330", "C-326", "C-378", "C-377", "C-48", "C-44",
-                "C-275", "C-273", "C-114", "C-111", "C-227", "C-400",
+                "C-275", "C-273", "C-114", "C-111", "C-400",
                 "C-436", "IB-10", "IB-13"]
 
 

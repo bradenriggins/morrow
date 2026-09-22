@@ -1454,11 +1454,31 @@ def _learner_text_preparation(context):
     # id conflicts (it is the fresher record).
     vault = context.get("learnerVault")
     if vault is not None:
-        known_ids = {identity["id"] for identity in identities}
+        by_id = {identity["id"]: index
+                 for index, identity in enumerate(identities)}
         for identity in vault.identities_for_scope(scope):
-            if identity["id"] not in known_ids:
-                known_ids.add(identity["id"])
+            index = by_id.get(identity["id"])
+            if index is None:
+                by_id[identity["id"]] = len(identities)
                 identities.append(identity)
+                continue
+            # The fresher record keeps its fields, but a name the vault
+            # already knows for this learner (a receipt such as
+            # bulk_user_tags carries only the id) still projects to her
+            # label wherever it appears in free text.
+            current = identities[index]
+            extra = [value for value in (
+                identity.get("name"), identity.get("email"),
+                identity.get("loginId"), identity.get("sisUserId"))
+                + tuple(identity.get("aliases") or ())
+                if isinstance(value, str) and value.strip()
+                and value != current.get("name")]
+            if extra:
+                merged = dict(current)
+                merged["aliases"] = list(current.get("aliases") or []) + [
+                    value for value in extra
+                    if value not in (current.get("aliases") or [])]
+                identities[index] = merged
     return {"context": context, "scope": scope,
             "identities": identities}
 
@@ -1928,10 +1948,12 @@ def _learner_identity(value, kind=None, context=None):
             raise PrivacyError("learner_roster_identity_unavailable")
         return current
     normalized_keys = set(fields.keys())
+    # The SIS id is an identifier to label, never the record's primary
+    # id: the roster is keyed by the Canvas user id, so taking the SIS
+    # id as primary made a roster read refuse whenever it was set.
     direct_id = _identity_value(fields, [
         "user_id", "userId", "learner_id", "learnerId", "student_id",
-        "studentId", "canvas_user_id", "canvasUserId", "sis_user_id",
-        "sisUserId"])
+        "studentId", "canvas_user_id", "canvasUserId"])
     has_person_id = any(k in normalized_keys for k in
                         ("userid", "learnerid", "studentid", "canvasuserid",
                          "sisuserid"))
@@ -1959,6 +1981,15 @@ def _learner_identity(value, kind=None, context=None):
     if (kind or has_generic_signal) and kind not in ("submission", "enrollment"):
         fallback_id = _identity_value(fields, ["id"])
     ident = direct_id or fallback_id
+    sis_user_id = _identity_value(fields, ["sis_user_id", "sisUserId"])
+    if not ident and sis_user_id and context is not None:
+        matches = [candidate["id"]
+                   for candidate in context["identityById"].values()
+                   if candidate.get("sisUserId") == sis_user_id]
+        if len(matches) == 1:
+            ident = matches[0]
+    if not ident and sis_user_id:
+        ident = sis_user_id
     if not ident:
         return None
     identity = {"id": ident}
@@ -1967,7 +1998,6 @@ def _learner_identity(value, kind=None, context=None):
                                     "studentName"])
     email = _identity_value(fields, ["email", "primary_email", "primaryEmail"])
     login_id = _identity_value(fields, ["login_id", "loginId"])
-    sis_user_id = _identity_value(fields, ["sis_user_id", "sisUserId"])
     if name:
         identity["name"] = name
     if email:
