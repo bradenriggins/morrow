@@ -322,7 +322,7 @@ function renderPrivateChat() {
     : !clients.length
       ? "The assistant relay is not ready."
       : !courses.length
-        ? "Open and reconnect one course before using Private Chat."
+        ? "Open one connected course in Canvas or Moodle before using Private Chat."
         : !selectedCourse
           ? "The course used by this Private Chat is no longer connected. Close the drawer and start again."
         : "Ready. Morrow replaces the listed student identities before the message reaches the assistant.";
@@ -1101,7 +1101,7 @@ function courseDetailDomId(sourceBindingId) {
 
 /** WI-1.1, WI-5.3: the reason a "Needs attention" row needs a button instead of the D7 text. */
 function attentionRowNote(binding) {
-  if (!isEligible(binding)) return "Morrow cannot identify this course. Reconnect it from the Morrow popup.";
+  if (!isEligible(binding)) return "Morrow cannot identify this course. Open it in Canvas or Moodle and select Connect this course in the Morrow Bridge popup.";
   if (siteClosed(binding)) return `${providerName(binding)} is closed. Morrow Bridge can open it for you.`;
   return "";
 }
@@ -1201,7 +1201,7 @@ function renderCourseDetail(binding, isOpen) {
         <p>Disconnect ${escapeHtml(courseName(binding))}? Morrow stops reading and changing this course, and its Edit access is removed. Your course in ${escapeHtml(providerName(binding))} is not changed. You can connect it again from this list.</p>
         <div class="action-buttons">
           <button type="button" class="secondary" data-disconnect-cancel="1" ${state.busy ? "disabled" : ""}>Keep course</button>
-          <button type="button" class="secondary danger-action" data-disconnect-confirm="1" ${state.busy ? "disabled" : ""}>Disconnect course</button>
+          <button type="button" class="secondary danger-action" data-disconnect-confirm="1" ${state.busy ? "disabled" : ""}>Disconnect this course</button>
         </div>
       </div>` : ""}
     </div>

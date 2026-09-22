@@ -562,6 +562,15 @@ test("a closed course row offers its own Open Canvas action, targeted at that ex
   assert.equal(page.hidden("#error"), true);
 });
 
+// Every recovery step the page names is one the person can take from a control that exists.
+test("recovery text names the Open and Connect controls that exist, not a reconnect step", async () => {
+  const unnamed = { sourceBindingId: "canvas:unnamed", provider: "canvas", runtimeVerified: true, editPolicyRevision: 0 };
+  const page = await openSettings({ status: () => statusFixture([unnamed]) });
+  assert.equal(page.text('[data-row-kind="attention"] .course-row-note'), "Morrow cannot identify this course. Open it in Canvas or Moodle and select Connect this course in the Morrow Bridge popup.");
+  assert.match(page.text(".access-rules-list"), /If a course needs sign-in again, select Open Canvas or Open Moodle on its row, and sign in if asked\./);
+  assert.doesNotMatch(page.text("body"), /reconnect it from the Morrow popup|Open and reconnect/i);
+});
+
 test("a closed course's Open Canvas shows a sign-in notice when the reopened site is still unverified", async () => {
   const closed = { ...ANATOMY, runtimeVerified: false, siteAnchorId: "canvas:site-1" };
   const page = await openSettings({

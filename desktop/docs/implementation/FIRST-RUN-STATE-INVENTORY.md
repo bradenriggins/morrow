@@ -216,7 +216,7 @@ connection keeps the platform's own name, because that is a specific, already-gr
 to (`connector/extension/popup/popup-view.js:160-175`, `connector/extension/popup/popup.js:157-162`).
 
 **The popup as home (WI-5.8).** Below the status line, up to 5 connected courses show by name with
-their own D7 state text ("Plan. Asks first.", "Edit until 2:15 PM. Routine edits.", and so on, the
+their own D7 state text ("Plan. Asks first.", "Edit. Routine edits.", and so on, the
 same wording the Courses and access page uses), then **All courses**, which opens Plan and Edit
 settings. With no connected course the list stays out of the page entirely
 (`connector/extension/popup/popup-view.js:19-52`, `connector/extension/popup/popup.js:90-101`).
@@ -313,9 +313,9 @@ action. **Setup overview** shows the same three stages as the app, popup, and we
 | `connecting` | "Connecting Morrow" and a waiting detail. | No action. Return in a moment. | `connector/extension/onboarding/onboarding-state.js:196` |
 | `paired-not-connected` | "Open Morrow again" and the assistant recovery. | Open Morrow and choose the assistant again. | `connector/extension/onboarding/onboarding-state.js:210` |
 | `runtime-mismatch` | "Morrow needs a reload" / "Reload Morrow Bridge" with version detail. | Update Morrow, reload Bridge, then **Connect Morrow** again. | `connector/extension/onboarding/onboarding-state.js:217` |
-| `connected-no-site` | "Open Canvas or Moodle" and the exact platform-detection behavior. | Open a signed-in course, then select **Connect Canvas** or **Connect Moodle**. | `connector/extension/onboarding/onboarding-state.js:226` |
-| `site-saved-not-verified` | "Reconnect Canvas" and a detail that names the saved Canvas course. | Open it, sign in, then **Connect Canvas**. | `connector/extension/onboarding/onboarding-state.js:225` |
-| `site-ready-no-course` | "Select a course in Plan" and the exact final course-selection control. | **Open Plan and Edit settings**, then **Connect selected courses in Plan**. | `connector/extension/onboarding/onboarding-state.js:233` |
+| `connected-no-site` | "Open Canvas or Moodle" and the exact platform-detection behavior. | Open a signed-in course, then select **Connect this course** in the popup. | `connector/extension/onboarding/onboarding-state.js:226` |
+| `site-saved-not-verified` | "Reconnect Canvas" and a detail that names the saved Canvas course. | Select **Open Canvas** in the popup, or open the course, and sign in if asked. | `connector/extension/onboarding/onboarding-state.js:225` |
+| `site-ready-no-course` | "Select a course in Plan" and the exact final course-selection control. | **Open Plan and Edit settings**, then **Connect** on a course under Not connected. | `connector/extension/onboarding/onboarding-state.js:233` |
 | `course-ready` | "One step left" / "Try a first read" and the exact request to ask. | Ask the assistant for the read. | `connector/extension/onboarding/onboarding-state.js:240` |
 | `ready` | "Ready to use" / "Plan your first change" after a named first read. | Ask the assistant for a change. Plan holds it for review. | `connector/extension/onboarding/onboarding-state.js:182` |
 
@@ -359,13 +359,13 @@ The exact heading, summary, next action, detail, and checklist strings emitted f
 - "Morrow Bridge is connected to Morrow"
 - "Morrow reports a different version from this Morrow Bridge"
 - "Open Canvas or Moodle"
-- "Open a permitted Canvas or Moodle course in Chrome and sign in. Morrow Bridge identifies the platform and shows Connect Canvas or Connect Moodle. Select that button and allow Chrome access to the exact address shown."
+- "Open a Canvas or Moodle course in Chrome and sign in. The Morrow Bridge popup then shows Connect this course. Select it and allow Chrome access to the exact address shown."
 - "Morrow matches this Morrow Bridge version and its list of course actions"
 - "Reconnect Canvas"
-- "Open the saved Canvas course in Chrome and sign in. Morrow Bridge identifies it and shows Connect Canvas. Select that button and allow Chrome access to the exact address shown."
+- "Select Open Canvas in the Morrow Bridge popup, or open the saved Canvas course in Chrome yourself, and sign in if Canvas asks."
 - "Saved Canvas needs sign-in or reconnection"
 - "Select a course in Plan"
-- "Open Plan and Edit settings. Find available courses, choose a course, then select Connect selected courses in Plan."
+- "Open Plan and Edit settings. The courses on your signed-in site are listed under Not connected. Select Connect on a course. It connects in Plan."
 - "Canvas is ready; select courses in Plan"
 - "One step left"
 - "1 selected course is ready in this Chrome session. One read from your assistant completes this setup."
@@ -426,11 +426,11 @@ from `connector/extension/src/bridge-problem-copy.js:17` and written into the al
 | --- | --- | --- | --- |
 | `settings-first-paint` | "Checking connected courses…", "Loading connected courses…", "Checking Chrome permission…"; **Refresh connected courses** is disabled during the read | None. The read answers and replaces these lines | `connector/extension/settings/settings.html:28`, `connector/extension/settings/settings.html:56`, `connector/extension/settings/settings.html:88`, disabled at `connector/extension/settings/settings.js:840` |
 | `settings-read-failed` | The alert names the failure. The page says "Connected courses were not checked." and "Course access was not checked. Select Refresh connected courses." It shows no false loading state. | **Refresh connected courses**, re-enabled when the read ends | `connector/extension/settings/settings.js:553`, `connector/extension/settings/settings.js:615`, `connector/extension/settings/settings.js:709`, state set at `connector/extension/settings/settings.js:924` |
-| `settings-no-anchor` | "No signed-in Canvas or Moodle course is available. Open one course in Chrome, then refresh this page."; the site list and **Find available courses** are disabled | Open a signed-in course in Chrome, then **Refresh connected courses** | `connector/extension/settings/settings.js:555`, disabled at `connector/extension/settings/settings.js:548` |
-| `settings-anchor-ready` | "Find courses from this signed-in site. You choose which courses to connect in Plan." and "No connected courses are available. Choose a signed-in site above to find courses you can connect." | **Find available courses** | `connector/extension/settings/settings.js:529`, `connector/extension/settings/settings.js:571` |
-| `settings-available-list` | "Choose courses to connect", the page of available courses, and how many the page shows | Select courses, then **Connect selected courses in Plan** | `connector/extension/settings/settings.js:543`, `connector/extension/settings/settings.js:586-588`, `connector/extension/settings/settings.js:638` |
-| `settings-more-available` | "Page N shows M available courses. More courses are available from this site." | **Load more available courses**, or connect what is selected first | `connector/extension/settings/settings.js:557`, `connector/extension/settings/settings.js:562` |
-| `settings-discovery-expired` | "This available-course list has expired. Find available courses again before connecting courses." | **Find available courses** | `connector/extension/settings/settings.js:553`, `connector/extension/settings/settings.js:569` |
+| `settings-no-anchor` | "Open a course in Canvas or Moodle. Morrow Bridge finds it." and, once a site is saved, **Open Canvas** or **Open Moodle** | Open a signed-in course in Chrome, then **Connect this course** in the popup | `connector/extension/settings/settings.js` `renderCourseList` |
+| `settings-available-list` | Each signed-in site's own available courses under "Not connected", read by itself when the page opens | **Connect** on a course row | `connector/extension/settings/settings.js` `autoStartDiscovery`, `renderCourseRow` |
+| `settings-more-available` | **Load more available courses** while any site has another page | **Load more available courses** | `connector/extension/settings/settings.js` `loadMoreCourses` |
+| `settings-discovery-expired` | Nothing changes on screen. The rows stay; **Connect** or **Load more available courses** reads that site's list again first, and Connect tries once more if the Bridge answers that the list is old or missing | **Connect** again only if the course left the list | `connector/extension/settings/settings.js` `connectCourse`, `currentDiscoveryFor` |
+| `settings-discovery-failed` | The alert names the failure and says to select **Refresh connected courses**; a background refresh does not retry it | **Refresh connected courses**, which reads every site's list again | `connector/extension/settings/settings.js` `readDiscovery`, refresh button listener |
 | `settings-connected` | How many connected courses are ready to use, and how many need an open course tab or a reconnected site | Select a course, then keep Plan or choose Edit | `connector/extension/settings/settings.js:593-597` |
 | `settings-file-access-off` | "Off. Morrow cannot access course file content." | Optional: **Enable course file access** | `connector/extension/settings/settings.js:726`, `connector/extension/settings/settings.html:92` |
 | `settings-file-access-revoked` | "Off. Chrome permission was removed, so Morrow keeps course file access off." | Optional: **Enable course file access** again | `connector/extension/settings/settings.js:723` |
@@ -589,7 +589,7 @@ stale name here.
 | `Show more` | Courses and access | `connector/extension/settings/settings.html:57` |
 | `Load more available courses` | Courses and access | `connector/extension/settings/settings.html:60` |
 | `Plan. Ask first.` | Courses and access | `connector/extension/settings/settings.html:65` |
-| `Edit. Routine edits for 4 hours.` | Courses and access | `connector/extension/settings/settings.html:66` |
+| `Edit. Routine edits.` | Courses and access | `connector/extension/settings/settings.html:66` |
 | `Enable course file access` | Courses and access | `connector/extension/settings/settings.html:166`, `connector/extension/settings/settings.js:1510` |
 | `Turn on course file access` | Courses and access | `connector/extension/settings/settings.js:1510` |
 | `Remove HTTPS file access` | Courses and access | `connector/extension/settings/settings.html:167` |

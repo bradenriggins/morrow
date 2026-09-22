@@ -68,6 +68,24 @@ test("setup guide distinguishes a closed assistant, signed-out course, Plan sele
   assert.equal(ready.title, "Plan your first change");
 });
 
+// Each next step names a control the popup or Plan and Edit settings really shows: Connect this
+// course, Open Canvas or Open Moodle, and Connect on a course row. There is no Find courses button
+// and no Connect selected courses.
+test("setup guide steps name only controls that exist", () => {
+  const connected = { paired: true, connected: true, runtimeHealthy: true };
+  const closed = setupGuideState({ ...connected, bindings: [], siteAnchors: [{ provider: "canvas", runtimeVerified: false }] });
+  assert.equal(closed.detail, "Select Open Canvas in the Morrow Bridge popup, or open the saved Canvas course in Chrome yourself, and sign in if Canvas asks.");
+  const none = setupGuideState({ ...connected, bindings: [], siteAnchors: [] });
+  assert.equal(none.detail, "Open a Canvas or Moodle course in Chrome and sign in. The Morrow Bridge popup then shows Connect this course. Select it and allow Chrome access to the exact address shown.");
+  const plan = setupGuideState({ ...connected, bindings: [], siteAnchors: [{ runtimeVerified: true }] });
+  assert.equal(plan.detail, "Open Plan and Edit settings. The courses on your signed-in site are listed under Not connected. Select Connect on a course. It connects in Plan.");
+  const html = readFileSync(new URL("../../connector/extension/onboarding/onboarding.html", import.meta.url), "utf8");
+  for (const text of [closed.detail, none.detail, plan.detail, html]) {
+    assert.doesNotMatch(text, /Connect Canvas|Connect Moodle|Find available courses|Connect selected courses|matching platform button/);
+  }
+  assert.match(html, /shows <b>Connect this course<\/b>/);
+});
+
 // The five checks are the completion goal: an assistant approved this connection, Morrow matches
 // this extension, the connection is open, the selected course is ready, and one course read
 // actually happened. Each fixture completes one more of them.

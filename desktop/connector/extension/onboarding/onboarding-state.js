@@ -222,15 +222,15 @@ function readState(status) {
     ...state,
     title: anchors.length ? `Reconnect ${platform || "your learning platform"}` : "Open Canvas or Moodle",
     detail: anchors.length
-      ? `Open the saved ${platform || "learning platform"} course in Chrome and sign in. Morrow Bridge identifies it and shows ${platform ? `Connect ${platform}` : "the matching platform button"}. Select that button and allow Chrome access to the exact address shown.`
-      : "Open a permitted Canvas or Moodle course in Chrome and sign in. Morrow Bridge identifies the platform and shows Connect Canvas or Connect Moodle. Select that button and allow Chrome access to the exact address shown.",
+      ? `Select ${platform ? `Open ${platform}` : "Open Canvas or Open Moodle"} in the Morrow Bridge popup, or open the saved ${platform || "learning platform"} course in Chrome yourself, and sign in if ${platform || "it"} asks.`
+      : "Open a Canvas or Moodle course in Chrome and sign in. The Morrow Bridge popup then shows Connect this course. Select it and allow Chrome access to the exact address shown.",
     showAssistantGuide: false,
     canOpenSettings: false,
   };
   if (open === "course") return {
     ...state,
     title: "Select a course in Plan",
-    detail: "Open Plan and Edit settings. Find available courses, choose a course, then select Connect selected courses in Plan.",
+    detail: "Open Plan and Edit settings. The courses on your signed-in site are listed under Not connected. Select Connect on a course. It connects in Plan.",
     showAssistantGuide: false,
     canOpenSettings: true,
   };
