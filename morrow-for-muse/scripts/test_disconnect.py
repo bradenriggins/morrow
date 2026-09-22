@@ -129,3 +129,28 @@ def test_disconnect_is_listed_in_help():
     proc = subprocess.run([sys.executable, MORROW, "--help"],
                           capture_output=True, text=True, timeout=30)
     assert "disconnect" in proc.stdout
+
+
+def test_non_interactive_disconnect_without_yes_names_the_flag(rig):
+    # The agent has no terminal: a run without --yes must say how to
+    # proceed (the educator confirms in chat, then --yes), not report
+    # "aborted by user" for a question nobody could answer.
+    proc = _run(rig)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0
+    assert "--yes" in out
+    assert "aborted by user" not in out
+    assert os.path.exists(os.path.join(rig["profile"], "Cookies"))
+
+
+@pytest.mark.parametrize("doc", ["content/revoke.md", "content/consent.md",
+                                 "SKILL.md"])
+def test_documented_agent_path_uses_yes(doc):
+    with open(os.path.join(TREE, doc), encoding="utf-8") as fh:
+        text = fh.read()
+    runs = [line for line in text.splitlines()
+            if "bin/morrow disconnect" in line]
+    assert runs, doc
+    assert "bin/morrow disconnect --yes" in text, doc
+    assert "bin/morrow disconnect`" not in text.replace(
+        "bin/morrow disconnect --yes`", ""), doc

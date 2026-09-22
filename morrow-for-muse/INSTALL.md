@@ -305,6 +305,10 @@ bin/morrow disconnect          # prompts before it deletes anything
 bin/morrow disconnect --yes
 ```
 
+Without a terminal (an agent run) there is no prompt to answer, so a
+run without `--yes` changes nothing and says to rerun with `--yes`.
+The agent asks the educator to confirm in chat first.
+
 Stops the helper and its Chromium (exact-PID signaling only), removes
 this tree's keepalive cron entry, and deletes the Canvas session
 material: `<tree>/helper/profile/` (or `LOGIN_HELPER_PROFILE_DIR`), the

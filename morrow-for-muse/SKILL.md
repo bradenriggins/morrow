@@ -103,7 +103,10 @@ preemptively and never on every run: a healthy session needs no page.
    and confirm it is them before doing anything else. keepalive also
    runs this on its first healthy tick. The pin never changes silently:
    a different account signing in later is refused until the educator
-   disconnects (`bin/morrow disconnect`) and signs in fresh.
+   disconnects and signs in fresh. To disconnect, tell the educator
+   what will be removed, get their yes in chat, then run
+   `bin/morrow disconnect --yes` (without a terminal, a run without
+   `--yes` changes nothing and says so).
 
 ## Reading /status: the fields and what they mean
 

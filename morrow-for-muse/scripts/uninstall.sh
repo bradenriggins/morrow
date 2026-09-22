@@ -254,6 +254,16 @@ note "exits."
 note ""
 fi
 if [ "${CONFIRM}" = "1" ]; then
+  if [ ! -t 0 ]; then
+    # No terminal (an agent run): there is nobody to answer the prompt.
+    # The educator confirms in chat; the agent then passes --yes.
+    if [ "${MODE}" = "disconnect" ]; then
+      _yes_cmd="bin/morrow disconnect --yes"
+    else
+      _yes_cmd="scripts/uninstall.sh --yes"
+    fi
+    die "nothing was changed: there is no terminal to type \"yes\" in. Ask the educator to confirm, then run ${_yes_cmd}"
+  fi
   printf 'Type "yes" to continue: '
   read -r _ans
   [ "${_ans}" = "yes" ] || die "aborted by user"

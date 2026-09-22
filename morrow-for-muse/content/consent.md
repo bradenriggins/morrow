@@ -86,11 +86,11 @@ on your Muse's own computer, never in a download or update.
 - Sign out of Canvas inside the helper browser. That ends the
   session Morrow uses.
 - For a full disconnect, say "disconnect Morrow from Canvas". Muse
-  runs `bin/morrow disconnect`, which stops the helper, removes its
-  restart schedule (otherwise it would restart the signed-in helper
-  within five minutes), deletes the helper profile
-  (`<tree>/helper/profile/`, which holds the session cookies), and
-  checks each step before it reports done.
+  asks you to confirm, then runs `bin/morrow disconnect --yes`, which
+  stops the helper, removes its restart schedule (otherwise it would
+  restart the signed-in helper within five minutes), deletes the
+  helper profile (`<tree>/helper/profile/`, which holds the session
+  cookies), and checks each step before it reports done.
 
 Logging out of Canvas on your laptop or phone does not reliably end
 the helper's own session, because Canvas sessions are per-device.
