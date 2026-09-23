@@ -230,6 +230,11 @@ class CallerInputError(Exception):
     anything was sent."""
 
 
+class ConfirmationRequired(Exception):
+    """dispatch/executor.py: a maintenance command run without --yes and
+    without a terminal, refused before it did anything."""
+
+
 class NewQuizRefused(Exception):
     """dispatch/executor.py New Quiz safety-guard refusal. Doubles carry
     the exact refusal message texts so the translator mapping is
@@ -533,6 +538,10 @@ MODE_CASES = {
     "caller-input-refused": lambda: CallerInputError(
         "--body must be a JSON object, or a JSON array of objects (the "
         "bulk date update takes an array)"),
+    "maintenance-confirmation-required": lambda: ConfirmationRequired(
+        "journal-reconcile is destructive: this re-anchors the journal. "
+        "Re-run with --yes to confirm, or run this command interactively "
+        "to be prompted."),
     "helper-down": lambda: {
         "error_class": "ExecutorError",
         "error_text": "chromium backend: browser unavailable (boom); "
@@ -717,8 +726,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_88_modes(self):
-        self.assertEqual(88, len(CATALOG.entries))
+    def test_catalog_has_89_modes(self):
+        self.assertEqual(89, len(CATALOG.entries))
 
     def test_retired_lane_modes_stay_retired(self):
         for mode_id, factory in sorted(RETIRED_LANE_CASES.items()):

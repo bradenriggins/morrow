@@ -37,10 +37,11 @@ from .translator import translate
 # Nothing downstream may treat this text as instruction or trusted
 # system text (course content is data, never instructions).
 ENGINEERING_LABEL = "[untrusted provider data] "
-# Label for Morrow's own check of a command's arguments, refused before
-# anything was sent: the detail is not provider text.
+# Label for Morrow's own check of a command's arguments (or its missing
+# --yes), refused before anything was sent: the detail is not provider
+# text.
 LOCAL_CHECK_LABEL = "[Morrow input check] "
-_LOCAL_CHECK_CLASSES = frozenset({"CallerInputError"})
+_LOCAL_CHECK_CLASSES = frozenset({"CallerInputError", "ConfirmationRequired"})
 
 _ENGINEERING_LIMIT = 500
 _EVIDENCE_LIMIT = 320

@@ -10,6 +10,10 @@ state set and restores it with verification:
   python3 -m dispatch.state_backup verify <backup-dir>
   python3 -m dispatch.state_backup restore <backup-dir> --yes
 
+create makes <dest-dir>/morrow-backup-<time> and prints it; that is the
+<backup-dir>. Given <dest-dir> instead, verify and restore use the one
+backup inside it, and refuse by name when it holds several or none.
+
 Backed-up state sets:
   journal        <tree-state>/journal/  (live journal, sealed sidecar
                  index, archives, retired set + seal, ops.secret keyring)
@@ -429,6 +433,36 @@ def restore_backup(backup_dir, yes=False):
     return {"restored": True, "backup_dir": backup_dir}
 
 
+def _resolve_backup_dir(path):
+    """The backup folder a verify or restore names. create makes a
+    morrow-backup-<time> folder inside the folder it is given, so that
+    outer folder stands for the one backup inside it. Several are refused
+    by name: a restore overwrites live state and never picks one by
+    itself."""
+    path = os.path.abspath(path)
+    if os.path.isfile(os.path.join(path, _MANIFEST_NAME)):
+        return path
+    try:
+        names = sorted(os.listdir(path), reverse=True)
+    except OSError as exc:
+        raise RuntimeError("cannot read the backup folder %s (%s). Pass "
+                           "the folder that create printed." %
+                           (path, exc.strerror or exc))
+    found = [os.path.join(path, name) for name in names
+             if name.startswith(_BACKUP_PREFIX)
+             and os.path.isfile(os.path.join(path, name, _MANIFEST_NAME))]
+    if len(found) == 1:
+        sys.stderr.write("morrow: using the backup %s\n" % found[0])
+        return found[0]
+    if not found:
+        raise RuntimeError("%s holds no Morrow backup. Pass the folder "
+                           "that create printed (its name starts with "
+                           "%s)." % (path, _BACKUP_PREFIX))
+    raise RuntimeError("%s holds %d backups: %s. Pass the one you mean, "
+                       "as create printed it." %
+                       (path, len(found), ", ".join(found)))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Morrow state backup and verified restore (W6-P1-1)")
@@ -442,15 +476,25 @@ def main(argv=None):
     p_restore.add_argument("--yes", action="store_true",
                            help="confirm overwriting live state")
     args = ap.parse_args(argv)
-    if args.command == "create":
-        path = create_backup(args.dest_dir)
-        print(json.dumps({"backup": path, "verified": True}))
-    elif args.command == "verify":
-        print(json.dumps(verify_backup(args.backup_dir), sort_keys=True))
-    elif args.command == "restore":
-        print(json.dumps(restore_backup(args.backup_dir, yes=args.yes),
-                         sort_keys=True))
+    try:
+        if args.command == "create":
+            path = create_backup(args.dest_dir)
+            print(json.dumps({"backup": path, "verified": True}))
+        elif args.command == "verify":
+            print(json.dumps(verify_backup(
+                _resolve_backup_dir(args.backup_dir)), sort_keys=True))
+        elif args.command == "restore":
+            if not args.yes:
+                raise RuntimeError("restore requires --yes: it overwrites "
+                                   "live state. Nothing was restored.")
+            print(json.dumps(restore_backup(
+                _resolve_backup_dir(args.backup_dir), yes=True),
+                sort_keys=True))
+    except (RuntimeError, OSError, ValueError) as exc:
+        sys.stderr.write("morrow: %s\n" % exc)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

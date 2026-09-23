@@ -294,6 +294,12 @@ class CallerInputError(ExecutorError):
     is Morrow's own check, never provider data."""
 
 
+class ConfirmationRequired(ExecutorError):
+    """A maintenance command that changes Morrow's own records was run
+    without --yes and without a terminal to ask on, so it refused
+    before doing anything."""
+
+
 class VerificationFailed(ExecutorError):
     pass
 
@@ -10470,7 +10476,7 @@ def _require_destructive_confirm(command, warning, yes):
               file=sys.stderr)
         return
     if not sys.stdin.isatty():
-        raise ExecutorError(
+        raise ConfirmationRequired(
             "%s is destructive: %s Re-run with --yes to confirm, or run "
             "this command interactively to be prompted." % (command, warning))
     print("WARNING: %s" % warning, file=sys.stderr)

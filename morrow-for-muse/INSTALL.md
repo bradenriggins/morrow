@@ -575,26 +575,30 @@ Create a backup before any risky operation:
 python3 -m dispatch.state_backup create /path/to/backup-dir
 ```
 
-The backup contains every HMAC/AES secret in plaintext. Store it
-encrypted. Never store backups unencrypted.
+It makes a new folder inside the one you name and prints it, for
+example `/path/to/backup-dir/morrow-backup-20260923T205434Z`. The
+commands below take that printed folder, shown here as
+`morrow-backup-<time>`. The backup contains every HMAC/AES secret in
+plaintext. Store it encrypted. Never store backups unencrypted.
 
 Verify a backup (checks manifest + sha256 of every file):
 
 ```
-python3 -m dispatch.state_backup verify /path/to/backup-dir
+python3 -m dispatch.state_backup verify /path/to/backup-dir/morrow-backup-<time>
 ```
 
 Restore (fail-closed: verifies first, preserves the generation
 high-water mark, writes the restore marker):
 
 ```
-python3 -m dispatch.state_backup restore /path/to/backup-dir --yes
+python3 -m dispatch.state_backup restore /path/to/backup-dir/morrow-backup-<time> --yes
 ```
 
-After a restore, the journal is fail-closed until you reconcile:
+After a restore, the journal is fail-closed until you reconcile.
+Reconcile in-flight ops against the provider first, then run:
 
 ```
-python3 -m dispatch.executor journal-reconcile
+python3 -m dispatch.executor journal-reconcile --yes
 ```
 
 ### Journal secret lost or corrupted (W6-P1-3)
@@ -626,7 +630,7 @@ missing archives. Do NOT re-claim op_ids meanwhile. Restore the
 archives from backup, then run:
 
 ```
-python3 -m dispatch.executor journal-reconcile
+python3 -m dispatch.executor journal-reconcile --yes
 ```
 
 ### Retired set seal (W6-P1-5)
