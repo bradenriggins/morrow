@@ -87,6 +87,8 @@ This release fixes the problems a full review of Morrow found before release. Te
 - A first name used alone, such as Will or Grace, is replaced only where it is written with a capital letter, as a family name already was. In small letters it is usually an ordinary word, and replacing it put the student's full name into text the assistant saved. A name part in a script with no capital letters, such as Korean, is now replaced wherever it appears.
 - A student's family name written alone, such as "Adams replied.", is replaced with the student's label in Private Chat and in course text the assistant reads, where it is written with a capital letter. A suffix such as Jr. is not taken for the family name.
 - Private Chat replaces a student's ID number or a login made only of numbers, and refuses a message that still holds one.
+- A student's name is replaced inside running text in Chinese, Japanese, and Thai, with a Korean particle attached, and after a one-letter Arabic or Hebrew prefix, in Private Chat and in course text the assistant reads. Before, it reached the assistant as written.
+- A student's name is replaced when it is written with a curly apostrophe or another hyphen, as in O’Brien or Smith‑Jones, with a capital İ, or without its accents. Private Chat and course text the assistant reads now replace the same names.
 
 ### Interface
 

@@ -502,7 +502,7 @@ interface PreparedLearnerTextRedactionContext extends LearnerTextRedactionContex
   readonly identityById: ReadonlyMap<string, LearnerIdentity>;
   readonly tokensById: ReadonlyMap<string, LearnerAlias>;
   readonly aliases: ReadonlyMap<string, LearnerAlias>;
-  readonly aliasMatcher: RegExp | null;
+  readonly aliasMatchers: readonly RegExp[];
   readonly referenceLabels: ReadonlyMap<string, string>;
   readonly identityByLabel: ReadonlyMap<string, LearnerIdentity>;
 }
@@ -525,8 +525,97 @@ function mergeLearnerIdentity(left: LearnerIdentity, right: LearnerIdentity): Le
   };
 }
 
+// Rich-text editors and phones write a name's apostrophe or hyphen as another character, and
+// people drop a name's accents. Both are folded away on the roster side and the text side.
+// connector/extension/src/protected-request.js folds the same way, so the gateway and Morrow
+// Bridge replace the same names.
+const APOSTROPHE_VARIANTS = /[\u2018\u2019\u02bc\uff07\u0060\u00b4]/gu;
+const HYPHEN_VARIANTS = /[\u2010-\u2013\ufe63\uff0d]/gu;
+
+function foldIdentityText(value: string): string {
+  return value.replace(APOSTROPHE_VARIANTS, "'").replace(HYPHEN_VARIANTS, "-")
+    .normalize("NFKD").replace(/\p{M}/gu, "").normalize("NFKC");
+}
+
 function normalizeAlias(value: string): string {
-  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");
+  return foldIdentityText(value).trim().replace(/\s+/gu, " ").toLowerCase();
+}
+
+// Scripts that write words with no space between them, or that attach a particle to a name, as
+// Korean does in 김민준의. A name written in one has no word edge. A name written in any other
+// script still ends where a word of one of these begins, as in 请看Ada Lovelace的作业.
+const UNSPACED_SCRIPT = "\\p{scx=Han}\\p{scx=Hiragana}\\p{scx=Katakana}\\p{scx=Hangul}\\p{scx=Thai}\\p{scx=Lao}\\p{scx=Khmer}\\p{scx=Myanmar}";
+const UNSPACED_LETTER = new RegExp(`^[${UNSPACED_SCRIPT}]$`, "u");
+const SPACED_WORD_CHARACTER = `(?![${UNSPACED_SCRIPT}])[\\p{L}\\p{N}_]`;
+const UNSPACED_GAP = new RegExp(`(?<=[${UNSPACED_SCRIPT}]) (?=[${UNSPACED_SCRIPT}])`, "gu");
+// Arabic and Hebrew attach a one-letter prefix, such as "to" or "and", to the name that follows.
+const PROCLITIC_LETTERS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^\p{scx=Arabic}$/u, "وفبكل"],
+  [/^\p{scx=Hebrew}$/u, "ובכלמשה"],
+];
+
+/**
+ * The lookup key of an alias. A space between two letters of an unspaced script is dropped,
+ * because people write 佐藤花子 and 佐藤 花子 for one name.
+ */
+function aliasKey(value: string): string {
+  return normalizeAlias(value).replace(UNSPACED_GAP, "");
+}
+
+function aliasBody(key: string): string {
+  const points = [...key];
+  let body = "";
+  for (const [index, point] of points.entries()) {
+    const previous = points[index - 1];
+    if (previous !== undefined && UNSPACED_LETTER.test(previous) && UNSPACED_LETTER.test(point)) body += "\\s*";
+    body += point === " " ? "\\s+" : escapeRegExp(point);
+  }
+  return body;
+}
+
+/** The word edges an alias key needs on each side to be a whole name. */
+function aliasEdges(key: string): readonly [string, string] {
+  const points = [...key];
+  const first = points[0] ?? "";
+  const last = points.at(-1) ?? "";
+  const edge = `(?<!${SPACED_WORD_CHARACTER})`;
+  const proclitic = PROCLITIC_LETTERS.find(([script]) => script.test(first))?.[1];
+  const before = UNSPACED_LETTER.test(first) ? "" : proclitic ? `(?:${edge}|(?<=${edge}[${proclitic}]))` : edge;
+  const after = UNSPACED_LETTER.test(last) ? "" : `(?!${SPACED_WORD_CHARACTER})`;
+  return [before, after];
+}
+
+/**
+ * One matcher for each kind of word edge, so each edge is tested once at a position rather than
+ * once for every alias. Within a matcher the longest alias is tried first.
+ */
+function aliasMatchers(keys: Iterable<string>): readonly RegExp[] {
+  const groups = new Map<string, { readonly edges: readonly [string, string]; readonly keys: string[] }>();
+  for (const key of keys) {
+    if (!key) continue;
+    const edges = aliasEdges(key);
+    const group = groups.get(edges.join("\u0000")) ?? { edges, keys: [] };
+    group.keys.push(key);
+    groups.set(edges.join("\u0000"), group);
+  }
+  return [...groups.values()].map(({ edges: [before, after], keys: grouped }) => new RegExp(
+    `${before}(?:${grouped.sort((left, right) => right.length - left.length).map(aliasBody).join("|")})${after}`,
+    "giu",
+  ));
+}
+
+/** Every alias the matchers find, leftmost first and the longest where two start together. */
+function aliasMatches(text: string, matchers: readonly RegExp[]): Array<{ readonly index: number; readonly text: string }> {
+  const found = matchers.flatMap((matcher) => [...text.matchAll(matcher)].map((match) => ({ index: match.index!, text: match[0] })))
+    .sort((left, right) => left.index - right.index || right.text.length - left.text.length);
+  const output: Array<{ readonly index: number; readonly text: string }> = [];
+  let cursor = 0;
+  for (const match of found) {
+    if (match.index < cursor) continue;
+    output.push(match);
+    cursor = match.index + match.text.length;
+  }
+  return output;
 }
 
 // A generational suffix ends a name but is never the family name.
@@ -660,7 +749,7 @@ function normalizedIdentityTextView(value: string): NormalizedTextView {
   // no encoded representation and normalization changes no code units. This
   // is the dominant provider-response path, so do not allocate one source span
   // per code unit or segment every grapheme unless a mapped view is required.
-  if (!/[&%]/u.test(value) && value.normalize("NFKC") === value) {
+  if (!/[&%]/u.test(value) && foldIdentityText(value) === value) {
     return { text: value, spans: null };
   }
 
@@ -712,7 +801,7 @@ function normalizedIdentityTextView(value: string): NormalizedTextView {
     if (spans.length === 0) continue;
     const start = Math.min(...spans.map((span) => span.start));
     const end = Math.max(...spans.map((span) => span.end));
-    appendCodePoints(normalized, segment.segment.normalize("NFKC"), start, end);
+    appendCodePoints(normalized, foldIdentityText(segment.segment), start, end);
   }
 
   return {
@@ -751,7 +840,7 @@ function applySourceReplacements(value: string, replacements: readonly SourceRep
 }
 
 function addAlias(aliases: Map<string, LearnerAlias>, alias: string, token: string, capitalized = false): void {
-  const key = normalizeAlias(alias);
+  const key = aliasKey(alias);
   if (!key) return;
   const existing = aliases.get(key);
   aliases.set(key, {
@@ -760,29 +849,22 @@ function addAlias(aliases: Map<string, LearnerAlias>, alias: string, token: stri
   });
 }
 
-function buildAliasMatcher(aliases: ReadonlyMap<string, LearnerAlias>): RegExp | null {
-  const candidates = [...aliases.keys()].sort((left, right) => right.length - left.length);
-  if (candidates.length === 0) return null;
-  const expression = candidates.map((candidate) => escapeRegExp(candidate).replace(/ /gu, "\\s+")).join("|");
-  return new RegExp(`(?<![\\p{L}\\p{N}_])(?:${expression})(?![\\p{L}\\p{N}_])`, "giu");
-}
-
 function replaceKnownAliases(
   value: string,
   aliases: ReadonlyMap<string, LearnerAlias>,
-  matcher: RegExp | null,
+  matchers: readonly RegExp[],
 ): string {
-  if (!matcher) return value;
+  if (matchers.length === 0) return value;
   const view = normalizedIdentityTextView(value);
   const replacements: SourceReplacement[] = [];
   const references = [...view.text.matchAll(/\bStudent A[1-9][0-9]*\b/gu)];
-  for (const match of view.text.matchAll(matcher)) {
-    if (references.some((reference) => match.index! >= reference.index! && match.index! < reference.index! + reference[0].length)) continue;
-    const alias = aliases.get(normalizeAlias(match[0]));
+  for (const match of aliasMatches(view.text, matchers)) {
+    if (references.some((reference) => match.index >= reference.index! && match.index < reference.index! + reference[0].length)) continue;
+    const alias = aliases.get(aliasKey(match.text));
     // A script with no capital letters cannot mark a name, so only a match written in small
     // letters of a cased script is left as the ordinary word it usually is.
-    if (alias?.capitalized === true && !/[\p{Lu}\p{Lt}]/u.test(match[0]) && /\p{Ll}/u.test(match[0])) continue;
-    const source = sourceRangeForView(view, match.index!, match.index! + match[0].length);
+    if (alias?.capitalized === true && !/[\p{Lu}\p{Lt}]/u.test(match.text) && /\p{Ll}/u.test(match.text)) continue;
+    const source = sourceRangeForView(view, match.index, match.index + match.text.length);
     if (!source) continue;
     replacements.push({
       ...source,
@@ -937,7 +1019,7 @@ function preparedLearnerTextContext(
     identityById,
     tokensById,
     aliases,
-    aliasMatcher: buildAliasMatcher(aliases),
+    aliasMatchers: aliasMatchers(aliases.keys()),
     referenceLabels: preparedReferences.referenceLabels,
     identityByLabel,
   };
@@ -1020,7 +1102,7 @@ function redactKnownLearnerTextPrepared(
     return value.replace(wholeId, exactContext.tokensById.get(wholeId)!.token ?? "[learner]");
   }
   return replaceKnownIdentityReferences(
-    replaceKnownAliases(value, exactContext.aliases, exactContext.aliasMatcher),
+    replaceKnownAliases(value, exactContext.aliases, exactContext.aliasMatchers),
     exactContext.tokensById,
     shape.wholeNumericIdIsIdentity,
   );
