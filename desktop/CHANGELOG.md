@@ -6,12 +6,12 @@ Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/
 
 Unsigned installers: `Morrow-1.0.5-mac-arm64.dmg`, `Morrow-1.0.5-mac-arm64.zip`, and `Morrow-1.0.5-win-x64.exe`. Ships with Morrow Bridge 1.0.120.
 
-This release fixes every Critical and High defect found in the adversarial audits after the 2026-09-22 handoff, and what the final review before release found.
+This release fixes the problems a full review of Morrow found before release. Technical notes for developers are at the end.
 
 ### Approvals and Edit access
 
-- A change is approved only with a Morrow Bridge signature from the educator's own Chrome tab. A local program can no longer approve a change with a bare HTTP request.
-- Morrow Bridge pairs with Morrow only when you select Connect Morrow, and only with a proof from the Bridge folder Morrow set up. A local program can no longer pair itself over HTTP, read the connection token, and then approve changes. The Chrome page that asked you to allow the connection is gone.
+- A change is approved only from Morrow Bridge in your own Chrome tab. Another program on your computer can no longer approve a change.
+- Morrow Bridge pairs with Morrow only when you select Connect Morrow, and only with a proof from the Bridge folder Morrow set up. Another program on your computer can no longer connect itself to Morrow in place of Morrow Bridge and then approve changes. The Chrome page that asked you to allow the connection is gone.
 - Edit access has no time limit. Old timed grants fall back to Plan and are never extended.
 - A review that is waiting ends when its Morrow connection ends.
 - Routine Edit and the publish choice no longer create a Canvas page, or publish a new front page, without your review. When the page is not there, or Morrow cannot read it, the change waits for your review.
@@ -52,11 +52,11 @@ This release fixes every Critical and High defect found in the adversarial audit
 
 ### Setup
 
-- The ChatGPT configuration no longer writes `required = true`. Morrow finds, repairs, and removes its own assistant entry by structure, not by text matching, and names each reason it refuses a change.
+- ChatGPT and Codex now start even when Morrow cannot. Morrow finds, repairs, and removes its own entry in their settings file and leaves the rest of the file as it was. When it cannot change the file, it says why.
 - A "Quit and reopen" step checks that the assistant really connected.
 - On a Mac, Morrow offers to move itself to Applications when it runs from somewhere else.
 - The exact Bridge folder is shown with a Copy button. Long folder paths wrap.
-- Claude Desktop detection is real, including the Microsoft Store (MSIX) install on Windows.
+- Morrow really checks whether Claude Desktop is installed, including Claude Desktop from the Microsoft Store on Windows.
 - Removal keeps a settings file's own permissions and refuses a read-only file.
 - On a busy Windows computer, confirming the Claude Desktop app could take longer than Morrow waited, and Morrow then asked for approval in Claude Desktop again. Morrow now waits up to 10 seconds, says it is still checking, and checks again on its own. Messages between Claude Desktop and Morrow keep flowing during the check.
 - Morrow starts faster on Windows: it checks each private file once per start instead of once per read.
@@ -67,7 +67,7 @@ This release fixes every Critical and High defect found in the adversarial audit
 - What stays on this computer, the uninstall steps, and the removal confirmation name the copy of the Morrow extension Claude Desktop keeps, and say to remove Morrow in Claude Desktop under Settings, Extensions. They no longer say that Remove Morrow's data stops every assistant from starting Morrow.
 - Morrow finds Gemini CLI by reading its installed package instead of running it, so detection no longer writes to your Gemini folder and no longer misses a slow first start.
 - The app says where unsigned builds get updates. The Mac note now says that moving Morrow to Applications can ask for an administrator password.
-- Setting up or updating Morrow Bridge no longer fails when Windows is slow to start PowerShell.
+- Setting up or updating Morrow Bridge no longer fails when Windows is slow.
 - Errors from the Settings page now show on the Settings page.
 - The Materials folder row has Show folder and Copy path, because the folder Morrow makes sits inside a folder macOS and Windows hide.
 - Canvas file uploads can use files you put in the Materials folder, as Moodle uploads already could.
@@ -81,8 +81,8 @@ This release fixes every Critical and High defect found in the adversarial audit
 
 ### Privacy
 
-- Learner ids inside grade, submission, and profile links are replaced with labels.
-- Each student has one label everywhere. Real names reach the educator only through Morrow Bridge in their own tab (Private Chat and the review tab). Every HTTP endpoint serves labels only.
+- Student IDs inside grade, submission, and profile links are replaced with labels.
+- Each student has one label everywhere. Real names appear only in Morrow Bridge in your own Chrome tab (Private Chat and the review tab). Any other program on your computer that asks Morrow for course information gets labels only.
 - Private Chat reads a sentence start correctly through quotes and line breaks.
 - A first name used alone, such as Will or Grace, is replaced only where it is written with a capital letter, as a family name already was. In small letters it is usually an ordinary word, and replacing it put the student's full name into text the assistant saved. A name part in a script with no capital letters, such as Korean, is now replaced wherever it appears.
 - A student's family name written alone, such as "Adams replied.", is replaced with the student's label in Private Chat and in course text the assistant reads, where it is written with a capital letter. A suffix such as Jr. is not taken for the family name.
@@ -90,28 +90,27 @@ This release fixes every Critical and High defect found in the adversarial audit
 
 ### Interface
 
-- Supporting text fills its container instead of wrapping early.
+- Supporting text uses the full width of its area instead of wrapping early.
 - Each setup state has one primary action, and the connected Home is clearer.
 - In "Try asking", every Copy button sits in the same place: at the right edge, or under its example in the narrowest windows.
 - The Edit banner in Plan and Edit settings stacks in a narrow window, so its sentence uses the full width.
 - What a screen reader announces in the header matches the step on screen.
 - Manage on Home moves focus to the Settings heading.
 
-### Build and CI
+### Not verified for this release
 
-- CI reads workflows from the repository root, runs each product's suite when it changes, and runs both suites when a workflow changes. The aggregate check fails when change detection fails.
-- Dependabot points at the real manifests. The pre-commit hook runs each product's suite from its own directory.
-- Both release jobs preflight the signed release configuration. The installer layout check runs with the browser harnesses.
-- The required check also runs the desktop contracts on Windows and on macOS.
-- The em dash and retired-phrase checks read the whole repository, and run on every change.
-- Workflow actions run on their current releases, and Dependabot groups its updates into weekly pull requests.
+- The new steps on live Canvas, Moodle, or Blackboard courses.
+- Connect Morrow in an everyday Chrome with the Bridge folder an installed Morrow set up. Morrow's own tests run the same step in a test copy of Chrome with a test folder.
+- The Windows-only cases, such as Claude Desktop from the Microsoft Store and files another program keeps open, on a real Windows computer.
+- Signed installers: this release is not signed by Apple or Microsoft.
+
+### Technical notes
+
+- CI runs the repository text checks (no em dash and no retired phrase anywhere in the repository) on every change. When the desktop changes, it runs the desktop suite on Linux, and the installer contracts and every desktop test Linux skips on Windows and on macOS. When Morrow for Muse changes, it runs the Muse suite. A workflow change runs every suite, and the required check fails when change detection fails.
+- Morrow no longer writes `required = true` into the Codex configuration, and it finds its own entry there by the file's structure, not by text matching.
+- Claude Desktop detection covers the Microsoft Store (MSIX) install.
+- Dependabot reads the real manifests and groups its updates into weekly pull requests, and workflow actions run on their current releases. The pre-commit hook runs each product's suite from its own directory.
+- Both release jobs preflight the signed release configuration. The installer layout check runs with the browser harnesses. The release procedure smoke-tests the exact installers it publishes.
 - Morrow builds with TypeScript 7 and tests with Vitest 5, type-checked against the Node release the app embeds.
 - An installed Morrow ignores the start settings that only Morrow's own tests use.
 - The Windows packager starts pnpm with no shell.
-
-### Not verified for this release
-
-- Live Canvas, Moodle, or Blackboard runs of the new flows.
-- Connect Morrow in a real Chrome profile with the Bridge folder an installed app set up. The browser harness runs the same step in Chrome for Testing with a fixture folder.
-- Windows-specific paths (Store Claude Desktop detection, locked files) on a real Windows host.
-- Signed builds: signing secrets do not exist yet, so this release is unsigned.
