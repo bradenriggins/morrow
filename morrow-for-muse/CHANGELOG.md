@@ -33,6 +33,9 @@ In plain words:
 - Three settings that promised things Morrow does not do are gone:
   batched approvals, bulk action confirmations, and cleanup of test
   objects.
+- The docs no longer describe an undo command. This release has no
+  automatic undo, and each approval says so. To reverse a change,
+  Morrow prepares the reverse change as a new change you approve.
 
 ## 0.4.0 (2026-09-22)
 
@@ -44,7 +47,8 @@ In plain words:
 
 - Every write path goes through the mode gate (discovery, pack
   override, and undo included), and only live-proven operations run.
-  Undo is its own approved write, bound to the journaled operation.
+  (Correction, final sweep: 0.4.0 pins no undo entry, so it has no
+  automatic undo; the undo command refuses every entry.)
 - An approval binds the exact method, path, query, and body, and the
   vault token of each student label it names. Any non-empty educator
   reply approves. The typed `plan-write` and `approve-write` commands

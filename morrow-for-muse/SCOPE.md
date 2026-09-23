@@ -88,8 +88,10 @@ marked `live-proven` is not a v1 claim.
   revision revert (C-328) are refused for the same reason.
 - The governance layer that makes it safe: frozen plans, the admission
   gate (`dispatch/admission.py`) enforcing the live-proven catalog,
-  educator-signed approvals, per-category never-dispatch lists,
-  journaled dispatches, and undo entries for undoable writes. Only
+  educator-signed approvals, per-category never-dispatch lists, and
+  journaled dispatches. This release has no automatic undo: no undo
+  entry is pinned, and each approval says the change cannot be undone
+  automatically; a reversal is a new change the educator approves. Only
   live-proven operations run, with one exception: a catalog row marked
   `pending` (never tried live) dispatches only with `--allow-unproven`
   plus an educator-signed v2 approval carrying `allow_unproven: true`,

@@ -184,7 +184,7 @@ institutional signoffs above have been performed or claimed here.
 - Never puts raw student PII in the journal or the agent-visible
   receipt for learner-data reads. The raw provider payload stays in
   the pending envelope (a 0600 file) only so internal machinery
-  (deferred verify, undo) can resolve result references, and the
+  (deferred verify) can resolve result references, and the
   envelope is deleted when the op completes.
 - Never de-tokenizes for the agent. The executor resolves a label to
   a real Canvas id only at the LMS boundary of a write (so Canvas

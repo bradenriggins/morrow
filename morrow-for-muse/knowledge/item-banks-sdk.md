@@ -187,7 +187,7 @@ does not serve them under the banks.build authorization scope
 
 IB-1 archive is live-proven, but "live-proven" does not mean "safe
 to run casually". Bank archive is the provider's whole-bank delete:
-there is no undo, and the undo entry in a manifest cannot restore it.
+there is no undo, and no later change can restore it.
 Before any archive dispatch:
 
 - Read and present the fresh bank first (IB-9 get bank, IB-13 list

@@ -285,10 +285,14 @@ template. Through the CLI it fills path slots only; there is no CLI
 flag for query args like `per_page`. To send a body or query block,
 dispatch programmatically through `dispatch_catalog_op(...)` in
 `dispatch/executor.py` with `extra={"body": {...}}` or
-`extra={"query": {...}}`, or dispatch
-a manifest entry with `execute --entry <manifest.json> --params '{...}'`.
+`extra={"query": {...}}`.
 
-Writes need three things or they are refused:
+For writes, use the typed `plan-write` and `approve-write` commands
+(SKILL.md): they build the frozen plan, the approval, and the course
+check for you. In edit mode a write needs no approval. The lower-level
+`catalog --plan <file> --approval <file>` path is for scripts and
+proof drivers; in plan mode it refuses a write without these three
+things:
 
 1. A frozen plan file (`--plan`), digest-bound to the exact action.
 2. An educator-signed approval record (`--approval`), digest-bound to
@@ -307,8 +311,9 @@ pass, immediately before the first provider call. A refusal at any of
 those gates leaves the approval unconsumed and reusable, and the
 op_id claim is released (W4 approval ordering).
 
-`undo` runs an entry's undo block as a new, separately journaled
-operation (it needs its own educator approval bound to the undo action).
+This release has no automatic undo: the pack pins no manifest entry,
+so the executor's manifest and undo commands refuse. A reversal is a
+new write the educator approves.
 
 Every dispatch journals to `~/.morrow/trees/<tree-id>/journal/ops.jsonl`
 (or `$MORROW_TREE_STATE_DIR/journal/ops.jsonl` when overridden; the

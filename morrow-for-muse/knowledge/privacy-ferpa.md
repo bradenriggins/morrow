@@ -34,7 +34,7 @@ they become agent-visible or journaled:
   when the educator deletes the file; a fresh run mints a fresh
   vault. There is no automatic expiry; the educator owns deletion.
 - The raw provider payload stays in a 0600 pending envelope only so
-  internal machinery (deferred verify, undo) can resolve result
+  internal machinery (deferred verify) can resolve result
   references, and the envelope is deleted when the op completes.
 - The educator's own profile (`/users/self`) is explicitly not
   learner data and is never de-identified, so principal

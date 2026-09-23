@@ -349,20 +349,15 @@ It reaches `pending` rows only: rows marked `failed`, `unsupported`,
 routes, and learner-data rows are refused with or without it. It does
 not skip write approval, the frozen plan, or any other gate.
 
-Entry manifests: `execute --entry <manifest.json> --params '{...}'`
-dispatches a manifest entry the same way. `undo` runs an entry's undo
-block as a new, separately journaled operation. An undo is its own
-write: in plan mode it needs its own educator approval, minted for
-`dispatch.executor.undo_approval_subject(entry, params, of_op_id)`
-(bound to the undo action and the object it targets). The undo target
-comes ONLY from the journaled receipt of `--of-op-id`: that op must be
-a completed write of the same entry with the same params, and a
-`--result` that disagrees with its journaled receipt is refused
-(`UndoTargetMismatch`). The approval display shows the exact undo
-method, path, and target. The
-forward write's approval never admits its undo, and a DELETE undo asks
-for deletion confirmation in edit mode when `confirm_destructive_writes`
-is on. `--dry-run` journals nothing, in either mode.
+Undo: this release has no automatic undo. Every write's
+`approval_display` says "Morrow cannot undo this change automatically",
+and every write result carries `"undo_available": false`. The
+executor's manifest and undo commands refuse every entry in this
+release (the pack pins none), so never run them. When the educator
+wants a change reversed, prepare the reverse change as a new write
+(for example, rename the page back) with `plan-write`, or run it
+directly in edit mode, and tell them it is a new change, not an undo.
+`--dry-run` journals nothing, in either mode.
 
 ## Governance (not optional)
 
