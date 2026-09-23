@@ -113,7 +113,6 @@ SESSION_DEAD_FAMILY = {
     "canvas-session-dead",
     "canvas-session-dead-mid-write-uncertain",
     "session-expiry-no-warning",
-    "browser-task-session-dead-transient",
     "session-flapping-multi-uncertain",
 }
 
@@ -471,14 +470,6 @@ MODE_CASES = {
         "body_text": "policy refusal: writes disabled by tenant config",
         "body_has_specific_message": True, "lane": "browser",
     },
-    "https-lane-pat-revoked": lambda: {
-        "provider": "canvas", "http_status": 401, "lane": "https",
-        "session_logged_in": True,
-    },
-    "password-changed-mid-op": lambda: {
-        "provider": "canvas", "http_status": 401, "lane": "https",
-        "session_logged_in": False, "attempt_count": 1,
-    },
     "ib-canonical-item-get-404": lambda: {
         "provider": "item-banks", "http_status": 404,
         "route_kind": "canonical", "operation_kind": "read",
@@ -583,43 +574,6 @@ MODE_CASES = {
         "session_dead_signal": True, "expiry_surprise": True,
         "first_failure_signal": True,
     },
-    "reauth-principal-pin-vacuous": lambda: {
-        "provider": "moodle", "principal_match": True,
-        "principal_evidence_empty": True,
-    },
-    "moodle-stale-password": lambda: {
-        "provider": "moodle", "moodle_kind": "login_failed",
-    },
-    "moodle-grade-delete-route-changed": lambda: {
-        "provider": "moodle",
-        "route_path": "/grade/edit.php?action=delete&id=7",
-        "delete_noop": True,
-    },
-    "moodle-ajax-disabled-provider": lambda: {
-        "provider": "moodle", "ajax_webservices_available": False,
-    },
-    "moodle-dead-session-200-login": lambda: {
-        "provider": "moodle", "http_status": 200,
-        "body_text": "<html><body>please login to continue</body></html>",
-        "moodle_envelope_present": False,
-    },
-    "moodle-ajax-302-to-login": lambda: {
-        "provider": "moodle", "http_status": 302,
-        "redirect_location": "https://moodle.example.edu/login/index.php",
-    },
-    "moodle-sandbox-reset-transient": lambda: {
-        "provider": "moodle", "sandbox_reset": True,
-        "retry_succeeded": True,
-    },
-    "browser-task-session-dead-transient": lambda: {
-        "session_dead_signal": True, "phase": "launch",
-        "attempt_number": 2,
-    },
-    "browser-task-death-uncertain": lambda: {
-        "uncertain_write": True, "transport": "browser-task",
-        "operation_kind": "write",
-    },
-    "form-lane-fail-closed": lambda: {"gate": "FormTransportUnavailable"},
     "write-halt-active": lambda: WriteHaltActive("halt engaged"),
     "write-halt-session-expired": _session_expired_halt,
     "write-halt-account-mismatch": _account_mismatch_halt,
@@ -666,12 +620,8 @@ MODE_CASES = {
     "session-principal-less-store": lambda: {
         "operation_kind": "reauth", "session_store_principal": False,
     },
-    "browser-task-dead": lambda: {"task_state": "died"},
     "ib-provider-unserved": lambda: {
         "provider": "item-banks", "provider_served": False,
-    },
-    "moodle-route-changed": lambda: {
-        "moodle_route_shape": "dead", "provider": "moodle",
     },
     "student-resolution-ambiguous": _student_ambiguous_case,
     "student-resolution-no-match": _student_not_found_case,
@@ -705,6 +655,60 @@ MODE_CASES = {
         lambda: {"write_outcome": "unverified"},
     "unknown": lambda: {"some": "weird", "unmatched": 1},
 }
+# Evidence shapes of the modes retired on 2026-09-23 because their lanes
+# do not ship in v1 (the raw HTTPS lane's access token, the retired form
+# and browser-task lanes, Moodle). None of them may come back.
+RETIRED_LANE_CASES = {
+    "https-lane-pat-revoked": lambda: {
+        "provider": "canvas", "http_status": 401, "lane": "https",
+        "session_logged_in": True,
+    },
+    "password-changed-mid-op": lambda: {
+        "provider": "canvas", "http_status": 401, "lane": "https",
+        "session_logged_in": False, "attempt_count": 1,
+    },
+    "reauth-principal-pin-vacuous": lambda: {
+        "provider": "moodle", "principal_match": True,
+        "principal_evidence_empty": True,
+    },
+    "moodle-stale-password": lambda: {
+        "provider": "moodle", "moodle_kind": "login_failed",
+    },
+    "moodle-grade-delete-route-changed": lambda: {
+        "provider": "moodle",
+        "route_path": "/grade/edit.php?action=delete&id=7",
+        "delete_noop": True,
+    },
+    "moodle-ajax-disabled-provider": lambda: {
+        "provider": "moodle", "ajax_webservices_available": False,
+    },
+    "moodle-dead-session-200-login": lambda: {
+        "provider": "moodle", "http_status": 200,
+        "body_text": "<html><body>please login to continue</body></html>",
+        "moodle_envelope_present": False,
+    },
+    "moodle-ajax-302-to-login": lambda: {
+        "provider": "moodle", "http_status": 302,
+        "redirect_location": "https://moodle.example.edu/login/index.php",
+    },
+    "moodle-sandbox-reset-transient": lambda: {
+        "provider": "moodle", "sandbox_reset": True,
+        "retry_succeeded": True,
+    },
+    "browser-task-session-dead-transient": lambda: {
+        "session_dead_signal": True, "phase": "launch",
+        "attempt_number": 2,
+    },
+    "browser-task-death-uncertain": lambda: {
+        "uncertain_write": True, "transport": "browser-task",
+        "operation_kind": "write",
+    },
+    "form-lane-fail-closed": lambda: {"gate": "FormTransportUnavailable"},
+    "browser-task-dead": lambda: {"task_state": "died"},
+    "moodle-route-changed": lambda: {
+        "moodle_route_shape": "dead", "provider": "moodle",
+    },
+}
 
 
 class PerModeTests(unittest.TestCase):
@@ -713,8 +717,16 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_102_modes(self):
-        self.assertEqual(102, len(CATALOG.entries))
+    def test_catalog_has_88_modes(self):
+        self.assertEqual(88, len(CATALOG.entries))
+
+    def test_retired_lane_modes_stay_retired(self):
+        for mode_id, factory in sorted(RETIRED_LANE_CASES.items()):
+            with self.subTest(mode_id=mode_id):
+                self.assertIsNone(CATALOG.get(mode_id))
+                tr = translate("retired lane probe", factory())
+                self.assertNotIn(tr.mode_id, RETIRED_LANE_CASES)
+                assert_message_quality(self, tr, CATALOG.get(tr.mode_id))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):
@@ -906,7 +918,7 @@ class ModeSystemMappingTests(unittest.TestCase):
     def test_exception_attrs_fill_placeholders(self):
         tr = translate("publish quiz", _ambiguous_course_case())
         self.assertEqual("ambiguous_course_write_refused", tr.mode_id)
-        self.assertIn("Bio 101", tr.agent_message)
+        self.assertEqual("Bio 101", tr.evidence["query"])
         self.assertIn("Biology 101 (Fall 2026)", tr.agent_message)
 
         tr = translate("change a setting", _mode_settings_tamper_case())
@@ -919,8 +931,9 @@ class ModeSystemMappingTests(unittest.TestCase):
         self.assertEqual("write-halt-active", tr.mode_id)
         tr = translate("write op", {"gate": "WriteApprovalMissing"})
         self.assertEqual("write-approval-missing", tr.mode_id)
+        # The form lane is retired: its refusal is no longer a mode.
         tr = translate("write op", {"gate": "FormTransportUnavailable"})
-        self.assertEqual("form-lane-fail-closed", tr.mode_id)
+        self.assertEqual("unknown", tr.mode_id)
 
 
 # ---------------------------------------------------------------------------

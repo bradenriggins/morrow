@@ -9,13 +9,13 @@
 - One honest heads-up before anything else: Meta uses eligible Muse interaction data for model training by default. There is an opt-out in Muse's settings; check there for the data-sharing opt-out. We name it here because you are about to trust this agent with your courses, and buried defaults are how trust dies.
 - A second heads-up: on some Muse computers, the network that carries traffic out of the computer can read that traffic, including your Canvas sign-in session and the course pages Morrow loads. Morrow cannot prevent that. If your school has rules about where course content may go, check them before you connect.
 
-## Step 1: Ask Muse to connect your Canvas account
+## Step 1: Ask Muse to set up Morrow
 
 In Muse, type:
 
-> Connect my Canvas account.
+> Set up Morrow for Muse by following https://meetmorrow.app/morrow-for-muse
 
-That is the whole setup command. Everything below happens as a conversation; you never touch a terminal or a settings page.
+That is the whole setup command: Muse reads the setup steps on that page and does them. Everything below happens as a conversation; you never touch a terminal or a settings page. If Morrow is already set up in your Muse, say "Connect my Canvas account" instead.
 
 ## Step 2: Read the consent moment
 

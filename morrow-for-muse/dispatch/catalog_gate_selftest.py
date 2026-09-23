@@ -5,20 +5,19 @@ Covers dispatch_catalog_op's enforcement of the authoritative
 proof-battery/OPERATION_CATALOG.md, offline (mocked ChromiumSession
 transport; no provider touched):
 
-  1. A live-proven catalog op dispatches normally, with no override.
-  2. An unproven (pending) catalog op refuses with CatalogNotProven when
-     --allow-unproven is absent; the refusal is journaled under its own
-     refusal event id, so the requested op_id is not consumed.
-  3. The same unproven op dispatches with allow_unproven=True plus an
-     educator-signed approval record carrying allow_unproven: true; the
-     journal records the catalog status and the signed override, and the
-     override record is single-use.
-  4. A never-dispatch op refuses (NeverDispatch) even with
-     allow_unproven=True and a signed override record.
-  5. An evidence-hold op refuses (EvidenceHold) even with
-     allow_unproven=True and a signed override record.
-  6. An unknown op name refuses (CatalogNotProven) and cannot be
-     overridden even with a signed record.
+  1. A live-proven catalog op dispatches normally.
+  2. An unproven (pending) catalog op refuses with CatalogNotProven; the
+     refusal is journaled under its own refusal event id, so the
+     requested op_id is not consumed.
+  3. The same unproven op still refuses with an educator-signed approval
+     record, with or without the retired allow_unproven: true field, and
+     nothing is sent: only live-proven operations run.
+  4. A never-dispatch op refuses (NeverDispatch) even with a signed
+     approval record.
+  5. An evidence-hold op refuses (EvidenceHold) even with a signed
+     approval record.
+  6. An unknown op name refuses (CatalogNotProven) even with a signed
+     approval record.
   7. A descriptor mismatch (proven name, wrong method/path) refuses
      (CatalogNotProven): a proven name cannot be paired with arbitrary
      CLI arguments.
@@ -56,7 +55,7 @@ ex.dispatch_catalog_op = _driver_channel(ex.dispatch_catalog_op)
 ex.dispatch_undo = _driver_channel(ex.dispatch_undo)
 from dispatch.admission import (  # noqa: E402
     mint_approval, sign_approval, load_policy,
-    NeverDispatch, EvidenceHold, ApprovalMismatch)
+    NeverDispatch, EvidenceHold)
 import dispatch.admission as admission_mod  # noqa: E402
 import chromium_session as cs  # noqa: E402
 
@@ -201,20 +200,25 @@ def _class_of(name, method, path, fallback="read"):
     return "write" if d.get("effect_rw") == "W" else "read"
 
 
-def _override_record(name, method, path, params):
+def _signed_record(name, method, path, params, old_flag=True):
+    """An educator-signed approval for this exact op. old_flag adds the
+    retired allow_unproven: true field under the seal, the shape the
+    removed override accepted."""
     entry = ex.catalog_descriptor_to_entry(name, method, path,
                                            _class_of(name, method, path),
                                            "canvas", None)
-    rec = mint_approval(entry, params, tenant_base=BASE, allow_unproven=True,
+    rec = mint_approval(entry, params, tenant_base=BASE,
                         target_identity={
                             "course_id": params.get("course_id"),
                             "course_name": "Catalog Gate",
                         } if params.get("course_id") else None)
+    if old_flag:
+        rec["allow_unproven"] = True
     sign_approval(rec, _AUTH, channel="driver")
     return rec
 
 
-# 1. live-proven dispatches with no override.
+# 1. live-proven dispatches.
 op1 = str(uuid.uuid4())
 out1 = ex.dispatch_catalog_op(
     LIVE, live_desc["method"], live_desc["path"], "read", dict(LIVE_PARAMS),
@@ -225,23 +229,23 @@ rec1 = _journal_for(op1)
 check("live-proven journals catalog_status",
       rec1 is not None and rec1.get("catalog_status") == "live-proven",
       repr((rec1 or {}).get("catalog_status")))
-check("live-proven needs no override",
-      rec1 is not None and rec1.get("unproven_override") is None)
+check("live-proven journals no override field",
+      rec1 is not None and "unproven_override" not in rec1)
 
-# 2. unproven without the flag refuses; refusal is journaled separately.
+# 2. unproven refuses; the refusal is journaled separately.
 op2 = str(uuid.uuid4())
 try:
     ex.dispatch_catalog_op(
         PENDING, pending_desc["method"], pending_desc["path"], "read",
         dict(PENDING_PARAMS), provider="canvas", op_id=op2, pack=_pack(),
         session=_session([(200, "{}")]))
-    check("unproven without flag refuses", False, "no exception")
+    check("unproven refuses", False, "no exception")
 except ex.CatalogNotProven as exc:
-    check("unproven without flag refuses", True)
+    check("unproven refuses", True)
     check("refusal names the catalog status",
           repr(pending_desc["status"]) in str(exc), str(exc))
 except Exception as exc:  # noqa: BLE001
-    check("unproven without flag refuses", False, "wrong: %r" % exc)
+    check("unproven refuses", False, "wrong: %r" % exc)
 check("refused op_id was not journaled as a dispatch",
       _journal_for(op2) is None)
 refusals = [r for r in _journal_records()
@@ -254,65 +258,30 @@ check("refusal record carries the catalog status",
       refusals and refusals[0].get("catalog_status") == pending_desc["status"],
       repr(refusals[0].get("catalog_status") if refusals else None))
 
-# 3. unproven with a signed override dispatches.
-op3 = str(uuid.uuid4())
-rec3 = _override_record(PENDING, pending_desc["method"], pending_desc["path"],
-                        dict(PENDING_PARAMS))
-out3 = ex.dispatch_catalog_op(
-    PENDING, pending_desc["method"], pending_desc["path"], "read",
-    dict(PENDING_PARAMS), provider="canvas", op_id=op3, pack=_pack(),
-    approval=rec3, allow_unproven=True,
-    session=_session([(200, '{"assignments": []}')]))
-check("unproven override dispatches", out3["op_id"] == op3, repr(out3))
-jrec3 = _journal_for(op3)
-check("override journals the catalog status",
-      jrec3 is not None
-      and jrec3.get("catalog_status") == pending_desc["status"],
-      repr((jrec3 or {}).get("catalog_status")))
-ov3 = (jrec3 or {}).get("unproven_override") or {}
-check("override journals the signed override",
-      ov3.get("allow_unproven") is True
-      and ov3.get("by") == "educator", repr(ov3))
-# The override record is single-use: replay refuses.
-try:
-    ex.dispatch_catalog_op(
-        PENDING, pending_desc["method"], pending_desc["path"], "read",
-        dict(PENDING_PARAMS), provider="canvas", op_id=str(uuid.uuid4()),
-        pack=_pack(), approval=rec3, allow_unproven=True,
-        session=_session([(200, "{}")]))
-    check("override record is single-use", False, "replay dispatched")
-except ApprovalMismatch:
-    check("override record is single-use", True)
-except Exception as exc:  # noqa: BLE001
-    check("override record is single-use", False, "wrong: %r" % exc)
-
-# 3b. allow_unproven with a record that lacks the signed flag refuses.
-# Mint fresh with no allow_unproven field, then sign: the seal is valid
-# but the flag is absent.
-entry3b = ex.catalog_descriptor_to_entry(PENDING, pending_desc["method"],
-                                         pending_desc["path"],
-                                         _class_of(PENDING,
-                                                   pending_desc["method"],
-                                                   pending_desc["path"]),
-                                         "canvas", None)
-rec3b = mint_approval(entry3b, dict(PENDING_PARAMS), tenant_base=BASE,
-                      target_identity={"course_id": "424242",
-                                       "course_name": "Catalog Gate"})
-sign_approval(rec3b, _AUTH, channel="driver")
-try:
-    ex.dispatch_catalog_op(
-        PENDING, pending_desc["method"], pending_desc["path"], "read",
-        dict(PENDING_PARAMS), provider="canvas", op_id=str(uuid.uuid4()),
-        pack=_pack(), approval=rec3b, allow_unproven=True,
-        session=_session([(200, "{}")]))
-    check("override without the signed flag refuses", False, "dispatched")
-except ApprovalMismatch:
-    check("override without the signed flag refuses", True)
-except Exception as exc:  # noqa: BLE001
-    check("override without the signed flag refuses", False, "wrong: %r" % exc)
+# 3. unproven still refuses with a signed approval, with or without the
+# retired allow_unproven field; nothing is sent.
+for label, old_flag in (("carrying the retired flag", True),
+                        ("without the flag", False)):
+    rec3 = _signed_record(PENDING, pending_desc["method"],
+                          pending_desc["path"], dict(PENDING_PARAMS),
+                          old_flag=old_flag)
+    sess3 = _session([(200, '{"assignments": []}')])
+    try:
+        ex.dispatch_catalog_op(
+            PENDING, pending_desc["method"], pending_desc["path"], "read",
+            dict(PENDING_PARAMS), provider="canvas", op_id=str(uuid.uuid4()),
+            pack=_pack(), approval=rec3, session=sess3)
+        check("signed approval %s does not run an unproven op" % label,
+              False, "dispatched")
+    except ex.CatalogNotProven:
+        check("signed approval %s does not run an unproven op" % label,
+              sess3._transport.calls == [], repr(sess3._transport.calls))
+    except Exception as exc:  # noqa: BLE001
+        check("signed approval %s does not run an unproven op" % label,
+              False, "wrong: %r" % exc)
 
 # 4. never-dispatch cannot be overridden.
-rec4 = _override_record(NEVER, "POST",
+rec4 = _signed_record(NEVER, "POST",
                         "/api/v1/courses/{course_id}/blueprint_templates/migrations",
                         {"course_id": "424242"})
 try:
@@ -323,7 +292,7 @@ try:
                   "/api/v1/courses/{course_id}/blueprint_templates/migrations"),
         {"course_id": "424242"}, provider="canvas",
         op_id=str(uuid.uuid4()), pack=_pack(), approval=rec4,
-        allow_unproven=True, session=_session([(200, "{}")]))
+        session=_session([(200, "{}")]))
     check("never-dispatch cannot be overridden", False, "dispatched")
 except NeverDispatch:
     check("never-dispatch cannot be overridden", True)
@@ -335,15 +304,14 @@ hold_desc = ex.catalog_descriptor_for(HOLD)
 hold_method = hold_desc["method"] if hold_desc else "POST"
 hold_path = hold_desc["path"] if hold_desc else "/api/quizzes/{builder_quiz_id}/quiz_entries"
 hold_params = {"builder_quiz_id": "424242"}
-rec5 = _override_record(HOLD, hold_method, hold_path, hold_params)
+rec5 = _signed_record(HOLD, hold_method, hold_path, hold_params)
 try:
     ex.dispatch_catalog_op(
         HOLD, hold_method, hold_path,
         _class_of(HOLD, hold_method, hold_path),
         dict(hold_params),
         provider="canvas", op_id=str(uuid.uuid4()), pack=_pack(),
-        approval=rec5, allow_unproven=True,
-        session=_session([(200, "{}")]))
+        approval=rec5, session=_session([(200, "{}")]))
     check("evidence-hold cannot be overridden", False, "dispatched")
 except EvidenceHold:
     check("evidence-hold cannot be overridden", True)
@@ -351,14 +319,14 @@ except Exception as exc:  # noqa: BLE001
     check("evidence-hold cannot be overridden", False, "wrong: %r" % exc)
 
 # 6. unknown operations cannot be overridden.
-rec6 = _override_record(UNKNOWN, "GET", "/api/v1/courses/{course_id}/nope",
-                        {"course_id": "424242"})
+rec6 = _signed_record(UNKNOWN, "GET", "/api/v1/courses/{course_id}/nope",
+                      {"course_id": "424242"})
 try:
     ex.dispatch_catalog_op(
         UNKNOWN, "GET", "/api/v1/courses/{course_id}/nope", "read",
         {"course_id": "424242"}, provider="canvas",
         op_id=str(uuid.uuid4()), pack=_pack(), approval=rec6,
-        allow_unproven=True, session=_session([(200, "{}")]))
+        session=_session([(200, "{}")]))
     check("unknown op cannot be overridden", False, "dispatched")
 except ex.CatalogNotProven:
     check("unknown op cannot be overridden", True)

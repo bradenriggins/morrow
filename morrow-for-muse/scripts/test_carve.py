@@ -299,15 +299,24 @@ def test_no_shipped_file_invokes_a_dev_only_script(carved):
     assert not missing, missing
 
 
-def test_shipped_chromium_selftest_reads_only_shipped_code(carved):
-    # transport/README.md names local_chromium_selftest.py as the coverage
-    # for the proxy allowlist, and it ships; its allowlist scan must not
-    # open session/capture.py, which the carve leaves out.
+def test_chromium_selftest_allowlist_scan_needs_no_rig_only_code(
+        carved, tmp_path):
+    # local_chromium_selftest.py once shipped, and its allowlist scan
+    # opened session/capture.py, which the carve leaves out, so it failed
+    # in every released tree. It now runs in the source repository's CI
+    # (scripts/dev-suites.sh), not from the release; its scan must still
+    # pass in a tree without the rig-only capture module.
+    suite = os.path.join("transport", "local_chromium_selftest.py")
+    assert not os.path.exists(os.path.join(carved, suite))
+    assert not os.path.exists(os.path.join(carved, "session", "capture.py"))
+    tree = tmp_path / "release"
+    shutil.copytree(carved, str(tree), symlinks=True)
+    shutil.copy2(os.path.join(TREE, suite), str(tree / suite))
     probe = ("import local_chromium_selftest as t\n"
              "t._t_proxy_generic_call_methods_allowlisted()\n"
              "raise SystemExit(1 if t.FAIL else 0)\n")
     result = subprocess.run([sys.executable, "-c", probe],
-                            cwd=os.path.join(carved, "transport"),
+                            cwd=str(tree / "transport"),
                             capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
 

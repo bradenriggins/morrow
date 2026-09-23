@@ -82,30 +82,28 @@ marked `live-proven` is not a v1 claim.
   feeds, content migrations and exports, groups, users and search,
   conferences, collaborations, media objects, permissions, and
   activity stream.
-  Some of these reads return people and are now classified as learner
-  data, so they are refused like every other learner-data row (see
+  Some of these reads return people, so they are learner data (see
   "Out for v1"): C-78 potential collaborators, C-105/C-106 activity
   stream, C-112 effective due dates, C-274/C-343/C-344 assignment
   overrides, C-327/C-331/C-332 page revisions, C-231/C-234/C-235/C-236
   date details (override student lists), C-403 course search, and
-  C-322 outcome alignments for a student. The live-proven
-  override writes (C-34, C-36, C-39, C-41, C-51, C-284) and the page
-  revision revert (C-328) are refused for the same reason.
+  C-322 outcome alignments for a student. Like every learner-data row,
+  they dispatch only on the Chromium lane with the encrypted learner
+  vault, de-identified before the agent or the journal sees them
+  (fixture-proven, see "Out for v1"); no other lane runs them
+  (`LearnerDataGated`). The live-proven override writes (C-34, C-36,
+  C-39, C-41, C-51, C-284) and the page revision revert (C-328) follow
+  the same rule.
 - The governance layer that makes it safe: frozen plans, the admission
   gate (`dispatch/admission.py`) enforcing the live-proven catalog,
   educator-signed approvals, per-category never-dispatch lists, and
   journaled dispatches. This release has no automatic undo: no undo
   entry is pinned, and each approval says the change cannot be undone
   automatically; a reversal is a new change the educator approves. Only
-  live-proven operations run, with one exception: a catalog row marked
-  `pending` (never tried live) dispatches only with `--allow-unproven`
-  plus an educator-signed v2 approval carrying `allow_unproven: true`,
-  bound to that exact operation and its parameters, single use. The
-  educator must sign it; the agent cannot. Rows marked `failed`,
-  `unsupported`, `excluded`, or `evidence-hold` are refused with or
-  without it, and it does not bypass write approval, frozen-plan
-  requirements, never-dispatch, learner-data refusal, or
-  unknown-operation refusal.
+  live-proven operations run, with no exception and no override: rows
+  marked `pending`, `failed`, `unsupported`, `excluded`, or
+  `evidence-hold`, and unknown operations, are refused even when the
+  educator asks and even with a signed approval.
 - The Canvas Login Helper (`helper/`): educator self-sign-in,
   SSO/MFA-capable, with keepalive.
 
@@ -152,9 +150,8 @@ live battery marks them live-proven in
   package), where every receipt is de-identified in `dispatch_entry`
   (course-scoped labels such as `Student A1`) before the agent or the
   journal sees it. Everywhere else (the raw HTTPS lane, or no
-  `cryptography`) they are refused (`LearnerDataGated`;
-  `--allow-unproven` cannot override it). The educator works by name
-  through `morrow students find` and writes by label (SKILL.md
+  `cryptography`) they are refused (`LearnerDataGated`). The educator
+  works by name through `morrow students find` and writes by label (SKILL.md
   "Working by name"). Proof status: the by-name flow and the opened
   people-bearing rows are proven against synthetic Canvas fixtures in
   the source tree's end-to-end tests; they have not yet been exercised

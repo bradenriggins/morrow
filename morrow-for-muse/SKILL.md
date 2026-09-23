@@ -75,18 +75,21 @@ only when it reports `"logged_in": false` (genuine reauthentication
 need), or once for the first onboarding below. Never open it
 preemptively and never on every run: a healthy session needs no page.
 
-1. Make sure `CANVAS_BASE` is set to the educator's Canvas host
-   (e.g. `https://myschool.instructure.com`), either in the environment
-   or in the tree's `helper/env` (the legacy global `~/.morrow/env` is
-   honored for `CANVAS_BASE` only). There is no default tenant; the
-   helper refuses to start on the placeholder.
-2. If the installer skipped the helper launch because `CANVAS_BASE`
-   was not set yet, run `bash install.sh` again (from this tree) once
-   it is set. The rerun checks the Canvas address first (a
-   placeholder, an address that does not load, or a Canvas error page
-   stops it with a message) and then starts the helper through
-   `helper/keepalive.sh`. Do not start keepalive.sh by hand for this:
-   it skips those checks.
+1. Write the educator's Canvas address to the tree's `helper/env` as
+   `CANVAS_BASE=https://...` (e.g. `https://myschool.instructure.com`),
+   after confirming it with them. When the host does not end in
+   `.instructure.com`, confirm with the educator that it is their
+   school's Canvas, then add
+   `CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=<exact host>` too. There is no
+   default tenant; the helper refuses to start on the placeholder.
+2. Start the helper by running the installer again: `bash install.sh`
+   (from this tree). It first checks the address: a placeholder, an
+   address that does not load, or a Canvas error page stops it with a
+   plain reason. Tell the educator what it said, ask for the address
+   again, and fix `helper/env`. Only then does it start the helper.
+   Never start the helper for the first time with
+   `helper/keepalive.sh`: it skips that check, so a mistyped address
+   shows the educator a sign-in page that cannot load.
    Do not hand-launch `helper/server.py` directly: it sources
    `<tree>/helper/env` itself, so it fails without `CANVAS_BASE`
    exported in the shell or the tree env file, and the production-port
@@ -378,16 +381,12 @@ with `dispatch/admission.py` `mint_approval` / `sign_approval`) stays
 for proof drivers and scripts; use the two commands above instead.
 
 Only operations marked `live-proven` in
-`proof-battery/OPERATION_CATALOG.md` dispatch, with one exception, the
-`--allow-unproven` exception: a catalog row marked `pending` (never
-tried live) dispatches only when the caller passes `--allow-unproven`
-AND the approval is an educator-signed v2 approval carrying
-`allow_unproven: true`, bound to that exact operation and its
-parameters, single use. The educator must sign it; the agent cannot.
-It reaches `pending` rows only: rows marked `failed`, `unsupported`,
-`excluded`, or `evidence-hold`, unknown operations, never-dispatch
-routes, and learner-data rows are refused with or without it. It does
-not skip write approval, the frozen plan, or any other gate.
+`proof-battery/OPERATION_CATALOG.md` dispatch. There is no exception
+and no override: rows marked `pending`, `failed`, `unsupported`,
+`excluded`, or `evidence-hold`, and unknown operations, are refused
+even when the educator asks and even with a signed approval. Tell the
+educator plainly that Morrow does not do that task yet, and offer a
+live-proven task that gets them close, if there is one.
 
 Undo: this release has no automatic undo. Every write's
 `approval_display` says "Morrow cannot undo this change automatically",
@@ -404,13 +403,12 @@ directly in edit mode, and tell them it is a new change, not an undo.
 - Frozen plans: a write's plan digest must match the action exactly.
 - Admission: `dispatch/admission.py` enforces the live-proven catalog.
   Only operations marked `live-proven` in
-  `proof-battery/OPERATION_CATALOG.md` dispatch; the only exception is
-  the educator-signed `--allow-unproven` override for `pending` rows
-  described above. Learner-data operations (any operation whose
+  `proof-battery/OPERATION_CATALOG.md` dispatch, with no exception and
+  no override. Learner-data operations (any operation whose
   response carries people; see SCOPE.md) dispatch only on the Chromium
   lane with the encrypted learner vault, where every receipt is
   de-identified (see "Privacy" below); anywhere else they are refused
-  (`LearnerDataGated`), and `--allow-unproven` cannot override that.
+  (`LearnerDataGated`).
 - Journaling: a dispatch journals more than one record. Reads journal a
   `wal="claimed"` record before provider work, then a completion record;
   writes journal an fsynced `wal="pending"` claim, then a `wal="complete"`

@@ -263,9 +263,8 @@ def test_people_ops_open_on_the_projecting_lane(name, method, path):
     pytest.importorskip("cryptography")
     from dispatch import executor as ex
     entry = ex.catalog_descriptor_to_entry(name, method, path)
-    status, _ = ex._catalog_provenance_gate(
-        entry, name, method, path, {}, "canvas", approval=None,
-        allow_unproven=False, session=_Browser())
+    status = ex._catalog_provenance_gate(
+        entry, name, method, path, {}, session=_Browser())
     assert status == "live-proven"
 
 
@@ -277,13 +276,11 @@ def test_people_ops_stay_refused_without_a_projection_point(
     entry = ex.catalog_descriptor_to_entry(name, method, path)
     with pytest.raises(LearnerDataGated):
         ex._catalog_provenance_gate(
-            entry, name, method, path, {}, "canvas", approval=None,
-            allow_unproven=False, session=_Raw())
+            entry, name, method, path, {}, session=_Raw())
     monkeypatch.setattr(core, "AESGCM", None)
     with pytest.raises(LearnerDataGated) as info:
         ex._catalog_provenance_gate(
-            entry, name, method, path, {}, "canvas", approval=None,
-            allow_unproven=False, session=_Browser())
+            entry, name, method, path, {}, session=_Browser())
     assert "has not landed" not in str(info.value)
     assert "cryptography" in str(info.value)
 
@@ -296,9 +293,6 @@ def test_pending_people_ops_stay_refused_on_the_projecting_lane():
         "canvas_get_course_level_student_summary_data", "GET",
         "/api/v1/courses/{course_id}/analytics/student_summaries")
     entry = ex.catalog_descriptor_to_entry(name, method, path)
-    from dispatch.admission import WriteApprovalMissing
-    with pytest.raises((LearnerDataGated, ex.CatalogNotProven,
-                        WriteApprovalMissing)):
+    with pytest.raises((LearnerDataGated, ex.CatalogNotProven)):
         ex._catalog_provenance_gate(
-            entry, name, method, path, {}, "canvas", approval=None,
-            allow_unproven=True, session=_Browser())
+            entry, name, method, path, {}, session=_Browser())

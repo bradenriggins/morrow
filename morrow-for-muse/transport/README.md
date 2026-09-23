@@ -138,6 +138,13 @@ INSTALL.md; INSTALL.md sits outside the in-scope tree for this
 remediation, so they live here instead and the gap is reported with the
 fix.)
 
+The "Coverage:" lines name the selftest suites that check each
+decision. `egress_selftest.py`, `helper_selftest.py`, and
+`helper/cdp_http_auth_selftest.py` are install suites: they ship and run
+at every install (`scripts/install-suites.sh`). `local_chromium_selftest.py`
+runs in the source repository's CI (`scripts/dev-suites.sh`) and is not
+part of the release.
+
 ### No TCP CDP: pipe only (W4-P0-3, W4-P2-16)
 
 Chromium launches with `--remote-debugging-pipe`, never
@@ -148,7 +155,8 @@ construction without a launcher owner is refused. The only
 cross-process CDP path is the helper's /cdp/* proxy, which requires the
 per-launch HELPER_AUTH_TOKEN (verified by
 helper/cdp_http_auth_selftest.py). Coverage: local_chromium_selftest.py
-(no-debugging-port-flag, cdp-ownerless-refused, no-tcp-probe-helpers).
+in the source repository (no-debugging-port-flag, cdp-ownerless-refused,
+no-tcp-probe-helpers).
 
 ### Cross-tree isolation (W4-P2-16)
 
@@ -173,7 +181,8 @@ environment (never argv) and adopts a listening forwarder port only
 when the holder's environ names the current launcher PID
 (_verify_forwarder_holder); a forwarder owned by another launcher is
 refused, not adopted. Coverage: egress_selftest.py sections (c)/(d),
-local_chromium_selftest.py verify-forwarder-holder-*.
+local_chromium_selftest.py verify-forwarder-holder-* in the source
+repository.
 
 ### HTTPS upstream proxy: TLS before auth (W4-P1-3)
 
@@ -191,8 +200,9 @@ permit https:// only (about:blank narrowly allowed for new tabs, where
 no credentialed traffic flows). http:// is refused so session cookies
 can never cross the wire in cleartext. The old document.title-based
 logged_in check is gone; login state comes from the document URL.
-Coverage: local_chromium_selftest.py (https-nav-guard) and
-helper_selftest.py section 14 (W4-P2-8 navigation URL policy probe).
+Coverage: local_chromium_selftest.py in the source repository
+(https-nav-guard) and helper_selftest.py section 14 (W4-P2-8 navigation
+URL policy probe).
 
 ### Isolated-world API fetches (W4-P1-13)
 
@@ -202,7 +212,7 @@ reached by page scripts, so a compromised page cannot exfiltrate or
 rewrite the requests. The trust boundary: the isolated world trusts
 Chromium's world isolation, not page content; responses are still
 validated as JSON before use. Coverage: local_chromium_selftest.py
-(isolated-world checks).
+in the source repository (isolated-world checks).
 
 ### Downloads denied, fail closed (W4-P2-18)
 
@@ -210,7 +220,7 @@ Browser.setDownloadBehavior({"behavior":"deny"}) is set on every
 session; there is no download-accept path. Any page that triggers a
 download fails closed (the download is dropped, the op errors) rather
 than writing untrusted bytes to disk. Coverage:
-local_chromium_selftest.py.
+local_chromium_selftest.py in the source repository.
 
 ### Root / --no-sandbox decision (W4-P0-9)
 

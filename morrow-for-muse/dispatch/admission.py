@@ -39,13 +39,9 @@ Approval records (v2): JSON, either supplied as a dict or read from
      "authorization": "<verbatim educator authorization basis>",
      "channel": "<'educator-chat' | 'driver'>",
      "sig": "<HMAC-SHA256 tamper seal over the other fields>"}
-Optional field: "allow_unproven": true authorizes one dispatch of a
-catalog operation that is NOT marked live-proven in
-proof-battery/OPERATION_CATALOG.md (the F-2 override lane; the executor
-passes --allow-unproven). The field is set before sign_approval, so the
-seal covers it; a record without allow_unproven: true can never
-authorize an unproven op, and the field authorizes nothing else. Unknown
-operations (not in the catalog at all) cannot be overridden.
+No field of an approval lets a catalog operation that is not marked
+live-proven in proof-battery/OPERATION_CATALOG.md run: the executor's
+catalog provenance gate refuses it before any approval is read.
 The gate recomputes the op digest from the actual dispatch (entry name,
 canonical params, tenant base, and the exact request: method, path,
 query, and body) and refuses on any mismatch, so one approval
@@ -1044,7 +1040,7 @@ def op_digest_of(entry_name: str, params: dict, tenant_base: str | None,
 
 
 def mint_approval(entry: dict, params: dict, tenant_base: str | None = None,
-                  ttl_seconds: int = 3600, allow_unproven: bool = False,
+                  ttl_seconds: int = 3600,
                   target_identity: dict | None = None) -> dict:
     """Build an UNSIGNED v2 approval record (by=None).
 
@@ -1052,11 +1048,6 @@ def mint_approval(entry: dict, params: dict, tenant_base: str | None = None,
     category, issued/expiry times. The educator signs it via
     sign_approval() with the verbatim authorization basis. This function
     never sets by itself: an unsigned record is refused by the gate.
-
-    allow_unproven=True stamps the record as a catalog-provenance
-    override (F-2): dispatching an unproven catalog op still requires
-    the educator's signature, and the flag is bound by the tamper seal
-    like every other field, so the agent cannot self-authorize it.
 
     target_identity (W4-P0-11) is the human-meaningful write target the
     educator reviewed: {"course_id": ..., "course_name": ..., "term":
@@ -1110,8 +1101,6 @@ def mint_approval(entry: dict, params: dict, tenant_base: str | None = None,
             target_block[key] = declared_target[key]
     if target_block:
         record["target"] = target_block
-    if allow_unproven:
-        record["allow_unproven"] = True
     return record
 
 
@@ -1277,9 +1266,9 @@ def _write_consumed_seal() -> None:
 
 
 def _load_consumed() -> dict:
-    # W5-P1-3: the membership checks in check_write_approval,
-    # check_unproven_override, and reverify_approval each parsed the
-    # whole file (~3 parses per admit). Cache in process keyed on
+    # W5-P1-3: the membership checks in check_write_approval and
+    # reverify_approval each parsed the whole file (several parses per
+    # admit). Cache in process keyed on
     # (mtime_ns, size); the file changes only under _record_consumed's
     # flock, so the common path is one stat() per admit instead of a
     # full parse. CONSUMED_PATH is read at call time (not bound as a
@@ -1704,9 +1693,8 @@ def _verify_record_binding(entry: dict, params: dict, record: dict,
     slip through the production path.
 
     Consumption is deliberately left to the caller: check_write_approval
-    enforces single-use for writes, and check_unproven_override enforces
-    it for catalog overrides, so a record that authorizes both is still
-    burned exactly once by the dispatcher's persist/consume ordering.
+    enforces single-use for writes, and the dispatcher burns the record
+    exactly once by its persist/consume ordering.
     """
     _verify_seal(record)
     if record.get("by") != "educator":
@@ -1794,66 +1782,6 @@ def _verify_record_binding(entry: dict, params: dict, record: dict,
         "target": record.get("target"),
     }
     return audit
-
-
-def check_unproven_override(entry: dict, params: dict, approval: dict | None,
-                            tenant_base: str | None = None,
-                            require_educator_channel: bool = True):
-    """Enforce the F-2 unproven-catalog override.
-
-    A catalog operation that is NOT marked live-proven in
-    proof-battery/OPERATION_CATALOG.md may still dispatch, but only when
-    the educator explicitly authorized THIS unproven op: the signed v2
-    approval record must carry allow_unproven: true (sealed by
-    sign_approval like every other field). The record is otherwise held
-    to the exact same binding as a write approval: educator-signed,
-    verbatim authorization, op name, category, time validity, op_digest
-    and params_digest bound to this dispatch, and single-use.
-
-    The allow_unproven flag authorizes only the catalog-provenance
-    question. It does not relax any other gate: for writes the record
-    must ALSO pass check_write_approval in the normal admission path,
-    and never-dispatch / unsupported / evidence-hold / learner-data
-    refusals cannot be overridden at all. Unknown operations (not in the
-    catalog) are refused by the catalog gate before this is reached and
-    cannot be overridden.
-
-    Returns (audit_block, signed_record) for the journal and for
-    persist_signed_record(); the audit block carries allow_unproven: true
-    so the journal shows the override explicitly.
-
-    This function CHECKS ONLY and never mutates; the dispatcher persists
-    and consumes the record after every gate has passed, exactly like a
-    write approval.
-    """
-    record, provenance = load_approval(None, approval)
-    if record is None:
-        raise WriteApprovalMissing(
-            "operation %r is not marked live-proven in the catalog; dispatch "
-            "needs an educator-signed v2 approval record carrying "
-            "allow_unproven: true (pass approval=<record> or place it at %s)"
-            % (entry.get("name"),
-               os.path.join(APPROVALS_DIR, "<op_id>.json")))
-    if not isinstance(record, dict) or record.get("version") != APPROVAL_VERSION:
-        raise ApprovalMismatch(
-            "approval for %r is not a v%d record; v1 approvals (no digest "
-            "binding, no expiry, no category) are retired and refused"
-            % (entry.get("name"), APPROVAL_VERSION))
-    if record.get("allow_unproven") is not True:
-        raise ApprovalMismatch(
-            "operation %r is not marked live-proven in the catalog, and the "
-            "signed approval record does not carry allow_unproven: true; the "
-            "educator must explicitly authorize this unproven op"
-            % entry.get("name"))
-    audit = _verify_record_binding(entry, params, record, tenant_base,
-                                   provenance,
-                                   require_educator_channel=require_educator_channel)
-    audit["allow_unproven"] = True
-    if _use_key(record) in _load_consumed():
-        raise ApprovalMismatch(
-            "unproven override for %r was already consumed; overrides are "
-            "single-use" % entry.get("name"))
-    return audit, record
 
 
 def consume_approval(record: dict | None) -> None:

@@ -68,10 +68,25 @@ DEV_ONLY = (
     "learners/live_verify_reads.py", "learners/live_verify_resolution.py",
     # internal audit and integration notes (status as of past waves)
     "audit/", "INTEGRATION_NOTES.md",
-    # dev harnesses that are not install suites (install.sh step 9)
+    # dev harnesses that are not install suites (install.sh step 9): CI
+    # runs them from the source repository through scripts/dev-suites.sh,
+    # and nothing would run them in the release
+    "scripts/dev-suites.sh",
     "transport/selftest.py", "transport/browser_backend_selftest.py",
     "transport/item_bank_sdk_selftest.py",
     "provision/provision_selftest.py", "provision/launch_driver_selftest.py",
+    "catalog/a11y/a11y_parity_selftest.py", "catalog/a11y/a11y_selftest.py",
+    "dispatch/approval_display_selftest.py",
+    "dispatch/catalog_gate_selftest.py", "dispatch/state_backup_selftest.py",
+    "dispatch/wave3_hardening_selftest.py",
+    "dispatch/wave5_concurrency_selftest.py",
+    "dispatch/wave5_injection_selftest.py",
+    "dispatch/wave6_crypto_selftest.py",
+    "helper/educator_surface_selftest.py",
+    "reauth/wave5_resource_selftest.py", "session/cdp_selftest.py",
+    "transport/chromium_memory_selftest.py",
+    "transport/local_chromium_selftest.py",
+    "transport/wave5_injection_selftest.py",
     # the pytest suite's scratch-HOME isolation
     "conftest.py",
 )

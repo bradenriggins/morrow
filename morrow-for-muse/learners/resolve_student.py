@@ -384,6 +384,14 @@ _RUNGS = (RUNG_USER_ID, RUNG_SIS_USER_ID, RUNG_LOGIN, RUNG_EMAIL,
           RUNG_NAME_EXACT, RUNG_NAME_FUZZY)
 
 
+# Canvas's enrollment role names in the educator's words.
+_PLAIN_ROLES = {"StudentEnrollment": "student", "TaEnrollment": "TA",
+                "TeacherEnrollment": "teacher",
+                "ObserverEnrollment": "observer",
+                "DesignerEnrollment": "designer",
+                "StudentViewEnrollment": "test student"}
+
+
 def public_candidate_summary(candidates, label_for=None):
     """PII-free disambiguation list for the agent-visible message.
 
@@ -403,8 +411,8 @@ def public_candidate_summary(candidates, label_for=None):
         sections = sorted(candidate_sections(cand))
         section_bit = ("section %s" % (", ".join(str(s) for s in sections))
                        if sections else "no section recorded")
-        roles = candidate_roles(cand)
-        role_bit = ("roles: %s" % ", ".join(roles)) if roles else "no roles"
+        roles = [_PLAIN_ROLES.get(r, r) for r in candidate_roles(cand)]
+        role_bit = ", ".join(roles) if roles else "no role recorded"
         test_bit = " (test student)" if candidate_is_test_student(cand) else ""
         parts.append("%s (%s; %s)%s" % (who, section_bit, role_bit, test_bit))
     return "; ".join(parts)

@@ -1,9 +1,12 @@
 #!/bin/bash
-# install-suites.sh [--show-failures]
+# install-suites.sh [--show-failures] [suite ...]
 #
 # Runs the install selftest suites of the tree this script ships in.
 # install.sh runs it at step 9, and CI runs it on the carved release
-# tree, so the list below is the one list both use.
+# tree, so the list below is the one list both use. Suites named on the
+# command line (tree-relative paths) run instead of that list, with the
+# same isolation: scripts/dev-suites.sh uses this for the source
+# repository's other selftests.
 #
 # Each suite runs with python3 from the tree root, in its own fresh
 # scratch HOME under the tree's .selftest-work/, with every variable
@@ -20,11 +23,15 @@ set -u
 
 TREE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHOW_FAILURES=0
-case "${1:-}" in
-  "") ;;
-  --show-failures) SHOW_FAILURES=1 ;;
-  *) echo "usage: $0 [--show-failures]" >&2; exit 2 ;;
-esac
+NAMED=""
+for _arg in "$@"; do
+  case "${_arg}" in
+    --show-failures) SHOW_FAILURES=1 ;;
+    -*) echo "usage: $0 [--show-failures] [suite ...]" >&2; exit 2 ;;
+    *) NAMED="${NAMED} ${_arg}" ;;
+  esac
+done
+unset _arg
 
 SUITES="transport/chromium_session_selftest.py
 transport/egress_selftest.py
@@ -49,6 +56,7 @@ failures/test_error_translation.py
 learners/test_resolve_student.py
 query/selftest_query.py
 catalog/a11y/runner_selftest.py"
+[ -n "${NAMED}" ] && SUITES="${NAMED}"
 SELFTEST_UNSET="MORROW_HOME MORROW_TREE_STATE_DIR MORROW_SOURCE_VAULT_PATH MORROW_APPROVAL_SIGNING_KEY MORROW_USER_ID MORROW_CONVERSATION_ID MORROW_HELPER_ENV_FILE MORROW_PRIVACY_MAP MORROW_PRIVACY_SALT MORROW_SELFTEST_HOME LOGIN_HELPER_PROFILE_DIR LOGIN_HELPER_PORT LOGIN_HELPER_CDP_PORT"
 
 WORK="${TREE}/.selftest-work"

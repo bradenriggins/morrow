@@ -18,11 +18,9 @@ live-proven 14, pending 2, failed 0, evidence-hold 4.
 Statuses mean:
 - `live-proven`: a disposable live battery proved the operation through
   the browser-owned session with readback verification and full cleanup.
-  This is the only status that dispatches without an educator override
-  (with one caveat, below).
-- `pending`: never proven. Dispatch refuses unless the educator signs
-  an explicit `--allow-unproven` override as part of the approval, and
-  even that cannot override the absolute refusals below.
+  This is the only status that dispatches (with one caveat, below).
+- `pending`: never proven. Dispatch refuses it, even when the educator
+  asks and even with a signed approval. Nothing overrides that.
 - `failed`: a live battery attempted it and it did not work. It is not
   retried without a code or request-shape change. Do not dispatch it.
 - `unsupported`: the provider does not serve the route (e.g. AI
@@ -39,20 +37,16 @@ The gate checks the catalog row BEFORE anything else
 (`_catalog_provenance_gate` in `dispatch/executor.py`):
 
 1. The `--name` must be a real catalog tool name. An unknown name raises
-   `CatalogNotProven` and cannot be overridden by any flag. The name is
-   not free text.
+   `CatalogNotProven`. The name is not free text.
 2. The `--method` and `--path` you pass must match the row's recorded
    method and path exactly. A proven name paired with arbitrary CLI
    arguments raises `CatalogNotProven`. You cannot smuggle a new request
    shape behind a proven name.
-3. The row status must be `live-proven`. The one exception: a row
-   marked `pending` (never tried live) runs with `--allow-unproven` plus
-   an educator-signed approval record carrying `allow_unproven: true`
-   (sealed by `sign_approval`). Rows marked `failed`, `unsupported`, or
-   `excluded` are refused with or without it.
+3. The row status must be `live-proven`. Rows marked `pending`,
+   `failed`, `unsupported`, or `excluded` raise `CatalogNotProven`. No
+   flag and no approval changes that.
 
-Then the absolute refusals run, and `--allow-unproven` cannot touch
-them: `never_dispatch` rows (blueprint, CSP, SIS, conversations,
+Then the absolute refusals run: `never_dispatch` rows (blueprint, CSP, SIS, conversations,
 feature flags, the quiz submission-users message), `unsupported`,
 `evidence-hold`, and `learner-data` (URL substrings `/users/`,
 `/enrollments`, `/submissions`, `/gradebook`, `/grades`, `/analytics`,
@@ -96,13 +90,14 @@ readback and cleanup:
   (C-287 create, C-293 read, C-295 list, C-298 update, C-290 delete)
   are proven through the same pipeline (items 11057310, 11057311).
   Excluded: publish (never tested).
-- **Item Banks**: bank-level operations only (IB-1 archive, IB-5
-  create, IB-9 get, IB-12 list, IB-13 list entries, IB-10 get entry,
-  IB-15 list shares, IB-16 rename, IB-17 share, IB-20 unshare). Item create/read/update
-  (IB-6/IB-11/IB-18) are implemented in the Item Banks SDK lane but
-  live proof is pending, so they are cataloged as pending. Item delete
-  (IB-19) is implemented and unproven; the live battery attempts it
-  against a disposable item before any claim. quiz_entries routes
+- **Item Banks**: bank operations (IB-1 archive, IB-5 create, IB-9
+  get, IB-12 list, IB-13 list entries, IB-10 get entry, IB-15 list
+  shares, IB-16 rename, IB-17 share, IB-20 unshare) and item
+  operations (IB-6 item create, IB-18 item update, IB-4 attach an item
+  to a bank, IB-7 remove a bank entry) are live-proven through the
+  Item Banks SDK lane. Read an item through its bank entry (IB-10).
+  The direct item read (IB-11) and item delete (IB-19) are pending: the
+  gate refuses them. quiz_entries routes
   (IB-2/3/8/14) are evidence-hold (401 under the banks.build scope).
   Full mechanism: `knowledge/item-banks-sdk.md`.
 - **Reads**: 115 live-proven reads (110 Canvas plus 5 Item Bank)

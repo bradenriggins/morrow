@@ -102,10 +102,9 @@ encrypted learner vault (the optional `cryptography` package). There
 the executor projects every receipt in `dispatch_entry`'s success path
 before anything is agent-visible or journaled. Everywhere else (the
 raw HTTPS lane, or no `cryptography`) they are refused
-(`LearnerDataGated` in `dispatch/admission.py`), and an
-educator-signed `--allow-unproven` cannot override that (it is an
-absolute check, alongside never-dispatch, unsupported, and
-evidence-hold). Only `live-proven` rows dispatch.
+(`LearnerDataGated` in `dispatch/admission.py`); nothing overrides
+that (it is an absolute check, alongside never-dispatch, unsupported,
+and evidence-hold). Only `live-proven` rows dispatch.
 
 Practical consequences for agents:
 - Never paste learner names, emails, logins, or SIS ids from the LMS

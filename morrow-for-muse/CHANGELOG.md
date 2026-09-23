@@ -59,6 +59,10 @@ Changes to your courses:
 - Discussion changes are refused until they are tested through the
   browser Morrow uses today; they were tested only through an older,
   retired route.
+- Morrow does only tasks we have tested on a real Canvas course, with
+  no exception. In 0.4.0, the assistant could offer to run a task we
+  had not tested if you approved it, although the consent page said
+  Morrow refuses such a task even if you ask. That option is gone.
 - The approval you read before a change is in plain words: the
   course, the change, every value that will be sent, and whether
   Morrow can undo it. A course rename and a change to the dates of
@@ -189,6 +193,12 @@ Messages:
 - The notice about paused changes counts only changes that are still
   waiting for you, not earlier expired sign-ins, and it goes away once
   nothing waits.
+- Messages about a problem use plain words and promise only what
+  Morrow does. When Canvas refuses a change, you are told that nothing
+  changed and that the assistant can prepare it again when you say so;
+  Morrow never sends it again on its own. When a request needs student
+  records and the package that hides student names is missing, the
+  message names the command that installs it.
 
 Installing and the docs:
 
@@ -394,7 +404,8 @@ Technical notes:
   `ItemBanksNotReached`, and `RequestNotSendable`. New failure modes
   `canvas-account-check-failed`, `helper-browser-not-reached`, and
   `item-banks-not-reached`. With the two prepared-write modes and the
-  three Canvas refusal modes, the catalog has 102 modes. An Item Banks
+  three Canvas refusal modes, less the 14 modes retired for lanes that
+  do not ship, the catalog has 88 modes. An Item Banks
   page-program outcome other than the program's own is now
   `ItemBankSdkMaybeAttempted` (uncertain), never "not sent".
 - `reauth/state_machine.py` `paused_ops()` (one entry per op, newest

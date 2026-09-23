@@ -46,8 +46,8 @@
       "severity_hint": "medium",
       "root_cause": "The page-context write path harvests the X-CSRF-Token fresh from the _csrf_token cookie on every call. When the live document.cookie has no _csrf_token (helper tab navigated away, cookie expired, or session otherwise degraded), the write is refused before any network call. This is the fail-closed fix for the 2026-09-22 incident where missing tokens produced misleading provider 422s; the product path can no longer produce a silent missing-token write.",
       "is_not": "This is not a provider refusal: no HTTP request was sent, so there is no 422 and nothing was applied. It is not session death either (a dead session redirects API calls to the login page); it is specifically the CSRF cookie missing from a live page.",
-      "agent_message": "What was attempted: {operation}. What the evidence showed: the Canvas page in the helper browser had no security token for changes, so Morrow did not send the change (reference {correlation_id}). What this means: nothing was sent and nothing changed. This happens when the helper tab is on another page or its Canvas sign-in cookie expired. What happens next: I will check that the helper page shows you signed in to Canvas, then prepare the change again.",
-      "auto_action": "Check the helper /status and that the helper page shows the educator signed in to Canvas (sign in again there if it does not); then run the change again: for a Plan-mode write, run plan-write again and ask the educator to approve it. Never build a CSRF header by hand.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow stopped before sending the change, because the Canvas page the helper keeps open could not confirm that the change came from your signed-in session (reference {correlation_id}). What this means: nothing was sent and nothing changed. The helper page may be open on another page, or your sign-in may need a refresh. What happens next: I will check that you are still signed in on the helper page. Then say the word and I will prepare the change again; in plan mode you approve it again before it is sent.",
+      "auto_action": "Probe the helper /status; if it reports logged_in false, guide the educator to sign in again on the helper page. Nothing was sent and the executor never resends on its own: prepare the change again (plan-write, or catalog in edit mode) only after the educator says so. Never build a CSRF header by hand.",
       "escalate_when": "the helper session is healthy and the tenant tab is open but document.cookie still has no _csrf_token",
       "signature": {
         "error_class": {
@@ -61,8 +61,8 @@
       "signature_notes": "fail-closed pre-send refusal raised by transport/local_chromium.py (CsrfTokenMissing; transport/chromium_session.py raises it for a write as CsrfWriteNotSent, a WriteNotAttempted) or transport/browser_backend.py (BrowserCsrfTokenMissing); no provider contact happened",
       "severity_hint_inventory": "config",
       "placeholders": [
-        "correlation_id",
-        "operation"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -72,8 +72,8 @@
       "severity_hint": "medium",
       "root_cause": "Canvas returns this generic 422 body when a non-GET request arrives without a valid X-CSRF-Token (verified live 2026-09-22 with absent and wrong tokens, byte-identical bodies). It can also be a genuine validation error on the payload. Without the full write/read/session evidence the two cannot be distinguished from status and body alone.",
       "is_not": "This is not proven to be a CSRF problem from this evidence alone; it is also not proven to be session death (dead sessions 302 API calls to the login page instead of 422) or rate limiting (that surfaces as 429).",
-      "agent_message": "What was attempted: {operation}. What the evidence showed: the provider answered HTTP 422 with an unprocessable_content body. What this means: the most common cause in this product is a missing or invalid CSRF security token, but from this evidence alone I have not verified that reads still work or that the session is healthy, so a payload validation problem is still possible. What happens next: I am checking the session and resending through the normal page-context path with a fresh token harvest, then verifying with a readback.",
-      "auto_action": "Re-check helper session health, resend through the canonical page-context path with a fresh _csrf_token harvest per call, and run a terminal readback to confirm the write landed.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Canvas refused the change without saying why (reference {correlation_id}). What this means: nothing changed in Canvas. Most often the Canvas page the helper keeps open needs a refresh, but Canvas may also have refused a value. What happens next: I will check that you are still signed in on the helper page. Then say the word and I will prepare the change again; if Canvas refuses it again, I will tell you and we can change what we send.",
+      "auto_action": "Probe the helper /status; if it reports logged_in false, guide a fresh sign-in on the helper page. Nothing was saved and the executor never resends on its own: prepare the change again (plan-write, or catalog in edit mode) only after the educator says so. If Canvas refuses the same change twice, report it and stop.",
       "escalate_when": "the canonical path also 422s with a confirmed fresh token harvest",
       "signature": {
         "http_status": 422,
@@ -84,7 +84,8 @@
       "signature_notes": "hedged variant: matches on status plus body alone, so a bare 422 dict or a ProviderHttpError carrying the body still gets a CSRF-aware message. The strict canvas-csrf-422-writes-only entry (8 predicates) wins by specificity when the full writes_fail/reads_ok/session evidence is present.",
       "severity_hint_inventory": "config",
       "placeholders": [
-        "operation"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -288,8 +289,8 @@
       "severity_hint": "high",
       "root_cause": "Verified mechanism: the provider's session cookie expired, was revoked, or the SSO flow lapsed, so the tenant answers with its login page (redirect or HTTP 200 HTML). The transport detects both shapes and raises SessionDead. Expiry is never warned ahead of time: the keepalive watches process health and the URL heuristic, never the expiry horizon (known real horizons included a stay-signed-in credential expiring 2026-10-05 and an OTP remember-me expiring 2026-10-21), so the first signal is a failed op.",
       "is_not": "This is not a write block and not rate limiting. A dead Chromium masquerades similarly but shows url='' with logged_in=false and needs a browser restart, not a sign-in.",
-      "agent_message": "What was attempted: I tried {operation} on {tenant} and Canvas answered with its login page instead of data, which means your saved sign-in has expired. What the evidence showed: a redirect to /login (or login HTML returned with a 200 status), the standard signature of a dead session. What this means: your Canvas login in the helper browser needs to be refreshed; nothing about the operation itself failed. What happens next: I am pausing all writes so nothing goes out while the session is dead, holding any unfinished work aside, and asking you to sign in once through the helper page. After I verify the fresh sign-in, the held work needs your explicit approval before anything re-runs.",
-      "auto_action": "Halt writes via the write-halt lever, quarantine in-flight ops, and require a guided re-sign-in with principal re-verification before any op resumes. Nothing re-dispatches without educator approval.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow could not use your Canvas sign-in on the helper page: Canvas asked for a sign-in, or the helper's browser stopped (reference {correlation_id}). What this means: nothing about the task itself went wrong, and nothing more goes to Canvas until your sign-in works again. A change that was under way is set aside, not lost. What happens next: I will check the helper page. If it asks you to sign in, sign in there again; I will check that it is still your account, then ask you before anything that was set aside runs again.",
+      "auto_action": "The executor already paused writes and set aside the in-flight change. Probe the helper /status: if the helper or its browser is down, restart it with helper/keepalive.sh; if it reports logged_in false, guide the educator to sign in again on the helper page, then run reauth/state_machine.py resume, which checks the account. Nothing set aside runs again without the educator's approval.",
       "escalate_when": "Always bring this to the educator: only they can re-sign in, and only they can approve the resume of quarantined ops.",
       "signature": {
         "__any_of": [
@@ -331,7 +332,7 @@
       "severity_hint_inventory": "auth",
       "placeholders": [
         "operation",
-        "tenant"
+        "correlation_id"
       ]
     },
     {
@@ -524,57 +525,6 @@
       ]
     },
     {
-      "id": "https-lane-pat-revoked",
-      "title": "Tenant admin revoked the PAT (https lane 401 that re-sign-in cannot fix)",
-      "surface": "tenant",
-      "severity_hint": "high",
-      "root_cause": "Verified at the classification layer (wave 4 P2-4): on the https lane a tenant admin revoking the PAT surfaces as provider HTTP 401 fail-fast. The Chromium lane remedy (re-sign-in) does not apply here.",
-      "is_not": "This is not session death in the browser sense; the browser session may be perfectly alive while the token is dead.",
-      "agent_message": "What was attempted: I tried {operation} on {tenant} using your access token and Canvas answered 401. What the evidence showed: a clean refusal of the access token itself, which happens when a Canvas admin revokes the token. What this means: re-signing in to the browser will not help; the token is dead and a new one has to be created in Canvas. What happens next: I am parking this operation and asking you to generate a fresh token in your Canvas account settings, then I will re-run the operation.",
-      "auto_action": "Fail fast, park the op, and ask the educator to mint a fresh token. Do not retry with the revoked token.",
-      "escalate_when": "Always: minting a new token requires the educator in the Canvas UI.",
-      "signature": {
-        "provider": "canvas",
-        "http_status": 401,
-        "lane": "https",
-        "session_logged_in": {
-          "truthy": true
-        }
-      },
-      "signature_notes": "http_status: 401; lane: \"https PAT lane\"; remedy_signal: \"re-sign-in does not restore access; only a freshly minted token does\"",
-      "severity_hint_inventory": "auth",
-      "placeholders": [
-        "operation",
-        "tenant"
-      ]
-    },
-    {
-      "id": "password-changed-mid-op",
-      "title": "Educator changed their password mid-operation (definitive 401)",
-      "surface": "session",
-      "severity_hint": "high",
-      "root_cause": "Verified synthetically (wave 4 P2-4): a definitive 401 fails fast and is never retried as a write. Password change is the classic cause of a sudden definitive 401 on a previously working lane.",
-      "is_not": "This is not throttling and not a scope refusal; the whole lane's credential is invalid, not just one route.",
-      "agent_message": "What was attempted: I tried {operation} on {tenant} and the provider refused with a 401 on the first and only attempt. What the evidence showed: a definitive credential refusal, the pattern seen when a password changed after the session was captured. What this means: the stored credential no longer matches and nothing will go through until it is refreshed. What happens next: I am stopping dispatch on this lane; if you recently changed your Canvas password, please re-sign in through the helper page and I will resume.",
-      "auto_action": "Fail fast, halt the lane, and require re-sign-in. Do not retry.",
-      "escalate_when": "Always: the educator must re-sign in.",
-      "signature": {
-        "provider": "canvas",
-        "http_status": 401,
-        "lane": "https",
-        "session_logged_in": {
-          "falsy": true
-        },
-        "attempt_count": 1
-      },
-      "signature_notes": "classification: \"fail fast, never UncertainWrite\"; http_status: 401; retry_behavior: \"exactly 1 attempt, never retried as a write\"",
-      "severity_hint_inventory": "auth",
-      "placeholders": [
-        "operation",
-        "tenant"
-      ]
-    },
-    {
       "id": "ib-canonical-item-get-404",
       "title": "Item Bank direct item GET returns provider 404 (canonical route unserved)",
       "surface": "item-banks",
@@ -686,8 +636,8 @@
       "severity_hint": "medium",
       "root_cause": "Item Bank requests go through the Item Banks tool that Canvas opens for the course in the helper browser. Opening it failed before the request was dispatched (the tool lookup, the launch, the access token, or the course scope), so the lane refused before sending (transport/chromium_session.py _sdk_item_request).",
       "is_not": "This is not a change that may have applied and not an expired sign-in: nothing was sent.",
-      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow could not open Item Banks for this course in the helper browser, so it did not send the request (reference {correlation_id}). What this means: nothing was sent and nothing changed. What happens next: I will check that the helper page shows you signed in to Canvas and try again; if Item Banks still does not open, I will tell you what Canvas showed.",
-      "auto_action": "Read engineering_detail for the cause (tool lookup, launch, token, or course scope); check the helper session; then run the operation again (for a Plan-mode write, run plan-write again and ask the educator to approve it).",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow could not open Item Banks for this course in the helper browser, so it did not send the request (reference {correlation_id}). What this means: nothing was sent and nothing changed. What happens next: I will check that the helper page shows you signed in to Canvas, then try a read again; if Item Banks still does not open, I will tell you what Canvas showed. For a change, say the word and I will prepare the change again; in plan mode you approve it again before it is sent.",
+      "auto_action": "Read engineering_detail for the cause (tool lookup, launch, token, or course scope); check the helper session; then run a read again. Nothing was sent and the executor never resends on its own: prepare a change again (plan-write, or catalog in edit mode) only after the educator says so.",
       "escalate_when": "Item Banks still does not open for the course after the helper page shows the educator signed in",
       "signature": {
         "error_class": "ItemBanksNotReached"
@@ -803,11 +753,11 @@
       "title": "Operation not in the proven catalog (CatalogNotProven)",
       "surface": "canvas",
       "severity_hint": "medium",
-      "root_cause": "Verified mechanism: the provenance gate admits only catalog rows marked live-proven (or pending rows with an educator-signed unproven override). Unknown names and unproven rows are refused by design.",
+      "root_cause": "Verified mechanism: the provenance gate admits only catalog rows marked live-proven. Unknown names and rows with any other status are refused by design, and nothing overrides that.",
       "is_not": "This is not a provider failure and not a broken session. The capability may simply not be proven yet.",
-      "agent_message": "What was attempted: I tried {operation} and the safety gate refused because that operation is not in the proven catalog (or is still marked pending). What the evidence showed: this operation has not been proven safe on live courses yet, which is the system keeping unproven operations away from your live courses by design. What this means: I cannot run this exact operation through the governed path right now. What happens next: I can check whether a proven equivalent exists, or you can explicitly approve an unproven run with a signed override, understanding it carries more risk. Absolute refusals (like held destructive operations) cannot be overridden.",
-      "auto_action": "Offer the nearest proven equivalent; if the educator approves, mint the unproven override explicitly. Never invent a route name.",
-      "escalate_when": "Always surface the first time an operation they asked for is refused this way, with the equivalent or override options.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow only does tasks we have tested on a real Canvas course, and this task is not one of them yet. What this means: I did not do it, and nothing changed in Canvas. Morrow cannot do an untested task, even if you ask. What happens next: I can look for a tested task that gets you close, if there is one.",
+      "auto_action": "Offer the nearest live-proven task, if there is one. Never invent a route name, and never offer to run the refused task.",
+      "escalate_when": "Always surface the first time a task they asked for is refused this way, with the nearest tested task if there is one.",
       "signature": {
         "__any_of": [
           {
@@ -818,7 +768,7 @@
           }
         ]
       },
-      "signature_notes": "causes: [\"unknown tool name\", \"row marked pending\", \"IB rows pre-fix naming\"]; gate: \"CatalogNotProven\"; override: \"educator-signed --allow-unproven approval only; absolute refusals cannot be overridden\"",
+      "signature_notes": "causes: [\"unknown tool name\", \"row marked pending\", \"IB rows pre-fix naming\"]; gate: \"CatalogNotProven\"; override: \"none; nothing overrides this refusal\"",
       "severity_hint_inventory": "user-action",
       "placeholders": [
         "operation"
@@ -876,7 +826,7 @@
       "severity_hint": "low",
       "root_cause": "Verified: the helper is supervised every 5 minutes, by a cron entry where the machine has cron, or by the keepalive background loop (helper/supervisor.py) where it does not (the Muse VM has no cron daemon). After a restart the helper stays down until that supervision runs keepalive; on a machine without cron the background loop starts again only with `bin/morrow start` or the next morrow command.",
       "is_not": "This is not session death; there is no browser to check yet.",
-      "agent_message": "What was attempted: I tried to reach the login helper and it is not running. What the evidence showed: a connection refusal on its local port. After a restart the helper stays down until its supervision (a cron entry, or the keepalive background loop on a machine without cron) runs again. What this means: nothing about your Canvas session; the local service just is not up. What happens next: I am starting it through the keepalive supervisor and then checking the session health; if it comes up logged in, we continue where we left off.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: the helper, the private browser Morrow uses to reach Canvas on your Muse computer, is not running (reference {correlation_id}). What this means: your Canvas sign-in is not affected, and nothing was sent. What happens next: I will start the helper again and check that you are still signed in, then try again.",
       "auto_action": "Run helper/keepalive.sh to relaunch, then run bin/morrow start so supervision keeps it up (it starts the keepalive background loop on a machine without cron and is a no-op with cron), then re-probe /status and session health.",
       "escalate_when": "Escalate if the helper fails to come up after keepalive recovery (log the real failure from server.log), since a human may need to re-sign in.",
       "signature": {
@@ -892,7 +842,10 @@
       },
       "signature_notes": "evidence: transport/chromium_session.py _ensure_transport raises ExecutorError('chromium backend: browser unavailable (...); the login helper endpoint is down too -- start it with helper/keepalive.sh, then retry') when the browser launch fails and the helper /status endpoint is unreachable. Previous signature keyed on 'helper_reachable', which no production code ever sets, so the entry could never match (2026-09-22 first-run audit). ChromiumSession.raw_request raises it as HelperNotReached (a WriteNotAttempted: nothing was sent) with the same text.",
       "severity_hint_inventory": "transient",
-      "placeholders": []
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
     },
     {
       "id": "helper-browser-not-reached",
@@ -901,8 +854,8 @@
       "severity_hint": "medium",
       "root_cause": "The Chromium lane attaches to the helper's browser (or starts its own) on the first call of a session. That failed for a reason other than a dead Canvas session or a stopped helper service (for example no Chromium binary, or the session probe failed), so the lane refused before sending the request (transport/chromium_session.py raw_request).",
       "is_not": "This is not an expired Canvas sign-in and not a change that may have applied: nothing was sent.",
-      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow could not reach the helper browser, so it did not send the request (reference {correlation_id}). What this means: nothing was sent and nothing changed. What happens next: I will check the helper and then try again.",
-      "auto_action": "Read engineering_detail for the cause; check the helper /status and run helper/keepalive.sh if the helper is not healthy; then run the operation again (for a Plan-mode write, run plan-write again and ask the educator to approve it).",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow could not reach the helper browser, so it did not send the request (reference {correlation_id}). What this means: nothing was sent and nothing changed. What happens next: I will check the helper, then try a read again. For a change, say the word and I will prepare the change again; in plan mode you approve it again before it is sent.",
+      "auto_action": "Read engineering_detail for the cause; check the helper /status and run helper/keepalive.sh if the helper is not healthy; then run a read again. Nothing was sent and the executor never resends on its own: prepare a change again (plan-write, or catalog in edit mode) only after the educator says so.",
       "escalate_when": "the helper is healthy and the browser still cannot be reached",
       "signature": {
         "error_class": "HelperNotReached"
@@ -921,7 +874,7 @@
       "severity_hint": "high",
       "root_cause": "Verified mechanism: before every write, and once per session for reads, the Chromium lane reads GET /api/v1/users/self and compares it with the account pinned at first sign-in (reauth/state_machine.py pin). Someone signed in to the helper browser as another account (a shared machine, a second educator, a student), so the lane refused and imposed the re-auth write halt.",
       "is_not": "This is not an expired session and not a permission error on one course. The other account's identity is never shown.",
-      "agent_message": "What was attempted: I tried {operation} through the login helper. What the evidence showed: the helper browser is signed in to a different Canvas account than the one this connector is pinned to. What this means: nothing was sent, and writes are paused so nothing can go out under the wrong account. What happens next: please sign out in the helper page and sign back in with your own account; I will then confirm it is your pinned account and resume. If you want to use a different account from now on, I can disconnect this connector first so you can sign in fresh.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: the helper page is signed in to a different Canvas account than the one you confirmed when you set up Morrow (reference {correlation_id}). What this means: nothing was sent, and changes are paused so nothing goes out under the wrong account. What happens next: sign out on the helper page (Account, then Logout) and sign back in with your own account; I will check that it is the account you confirmed and continue. To use a different account from now on, I can disconnect Morrow first so you can sign in fresh.",
       "auto_action": "Keep the write halt. After the educator signs back in, run reauth/state_machine.py resume, which verifies the live account against the pin; to change accounts, run bin/morrow disconnect with the educator's yes, then sign in and pin again.",
       "escalate_when": "Always: only the educator can sign back in as their own account or choose to disconnect.",
       "signature": {
@@ -930,7 +883,8 @@
       "signature_notes": "evidence: transport/chromium_session.py ChromiumSession._verify_principal raises PrincipalMismatch when GET /api/v1/users/self differs from reauth/state_machine.pinned_principal() (final muse audit M3).",
       "severity_hint_inventory": "user-action",
       "placeholders": [
-        "operation"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -940,7 +894,7 @@
       "severity_hint": "medium",
       "root_cause": "Verified mechanism: writes on the Chromium lane require the account pinned at first sign-in (reauth/state_machine.py pin --first-signin). No pin exists yet, or the pin record cannot be trusted (loose permissions, corrupt), so the write was refused before anything was sent.",
       "is_not": "This is not a dead session and not a mismatch: there is no trusted pin to compare against.",
-      "agent_message": "What was attempted: I tried {operation} through the login helper. What the evidence showed: this connector has no trusted record of which Canvas account is yours. What this means: nothing was sent; I will not write until the signed-in account is confirmed as yours. What happens next: I will read the signed-in account's name and ask you to confirm it is you, then record it and retry.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow has no record yet of which Canvas account is yours (reference {correlation_id}). What this means: nothing was sent, and Morrow makes no change until you confirm that the signed-in account is yours. What happens next: I will read the name of the account signed in on the helper page and ask you to confirm it is you, then try again.",
       "auto_action": "Run reauth/state_machine.py pin --first-signin, show the educator the printed name and get their confirmation; when the pin record is damaged, disconnect (with the educator's yes) and sign in fresh.",
       "escalate_when": "Always: the educator must confirm the account is theirs.",
       "signature": {
@@ -949,7 +903,8 @@
       "signature_notes": "evidence: transport/chromium_session.py ChromiumSession._verify_principal raises PrincipalNotPinned for a write with no pin, or for any call when pinned_principal() raises PrincipalPinError (final muse audit M3).",
       "severity_hint_inventory": "user-action",
       "placeholders": [
-        "operation"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -959,8 +914,8 @@
       "severity_hint": "medium",
       "root_cause": "Before every write, and once per session for reads, the Chromium lane reads GET /api/v1/users/self to compare the signed-in account with the pinned one (transport/chromium_session.py _verify_principal). That read failed or returned no account id (for example HTTP 500), so the lane refused before sending the request.",
       "is_not": "This is not a different account signed in, not an expired sign-in, and not a change that may have applied: nothing was sent.",
-      "agent_message": "What was attempted: {operation}. What the evidence showed: before sending anything, Morrow checks which Canvas account is signed in on the helper page, and Canvas did not answer that check (reference {correlation_id}). What this means: Morrow did not send the request, so nothing was sent and nothing changed. What happens next: I will check that the helper page shows you signed in to Canvas, then try again.",
-      "auto_action": "Check the helper /status; then run the operation again (for a Plan-mode write, run plan-write again and ask the educator to approve it). If the check keeps failing, report it with the engineering detail.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: before sending anything, Morrow checks which Canvas account is signed in on the helper page, and Canvas did not answer that check (reference {correlation_id}). What this means: Morrow did not send the request, so nothing was sent and nothing changed. What happens next: I will check that the helper page shows you signed in to Canvas, then try a read again. For a change, say the word and I will prepare the change again; in plan mode you approve it again before it is sent.",
+      "auto_action": "Check the helper /status; then run a read again. Nothing was sent and the executor never resends on its own: prepare a change again (plan-write, or catalog in edit mode) only after the educator says so. If the check keeps failing, report it with the engineering detail.",
       "escalate_when": "the account check fails again after the helper page shows the educator signed in",
       "signature": {
         "error_class": "AccountCheckFailed"
@@ -1078,241 +1033,6 @@
       ]
     },
     {
-      "id": "reauth-principal-pin-vacuous",
-      "title": "Moodle re-auth principal pinning passes vacuously when extraction failed",
-      "surface": "moodle",
-      "severity_hint": "high",
-      "root_cause": "Verified synthetically (W3-P0-21): when the theme-scraped principal extraction returned {} on both sides, the comparison '' == '' passed vacuously, approving quarantined op resumes against an unverified principal. Fixed: matches require non-empty evidence on both sides.",
-      "is_not": "This is not a successful identity verification; an empty principal is zero evidence.",
-      "agent_message": "What was attempted: I was verifying your Moodle identity before resuming the paused operations, and the check came back empty on both sides. What the evidence showed: I could not read who is signed in from the page, so there is no verified identity to compare against: an empty comparison is not a match. What this means: I cannot safely approve resuming the held operations against an unverified session. What happens next: I am keeping the operations held and asking you to confirm you are signed in as the right account; once a live-verified identity is captured, the resume flow can proceed.",
-      "auto_action": "Keep ops quarantined, set principal_match=False, and require manual educator confirmation of the account before any resume.",
-      "escalate_when": "Always: an unverified principal must be confirmed by the educator before quarantined ops re-dispatch.",
-      "signature": {
-        "provider": "moodle",
-        "principal_match": {
-          "truthy": true
-        },
-        "principal_evidence_empty": {
-          "truthy": true
-        }
-      },
-      "signature_notes": "fixed_check: \"id_match and username_match require non-empty values on both sides\"; old_check: \"'' == '' evaluated True, principal_match=True with zero principal evidence\"; principal_both_sides: \"{} (empty)\"",
-      "severity_hint_inventory": "auth",
-      "placeholders": []
-    },
-    {
-      "id": "moodle-stale-password",
-      "title": "Moodle login fails: stale default demo password",
-      "surface": "moodle",
-      "severity_hint": "medium",
-      "root_cause": "Verified live: the provider changed the demo password; the tool's default was stale.",
-      "is_not": "This is not an account problem and not a lockout.",
-      "agent_message": "What was attempted: I tried to sign in to the Moodle sandbox and the login was rejected. What the evidence showed: the sandbox provider changed its published demo password and the tool was still defaulting to the old one; updating the default fixed it live today. What this means: the account and the tool are fine, the password was just stale. What happens next: I am logging in with the current published password and re-verifying the session before continuing.",
-      "auto_action": "Update the default password and re-verify login live. Prefer MOODLE_PASSWORD env or getpass prompt over argv.",
-      "escalate_when": "Escalate if the published password itself is rejected, which would indicate a provider-side change needing investigation.",
-      "signature": {
-        "provider": "moodle",
-        "moodle_kind": "login_failed"
-      },
-      "signature_notes": "evidence: \"live-proof 2026-09-22: verified live, default updated, login re-verified OK\"; mechanism: \"moodle/login.py (dev tree only, not shipped) defaulted to 'moodle'; the provider's current published password differs\"; symptom: \"login rejects the defaulted password\"",
-      "severity_hint_inventory": "config",
-      "placeholders": []
-    },
-    {
-      "id": "moodle-grade-delete-route-changed",
-      "title": "Moodle grade-delete route silently fails on Moodle 5.2 (tenant route change)",
-      "surface": "moodle",
-      "severity_hint": "medium",
-      "root_cause": "Verified live on Moodle 5.2: the old delete route silently fails; the working route needs action=delete&confirm=1&eid=igN.",
-      "is_not": "This is not a permissions failure; the silent no-op is a provider route change.",
-      "agent_message": "What was attempted: I tried to delete the grade item through the old route and it silently did nothing. What the evidence showed: on Moodle 5.2 the old delete URL no longer acts, while the grade-tree route with the confirm and element parameters deletes and the item is verifiably gone. What this means: the provider changed the route, not that deletion is blocked. What happens next: I am using the working route and verifying the item is gone before reporting the delete as done.",
-      "auto_action": "Use the action=delete&confirm=1&eid=igN route; always verify-gone after a grade delete.",
-      "escalate_when": "Escalate if the working route also fails on a newer Moodle, which would indicate another provider route change to document.",
-      "signature": {
-        "provider": "moodle",
-        "route_path": {
-          "contains": "action=delete"
-        },
-        "delete_noop": {
-          "truthy": true
-        }
-      },
-      "signature_notes": "dead_route: \"grade/edit/tree/action.php?action=delete (silently fails on 5.2)\"; evidence: \"live-proof 2026-09-22 Moodle lane: fixed and documented in moodle/README.md (dev tree only, not shipped)\"; verify_rule: \"verify-gone required after delete\"; working_route: \"grade tree with action=delete&confirm=1&eid=igN\"",
-      "severity_hint_inventory": "provider",
-      "placeholders": []
-    },
-    {
-      "id": "moodle-ajax-disabled-provider",
-      "title": "Moodle sandbox AJAX webservices disabled provider-wide",
-      "surface": "moodle",
-      "severity_hint": "medium",
-      "root_cause": "Verified live: the sandbox provider disabled AJAX webservices entirely. The sanctioned page and form fallback was live-proven as the replacement.",
-      "is_not": "This is not a session failure and not something re-authenticating fixes.",
-      "agent_message": "What was attempted: I tried the Moodle webservice calls and found them disabled across the whole sandbox. What the evidence showed: even the basic site-info service is unavailable provider-wide, so this is the provider's policy, not a problem with your session. What this means: API-style calls cannot work here today. What happens next: I am using the page and form fallback, which was live-proven for this exact situation, and noting that the AJAX paths need a fresh live proof if the provider ever re-enables them.",
-      "auto_action": "Route through the page/form fallback; do not retry the AJAX services.",
-      "escalate_when": "Surface to the educator only if a capability strictly requires the webservice path.",
-      "signature": {
-        "provider": "moodle",
-        "ajax_webservices_available": {
-          "falsy": true
-        }
-      },
-      "signature_notes": "evidence: \"live-proof 2026-09-22 Moodle lane\"; fallback: \"page and form fallback live-proven instead\"; scope: \"sandbox-wide (provider policy, not a session problem)\"; symptom: \"core_webservice_get_site_info and other AJAX service calls unavailable\"",
-      "severity_hint_inventory": "provider",
-      "placeholders": []
-    },
-    {
-      "id": "moodle-dead-session-200-login",
-      "title": "Moodle dead session serving HTTP-200 login page",
-      "surface": "moodle",
-      "severity_hint": "high",
-      "root_cause": "Verified: a dead Moodle session whose tenant serves the login page as 200 HTML has no error envelope; the fixed classifier treats that as a reauth signal instead of 'ok'.",
-      "is_not": "This is not a successful response; the missing envelope is the signal.",
-      "agent_message": "What was attempted: I tried {operation} on the Moodle site and got a 200 back, but the body is the login page, not data. What the evidence showed: a missing AJAX envelope where the tenant's reply should carry one, which is the signature of a dead session wearing a success status code. What this means: your Moodle sign-in expired. What happens next: I am engaging the re-auth flow: quarantining in-flight ops and asking you to sign in again before anything resumes.",
-      "auto_action": "Classify as reauth, quarantine in-flight ops, require re-sign-in. Never treat the 200 body as data.",
-      "escalate_when": "Always: only the educator can re-sign in.",
-      "signature": {
-        "provider": "moodle",
-        "http_status": 200,
-        "body_text": {
-          "contains": "login"
-        },
-        "moodle_envelope_present": {
-          "falsy": true
-        }
-      },
-      "signature_notes": "evidence: \"W3-P1-21, verified synthetically; on the sandbox dead sessions arrive as 200 + servicerequireslogin envelope\"; fixed_classification: \"('reauth', 'HTTP 200 without a Moodle AJAX envelope')\"; pre_fix_behavior: \"classified 'ok', then crashed with AttributeError in ajax()/write()\"; response: \"HTTP 200 with login HTML, no Moodle AJAX envelope\"",
-      "severity_hint_inventory": "auth",
-      "placeholders": [
-        "operation"
-      ]
-    },
-    {
-      "id": "moodle-ajax-302-to-login",
-      "title": "Moodle AJAX call 302s to /login (dead session)",
-      "surface": "moodle",
-      "severity_hint": "high",
-      "root_cause": "Verified: the AJAX path used allow_redirects=False and classified on the request URL, so the 302-to-login redirect was never detected. The fixed classifier checks the Location header.",
-      "is_not": "This is not a network problem and not a plain error; the retry semantics are wrong for it.",
-      "agent_message": "What was attempted: I tried {operation} on the Moodle site and the call bounced to the login page with a 302. What the evidence showed: the redirect target in the Location header: the session is dead. What this means: this needs the re-auth flow, not a network retry. What happens next: I am quarantining in-flight ops and asking you to sign in again; nothing resumes until the session is live-verified.",
-      "auto_action": "Classify as reauth, quarantine in-flight ops, require re-sign-in. Do not retry as a network error.",
-      "escalate_when": "Always: only the educator can re-sign in.",
-      "signature": {
-        "provider": "moodle",
-        "http_status": 302,
-        "redirect_location": {
-          "contains": "login"
-        }
-      },
-      "signature_notes": "evidence: \"W3-P1-22, verified synthetically\"; fixed_classification: \"reauth\"; pre_fix_behavior: \"classified 'network' (plain error, no machine halt, no quarantine)\"; response: \"HTTP 302 with Location header pointing at /login\"",
-      "severity_hint_inventory": "auth",
-      "placeholders": [
-        "operation"
-      ]
-    },
-    {
-      "id": "moodle-sandbox-reset-transient",
-      "title": "Moodle sandbox reset mid-operation (transient provider reset)",
-      "surface": "moodle",
-      "severity_hint": "low",
-      "root_cause": "Verified: the provider's demo sandbox resets itself periodically; in-flight work during a reset fails transiently.",
-      "is_not": "This is not a session failure, not a code bug, and not something the educator did.",
-      "agent_message": "What was attempted: I tried {operation} on the Moodle sandbox and hit failures in the middle of the run. What the evidence showed: the provider's demo sandbox reset itself mid-battery, a known transient behavior there, and every attempt retried to success with no changes. What this means: nothing is broken; the sandbox just hiccuped. What happens next: I am retrying the affected steps; if they keep failing after the reset window, I will look deeper.",
-      "auto_action": "Retry the affected steps; journal the transient failures as evidence.",
-      "escalate_when": "Escalate only if failures persist well after the reset window, which would indicate a real problem.",
-      "signature": {
-        "provider": "moodle",
-        "sandbox_reset": {
-          "truthy": true
-        },
-        "retry_succeeded": {
-          "truthy": true
-        }
-      },
-      "signature_notes": "evidence: \"live-proof 2026-09-22: 4 intermediate attempt failures (sandbox reset mid-battery), all retried to success\"; pattern: \"intermediate attempts fail, retry succeeds with no config change\"",
-      "severity_hint_inventory": "transient",
-      "placeholders": [
-        "operation"
-      ]
-    },
-    {
-      "id": "browser-task-session-dead-transient",
-      "title": "Browser-task session transiently dead (sdk.launch retry)",
-      "surface": "browser-task",
-      "severity_hint": "low",
-      "root_cause": "Verified in the live-proof battery: transient session-dead on launch clears with retry; the two-phase design keeps the op_id reusable because nothing was journaled.",
-      "is_not": "This is not a permanent session death and not a write block. No educator action is implied yet.",
-      "agent_message": "What was attempted: I tried to launch the browser task for {operation} and the session was momentarily unavailable. What the evidence showed: the transient session-dead on launch, which the live battery showed clears with retry, and nothing was recorded against the operation. What this means: the launch just needs another attempt, not a re-sign-in. What happens next: I am retrying the launch up to three times; the operation itself is untouched and reusable.",
-      "auto_action": "Retry sdk.launch() up to 3 times; leave the op_id reusable since nothing was journaled.",
-      "escalate_when": "Escalate if all 3 attempts fail, which graduates to the full session-dead flow.",
-      "signature": {
-        "session_dead_signal": {
-          "truthy": true
-        },
-        "phase": "launch",
-        "attempt_number": {
-          "lte": 3
-        }
-      },
-      "signature_notes": "dispatch_shape: \"two-phase dispatch/complete; session_dead journals nothing and the op_id stays reusable\"; retry: \"3-attempt retry, usually succeeds\"; symptom: \"sdk.launch() raises session-dead\"",
-      "severity_hint_inventory": "transient",
-      "placeholders": [
-        "operation"
-      ]
-    },
-    {
-      "id": "browser-task-death-uncertain",
-      "title": "Browser died during a write (uncertain outcome)",
-      "surface": "browser-task",
-      "severity_hint": "low",
-      "root_cause": "Verified: Chromium killed mid-write left the outcome ambiguous; the pre-fix code retried 4 pointless times and let a generic error escape unjournaled with a reusable op_id (double-apply risk). Post-fix, ambiguous write failures are classified UncertainWrite and journaled.",
-      "is_not": "This is not a confirmed failure and must never be silently retried.",
-      "agent_message": "What was attempted: I tried {operation} and the browser died in the middle of the write. What the evidence showed: a lost control-channel connection mid-write, which means I cannot prove whether Canvas applied the change, so the attempt is recorded as uncertain rather than retried blindly. What this means: the write may or may not have landed, and a blind retry could duplicate it. What happens next: I am reconciling with a terminal readback against Canvas; only if the write provably did not land will I re-dispatch it.",
-      "auto_action": "Journal UncertainWrite; reconcile via terminal readback before any re-dispatch.",
-      "escalate_when": "Escalate if the readback cannot determine the outcome, so the educator can check the object in the Canvas UI.",
-      "signature": {
-        "uncertain_write": {
-          "truthy": true
-        },
-        "transport": "browser-task",
-        "operation_kind": "write"
-      },
-      "signature_notes": "classification: \"UncertainWrite, journaled (never a bare unjournaled error)\"; evidence: \"W2-P0-4, proven live pre-fix, fixed post-wave-2\"; fixed_behavior: \"no longer retried blindly to MAX_ATTEMPTS; op_id never left reusable after an uncertain write\"; symptom: \"builtin ConnectionError 'cdp socket closed' mid-write\"",
-      "severity_hint_inventory": "transient",
-      "placeholders": [
-        "operation"
-      ]
-    },
-    {
-      "id": "form-lane-fail-closed",
-      "title": "Form lane is fail-closed (FormTransportUnavailable)",
-      "surface": "form-lane",
-      "severity_hint": "high",
-      "root_cause": "Policy by Braden's standing directive: the form write lane fails closed; any form write raises FormTransportUnavailable. Live write lanes are the relay page and local Chromium.",
-      "is_not": "This is not a bug and not a transient failure; retrying the same path will always raise.",
-      "agent_message": "What was attempted: I tried {operation} through the form route and it refused by design. What the evidence showed: form writes are deliberately disabled: that route is parked and any form write refuses rather than silently degrading. What this means: the form route cannot be used, not that your data is wrong. What happens next: I am routing the write through the live lanes (the sanctioned relay page or the local Chromium transport) instead of retrying the form path.",
-      "auto_action": "Route the write through the live relay-page or local Chromium lane; never retry the form path.",
-      "escalate_when": "Surface to the educator only if no live write lane can serve the operation either.",
-      "signature": {
-        "__any_of": [
-          {
-            "gate": "FormTransportUnavailable"
-          },
-          {
-            "error_class": "FormTransportUnavailable"
-          },
-          {
-            "gate": "BrowserLaneBlocked"
-          }
-        ]
-      },
-      "signature_notes": "evidence: \"Braden's 2026-09-20 directive: form lane FAIL-CLOSED; write machinery parked in the selftest\"; exception: \"FormTransportUnavailable, mapped to BrowserLaneBlocked\"; scope: \"any form write through the retired relay machinery\"",
-      "severity_hint_inventory": "engineering",
-      "placeholders": [
-        "operation"
-      ]
-    },
-    {
       "id": "write-halt-active",
       "title": "Changes are paused by an operator (manual write halt)",
       "surface": "canvas",
@@ -1386,8 +1106,8 @@
       "severity_hint": "medium",
       "root_cause": "Verified mechanism: every write-class op requires the educator-signed, digest-bound v2 approval ceremony; without it the gate refuses.",
       "is_not": "This is not a provider refusal and not a technical failure; the safety ceremony simply was not completed.",
-      "agent_message": "What was attempted: I did not go ahead with {operation}, because you have not approved this change yet. What the evidence showed: there is no valid signed approval on file for this write, so the safety gate refused it. What this means: the safety check worked as designed; your write is untouched. What happens next: I need your explicit approval before this can go, and I will show you exactly what would be written first.",
-      "auto_action": "Present the operation payload for educator approval; dispatch only after a valid signed approval.",
+      "agent_message": "What was attempted: I did not go ahead with {operation}, because you have not approved this change yet. What the evidence showed: Morrow has no approval from you for this exact change (reference {correlation_id}). What this means: nothing was sent and nothing changed. What happens next: I will show you exactly what would change, and send it only after you approve.",
+      "auto_action": "Prepare the change with plan-write, show the educator its approval_display, and run approve-write with their reply; never send the write without it.",
       "escalate_when": "Always: approval is the educator's act by definition.",
       "signature": {
         "__any_of": [
@@ -1402,7 +1122,8 @@
       "signature_notes": "gate: \"WriteApprovalMissing\"; trigger: \"write-class op dispatched without a valid signed approval, or caller declared a write as read (CatalogEffectMismatch pre-fix sibling)\"",
       "severity_hint_inventory": "user-action",
       "placeholders": [
-        "operation"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -1412,8 +1133,8 @@
       "severity_hint": "medium",
       "root_cause": "Verified mechanism: operations touching learner data dispatch only on the Chromium lane with the encrypted learner vault (the optional 'cryptography' package), where the projection choke de-identifies every receipt before anything reaches the agent; on any other lane, or without the vault, they are refused.",
       "is_not": "This is not an evidence hold and not a provider refusal; it is the privacy boundary doing its job.",
-      "agent_message": "What was attempted: I did not go ahead with {operation} because it touches student data and this connection cannot de-identify it. What the evidence showed: the student-data safety check fired on this operation, which exists to protect your students' information by design. What this means: the refusal is protecting your students, not a broken feature. What happens next: student data runs only through the signed-in browser lane with the encrypted student vault installed (the optional 'cryptography' package); I will not fetch raw rosters around it.",
-      "auto_action": "Refuse by default; do not bypass the privacy boundary.",
+      "agent_message": "What was attempted: I did not go ahead with {operation}, because it reads or changes student records. What the evidence showed: the package that keeps student names and details hidden from the assistant is not installed on your Muse computer (reference {correlation_id}). What this means: Morrow refuses anything that touches student records until it can hide them, so nothing was read or changed. Everything else works. What happens next: the person who looks after your Morrow setup can install it by running python3 -m pip install --require-hashes -r requirements-optional.txt in the Morrow folder. Then I can try again.",
+      "auto_action": "Refuse; never fetch student records another way. Tell the educator the operator must run `python3 -m pip install --require-hashes -r requirements-optional.txt` in the tree, then retry.",
       "escalate_when": "Surface to the educator with a plain-language explanation of why the data is protected and what would let it proceed.",
       "signature": {
         "__any_of": [
@@ -1428,7 +1149,8 @@
       "signature_notes": "evidence: \"admission_policy.json learner-data URL segments and substrings plus the catalog [LEARNER-DATA] flag; projection choke in dispatch/executor.py\"; gate: \"LearnerDataGated\"; signal: \"touches_learner_data=True on a lane without a projection point or without the encrypted vault\"",
       "severity_hint_inventory": "user-action",
       "placeholders": [
-        "operation"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -1438,8 +1160,8 @@
       "severity_hint": "high",
       "root_cause": "Verified: the catalog's R/W column is authoritative; a mismatched caller declaration raised CatalogEffectMismatch post-fix. Pre-fix, a one-word typo ('read' for a DELETE) dropped the approval ceremony, frozen-plan requirement, write halt, and write WAL semantics at once.",
       "is_not": "This is not a provider issue; it is an internal safeguard firing.",
-      "agent_message": "What was attempted: I stopped {operation} before it reached Canvas because the call was declared as a read while the catalog says it is a write. What the evidence showed: the mismatch between what the call claimed (for example, 'read') and what the operation actually does (a write). What this means: the approval step required for writes would have been skipped, so the system refused rather than proceed ungoverned. What happens next: I am re-declaring the operation as a write and running it through the full approval step.",
-      "auto_action": "Derive the effect class from the catalog, never from the caller; re-run the admission path correctly.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: I described the task as the wrong kind (a read when it changes something, or the other way round), so Morrow stopped before sending anything (reference {correlation_id}). What this means: nothing was sent and nothing changed. What happens next: I will run it again described correctly. A change still follows your mode: in plan mode you approve it first.",
+      "auto_action": "Run the catalog command again without --class (the catalog row sets the effect class); a write then follows the educator's mode.",
       "escalate_when": "Escalate to engineering if the catalog's own R/W marking is wrong, since that is a data fix, not an educator decision.",
       "signature": {
         "__any_of": [
@@ -1454,7 +1176,8 @@
       "signature_notes": "evidence: \"W3-P0-6 catalog path fixed; W4-P0-10 manifest path: effects read/plan bypassed every write safeguard pre-fix\"; gate: \"CatalogEffectMismatch\"; trigger: \"caller declared a write as read (or a manifest effects field set to read/plan for a write block)\"",
       "severity_hint_inventory": "engineering",
       "placeholders": [
-        "operation"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -1483,7 +1206,7 @@
       "severity_hint": "high",
       "root_cause": "Verified: pre-fix the journal skipped torn lines, so a crash-torn tail forgot the op_id and allowed replay. Post-fix, torn lines are a loud failure.",
       "is_not": "This is not normal operation and not something to work around by hand-editing the journal.",
-      "agent_message": "What was attempted: I tried to continue {operation} and found the operation log was damaged by a crash. What the evidence showed: the log's own integrity check failing loudly, which is the designed behavior: it refuses to guess rather than risk replaying a write. What this means: work is paused until the log is repaired, because proceeding could apply a write twice. What happens next: I am not touching the log by hand; this needs the journal repair procedure run deliberately, and I will report exactly what it finds.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow's record of the changes it made on your Muse computer is damaged, most likely by a crash (reference {correlation_id}). What this means: Morrow stopped, because going on could send a change twice. Nothing new was sent. What happens next: the person who looks after your Morrow setup needs to repair the record; I will not touch it myself. Give them the reference number.",
       "auto_action": "Stop dispatch; surface the journal-repair procedure to the operator. Never hand-edit the journal.",
       "escalate_when": "Escalate to engineering immediately: journal integrity is a stop-everything event.",
       "signature": {
@@ -1501,7 +1224,8 @@
       "signature_notes": "detector: \"JournalTorn raised on unparseable lines\"; evidence: \"W2-P0-3, proven live pre-fix, fixed post-wave-2\"; fixed_behavior: \"torn lines fail loudly; op_id never silently forgotten; exclusive flock on checks and mutations; fsync on writes\"",
       "severity_hint_inventory": "engineering",
       "placeholders": [
-        "operation"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -1511,8 +1235,8 @@
       "severity_hint": "low",
       "root_cause": "Verified (W2-P0-1, proven live): a connection reset after the provider applied a write is indistinguishable from one before it, so blind retry double-applies. Post-fix, ambiguous failures raise UncertainWrite instead of retrying.",
       "is_not": "This is not a confirmed failure and not a success. It is the honest third state.",
-      "agent_message": "What was attempted: I tried {operation} and the connection broke at a point where I cannot tell whether Canvas applied the write. What the evidence showed: the ambiguous transport failure, and the system recorded it as uncertain rather than retrying blindly, because a blind retry once double-applied a write live. What this means: the write may have landed exactly once, and guessing either way is how duplicates happen. What happens next: I am reconciling with a terminal readback to learn the true state; only if the write provably did not land will I send it again, under a fresh claim.",
-      "auto_action": "Reconcile via readback; re-dispatch only on proven non-application.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: the connection broke at a point where Morrow cannot tell whether Canvas saved the change (reference {correlation_id}). What this means: the change may or may not be in Canvas. Sending it again could make a duplicate, so Morrow did not. What happens next: I will read the item back from Canvas to see whether the change is there. If it is not, I will ask you before sending it again.",
+      "auto_action": "Read the target object back with a live-proven read to learn whether the change is there, and tell the educator what Canvas has. Prepare the change again (plan-write, or catalog in edit mode) only when that read proves it did not apply and the educator says so; never resend the same request.",
       "escalate_when": "Escalate if the readback cannot decide the state; the educator can check the object in the Canvas UI.",
       "signature": {
         "__any_of": [
@@ -1532,7 +1256,8 @@
       "signature_notes": "classification: \"UncertainWrite\"; fixed_behavior: \"never retried blindly; pre-fix retries double-applied non-idempotent POSTs (proven live)\"; journal: \"fsync'd write-ahead pending record before dispatch; uncertain receipt journaled with step evidence\"; triggers: [\"connection reset where the server may have applied the write\", \"HTTP 429/5xx on a write\", \"ambiguous transport failure\"]",
       "severity_hint_inventory": "transient",
       "placeholders": [
-        "operation"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -1564,7 +1289,7 @@
       "severity_hint": "high",
       "root_cause": "Verified mechanism: a write that declares a verify block is read back after Canvas answers with success, and the readback is compared with what the write asked for. When that readback completes and proves the stored object differs (a field has another value, or the object is missing), the executor journals the op as failed, not uncertain, and raises VerificationFailed naming the mismatch.",
       "is_not": "This is not an uncertain write: the readback completed and proved the result differs. It is not a success either, and it is not a session or network problem.",
-      "agent_message": "What was attempted: I tried {operation}. What the evidence showed: Canvas answered the write with success, but when I read the object back to check it, the result did not match what the write asked for (reference {correlation_id}); the journal records the mismatch as a failed write. What this means: the change did not land as intended, so I am treating it as failed, not done. What happens next: I will show you what Canvas actually has next to what was requested, and you decide whether I correct it, remove it, or leave it as it is.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Canvas answered that the change was saved, but when Morrow read it back, it did not match what was asked for (reference {correlation_id}). What this means: the change did not land as intended, so Morrow counts it as failed, not done. What happens next: I will show you what Canvas has next to what was asked for, and you decide whether I correct it, remove it, or leave it as it is.",
       "auto_action": "Record as a failed write; never report success; present the requested vs stored values and the object address; never blind-retry.",
       "escalate_when": "Always surface to the educator with the mismatch; they choose correct, remove, or keep.",
       "signature": {
@@ -1586,8 +1311,8 @@
       "severity_hint": "low",
       "root_cause": "Verified in code (dispatch/executor.py): only failures that prove the provider never saw the request bytes retry internally; exhaustion raises WriteNotAttempted, the terminal error for a never-attempted write.",
       "is_not": "This is not an uncertain write; nothing could have been applied, so retry is safe.",
-      "agent_message": "What was attempted: I tried {operation} and the network never delivered it to Canvas: DNS or connection refused on every attempt. What the evidence showed: the provider demonstrably never saw the request bytes, so nothing was applied and this is the safe-to-retry case. What this means: the write simply did not happen. What happens next: I am releasing the claim and retrying the write cleanly once connectivity is back.",
-      "auto_action": "Release the claim, journal under a fresh event id, and retry the write.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: the change never reached Canvas (reference {correlation_id}). What this means: nothing changed, so trying again is safe. What happens next: say the word and I will prepare the change again; in plan mode you approve it again before it is sent.",
+      "auto_action": "Nothing was sent and the executor released the claim. When the educator says so, prepare the change again (plan-write, or catalog in edit mode); if the network or the helper is down, check the helper /status first.",
       "escalate_when": "Escalate if the network failure persists, since that points at the egress path or a provider outage rather than the operation.",
       "signature": {
         "write_not_attempted": {
@@ -1597,7 +1322,8 @@
       "signature_notes": "classification: \"WriteNotAttempted\"; journal: \"journaled under a fresh event id; claim released\"; op_id: \"reusable after claim release\"; triggers: \"provider-never-saw-it failures on every attempt (DNS failure, connection refused, unreachable host)\"",
       "severity_hint_inventory": "transient",
       "placeholders": [
-        "operation"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -1805,7 +1531,7 @@
       "placeholders": []
     },
     {
-      "agent_message": "What was attempted: {operation} for the student the educator named. What the evidence showed: that name matched {match_count} roster entries at the {match_kind} identifier level, so no single student can be picked without guessing (reference {correlation_id}). What this means: I am not choosing one for you, because a silent wrong pick would attach the wrong student's data to this operation. What happens next: please tell me which student you meant: {candidates_public}.",
+      "agent_message": "What was attempted: {operation} for the student you named. What the evidence showed: that name matches {match_count} students in this course (reference {correlation_id}). What this means: Morrow will not pick one, because a wrong pick would attach the change to the wrong student. What happens next: tell me which student you mean: {candidates_public}.",
       "auto_action": "Ask the educator to disambiguate using the listed candidates; re-run resolution only with an explicit choice (name plus section, login id, SIS id, or user id).",
       "escalate_when": "if the educator cannot distinguish the candidates either, or the same query keeps coming back ambiguous (roster data quality issue to fix in Canvas)",
       "id": "student-resolution-ambiguous",
@@ -1817,19 +1543,17 @@
       "signature_notes": "classification: \"StudentAmbiguous\"; fixed_behavior: \"never a silent pick; the agent-visible message lists candidates by stable label or section descriptor, never by name\"; triggers: [\"duplicate display names\", \"same name in several sections\", \"typo near two similar names\"]",
       "severity_hint_inventory": "engineering",
       "placeholders": [
-        "auto_action",
-        "candidates_public",
-        "correlation_id",
+        "operation",
         "match_count",
-        "match_kind",
-        "operation"
+        "correlation_id",
+        "candidates_public"
       ],
       "signature": {
         "error_class": "StudentAmbiguous"
       }
     },
     {
-      "agent_message": "What was attempted: {operation} for the student the educator named. What the evidence showed: that name matched no active student enrollment in course {course_id} at any identifier level (reference {correlation_id}); filters skipped: {excluded_summary}. What this means: there is no student I can safely resolve this to, so nothing was looked up and nothing was changed. What happens next: check the spelling, or give me a stronger identifier (login id, SIS id, or email). If the student should be there, they may be inactive, concluded, in another section, or enrolled under a different name.",
+      "agent_message": "What was attempted: {operation} for the student you named. What the evidence showed: no active student in this course matches that name (reference {correlation_id}). What this means: nothing was looked up or changed. What happens next: check the spelling, or tell me the student's Canvas login or email. If the student should be there, they may be inactive, finished with the course, or listed under a different name.",
       "auto_action": "Ask the educator for a stronger identifier or confirm whether to include inactive/concluded enrollments or another section; re-run resolution with the confirmed scope.",
       "escalate_when": "if the educator confirms the student is actively enrolled and the query still matches nothing (roster read or data issue)",
       "id": "student-resolution-no-match",
@@ -1841,11 +1565,8 @@
       "signature_notes": "classification: \"StudentNotFound\"; fixed_behavior: \"the no-match message reports which filters excluded candidates, so an inactive or wrong-section student is explainable, not mysterious\"; triggers: [\"misspelled name\", \"inactive or concluded enrollment\", \"wrong section\", \"nickname the roster never mentions\"]",
       "severity_hint_inventory": "engineering",
       "placeholders": [
-        "auto_action",
-        "correlation_id",
-        "course_id",
-        "excluded_summary",
-        "operation"
+        "operation",
+        "correlation_id"
       ],
       "signature": {
         "error_class": "StudentNotFound"
@@ -1858,7 +1579,7 @@
       "severity_hint": "high",
       "root_cause": "Authority rule, enforced in code: only the educator can grant edit mode, and the agent can never promote itself. The admission gate caught the agent-side promotion attempt and refused it before anything was written.",
       "is_not": "This is never a product bug, never a session problem, and never a misunderstanding about a timed grant. It is the agent violating the authority rule, caught and refused.",
-      "agent_message": "What was attempted: I tried {operation}, and in doing so I attempted to move myself into edit mode without your grant. What the evidence showed: a self-grant refusal from the safety gate (reference {correlation_id}); no educator-issued edit grant was on file for this session. What this means: I tried to give myself edit permission you never gave me, which violates the authority rule; nothing was changed and no grant was issued. What happens next: tell me explicitly that I may work in edit mode, and I will proceed; until then I stay in plan mode.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: I tried to turn on edit mode myself, and Morrow refused, because only you can turn it on (reference {correlation_id}). What this means: nothing changed, and Morrow stays in plan mode. What happens next: if you want edit mode, tell me so in your own words; until then, every change waits for your approval.",
       "auto_action": "Refuse the promotion; make no writes; ask the educator to grant edit mode explicitly.",
       "escalate_when": "Always: a self-promotion attempt must reach the educator immediately.",
       "signature": {
@@ -1886,7 +1607,7 @@
       "severity_hint": "medium",
       "root_cause": "Enforced plan-mode rule: plan mode is read-and-design only. A write requires an educator-approved, validated plan on file, and the gate refuses writes without one.",
       "is_not": "This is not a missing edit grant and not a provider refusal; the plan itself was never approved.",
-      "agent_message": "What was attempted: I tried {operation} while in plan mode, but there is no educator-approved validated plan on file. What the evidence showed: a plan-mode refusal (reference {correlation_id}); plan mode permits reads and design only, and no approval was recorded for plan {plan_id}. Nothing was written. What this means: planning is not permission; the plan must be validated and explicitly approved before any write can go. What happens next: review the proposed plan and approve it explicitly if it looks right, or grant edit mode so changes go without per-plan approval.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: you are in plan mode, and you have not approved this change (reference {correlation_id}). What this means: nothing was written. In plan mode, every change waits for your approval. What happens next: I will show you exactly what would change and send it once you approve, or you can turn on edit mode so changes go without asking each time.",
       "auto_action": "Refuse the write; keep the plan in draft; present the plan for educator review and explicit approval, or offer edit mode.",
       "escalate_when": "Always: the educator must review and approve the plan, or grant edit mode, before any write.",
       "signature": {
@@ -1904,8 +1625,7 @@
       "signature_notes": "documented refusal shape (modes/ admission gate): exception \"PlanModeWriteWithoutApproval\" or dict evidence carrying plan_mode_write_without_approval; optional plan_id attr.",
       "placeholders": [
         "operation",
-        "correlation_id",
-        "plan_id"
+        "correlation_id"
       ]
     },
     {
@@ -1915,7 +1635,7 @@
       "severity_hint": "medium",
       "root_cause": "Enforced ownership rule: user settings are educator-owned. Any agent-initiated change without an educator confirmation is refused by the settings guard before it applies.",
       "is_not": "This is not a failed settings write and not a provider problem; the setting is unchanged because the confirmation was missing.",
-      "agent_message": "What was attempted: I tried to change the setting {setting_name} as part of {operation}, without your confirmation. What the evidence showed: a settings refusal (reference {correlation_id}); the setting is unchanged and the attempted change was dropped. What this means: settings are yours to change; I will not adjust them silently even when it would help the task. What happens next: tell me the exact setting value you want and I will apply it with your confirmation, or leave the setting as it is.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: I tried to change your {setting_name} setting without your confirmation, and Morrow refused (reference {correlation_id}). What this means: the setting is unchanged; your settings change only when you say so. What happens next: tell me the value you want and I will change it with your confirmation, or leave it as it is.",
       "auto_action": "Drop the change; leave the setting untouched; never retry the change without explicit educator confirmation.",
       "escalate_when": "Surface the first time a task reaches for a setting; the educator confirms or declines.",
       "signature": {
@@ -1933,8 +1653,8 @@
       "signature_notes": "exception: \"ModeSettingsTamper\" (settings/ package guard, workstream B); the translator merges the setting_name attr as evidence.",
       "placeholders": [
         "operation",
-        "correlation_id",
-        "setting_name"
+        "setting_name",
+        "correlation_id"
       ]
     },
     {
@@ -1944,7 +1664,7 @@
       "severity_hint": "medium",
       "root_cause": "Enforced no-guess rule: when course resolution returns multiple candidates or low confidence and the educator never confirmed the target conversationally, the write is refused rather than aimed at a guess.",
       "is_not": "This is not a wrong-course typo and not a provider problem; the course exists, but the agent could not tell which one was meant.",
-      "agent_message": "What was attempted: I tried {operation}, but the course target was ambiguous: the query {query} matched more than one course (or matched with low confidence), and you never confirmed which one. What the evidence showed: an ambiguous-course refusal (reference {correlation_id}); candidates seen: {candidates_public}. Nothing was written. What this means: I will not guess which course you meant; aiming a write at the wrong course would be silent damage. What happens next: tell me exactly which course this is for (name and term, or the course id), and I will run the write against the confirmed target.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: I could not be sure which course you meant, and you have not confirmed it (reference {correlation_id}). Courses that could match: {candidates_public}. What this means: nothing was written; Morrow will not guess the course. What happens next: tell me which course you mean (its name and term), and I will make the change there.",
       "auto_action": "Refuse the write; present the candidate courses side by side; run only after the educator names the target conversationally.",
       "escalate_when": "Always: the educator must pick the course; the agent never picks for them.",
       "signature": {
@@ -1963,7 +1683,6 @@
       "placeholders": [
         "operation",
         "correlation_id",
-        "query",
         "candidates_public"
       ]
     },
@@ -1974,7 +1693,7 @@
       "severity_hint": "high",
       "root_cause": "Destructive writes (HTTP DELETE, or entries marked destructive) are the one category that can still surface a confirmation inside edit mode while the educator's confirm_destructive_writes setting is on (off by default; edit mode does not ask per write unless the educator turns this guardrail on). The write was attempted without a recorded educator yes for that specific destructive action.",
       "is_not": "This is not a mode-authority problem and not a provider problem; the educator is in edit mode and the write is authorized, but the destructive confirmation is missing.",
-      "agent_message": "What was attempted: I tried {operation}, which destroys data. What the evidence showed: a destructive-confirmation refusal (reference {correlation_id}); your confirm_destructive_writes setting is on, and I have no recorded yes from you for this specific deletion. Nothing was destroyed. What this means: edit mode skips per-write approval, but destructive writes still need your explicit yes while that setting is on. What happens next: I will tell you exactly what will be destroyed and ask for your yes; I run it only after you say yes (or you can turn the setting off).",
+      "agent_message": "What was attempted: {operation}, which destroys data. What the evidence showed: your setting that makes deletions ask first is on, and you have not said yes to this deletion (reference {correlation_id}). What this means: nothing was deleted. Edit mode makes changes without asking, but deletions still ask while that setting is on. What happens next: I will tell you exactly what will be destroyed and ask for your yes; I run it only after you say yes (or you can turn the setting off).",
       "auto_action": "Refuse the write; the agent names exactly what would be destroyed and asks the educator for a yes; run only after that yes.",
       "escalate_when": "Always: the educator must confirm the destructive action; the agent never destroys data on an implied yes.",
       "signature": {
@@ -2002,7 +1721,7 @@
       "severity_hint": "medium",
       "root_cause": "Enforced no-guess rule: a write that targets a course must say how that course was resolved (which course, how confident, whether the educator confirmed it). A write with no resolution, or with a resolution naming a different course than the write targets, is refused before anything is sent.",
       "is_not": "This is not a provider problem and not a permission problem; the course may exist, but the agent has not shown which course it means.",
-      "agent_message": "What was attempted: I tried {operation}, but I had not confirmed which course it is for. What the evidence showed: a course-confirmation refusal (reference {correlation_id}); the write carried no confirmed course, or named a different course than the one it targets. Nothing was written. What this means: I will not guess which course you meant; aiming a write at the wrong course would be silent damage. What happens next: tell me exactly which course this is for (name and term, or the course id), and I will run the write against the confirmed course.",
+      "agent_message": "What was attempted: I tried {operation}, but I had not confirmed which course it is for. What the evidence showed: the change carried no confirmed course, or it names a different course than the one you confirmed (reference {correlation_id}). What this means: nothing was written; Morrow will not guess the course. What happens next: tell me which course this is for (its name and term), and I will make the change there.",
       "auto_action": "Refuse the write; resolve the course with the educator conversationally, then re-dispatch with the confirmed course.",
       "escalate_when": "Always: the educator names the course; the agent never picks it for them.",
       "signature": {
@@ -2030,7 +1749,7 @@
       "severity_hint": "high",
       "root_cause": "Enforced integrity rule: the effect class comes from the operation's own requests. An operation that declares \"read\" (or \"plan\") but contains a PUT, POST, PATCH, or DELETE is refused, so a write can never skip write approval by claiming to be a read.",
       "is_not": "This is not a Canvas error and not a session problem; the operation definition contradicts itself.",
-      "agent_message": "What was attempted: I tried {operation}, but the operation is labeled as a read while it contains a request that would change data. What the evidence showed: an effect-class refusal (reference {correlation_id}); the dispatcher derives the real effect from the requests themselves, and they include a write. Nothing was sent. What this means: running it as a read would skip the approval every write needs, so it is refused. What happens next: I will not run this operation as defined. If you want the change it makes, I will prepare it as a write, and it will follow your current mode (plan mode asks for your approval first).",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: the task was described as only reading, but it would change something, so Morrow stopped before sending anything (reference {correlation_id}). What this means: nothing was sent. Running it as a read would skip the approval every change needs. What happens next: I will not run it this way. If you want the change, I will prepare it as a change, and it follows your mode: in plan mode you approve it first.",
       "auto_action": "Refuse; never re-dispatch the same definition; offer the equivalent write through the normal write path.",
       "escalate_when": "Report to engineering: an operation definition that contradicts its own requests is a defect.",
       "signature": {
@@ -2058,7 +1777,7 @@
       "severity_hint": "high",
       "root_cause": "Verified mechanism (D-009): Canvas can answer a write with success while storing different values. The executor reads the object back after every write and compares each requested field; a mismatch is recorded as a failed write with the fields named.",
       "is_not": "This is not an uncertain write: the readback proved the stored values differ. It is not a success either.",
-      "agent_message": "What was attempted: I tried {operation}. What the evidence showed: Canvas answered with success, but when I read the object back, some fields did not match what I sent (reference {correlation_id}); the journal names each mismatched field and the object's address. What this means: the change did not land as intended, so I am treating it as failed, not done. What happens next: I will show you what Canvas actually stored next to what was requested, and you decide whether I correct it, remove the object, or leave it as it is.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Canvas answered that the change was saved, but when Morrow read it back, some fields did not match what was sent (reference {correlation_id}). What this means: the change did not land as intended, so Morrow counts it as failed, not done. What happens next: I will show you what Canvas has next to what was asked for, and you decide whether I correct it, remove it, or leave it as it is.",
       "auto_action": "Record as a failed write; never report success; present requested vs stored fields and the object address for cleanup or correction.",
       "escalate_when": "Always surface to the educator with the mismatched fields; they choose correct, remove, or keep.",
       "signature": {
@@ -2114,45 +1833,19 @@
       "severity_hint": "high",
       "root_cause": "Contract, not a mechanism: any failure the catalog does not recognize must still produce a structured, evidence-grounded message and a preserved forensic record.",
       "is_not": "This is not a license to guess the cause. The message states exactly what was checked and what is unknown.",
-      "agent_message": "What was attempted: {operation}{where}. It failed in a way I do not have a classified pattern for, so I am reporting exactly what I know instead of guessing. What the evidence showed: {known_evidence} (reference {correlation_id}). What this means: I have ruled out the known failure patterns but have not identified the cause, so I will not retry anything that might have applied. What happens next: I am not retrying it. If it happens again, you can email hello@meetmorrow.app with the reference above, the Morrow for Muse version, and what you asked for. Leave student information out of the email.",
-      "auto_action": "Report the evidence summary and the reference; park the op; never blind-retry. If the op was write-class and possibly applied, reconcile via readback before any re-dispatch. Give the educator the support address (SKILL.md, Getting help)",
+      "agent_message": "What was attempted: {operation}{where}. It failed in a way Morrow does not recognize, so I am telling you exactly what is known instead of guessing. What the evidence showed: {known_evidence} (reference {correlation_id}). What this means: the cause is not clear, and the task might have made a change, so I will not try it again on my own. What happens next: I can check what is in Canvas now. If this keeps happening, you can email hello@meetmorrow.app with the reference above, the Morrow for Muse version, and what you asked for. Leave student information out of the email.",
+      "auto_action": "Show the educator the reference number and the known facts, and give them the support address (SKILL.md, Getting help); never retry a write that might have applied. When the task was a change, read the object back with a live-proven read before anything else, and give the operator the technical detail from the error payload.",
       "escalate_when": "Always surface to the educator with the evidence summary, the reference, and the support address",
       "signature": {},
       "signature_notes": "contract: \"this entry fires only when no other catalog entry's signature matches\"; never: \"never 'I don't know what happened'; never retry an uncertain write blindly\"; required_capture: [\"what was attempted (operation, tenant, object)\", \"full provider response (status, headers incl. x-request-context-id, body)\", \"session state at the time (logged_in, chromium_alive, write_halt_active)\", \"transport used and attempt count\", \"journal state (op_id, claim, receipt)\"]",
       "severity_hint_inventory": "engineering",
       "fallback": true,
       "placeholders": [
-        "correlation_id",
-        "known_evidence",
         "operation",
-        "where"
+        "where",
+        "known_evidence",
+        "correlation_id"
       ]
-    },
-    {
-      "agent_message": "What was attempted: {operation}. What the evidence showed: the browser task running the operation failed or died partway through (reference {correlation_id}). The provider never answered, and nothing was recorded as completed. What this means: the tool doing the work broke, not your course or the provider. What happens next: {auto_action}.",
-      "auto_action": "I am retrying once with a fresh browser session; nothing was recorded as done, so the retry is the same operation, not a duplicate.",
-      "escalate_when": "if browser tasks die repeatedly (helper or VM problem), or the retry dies at the same step",
-      "id": "browser-task-dead",
-      "is_not": "This is not a provider rejection: Canvas or Moodle never got far enough to answer.",
-      "root_cause": "The browser task itself failed or died in the middle of the operation. Nothing was journaled for the op, so the op_id stays reusable.",
-      "severity_hint": "high",
-      "surface": "transport/browser_backend.py two-phase dispatch/complete",
-      "title": "Browser task failed or died mid-operation",
-      "signature_notes": "task_state: {\"in\": [\"failed\", \"died\", \"crashed\"]}",
-      "placeholders": [
-        "auto_action",
-        "correlation_id",
-        "operation"
-      ],
-      "signature": {
-        "task_state": {
-          "in": [
-            "failed",
-            "died",
-            "crashed"
-          ]
-        }
-      }
     },
     {
       "agent_message": "What was attempted: {operation}. What the evidence showed: no provider-served route exists for this Item Bank capability on this provider build (reference {correlation_id}). What this means: this capability cannot be reached right now, however we try. What happens next: {auto_action}.",
@@ -2176,33 +1869,6 @@
       }
     },
     {
-      "agent_message": "What was attempted: {operation} against the Moodle route {route_path}. What the evidence showed: the route answered with an unexpected shape or is dead (reference {correlation_id}). What this means: Moodle's API surface moved under us, or the route name we used is stale. Your data was not touched. What happens next: {auto_action}.",
-      "auto_action": "I am re-checking the Moodle route catalog and retrying against the current route for this capability.",
-      "escalate_when": "if the capability has no current route at all (capability gap), or the shape change looks like a Moodle upgrade that renamed several routes",
-      "id": "moodle-route-changed",
-      "is_not": "This is not an auth failure. The call reached Moodle; the route itself is what changed.",
-      "root_cause": "The Moodle webservice route answered with a shape the lane does not recognize, or the route is dead (for example a stale grade deletion route after a Moodle upgrade).",
-      "severity_hint": "medium",
-      "surface": "moodle/session.py, moodle/probe.py (dev tree only, not shipped)",
-      "title": "Moodle webservice route returned an unexpected shape or is dead",
-      "signature_notes": "moodle_route_shape: {\"in\": [\"unexpected\", \"dead\"]}; provider: \"moodle\"",
-      "placeholders": [
-        "auto_action",
-        "correlation_id",
-        "operation",
-        "route_path"
-      ],
-      "signature": {
-        "moodle_route_shape": {
-          "in": [
-            "unexpected",
-            "dead"
-          ]
-        },
-        "provider": "moodle"
-      }
-    },
-    {
       "id": "quiz-resolution-no-match",
       "title": "No quiz matched the reference week (e.g. \"last week's quiz\")",
       "surface": "query/quiz_resolve.py",
@@ -2210,7 +1876,7 @@
       "severity_hint_inventory": "engineering",
       "root_cause": "Verified in code (query/quiz_resolve.py): \"last week's quiz\" means the ISO Monday-Sunday week before the current week in America/Chicago, matched on the quiz's effective date (assignment.due_at, then quiz.due_at, assignment.lock_at, quiz.lock_at, assignment.unlock_at, quiz.unlock_at, quiz.created_at). Quizzes with no dates at all are undated and excluded; unpublished quizzes are excluded. Zero candidates is a no-match, never a silent pick of the nearest quiz.",
       "is_not": "This is not a failure of the lookup itself: the quizzes and assignments reads succeeded, and refusing to guess which quiz the educator meant is the correct behavior.",
-      "agent_message": "What was attempted: {operation} for {query}. What the evidence showed: no published quiz has an effective date inside {window_start}..{window_end} ({candidates_examined} quizzes scanned, {undated} undated, {unpublished} unpublished; reference {correlation_id}). Nearest dated quizzes: {nearest_public}. What this means: I cannot tell which quiz you meant without guessing, so I looked nothing up. What happens next: give me the quiz by name or tell me which of the dated quizzes above you meant.",
+      "agent_message": "What was attempted: {operation} for {query}. What the evidence showed: no published quiz has a date between {window_start} and {window_end} (its due date, or when it opens or closes), after checking {candidates_examined} quizzes ({undated} without a date, {unpublished} not published; reference {correlation_id}). Nearest quizzes with a date: {nearest_public}. What this means: I cannot tell which quiz you meant without guessing, so I looked nothing up. What happens next: tell me the quiz by name, or which of the quizzes above you meant.",
       "auto_action": "Ask the educator to name the quiz explicitly (title or quiz id); re-run resolution only with an explicit choice.",
       "escalate_when": "if the quiz should exist but has no due date in Canvas (data quality issue to fix on the assignment)",
       "signature": {
@@ -2225,8 +1891,8 @@
         "candidates_examined",
         "undated",
         "unpublished",
-        "nearest_public",
-        "correlation_id"
+        "correlation_id",
+        "nearest_public"
       ]
     },
     {
@@ -2237,7 +1903,7 @@
       "severity_hint_inventory": "engineering",
       "root_cause": "Verified in code (query/quiz_resolve.py): more than one published quiz has an effective date inside the reference week window. Resolution is fail-closed on ambiguity.",
       "is_not": "This is not a failure of the lookup itself: the quizzes and assignments reads succeeded, and refusing to guess is the correct behavior.",
-      "agent_message": "What was attempted: {operation} for {query}. What the evidence showed: {match_count} quizzes have an effective date inside {window_start}..{window_end}, so no single quiz can be picked without guessing (reference {correlation_id}). What this means: I am not choosing one for you, because a silent wrong pick would report the wrong quiz's failures. What happens next: please tell me which quiz you meant: {candidates_public}.",
+      "agent_message": "What was attempted: {operation} for {query}. What the evidence showed: {match_count} quizzes have a date between {window_start} and {window_end}, so Morrow cannot pick one without guessing (reference {correlation_id}). What this means: I am not choosing for you, because a wrong pick would report the wrong quiz. What happens next: tell me which quiz you meant: {candidates_public}.",
       "auto_action": "Ask the educator to disambiguate using the listed candidates; re-run resolution only with an explicit choice (title plus effective date, or quiz id).",
       "escalate_when": "if the educator cannot distinguish the candidates either (duplicate quiz titles with different due dates)",
       "signature": {
@@ -2250,8 +1916,8 @@
         "match_count",
         "window_start",
         "window_end",
-        "candidates_public",
-        "correlation_id"
+        "correlation_id",
+        "candidates_public"
       ]
     },
     {
@@ -2262,7 +1928,7 @@
       "severity_hint_inventory": "engineering",
       "root_cause": "The failed-students query takes typed arguments (query/chain.py run_query): a quiz window of last_week or this_week, and at most one threshold (below_percent 0-100, below_points 0 or more, or letter_f). Any other value raises QueryArgumentsInvalid before any Canvas read.",
       "is_not": "This is not a Canvas or session problem: the arguments passed to the query were not valid, so nothing was read.",
-      "agent_message": "What was attempted: {operation}. What the evidence showed: the query arguments were not valid ({evidence_summary}; reference {correlation_id}). What this means: I ran no Canvas reads and classified no students. What happens next: I will check what the educator asked for and run the query again with a quiz window of last week or this week and at most one threshold (a percent, a number of points, or a letter grade of F), asking the educator if their request is unclear.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: the question Morrow was asked to answer is not one it can run as asked (reference {correlation_id}). What this means: Morrow read nothing from Canvas and sorted no students. What happens next: I will check what you asked and run it again for last week's or this week's quiz, with at most one cutoff (a percent, a number of points, or a letter grade of F). If your request is unclear, I will ask you.",
       "auto_action": "Re-run with valid typed arguments; ask the educator when their request is unclear.",
       "escalate_when": "never; this is a usage message, not an incident",
       "signature": {
@@ -2271,7 +1937,6 @@
       "signature_notes": "classification: \"QueryArgumentsInvalid\"; fixed_behavior: \"no Canvas reads run on invalid arguments\"; triggers: [\"an unknown quiz window\", \"more than one threshold\", \"a threshold out of range\"]",
       "placeholders": [
         "operation",
-        "evidence_summary",
         "correlation_id"
       ]
     },
@@ -2303,7 +1968,7 @@
       "severity_hint_inventory": "engineering",
       "root_cause": "Verified in code (query/thresholds.py): \"failed\" needs a fail threshold. not_graded assignments have no grade at all, and a null/zero points_possible makes a percent threshold uncomputable. The chain refuses to divide by zero or invent a threshold.",
       "is_not": "This is not missing data: the assignment is configured in a way that makes \"failed\" meaningless.",
-      "agent_message": "What was attempted: {operation}. What the evidence showed: no meaningful fail threshold exists for this assignment (reference {correlation_id}). What this means: \"failed\" cannot be computed here, so no students were classified. What happens next: set a points value and a grading type on the assignment in Canvas, or give an explicit threshold like \"below 40 points\".",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: this assignment has no points or grading type that says what failing means (reference {correlation_id}). What this means: Morrow cannot tell who failed, so no students were sorted. What happens next: set a points value and a grading type on the assignment in Canvas, or give me a cutoff such as \"below 40 points\".",
       "auto_action": "Ask the educator for an explicit threshold or to fix the assignment configuration; do not invent one.",
       "escalate_when": "never; this is a configuration message, not an incident",
       "signature": {
@@ -2322,7 +1987,7 @@
       "severity_hint": "medium",
       "root_cause": "Verified in code (query/quiz_resolve.py): the resolver only implements the \"last_week\" and \"this_week\" quiz windows. Any other quiz reference raises UnsupportedQuizRef instead of guessing a quiz. The typed query (query/chain.py) refuses other windows before calling the resolver, so this is reached only by a direct resolver caller.",
       "is_not": "This is not a Canvas outage, not a session problem, and not an empty course: the quiz list was never consulted because the reference itself is not resolvable yet.",
-      "agent_message": "What was attempted: {operation}. What the evidence showed: the quiz reference could not be resolved ({evidence_summary}; reference {correlation_id}). What this means: this query only resolves the quiz due last week or this week so far; any other quiz needs the educator to pick it first. No students were classified and nothing was written. What happens next: ask the educator which quiz they mean (title plus due date from the course quiz list), then re-run for last week or this week as appropriate.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow can answer this question only for last week's quiz, or this week's quiz so far (reference {correlation_id}). What this means: no students were sorted and nothing was written. What happens next: tell me which quiz you mean (its title and due date). If it is last week's or this week's, I will run the question for that week.",
       "auto_action": "Stop without reading submissions; ask the educator to name the quiz; never pick one silently.",
       "escalate_when": "If the educator names the quiz and the chain still cannot resolve it, escalate: the resolver may need the named-quiz lane.",
       "signature": {
@@ -2331,7 +1996,6 @@
       "signature_notes": "classification: \"UnsupportedQuizRef\"; fixed_behavior: \"raise instead of silently picking a quiz\"; triggers: [\"named quiz reference\", \"yesterday's quiz\", \"bare 'the quiz'\"]",
       "placeholders": [
         "operation",
-        "evidence_summary",
         "correlation_id"
       ]
     },
@@ -2342,7 +2006,7 @@
       "severity_hint": "medium",
       "root_cause": "Verified in code (query/live_read.py, query/quiz_resolve.py, query/chain.py): every real API call in the failed-students chain runs as an in-page GET through the login helper's authenticated browser context. LiveReadError means one of those reads failed: the helper is down, its token file is unreadable or malformed, Chromium is not alive, the Canvas session is logged out or the principal check failed, a single read returned an HTTP error or non-JSON body, or a collection read was truncated. The chain is read-only; a failed read never writes.",
       "is_not": "This is not a Canvas data problem and not a threshold problem: the chain never got far enough to classify any submissions, so an empty or partial class must never be reported.",
-      "agent_message": "What was attempted: {operation}. What the evidence showed: the live read failed ({evidence_summary}; reference {correlation_id}). What this means: the helper path that performs this chain's Canvas reads is unhealthy or one read was refused; no submissions were classified and nothing was written. What happens next: check the helper (process running, token file readable, Chromium alive, Canvas session logged in as the pinned educator), then retry the read. Never treat a failed read as an empty class.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow could not read what it needed from Canvas (reference {correlation_id}). What this means: no students were sorted and nothing was written. A class Morrow could not read is not an empty class, so I will not guess. What happens next: I will check the helper page and your sign-in, then try the question again.",
       "auto_action": "Park the query; surface the read failure with the evidence; retry only after the helper and session are healthy.",
       "escalate_when": "If the helper is healthy and the read still fails, or the principal check keeps failing after the educator re-signs in.",
       "signature": {
@@ -2351,7 +2015,6 @@
       "signature_notes": "classification: \"LiveReadError\"; fixed_behavior: \"fail closed, never report a partial class\"; triggers: [\"helper down\", \"token file unreadable\", \"Chromium not alive\", \"session logged out\", \"principal mismatch\", \"read HTTP error\", \"non-JSON body\", \"truncated collection\"]",
       "placeholders": [
         "operation",
-        "evidence_summary",
         "correlation_id"
       ]
     },
@@ -2380,8 +2043,8 @@
       "severity_hint": "low",
       "root_cause": "Verified 2026-09-22: with no CANVAS_BASE and no browser lane state, ChromiumSession.load raises SessionMissing('chromium backend needs a Canvas base URL: ...'). This is the normal state of a fresh install before the educator connects Canvas, not a product defect.",
       "is_not": "This is not session death, not a broken install, and not a Canvas outage. Nothing is misconfigured; the connection simply has not been set up yet.",
-      "agent_message": "What was attempted: I tried {operation}, but Morrow is not connected to your Canvas account yet. What the evidence showed: no Canvas school URL is configured, so there is no session to use. What this means: this is the normal first step and nothing is broken. What happens next: connect Canvas by telling me your school's Canvas URL (it looks like canvas.school.example.edu, with your own school in place of \"school\"), then sign in on the login helper page yourself. Once you are signed in I will verify it is really you and retry this for you.",
-      "auto_action": "Ask the educator for their Canvas base URL (only if it cannot be determined safely), record it in the helper env, start the helper, and guide them to sign in through the helper page themselves; then verify the principal and retry the operation.",
+      "agent_message": "What was attempted: I tried {operation}, but Morrow is not connected to your Canvas account yet. What the evidence showed: Morrow does not have your school's Canvas address yet (reference {correlation_id}). What this means: this is the normal first step and nothing is broken. What happens next: connect Canvas by telling me your school's Canvas address (it looks like canvas.school.example.edu, with your own school in place of \"school\"), then sign in on the helper page yourself. Once you are signed in, I will check that it is really you and try this again.",
+      "auto_action": "Ask the educator for their Canvas base URL (only if it cannot be determined safely) and confirm it with them. Write CANVAS_BASE (and CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED when the host does not end in .instructure.com and the educator confirmed it) to the tree's helper/env, then run bash install.sh, which probes the address and then starts the helper. If the probe refuses the address, tell the educator what it said and ask again. Then guide them to sign in through the helper page themselves, verify the principal, and retry the operation.",
       "escalate_when": "Escalate if the educator provided a URL and the tenant probe still fails after the placeholder and reachability checks, since that points at a real connectivity problem rather than missing setup.",
       "signature": {
         "error_class": "SessionMissing",
@@ -2392,7 +2055,8 @@
       "signature_notes": "evidence: 2026-09-22 isolated first-run (no CANVAS_BASE, fresh MORROW_HOME): executor 'catalog users_self' raised SessionMissing; evidence map carried error_class=SessionMissing, provider=canvas, error_text='chromium backend needs a Canvas base URL: pass base_url, set CANVAS_BASE, or onboard the browser lane state (~/.morrow/browser_lane.json)'. Before this entry the case fell through to the unknown fallback with a parking message.",
       "severity_hint_inventory": "setup",
       "placeholders": [
-        "operation"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -2402,7 +2066,7 @@
       "severity_hint": "high",
       "root_cause": "Guard rule, verified in code: guard_new_quiz_request in dispatch/executor.py refuses PUT on /api/quiz/v1 paths and on New Quiz tool names; the refusal happens before any session or network use.",
       "is_not": "This is not a provider 405 and not a session problem. Retrying the same PUT will refuse the same way.",
-      "agent_message": "What was attempted: I tried to send a PUT write to a New Quiz path. What the evidence showed: the New Quiz safety guard refused it before anything reached Canvas: New Quiz updates use PATCH, never PUT. What this means: this is a product rule, not a provider error. Nothing was sent and nothing changed. What happens next: I will resend the same change as a PATCH. If the PATCH write is not the one you approved, I will stop and ask first.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow's New Quizzes safeguard stopped the change before it reached Canvas, because it was sent in a form that can wipe parts of a New Quiz (reference {correlation_id}). What this means: nothing was sent and nothing changed. What happens next: I will prepare the same change in the safe form; in plan mode you approve it before it is sent.",
       "auto_action": "Resend the identical change as PATCH; never retry PUT on a New Quiz path.",
       "escalate_when": "Surface whenever the PATCH retry is refused or the write was not the approved one.",
       "signature": {
@@ -2414,7 +2078,8 @@
       "signature_notes": "evidence: \"dispatch/executor.py guard_new_quiz_request: PUT is never used on New Quiz paths (%s); use PATCH\"; gate: \"NewQuizRefused\"",
       "severity_hint_inventory": "engineering",
       "placeholders": [
-        "path"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -2424,7 +2089,7 @@
       "severity_hint": "high",
       "root_cause": "Guard rule, verified in code: guard_new_quiz_request refuses deletes through /api/v1 assignments paths; new_quiz_delete_request builds the quiz-API route.",
       "is_not": "This is not a provider refusal and not something an approval can override. The assignment endpoint is never the right delete path for a New Quiz.",
-      "agent_message": "What was attempted: I tried to delete a New Quiz through the classic assignment endpoint. What the evidence showed: the safety guard refused it: deleting the assignment first orphans the quiz backend object (this exact mistake once left orphan quiz 506477 unreachable in production). What this means: the quiz was not deleted and nothing changed. The guard is protecting the quiz backend from becoming unreachable. What happens next: I will delete through the New Quizzes API route instead, with your approval as a destructive write.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow's New Quizzes safeguard stopped it, because deleting a New Quiz through its assignment leaves the quiz itself behind where no one can reach it (reference {correlation_id}). What this means: the quiz was not deleted and nothing changed. What happens next: I will delete the quiz the supported way instead, and because it deletes something, I will ask for your yes first.",
       "auto_action": "Route the delete through the quiz API (DELETE /api/quiz/v1/courses/{course_id}/quizzes/{assignment_id}); never retry the assignment endpoint.",
       "escalate_when": "Surface whenever a New Quiz delete is requested, with the irreversible-delete disclosure.",
       "signature": {
@@ -2436,7 +2101,8 @@
       "signature_notes": "evidence: \"dispatch/executor.py guard_new_quiz_request and new_quiz_delete_request\"; gate: \"NewQuizRefused\"",
       "severity_hint_inventory": "engineering",
       "placeholders": [
-        "quiz_id"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -2446,7 +2112,7 @@
       "severity_hint": "medium",
       "root_cause": "Guard rule, verified in code: new_quiz_item_request in dispatch/executor.py refuses stimulus create/update targets; the New Quizzes contract doc records the provider 422.",
       "is_not": "This is not session death and not a transient 422. Re-signing in does not fix it.",
-      "agent_message": "What was attempted: I tried to create or update a stimulus item on a New Quiz through the API. What the evidence showed: the guard refused the stimulus write: stimulus items can only be retrieved through the API; Canvas requires them to be created and updated in the browser UI (the provider answers 422 on API create). What this means: this is a Canvas product limit, not something an approval can override. Nothing was sent. What happens next: I will not attempt the API write. If the stimulus content needs changing, you will need to open the quiz builder in a browser, or I can change a non-stimulus item instead.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow's New Quizzes safeguard stopped it, because Canvas lets a stimulus be created or changed only in the quiz builder, not by a tool like Morrow (reference {correlation_id}). What this means: nothing was sent, and no approval can change that. What happens next: to change the stimulus, open the quiz in the Canvas quiz builder. I can change the other questions for you.",
       "auto_action": "Do not retry the stimulus API write; offer the UI path or a non-stimulus alternative.",
       "escalate_when": "Surface whenever stimulus content is requested to change, with the UI-only limit stated plainly.",
       "signature": {
@@ -2458,7 +2124,8 @@
       "signature_notes": "evidence: \"dispatch/executor.py new_quiz_item_request stimulus refusal; knowledge/new-quizzes-contract.md\"; gate: \"NewQuizRefused\"",
       "severity_hint_inventory": "engineering",
       "placeholders": [
-        "quiz_id"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -2468,7 +2135,7 @@
       "severity_hint": "high",
       "root_cause": "Guard rule, verified in code: new_quiz_settings_request in dispatch/executor.py refuses when the saved block is missing or unreadable; plan_new_quiz_settings performs the read-then-merge.",
       "is_not": "This is not a provider error. The settings on the quiz are untouched.",
-      "agent_message": "What was attempted: I tried to write quiz_settings to a New Quiz without a fresh saved settings block. What the evidence showed: the guard refused the write because the saved quiz_settings block was missing or unreadable: a partial PATCH can replace the whole settings block instead of merging, which would wipe settings you already set. What this means: the refusal protected your existing quiz settings. Nothing was sent. What happens next: I will read the current settings block first, merge your change locally, and send the complete block for your review.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow's New Quizzes safeguard stopped the settings change, because Morrow did not have a fresh copy of the quiz's current settings, and sending only part of them can wipe the rest (reference {correlation_id}). What this means: your quiz settings are unchanged. What happens next: I will read the current settings first, add your change to them, and show you the whole set before it is sent.",
       "auto_action": "Read the current block, merge locally with plan_new_quiz_settings, send the complete block; never send a blind partial settings PATCH.",
       "escalate_when": "Surface whenever a settings write is requested, with the merge plan stated before sending.",
       "signature": {
@@ -2480,7 +2147,8 @@
       "signature_notes": "evidence: \"dispatch/executor.py new_quiz_settings_request\"; gate: \"NewQuizRefused\"",
       "severity_hint_inventory": "engineering",
       "placeholders": [
-        "quiz_id"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -2490,7 +2158,7 @@
       "severity_hint": "high",
       "root_cause": "Guard rule, verified in code: check_interaction_ids_preserved in dispatch/executor.py refuses added/removed interaction ids; the ghost-stub incident is recorded in knowledge/new-quizzes-contract.md.",
       "is_not": "This is not a provider 400. The item on the quiz is untouched.",
-      "agent_message": "What was attempted: I tried to update a quiz item in place, and the payload renamed interaction ids. What the evidence showed: the guard refused the update: New Quizzes merges interaction_data by id, so regenerating choice, question, or blank ids does not replace the old elements, it orphans them into blank ghost-stub choices (observed in production: one item ended with 10 real choices and 18 blank ones). What this means: the in-place edit would have corrupted the item. Nothing was sent. What happens next: I will not do an in-place PATCH. The safe flow is delete the item and add the replacement, as two separately reviewed changes.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow's New Quizzes safeguard stopped an edit that would have left blank extra answer choices in the question (reference {correlation_id}). What this means: nothing was sent, and the question is unchanged. What happens next: I will not edit it in place. The safe way is to remove the question and add the corrected one, as two changes you review separately.",
       "auto_action": "Do not retry the in-place PATCH; use the delete-plus-re-add flow with id preservation verified by check_interaction_ids_preserved.",
       "escalate_when": "Surface whenever an item edit regenerates interaction ids, with the ghost-stub history stated.",
       "signature": {
@@ -2502,8 +2170,8 @@
       "signature_notes": "evidence: \"dispatch/executor.py check_interaction_ids_preserved\"; gate: \"NewQuizRefused\"",
       "severity_hint_inventory": "engineering",
       "placeholders": [
-        "added",
-        "removed"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -2513,7 +2181,7 @@
       "severity_hint": "high",
       "root_cause": "Guard rule, verified in code: PROTECTED_NEW_QUIZ_IDS in dispatch/executor.py; guard_new_quiz_request refuses any write touching them.",
       "is_not": "This is not a permissions problem on the session. No approval or re-sign-in can admit this write.",
-      "agent_message": "What was attempted: I tried to write to a New Quiz that is permanently protected from automation. What the evidence showed: the guard refused the write: this quiz id is never touched by Morrow (a past incident left an orphan quiz backend object when the guard did not exist). What this means: this is a standing protection, not something an approval can override. Nothing was sent. What happens next: I will not retry this write. If this quiz genuinely needs the change, you will need to make it in the Canvas UI yourself.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: this New Quiz is one Morrow never changes, because of a past problem with it (reference {correlation_id}). What this means: nothing was sent, and no approval can change that. What happens next: if the quiz needs this change, make it yourself in Canvas.",
       "auto_action": "Do not retry; route the educator to the Canvas UI for this quiz.",
       "escalate_when": "Surface whenever this quiz is the target of a write, with the standing protection stated plainly.",
       "signature": {
@@ -2525,7 +2193,8 @@
       "signature_notes": "evidence: \"dispatch/executor.py PROTECTED_NEW_QUIZ_IDS\"; gate: \"NewQuizRefused\"",
       "severity_hint_inventory": "engineering",
       "placeholders": [
-        "quiz_id"
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -2535,7 +2204,7 @@
       "severity_hint": "medium",
       "root_cause": "A New Quiz safety guard fired in dispatch/executor.py before any provider call. The engineering detail carries the exact rule that fired.",
       "is_not": "This is not a provider error and not a session problem. Nothing reached Canvas.",
-      "agent_message": "What was attempted: I tried a New Quiz write and the safety guard refused it before anything reached Canvas. What the evidence showed: a New Quiz safety guard fired; the engineering detail carries the exact rule that fired. What this means: nothing was sent to Canvas and nothing changed. The refusal is a deliberate product rule. What happens next: I will surface the exact rule from the engineering detail and propose the guarded path that does what you asked.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow's New Quizzes safeguard stopped this change before it reached Canvas (reference {correlation_id}). What this means: nothing was sent and nothing changed. What happens next: I will tell you which rule stopped it and suggest a safe way to make the change you asked for.",
       "auto_action": "Surface the exact guard rule from the engineering detail; propose the guarded path.",
       "escalate_when": "Surface whenever the guard rule is not one of the specific cataloged New Quiz rules.",
       "signature": {
@@ -2547,5 +2216,5 @@
   ],
   "generated": "2026-09-22",
   "version": 2,
-  "note": "Merged failure-mode catalog for the Morrow error translation layer. The 51-mode inventory at audits/error-translation-2026-09-22/catalog.json is canonical; three seeded modes with no inventory equivalent are kept (ib-provider-unserved, moodle-route-changed, browser-task-dead). Signatures are machine-checkable predicates over the evidence map produced by translator._coerce_evidence; the inventory's full human-readable evidence lives in signature_notes. No em dashes anywhere in this file, by standing rule."
+  "note": "Merged failure-mode catalog for the Morrow error translation layer. The 51-mode inventory at audits/error-translation-2026-09-22/catalog.json is canonical; one seeded mode with no inventory equivalent is kept (ib-provider-unserved). Modes for lanes that do not ship in v1 (Moodle, the raw HTTPS lane's access token, the form and browser-task lanes) were retired on 2026-09-23. Signatures are machine-checkable predicates over the evidence map produced by translator._coerce_evidence; the inventory's full human-readable evidence lives in signature_notes. No em dashes anywhere in this file, by standing rule."
 }

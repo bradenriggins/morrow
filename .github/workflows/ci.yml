@@ -162,6 +162,10 @@ jobs:
           python -c "import cryptography"
       - name: Muse test suite
         run: python -m pytest -q
+      # The selftests that are not install suites (pytest collects none
+      # of them), with the install runner's isolation.
+      - name: Dev selftest suites
+        run: bash scripts/dev-suites.sh --show-failures
       # pytest collects none of the *_selftest.py install suites. Carve
       # the release tree the way a release does (the carve also runs the
       # secrets gate with no exclusions), then run the install suites

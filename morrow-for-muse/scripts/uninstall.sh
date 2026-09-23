@@ -77,7 +77,8 @@ unset _a
 # Session material a disconnect removes (the educator's records stay).
 DISCONNECT_PATHS="${PROFILE_DIR} ${MORROW_HOME}/browser_lane.json ${MORROW_HOME}/browser_lane.json.lock ${MORROW_HOME}/session.json ${MORROW_HOME}/session.json.prev ${MORROW_HOME}/principal_pin.json ${MORROW_HOME}/browser-pending ${MORROW_HOME}/browser-briefs"
 
-die() { printf 'UNINSTALL FAIL: %s\n' "$1" >&2; exit 1; }
+if [ "${MODE}" = "disconnect" ]; then STOP_PREFIX="DISCONNECT STOPPED"; else STOP_PREFIX="UNINSTALL STOPPED"; fi
+die() { printf '%s: %s\n' "${STOP_PREFIX}" "$1" >&2; exit 1; }
 note() { printf '%s\n' "$1"; }
 
 pid_holding_port() {
@@ -269,11 +270,11 @@ if [ "${CONFIRM}" = "1" ]; then
     else
       _yes_cmd="scripts/uninstall.sh --yes"
     fi
-    die "nothing was changed: there is no terminal to type \"yes\" in. Ask the educator to confirm, then run ${_yes_cmd}"
+    die "not confirmed, so nothing was changed. There is no terminal to type \"yes\" in: ask the educator to confirm, then run ${_yes_cmd}"
   fi
   printf 'Type "yes" to continue: '
   read -r _ans
-  [ "${_ans}" = "yes" ] || die "aborted by user"
+  [ "${_ans}" = "yes" ] || die "not confirmed, so nothing was changed"
 fi
 
 # -- 1. stop the processes -------------------------------------------------
@@ -576,8 +577,7 @@ note ""
 # W4-P1-6: the final summary enumerates what was ACTUALLY removed.
 note "Uninstall complete. Removed:"
 printf '%s' "${_REMOVED}" | sed 's/^/  /'
-note "Gone: the tree, the state dir, the profile, upgrade backups, and failed trees."
-note "Uninstall complete. Gone: the tree, ${MORROW_HOME}, the browser profile, the learner source vault (${VAULT_PATH} + .key), browser transient state (pending envelopes, briefs), the cron entries, and the running processes."
+note "Gone: the tree, ${MORROW_HOME}, the browser profile, the learner source vault (${VAULT_PATH} + .key), browser transient state (pending envelopes, briefs), upgrade backups, failed trees, the cron entries, and the running processes."
 note ""
 note "(The W4-P2-12 open-file-descriptor caveat printed before confirmation"
 note "still applies: the 'verified gone' checks above cover the filesystem,"

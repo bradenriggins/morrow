@@ -40,10 +40,8 @@ the governance port (architecture doc sections 1.2, 2.2, 4):
                                  pipeline as manifest entries, but only after
                                  the catalog provenance gate: the op must be
                                  marked live-proven in
-                                 proof-battery/OPERATION_CATALOG.md, or the
-                                 educator must have signed an explicit
-                                 allow_unproven override (--allow-unproven),
-                                 which is journaled with the op
+                                 proof-battery/OPERATION_CATALOG.md; nothing
+                                 overrides that
   undo                         - an entry's undo block runs as a new, separately
                                  journaled operation
 
@@ -130,7 +128,7 @@ if _EXEC_TREE_ROOT not in sys.path:
 from dispatch.admission import (  # noqa: E402
     admit, persist_signed_record, consume_approval, check_policy_gates,
     load_policy, check_never_dispatch, check_unsupported,
-    check_evidence_holds, check_learner_data, check_unproven_override,
+    check_evidence_holds, check_learner_data,
     touches_learner_data as admission_touches_learner_data,
     request_subject as admission_request_subject,
     request_digest as admission_request_digest,
@@ -522,9 +520,9 @@ class CatalogNotProven(ExecutorError):
     """The catalog provenance gate refused a catalog dispatch: the named
     operation is not in proof-battery/OPERATION_CATALOG.md, the supplied
     method/path do not match the catalog row, or the row is not marked
-    live-proven and no educator-signed --allow-unproven override was
-    presented. Never-dispatch, unsupported, evidence-hold, and
-    learner-data refusals raise their own admission errors instead."""
+    live-proven. Nothing overrides it. Never-dispatch, unsupported,
+    evidence-hold, and learner-data refusals raise their own admission
+    errors instead."""
 
 
 class CatalogEffectMismatch(ExecutorError):
@@ -7854,7 +7852,7 @@ def _render_dry_run(entry, params, session, pack, plan, op_id,
                      "was consumed")}
 
 
-def _burn_write_approval(approval_record, override_record, op_id) -> None:
+def _burn_write_approval(approval_record, op_id) -> None:
     """Persist the signed write approval under the final op_id, then mark
     it single-use (W4 approval ordering).
 
@@ -7867,31 +7865,25 @@ def _burn_write_approval(approval_record, override_record, op_id) -> None:
     write that never happened. Persist-before-consume keeps every
     crash state recoverable: persisted-but-unconsumed re-admits cleanly
     on retry, and consumed implies persisted, so the complete phase
-    can always re-verify an admitted write. For writes the F-2 override
-    record IS the write approval; a distinct override record (should
-    one ever exist) burns here too."""
-    records = [approval_record]
-    if override_record is not approval_record:
-        records.append(override_record)
-    for record in records:
-        if record is None:
-            continue
-        path = os.path.join(_approvals_dir(), str(op_id) + ".json")
-        preexisting = os.path.exists(path)
-        persist_signed_record(record, op_id)
-        try:
-            consume_approval(record)
-        except Exception:
-            # The write is not sent: drop the copy this burn persisted
-            # under the refused op_id. A record that was on disk before
-            # (the file ceremony's signed approval) is the educator's
-            # and stays.
-            if not preexisting:
-                try:
-                    os.unlink(path)
-                except OSError:
-                    pass
-            raise
+    can always re-verify an admitted write."""
+    if approval_record is None:
+        return
+    path = os.path.join(_approvals_dir(), str(op_id) + ".json")
+    preexisting = os.path.exists(path)
+    persist_signed_record(approval_record, op_id)
+    try:
+        consume_approval(approval_record)
+    except Exception:
+        # The write is not sent: drop the copy this burn persisted
+        # under the refused op_id. A record that was on disk before
+        # (the file ceremony's signed approval) is the educator's
+        # and stays.
+        if not preexisting:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        raise
 
 
 def _learner_vault_ready(session) -> bool:
@@ -8009,7 +8001,7 @@ def _require_course_resolution(entry: dict, params: dict, mode_ctx) -> None:
 def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                    plan: FrozenPlan = None, op_id: str = None,
                    kind: str = "dispatch", approval: dict = None,
-                   unproven_override=None, catalog_status=None,
+                   catalog_status=None,
                    dry_run=False, require_educator_channel: bool = True,
                    mode_ctx: dict = None) -> dict:
     """Execute one manifest entry; see _dispatch_entry_inner.
@@ -8030,7 +8022,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
     try:
         out = _dispatch_entry_inner(
             entry, params, session, pack, plan=plan, op_id=op_id, kind=kind,
-            approval=approval, unproven_override=unproven_override,
+            approval=approval,
             catalog_status=catalog_status, dry_run=dry_run,
             require_educator_channel=require_educator_channel,
             mode_ctx=mode_ctx, _labels=holder)
@@ -8237,17 +8229,15 @@ def _resolve_dispatch_labels(entry, params, tenant_base, mode_ctx):
 def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                           pack: dict, plan: FrozenPlan = None,
                           op_id: str = None, kind: str = "dispatch",
-                          approval: dict = None, unproven_override=None,
+                          approval: dict = None,
                           catalog_status=None, dry_run=False,
                           require_educator_channel: bool = True,
                           mode_ctx: dict = None,
                           _labels: dict = None) -> dict:
     """Execute one manifest entry through the full pipeline and journal it.
 
-    unproven_override is the F-2 (audit, signed_record) pair from the
-    catalog provenance gate, or (None, None); catalog_status is the
-    catalog status row of a catalog-dispatched op (None for manifest
-    entries). Both are journaled with the op.
+    catalog_status is the catalog status row of a catalog-dispatched op
+    (None for manifest entries). It is journaled with the op.
 
     dry_run=True (W4-P2-26): evaluate every gate and render the exact
     write request that would be sent, without sending anything and
@@ -8279,7 +8269,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         _aux = entry.get(_key)
         if isinstance(_aux, dict) and _aux.get("url"):
             _assert_read_only_block(entry, _aux, _key)
-    live_proven_gate(entry, unproven_override, journal=not dry_run)
+    live_proven_gate(entry, journal=not dry_run)
     _require_numbered_course(entry, params)
     if is_write:
         _require_course_resolution(entry, params, mode_ctx)
@@ -8377,20 +8367,6 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # call: release the claim (nothing could have applied) and stop
         # before burning approvals or touching the provider.
         _raise_if_shutdown_requested(op_id, claim_token)
-        # F-2: the unproven-catalog override for reads burns here: reads
-        # have no target-identity or before-state provider checks. For
-        # writes the approval (and any override it carries) burns only
-        # after the target-identity and before-state checks pass,
-        # immediately before the write is sent (see _burn_write_approval
-        # below): a refusal on those checks must leave the approval
-        # reusable, the op_id unclaimed, and nothing journaled. The
-        # dispatcher persists the record under the final op_id, then
-        # marks it consumed: persist-before-consume keeps every crash
-        # state recoverable.
-        override_audit, override_record = unproven_override or (None, None)
-        if override_record is not None and not is_write:
-            persist_signed_record(override_record, op_id)
-            consume_approval(override_record)
 
         if provider == "morrow" or (entry.get("request") or {}).get("method") == "LOCAL":
             raise LocalProcedureRefused(
@@ -8462,7 +8438,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                     entry, params, session, pack, config, transients)
                 # W4 approval ordering: every pre-write check passed; burn
                 # the approval now, immediately before the write is sent.
-                _burn_write_approval(approval_record, override_record, op_id)
+                _burn_write_approval(approval_record, op_id)
             result, transients = run_multi_step(
                 entry, session, pack, config, params, transients,
                 max_bytes=entry_max_bytes, attempt_state=attempt_state)
@@ -8496,7 +8472,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                     max_bytes=entry_max_bytes)
                 # W4 approval ordering: every pre-write check passed; burn
                 # the approval now, immediately before the write is sent.
-                _burn_write_approval(approval_record, override_record, op_id)
+                _burn_write_approval(approval_record, op_id)
                 attempt_state["write_attempted"] = True
             status, resp_headers, raw, attempts = session.raw_request(
                 method, url, headers, body_bytes, is_write=is_write,
@@ -8528,7 +8504,6 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                                  uncertain_result, exc.attempts or 0,
                                  uncertain=True,
                                  approval_audit=approval_audit,
-                                 unproven_override=override_audit,
                                  catalog_status=catalog_status,
                                  target=target_identity_verified,
                                  before_state=before_state_check,
@@ -8567,7 +8542,6 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                                  op_id, None, verification,
                                  failed_result, 0, uncertain=False,
                                  approval_audit=approval_audit,
-                                 unproven_override=override_audit,
                                  catalog_status=catalog_status,
                                  target=target_identity_verified,
                                  before_state=before_state_check,
@@ -8634,7 +8608,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # reserved for reconciliation), and re-raise.
         _journal_write_failure_audit(
             entry_name, kind, effects, journal_params, plan, op_id, exc,
-            attempt_state, approval_audit, override_audit, catalog_status)
+            attempt_state, approval_audit, catalog_status)
         # W5-P2-1: the audit record is journaled (drained); a pending
         # shutdown now stops the run instead of continuing.
         _raise_if_shutdown_requested()
@@ -8710,7 +8684,6 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                                          tenant_base),
                                      attempts, uncertain=False,
                                                                   approval_audit=approval_audit,
-                                                                  unproven_override=override_audit,
                                                                   catalog_status=catalog_status,
                                                                   target=target_identity_verified,
                                                                   before_state=before_state_check,
@@ -8738,7 +8711,6 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                                          tenant_base),
                                      attempts, uncertain=True,
                                      approval_audit=approval_audit,
-                                     unproven_override=override_audit,
                                      catalog_status=catalog_status,
                                      target=target_identity_verified,
                                      before_state=before_state_check,
@@ -8775,7 +8747,6 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                                          tenant_base),
                                      attempts, uncertain=not proven,
                                      approval_audit=approval_audit,
-                                     unproven_override=override_audit,
                                      catalog_status=catalog_status,
                                      target=target_identity_verified,
                                      before_state=before_state_check,
@@ -8844,7 +8815,6 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
     record = _journal_record(entry_name, kind, effects, journal_params, plan, op_id,
                              after_digest, verification, result, attempts,
                                                           approval_audit=approval_audit,
-                                                          unproven_override=override_audit,
                                                           catalog_status=catalog_status,
                                                           pagination=(
                                                               {"note": pagination.get("note"),
@@ -8931,7 +8901,7 @@ def _link_next_url(link_header):
 
 def _journal_record(entry_name, kind, effects, params, plan, op_id,
                     after_digest, verification, result, attempts, uncertain=False,
-                    approval_audit=None, unproven_override=None,
+                    approval_audit=None,
                     catalog_status=None, pagination=None,
                     target=None, before_state=None, undo_available=None):
     """Canonical journal record for dispatch/undo completion.
@@ -8965,9 +8935,7 @@ def _journal_record(entry_name, kind, effects, params, plan, op_id,
         # op_digest, channel, provenance, verbatim authorization citation.
         "approval": approval_audit,
         # F-2 catalog provenance: the catalog status row of the dispatched
-        # op, and the signed unproven-override audit block when an override
-        # was used (None for manifest entries and live-proven catalog ops).
-        "unproven_override": unproven_override,
+        # op (None for manifest entries).
         "catalog_status": catalog_status,
         # W4-P0-11: the provider-verified write target identity
         # (course_id, course_name, term, tenant), None for reads and
@@ -8991,8 +8959,7 @@ def _journal_record(entry_name, kind, effects, params, plan, op_id,
 
 def _journal_write_failure_audit(entry_name, kind, effects, params, plan,
                                  op_id, exc, attempt_state,
-                                 approval_audit, override_audit,
-                                 catalog_status):
+                                 approval_audit, catalog_status):
     """Journal an ambiguous write failure (W2-P0-4) under a fresh event id.
 
     A write provider call was invoked and the failure is neither
@@ -9033,7 +9000,6 @@ def _journal_write_failure_audit(entry_name, kind, effects, params, plan,
         "attempts": getattr(exc, "attempts", None) or 0,
         "uncertain": True,
         "approval": approval_audit,
-        "unproven_override": override_audit,
         "catalog_status": catalog_status,
     }
     journal_append(record)
@@ -9046,8 +9012,7 @@ def _journal_write_failure_audit(entry_name, kind, effects, params, plan,
 # F-2: the catalog provenance gate. dispatch/executor.py reads the
 # authoritative operation catalog directly (no generated side index that
 # could go stale) and refuses to synthesize a dispatchable entry for any
-# op that is not marked live-proven, unless the educator signed an
-# explicit allow_unproven override (CLI --allow-unproven).
+# op that is not marked live-proven.
 _OPERATION_CATALOG_PATH = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "proof-battery",
     "OPERATION_CATALOG.md"))
@@ -9147,35 +9112,23 @@ def _journal_catalog_refusal(name, method, path_template, params, status,
               file=sys.stderr)
 
 
-# Catalog statuses the educator-signed --allow-unproven override may
-# reach: rows never tried live. failed, unsupported, excluded, and
-# evidence-hold rows are refused with or without it.
-_UNPROVEN_OVERRIDABLE = frozenset({"pending"})
-
-
 def _catalog_provenance_gate(entry: dict, name: str, method: str,
-                             path_template: str, params: dict,
-                             provider: str, approval, allow_unproven: bool,
-                             session, require_educator_channel: bool = True):
+                             path_template: str, params: dict, session):
     """F-2 catalog provenance gate for catalog dispatch.
 
-    Runs BEFORE any session is loaded or admission runs. Returns
-    (catalog_status, (override_audit, override_record)): the override pair
-    is (None, None) for live-proven ops. Raises on any refusal:
+    Runs BEFORE any session is loaded or admission runs. Returns the
+    catalog status ("live-proven"). Raises on any refusal. Nothing
+    overrides a refusal, and no approval changes the answer: admission
+    checks the approval later, for writes only.
 
       - the absolute admission checks (never-dispatch, unsupported,
-        evidence-hold, learner-data) raise their own errors and cannot be
-        overridden by --allow-unproven;
-      - an unknown tool name raises CatalogNotProven and cannot be
-        overridden;
+        evidence-hold, learner-data) raise their own errors;
+      - an unknown tool name raises CatalogNotProven;
       - a supplied method/path that does not match the catalog row raises
         CatalogNotProven (a proven name cannot be paired with arbitrary
         CLI arguments);
-      - a failed, unsupported, or excluded row raises CatalogNotProven
-        and cannot be overridden;
-      - a pending row raises CatalogNotProven unless allow_unproven is
-        set AND the educator-signed approval record carries
-        allow_unproven: true (sealed by sign_approval).
+      - a row that is not marked live-proven (pending, failed,
+        unsupported, excluded, or unmarked) raises CatalogNotProven.
 
     Every refusal is journaled under its own refusal event id.
     """
@@ -9200,8 +9153,8 @@ def _catalog_provenance_gate(entry: dict, name: str, method: str,
     descriptor = catalog_descriptor_for(name)
     if descriptor is None:
         detail = ("operation %r is not a dispatchable row in "
-                  "proof-battery/OPERATION_CATALOG.md; refusing (unknown "
-                  "operations cannot be overridden)" % name)
+                  "proof-battery/OPERATION_CATALOG.md; only live-proven "
+                  "operations run. Refusing." % name)
         _journal_catalog_refusal(name, method, path_template, params,
                                  "unknown", detail)
         raise CatalogNotProven(detail)
@@ -9217,36 +9170,12 @@ def _catalog_provenance_gate(entry: dict, name: str, method: str,
         raise CatalogNotProven(detail)
     status = descriptor["status"]
     if status == "live-proven":
-        return status, (None, None)
-    if status not in _UNPROVEN_OVERRIDABLE:
-        # A row the live battery proved failed, or marked unsupported or
-        # excluded, has no working route: no override reaches it.
-        detail = ("operation %r is marked %r in the catalog; only "
-                  "live-proven operations run, and the educator-signed "
-                  "--allow-unproven override reaches only rows marked "
-                  "pending (never tried live). Refusing."
-                  % (name, status or "unmarked"))
-        _journal_catalog_refusal(name, method, path_template, params,
-                                 status or "unmarked", detail)
-        raise CatalogNotProven(detail)
-    if not allow_unproven:
-        detail = ("operation %r is marked %r in the catalog, not "
-                  "live-proven; dispatch needs --allow-unproven plus an "
-                  "educator-signed approval record carrying "
-                  "allow_unproven: true" % (name, status or "unmarked"))
-        _journal_catalog_refusal(name, method, path_template, params,
-                                 status or "unmarked", detail)
-        raise CatalogNotProven(detail)
-    if session is None:
-        session = SessionStore.load()
-    try:
-        tenant_base = session.base_for(provider or "canvas")
-    except Exception:
-        tenant_base = None
-    audit, record = check_unproven_override(
-        entry, params, approval, tenant_base,
-        require_educator_channel=require_educator_channel)
-    return status, (audit, record)
+        return status
+    detail = ("operation %r is marked %r in the catalog; only live-proven "
+              "operations run. Refusing." % (name, status or "unmarked"))
+    _journal_catalog_refusal(name, method, path_template, params,
+                             status or "unmarked", detail)
+    raise CatalogNotProven(detail)
 
 _BLOCK_BASE_TOKEN_RE = re.compile(r"^\{[A-Za-z_][A-Za-z0-9_]*\}")
 _PATH_SLOT_RE = re.compile(r"\{[^{}]+\}")
@@ -9278,22 +9207,17 @@ def _block_catalog_key(block: dict) -> tuple:
     return _normalized_catalog_key(block.get("method") or "GET", stripped)
 
 
-def live_proven_gate(entry: dict, unproven_override=None,
-                     journal: bool = True) -> None:
+def live_proven_gate(entry: dict, journal: bool = True) -> None:
     """Refuse unless every request-issuing block of the entry is a
     live-proven row of proof-battery/OPERATION_CATALOG.md.
 
     Applies to every dispatch path (manifest entries, catalog-synthetic
     entries, undo), not only to dispatch_catalog_op: the catalog is the
     authority on what may run. Blocks are matched by method and path
-    template (slot names ignored). The one exception is the F-2
-    educator-signed unproven override issued by the catalog provenance
-    gate: with a signed override record present, the entry's own
-    request block may be a known non-live-proven row; every other block
-    must still be live-proven. Unknown operations are never runnable.
-    Readbacks derived by the executor itself are not entry blocks and
-    are not gated here. Raises CatalogNotProven."""
-    _audit, override_record = unproven_override or (None, None)
+    template (slot names ignored). There is no exception: unknown and
+    non-live-proven operations are never runnable. Readbacks derived by
+    the executor itself are not entry blocks and are not gated here.
+    Raises CatalogNotProven."""
     index = _catalog_rows_by_key()
     name = entry.get("name")
     for where, block in _entry_request_blocks(entry):
@@ -9303,8 +9227,6 @@ def live_proven_gate(entry: dict, unproven_override=None,
         rows = index.get((method, path)) or []
         statuses = sorted({row["status"] for row in rows})
         if "live-proven" in statuses:
-            continue
-        if rows and override_record is not None and where == "request":
             continue
         detail = ("entry %r %s block %s %s is %s in "
                   "proof-battery/OPERATION_CATALOG.md; only live-proven "
@@ -9424,8 +9346,7 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
                         provider: str = "canvas", auth_slot: str = None,
                         plan: FrozenPlan = None, op_id: str = None,
                         pack: dict = None, extra: dict = None,
-                        approval: dict = None, session=None,
-                        allow_unproven: bool = False, dry_run=False,
+                        approval: dict = None, session=None, dry_run=False,
                         require_educator_channel: bool = True,
                         mode_ctx: dict = None) -> dict:
     """Dispatch one generated-catalog operation through the full pipeline.
@@ -9435,10 +9356,9 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
     is de-identified; elsewhere they are refused (LearnerDataGated).
 
     F-2: the catalog provenance gate runs first. The op must be marked
-    live-proven in proof-battery/OPERATION_CATALOG.md, or the caller must
-    pass allow_unproven=True with an educator-signed approval record
-    carrying allow_unproven: true. Unknown names and descriptor mismatches
-    are refused outright and cannot be overridden.
+    live-proven in proof-battery/OPERATION_CATALOG.md; every other row,
+    unknown names, and descriptor mismatches are refused, and nothing
+    overrides that.
 
     session defaults to the https lane's SessionStore; pass a
     ChromiumSession for the chromium backend.
@@ -9450,15 +9370,12 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
     params = params or {}
     entry = catalog_descriptor_to_entry(name, method, path_template,
                                         effect_class, provider, auth_slot, extra)
-    status, unproven_override = _catalog_provenance_gate(
-        entry, name, method, path_template, params, provider,
-        approval=approval, allow_unproven=allow_unproven, session=session,
-        require_educator_channel=require_educator_channel)
+    status = _catalog_provenance_gate(
+        entry, name, method, path_template, params, session=session)
     if session is None:
         session = SessionStore.load()
     return dispatch_entry(entry, params, session, pack, plan=plan, op_id=op_id,
                           approval=approval,
-                          unproven_override=unproven_override,
                           catalog_status=status, dry_run=dry_run,
                           require_educator_channel=require_educator_channel,
                           mode_ctx=mode_ctx)
@@ -9725,7 +9642,7 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
         # approval now, immediately before the undo write is sent, so a
         # target refusal leaves the approval reusable and the undo op_id
         # unclaimed.
-        _burn_write_approval(approval_record, None, undo_op_id)
+        _burn_write_approval(approval_record, undo_op_id)
         # W5-P2-1: last checkpoint before the provider call: a pending
         # signal releases the claim and stops before any effect.
         _raise_if_shutdown_requested(undo_op_id, undo_claim)
@@ -10177,7 +10094,6 @@ def prepare_plan_write(name: str, method: str, path_template: str,
             % (name, entry.get("effects")))
     enforce_effect_class(entry)
     _catalog_provenance_gate(entry, name, method, path_template, params,
-                             provider, approval=None, allow_unproven=False,
                              session=session)
     check_policy_gates(entry, bool(getattr(session, "browser_owned_auth",
                                            False)))
@@ -10676,14 +10592,6 @@ def build_parser():
                        help="path to an educator-signed v2 approval record JSON (required for writes); "
                         "must be digest-bound to this exact action, unexpired, category-scoped, "
                         "and unused (see dispatch/admission.mint_approval)")
-    p_cat.add_argument("--allow-unproven", action="store_true",
-                       help="dispatch a catalog op that is not marked live-proven in "
-                            "proof-battery/OPERATION_CATALOG.md. Requires an educator-signed "
-                            "approval record carrying allow_unproven: true (see "
-                            "dispatch/admission.check_unproven_override); the override is "
-                            "journaled with the op. Unknown operations and never-dispatch / "
-                            "unsupported / evidence-hold / learner-data refusals cannot be "
-                            "overridden.")
     add_backend(p_cat)
     add_mode_ctx(p_cat)
     add_dry_run(p_cat)
@@ -10909,7 +10817,6 @@ def main(argv=None):
                                           provider=args.provider, auth_slot=args.slot,
                                           plan=plan, op_id=args.op_id, pack=pack,
                                           extra=extra, approval=approval,
-                                          allow_unproven=args.allow_unproven,
                                           session=session,
                                           dry_run=args.dry_run,
                                           require_educator_channel=not args.allow_driver_channel,
@@ -10922,7 +10829,6 @@ def main(argv=None):
                                       provider=args.provider, auth_slot=args.slot,
                                       plan=plan, op_id=args.op_id, pack=pack,
                                       extra=extra, approval=approval,
-                                      allow_unproven=args.allow_unproven,
                                       dry_run=args.dry_run,
                                       require_educator_channel=not args.allow_driver_channel,
                                       mode_ctx=mode_ctx)

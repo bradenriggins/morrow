@@ -435,7 +435,7 @@ def t_translator():
     check("tr/no-match", te.mode_id == "quiz-resolution-no-match"
           and "no published quiz" in te.agent_message, te.mode_id)
     check("tr/no-match-placeholders",
-          "2026-09-14..2026-09-20" in te.agent_message
+          "between 2026-09-14 and 2026-09-20" in te.agent_message
           and "(unknown)" not in te.agent_message, te.agent_message[:200])
     te = TR.translate("op", Q.QuizAmbiguous(
         datetime(2026, 9, 14), datetime(2026, 9, 20),
@@ -473,7 +473,7 @@ def t_translator():
               e.translated.mode_id == "query-arguments-invalid",
               e.translated.mode_id)
         check("tr/chainfailure-message",
-              "arguments were not valid" in e.translated.agent_message)
+              "not one it can run" in e.translated.agent_message)
     try:
         C.run_query("89585", "last_week", reader=FakeReader([], []), now_utc=NOW,
                     tenant_base=_TEST_TENANT, timezone=CHI)

@@ -83,6 +83,14 @@ class QuizResolutionError(Exception):
         self.resolution_evidence = dict(evidence or {})
 
 
+def _date_word(field):
+    """The educator's word for the date field that set a quiz's
+    effective date (assignment.due_at -> "due")."""
+    name = str(field or "").rsplit(".", 1)[-1]
+    return {"due_at": "due", "lock_at": "closes", "unlock_at": "opens",
+            "created_at": "created"}.get(name, "dated")
+
+
 class QuizNotFound(QuizResolutionError):
     """No quiz matched the reference window; carries context, not a pick."""
 
@@ -103,8 +111,8 @@ class QuizNotFound(QuizResolutionError):
                 "window_start": local_ymd(window_start, tz),
                 "window_end": local_ymd(window_end, tz),
                 "nearest_public": "; ".join(
-                    "%s (id %s, %s via %s)" % (t, i, eff, f)
-                    for t, i, eff, f in nearest) or "(no dated quizzes)",
+                    "%s (id %s, %s %s)" % (t, i, _date_word(f), eff)
+                    for t, i, eff, f in nearest) or "no quiz has a date",
             })
         self.window_start = window_start
         self.window_end = window_end
@@ -131,8 +139,8 @@ class QuizAmbiguous(QuizResolutionError):
                 "window_start": local_ymd(window_start, tz),
                 "window_end": local_ymd(window_end, tz),
                 "candidates_public": "; ".join(
-                    "%s (id %s, effective %s via %s, %s points)" % (
-                        t, i, eff, f,
+                    "%s (id %s, %s %s, %s points)" % (
+                        t, i, _date_word(f), eff,
                         ("%.0f" % p) if p is not None else "?")
                     for t, i, eff, f, p in candidates),
             })
