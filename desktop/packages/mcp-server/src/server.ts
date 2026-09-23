@@ -23,7 +23,7 @@ import { capabilityInputRefusalText, capabilityProblemText, isPrivateSourceTool,
 import { registerActivityTool, type ActivityGroups } from "./activity-tools.js";
 import { MORROW_SERVER_INSTRUCTIONS } from "./server-instructions.js";
 import { registerLessonReviewTool, type LessonReviewState } from "./lesson-review.js";
-import { registerEditAccessTool, type EditAccessRequestState } from "./edit-access.js";
+import { registerEditAccessTool } from "./edit-access.js";
 import { PrivateChatContinuationLedger, registerPrivateChatTool, type PrivateChatRequestState } from "./private-chat.js";
 import { registerCourseAuditResource, registerCourseAuditTool } from "./course-audit.js";
 import { registerCourseInventoryTool } from "./course-inventory.js";
@@ -312,7 +312,7 @@ export function createMorrowServer(
   groups?: ActivityGroups,
 ): McpServer {
   const workspaceRoot = serverContext.workspaceRoot;
-  const reviewState = createRequestStateCodec<LessonReviewState | EditAccessRequestState | PrivateChatRequestState>({
+  const reviewState = createRequestStateCodec<LessonReviewState | PrivateChatRequestState>({
     key: serverContext.requestStateKey ?? randomBytes(32), ttlSeconds: 600,
     bind: (context) => `${context.mcpReq.method}\0${context.sessionId ?? ""}\0${context.http?.authInfo?.clientId ?? ""}`,
   });
@@ -332,7 +332,7 @@ export function createMorrowServer(
     ...(groups ? { groups } : {}),
   });
   registerLessonReviewTool(server, runtime, reviewState);
-  registerEditAccessTool(server, runtime, reviewState);
+  registerEditAccessTool(server, runtime);
   registerPrivateChatTool(server, runtime, reviewState, serverContext.privateChatContinuations);
   registerCourseAuditResource(server);
   registerCourseAuditTool(server, runtime);

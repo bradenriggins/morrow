@@ -17,7 +17,8 @@ const MAX_LEARNER_NAMES = 300;
 const PROOF_CONTEXT = "morrow.review-approval.v1";
 const PRESENCE_ORIGIN = /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/;
 const PRESENCE_KEY = /^[A-Za-z0-9_-]{43}$/;
-const REVIEW_PATH = /^\/(?:operations|batches)\/[A-Za-z0-9_.%-]{1,480}$/;
+// A change review, a group review, or an Edit access review (Turn on Edit from a conversation).
+const REVIEW_PATH = /^\/(?:operations|batches|edit-access)\/[A-Za-z0-9_.%-]{1,480}$/;
 const NONCE = /^[A-Za-z0-9_-]{43}$/;
 
 /** The same rule as `normalizeBridgeUiState` in packages/bridge-protocol applies to `presence`. */

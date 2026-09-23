@@ -107,6 +107,7 @@ import {
 } from "@morrow/operation-journal";
 import { StdioMcpUpstream, UpstreamNotDispatchedError } from "@morrow/upstream-mcp";
 import { FileStageStore, MAX_STAGED_FILE_BYTES, type FileStageBinding, type FileStageScope } from "./file-staging.js";
+import { DESTRUCTIVE_EDIT_REFUSAL, EditAccessReviews } from "./edit-access-review.js";
 import { validItemBankFanOutReceipt } from "./item-bank-fan-out.js";
 import { itemBankFanOutPlanRefusal } from "./item-bank-repair.js";
 import { readExactTrustFile, readExactTrustJson } from "./exact-trust-file.js";
@@ -2064,6 +2065,11 @@ export class GatewayRuntime {
   private approvalBaseUrl: string | null = null;
   private approvalPresence: BridgeUiApprovalPresence | null = null;
   /**
+   * Edit asked for in a conversation, waiting for the person's click on Morrow's review page. The
+   * review server turns one on only with Morrow Bridge's signature over that click.
+   */
+  readonly editAccessReviews = new EditAccessReviews((prepared) => this.applyBrowserEditAccess(prepared));
+  /**
    * Who each learner label on an open review is, keyed by review path, for Morrow Bridge only.
    * An entry ends with its review: when the change is cancelled, or 15 minutes after the review
    * page last showed it, the same lifetime as the page's approval cookie.
@@ -3807,8 +3813,8 @@ export class GatewayRuntime {
         || available.has(category.id)) {
         throw new Error("The selected browser course categories changed. Read current course connections and try again.");
       }
-      // The confirmation a person accepts has to name what the settings page names, so the two
-      // flags its confirmation stage reads travel with the label instead of being dropped here.
+      // The Edit access review a person answers has to name what the settings page names, so the
+      // two flags its confirmation stage reads travel with the label instead of being dropped here.
       // The six WI-3.1 option facts (area, kind, reach, learnerVisible, routine, rememberable)
       // pass through the same way, for later work items that read a category's facts here.
       if (category.availability !== "review") {
@@ -3831,6 +3837,8 @@ export class GatewayRuntime {
       for (const id of input.enabledCategories ?? []) {
         const reason = this.browserEditCategoryUnavailableReason(provider, id);
         if (reason !== null) throw new EditCategoryUnavailableError(id, reason);
+        // A removal is turned on only by the person in Morrow Bridge settings, never from a conversation.
+        if (available.get(id)?.destructive === true) throw new EditCategoryUnavailableError(id, DESTRUCTIVE_EDIT_REFUSAL);
       }
     }
     const selectedIds = input.enabledCategories ? [...input.enabledCategories] : [];
@@ -3877,6 +3885,18 @@ export class GatewayRuntime {
       return this.browserEditAccessSelection(binding, input, mode);
     }).sort((left, right) => compareAscii(left.sourceBindingId, right.sourceBindingId));
     return { mode, selections };
+  }
+
+  /**
+   * Opens Morrow's Edit access review for a scope `prepareBrowserEditAccess` already checked. It
+   * saves nothing: only the person's signed click on that review page does.
+   */
+  createEditAccessReview(prepared: BrowserEditAccessPrepared): JsonObject {
+    return this.editAccessReviews.create(prepared, this.approvalBaseUrl);
+  }
+
+  editAccessReviewResult(editAccessId: string): JsonObject {
+    return this.editAccessReviews.result(editAccessId);
   }
 
   async applyBrowserEditAccess(

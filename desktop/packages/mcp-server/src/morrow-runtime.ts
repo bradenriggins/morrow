@@ -792,6 +792,10 @@ export class MorrowRuntime {
         approveBatch: (batchId) => runtime!.approveBatch(batchId),
         runApprovedBatch: (batchId, signal) => runtime!.runApprovedBatch(batchId, signal),
         cancelBatchApproval: (batchId) => runtime!.cancelBatchApproval(batchId),
+        editAccessGet: (editAccessId) => gateway.editAccessReviews.page(editAccessId),
+        approveEditAccess: (editAccessId) => gateway.editAccessReviews.approve(editAccessId),
+        runApprovedEditAccess: (editAccessId) => gateway.editAccessReviews.run(editAccessId),
+        cancelEditAccess: (editAccessId) => gateway.editAccessReviews.cancel(editAccessId),
       });
       runtime = new MorrowRuntime(gateway, batches, sourceSettlements, approval);
       runtime.synchronizeEffectBatchAuthority();

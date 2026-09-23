@@ -60,7 +60,7 @@ import { executeMoodleBigBlueButtonInPage } from "./moodle-bbb-executor.js";
 import { executeMoodleSubsectionInPage } from "./moodle-subsection-executor.js";
 import { executeMoodleBackupInPage } from "./moodle-backup-executor.js";
 import { collectMoodleCourseParticipantRoster } from "./moodle-privacy.js";
-import { EDIT_PERMISSION_SCHEMA, EDIT_POLICY_SELECTION_LIMIT, categoriesForBinding, changedFields, createEditPermission, guardedItemBankUpdate, migrateLegacyEditPermission, validEditPermission } from "./edit-policy.js";
+import { EDIT_PERMISSION_SCHEMA, EDIT_POLICY_SELECTION_LIMIT, categoriesForBinding, changedFields, createEditPermission, destructiveCategoryIds, guardedItemBankUpdate, migrateLegacyEditPermission, validEditPermission } from "./edit-policy.js";
 import { BridgeMaintenanceError, createBridgeMaintenance } from "./bridge-maintenance.js";
 import { serializeBridgeResult } from "./bridge-transport.js";
 import { canvasProtectedRoster, protectLocalRequest, sourceProtectedRoster } from "./protected-request.js";
@@ -2456,6 +2456,12 @@ async function applyBridgePolicySet(policySet, command) {
         nextRevisions[selection.sourceBindingId] = priorRevision + 1;
         entries.push({ sourceBindingId: selection.sourceBindingId, state: "plan", revision: priorRevision + 1, changed: true });
         changed = true;
+        continue;
+      }
+      // A command from the Morrow socket never turns on an action that removes content. The person
+      // turns those on in Plan and Edit settings, which saves through saveEditPolicy instead.
+      if (destructiveCategoryIds(selection.enabledCategories, binding, [...state.operations.values()]).length) {
+        entries.push({ sourceBindingId: selection.sourceBindingId, state: permission ? "edit" : "plan", revision: priorRevision, ...(permission ? { editPermission: permission } : {}), code: "edit_policy_destructive_refused" });
         continue;
       }
       const anchor = anchorForBinding(binding, stored.siteAnchors);

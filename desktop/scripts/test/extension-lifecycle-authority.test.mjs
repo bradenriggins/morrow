@@ -731,7 +731,37 @@ async function policySetDurationRefusedScenario() {
   assert.deepEqual(value.local.values.editPolicies, {});
 }
 
-/** A grant saved before Edit stopped being timed: the same shape, with its own end time in its scope. */
+// A removal is turned on only by the person in Plan and Edit settings. A Morrow socket command that
+// names one, alone or among other actions, saves nothing for that course.
+async function policySetDestructiveRefusedScenario() {
+  const value = fixture();
+  await importWorker("policy-destructive-refused");
+  const socket = await authenticate(value);
+  const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
+  const editable = options.result.options.filter((candidate) => candidate.availability === "edit");
+  const removal = editable.find((candidate) => candidate.destructive === true);
+  const routine = editable.find((candidate) => candidate.destructive !== true);
+  assert.ok(removal && routine, "fixture catalog must offer an editable removal and an editable routine action");
+  for (const [index, enabledCategories] of [[removal.id], [removal.id, routine.id].sort()].entries()) {
+    const command = policySetCommand({
+      requestId: `request-policy-destructive-${index}`,
+      operationId: `operation-policy-destructive-${index}`,
+      editPolicySet: { mode: "edit", selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: 0, enabledCategories }] },
+    });
+    socket.receive(command);
+    const result = await eventually(() => socket.sent.find((message) => message.requestId === command.requestId));
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.result.entries[0], { sourceBindingId: bindingId, state: "plan", revision: 0, code: "edit_policy_destructive_refused" });
+    assert.deepEqual(value.local.values.editPolicies ?? {}, {});
+    assert.equal(value.createdTabs.length, 0);
+  }
+  // The same removal saved from the settings page, where the person selects it, is still allowed.
+  const saved = await sendRuntime(value, { type: "morrow_edit_policy_save", sourceBindingId: bindingId, enabledCategories: [removal.id] }, settingsSender());
+  assert.equal(saved.ok, true);
+  assert.deepEqual(value.local.values.editPolicies[bindingId].enabledCategories, [removal.id]);
+}
+
+/** A grant saved before Edit stopped being timed: the same shape, with its own end time in its scope. *//** A grant saved before Edit stopped being timed: the same shape, with its own end time in its scope. */
 async function legacyTimedGrant(permission, binding, expiresAt) {
   const stable = (entry) => Array.isArray(entry) ? `[${entry.map(stable).join(",")}]`
     : entry && typeof entry === "object" ? `{${Object.keys(entry).sort().map((key) => `${JSON.stringify(key)}:${stable(entry[key])}`).join(",")}}`
@@ -1908,6 +1938,7 @@ const scenarios = {
   "policy-merge-union": policySetMergeUnionScenario,
   "policy-merge-fresh": policySetMergeFreshGrantScenario,
   "policy-duration-refused": policySetDurationRefusedScenario,
+  "policy-destructive-refused": policySetDestructiveRefusedScenario,
   "policy-merge-legacy": policySetMergeLegacyTimedScenario,
   "settings-save-untimed": settingsSaveUntimedScenario,
   "edit-scope-page-create": editScopePageCreateScenario,
@@ -2060,6 +2091,10 @@ test("a policy-set merge with no active grant starts a fresh grant with no end t
 
 test("a policy-set that still names a duration is refused and saves nothing", async () => {
   await isolatedScenario("policy-duration-refused");
+});
+
+test("a policy-set from the Morrow socket that names an action that removes content saves nothing", async () => {
+  await isolatedScenario("policy-destructive-refused");
 });
 
 test("a policy-set merge into a grant saved with an end time keeps that end time", async () => {
