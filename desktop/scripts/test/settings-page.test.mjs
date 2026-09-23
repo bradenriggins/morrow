@@ -441,6 +441,62 @@ test("Customize shows a platform-neutral bundle for a mixed Canvas and Moodle se
   assert.deepEqual(listedActions(page), ["Routine edits"]);
 });
 
+// The Routine edits promise is the list of changes Morrow makes with no review. Each field a
+// routine rule may change maps to the words that name it, and the one thing the routine set
+// creates is named as the only exception to "always asks before it creates".
+const ROUTINE_FIELD_WORDS = new Map([
+  ...["content", "name", "instructions", "wiki_page_body", "wiki_page_title", "module_name", "module_item_title",
+    "assignment_description", "assignment_name", "message", "title", "quiz_description", "quiz_title"].map((field) => [field, "text and titles"]),
+  ["module_position", "reorder"],
+  ["module_item_position", "reorder"],
+  ["module_item_indent", "indent"],
+  ["module_item_external_url", "module item links"],
+  ["module_item_new_tab", "how they open"],
+  ["module_item_module_id", "move"],
+  ["parent_folder_id", "move"],
+  ["parent_folder_path", "move"],
+]);
+
+test("the Routine edits promise names every change the routine set makes with no review", async () => {
+  const rules = CURATED_CATEGORY_SPECS.filter((spec) => spec.routine === true).flatMap((spec) => spec.rules || []);
+  const unnamed = [...new Set(rules.flatMap((rule) => rule.allowedChangedFields || []))].filter((field) => !ROUTINE_FIELD_WORDS.has(field));
+  assert.deepEqual(unnamed, [], "a routine field the Routine edits promise does not name");
+  const created = [...new Set(rules.map((rule) => /^(?:canvas|moodle)_create_([a-z]+)/u.exec(rule.toolName)?.[1]).filter(Boolean))];
+  assert.deepEqual(created, ["folder"], "the routine set creates something new; name it in the Routine edits promise");
+  assert.equal(CURATED_CATEGORY_SPECS.some((spec) => spec.routine === true && spec.id === "canvas_alt_text"), true);
+
+  const routine = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1"), enabledCategories: CANVAS_ROUTINE_IDS } });
+  const routinePage = await openSettings({ status: () => statusFixture([routine]) });
+  const lead = (await openCourseDetail(routinePage, routine.sourceBindingId)).querySelector(".field-help").textContent;
+
+  const chemistry = moodleCourse(2, "Chemistry");
+  const page = await openSettings({
+    status: () => statusFixture([ANATOMY, chemistry]),
+    options: (sourceBindingId) => optionsFixture(
+      sourceBindingId,
+      sourceBindingId.startsWith("moodle:") ? MOODLE_ROUTINE_OPTIONS : CANVAS_ROUTINE_OPTIONS,
+      { provider: sourceBindingId.startsWith("moodle:") ? "moodle" : "canvas" },
+    ),
+  });
+  await page.click("#course-select-mode");
+  await page.click(`[data-binding-id="${ANATOMY.sourceBindingId}"] .course-select`);
+  await page.click(`[data-binding-id="${chemistry.sourceBindingId}"] .course-select`);
+  await page.waitFor(() => page.query("#course-bulk-routine").disabled === false, "the mixed selection's options never finished loading");
+  await page.click("#mode-edit");
+  await openCustomizeGroup(page, "other", "edit");
+  const family = page.query("#category-list .category-option small").textContent;
+  const summaries = [page.text("#routine-switch .routine-toggle small"), family];
+  for (const summary of summaries) {
+    for (const words of new Set(ROUTINE_FIELD_WORDS.values())) assert.match(summary, new RegExp(words, "iu"), summary);
+    assert.match(summary, /\bcreates? folders\b/u, summary);
+    assert.match(summary, /alternative text/u, summary);
+  }
+  for (const promise of [...summaries, lead]) {
+    assert.match(promise, /creates anything other than a folder/u, promise);
+    assert.doesNotMatch(promise, /(?:before it|never) creates,/u, promise);
+  }
+});
+
 // WI-5.3: the bulk bar's Plan shortcut reuses returnToPlan, the same handler "Return selected
 // courses to Plan" uses.
 test("the bulk bar's Plan shortcut returns every selected course to Plan", async () => {

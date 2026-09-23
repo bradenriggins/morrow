@@ -711,7 +711,7 @@ function categoryFamily(category) {
 const CATEGORY_FAMILIES = Object.freeze({
   routine: Object.freeze({
     label: "Routine edits",
-    description: "Edit titles, text, order, file names and alternative text that already exist in every selected course. It never creates, publishes, removes, posts, or changes a date, points or a setting.",
+    description: "Edit text and titles, change module item links and how they open, reorder, indent and move modules, items and files, create folders, and add alternative text in the selected courses. It never creates anything other than a folder, publishes, removes, posts, or changes a date, points or a course setting.",
   }),
   dates: Object.freeze({
     label: "Change assignment and quiz dates",
@@ -1198,7 +1198,7 @@ function renderCourseDetail(binding, isOpen) {
   const level = courseLevel(binding);
   const ids = level === "plan" ? [] : (Array.isArray(binding?.editPermission?.enabledCategories) ? binding.editPermission.enabledCategories.filter((value) => typeof value === "string") : []);
   const lead = level === "routine"
-    ? "Morrow makes the routine edits below without another approval until you choose Plan. It always asks before it creates, publishes, removes, posts, or changes a date, points or a setting."
+    ? "Morrow makes the routine edits below without another approval until you choose Plan. It always asks before it creates anything other than a folder, publishes, removes, posts, or changes a date, points or a course setting."
     : level === "custom"
       ? "Morrow makes the changes you selected in Customize until you choose Plan. It asks before every other change."
       : "Morrow asks before each change. To skip the review for one kind of edit, choose Edit above, or use “do not ask again” on a review.";
