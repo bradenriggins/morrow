@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { readExactTrustFile } from "./exact-trust-file.mjs";
+import { isUnsignedPackageSigning } from "./unsigned-desktop-signing.mjs";
 
 export const WINDOWS_SMOKE_OBSERVATION_SCHEMA = "morrow.desktop-windows-smoke.v1";
 export const WINDOWS_SMOKE_EVIDENCE_SCHEMA = "morrow.desktop-windows-smoke-evidence.v1";
@@ -89,15 +90,12 @@ export function createWindowsSmokeBindingFromPackage({ runId, sourceCommit, pack
     || receipt.source?.dirty !== false
     || receipt.payload?.releaseGraph?.schema !== "morrow.desktop-packager-admission.v1"
     || !SHA256_PATTERN.test(receipt.payload?.releaseGraph?.sha256 || "")
-    || receipt.signing?.mode !== "unsigned_private_qa"
-    || receipt.signing?.target !== "win32-x64"
-    || receipt.signing?.publicRelease !== false
-    || receipt.signing?.artifactSignature !== "authenticode_absent"
+    || !isUnsignedPackageSigning(receipt.signing, "win32-x64", { artifactSignature: "authenticode_absent" })
     || !artifact
     || artifact.name !== expectedName
     || !SHA256_PATTERN.test(artifact.sha256 || "")
     || basename(installer) !== artifact.name) {
-    throw new Error("Windows package receipt is not the expected unsigned QA release graph.");
+    throw new Error("Windows package receipt is not the expected unsigned release graph.");
   }
   const installerBytes = readExactTrustFile(installer, {
     label: "Windows installer",

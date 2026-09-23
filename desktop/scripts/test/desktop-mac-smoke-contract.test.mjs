@@ -116,7 +116,59 @@ test("macOS smoke evidence binds the retained package graph, DMG, ZIP, source, a
     packageReceipt,
     source: "d".repeat(40),
     runId: "b".repeat(32),
-  }), /not the expected unsigned QA release graph/);
+  }), /not the expected unsigned release graph/);
+});
+
+/**
+ * The release a maintainer publishes is built with --unsigned-release, and the QA workflow builds
+ * with --unsigned-qa. Both are the same unsigned application; only the receipt's signing record
+ * differs. docs/versioning.md smoke-tests the published files before `gh release create`, so the
+ * harness binds either record the packager writes, and nothing else.
+ *
+ * Failure mode pinned down (written before the fix; final sweep 2026-09-23): the harness refused
+ * every --unsigned-release receipt, so the files educators download were never started by a smoke
+ * test; the QA run tested other bytes that were then discarded.
+ */
+test("macOS smoke binds the unsigned release build a maintainer publishes, and no other signing record", async (t) => {
+  const root = mkdtempSync(resolve(tmpdir(), "morrow-mac-smoke-release-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const imageBytes = Buffer.from("published disk image");
+  const archiveBytes = Buffer.from("published archive");
+  writeFileSync(resolve(root, "Morrow-1.0.5-mac-arm64.dmg"), imageBytes);
+  writeFileSync(resolve(root, "Morrow-1.0.5-mac-arm64.zip"), archiveBytes);
+  const bind = (signing) => {
+    const packageReceipt = resolve(root, "receipt.json");
+    writeFileSync(packageReceipt, JSON.stringify({
+      schema: "morrow.desktop-installer.v1",
+      version: "1.0.5",
+      target: "darwin-arm64",
+      source: { head: SOURCE, dirty: false },
+      payload: { releaseGraph: { schema: "morrow.desktop-packager-admission.v1", sha256: "c".repeat(64) } },
+      signing,
+      artifacts: [
+        { name: "Morrow-1.0.5-mac-arm64.dmg", sha256: sha256(imageBytes) },
+        { name: "Morrow-1.0.5-mac-arm64.zip", sha256: sha256(archiveBytes) },
+      ],
+    }));
+    return createMacSmokeBinding({ diskImage: resolve(root, "Morrow-1.0.5-mac-arm64.dmg"), packageReceipt, source: SOURCE, runId: "b".repeat(32) });
+  };
+
+  const release = { mode: "unsigned_public_release", target: "darwin-arm64", publicRelease: true, automaticUpdates: false };
+  const binding = await bind(release);
+  assert.equal(binding.diskImage.fileName, "Morrow-1.0.5-mac-arm64.dmg");
+  assert.equal(binding.packageReceipt.fileName, "receipt.json");
+  await bind({ mode: "unsigned_private_qa", target: "darwin-arm64", publicRelease: false });
+
+  for (const signing of [
+    { ...release, publicRelease: false },
+    { ...release, automaticUpdates: true },
+    { mode: "unsigned_private_qa", target: "darwin-arm64", publicRelease: true },
+    { ...release, target: "win32-x64" },
+    { ...release, identity: "Developer ID Application" },
+    { mode: "signed_public_release", target: "darwin-arm64", publicRelease: true, automaticUpdates: false },
+  ]) {
+    await assert.rejects(bind(signing), /not the expected unsigned release graph/, JSON.stringify(signing));
+  }
 });
 
 test("accepts the named unbound state when another program held the Chrome bridge port", () => {

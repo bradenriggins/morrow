@@ -10,6 +10,7 @@ import { runOwnedProcess } from "../lib/owned-process.mjs";
 import { assertDesktopRendererSmokeReceipt } from "../lib/desktop-renderer-smoke.mjs";
 import { electronAsarReleaseIdentity, readElectronAsarPackage } from "../lib/electron-asar-package.mjs";
 import { withTemporaryDirectory } from "../lib/temporary-directory.mjs";
+import { isUnsignedPackageSigning } from "../lib/unsigned-desktop-signing.mjs";
 
 const MAX_OUTPUT_BYTES = 128 * 1024;
 // Morrow verifies every file of the sealed MCP payload by hash before it starts
@@ -81,9 +82,9 @@ async function createMacSmokeBinding({ diskImage, packageReceipt, source, runId 
     || receipt.target !== "darwin-arm64" || receipt.source?.head !== source || receipt.source?.dirty !== false
     || receipt.payload?.releaseGraph?.schema !== "morrow.desktop-packager-admission.v1"
     || !/^[0-9a-f]{64}$/.test(receipt.payload?.releaseGraph?.sha256 || "")
-    || receipt.signing?.mode !== "unsigned_private_qa" || receipt.signing?.target !== "darwin-arm64"
-    || receipt.signing?.publicRelease !== false || !Array.isArray(receipt.artifacts) || receipt.artifacts.length !== 2) {
-    throw new Error("The macOS smoke package receipt is not the expected unsigned QA release graph.");
+    || !isUnsignedPackageSigning(receipt.signing, "darwin-arm64")
+    || !Array.isArray(receipt.artifacts) || receipt.artifacts.length !== 2) {
+    throw new Error("The macOS smoke package receipt is not the expected unsigned release graph.");
   }
   const artifactDirectory = dirname(packageReceipt);
   const artifacts = [];
@@ -403,7 +404,7 @@ async function main() {
         listenerProven: bridgePortFree
       },
       observed: { stderrStage: appReceipt.runtimeTrace.stderrStage, portBinding: appReceipt.runtimeTrace.portBinding },
-      // This harness mounts and launches the retained unsigned QA disk image.
+      // This harness mounts and launches the retained unsigned disk image.
       // It measures none of the following, so no run of it is evidence about them.
       notVerified: ["code signature", "notarization", "Gatekeeper quarantine handling", "macOS on Intel"]
     };
