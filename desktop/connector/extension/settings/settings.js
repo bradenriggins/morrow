@@ -1346,13 +1346,15 @@ function renderCourseList(focus = focusedCourseControl()) {
     courseList.innerHTML = Array.from({ length: 3 }, () => '<div class="course-card-skeleton" aria-hidden="true"></div>').join("");
   } else if (!connectedBindings.length && !rows.length) {
     // WI-F.10: one composed empty message, plus the WI-1.1 open-platform action once a site is saved.
+    // With no saved site, Morrow Bridge has no Chrome access to any course tab, so the message names
+    // the popup step that grants it.
     const anchor = savedAnchor();
     courseList.innerHTML = anchor
       ? `<div class="course-list-empty state-message">
           <p>Open a course in Canvas or Moodle. Morrow Bridge finds it.</p>
           <button id="open-platform-empty" type="button" ${state.openPlatformBusy ? 'disabled aria-busy="true"' : ""}>${escapeHtml(openPlatformLabel(anchor, state.openPlatformProgressVisible))}</button>
         </div>`
-      : '<p class="state-message">Open a course in Canvas or Moodle. Morrow Bridge finds it.</p>';
+      : '<p class="state-message">Open a signed-in Canvas or Moodle course in Chrome. Then open the Morrow Bridge popup, select Connect this course, and allow access when Chrome asks.</p>';
   } else if (!limited.length) {
     courseList.innerHTML = state.filters.q.trim() || state.filters.platform !== "all" || state.filters.term !== "all" || state.filters.scope !== "all"
       ? `<p class="state-message">No course matches this search or filter. Clear it to view every course in this list.</p>`

@@ -153,8 +153,9 @@ test("with no connected course the page states that, and offers no course to act
   assert.equal(page.text("#connection-status"), "No course is connected yet.");
   // WI-F.10: pin changed from "No connected courses are available. Choose a signed-in site above to
   // find courses you can connect." to the composed empty message. No site is saved here, so it
-  // carries no action.
-  assert.equal(page.text("#course-list"), "Open a course in Canvas or Moodle. Morrow Bridge finds it.");
+  // carries no action. Morrow Bridge cannot see a course tab before Chrome grants it that site, so
+  // the message names the popup step that does, not a course the Bridge finds by itself.
+  assert.equal(page.text("#course-list"), "Open a signed-in Canvas or Moodle course in Chrome. Then open the Morrow Bridge popup, select Connect this course, and allow access when Chrome asks.");
   assert.equal(page.queryAll("#course-list button").length, 0);
   assert.equal(page.query("#course-list").getAttribute("aria-busy"), "false");
   assert.equal(page.text("#selection-summary"), "No course selected. Select a course above, then choose Plan or Edit.");
@@ -250,7 +251,7 @@ test("the connected-course summary counts only runtime-verified eligible courses
     "0 connected courses are ready to use. 1 saved course needs an open course tab or a reconnected site.");
   await reread([], "No course is connected yet.");
   // WI-F.10 pin: see "with no connected course the page states that, and offers no course to act on".
-  assert.equal(page.text("#course-list"), "Open a course in Canvas or Moodle. Morrow Bridge finds it.");
+  assert.equal(page.text("#course-list"), "Open a signed-in Canvas or Moodle course in Chrome. Then open the Morrow Bridge popup, select Connect this course, and allow access when Chrome asks.");
 });
 
 // WI-5.3: a course loses its checkbox and moves to "Needs attention" the moment its site closes; a
