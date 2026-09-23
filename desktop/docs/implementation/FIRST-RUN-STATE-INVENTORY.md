@@ -241,7 +241,7 @@ it. After acceptance the popup keeps one link with that same name instead of rep
 | `detected-platform` | The active course is detected. The primary action and detail both say **Connect this course**, on Canvas or Moodle alike. | Select **Connect this course** and allow the exact address Chrome shows. | `connector/extension/popup/popup-view.js:191` |
 | `site-ready-no-course` | Course "Ready", **Choose courses**, and a Plan explanation. | **Choose courses**, which opens Plan and Edit settings. | `connector/extension/popup/popup-view.js:220` |
 | `site-stale` | Course "Canvas is closed" and the detail names the saved Canvas connection. | Select **Open Canvas** to reopen it (WI-1.1). | `connector/extension/popup/popup-view.js:197` |
-| `course-ready` | Course "Connected", the selected course and last-check time, and a detail that names the Canvas course tab. | Ask the assistant, or use **Check or switch course**. | `connector/extension/popup/popup-view.js:216` |
+| `course-ready` | Course "Connected", the selected course and the time it was connected, and a detail that names the Canvas course tab. | Ask the assistant, or use **Check or switch course**. | `connector/extension/popup/popup-view.js:216` |
 | `course-tab-closed` | Course "Canvas is closed" and a detail that names the closed Canvas tab. | Select **Open Canvas** to reopen it (WI-1.1). | `connector/extension/popup/popup-view.js:193` |
 
 The exact status, course, action, and detail strings emitted for these branches are:
