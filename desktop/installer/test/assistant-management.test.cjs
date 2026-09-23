@@ -21,6 +21,11 @@ function sha256(content) {
   return crypto.createHash("sha256").update(content).digest("hex");
 }
 
+// Claude Desktop runs on macOS and Windows. A Claude Desktop setup test uses
+// this host's own platform where Claude Desktop runs, and macOS elsewhere: a
+// setup made for one platform names paths the other platform cannot hold.
+const CLAUDE_DESKTOP_PLATFORM = process.platform === "win32" ? "win32" : "darwin";
+
 async function temporaryRoot() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-assistant-management-"));
   await fs.mkdir(path.join(root, "UserData"), { recursive: true });
@@ -714,7 +719,7 @@ test("Claude replacement revokes old roots before activation and restores them w
   const root = await temporaryRoot();
   const materials = path.join(root, "Materials");
   await fs.mkdir(materials);
-  const { installer } = controller(root, { platform: "darwin" });
+  const { installer } = controller(root, { platform: CLAUDE_DESKTOP_PLATFORM });
   await claudeRuntimeFixture(installer);
   installer.ensureRuntime = async () => installer.paths;
   const old = await claudeSetupFixture(installer, "setup-old", "old-installation");
@@ -825,7 +830,7 @@ test("startup migrates a legacy Claude launcher to an authority-bound generation
   const root = await temporaryRoot();
   const materials = path.join(root, "Materials");
   await fs.mkdir(materials);
-  const { installer } = controller(root, { platform: "darwin" });
+  const { installer } = controller(root, { platform: CLAUDE_DESKTOP_PLATFORM });
   await claudeRuntimeFixture(installer);
   const legacy = await claudeSetupFixture(installer, "setup-legacy", "legacy-installation");
   await installer.writeRecord({
@@ -1151,10 +1156,9 @@ test("a folder change makes the Claude Desktop extension again, for the folder t
   const chosen = path.join(root, "Fall biology");
   await fs.mkdir(chosen, { recursive: true });
   // Claude Desktop is configured by an extension a person approves, so the
-  // folder is inside the extension Morrow generates. The platform is fixed
-  // here because Claude Desktop documents this file for macOS and Windows.
+  // folder is inside the extension Morrow generates.
   const { installer } = controller(root, {
-    platform: "darwin",
+    platform: CLAUDE_DESKTOP_PLATFORM,
     dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) }
   });
   for (const file of [installer.paths.node, installer.paths.server, installer.paths.upstreams]) await writeFile(file, "fixture");
