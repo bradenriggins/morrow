@@ -78,6 +78,11 @@ function readiness(state) {
     heading: "Waiting for approval",
     summary: "Morrow is waiting for you to allow this connection on the Morrow page that opened.",
   };
+  if (state.authenticationFailed) return {
+    tone: "attention",
+    heading: "Reconnect needed",
+    summary: "Morrow no longer accepts the connection Morrow Bridge saved, so it needs a new approval.",
+  };
   if (state.connecting) return {
     tone: "waiting",
     heading: "Connecting Morrow",
@@ -102,7 +107,7 @@ function readiness(state) {
 
 export function setupGuideState(status) {
   const known = Boolean(status) && typeof status === "object";
-  const state = { canOpenApproval: false, ...(known ? readState(status) : unreadState()), known };
+  const state = { canOpenApproval: false, canReconnect: false, ...(known ? readState(status) : unreadState()), known };
   return { ...state, ...readiness(state) };
 }
 
@@ -111,8 +116,11 @@ function readState(status) {
   const anchors = Array.isArray(status?.siteAnchors) ? status.siteAnchors : [];
   const readyCourses = bindings.filter((binding) => binding?.runtimeVerified === true).length;
   const readySites = anchors.filter((anchor) => anchor?.runtimeVerified === true).length;
-  const paired = status?.paired === true;
   const pairing = status?.pairing === true;
+  // Morrow refused the saved connection (it was reinstalled, or its data was removed), so the
+  // earlier approval no longer counts, and opening Morrow again cannot fix it.
+  const authenticationFailed = !pairing && status?.authenticationFailed === true;
+  const paired = status?.paired === true && !authenticationFailed;
   const connecting = status?.connecting === true;
   const connected = status?.connected === true;
   // Morrow closes a connection from a Bridge build it does not expect with its own reason, so the
@@ -130,6 +138,8 @@ function readState(status) {
       done: paired,
       text: paired
         ? "An assistant approved this connection in Morrow. Morrow Bridge sees the connection, not the assistant itself."
+        : authenticationFailed
+          ? "Morrow no longer accepts this saved connection, so it needs a new approval"
         : pairing
           ? "An assistant approval is waiting on the Morrow page that opened"
           : "No assistant has approved this connection yet",
@@ -178,7 +188,7 @@ function readState(status) {
   // The first check that is not complete is the step this guide asks for, unless an approval or a
   // connection attempt is already open, which is the step in front of the person right now.
   const open = checks.find((check) => !check.done)?.id || "";
-  const state = { ready, pairing, connecting, connected, runtimeHealthy, readyCourses, readySites, readCourse, open, checks };
+  const state = { ready, pairing, authenticationFailed, connecting, connected, runtimeHealthy, readyCourses, readySites, readCourse, open, checks };
 
   if (ready) return {
     ...state,
@@ -192,6 +202,14 @@ function readState(status) {
     detail: "Select Allow connection on the Morrow page that opened. If you closed that page, select Open the approval page.",
     canOpenSettings: false,
     canOpenApproval: true,
+  };
+  // The same step and words as the Morrow Bridge popup (popup/popup-view.js).
+  if (authenticationFailed) return {
+    ...state,
+    title: "Reconnect Morrow",
+    detail: "Morrow Bridge refused the saved local connection. Select Reconnect Morrow, then approve the new connection in Morrow. Your selected courses stay saved.",
+    canOpenSettings: false,
+    canReconnect: true,
   };
   if (connecting) return {
     ...state,

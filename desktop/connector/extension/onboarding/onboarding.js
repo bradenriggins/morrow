@@ -17,6 +17,7 @@ const nextTitle = document.querySelector("#next-title");
 const nextDetail = document.querySelector("#next-detail");
 const openSettings = document.querySelector("#open-settings");
 const openApproval = document.querySelector("#open-approval");
+const reconnectMorrow = document.querySelector("#reconnect-morrow");
 const quickOpenSettings = document.querySelector("#quick-open-settings");
 const error = document.querySelector("#error");
 
@@ -58,6 +59,7 @@ function render(status) {
   nextDetail.textContent = state.detail;
   openSettings.hidden = !state.canOpenSettings;
   openApproval.hidden = !state.canOpenApproval;
+  reconnectMorrow.hidden = !state.canReconnect;
 }
 
 // The cause reaches the page, not only the console: one code becomes what happened, why, and the
@@ -139,6 +141,19 @@ openApproval.addEventListener("click", async () => {
     showError(cause);
   } finally {
     openApproval.disabled = false;
+  }
+});
+// Morrow refused the saved connection, so this starts a new one for the person to approve in Morrow.
+reconnectMorrow.addEventListener("click", async () => {
+  reconnectMorrow.disabled = true;
+  try {
+    await message("morrow_pair");
+    clearError();
+    await refresh();
+  } catch (cause) {
+    showError(cause);
+  } finally {
+    reconnectMorrow.disabled = false;
   }
 });
 quickOpenSettings.addEventListener("click", () => { void chrome.runtime.openOptionsPage(); });
