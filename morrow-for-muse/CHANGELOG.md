@@ -161,6 +161,11 @@ Installing and the docs:
   installer's own checks still ship, and they keep to a scratch folder.
 - The troubleshooting guide names the Python version the installer
   needs: 3.11 or newer.
+- A restored backup works. The backup left out the key that checks
+  your approvals, settings, and Edit mode, so after a restore Morrow
+  refused every change. It also left out your student labels, the
+  Canvas account you signed in with, your settings, and your Edit
+  mode. The backup now holds all of them.
 - The example commands in the assistant's instructions and the install
   guide run as written. They put the Canvas address option after the
   command, where Morrow refused it, so every example read and change
@@ -236,6 +241,16 @@ Technical notes:
   lane, not only on the https lane. A body the lane cannot encode
   raises `WriteNotAttempted`, so its claim is released instead of being
   journaled as a write that may have applied.
+- `dispatch/state_backup.py` backs up and restores the approval signing
+  keyring (`secrets/`), the source vault Morrow writes
+  (`morrow_source_vault.json` with its `.key` and `.echo`, restored to
+  the current vault path), the pinned account (`browser_lane.json`,
+  `principal_pin.json`), `settings/`, and `modes/`. A signing key moved
+  out with `MORROW_APPROVAL_SIGNING_KEY` stays out, and create says so.
+  Restore makes missing state folders 0700, and a backed-up name may
+  hold a colon (the user id) but never starts with a drive letter.
+  `dispatch/test_state_backup_restore.py` seeds an install, backs it
+  up, deletes the home, restores, and approves a change.
 - `dispatch/executor.py` accepts `--canvas-base` before or after the
   subcommand (`build_parser`), and the error funnel skips the values of
   top-level options when it names the step. `dispatch/test_documented_commands.py`

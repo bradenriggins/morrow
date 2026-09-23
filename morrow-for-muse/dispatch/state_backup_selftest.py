@@ -31,8 +31,11 @@ def check(name, cond, detail=""):
         "%s%s" % (name, (" (%s)" % detail) if detail and not cond else ""))
 
 
-# 1. _check_rel_safe: plain relative paths pass through.
-for good in ("journal.jsonl", "sub/dir/file.json", "a-b_c.json"):
+# 1. _check_rel_safe: plain relative paths pass through, including the
+# settings and mode-grant files named for a user id with a colon.
+for good in ("journal.jsonl", "sub/dir/file.json", "a-b_c.json",
+             "canvas:42@c.example.edu.json",
+             "grants/canvas:42@c.example.edu.json"):
     try:
         check("accepts %r" % good, sb._check_rel_safe(good, "t") == good)
     except RuntimeError as exc:
@@ -40,7 +43,8 @@ for good in ("journal.jsonl", "sub/dir/file.json", "a-b_c.json"):
 
 # 2. _check_rel_safe: escaping / absolute / empty shapes are refused.
 for bad in ("../evil", "sub/../../evil", "/abs/path", "", ".",
-            "a/./b", "..\\evil", "C:\\evil"):
+            "a/./b", "..\\evil", "C:\\evil", "C:evil", "C:/evil",
+            "sub/D:evil"):
     try:
         sb._check_rel_safe(bad, "t")
         check("refuses %r" % bad, False, "no exception")

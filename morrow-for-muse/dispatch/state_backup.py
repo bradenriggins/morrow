@@ -15,11 +15,27 @@ Backed-up state sets:
                  index, archives, retired set + seal, ops.secret keyring)
   tree-binding   <tree-state>/.morrow-tree-binding (W6-P2-7 marker)
   approvals      <morrow-home>/approvals/ (approval records, consumed set)
-  vault          <morrow-home>/learner_vault/ (map, seals, secret.key)
+  secrets        <morrow-home>/secrets/ (the approval signing keyring
+                 that seals the consumed set, settings, and mode grants)
+  source-vault   the learner vault Morrow writes
+                 (<morrow-home>/morrow_source_vault.json) with its .key
+                 and .echo siblings, stored as vault, vault.key, and
+                 vault.echo so a restore follows MORROW_SOURCE_VAULT_PATH
+  vault          <morrow-home>/learner_vault/ (the legacy vault: map,
+                 seals, secret.key; recorded absent when it is gone)
+  account        <morrow-home>/{browser_lane.json, principal_pin.json}
+                 (the pinned Canvas account)
+  settings       <morrow-home>/settings/ (the educator's settings)
+  modes          <morrow-home>/modes/ (the educator's mode grants)
   reauth         <morrow-home>/{session.json, reauth_state.json,
                  quarantine.jsonl, quarantine.secret} (W6-P0-1)
   tree-id        <tree>/.morrow-tree-id (W6-P2-6)
   tree-registry  <morrow-home>/trees/.tree-id-registry.json (W6-P2-6)
+
+A signing key moved outside <morrow-home>/secrets/ with
+MORROW_APPROVAL_SIGNING_KEY is left out on purpose (that override exists
+to keep the key out of backups); create says so, and the operator keeps
+that key.
 
 Deliberately EXCLUDED (never backed up, never restored):
   <tree-state>/journal.generation.highwater
@@ -30,7 +46,7 @@ instead, which keeps the journal fail-closed until the operator runs
 `journal-reconcile`.
 
 SECURITY: the backup contains every HMAC/AES secret (journal secret,
-vault secret, quarantine secret). It is written in plaintext and MUST
+approval signing key, vault key, quarantine secret). It is written in plaintext and MUST
 be stored encrypted (the manifest says so, and create prints a loud
 warning). Never store state-tree backups unencrypted.
 
@@ -44,6 +60,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -61,6 +78,7 @@ _FORMAT_VERSION = 1
 _HIGHWATER_NAME = "journal.generation.highwater"
 # The restore marker, written by restore (W6-P1-2).
 _RESTORED_MARKER = "restored_from.json"
+_DRIVE = re.compile(r"^[A-Za-z]:")
 
 
 def _check_rel_safe(rel, where):
@@ -72,12 +90,15 @@ def _check_rel_safe(rel, where):
     if not isinstance(rel, str) or not rel or os.path.isabs(rel):
         raise RuntimeError(
             "backup %s lists unsafe rel path %r: refusing" % (where, rel))
-    # Backslashes and colons never appear in create_backup output (posix
-    # tree); refusing them closes Windows drive-letter / ADS shapes too.
-    if "\\" in rel or ":" in rel:
+    # Backslashes never appear in create_backup output (posix tree), and
+    # no part starts with a drive letter; refusing both closes the
+    # Windows drive shapes. A colon elsewhere is an ordinary posix name
+    # character: settings and mode grants are named for the user id
+    # ("canvas:42@school.instructure.com").
+    parts = rel.split("/")
+    if "\\" in rel or any(_DRIVE.match(p) for p in parts):
         raise RuntimeError(
             "backup %s lists unsafe rel path %r: refusing" % (where, rel))
-    parts = rel.split("/")
     if any(p in ("", ".", "..") for p in parts):
         raise RuntimeError(
             "backup %s lists escaping rel path %r: refusing" % (where, rel))
@@ -106,19 +127,53 @@ def _tree_id():
         return None
 
 
+# The source vault's files, by the name each takes inside a backup.
+_SOURCE_VAULT_SUFFIXES = {"vault": "", "vault.key": ".key",
+                          "vault.echo": ".echo"}
+
+
+def _secrets_dir():
+    from dispatch import admission as _adm
+    return _adm.SECRETS_DIR
+
+
+def _signing_key_outside():
+    """The signing key's path when MORROW_APPROVAL_SIGNING_KEY moved it
+    out of the secrets dir, else None."""
+    from dispatch import admission as _adm
+    key_dir = os.path.dirname(os.path.abspath(_adm.SIGNING_KEY_PATH))
+    if key_dir == os.path.abspath(_adm.SECRETS_DIR):
+        return None
+    return _adm.SIGNING_KEY_PATH
+
+
+def _source_vault_path():
+    from privacy import executor_wire as _wire
+    return _wire._source_vault_path()
+
+
 def _state_sets():
     """[(name, kind, spec)] describing the backup set.
 
-    kind is "dir" (copy the whole dir), "file" (copy one file), or
-    "files" (copy the listed files, skipping missing ones).
+    kind is "dir" (copy the whole dir), "file" (copy one file), "files"
+    (copy the listed files, skipping missing ones), or "named" (copy
+    {name in the backup: live path}, skipping missing ones).
     """
     home = morrow_home()
     tsd = _tree_state_dir()
+    vault = _source_vault_path()
     return [
         ("journal", "dir", os.path.join(tsd, "journal")),
         ("tree-binding", "file", os.path.join(tsd, ".morrow-tree-binding")),
         ("approvals", "dir", os.path.join(home, "approvals")),
+        ("secrets", "dir", _secrets_dir()),
+        ("source-vault", "named", {name: vault + suffix for name, suffix
+                                   in _SOURCE_VAULT_SUFFIXES.items()}),
         ("vault", "dir", os.path.join(home, "learner_vault")),
+        ("account", "files", [os.path.join(home, n) for n in (
+            "browser_lane.json", "principal_pin.json")]),
+        ("settings", "dir", os.path.join(home, "settings")),
+        ("modes", "dir", os.path.join(home, "modes")),
         ("reauth", "files", [os.path.join(home, n) for n in (
             "session.json", "reauth_state.json",
             "quarantine.jsonl", "quarantine.secret")]),
@@ -136,8 +191,19 @@ def _sha256(path):
     return h.hexdigest()
 
 
+def _makedirs_private(path):
+    """os.makedirs, except every folder it creates is 0700 (makedirs
+    gives only the last one the mode). Existing folders are left as
+    they are."""
+    if not path or os.path.isdir(path):
+        return
+    _makedirs_private(os.path.dirname(path))
+    os.mkdir(path, 0o700)
+    os.chmod(path, 0o700)
+
+
 def _copy_one(src, dst):
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    _makedirs_private(os.path.dirname(dst))
     shutil.copy2(src, dst)
     os.chmod(dst, 0o600)
 
@@ -192,18 +258,22 @@ def create_backup(dest_dir):
                                    os.path.basename(spec))
                 _copy_one(spec, dst)
                 files[os.path.basename(spec)] = _sha256(dst)
-            elif kind == "files":
-                for src in spec:
+            elif kind in ("files", "named"):
+                pairs = spec.items() if kind == "named" else \
+                    [(os.path.basename(src), src) for src in spec]
+                for rel, src in pairs:
                     if not os.path.isfile(src):
                         continue
-                    dst = os.path.join(backup_dir, name,
-                                       os.path.basename(src))
+                    dst = os.path.join(backup_dir, name, rel)
                     _copy_one(src, dst)
-                    files[os.path.basename(src)] = _sha256(dst)
+                    files[rel] = _sha256(dst)
                 if not files:
                     manifest["sets"][name] = {"absent": True, "files": {}}
                     continue
             manifest["sets"][name] = {"absent": False, "files": files}
+    outside = _signing_key_outside()
+    if outside:
+        manifest["signing_key_outside"] = outside
     man_path = os.path.join(backup_dir, _MANIFEST_NAME)
     with open(man_path, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
@@ -214,11 +284,18 @@ def create_backup(dest_dir):
     sys.stderr.write(
         "morrow: backup created at %s (%d files).\n"
         "morrow: WARNING: this backup contains every Morrow secret "
-        "(journal HMAC key, vault key, quarantine key) in PLAINTEXT. "
-        "Store it ENCRYPTED; never leave it unencrypted.\n"
+        "(journal HMAC key, approval signing key, vault key, quarantine "
+        "key) in PLAINTEXT. Store it ENCRYPTED; never leave it "
+        "unencrypted.\n"
         "morrow: the generation high-water mark was deliberately "
         "excluded (anti-stale-restore anchor, W6-P1-2).\n"
         % (backup_dir, total_files))
+    if outside:
+        sys.stderr.write(
+            "morrow: the approval signing key is at %s "
+            "(MORROW_APPROVAL_SIGNING_KEY), outside this backup. Keep "
+            "that file: without it the restored approvals, settings, "
+            "and mode grants cannot be verified.\n" % outside)
     return backup_dir
 
 
@@ -289,9 +366,21 @@ def restore_backup(backup_dir, yes=False):
                     dst = os.path.join(tsd, rel)
                 elif name == "approvals":
                     dst = os.path.join(home, "approvals", rel)
+                elif name == "secrets":
+                    dst = os.path.join(_secrets_dir(), rel)
+                elif name == "source-vault":
+                    if rel not in _SOURCE_VAULT_SUFFIXES:
+                        raise RuntimeError(
+                            "backup source-vault lists unknown file %r: "
+                            "refusing" % rel)
+                    dst = _source_vault_path() + _SOURCE_VAULT_SUFFIXES[rel]
                 elif name == "vault":
                     dst = os.path.join(home, "learner_vault", rel)
-                elif name == "reauth":
+                elif name == "settings":
+                    dst = os.path.join(home, "settings", rel)
+                elif name == "modes":
+                    dst = os.path.join(home, "modes", rel)
+                elif name in ("account", "reauth"):
                     dst = os.path.join(home, rel)
                 elif name == "tree-id":
                     dst = os.path.join(_tree_root(), rel)
