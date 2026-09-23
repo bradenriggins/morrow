@@ -560,6 +560,15 @@ function configuredProject(assistant, home, target) {
   return clientConfigTarget(assistant, home, project) === target ? { project } : null;
 }
 
+/**
+ * Whether the project folder an assistant was set up in is still a folder.
+ * client-config cannot write into a folder that is gone, and Morrow never
+ * makes one again: the educator may have deleted it on purpose.
+ */
+async function projectFolderPresent(project) {
+  return fs.stat(project).then((info) => info.isDirectory(), () => false);
+}
+
 class InstallerController {
   constructor(deps) {
     this.app = deps.app;
@@ -1203,10 +1212,13 @@ class InstallerController {
   /**
    * Writes the materials folder into every assistant this installation
    * configured, so each assistant starts Morrow in the exact folder Morrow
-   * uses. Each client file is replaced only while its complete bytes still
-   * match the digest Morrow recorded. The installer record changes only after
-   * every assistant was written and read back. A failure restores each earlier
-   * file only if nothing else changed it after Morrow's write.
+   * uses. Morrow finds its own entry in each settings file by its marker and
+   * rewrites only that entry, so the rest of the file stays as the assistant
+   * or the person left it. An assistant whose project folder is gone is left
+   * out, and setup names that folder and offers Remove. The installer record
+   * changes only after every assistant was written and read back. A failure
+   * restores each earlier file only if nothing else changed it after Morrow's
+   * write.
    */
   async bindConfiguredAssistants(bindings, materials) {
     const staged = [];
@@ -1216,6 +1228,7 @@ class InstallerController {
           staged.push(await this.stageClaudeDesktopSetup(assistant, entry, materials));
           continue;
         }
+        if (project && !await projectFolderPresent(project)) continue;
         const installed = await this.installClientConfiguration(assistant, entry.target, project, materials, {
           rebind: true,
           updateRecord: false
@@ -2480,6 +2493,8 @@ class InstallerController {
       if (!entry || assistant.id === "claude-desktop") continue;
       const located = configuredProject(assistant, this.home, entry.target);
       if (!located) continue;
+      // Setup names a project folder that is gone and offers Remove; the other assistants are still repaired.
+      if (located.project && !await projectFolderPresent(located.project)) continue;
       const materials = await this.effectiveWorkspace(record);
       if (!materials) throw errorDetails("workspace_required");
       await this.installClientConfiguration(assistant, entry.target, located.project, materials, {
@@ -3187,9 +3202,12 @@ class InstallerController {
         : null;
       const present = claude ? claude.installed === true : await this.assistantConfigurationPresent(assistant, entry, materials);
       const moved = !claude && present !== true && await this.assistantEntryMoved(assistant, entry);
+      const projectFolder = entry && assistant.needsProject ? configuredProject(assistant, this.home, entry.target)?.project ?? null : null;
       return {
         moved,
         ...assistant,
+        projectFolder,
+        projectFolderMissing: projectFolder !== null && !await projectFolderPresent(projectFolder),
         detected: await this.detectedAssistant(assistant),
         configured: present,
         // Claude Desktop counts as configured only after its session connected.

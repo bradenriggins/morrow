@@ -231,6 +231,11 @@ function assistantDetail(assistant) {
 function assistantRow(assistant) {
   const title = escapeHtml(assistant.title);
   const identifier = escapeHtml(assistant.id);
+  // The assistant reads Morrow's entry only inside the project folder it was set up in. With that
+  // folder gone there is nothing to repair, so the row names the folder and offers Remove alone.
+  if (assistant.projectFolderMissing === true) {
+    return `<div class="materials-row materials-row-stacked"><div><h3>${title}</h3><p class="path-text">${escapeHtml(assistant.projectFolder)}</p><p>Morrow cannot find the project folder ${title} was set up in. If it is on a drive that is not connected, connect the drive, then select Check status. Otherwise select Remove, then set up ${title} in the project you use now.</p></div><div class="inline-actions"><button class="secondary-button" type="button" data-action="remove-assistant" data-assistant-id="${identifier}" aria-label="Remove Morrow from ${title}">Remove</button></div></div>`;
+  }
   const actions = [];
   if (assistant.pending === true) {
     actions.push('<button class="secondary-button" type="button" data-action="open-claude-desktop">Open Claude Desktop</button>');
@@ -261,9 +266,11 @@ function assistantRow(assistant) {
  */
 export function setupManagementView(current) {
   if (current?.lifecycle === "repair_required" || current?.runtime?.status === "repair_required") return null;
-  if (!configuredAssistant(current) && !pendingAssistant(current)) return null;
-  const assistants = (Array.isArray(current?.assistants) ? current.assistants : [])
-    .filter((assistant) => assistant?.configured === true || assistant?.pending === true
+  const all = Array.isArray(current?.assistants) ? current.assistants : [];
+  const projectFolderMissing = all.some((assistant) => assistant?.projectFolderMissing === true);
+  if (!configuredAssistant(current) && !pendingAssistant(current) && !projectFolderMissing) return null;
+  const assistants = all
+    .filter((assistant) => assistant?.configured === true || assistant?.pending === true || assistant?.projectFolderMissing === true
       || (assistant?.detected === true && assistant?.supported !== false));
   return { title: "Setup you can change", body: `${materialsRow(current)}${assistants.map(assistantRow).join("")}` };
 }

@@ -140,9 +140,14 @@ function controller(root, overrides = {}) {
       calls.push(args);
       if (args[0] === "mcp" && args[1] === "install") {
         const workspaceRoot = args[args.indexOf("--workspace-root") + 1];
+        const project = args.includes("--client-project") ? args[args.indexOf("--client-project") + 1] : null;
+        // client-config refuses a project folder that is not there, with no refusal line, as the real command does.
+        if (project !== null && !await fs.stat(project).then((info) => info.isDirectory(), () => false)) {
+          return { code: 1, stdout: "", stderr: `[morrow] projectRoot does not exist as a directory: ${project}\n` };
+        }
         const target = args[2] === "codex"
           ? path.join(root, "Home", ".codex", "config.toml")
-          : path.join(args[args.indexOf("--client-project") + 1], ".mcp.json");
+          : args[2] === "gemini" ? path.join(project, ".gemini", "settings.json") : path.join(project, ".mcp.json");
         let current = await fs.readFile(target, "utf8").catch(() => "");
         if (typeof beforeClientInstall === "function") {
           await beforeClientInstall({ args, target, current });
@@ -1059,6 +1064,102 @@ test("changing the materials folder writes the new folder into every configured 
     assert.equal(call.includes("--replace-morrow-entry"), true);
     assert.equal(call.includes("--expected-config-sha256"), false);
   }
+});
+
+test("Repair skips a project assistant whose project folder is gone, and repairs the assistants after it", async () => {
+  const root = await temporaryRoot();
+  const materials = path.join(root, "Materials");
+  const gone = path.join(root, "Fall course");
+  const kept = path.join(root, "Spring course");
+  for (const directory of [materials, gone, kept]) await fs.mkdir(directory, { recursive: true });
+  const claudeCode = path.join(gone, ".mcp.json");
+  const gemini = path.join(kept, ".gemini", "settings.json");
+  const entry = `${JSON.stringify(claudeCodeEntry(materials), null, 2)}\n`;
+  const configured = {
+    "claude-code": { target: claudeCode, sha256: await writeFile(claudeCode, entry) },
+    "gemini-cli": { target: gemini, sha256: await writeFile(gemini, entry) }
+  };
+  const { installer, calls } = controller(root);
+  await installer.writeRecord({ ...freshRecord(), materialsFolder: materials, selectedAssistantId: "claude-code", configured });
+  // The educator deletes the Claude Code project folder when the term ends.
+  await fs.rm(gone, { recursive: true });
+
+  await installer.repairAssistantConfiguration(await installer.record());
+
+  assert.deepEqual(calls.filter((entry) => entry[0] === "mcp").map((entry) => entry[2]), ["gemini"]);
+  assert.equal(await fs.stat(gone).then(() => true, () => false), false, "Morrow does not make the deleted folder again");
+  const record = await installer.record();
+  assert.deepEqual(record.configured["claude-code"], configured["claude-code"], "the entry stays listed so it can be removed");
+  assert.equal(record.configured["gemini-cli"].sha256, sha256(await fs.readFile(gemini)));
+});
+
+test("changing the materials folder leaves out a project assistant whose project folder is gone", async () => {
+  const root = await temporaryRoot();
+  const first = path.join(root, "Materials");
+  const chosen = path.join(root, "Fall biology");
+  const gone = path.join(root, "Fall course");
+  for (const directory of [first, chosen, gone]) await fs.mkdir(directory, { recursive: true });
+  const codex = path.join(root, "Home", ".codex", "config.toml");
+  const claudeCode = path.join(gone, ".mcp.json");
+  const configured = {
+    codex: { target: codex, sha256: await writeFile(codex, codexTable(first)) },
+    "claude-code": { target: claudeCode, sha256: await writeFile(claudeCode, `${JSON.stringify(claudeCodeEntry(first), null, 2)}\n`) }
+  };
+  const { installer, calls } = controller(root, {
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) }
+  });
+  await installer.writeRecord({ ...freshRecord(), materialsFolder: first, selectedAssistantId: "codex", configured });
+  await fs.rm(gone, { recursive: true });
+
+  assert.equal(await installer.configureWorkspace(null), true);
+
+  const canonical = await fs.realpath(chosen);
+  assert.deepEqual(calls.map((entry) => entry[2]), ["codex"]);
+  const record = await installer.record();
+  assert.equal(record.materialsFolder, canonical);
+  assert.equal((await fs.readFile(codex, "utf8")).includes(`cwd = "${canonical}"`), true);
+  assert.deepEqual(record.configured["claude-code"], configured["claude-code"]);
+});
+
+test("an assistant whose project folder is gone is named by that folder, and Remove takes it off the list", async () => {
+  const root = await temporaryRoot();
+  const materials = path.join(root, "Materials");
+  const gone = path.join(root, "Fall course");
+  const kept = path.join(root, "Spring course");
+  for (const directory of [materials, gone, kept]) await fs.mkdir(directory, { recursive: true });
+  const claudeCode = path.join(gone, ".mcp.json");
+  const gemini = path.join(kept, ".gemini", "settings.json");
+  const entry = `${JSON.stringify(claudeCodeEntry(materials), null, 2)}\n`;
+  const { installer } = controller(root);
+  await installer.writeRecord({
+    ...freshRecord(),
+    materialsFolder: materials,
+    selectedAssistantId: "claude-code",
+    configured: {
+      "claude-code": { target: claudeCode, sha256: await writeFile(claudeCode, entry) },
+      "gemini-cli": { target: gemini, sha256: await writeFile(gemini, entry) }
+    }
+  });
+  await fs.rm(gone, { recursive: true });
+  installer.ensureRuntime = async () => installer.paths;
+  installer.runtimeSnapshot = async () => readyRuntime();
+
+  const before = await installer.state();
+  const claudeRow = before.assistants.find((assistant) => assistant.id === "claude-code");
+  assert.equal(claudeRow.configured, false);
+  assert.equal(claudeRow.projectFolderMissing, true);
+  assert.equal(claudeRow.projectFolder, gone);
+  const geminiRow = before.assistants.find((assistant) => assistant.id === "gemini-cli");
+  assert.equal(geminiRow.projectFolderMissing, false);
+  assert.equal(geminiRow.projectFolder, kept);
+  assert.equal(before.assistants.find((assistant) => assistant.id === "codex").projectFolder, null);
+
+  await installer.removeAssistant("claude-code");
+
+  assert.deepEqual(Object.keys((await installer.record()).configured), ["gemini-cli"]);
+  const after = (await installer.state()).assistants.find((assistant) => assistant.id === "claude-code");
+  assert.equal(after.projectFolderMissing, false);
+  assert.equal(after.projectFolder, null);
 });
 
 test("choosing the folder that is already in use records the choice and rewrites no assistant", async () => {

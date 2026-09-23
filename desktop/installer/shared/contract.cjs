@@ -230,6 +230,11 @@ function installerState(input) {
     selected: assistant.selected === true,
     needsWorkspace: assistant.needsWorkspace === true,
     supported: assistant.supported === true,
+    // The project folder a project-scoped assistant (Claude Code, Gemini CLI)
+    // was set up in, which is where that assistant reads Morrow's entry, and
+    // whether that folder is gone. `null` for every other assistant.
+    projectFolder: publicFile(assistant.projectFolder),
+    projectFolderMissing: assistant.projectFolderMissing === true && publicFile(assistant.projectFolder) !== null,
   }));
   return {
     schema: "morrow.installer-state.v1",

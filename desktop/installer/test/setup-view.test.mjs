@@ -636,6 +636,23 @@ test("an assistant on this computer that is not set up can be set up after setup
   assert.equal(settings.body.includes("Claude Code"), false);
 });
 
+test("an assistant whose project folder is gone names that folder and offers Remove, not Set up", () => {
+  const stale = { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, needsWorkspace: true, detected: true, configured: false, projectFolder: "/Home/Courses/Fall course", projectFolderMissing: true };
+  const withAnother = setupManagementView(state({
+    ...CONNECTED_COURSE,
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }, stale],
+    materialsFolder: MATERIALS
+  }));
+  assert.match(withAnother.body, /<h3>Claude Code<\/h3><p class="path-text">\/Home\/Courses\/Fall course<\/p><p>Morrow cannot find the project folder Claude Code was set up in\. If it is on a drive that is not connected, connect the drive, then select Check status\. Otherwise select Remove, then set up Claude Code in the project you use now\.<\/p>/);
+  assert.match(withAnother.body, /data-action="remove-assistant" data-assistant-id="claude-code"/);
+  assert.doesNotMatch(withAnother.body, /data-action="install-assistant" data-assistant-id="claude-code"/);
+
+  // With no other assistant set up, Settings still offers the Remove.
+  const alone = setupManagementView(state({ lifecycle: "ready_for_assistant", assistants: [{ ...CHATGPT, detected: true }, stale], materialsFolder: MATERIALS }));
+  assert.ok(alone, "Settings offers the setup to change");
+  assert.match(alone.body, /data-action="remove-assistant" data-assistant-id="claude-code"/);
+});
+
 test("the completed course connection shows the three status lines, then three example requests, each with its own Copy button", () => {
   const current = state({ ...CONNECTED_COURSE, firstPreview: { available: true, completed: true } });
   const view = actionView(current, { chosenAssistantId: "codex" });
