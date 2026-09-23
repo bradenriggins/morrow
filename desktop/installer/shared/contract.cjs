@@ -20,6 +20,7 @@ const RETENTION_IDS = new Set([
   "backups",
   "bridge",
   "materials",
+  "previous_materials",
   "blackboard_credentials",
   "blackboard_configuration",
   "assistant_configuration",

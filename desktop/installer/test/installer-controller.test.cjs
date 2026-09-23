@@ -2639,6 +2639,52 @@ test("a confirmed removal removes what it listed, keeps what it did not, and rea
   assert.equal((await installer.state()).retention.removal, null);
 });
 
+// Assistant setup makes the default Materials folder. After Change folder, that
+// folder and the files in it are still Morrow's, so the list names it and the
+// removal takes it out, while the folder the person chose stays.
+test("after Change folder, the earlier default Materials folder is listed and removed, and the chosen folder is kept", async () => {
+  const root = await temporaryRoot();
+  const { installer, messageBoxes, paths } = await installationWithData(root, 1);
+  const chosen = path.join(root, "Chosen materials");
+  await fs.mkdir(chosen, { recursive: true });
+  await fs.writeFile(path.join(chosen, "week-2.md"), "week two\n");
+  await installer.writeRecord({ ...await installer.record(), materialsFolder: chosen });
+
+  const retention = (await installer.state()).retention;
+  const inUse = retention.locations.find((location) => location.id === "materials");
+  assert.equal(inUse.path, chosen);
+  assert.equal(inUse.removable, false);
+  assert.equal(inUse.keptReason, "outside_morrow_data");
+  const earlier = retention.locations.find((location) => location.id === "previous_materials");
+  assert.ok(earlier, "the earlier default Materials folder is listed");
+  assert.equal(earlier.path, paths.materials);
+  assert.equal(earlier.label, "Morrow's earlier Materials folder");
+  assert.equal(earlier.removable, true);
+
+  const receipt = await installer.removeData(null);
+  assert.match(messageBoxes.at(-1).detail, new RegExp(`Morrow will remove:[\\s\\S]*- Morrow's earlier Materials folder: ${paths.materials.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.equal(receipt.status, "removed");
+  assert.ok(receipt.removed.includes(paths.materials), "the removal reports the earlier folder as removed");
+  assert.ok(receipt.kept.includes(chosen), "the chosen folder is kept");
+  assert.equal(await fs.lstat(paths.materials).then(() => true, () => false), false);
+  assert.equal(await fs.readFile(path.join(chosen, "week-2.md"), "utf8"), "week two\n");
+});
+
+test("the earlier default Materials folder is not listed when it is the folder in use or was never made", async () => {
+  const root = await temporaryRoot();
+  const { installer, paths } = await installationWithData(root, 0);
+  let ids = (await installer.state()).retention.locations.map((location) => location.id);
+  assert.equal(ids.includes("previous_materials"), false);
+  assert.equal(ids.filter((id) => id === "materials").length, 1);
+
+  const chosen = path.join(root, "Chosen materials");
+  await fs.mkdir(chosen, { recursive: true });
+  await installer.writeRecord({ ...await installer.record(), materialsFolder: chosen });
+  await fs.rm(paths.materials, { recursive: true, force: true });
+  ids = (await installer.state()).retention.locations.map((location) => location.id);
+  assert.equal(ids.includes("previous_materials"), false);
+});
+
 test("a new desktop process does not recreate materials after confirmed removal", async () => {
   const root = await temporaryRoot();
   const { installer, paths } = await installationWithData(root, 1);

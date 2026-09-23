@@ -266,6 +266,7 @@ function retentionSnapshot(input = {}) {
   add("backups", "Copies of assistant settings Morrow changed", input.backups, "assistant_backup");
   add("bridge", "The Morrow Bridge folder Chrome loads", input.bridge);
   add("materials", "Your Morrow materials folder", input.materials);
+  add("previous_materials", "Morrow's earlier Materials folder", input.previousMaterials);
   add("blackboard_credentials", "Your Blackboard application secret", input.blackboardCredentials);
   add("blackboard_configuration", "Your Blackboard site, key, and course list", input.blackboardConfiguration);
   for (const assistant of Array.isArray(input.assistantConfigurations) ? input.assistantConfigurations : []) {

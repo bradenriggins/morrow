@@ -78,6 +78,7 @@ This release fixes the problems a full review of Morrow found before release. Te
 - Blackboard error steps name only the fields and buttons the form shows. The saved connection note says a new secret needs the application key too.
 - The Windows uninstall steps name the Settings page each version shows: Installed apps, then More and Uninstall on Windows 11, and Apps & features, then Uninstall on Windows 10.
 - "What stays on this computer" lists only what is on this computer, and says which part Remove Morrow's data removes and which part Morrow never removes.
+- After Change folder, "What stays on this computer" names the Materials folder Morrow made first, and Remove Morrow's data removes it with its files. It used to leave that folder behind and say Morrow removed its data.
 - Repair Morrow finishes when Claude Desktop is set up. It used to stop with "Morrow has work in progress".
 - Morrow starts more reliably on a slow or busy computer. Its course connection starts faster, and Morrow waits the full 30 seconds its first start is allowed instead of giving up after 15.
 
