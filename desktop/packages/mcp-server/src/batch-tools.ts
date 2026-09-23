@@ -294,7 +294,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
     "morrow_batch_health",
     {
       title: "Check group request status",
-      description: "Report bounded local batch-store, source-settlement, and scheduler status, including which group holds each batch window, when it started, which assistant session asked for it, and which runs are waiting. This does not read or change Canvas.",
+      description: "Report bounded local batch-store, source-settlement, and scheduler status, including which group holds each batch window, when it started, which assistant session asked for it, and which runs are waiting. This does not read or change the learning platform.",
       inputSchema: z.object({}),
       annotations: {
         readOnlyHint: true,
@@ -398,7 +398,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
           expiresAt: expires_at,
           ...(ratePolicy(rate_policy) ? { ratePolicy: ratePolicy(rate_policy)! } : {}),
         });
-        return textAndStructured("Prepared a group of requests. Canvas has not changed.", result);
+        return textAndStructured("Prepared a group of requests. The selected learning platform has not changed.", result);
       } catch (error) {
         return safeFailure(error);
       }
@@ -580,7 +580,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
     "morrow_batch_reconcile",
     {
       title: "Update group request status",
-      description: "Update source-settlement evidence for staged writes that use a source-owned task. Direct Canvas connector writes settle from their verified readback and need no source-task poll. This tool never approves, denies, resumes, undoes, or dispatches a task.",
+      description: "Update source-settlement evidence for staged writes that use a source-owned task. Direct Morrow Bridge writes settle from their verified readback and need no source-task poll. This tool never approves, denies, resumes, undoes, or dispatches a task.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
         offset: z.number().int().min(0).default(0),
@@ -642,7 +642,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
         return textAndStructured(
           mode === "inspect"
             ? `Reviewed interrupted group ${batch_id} without changing it.`
-            : `Updated the saved records for group ${batch_id}. This action sent no changes to Canvas.`,
+            : `Updated the saved records for group ${batch_id}. This action sent no changes to the learning platform.`,
           result,
         );
       } catch (error) {
