@@ -207,6 +207,9 @@ Settings and undo:
   Morrow prepares the reverse change as a new change you approve. If
   an undo is tried anyway, you are told that nothing was sent and
   nothing changed.
+- In Edit mode, a preview of a change (a dry run) says that Edit mode
+  allows it. It said your signed approval had been checked, which the
+  assistant could pass on to you as an approval you never gave.
 
 Messages:
 

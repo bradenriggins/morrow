@@ -7817,15 +7817,23 @@ def _render_dry_run(entry, params, session, pack, plan, op_id,
     kind, journals nothing, claims no op_id, and never persists or
     consumes the approval. Returns the report dict; the CLI prints it."""
     is_write = declared == "write"
+    if not is_write:
+        admission_detail = "read: no approval required"
+    elif isinstance(approval_audit, dict) \
+            and approval_audit.get("mode") == "edit":
+        admission_detail = ("admitted by Edit mode (no per-write approval); "
+                            "nothing is recorded in dry-run")
+    elif approval_audit is not None:
+        admission_detail = ("write approval verified (digest-bound, "
+                            "educator-signed, unexpired, single-use check "
+                            "passed); NOT consumed in dry-run")
+    else:
+        admission_detail = "admitted with no approval record checked"
     gates = [
         {"gate": "effect_class_derivation", "result": "pass",
          "detail": "declared %r, derived %r from the entry's blocks"
                    % (declared, derived)},
-        {"gate": "admission", "result": "pass",
-         "detail": ("write approval verified (digest-bound, educator-signed, "
-                     "unexpired, single-use check passed); NOT consumed in "
-                     "dry-run" if is_write and approval_audit is not None
-                     else "read: no approval required")},
+        {"gate": "admission", "result": "pass", "detail": admission_detail},
         {"gate": "write_halt", "result": "pass",
          "detail": "no write halt file present"},
     ]

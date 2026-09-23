@@ -22,6 +22,13 @@ Third-pass re-audit 2026-09-22 (probe reaudit3/undo3.py), H1:
     receipt of --of-op-id, so any target could be deleted under the
     name of an undo. The target must come ONLY from the journal.
 
+Muse UX audit round 2, 2026-09-23: in Edit mode, where no per-write
+approval exists, a dry run's admission gate said "write approval
+verified (digest-bound, educator-signed, ...)", so the agent could
+relay an educator's approval that never happened. The Edit grant
+admits the write, and the report says so; the approval wording stays
+for a write an approval record admitted.
+
 Hermetic: fake provider session; journal, approvals, settings, and the
 signing key live in pytest's tmp_path.
 """
@@ -112,6 +119,39 @@ def test_dry_run_admitted_in_edit_mode_journals_nothing():
                             mode_ctx=_ctx())
     assert out["dry_run"] is True
     assert _journal_lines() == []
+
+
+def _admission_gate(report):
+    return next(g for g in report["gates"] if g["gate"] == "admission")
+
+
+def test_dry_run_in_edit_mode_names_edit_mode_not_an_approval():
+    _set("default_mode", "edit")
+    out = ex.dispatch_entry(_create_entry(), {"course_id": "7"},
+                            FakeSession(), _pack(), dry_run=True,
+                            mode_ctx=_ctx())
+    detail = _admission_gate(out)["detail"]
+    assert "Edit mode" in detail, detail
+    assert "approval verified" not in detail, detail
+    assert "educator-signed" not in detail, detail
+
+
+def test_dry_run_with_an_approval_names_the_approval():
+    entry = _create_entry()
+    params = {"course_id": "7"}
+    plan = ex.FrozenPlan({
+        "op_id": "11111111-1111-4111-8111-111111111111",
+        "entry_name": entry["name"], "params": params,
+        "before_state_digest": None, "frozen_readback": "course 7",
+        "target_identity": {"course_id": "7", "course_name": "Course"}},
+        "plan")
+    out = ex.dispatch_entry(entry, params, FakeSession(), _pack(),
+                            plan=plan, dry_run=True,
+                            approval=_signed(entry, params),
+                            require_educator_channel=False)
+    detail = _admission_gate(out)["detail"]
+    assert "write approval verified" in detail, detail
+    assert "Edit mode" not in detail, detail
 
 
 def test_dry_run_refused_in_plan_mode_journals_nothing():
