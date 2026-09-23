@@ -1,7 +1,12 @@
 import { lstatSync, type Stats } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync, type DatabaseSyncOptions } from "node:sqlite";
-import { hardenPrivateFile, privateDirectoryAccessAccepted, privateFileAccessAccepted } from "./private-file-access.js";
+import {
+  hardenPrivateFile,
+  privateDirectoryAccessAccepted,
+  privateFileAccessAccepted,
+  privateFilesAccessAccepted,
+} from "./private-file-access.js";
 import {
   canonicalPrivateStateFilePath,
   createExactPrivateStateFile,
@@ -21,6 +26,12 @@ function sameFile(left: Stats, right: Stats): boolean {
  * the SHARED and shared-memory locks SQLite still believes it holds.
  */
 function exactPrivateIdentity(path: string, label: string, repairAccess: boolean): Stats | null {
+  const named = exactPrivateShape(path, label);
+  if (named === null) return null;
+  return admittedPrivateIdentity(path, label, named, privateFileAccessAccepted(path, named.mode, { trustedRoot: dirname(path) }), repairAccess);
+}
+
+function exactPrivateShape(path: string, label: string): Stats | null {
   let named: Stats;
   try { named = lstatSync(path); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -30,22 +41,35 @@ function exactPrivateIdentity(path: string, label: string, repairAccess: boolean
     || (typeof process.getuid === "function" && named.uid !== process.getuid())) {
     throw new Error(`${label} is not one exact private file`);
   }
-  if (!privateFileAccessAccepted(path, named.mode, { trustedRoot: dirname(path) })) {
-    if (!repairAccess || !hardenPrivateFile(path, { trustedRoot: dirname(path) })) {
-      throw new Error(`${label} access is not private`);
-    }
-    const hardened = lstatSync(path);
-    if (!hardened.isFile() || hardened.isSymbolicLink() || hardened.nlink !== 1 || !sameFile(named, hardened)) {
-      throw new Error(`${label} changed during admission`);
-    }
-    named = hardened;
-  }
   return named;
 }
 
+function admittedPrivateIdentity(path: string, label: string, named: Stats, accepted: boolean, repairAccess: boolean): Stats {
+  if (accepted) return named;
+  if (!repairAccess || !hardenPrivateFile(path, { trustedRoot: dirname(path) })) {
+    throw new Error(`${label} access is not private`);
+  }
+  const hardened = lstatSync(path);
+  if (!hardened.isFile() || hardened.isSymbolicLink() || hardened.nlink !== 1 || !sameFile(named, hardened)) {
+    throw new Error(`${label} changed during admission`);
+  }
+  return hardened;
+}
+
+/** Admits every sidecar present, asking about their access control together. */
 function verifySidecars(path: string, label: string, repairAccess: boolean): void {
-  for (const suffix of SQLITE_SIDECAR_SUFFIXES) {
-    exactPrivateIdentity(`${path}${suffix}`, `${label} ${suffix.slice(1)} file`, repairAccess);
+  const present = SQLITE_SIDECAR_SUFFIXES.flatMap((suffix) => {
+    const sidecarPath = `${path}${suffix}`;
+    const sidecarLabel = `${label} ${suffix.slice(1)} file`;
+    const named = exactPrivateShape(sidecarPath, sidecarLabel);
+    return named === null ? [] : [{ path: sidecarPath, label: sidecarLabel, named }];
+  });
+  const accepted = privateFilesAccessAccepted(
+    present.map((sidecar) => ({ path: sidecar.path, mode: sidecar.named.mode })),
+    { trustedRoot: dirname(path) },
+  );
+  for (const [index, sidecar] of present.entries()) {
+    admittedPrivateIdentity(sidecar.path, sidecar.label, sidecar.named, accepted[index] === true, repairAccess);
   }
 }
 

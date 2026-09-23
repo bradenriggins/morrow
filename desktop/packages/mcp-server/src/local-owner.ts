@@ -36,6 +36,7 @@ import {
   readExactPrivateStateFile,
   replaceExactPrivateStateFile,
   withExactPrivateStateFileTransaction,
+  withPrivateAccessOperation,
 } from "@morrow/gateway-core";
 import type { GatewayConfig } from "./config.js";
 import { createFullMorrowServer } from "./full-server.js";
@@ -712,7 +713,15 @@ async function runDedicatedStdio(config: GatewayConfig): Promise<void> {
   }
 }
 
-export async function runLocalOwner(config: GatewayConfig): Promise<void> {
+/**
+ * Starts the local owner. The start is one private-access operation: on
+ * Windows each state path is asked about once, not once per read.
+ */
+export function runLocalOwner(config: GatewayConfig): Promise<void> {
+  return withPrivateAccessOperation(() => startLocalOwner(config));
+}
+
+async function startLocalOwner(config: GatewayConfig): Promise<void> {
   if (
     process.env.MORROW_INSTALLER_TEST_MODE === "1"
     && process.env.MORROW_LOCAL_OWNER_TEST_STUBBORN_STARTUP === "1"

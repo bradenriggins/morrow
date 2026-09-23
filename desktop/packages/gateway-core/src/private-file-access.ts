@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { spawnSync } from "node:child_process";
 import { chmodSync, lstatSync } from "node:fs";
 import { dirname, relative, resolve, sep, win32 } from "node:path";
@@ -25,7 +26,17 @@ export interface PrivateFileAccessOptions {
   readonly trustedRoot?: string;
   readonly applyWindowsPrivateAcl?: (path: string) => boolean;
   readonly removeMacAcl?: (path: string) => boolean;
+  /** Runs one encoded PowerShell script in place of powershell.exe. */
+  readonly runWindowsPowerShell?: WindowsPowerShellRunner;
 }
+
+export interface WindowsPowerShellResult {
+  /** The exit status, or null when the process failed to start, timed out, or overflowed its output limit. */
+  readonly status: number | null;
+  readonly stdout: string;
+}
+
+export type WindowsPowerShellRunner = (encodedCommand: string, maxBuffer: number) => WindowsPowerShellResult;
 
 const WINDOWS_ACL_RESULTS = new Set<WindowsPrivateFileAccessClassification>([
   "private",
@@ -76,51 +87,200 @@ function windowsPowerShell() {
   };
 }
 
-function classifyWindowsPrivateAcl(path: string): WindowsPrivateFileAccessClassification {
-  const encodedPath = Buffer.from(path, "utf16le").toString("base64");
+// Each PowerShell start costs hundreds of milliseconds on Windows, so one
+// question names every path it needs, and within one operation (see
+// withPrivateAccessOperation) a file object already found private is not asked
+// about again.
+const WINDOWS_ACCESS_FUNCTION = [
+  "$allowed = @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18', 'S-1-5-32-544')",
+  "$sensitive = [Security.AccessControl.FileSystemRights]::ReadData -bor [Security.AccessControl.FileSystemRights]::ReadExtendedAttributes -bor [Security.AccessControl.FileSystemRights]::ReadAttributes -bor [Security.AccessControl.FileSystemRights]::ReadPermissions -bor [Security.AccessControl.FileSystemRights]::ExecuteFile -bor [Security.AccessControl.FileSystemRights]::WriteData -bor [Security.AccessControl.FileSystemRights]::AppendData -bor [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor [Security.AccessControl.FileSystemRights]::WriteAttributes -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership",
+  "function Get-MorrowPrivateAccess([string]$target) {",
+  "  $acl = if ([IO.Directory]::Exists($target)) { [IO.Directory]::GetAccessControl($target) } elseif ([IO.File]::Exists($target)) { [IO.File]::GetAccessControl($target) } else { throw 'Private path is unavailable' }",
+  "  try { $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value } catch { return 'unresolved_identity' }",
+  "  if ($allowed -notcontains $owner) { return 'untrusted_owner' }",
+  "  foreach ($rule in $acl.Access) { if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or (($rule.FileSystemRights -band $sensitive) -eq 0)) { continue }; try { $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { return 'unresolved_identity' }; if ($allowed -notcontains $sid) { return 'additional_principal_access_allow' } }",
+  "  return 'private'",
+  "}",
+  "for ($index = 0; $index -lt $morrowTargets.Count; $index++) {",
+  "  $verdict = 'unavailable'",
+  "  try { $verdict = Get-MorrowPrivateAccess ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($morrowTargets[$index]))) } catch { $verdict = 'unavailable' }",
+  "  \"$index $verdict\"",
+  "}",
+];
+
+const WINDOWS_APPLY_DIRECTORY_ACL = [
+  "$target = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($morrowTargets[0]))",
+  "$current = [Security.Principal.WindowsIdentity]::GetCurrent().User",
+  "$system = New-Object Security.Principal.SecurityIdentifier('S-1-5-18')",
+  "$admins = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')",
+  "$acl = [IO.Directory]::GetAccessControl($target)",
+  "$acl.SetAccessRuleProtection($true, $false)",
+  "$acl.SetOwner($current)",
+  "$inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit",
+  "foreach ($sid in @($current, $system, $admins)) { $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow); $acl.AddAccessRule($rule) }",
+  "[IO.Directory]::SetAccessControl($target, $acl)",
+];
+
+// A command line on Windows holds at most 32,767 characters.
+const WINDOWS_ENCODED_COMMAND_LIMIT = 30_000;
+
+function windowsAccessCommand(paths: readonly string[], applyDirectoryAcl: boolean): string {
+  const targets = paths.map((path) => `'${Buffer.from(path, "utf16le").toString("base64")}'`).join(", ");
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
-    `$target = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${encodedPath}'))`,
-    "$allowed = @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18', 'S-1-5-32-544')",
-    "$acl = if ([IO.Directory]::Exists($target)) { [IO.Directory]::GetAccessControl($target) } elseif ([IO.File]::Exists($target)) { [IO.File]::GetAccessControl($target) } else { throw 'Private path is unavailable' }",
-    "try { $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value } catch { 'unresolved_identity'; exit 0 }",
-    "if ($allowed -notcontains $owner) { 'untrusted_owner'; exit 0 }",
-    "$sensitive = [Security.AccessControl.FileSystemRights]::ReadData -bor [Security.AccessControl.FileSystemRights]::ReadExtendedAttributes -bor [Security.AccessControl.FileSystemRights]::ReadAttributes -bor [Security.AccessControl.FileSystemRights]::ReadPermissions -bor [Security.AccessControl.FileSystemRights]::ExecuteFile -bor [Security.AccessControl.FileSystemRights]::WriteData -bor [Security.AccessControl.FileSystemRights]::AppendData -bor [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor [Security.AccessControl.FileSystemRights]::WriteAttributes -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership",
-    "foreach ($rule in $acl.Access) { if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or (($rule.FileSystemRights -band $sensitive) -eq 0)) { continue }; try { $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { 'unresolved_identity'; exit 0 }; if ($allowed -notcontains $sid) { 'additional_principal_access_allow'; exit 0 } }",
-    "'private'",
-  ].join("; ");
-  const powershell = windowsPowerShell();
-  const result = spawnSync(powershell.executable, [
-    "-NoLogo",
-    "-NoProfile",
-    "-NonInteractive",
-    "-EncodedCommand",
-    Buffer.from(script, "utf16le").toString("base64"),
-  ], { encoding: "utf8", env: powershell.environment, timeout: 30_000, maxBuffer: 4 * 1024, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
-  if (result.status !== 0) return "unavailable";
-  const classification = String(result.stdout || "").trim() as WindowsPrivateFileAccessClassification;
-  return WINDOWS_ACL_RESULTS.has(classification) ? classification : "unavailable";
+    `$morrowTargets = @(${targets})`,
+    ...(applyDirectoryAcl ? WINDOWS_APPLY_DIRECTORY_ACL : []),
+    ...WINDOWS_ACCESS_FUNCTION,
+  ].join("\n");
+  return Buffer.from(script, "utf16le").toString("base64");
 }
 
-function applyWindowsPrivateAcl(path: string): boolean {
-  const encodedPath = Buffer.from(path, "utf16le").toString("base64");
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    `$target = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${encodedPath}'))`,
-    "$current = [Security.Principal.WindowsIdentity]::GetCurrent().User",
-    "$system = New-Object Security.Principal.SecurityIdentifier('S-1-5-18')",
-    "$admins = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')",
-    "$acl = [IO.Directory]::GetAccessControl($target)",
-    "$acl.SetAccessRuleProtection($true, $false)",
-    "$acl.SetOwner($current)",
-    "$inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit",
-    "foreach ($sid in @($current, $system, $admins)) { $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow); $acl.AddAccessRule($rule) }",
-    "[IO.Directory]::SetAccessControl($target, $acl)",
-  ].join("; ");
+function runWindowsPowerShell(encodedCommand: string, maxBuffer: number): WindowsPowerShellResult {
   const powershell = windowsPowerShell();
-  const result = spawnSync(powershell.executable, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { encoding: "utf8", env: powershell.environment, timeout: 30_000, maxBuffer: 4 * 1024, windowsHide: true, stdio: ["ignore", "ignore", "ignore"] });
-  return result.status === 0;
+  const result = spawnSync(powershell.executable, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodedCommand], {
+    encoding: "utf8",
+    env: powershell.environment,
+    timeout: 30_000,
+    maxBuffer,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  return { status: result.error ? null : result.status, stdout: String(result.stdout || "") };
+}
+
+/**
+ * Reads one answer as a verdict for each asked path, in order. Anything but a
+ * clean exit with exactly one known verdict line per path, numbered in order,
+ * answers "unavailable" for every path.
+ */
+function windowsAccessAnswer(result: WindowsPowerShellResult, count: number): WindowsPrivateFileAccessClassification[] {
+  const unavailable = Array.from({ length: count }, (): WindowsPrivateFileAccessClassification => "unavailable");
+  if (result.status !== 0 || typeof result.stdout !== "string") return unavailable;
+  const lines = result.stdout.split(/\r?\n/u);
+  if (lines.at(-1) === "") lines.pop();
+  if (lines.length !== count) return unavailable;
+  const verdicts: WindowsPrivateFileAccessClassification[] = [];
+  for (const [index, line] of lines.entries()) {
+    const match = /^(0|[1-9][0-9]*) ([a-z_]+)$/u.exec(line);
+    const verdict = match?.[2] as WindowsPrivateFileAccessClassification | undefined;
+    if (!match || Number(match[1]) !== index || !verdict || !WINDOWS_ACL_RESULTS.has(verdict)) return unavailable;
+    verdicts.push(verdict);
+  }
+  return verdicts;
+}
+
+/** Asks about several paths in as few PowerShell starts as the command-line limit allows. */
+function askWindowsAccess(
+  paths: readonly string[],
+  run: WindowsPowerShellRunner,
+  applyDirectoryAcl = false,
+): WindowsPrivateFileAccessClassification[] {
+  const verdicts: WindowsPrivateFileAccessClassification[] = [];
+  let start = 0;
+  while (start < paths.length) {
+    let end = start + 1;
+    while (end < paths.length && !applyDirectoryAcl
+      && windowsAccessCommand(paths.slice(start, end + 1), false).length <= WINDOWS_ENCODED_COMMAND_LIMIT) end += 1;
+    const chunk = paths.slice(start, end);
+    const command = windowsAccessCommand(chunk, applyDirectoryAcl);
+    verdicts.push(...(command.length <= WINDOWS_ENCODED_COMMAND_LIMIT
+      ? windowsAccessAnswer(run(command, 1_024 + 64 * chunk.length), chunk.length)
+      : chunk.map((): WindowsPrivateFileAccessClassification => "unavailable")));
+    start = end;
+  }
+  return verdicts;
+}
+
+interface PrivateAccessOperation {
+  open: boolean;
+  /** File objects (path, volume and file id) found private during this operation. */
+  readonly privateObjects: Set<string>;
+}
+
+const privateAccessOperations = new AsyncLocalStorage<PrivateAccessOperation>();
+
+/**
+ * Runs one operation, such as a Morrow runtime start, in which a Windows path
+ * found private is not asked about again while it names the same file object.
+ * Only a private answer is kept, only until the operation settles, and never
+ * after Morrow changes that path's access control. Work the operation leaves
+ * running afterwards asks again.
+ */
+export async function withPrivateAccessOperation<T>(run: () => Promise<T>): Promise<T> {
+  const operation: PrivateAccessOperation = { open: true, privateObjects: new Set() };
+  try {
+    return await privateAccessOperations.run(operation, run);
+  } finally {
+    operation.open = false;
+    operation.privateObjects.clear();
+  }
+}
+
+function currentPrivateAccessOperation(): PrivateAccessOperation | null {
+  const operation = privateAccessOperations.getStore();
+  return operation?.open ? operation : null;
+}
+
+function fileObject(path: string): string | null {
+  try {
+    const info = lstatSync(path, { bigint: true });
+    return `${path}\u0000${info.dev}\u0000${info.ino}`;
+  } catch {
+    return null;
+  }
+}
+
+function forgetPrivateObject(path: string): void {
+  const operation = currentPrivateAccessOperation();
+  if (!operation) return;
+  const prefix = `${resolve(path)}\u0000`;
+  for (const object of [...operation.privateObjects]) {
+    if (object.startsWith(prefix)) operation.privateObjects.delete(object);
+  }
+}
+
+/**
+ * Classifies each path's Windows access control, asking PowerShell once for
+ * every path not already found private in the current operation.
+ */
+function windowsAccessVerdicts(
+  paths: readonly string[],
+  options: PrivateFileAccessOptions,
+  applyDirectoryAcl = false,
+): WindowsPrivateFileAccessClassification[] {
+  const operation = currentPrivateAccessOperation();
+  const resolved = paths.map((path) => resolve(path));
+  const verdicts = new Map<string, WindowsPrivateFileAccessClassification>();
+  const asked: string[] = [];
+  for (const path of resolved) {
+    if (verdicts.has(path) || asked.includes(path)) continue;
+    const object = operation && !applyDirectoryAcl ? fileObject(path) : null;
+    if (object && operation!.privateObjects.has(object)) verdicts.set(path, "private");
+    else asked.push(path);
+  }
+  if (asked.length !== 0) {
+    const before = operation ? asked.map(fileObject) : [];
+    const answers = askWindowsAccess(asked, options.runWindowsPowerShell ?? runWindowsPowerShell, applyDirectoryAcl);
+    for (const [index, path] of asked.entries()) {
+      verdicts.set(path, answers[index]!);
+      const object = before[index];
+      if (operation && answers[index] === "private" && object && fileObject(path) === object) operation.privateObjects.add(object);
+    }
+  }
+  return resolved.map((path) => verdicts.get(path)!);
+}
+
+/**
+ * Classifies the Windows access control of each path in one PowerShell start
+ * where the command line allows. A path that cannot be read, and every path of
+ * an answer that is incomplete or malformed, is "unavailable".
+ */
+export function classifyWindowsPrivateAccess(
+  paths: readonly string[],
+  options: Pick<PrivateFileAccessOptions, "runWindowsPowerShell"> = {},
+): WindowsPrivateFileAccessClassification[] {
+  return windowsAccessVerdicts(paths, options);
 }
 
 function applyWindowsPrivateFileAcl(path: string): boolean {
@@ -187,8 +347,23 @@ export function privateDirectoryAccessAccepted(
     const classify = options.classifyMacAcl ?? classifyMacPrivateAcl;
     return classify(directoryPath) === "private";
   }
-  const classify = options.classifyWindowsAcl ?? classifyWindowsPrivateAcl;
-  return classify(directoryPath) === "private";
+  if (options.classifyWindowsAcl) return options.classifyWindowsAcl(directoryPath) === "private";
+  return windowsAccessVerdicts([directoryPath], options)[0] === "private";
+}
+
+/** Reads a file and its parent, and accepts their shape: a regular file in a real directory, no links. */
+function privateFileShape(filePath: string, options: PrivateFileAccessOptions): { readonly parentMode: number } | null {
+  let file;
+  let parent;
+  try {
+    file = lstatSync(filePath);
+    parent = lstatSync(dirname(filePath));
+  } catch {
+    return null;
+  }
+  if (!file.isFile() || file.isSymbolicLink() || !parent.isDirectory() || parent.isSymbolicLink()) return null;
+  if (options.trustedRoot && !trustedAncestorChainAccepted(filePath, options.trustedRoot)) return null;
+  return { parentMode: parent.mode };
 }
 
 /**
@@ -202,25 +377,43 @@ export function privateFileAccessAccepted(
   mode: number,
   options: PrivateFileAccessOptions = {},
 ): boolean {
+  return privateFilesAccessAccepted([{ path: filePath, mode }], options)[0] === true;
+}
+
+/**
+ * Accepts each of several sensitive regular files by the rules of
+ * privateFileAccessAccepted. On Windows one question covers every file and
+ * its parent.
+ */
+export function privateFilesAccessAccepted(
+  files: readonly { readonly path: string; readonly mode: number }[],
+  options: PrivateFileAccessOptions = {},
+): boolean[] {
   const platform = options.platform ?? process.platform;
-  let file;
-  let parent;
-  try {
-    file = lstatSync(filePath);
-    parent = lstatSync(dirname(filePath));
-  } catch {
-    return false;
-  }
-  if (!file.isFile() || file.isSymbolicLink() || !parent.isDirectory() || parent.isSymbolicLink()) return false;
-  if (options.trustedRoot && !trustedAncestorChainAccepted(filePath, options.trustedRoot)) return false;
+  const shapes = files.map((file) => privateFileShape(file.path, options));
   if (platform !== "win32") {
-    if ((mode & 0o077) !== 0 || (parent.mode & 0o022) !== 0) return false;
-    if (platform !== "darwin") return true;
-    const classify = options.classifyMacAcl ?? classifyMacPrivateAcl;
-    return classify(filePath) === "private" && classify(dirname(filePath)) === "private";
+    return files.map((file, index) => {
+      const shape = shapes[index];
+      if (!shape || (file.mode & 0o077) !== 0 || (shape.parentMode & 0o022) !== 0) return false;
+      if (platform !== "darwin") return true;
+      const classify = options.classifyMacAcl ?? classifyMacPrivateAcl;
+      return classify(file.path) === "private" && classify(dirname(file.path)) === "private";
+    });
   }
-  const classify = options.classifyWindowsAcl ?? classifyWindowsPrivateAcl;
-  return classify(filePath) === "private" && classify(dirname(filePath)) === "private";
+  if (options.classifyWindowsAcl) {
+    const classify = options.classifyWindowsAcl;
+    return files.map((file, index) => shapes[index] !== null
+      && classify(file.path) === "private" && classify(dirname(file.path)) === "private");
+  }
+  const asked = files.flatMap((file, index) => shapes[index] ? [file.path, dirname(file.path)] : []);
+  const verdicts = asked.length === 0 ? [] : windowsAccessVerdicts(asked, options);
+  let next = 0;
+  return files.map((_file, index) => {
+    if (!shapes[index]) return false;
+    const accepted = verdicts[next] === "private" && verdicts[next + 1] === "private";
+    next += 2;
+    return accepted;
+  });
 }
 
 /** Hardens one app-owned directory without recursing into its contents. */
@@ -241,9 +434,12 @@ export function hardenPrivateDirectory(directory: string, options: PrivateFileAc
       const classify = options.classifyMacAcl ?? classifyMacPrivateAcl;
       return classify(directory) === "private";
     }
-    const apply = options.applyWindowsPrivateAcl ?? applyWindowsPrivateAcl;
-    const classify = options.classifyWindowsAcl ?? classifyWindowsPrivateAcl;
-    return apply(directory) === true && classify(directory) === "private";
+    forgetPrivateObject(directory);
+    if (options.applyWindowsPrivateAcl || options.classifyWindowsAcl) {
+      if (!options.applyWindowsPrivateAcl || !options.classifyWindowsAcl) return false;
+      return options.applyWindowsPrivateAcl(directory) === true && options.classifyWindowsAcl(directory) === "private";
+    }
+    return windowsAccessVerdicts([directory], options, true)[0] === "private";
   } catch {
     return false;
   }
@@ -262,7 +458,10 @@ export function hardenPrivateFile(filePath: string, options: PrivateFileAccessOp
         const remove = options.removeMacAcl ?? removeMacPrivateAcl;
         if (!remove(filePath)) return false;
       }
-    } else if (!applyWindowsPrivateFileAcl(filePath)) return false;
+    } else {
+      forgetPrivateObject(filePath);
+      if (!applyWindowsPrivateFileAcl(filePath)) return false;
+    }
     const after = lstatSync(filePath);
     return before.dev === after.dev && before.ino === after.ino && after.nlink === 1
       && privateFileAccessAccepted(filePath, after.mode, options);
