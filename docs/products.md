@@ -4,7 +4,7 @@ The Morrow family ships two products from this monorepo. They share a philosophy
 
 ## Morrow Desktop (`desktop/`)
 
-The desktop app plus Morrow Bridge, its Chrome extension. An educator downloads Morrow for a Mac with Apple silicon or for Windows, follows the in-app setup, and connects the assistant they already use: ChatGPT, Claude Desktop, Claude Code, or Gemini CLI.
+The desktop app plus Morrow Bridge, its Chrome extension. An educator downloads Morrow for a Mac with Apple silicon or for Windows, follows the in-app setup, and connects the assistant they already use: the ChatGPT desktop app, Claude Desktop, Claude Code, or Gemini CLI. So far, only OpenAI's Codex CLI, which uses Morrow's ChatGPT setup, has been checked on a live Canvas test course. The ChatGPT desktop app, Claude Desktop, Claude Code, and Gemini CLI setups have passed Morrow's own tests only.
 
 - Works with Canvas and Moodle through the Chrome window where the educator is already signed in. Selected Canvas tasks have been checked on live test courses, and part of the Moodle catalog on a Moodle test course.
 - Can also connect to a Blackboard course once the school's Blackboard administrator sets up Morrow's connection, but no live Blackboard site has been tested yet.

@@ -149,6 +149,41 @@ test("the release workflow is dispatch-only and builds both desktop platforms", 
   assert.equal((release.match(/^\s+if-no-files-found: error$/gm) || []).length, 2);
 });
 
+/** The upload-artifact steps of one job, each with its `if` and its `with` inputs. */
+function uploadSteps(job) {
+  return job.split(/^(?= {6}- )/m)
+    .filter((step) => /^ {6}- (?:[a-z]+: .*\n {8})*uses: actions\/upload-artifact@/m.test(step))
+    .map((step) => ({
+      if: /^ {8}if: (.+)$/m.exec(step)?.[1],
+      ...Object.fromEntries([...step.matchAll(/^ {10}([a-z-]+): (.+)$/gm)].map(([, key, value]) => [key, value])),
+    }));
+}
+
+/**
+ * A failed or cancelled QA run keeps the JSON receipts its harnesses already wrote, because once the
+ * runner is gone they are the only record of what failed. The installer, disk image and archive never
+ * leave a failed run: only complete successful evidence uses the normal artifact names. Written
+ * before the fix (final sweep 2026-09-23): both uploads ran `if: success()` only, so failed run
+ * 35915669818 kept no Windows artifact, although desktop-windows-upgrade.ps1 writes each app receipt
+ * and its uninstall residue receipt before it reports the failure.
+ */
+test("a failed or cancelled QA job uploads only its JSON receipts, under a separate name", () => {
+  for (const [id, job] of jobs(release)) {
+    const steps = uploadSteps(job);
+    const kept = steps.filter((step) => step.if === "success()");
+    const receipts = steps.filter((step) => step.if === "failure() || cancelled()");
+    assert.equal(kept.length, 1, `${id} must upload its complete evidence once, after success`);
+    assert.equal(receipts.length, 1, `${id} must upload its receipts when it fails or is cancelled`);
+    assert.equal(steps.length, 2, `${id} must have no other upload`);
+    assert.equal(receipts[0].path, `${kept[0].path}/*.json`, `${id} must upload only the JSON receipts from the directory its successful run uploads`);
+    assert.equal(receipts[0].name, kept[0].name.replace(/-\$\{\{ github\.run_id \}\}$/, "-failure-receipts-${{ github.run_id }}"),
+      `${id} must name the failure receipts apart from complete evidence`);
+    assert.equal(receipts[0]["if-no-files-found"], "warn", "a run that fails before its first receipt has none, and the upload must not hide that failure");
+    assert.equal(receipts[0]["retention-days"], kept[0]["retention-days"]);
+    assert.ok(job.lastIndexOf("uses: actions/upload-artifact@") > job.lastIndexOf("run:"), `${id} must upload after every step that writes a receipt`);
+  }
+});
+
 test("each release job runs in the desktop product directory and uploads from it", () => {
   for (const [id, job] of jobs(release)) {
     assert.match(job, /^ {4}defaults:\n {6}run:\n {8}working-directory: desktop$/m, `${id} must run its commands in desktop/`);

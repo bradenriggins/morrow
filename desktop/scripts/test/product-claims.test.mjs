@@ -235,6 +235,52 @@ test("the platform sentence is quoted where LIMITATIONS.md says, and the landing
   assert.deepEqual(problems, []);
 });
 
+/** Markdown paragraphs with their first line. Each table row and list item stands alone; headings are skipped. */
+function paragraphs(text) {
+  const found = [];
+  let current = null;
+  for (const [index, line] of text.split("\n").entries()) {
+    if (!line.trim() || /^#{1,6} /.test(line)) {
+      current = null;
+      continue;
+    }
+    if (current && !/^\s*(?:\||[-*+] |\d+\. )/.test(line)) {
+      current.text += `\n${line}`;
+      continue;
+    }
+    current = { line: index + 1, text: line };
+    found.push(current);
+  }
+  return found.map((paragraph) => ({ ...paragraph, text: collapse(paragraph.text).replace(/’/g, "'") }));
+}
+
+// The attended live record, BT2-LIVE-PROOF.md, holds native Codex CLI runs on a live Canvas test
+// course and says Gemini CLI could not run; every other assistant setup has only Morrow's own tests.
+// A landing document that names an assistant states that status in the same paragraph, as the
+// website does. Written before the fix (final sweep 2026-09-23): the root README said "connect
+// ChatGPT, Claude, or Gemini" and docs/products.md listed all four assistants with no status.
+const ASSISTANT_PROOF_RECORD = "docs/implementation/BT2-LIVE-PROOF.md";
+const ASSISTANT_PROOF_STATUS = [
+  "So far, only OpenAI's Codex CLI, which uses Morrow's ChatGPT setup, has been checked on a live Canvas test course.",
+  "The ChatGPT desktop app, Claude Desktop, Claude Code, and Gemini CLI setups have passed Morrow's own tests only.",
+];
+
+test("every landing paragraph that names an assistant states each assistant's live proof status", () => {
+  const record = read(ASSISTANT_PROOF_RECORD);
+  assert.match(record, /\| Native Codex interactive update \|[^\n]*Codex CLI `\d+\.\d+\.\d+`/, `${ASSISTANT_PROOF_RECORD} no longer records the live Codex CLI run the status sentence rests on`);
+  assert.match(record, /Gemini CLI could not run/, `${ASSISTANT_PROOF_RECORD} no longer records that Gemini CLI could not run`);
+
+  const problems = [];
+  for (const doc of ["../README.md", "../docs/products.md"]) {
+    for (const paragraph of paragraphs(read(doc))) {
+      if (!/\b(?:ChatGPT|Claude|Gemini|Codex)\b/.test(paragraph.text)) continue;
+      const missing = ASSISTANT_PROOF_STATUS.filter((sentence) => !paragraph.text.includes(sentence));
+      if (missing.length > 0) problems.push(`${doc.slice(3)}:${paragraph.line} names an assistant without: ${missing.join(" ")}`);
+    }
+  }
+  assert.deepEqual(problems, [], `${ASSISTANT_PROOF_RECORD} is the record of which assistant ran on a live course`);
+});
+
 test("every repo-relative link in the claim documents resolves", () => {
   const broken = [];
   for (const doc of CLAIM_DOCS) {

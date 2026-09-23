@@ -1,5 +1,7 @@
 #!/bin/sh
-# Runs the test suite of each product this commit changes.
+# Runs the test suite of each product this commit changes, as the path filters
+# in .github/workflows/ci.yml do: a product's directory, the workflows, and the
+# root files that product's tests read (desktop/scripts/test/lib/ci-path-filters.mjs).
 # Install once, from the repository root: git config core.hooksPath desktop/.githooks
 set -eu
 
@@ -8,12 +10,11 @@ STAGED=$(git diff --cached --name-only)
 GIT_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars)
 unset $GIT_LOCAL_ENV_VARS
 
-# Desktop tests read the workflows under .github/, so a workflow change runs them too.
-if printf '%s\n' "$STAGED" | grep -Eq '^(desktop|\.github)/'; then
+if printf '%s\n' "$STAGED" | grep -Eq '^(desktop/|\.github/|\.gitattributes$|docs/versioning\.md$)'; then
   (cd "$REPO_ROOT/desktop" && pnpm test)
 fi
 
-if printf '%s\n' "$STAGED" | grep -q '^morrow-for-muse/'; then
+if printf '%s\n' "$STAGED" | grep -Eq '^(morrow-for-muse/|\.github/|\.gitattributes$|\.gitignore$|LICENSE$)'; then
   # The Muse learner-privacy tests need 'cryptography' and skip without
   # it; the suite then ends with a loud warning. MORROW_MUSE_PYTHON picks
   # a python that has it (pip install -r morrow-for-muse/requirements-optional.txt).
