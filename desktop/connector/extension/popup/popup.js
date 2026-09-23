@@ -433,7 +433,7 @@ editingSettings.addEventListener("click", () => {
   void chrome.runtime.openOptionsPage();
 });
 
-// WI-5.8: "All courses" opens the same Courses and access page as "Open Plan and Edit settings".
+// WI-5.8: "All courses" opens the same Plan and Edit settings page as "Open Plan and Edit settings".
 allCoursesButton.addEventListener("click", () => {
   openCourseSelection();
 });

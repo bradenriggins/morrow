@@ -1670,7 +1670,7 @@ try {
     await settings.locator("#action-filter").fill("");
   };
   await settings.goto(`chrome-extension://${EXTENSION_ID}/settings/settings.html`);
-  await settings.getByRole("heading", { name: "Courses and access", level: 1 }).waitFor();
+  await settings.getByRole("heading", { name: "Plan and Edit settings", level: 1 }).waitFor();
   await settings.locator("#connection-status").filter({ hasText: /^No course is connected yet\.$/ }).waitFor();
   // Settings reads the available courses of every signed-in site as soon as it opens: no button.
   const availableCourseListRead = async (message) => await waitFor(async () => {

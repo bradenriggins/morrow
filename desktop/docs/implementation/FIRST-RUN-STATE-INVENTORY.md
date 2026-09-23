@@ -221,7 +221,7 @@ to (`connector/extension/popup/popup-view.js:160-175`, `connector/extension/popu
 
 **The popup as home (WI-5.8).** Below the status line, up to 5 connected courses show by name with
 their own D7 state text ("Plan. Asks first.", "Edit. Routine edits.", and so on, the
-same wording the Courses and access page uses), then **All courses**, which opens Plan and Edit
+same wording Plan and Edit settings uses), then **All courses**, which opens Plan and Edit
 settings. With no connected course the list stays out of the page entirely
 (`connector/extension/popup/popup-view.js:19-52`, `connector/extension/popup/popup.js:90-101`).
 
@@ -591,25 +591,25 @@ stale name here.
 | `Setup overview` | Setup guide | `connector/extension/onboarding/onboarding.html:30` |
 | `Open the approval page` | Setup guide | `connector/extension/onboarding/onboarding.html:48` |
 | `Open Plan and Edit settings` | Setup guide | `connector/extension/onboarding/onboarding.html:49`, `connector/extension/onboarding/onboarding.html:49` |
-| `Ask first in all courses` | Courses and access | `connector/extension/settings/settings.html:23` |
-| `Refresh connected courses` | Courses and access | `connector/extension/settings/settings.html:35` |
-| `Open Canvas or Moodle when Morrow needs it.` | Courses and access | `connector/extension/settings/settings.html:148` |
-| `Select` | Courses and access | `connector/extension/settings/settings.html:50` |
-| `Connect` | Courses and access | state set at `connector/extension/settings/settings.js:906` |
-| `Show more` | Courses and access | `connector/extension/settings/settings.html:57` |
-| `Load more available courses` | Courses and access | `connector/extension/settings/settings.html:60` |
-| `Plan. Ask first.` | Courses and access | `connector/extension/settings/settings.html:65` |
-| `Edit. Routine edits.` | Courses and access | `connector/extension/settings/settings.html:66` |
-| `Enable course file access` | Courses and access | `connector/extension/settings/settings.html:161`, `connector/extension/settings/settings.js:1489` |
-| `Turn on course file access` | Courses and access | `connector/extension/settings/settings.js:1489` |
-| `Remove HTTPS file access` | Courses and access | `connector/extension/settings/settings.html:162` |
-| `Return selected courses to Plan` | Courses and access | `connector/extension/settings/settings.html:121` |
-| `Save Edit access` | Courses and access | `connector/extension/settings/settings.html:122`, `connector/extension/settings/settings.js:808` |
-| `Review and save` | Courses and access (WI-5.5 Customize view summary bar) | `connector/extension/settings/settings.js:1463` |
-| `Keep reviewing` | Courses and access | `connector/extension/settings/settings.html:131` |
-| `Save Edit access anyway` | Courses and access | `connector/extension/settings/settings.html:132` |
-| `Open Canvas` | Courses and access | `connector/extension/settings/settings.js:432` |
-| `Open Moodle` | Courses and access | `connector/extension/settings/settings.js:433` |
+| `Ask first in all courses` | Plan and Edit settings | `connector/extension/settings/settings.html:23` |
+| `Refresh connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:35` |
+| `Open Canvas or Moodle when Morrow needs it.` | Plan and Edit settings | `connector/extension/settings/settings.html:148` |
+| `Select` | Plan and Edit settings | `connector/extension/settings/settings.html:50` |
+| `Connect` | Plan and Edit settings | state set at `connector/extension/settings/settings.js:906` |
+| `Show more` | Plan and Edit settings | `connector/extension/settings/settings.html:57` |
+| `Load more available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:60` |
+| `Plan. Ask first.` | Plan and Edit settings | `connector/extension/settings/settings.html:65` |
+| `Edit. Routine edits.` | Plan and Edit settings | `connector/extension/settings/settings.html:66` |
+| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:161`, `connector/extension/settings/settings.js:1489` |
+| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:1489` |
+| `Remove HTTPS file access` | Plan and Edit settings | `connector/extension/settings/settings.html:162` |
+| `Return selected courses to Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:121` |
+| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:122`, `connector/extension/settings/settings.js:808` |
+| `Review and save` | Plan and Edit settings (WI-5.5 Customize view summary bar) | `connector/extension/settings/settings.js:1463` |
+| `Keep reviewing` | Plan and Edit settings | `connector/extension/settings/settings.html:131` |
+| `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:132` |
+| `Open Canvas` | Plan and Edit settings | `connector/extension/settings/settings.js:432` |
+| `Open Moodle` | Plan and Edit settings | `connector/extension/settings/settings.js:433` |
 | `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1191` |
 | `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1191` |
 | `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1191` |
@@ -633,11 +633,11 @@ Names a person reads as landmarks rather than presses:
 | `Course` | Morrow app progress rail | `installer/shared/setup-view.mjs:133` |
 | `Connect a Blackboard Learn site (optional)` | Morrow app | `installer/renderer/index.html:64` |
 | `Morrow setup` | Setup guide | `connector/extension/onboarding/onboarding.html:6` |
-| `Courses and access` | Courses and access | `connector/extension/settings/settings.html:6` |
-| `Morrow Bridge: Courses and access` | Courses and access browser tab | `connector/extension/settings/settings.html:6` |
-| `Your courses` | Courses and access | `connector/extension/settings/settings.html:32` |
-| `Course access` | Courses and access | `connector/extension/settings/settings.html:74` |
-| `Course file access` | Courses and access | `connector/extension/settings/settings.html:154` |
+| `Plan and Edit settings` | Plan and Edit settings | `connector/extension/settings/settings.html:15` |
+| `Morrow Bridge: Plan and Edit settings` | Plan and Edit settings browser tab | `connector/extension/settings/settings.html:6` |
+| `Your courses` | Plan and Edit settings | `connector/extension/settings/settings.html:32` |
+| `Course access` | Plan and Edit settings | `connector/extension/settings/settings.html:74` |
+| `Course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:154` |
 
 ---
 

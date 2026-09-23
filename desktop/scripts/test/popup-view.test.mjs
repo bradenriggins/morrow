@@ -128,7 +128,7 @@ test("pendingReviews keeps only well-formed entries, and reviewButtonLabel names
 });
 
 // WI-5.8: the popup's own course list keeps D7's exact wording ("Plan. Asks first.", "Edit.
-// Routine edits.", and so on), the same text the Courses and access page shows, from nothing but
+// Routine edits.", and so on), the same text Plan and Edit settings shows, from nothing but
 // morrow_edit_policy_status's own bindings array. Edit is not timed, so no state names an end time.
 test("courseStateText keeps D7's own wording, from the edit permission alone", () => {
   const canvasRoutineIds = CURATED_CATEGORY_SPECS.filter((spec) => spec.provider === "canvas" && spec.routine === true).map((spec) => spec.id);

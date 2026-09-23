@@ -124,7 +124,7 @@ test("the popup, settings, and setup guide carry no decorative eyebrow label", (
 test("the settings page states its headings without a label above each one", () => {
   const settings = readFileSync(new URL("connector/extension/settings/settings.html", root), "utf8");
   assert.deepEqual(eyebrowLabels(settings), []);
-  assert.match(settings, /<h1>Courses and access<\/h1>/);
+  assert.match(settings, /<h1>Plan and Edit settings<\/h1>/);
   assert.match(settings, /<h2 id="courses-title">Your courses<\/h2>/);
   assert.doesNotMatch(settings, /id="site-discovery-title"/);
   assert.match(settings, /<h3 id="file-storage-title">Course file access<\/h3>/);
@@ -132,6 +132,19 @@ test("the settings page states its headings without a label above each one", () 
   // The order between choosing courses and choosing access is stated as a constraint the reader
   // can act on, so no "Step 1" or "Step 2" label is needed to carry it.
   assert.match(settings, /Select courses, then choose Edit to review the available actions\./);
+});
+
+// The popup, the setup guide, and the error copy send the educator to "Plan and Edit settings", so the
+// page they land on carries that exact name in its tab title and its heading.
+test("the settings page carries the name every link to it uses", () => {
+  const read = (path) => readFileSync(new URL(path, root), "utf8");
+  const settings = read("connector/extension/settings/settings.html");
+  const name = "Plan and Edit settings";
+  assert.match(read("connector/extension/popup/popup.html"), new RegExp(`id="editing-settings"[^>]*>Open ${name}<`));
+  assert.match(read("connector/extension/onboarding/onboarding.html"), new RegExp(`id="open-settings"[^>]*>Open ${name}<`));
+  assert.match(read("connector/extension/src/bridge-problem-copy.js"), new RegExp(`Open ${name}`));
+  assert.match(settings, new RegExp(`<title>Morrow Bridge: ${name}</title>`));
+  assert.match(settings, new RegExp(`<h1>${name}</h1>`));
 });
 
 test("current setup surfaces use three stages and platform-specific course actions", () => {

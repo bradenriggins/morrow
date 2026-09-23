@@ -24,7 +24,7 @@ function permissionLapsed(permission) {
  * D7: one connection's own state text, read only from its editPermission summary. A permission
  * present in morrow_edit_policy_status's bindings is already fresh (the service worker filters out
  * a lapsed or catalog-stale one), so the popup needs no separate staleness check to show it (see
- * settings.js's isStale for the fuller check the Courses and access page keeps for other reasons).
+ * settings.js's isStale for the fuller check Plan and Edit settings keeps for other reasons).
  */
 export function courseStateText(binding) {
   const permission = binding?.editPermission;

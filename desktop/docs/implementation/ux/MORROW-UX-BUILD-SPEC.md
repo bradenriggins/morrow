@@ -452,7 +452,7 @@ Release batch R5. Bridge only. Needs R3. WI-5.1 can ship earlier.
 ### WI-5.2 Page structure
 
 - **File.** `settings/settings.html`.
-- Title and `h1`: "Courses and access". Order: banner (WI-1.4), "Your courses", then "Browser permissions and rules" (the present "Course file access" and "Access rules" panels, plus WI-1.2), then Private Chat as now.
+- Title and `h1`: **Superseded 2026-09-22: the page is titled "Plan and Edit settings", the name the popup, the setup guide, the error copy and the website already send the educator to.** Before: "Courses and access". Order: banner (WI-1.4), "Your courses", then "Browser permissions and rules" (the present "Course file access" and "Access rules" panels, plus WI-1.2), then Private Chat as now.
 - Remove the "Find courses" block. Start discovery when the page opens for each signed-in site. Keep a "Refresh" button.
 
 ### WI-5.3 The course list
@@ -700,7 +700,7 @@ The reference is the model "Moment 4: return and oversee" and the model "Customi
 - **Remove.** `PAGE_SIZE`, the page navigation, the two-view switch (`state.view`), `renderAnchors` and the "Find courses" block, `renderCategories`, `renderCategoryGroup`.
 - **Add to `state`.** `filters: { q, platform, term, scope }`, `selectMode: boolean`, `openCourses: Set`, `openAreas: Set`, `openKinds: Set`, `courseMeta: Map`.
 - **New render functions.** `renderBanner`, `renderCourseToolbar`, `renderCourseList`, `renderCourseRow`, `renderCourseDetail`, `renderBulkBar`, `renderCustomize`, `renderArea`, `renderKind`, `renderSummaryBar`. Each returns markup from state. A checkbox change updates counts and mixed states in place and does not call `renderCustomize` again.
-- **Markup.** One `h1` "Courses and access". Each list part is an `h2`. A course row is a `div` with a `button` that carries `aria-expanded` and `aria-controls`. A detail is a `div` with that id. A mixed checkbox sets `indeterminate = true` and `aria-checked="mixed"`.
+- **Markup.** One `h1` "Plan and Edit settings" (superseded 2026-09-22; before: "Courses and access"). Each list part is an `h2`. A course row is a `div` with a `button` that carries `aria-expanded` and `aria-controls`. A detail is a `div` with that id. A mixed checkbox sets `indeterminate = true` and `aria-checked="mixed"`.
 - **Text.** Use the exact strings in this spec and in the models. Each mode name appears with its meaning (D7).
 - **Proof.** New cases in `scripts/test/settings-page.test.mjs` for: search by code, the scope counts, a bulk level change for a Canvas and a Moodle course together, "select all" that leaves removal off, a mixed state, the summary sentence, and no second render on a checkbox change. Then `pnpm test:connector:browser` and `node scripts/ux/census.mjs --check`.
 
