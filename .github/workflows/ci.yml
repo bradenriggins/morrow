@@ -36,9 +36,10 @@ jobs:
               - 'morrow-for-muse/**'
               - '.github/**'
 
-  # No em dash and no retired phrase anywhere in the repository. These gates
-  # need only Node, so they run from the repository root with nothing to
-  # install.
+  # No em dash and no retired phrase anywhere in the repository, and the
+  # security policy and issue templates keep security reports and student
+  # information out of public issues. These gates need only Node, so they run
+  # from the repository root with nothing to install.
   check-repository:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -47,7 +48,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.23.2
-      - run: node --test desktop/scripts/test/no-em-dash.test.mjs desktop/scripts/test/product-claims.test.mjs
+      - run: node --test desktop/scripts/test/no-em-dash.test.mjs desktop/scripts/test/product-claims.test.mjs desktop/scripts/test/repository-policy.test.mjs
 
   check-desktop:
     needs: changes

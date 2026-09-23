@@ -100,6 +100,59 @@ test("no product-facing page anywhere in the repository uses a retired phrase", 
   assert.deepEqual(found, [], "these phrases are retired; scripts/test/lib/retired-claims.mjs says what each one got wrong");
 });
 
+// The desktop product's public name is Morrow Desktop, for Mac and Windows. "Morrow" alone is the
+// family and the app's own name on the computer, so a version number needs the product it belongs
+// to: Morrow Desktop, Morrow Bridge, or Morrow for Muse. Written before the fix (final sweep
+// 2026-09-23): LIMITATIONS.md said "Morrow `1.0.5`", the website said "Morrow for Mac and Windows",
+// and the existing release was titled "Morrow 1.0.4", so one product had three names.
+test("every page that states a version names the Morrow product it belongs to", () => {
+  const repositoryRoot = new URL("../", root);
+  const listed = spawnSync("git", ["-C", fileURLToPath(repositoryRoot), "ls-files", "-z", "--", "*.md", "*.html"], { encoding: "utf8" });
+  assert.equal(listed.status, 0, listed.stderr);
+  const pages = listed.stdout.split("\0").filter((path) => path && !INTERNAL_RECORDS.test(path));
+  const unnamed = pages.flatMap((page) => {
+    const text = readFileSync(new URL(page, repositoryRoot), "utf8");
+    return [...text.matchAll(/\bMorrow `?v?\d+\.\d+(?:\.\d+)?/g)]
+      .map((match) => `${page}:${text.slice(0, match.index).split("\n").length} "${match[0]}"`);
+  });
+  assert.deepEqual(unnamed, [], "write Morrow Desktop, Morrow Bridge, or Morrow for Muse before a version number");
+
+  const versioning = readFileSync(new URL("docs/versioning.md", repositoryRoot), "utf8");
+  const titles = [...versioning.matchAll(/gh release create (\S+)\/vX\.Y\.Z [^`]*--title "([^"]+)"/g)].map(([, tag, title]) => `${tag}: ${title}`);
+  assert.deepEqual(titles, ["desktop: Morrow Desktop X.Y.Z", "muse: Morrow for Muse X.Y.Z"], "each release title names its product");
+});
+
+// The newest section of CHANGELOG.md becomes the text of the GitHub release that
+// meetmorrow.app/download links to (docs/versioning.md step 4), so educators read it. Technical items
+// sit under a last "Technical notes" subsection; everything above it is in plain words.
+// Written before the fix (final sweep 2026-09-23): the 1.0.5 notes opened with "adversarial audits
+// after the 2026-09-22 handoff" and spoke of `required = true`, MSIX, an HTTP endpoint, CI,
+// Dependabot, and preflight, mixed in with the changes an educator sees.
+const RELEASE_NOTE_JARGON = /\b(?:adversarial|handoff|HTTP|endpoints?|MSIX|preflight|Dependabot|CI|TypeScript|Vitest|pnpm|workflows?|harness(?:es)?|fixtures?|runtime|MCP|tokens?|PowerShell|tenant|API)\b/gi;
+const RELEASE_FILE = /^Morrow-\d+\.\d+\.\d+-(?:mac-arm64\.(?:dmg|zip)|win-x64\.exe)$/;
+
+test("the newest release notes speak to educators, with technical notes last and apart", () => {
+  const changelog = read("CHANGELOG.md");
+  const heading = /^## \d+\.\d+\.\d+ \(\d{4}-\d\d-\d\d\)$/m.exec(changelog);
+  assert.ok(heading, "CHANGELOG.md must open its newest release with a dated version heading");
+  const next = changelog.indexOf("\n## ", heading.index + 1);
+  const section = changelog.slice(heading.index, next === -1 ? changelog.length : next);
+  const parts = section.split(/^(?=### )/m);
+  const technical = parts.findIndex((part) => /^### Technical notes\n/.test(part));
+  if (technical !== -1) assert.equal(technical, parts.length - 1, "Technical notes must be the last subsection");
+  const problems = [];
+  for (const part of technical === -1 ? parts : parts.slice(0, technical)) {
+    for (const sentence of sentences(part)) {
+      for (const [, code] of sentence.text.matchAll(/`([^`]+)`/g)) {
+        if (!RELEASE_FILE.test(code)) problems.push(`code \`${code}\` in: ${sentence.text}`);
+      }
+      const words = [...sentence.text.replace(/`[^`]+`/g, "").matchAll(RELEASE_NOTE_JARGON)].map(([word]) => word);
+      if (words.length > 0) problems.push(`${words.join(", ")} in: ${sentence.text}`);
+    }
+  }
+  assert.deepEqual(problems, [], `${heading[0]}: say what the educator sees, or move the item under ### Technical notes`);
+});
+
 test("the documented platform coverage matches the packages that ship", (t) => {
   if (present(BLACKBOARD_PACKAGE)) {
     for (const doc of ["ARCHITECTURE.md", "LIMITATIONS.md"]) {

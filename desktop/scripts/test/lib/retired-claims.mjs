@@ -17,6 +17,8 @@
  * - "Blackboard browser connection" and "Blackboard browser access" describe a route that does not
  *   exist: Blackboard runs through the Anthology Learn REST API with a local credential, and the
  *   Chrome connector never connects a Blackboard course page.
+ * - "Morrow for Mac and Windows" was a second name for Morrow Desktop. The product has one public
+ *   name, Morrow Desktop, and a page may add that it is for Mac and Windows.
  */
 export const RETIRED_PHRASES = [
   "Development preview",
@@ -25,6 +27,7 @@ export const RETIRED_PHRASES = [
   "private preview",
   "Blackboard browser connection",
   "Blackboard browser access",
+  "Morrow for Mac and Windows",
 ];
 
 /** A prohibition needs both parts: something forbidden, and the act of writing or saying it. */

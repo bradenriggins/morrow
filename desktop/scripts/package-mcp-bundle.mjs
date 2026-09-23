@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pnpmCommand } from "./lib/pnpm-command.mjs";
+import { unsignedSigningState } from "./lib/unsigned-desktop-signing.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLER = resolve(ROOT, "installer");
@@ -924,9 +925,9 @@ async function preparePayload(target, destination, replace) {
 }
 
 function signingState(target, unsignedQa, unsignedRelease) {
-  if (unsignedRelease) return { mode: "unsigned_public_release", target, publicRelease: true, automaticUpdates: false };
+  if (unsignedRelease) return unsignedSigningState(target, { publicRelease: true });
   if (!unsignedQa) throw new Error("Choose --unsigned-release for an unsigned distribution or --unsigned-qa for a private QA artifact.");
-  return { mode: "unsigned_private_qa", target, publicRelease: false };
+  return unsignedSigningState(target, { publicRelease: false });
 }
 
 function unsignedBuilderEnvironment(base = process.env) {

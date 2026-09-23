@@ -19,6 +19,8 @@ const release = readFileSync(join(repositoryRoot, releasePath), "utf8");
 const upgrade = readFileSync(join(root, upgradePath), "utf8");
 const boundedRunner = readFileSync(join(root, boundedRunnerPath), "utf8");
 const macSmoke = readFileSync(join(root, macSmokePath), "utf8");
+const versioningPath = "docs/versioning.md";
+const versioning = readFileSync(join(repositoryRoot, versioningPath), "utf8");
 const WINDOWS_APPLICATION_METADATA = Object.freeze({
   companyName: "Braden Riggins",
   productName: "Morrow",
@@ -339,6 +341,74 @@ test("the smoke command the macOS job runs is accepted by the smoke harness", (t
   const rejected = node([harness, "--not-an-option", directory]);
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /Usage:/, "option rejection is what the accepted run above is measured against");
+});
+
+/**
+ * docs/versioning.md step 4 builds the files educators download with --unsigned-release on the
+ * maintainer's computers. The QA workflow tests other bytes, so step 4 must start the exact files
+ * it publishes, with the same harness options the workflow passes (the tests above prove the
+ * harnesses accept them), before `gh release create`.
+ *
+ * Failure mode pinned down (written before the fix; final sweep 2026-09-23): step 4 went from the
+ * packaging command straight to SHA256SUMS and `gh release create`, and the macOS harness refused
+ * the --unsigned-release receipt, so no published installer had ever been started by a smoke test.
+ */
+test("the release procedure smoke-tests the exact installers it publishes, before it publishes them", () => {
+  const start = versioning.indexOf("4. **");
+  const end = versioning.indexOf("\n5. **", start);
+  assert.ok(start >= 0 && end > start, `${versioningPath} must keep the Desktop publishing step as step 4`);
+  const step = versioning.slice(start, end);
+  const publish = step.indexOf("gh release create desktop/vX.Y.Z");
+  assert.ok(publish > 0, `${versioningPath} step 4 must publish with gh release create`);
+  const published = step.slice(publish).split("`")[0];
+
+  for (const [id, harness, fileOption, file] of [
+    ["macos-installer", "scripts/test/desktop-mac-smoke.mjs", "--disk-image", "Morrow-X.Y.Z-mac-arm64.dmg"],
+    ["windows-installer", "scripts/test/desktop-windows-smoke.mjs", "--installer", "Morrow-X.Y.Z-win-x64.exe"],
+  ]) {
+    const command = step.match(new RegExp(`\`(node ${harness.replaceAll(".", "\\.")} [^\`]+)\``));
+    assert.ok(command, `${versioningPath} step 4 must run ${harness}`);
+    assert.ok(command.index < publish, `${versioningPath} step 4 must run ${harness} before gh release create`);
+    const documented = [...command[1].matchAll(/(?<=\s)--[a-z][a-z0-9-]*/g)].map((match) => match[0]);
+    assert.deepEqual(documented, invocationOptions(jobs(release).get(id), harness),
+      `${versioningPath} must pass ${harness} the options ${releasePath} passes it`);
+    // A placeholder such as <mac folder> holds a space, so a value runs to the next option.
+    const value = (option) => new RegExp(`${option} (.+?)(?= --|$)`).exec(command[1])?.[1] ?? "";
+    assert.ok(value(fileOption).endsWith(file), `the ${harness} run must start ${file}`);
+    assert.ok(published.includes(` ${file} `), `the file ${harness} starts must be the ${file} that step 4 publishes`);
+    assert.equal(value("--source"), "<tag commit>", `the ${harness} run must bind the commit the tag names`);
+  }
+});
+
+/**
+ * Each release's notes are its product's CHANGELOG.md section. docs/versioning.md gives the command
+ * that saves that section as the notes file, and this test runs the documented command for each
+ * product's current version and compares it with the whole section.
+ *
+ * Failure mode pinned down (written before the fix; final sweep 2026-09-23): the step said only
+ * "Save the version's section as a notes file". The published muse/v0.4.0 notes stop in the middle
+ * of the section ("Documentation:"), and they kept an undo claim the changelog had corrected.
+ */
+test("the documented notes command saves each product's whole changelog section", () => {
+  const versions = {
+    desktop: JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version,
+    "morrow-for-muse": readFileSync(join(repositoryRoot, "morrow-for-muse", "VERSION"), "utf8").trim(),
+  };
+  const commands = [...versioning.matchAll(/`(awk -v v="X\.Y\.Z" '[^']+' (desktop|morrow-for-muse)\/CHANGELOG\.md) > <notes file>`/g)];
+  assert.deepEqual(commands.map(([, , product]) => product), ["desktop", "morrow-for-muse"],
+    `${versioningPath} must give the notes command for Morrow Desktop (step 4) and Morrow for Muse (step 5)`);
+  for (const [, command, product] of commands) {
+    const version = versions[product];
+    const lines = readFileSync(join(repositoryRoot, product, "CHANGELOG.md"), "utf8").split("\n");
+    const start = lines.findIndex((line) => line.startsWith(`## ${version} (`));
+    assert.ok(start >= 0, `${product}/CHANGELOG.md has no section for ${version}`);
+    const end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
+    const section = lines.slice(start + 1, end === -1 ? lines.length : end).join("\n") + (end === -1 ? "" : "\n");
+    const saved = spawnSync("sh", ["-c", command.replace("X.Y.Z", version)], { cwd: repositoryRoot, encoding: "utf8" });
+    assert.equal(saved.status, 0, saved.stderr);
+    assert.ok(section.trim().length > 0);
+    assert.equal(saved.stdout, section, `the ${product} notes command must save the whole ${version} section`);
+  }
 });
 
 test("the macOS job mounts and tests the same disk image it uploads", () => {
