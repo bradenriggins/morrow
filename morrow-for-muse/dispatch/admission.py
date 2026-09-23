@@ -289,8 +289,11 @@ def _url_hits_any(url: str, substrings: list) -> str | None:
 # tokens close that hole. The plural resource nouns are the Canvas
 # collection names; the singular _id forms catch identifier parameters
 # (student_ids, user_id) that carry learner references in bodies.
+# include[]=assignment_visibility makes an assignment read list the ids
+# of the students who can see each assignment.
 _QUERY_BODY_LEARNER_TOKENS = ("enrollments", "students", "users",
-                              "student_id", "user_id")
+                              "student_id", "user_id",
+                              "assignment_visibility")
 
 
 # A JSON object key naming a learner record or learner identifier

@@ -68,6 +68,12 @@ Student privacy:
   different student in the same course given by its number. Morrow now
   refuses such a course before it reads anything, and the assistant
   asks for the course by name or by the number in its Canvas address.
+- Privacy fix: three reads showed students' Canvas user ids to the
+  assistant and kept them in Morrow's log: the due dates each student
+  has, the tags on each student, and which students can see an
+  assignment. Canvas puts those ids where Morrow did not look for
+  them. The assistant now sees each student's label there, and a read
+  that has an id Morrow cannot turn into a label is refused.
 
 Changes to your courses:
 
@@ -399,6 +405,12 @@ Technical notes:
   and the roster read steps aside for a write the write halt refuses.
   The roster read is fixture-proven, not yet live-proven through this
   lane.
+- `privacy/executor_wire.py`: `assignment_visibility` is a person-ids
+  key (and `include[]=assignment_visibility` a learner-data signal in
+  `dispatch/admission.py`), and the effective due dates (C-112) and
+  bulk user tags (C-226) reads add the student ids they use as map
+  keys to the boundary's roster, so the boundary labels those keys. A
+  non-id key in a student position refuses the read.
 - `dispatch/admission_policy.json` 1.4.0: `never_dispatch.request_flags`
   refuses `is_announcement` on any route; `canvas_create_external_feed_courses`
   is never-dispatch; C-139, C-141, C-167, and C-238 are evidence holds.

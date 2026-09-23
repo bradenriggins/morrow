@@ -68,6 +68,18 @@ _PERSON_ID_KEY_RE = re.compile(
 # Leading words that make a person-noun key a setting, not a person.
 _PERSON_KEY_SETTING_PREFIX = re.compile(
     r"^(?:allow|hide|show|filter|can|is|has|max|min|num|only|visible)_")
+# Canvas fields documented as a list of student ids whose names carry no
+# person word: an assignment's include[]=assignment_visibility answer.
+_PERSON_ID_LIST_KEYS = frozenset({"assignment_visibility"})
+# Canvas reads that key a map by student id (route keys as
+# dispatch/admission._route_key writes them), with the number of map
+# levels above the student ids: effective due dates map assignment id,
+# then student id; bulk user tags map student id.
+_STUDENT_KEYED_ROUTES = {
+    ("GET", "/api/v1/courses/{}/effective_due_dates"): 1,
+    ("GET", "/api/v1/courses/{}/bulk_user_tags"): 0,
+}
+_STUDENT_ID_KEY_RE = re.compile(r"^[0-9]{1,20}$")
 _ROSTER_PERSON_NAME_KEYS = ("user_name", "student_name", "author_name",
                             "display_name")
 _ROSTER_NAME_KEYS = ("name", "fullname", "display_name", "sortable_name",
@@ -154,7 +166,7 @@ def person_key_kind(key):
     k = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", str(key or "")).lower()
     if _PERSON_KEY_SETTING_PREFIX.match(k) or k.startswith("sis_"):
         return None
-    if _PERSON_ID_KEY_RE.match(k):
+    if _PERSON_ID_KEY_RE.match(k) or k in _PERSON_ID_LIST_KEYS:
         return "ids"
     if _PERSON_RECORD_KEY_RE.match(k):
         return "record"
@@ -561,6 +573,40 @@ def _harvest_roster(receipt, items_are_people=False):
     return found
 
 
+def _student_key_ids(entry, receipt, error_cls):
+    """The student ids a student-keyed read (_STUDENT_KEYED_ROUTES) uses
+    as map keys, so the boundary labels those keys. A key in a student
+    position that is not an id cannot be labeled: the read is refused,
+    and the key is not repeated in the refusal."""
+    request = (entry or {}).get("request") or {}
+    depth = _STUDENT_KEYED_ROUTES.get(_admission._route_key(
+        request.get("method") or "GET", request.get("url")))
+    if depth is None or not isinstance(receipt, dict):
+        return []
+    if set(receipt) == {"verification_detail", "provider_payload"}:
+        # The executor projects a verification detail with the raw
+        # answer beside it (_project_verification_detail).
+        receipt = receipt["provider_payload"]
+        if not isinstance(receipt, dict):
+            return []
+    maps = [receipt]
+    for _level in range(depth):
+        maps = [child for parent in maps for child in parent.values()
+                if isinstance(child, dict)]
+    ids = []
+    for student_map in maps:
+        for key in student_map:
+            if not _STUDENT_ID_KEY_RE.match(str(key)):
+                raise error_cls(
+                    "entry %r keys its answer by student, and one key is "
+                    "not a Canvas student id, so it cannot be shown as a "
+                    "label; refusing rather than showing it. Nothing was "
+                    "shown." % entry.get("name"))
+            if key not in ids:
+                ids.append(key)
+    return ids
+
+
 def _lane_generation(lane_state, provider="canvas"):
     lane = (lane_state or {}).get(provider) or {}
     try:
@@ -669,6 +715,13 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
     # On a user-collection route the items are people, so even a bare
     # {"id", "name"} joins the roster and is labeled.
     roster_entries = _harvest_roster(receipt, _is_user_collection(entry))
+    # A read that keys its answer by student id: each key joins the
+    # roster, so the boundary shows it as the student's label.
+    harvested = {str(e["id"]) for e in roster_entries}
+    roster_entries += [{"id": key, "name": "Learner %s" % key}
+                       for key in _student_key_ids(entry, receipt,
+                                                   error_cls)
+                       if key not in harvested]
     vault_path = _source_vault_path()
     if _privacy_core.AESGCM is None:
         # Fail closed AND actionable, before the boundary's invoke()
