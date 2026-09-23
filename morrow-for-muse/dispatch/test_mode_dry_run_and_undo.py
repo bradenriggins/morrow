@@ -279,3 +279,27 @@ def test_undo_dry_run_journals_nothing():
     assert out["dry_run"] is True
     assert sess.calls == []
     assert _journal_lines() == before
+
+
+def test_an_undo_refused_while_its_approval_burns_leaves_no_pending_claim(
+        monkeypatch):
+    """Final sweep 2026-09-22: the undo request phase caught only
+    ExecutorError, so an ApprovalMismatch from the approval burn (a
+    concurrent undo consumed the same approval first) left the never-sent
+    undo as a pending claim."""
+    entry = _create_entry()
+    of42 = _forward(entry, 42)
+    u_entry, u_params = ex.undo_approval_subject(
+        entry, {"course_id": "7"}, of42, {"id": 42})
+    approval = _signed(u_entry, u_params)
+    real = ex.verify_write_target_identity
+
+    def winner_consumes_first(*args, **kwargs):
+        admission_mod.consume_approval(approval)
+        return real(*args, **kwargs)
+    monkeypatch.setattr(ex, "verify_write_target_identity",
+                        winner_consumes_first)
+    with pytest.raises(admission_mod.ApprovalMismatch):
+        _undo(entry, {"id": 42}, approval=approval, of_op_id=of42)
+    assert [p for p in ex.journal_pending_ops()
+            if p.get("kind") == "undo"] == []

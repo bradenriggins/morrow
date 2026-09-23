@@ -7830,12 +7830,28 @@ def _burn_write_approval(approval_record, override_record, op_id) -> None:
     can always re-verify an admitted write. For writes the F-2 override
     record IS the write approval; a distinct override record (should
     one ever exist) burns here too."""
-    if approval_record is not None:
-        persist_signed_record(approval_record, op_id)
-        consume_approval(approval_record)
-    if override_record is not None and override_record is not approval_record:
-        persist_signed_record(override_record, op_id)
-        consume_approval(override_record)
+    records = [approval_record]
+    if override_record is not approval_record:
+        records.append(override_record)
+    for record in records:
+        if record is None:
+            continue
+        path = os.path.join(_approvals_dir(), str(op_id) + ".json")
+        preexisting = os.path.exists(path)
+        persist_signed_record(record, op_id)
+        try:
+            consume_approval(record)
+        except Exception:
+            # The write is not sent: drop the copy this burn persisted
+            # under the refused op_id. A record that was on disk before
+            # (the file ceremony's signed approval) is the educator's
+            # and stays.
+            if not preexisting:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+            raise
 
 
 def _learner_vault_ready(session) -> bool:
@@ -8437,6 +8453,23 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # W5-P2-1: the audit record is journaled (drained); a pending
         # shutdown now stops the run instead of continuing.
         _raise_if_shutdown_requested()
+        raise
+    except Exception as exc:
+        # Not an ExecutorError: an admission refusal while the approval
+        # burns (a concurrent dispatch consumed it first, or it could
+        # not be persisted), an OSError, a bug. Before a write provider
+        # call nothing could have applied: release the claim so the
+        # op_id stays reusable. After one, the claim stays pending for
+        # reconciliation, like a crash. KeyboardInterrupt and SystemExit
+        # are not Exceptions and keep the crash semantics.
+        if not is_write or not attempt_state.get("write_attempted"):
+            try:
+                release_op_id(op_id, claim_token,
+                              "request-phase failure before any effect "
+                              "could apply: %s" % type(exc).__name__)
+            except DuplicateOpId:
+                pass
+            _raise_if_shutdown_requested()
         raise
 
     # Verify phase for writes: the D-009 silent-write readback runs first
@@ -9480,6 +9513,7 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
                            if isinstance(params, dict) else None)
     entry_max_bytes = int((entry.get("result") or {}).get("max_bytes",
                                                           DEFAULT_MAX_BYTES))
+    undo_sent = False
     try:
         # W5-P2-1: shutdown checkpoint before any provider I/O: a pending
         # signal releases the fresh claim (nothing could have applied)
@@ -9512,6 +9546,7 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
         _raise_if_shutdown_requested(undo_op_id, undo_claim)
         method, url, headers, body_bytes = build_request(
             entry, undo, params, session, pack, config, {}, result_payload)
+        undo_sent = True
         status, resp_headers, raw, attempts = session.raw_request(
             method, url, headers, body_bytes, is_write=True,
             max_bytes=entry_max_bytes)
@@ -9557,6 +9592,18 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
                           "undo failure before any effect could apply")
         except DuplicateOpId:
             pass
+        raise
+    except Exception:
+        # Not an ExecutorError (an admission refusal while the approval
+        # burns, an OSError, a bug): before the undo was sent nothing
+        # could have applied, so release the claim; after, it stays
+        # pending for reconciliation, like a crash.
+        if not undo_sent:
+            try:
+                release_op_id(undo_op_id, undo_claim,
+                              "undo failure before any effect could apply")
+            except DuplicateOpId:
+                pass
         raise
     record = {
         "op_id": undo_op_id,
