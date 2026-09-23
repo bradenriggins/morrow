@@ -14,7 +14,7 @@ This is a monorepo. Each product lives in its own directory, ships on its own ve
 
 | Product | Directory | What it is |
 |---|---|---|
-| Morrow Desktop | `desktop/` | The desktop app plus Morrow Bridge, its Chrome extension. Download it for a Mac with Apple silicon or for Windows, connect ChatGPT, Claude, or Gemini, and work with the courses your account can open. Start at [`desktop/README.md`](desktop/README.md). |
+| Morrow Desktop | `desktop/` | The desktop app plus Morrow Bridge, its Chrome extension. Download it for a Mac with Apple silicon or for Windows, connect the ChatGPT desktop app, Claude Desktop, Claude Code, or Gemini CLI, and work with the courses your account can open. So far, only OpenAI's Codex CLI, which uses Morrow's ChatGPT setup, has been checked on a live Canvas test course. The ChatGPT desktop app, Claude Desktop, Claude Code, and Gemini CLI setups have passed Morrow's own tests only. Start at [`desktop/README.md`](desktop/README.md). |
 | Morrow for Muse | `morrow-for-muse/` | The connector that runs Morrow on your Muse computer. You sign in to Canvas on your Muse computer, and sign in again if Canvas ends the session. Version 1 supports Canvas only. Includes Morrow Direct, our open format that describes each course-site action Morrow can take and how it runs. Start at [`morrow-for-muse/SKILL.md`](morrow-for-muse/SKILL.md). |
 
 ## How Morrow works, in every product
