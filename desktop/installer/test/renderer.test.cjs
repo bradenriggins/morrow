@@ -1012,6 +1012,27 @@ test("copying an example request sends its exact text through the clipboard chan
   assert.equal(dom.element("#copy-status").textContent, "Copied to the clipboard.");
 });
 
+test("the materials folder row on Settings opens the folder and copies its path", async () => {
+  const calls = [];
+  const folder = "/Users/teacher/Library/Application Support/Morrow/Materials";
+  const current = state({ materialsFolder: folder });
+  const dom = await load("materials-folder", async (method, payload) => {
+    calls.push({ method, payload });
+    return ok(current);
+  });
+  await dom.element("#nav-settings").dispatch("click");
+  const body = dom.element("#setup-management-body");
+  const control = (action) => body.querySelectorAll("[data-action]").find((element) => element.dataset.action === action && (action !== "copy-example-prompt" || element.dataset.prompt === folder));
+  await body.dispatch("click", { target: control("reveal-materials-folder") });
+  await settle();
+  assert.deepEqual(calls.at(-1), { method: "installer:reveal-materials-folder", payload: undefined });
+  await body.dispatch("click", { target: control("copy-example-prompt") });
+  await settle();
+  assert.deepEqual(calls.at(-1), { method: "installer:copy-to-clipboard", payload: { text: folder } });
+  assert.equal(control("copy-example-prompt").textContent, "Copied");
+  assert.equal(dom.element("#copy-status").textContent, "Copied to the clipboard.");
+});
+
 test("the nav switches between Home and Settings, and Manage on Home reaches Settings (D8, D9)", async () => {
   const current = state({
     bridgePaired: true,

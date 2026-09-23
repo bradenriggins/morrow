@@ -3148,6 +3148,18 @@ class InstallerController {
       throw errorDetails("bridge_folder_unavailable");
     }
   }
+
+  /**
+   * Opens the materials folder Morrow uses. The default one is inside a folder
+   * macOS and Windows hide from the file manager, so Morrow opens it for the
+   * person. It never creates the folder: only assistant setup does.
+   */
+  async revealMaterialsFolder() {
+    const folder = await this.effectiveWorkspace().catch(() => null);
+    if (!folder) throw errorDetails("materials_folder_unavailable");
+    const failure = await Promise.resolve(this.shell.openPath(folder)).catch((error) => String(error?.message || error || "failed"));
+    if (failure) throw errorDetails("materials_folder_unavailable");
+  }
 }
 
 function createInstallerController(deps) {

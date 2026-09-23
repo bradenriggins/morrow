@@ -818,6 +818,11 @@ async function startMorrow(lifecycle) {
     try { await installer.revealBridgeFolder(); return respond(); }
     catch { return failed(errorDetails("bridge_folder_unavailable")); }
   });
+  ipcMain.handle("installer:reveal-materials-folder", async (event) => {
+    trusted(event);
+    try { await installer.revealMaterialsFolder(); return respond(); }
+    catch { return failed(errorDetails("materials_folder_unavailable")); }
+  });
   // Copies one example request to the system clipboard. Morrow writes nothing
   // else there, and this step changes no setup state, so it answers with the
   // state that already exists.

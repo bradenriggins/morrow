@@ -96,6 +96,7 @@ async function startedMorrow(options = {}) {
     installAssistant: answer("installAssistant", undefined),
     removeAssistant: answer("removeAssistant", undefined),
     revealBridgeFolder: answer("revealBridgeFolder", undefined),
+    revealMaterialsFolder: answer("revealMaterialsFolder", undefined),
     reconcileBridgeRelease: answer("reconcileBridgeRelease", undefined),
     firstSafeRead: answer("firstSafeRead", undefined),
     openClaudeDesktop: answer("openClaudeDesktop", undefined),

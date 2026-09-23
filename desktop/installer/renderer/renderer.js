@@ -611,7 +611,7 @@ function showCopied(text) {
 }
 
 function markCopied() {
-  for (const button of actionBody.querySelectorAll("[data-action]")) {
+  for (const button of [...actionBody.querySelectorAll("[data-action]"), ...setupManagementBody.querySelectorAll("[data-action]")]) {
     if (button.dataset.action !== "copy-example-prompt") continue;
     if (button.dataset.prompt === copiedText) {
       button.dataset.copyLabel ??= button.textContent;
@@ -742,8 +742,8 @@ async function handleAction(event) {
     else render(state);
     return;
   }
-  if (action === "reveal-bridge-folder") {
-    const next = await invoke("installer:reveal-bridge-folder");
+  if (action === "reveal-bridge-folder" || action === "reveal-materials-folder") {
+    const next = await invoke(action === "reveal-materials-folder" ? "installer:reveal-materials-folder" : "installer:reveal-bridge-folder");
     if (next) render(next);
     else render(state);
     return;

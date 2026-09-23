@@ -398,6 +398,21 @@ test("the materials folder is named, and can be changed, on Settings in every st
   }
 });
 
+// The default folder sits inside a folder macOS and Windows hide (Library, AppData), so the row
+// opens it and copies its path, the way the Bridge folder row does.
+test("the materials folder row can open the folder and copy its path, before and after setup", () => {
+  const copy = `data-action="copy-example-prompt" data-prompt="${escapeHtml(MATERIALS)}" aria-label="Copy the materials folder path">Copy path</button>`;
+  const settings = setupManagementView(state({ ...READY_ASSISTANT, materialsFolder: MATERIALS }));
+  assert.match(settings.body, /data-action="reveal-materials-folder">Show folder<\/button>/);
+  assert.ok(settings.body.includes(copy));
+  const welcome = actionView(state({ assistants: [{ ...CHATGPT, detected: true }], materialsFolder: MATERIALS, workspaceSelected: false }), { chosenAssistantId: null });
+  assert.match(welcome.body, /data-action="reveal-materials-folder">Show folder<\/button>/);
+  assert.ok(welcome.body.includes(copy));
+  // With no folder yet there is nothing to open or copy.
+  const none = actionView(state({ assistants: [{ ...CHATGPT, detected: true }] }), { chosenAssistantId: null });
+  assert.doesNotMatch(none.body, /reveal-materials-folder|Copy path/);
+});
+
 test("the folder row before setup asks for a folder and never claims a change it did not make", () => {
   const chosen = actionView(state({ assistants: [{ ...CHATGPT, detected: true }], materialsFolder: MATERIALS, workspaceSelected: false }), { chosenAssistantId: null });
   assert.ok(chosen.body.includes(escapeHtml(MATERIALS)));
@@ -456,7 +471,7 @@ test("two configured assistants are both shown as set up, and the panel keeps th
   const settings = setupManagementView(current);
   assert.match(settings.body, /<h3>ChatGPT<\/h3><p>Morrow is set up in this assistant\.<\/p>/);
   assert.match(settings.body, /<h3>Claude Desktop<\/h3><p>Morrow is set up in this assistant\.<\/p>/);
-  assert.deepEqual(actions(settings.body), ["choose-workspace", "remove-assistant", "remove-assistant"]);
+  assert.deepEqual(actions(settings.body), ["reveal-materials-folder", "copy-example-prompt", "choose-workspace", "remove-assistant", "remove-assistant"]);
   assert.match(settings.body, /data-assistant-id="codex" aria-label="Remove Morrow from ChatGPT"/);
   assert.match(settings.body, /data-assistant-id="claude-desktop" aria-label="Remove Morrow from Claude Desktop"/);
   // Both assistants are written the new folder, and Claude Desktop needs the
@@ -501,7 +516,7 @@ test("a second assistant waiting for approval keeps the first assistant's steps"
   // to, on Settings now.
   const settings = setupManagementView(current);
   assert.match(settings.body, /<h3>Claude Desktop<\/h3><p>Waiting for your approval in Claude Desktop\.<\/p>/);
-  assert.deepEqual(actions(settings.body), ["choose-workspace", "remove-assistant", "open-claude-desktop", "reveal-claude-extension", "check-claude-desktop", "remove-assistant"]);
+  assert.deepEqual(actions(settings.body), ["reveal-materials-folder", "copy-example-prompt", "choose-workspace", "remove-assistant", "open-claude-desktop", "reveal-claude-extension", "check-claude-desktop", "remove-assistant"]);
 });
 
 test("removing Claude Desktop names the step that is left inside Claude Desktop", () => {

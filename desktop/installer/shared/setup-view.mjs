@@ -186,7 +186,9 @@ function materialsRow(current, { optionalDisclosure = false } = {}) {
   const detail = current?.workspaceSelected === true
     ? `Morrow works with the course materials in this folder.${rebind}`
     : `Morrow made this folder for course materials. Choose a different folder to work somewhere else.${rebind}`;
-  return `<div class="materials-row"><div><h3>Materials folder</h3><p class="path-text">${escapeHtml(folder)}</p><p>${detail}</p></div><button class="secondary-button" type="button" data-action="choose-workspace">${settled ? "Change folder" : "Choose folder"}</button></div>`;
+  // The default folder sits inside a folder macOS and Windows hide, so the row opens it and
+  // copies its path rather than leaving the person to find it.
+  return `<div class="materials-row materials-row-stacked"><div><h3>Materials folder</h3><p class="path-text">${escapeHtml(folder)}</p><p>${detail}</p></div><div class="inline-actions"><button class="secondary-button" type="button" data-action="reveal-materials-folder">Show folder</button><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="${escapeHtml(folder)}" aria-label="Copy the materials folder path">Copy path</button><button class="secondary-button" type="button" data-action="choose-workspace">${settled ? "Change folder" : "Choose folder"}</button></div></div>`;
 }
 
 /** What one assistant row says about that assistant, in the words it can prove. */

@@ -681,6 +681,45 @@ test("the Bridge step shows the app-owned folder and reports a folder failure as
   assert.equal(result.error.message, "Morrow could not show the Morrow Bridge folder.");
 });
 
+// The default materials folder sits inside a folder the system hides, so Morrow opens it itself.
+test("Show folder opens the materials folder Morrow uses, and reports a missing folder as its own error", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-materials-reveal-"));
+  test.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const userData = path.join(root, "UserData");
+  await fs.promises.mkdir(userData, { recursive: true });
+  const controller = (shell) => createInstallerController({
+    app: { getPath: () => userData },
+    dialog: {},
+    shell,
+    platform: process.platform,
+    homeDirectory: path.join(root, "Home"),
+    testRoot: null,
+    isTestMode: false,
+    payloadRoot: path.join(root, "Payload"),
+    productVersion: "1.0.0-rc.0",
+    trustedBridgeReleaseManifestSha256: () => null,
+    trustedMcpRuntimeManifestSha256: () => null,
+    detectAssistant: async () => false,
+    runCli: async () => ({ code: 0, stdout: "", stderr: "" })
+  });
+  const opened = [];
+  const installer = controller({ openPath: async (target) => { opened.push(target); return ""; } });
+
+  await assert.rejects(() => installer.revealMaterialsFolder(), (error) => error.code === "materials_folder_unavailable");
+  assert.deepEqual(opened, [], "nothing was opened while the materials folder was missing");
+
+  await fs.promises.mkdir(installer.paths.defaultMaterials, { recursive: true });
+  await installer.revealMaterialsFolder();
+  assert.deepEqual(opened, [await fs.promises.realpath(installer.paths.defaultMaterials)]);
+
+  const refusing = controller({ openPath: async () => "no file manager answered" });
+  await assert.rejects(() => refusing.revealMaterialsFolder(), (error) => error.code === "materials_folder_unavailable");
+
+  const result = envelope(repairRequiredState(), errorDetails("materials_folder_unavailable"));
+  assert.equal(result.error.message, "Morrow could not open the materials folder.");
+  assert.doesNotMatch(result.error.recovery, /\//, "the recovery names no path");
+});
+
 test("the Blackboard request clears FormData and reaches only the trusted filesystem transaction", () => {
   const preload = fs.readFileSync(path.join(installerRoot, "preload.cjs"), "utf8");
   const main = fs.readFileSync(path.join(installerRoot, "main.cjs"), "utf8");
