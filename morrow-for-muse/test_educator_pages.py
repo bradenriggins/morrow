@@ -105,3 +105,32 @@ def test_the_educator_hears_who_else_can_read_course_traffic(rel):
     assert "Canvas sign-in session and the course pages" in text, rel
     assert "Morrow cannot prevent that" in text, rel
     assert "check them before you connect" in text, rel
+
+
+SUPPORT_EMAIL = "hello@meetmorrow.app"
+SUPPORT_PAGE = "meetmorrow.app/support"
+
+
+@pytest.mark.parametrize("rel", PAGES)
+def test_every_educator_page_says_how_to_get_help(rel):
+    # No Muse doc named a way to reach Morrow. setup-guide.md ended "that
+    # is a bug, and we want to hear about it" with no address, while the
+    # website's Support page expects Muse to help the educator email
+    # Morrow with the Morrow for Muse version (final sweep 2026-09-23).
+    text = _flat(rel)
+    assert SUPPORT_EMAIL in text, rel
+    assert SUPPORT_PAGE in text, rel
+    assert "Do not send student information" in text, rel
+
+
+def test_skill_tells_the_agent_how_the_educator_gets_help():
+    with open(os.path.join(TREE, "SKILL.md"), encoding="utf-8") as fh:
+        text = fh.read()
+    match = re.search(r"^## Getting help\n(.*?)(?=^## )", text,
+                      re.MULTILINE | re.DOTALL)
+    assert match, "SKILL.md has no Getting help section"
+    section = " ".join(match.group(1).split())
+    assert SUPPORT_EMAIL in section and SUPPORT_PAGE in section
+    # The version the Support page asks for, and how to read it.
+    assert "bin/morrow version" in section
+    assert "student" in section and "never" in section.lower()

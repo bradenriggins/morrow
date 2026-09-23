@@ -80,8 +80,13 @@ preemptively and never on every run: a healthy session needs no page.
    or in the tree's `helper/env` (the legacy global `~/.morrow/env` is
    honored for `CANVAS_BASE` only). There is no default tenant; the
    helper refuses to start on the placeholder.
-2. Start the helper if the installer has not already:
-   `bash helper/keepalive.sh` (from this tree).
+2. If the installer skipped the helper launch because `CANVAS_BASE`
+   was not set yet, run `bash install.sh` again (from this tree) once
+   it is set. The rerun checks the Canvas address first (a
+   placeholder, an address that does not load, or a Canvas error page
+   stops it with a message) and then starts the helper through
+   `helper/keepalive.sh`. Do not start keepalive.sh by hand for this:
+   it skips those checks.
    Do not hand-launch `helper/server.py` directly: it sources
    `<tree>/helper/env` itself, so it fails without `CANVAS_BASE`
    exported in the shell or the tree env file, and the production-port
@@ -352,6 +357,20 @@ educator (lower `confidence` below 0.9 without their confirmation is
 refused as ambiguous, never guessed). `plan-write` and `approve-write`
 also work in edit mode.
 
+A deletion asks first even in edit mode while the educator's
+`confirm_destructive_writes` setting is on ("always confirm
+deletions"). Tell them exactly what will be deleted and get their yes,
+then do one of these:
+
+- Show the deletion with `plan-write` and run `approve-write` with
+  their reply. Their reply confirms the deletion it approved.
+- Run the `catalog` deletion with `--destructive-confirmed "<their
+  reply, verbatim>"`.
+
+Never pass `--destructive-confirmed` without the educator's reply to
+that exact deletion. Without a yes the deletion is refused and nothing
+is deleted.
+
 Every write is refused while `~/.morrow/write_halt` exists.
 
 The lower-level path (`catalog --plan <file> --approval <file>`, built
@@ -479,7 +498,11 @@ both modes.
   approval, including for destructive writes. `confirm_destructive_writes`
   is an opt-in guardrail (default off, matching the model; the
   educator can turn it on: `morrow settings set
-  confirm_destructive_writes true`).
+  confirm_destructive_writes true`). While it is on, an edit-mode
+  deletion runs only with the educator's yes to that deletion:
+  `approve-write` with their reply, or `catalog` with
+  `--destructive-confirmed "<their reply>"` (see "Dispatching
+  operations").
 - You change the mode or a setting only because the educator asked
   for it. The command takes effect when you call it (there is no
   second confirmation call); relay its `message`, which says what the
@@ -847,6 +870,21 @@ Honest limitations (not defects, but know them):
   (an agent guess). Nothing technical prevents a guess; every lookup
   is journaled (course, conversation, outcome, and a keyed digest of
   the name, never the name), so guesses can be reviewed afterwards.
+
+## Getting help
+
+When the educator asks how to reach Morrow, or a failure message
+does not explain what went wrong, give them this:
+
+- Email hello@meetmorrow.app, or see meetmorrow.app/support.
+- Include the Morrow for Muse version: run `bin/morrow version` from
+  this tree and give them its first line (`morrow <version>`); the
+  helper's `/status` reports the same number as `helper_version`.
+  Include the step that failed and what they expected to happen.
+- Never include student information: no student names or labels,
+  records, grades, or screenshots that show students, and never a
+  password or sign-in detail. Tell the educator to leave these out of
+  the email too.
 
 ## Never
 

@@ -105,14 +105,16 @@ readback and cleanup:
   against a disposable item before any claim. quiz_entries routes
   (IB-2/3/8/14) are evidence-hold (401 under the banks.build scope).
   Full mechanism: `knowledge/item-banks-sdk.md`.
-- **Reads**: 113 verified GETs (108 Canvas plus 5 Item Bank) across
+- **Reads**: 115 live-proven reads (110 Canvas plus 5 Item Bank)
+  across the educator's own course list (C-437) and profile (C-436),
   course settings, tabs, sections, files and folders, pages, modules,
   assignments, assignment groups, classic quizzes, New Quiz reads,
   grading standards, rubrics, outcomes, external tools and feeds,
   content migrations and exports, groups, users and search,
   conferences, collaborations, media objects, permissions, and
-  activity stream, plus account/user/global reads. All recorded
-  `live-proven` in the catalog.
+  activity stream. All recorded `live-proven` in the catalog. Listing
+  accounts, another person's profile, global search, terms, and help
+  links have no catalog rows yet.
   Discussions: reads pending (C-144 through C-151, learner-data
   gated); plain discussion-topic writes (C-139 create, C-141 delete,
   C-167 update) are catalog live-proven BUT were proven through the

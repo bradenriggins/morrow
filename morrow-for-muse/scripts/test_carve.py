@@ -19,6 +19,11 @@ Failure modes pinned down (written before the fix):
      journal's generation high-water, and the live journal then refused
      every read as a STALE restore (final sweep 2026-09-23). Only the
      install suites ship; each keeps itself out of the live home.
+  7. The release zip held no license. The repository's MIT LICENSE sits
+     outside morrow-for-muse/, and the carve ships only files under it,
+     so an institution reviewing the zip had no license grant, though
+     the website says the license text travels with the source (final
+     sweep 2026-09-23).
 
 The full install proof (install.sh run from the carved tree into a
 scratch HOME/MORROW_HOME, then disconnect and uninstall) runs in a
@@ -33,6 +38,7 @@ import re
 import shutil
 import subprocess
 import sys
+import zipfile
 
 import pytest
 
@@ -74,7 +80,7 @@ def carved():
     try:
         # The secrets gate takes minutes over the whole tree; the gate
         # test below runs it once, and scripts/install-e2e.sh always does.
-        carve.carve(out, run_gate=False)
+        carve.carve(out, make_zip=True, run_gate=False)
         yield out
     finally:
         shutil.rmtree(os.path.dirname(out), ignore_errors=True)
@@ -94,6 +100,22 @@ def test_manifest_covers_every_shipped_file(carved):
             assert hashlib.sha256(fh.read()).hexdigest() == want, rel
     with open(os.path.join(TREE, "VERSION")) as fh:
         assert man["carve_version"] == fh.read().strip()
+
+
+def test_the_license_ships_in_the_tree_and_the_zip(carved):
+    with open(os.path.join(os.path.dirname(TREE), "LICENSE"), "rb") as fh:
+        license_text = fh.read()
+    assert license_text.startswith(b"MIT License")
+    with open(os.path.join(carved, "LICENSE"), "rb") as fh:
+        assert fh.read() == license_text
+    with open(os.path.join(carved, "pack", "carve-manifest.json")) as fh:
+        assert "LICENSE" in json.load(fh)["files"]
+    with open(os.path.join(TREE, "VERSION")) as fh:
+        version = fh.read().strip()
+    zpath = os.path.join(os.path.dirname(carved), "%s-%s.zip"
+                         % (carve.DIST_NAME, version))
+    with zipfile.ZipFile(zpath) as zf:
+        assert zf.read(carve.DIST_NAME + "/LICENSE") == license_text
 
 
 @pytest.mark.skipif(not os.environ.get("MORROW_CARVE_GATE"),

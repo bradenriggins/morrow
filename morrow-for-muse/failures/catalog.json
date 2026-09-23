@@ -151,6 +151,137 @@
       ]
     },
     {
+      "id": "canvas-not-permitted",
+      "title": "Canvas says this account may not do this, so nothing changed",
+      "surface": "canvas",
+      "severity_hint": "low",
+      "root_cause": "Canvas answers 401 with status \"unauthorized\" (\"user not authorized to perform that action\") or 403 when the signed-in account's role in the course, or its permissions, do not allow the request, for example a TA changing a course setting only a teacher can change. The session is live: an expired session answers 401 \"unauthenticated\", which is session death. The executor fails fast on a 4xx: Canvas refused the request, nothing was saved, and the op id is released.",
+      "is_not": "This is not an expired sign-in (a 401 \"unauthenticated\" is session death), not a problem with the values in the request, and not a change that might have applied.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Canvas says your account does not have permission to do this (status {status_code}), and said: {validation_messages} (reference {correlation_id}). What this means: nothing changed in Canvas. Your role in this course, or your school's Canvas settings, do not allow this for your account. What happens next: I will not try it again. If you should be able to do this, check that Morrow is signed in to your own Canvas account, or ask the course's teacher or your Canvas admin about your role.",
+      "auto_action": "Tell the educator what Canvas said and that nothing changed; do not retry; if they believe their account should be allowed, suggest checking the signed-in account and their course role with the teacher or Canvas admin",
+      "escalate_when": "never; Canvas refused the request for this account and nothing changed",
+      "signature": {
+        "provider": "canvas",
+        "http_status": {
+          "in": [
+            401,
+            403
+          ]
+        },
+        "operation_kind": {
+          "in": [
+            "read",
+            "write"
+          ]
+        },
+        "body_text": {
+          "not_contains": "unauthenticated"
+        }
+      },
+      "signature_notes": "classification: \"ProviderHttpError the executor classified as fail-fast (it sets operation_kind)\"; fixed_behavior: \"fail fast on 4xx, nothing saved, op id released\"; triggers: [\"401 unauthorized\", \"403\"]; not: [\"401 unauthenticated (session death)\"]",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "correlation_id",
+        "operation",
+        "status_code",
+        "validation_messages"
+      ]
+    },
+    {
+      "id": "canvas-not-found",
+      "title": "Canvas could not find the item, so nothing changed",
+      "surface": "canvas",
+      "severity_hint": "low",
+      "root_cause": "Canvas answers 404 when the course, page, assignment, or other item in the request does not exist at that address: it was deleted, its address changed (a renamed page gets a new address), or the id is wrong. The executor fails fast on a 4xx: nothing was saved, and the op id is released.",
+      "is_not": "This is not an expired sign-in, not a permission refusal, and not a change that might have applied.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Canvas could not find it (status 404), and said: {validation_messages} (reference {correlation_id}). What this means: nothing changed in Canvas. The item may have been deleted or renamed, or the course or item number is wrong. What happens next: I can look the item up again in the course and try again with what I find. A change still needs your approval first.",
+      "auto_action": "Tell the educator nothing changed; list that kind of item in the course again to find its current id or address (a renamed page has a new address), then prepare the request again; never resend the same request",
+      "escalate_when": "never; Canvas found nothing at that address and nothing changed",
+      "signature": {
+        "provider": "canvas",
+        "http_status": 404,
+        "operation_kind": {
+          "in": [
+            "read",
+            "write"
+          ]
+        }
+      },
+      "signature_notes": "classification: \"ProviderHttpError the executor classified as fail-fast (it sets operation_kind)\"; fixed_behavior: \"fail fast on 4xx, nothing saved, op id released\"; triggers: [\"404\"]",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "correlation_id",
+        "operation",
+        "validation_messages"
+      ]
+    },
+    {
+      "id": "canvas-refused-request",
+      "title": "Canvas refused the request, so nothing changed",
+      "surface": "canvas",
+      "severity_hint": "low",
+      "root_cause": "Canvas answered a 4xx status that no more specific mode covers, for example 409 (a conflicting change) or 413 (a request too large), or a 400 or 422 with no reason in the body. The executor fails fast on a 4xx: Canvas refused the request, nothing was saved, and the op id is released.",
+      "is_not": "This is not a change that might have applied: the executor classified the refusal as fail-fast. It is not the missing security token either (that 422 carries unprocessable_content and has its own mode).",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Canvas refused the request (status {status_code}), and said: {validation_messages} (reference {correlation_id}). What this means: nothing changed in Canvas. What happens next: I will not send the same request again. I can check the item and the values, then try again with a corrected request. A change still needs your approval first.",
+      "auto_action": "Tell the educator what Canvas said and that nothing changed; do not resend the same request; read the target again and correct the request before trying again",
+      "escalate_when": "never; Canvas refused the request and nothing changed",
+      "signature": {
+        "provider": {
+          "in": [
+            "canvas",
+            "item-banks"
+          ]
+        },
+        "http_status": {
+          "in": [
+            400,
+            402,
+            405,
+            406,
+            407,
+            408,
+            409,
+            410,
+            411,
+            412,
+            413,
+            414,
+            415,
+            416,
+            417,
+            418,
+            421,
+            422,
+            423,
+            424,
+            425,
+            426,
+            428,
+            429,
+            431,
+            451
+          ]
+        },
+        "operation_kind": {
+          "in": [
+            "read",
+            "write"
+          ]
+        },
+        "body_text": {
+          "not_contains": "unprocessable_content"
+        }
+      },
+      "signature_notes": "classification: \"ProviderHttpError the executor classified as fail-fast (it sets operation_kind)\"; fixed_behavior: \"fail fast on 4xx, nothing saved, op id released\"; the more specific Canvas modes (validation refusal, rate limit, not permitted, not found) come first in this file, so they win a tie",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "correlation_id",
+        "operation",
+        "status_code",
+        "validation_messages"
+      ]
+    },
+    {
       "id": "canvas-session-dead",
       "title": "Canvas session died (login page returned, SessionDead)",
       "surface": "session",
@@ -1983,9 +2114,9 @@
       "severity_hint": "high",
       "root_cause": "Contract, not a mechanism: any failure the catalog does not recognize must still produce a structured, evidence-grounded message and a preserved forensic record.",
       "is_not": "This is not a license to guess the cause. The message states exactly what was checked and what is unknown.",
-      "agent_message": "What was attempted: {operation}{where}. It failed in a way I do not have a classified pattern for, so I am reporting exactly what I know instead of guessing. What the evidence showed: {known_evidence} (reference {correlation_id}). What this means: I have ruled out the known failure patterns but have not identified the cause, so I will not retry anything that might have applied. What happens next: I am preserving the full evidence bundle for engineering review and parking the operation safely; you will get a concrete next step once the cause is identified.",
-      "auto_action": "Capture the full evidence bundle to the journal and engineering log; park the op; never blind-retry. If the op was write-class and possibly applied, reconcile via readback before any re-dispatch.",
-      "escalate_when": "Always surface to the educator with the evidence summary and the concrete next step; route the full bundle to engineering.",
+      "agent_message": "What was attempted: {operation}{where}. It failed in a way I do not have a classified pattern for, so I am reporting exactly what I know instead of guessing. What the evidence showed: {known_evidence} (reference {correlation_id}). What this means: I have ruled out the known failure patterns but have not identified the cause, so I will not retry anything that might have applied. What happens next: I am not retrying it. If it happens again, you can email hello@meetmorrow.app with the reference above, the Morrow for Muse version, and what you asked for. Leave student information out of the email.",
+      "auto_action": "Report the evidence summary and the reference; park the op; never blind-retry. If the op was write-class and possibly applied, reconcile via readback before any re-dispatch. Give the educator the support address (SKILL.md, Getting help)",
+      "escalate_when": "Always surface to the educator with the evidence summary, the reference, and the support address",
       "signature": {},
       "signature_notes": "contract: \"this entry fires only when no other catalog entry's signature matches\"; never: \"never 'I don't know what happened'; never retry an uncertain write blindly\"; required_capture: [\"what was attempted (operation, tenant, object)\", \"full provider response (status, headers incl. x-request-context-id, body)\", \"session state at the time (logged_in, chromium_alive, write_halt_active)\", \"transport used and attempt count\", \"journal state (op_id, claim, receipt)\"]",
       "severity_hint_inventory": "engineering",

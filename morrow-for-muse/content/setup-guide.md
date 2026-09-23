@@ -59,3 +59,7 @@ When it happens, Morrow notices the expired connection, stops any new changes im
 ## If something goes wrong during setup
 
 Setup failures are specific, never cryptic. If Morrow cannot reach your school's address, it tells you the address did not load and asks you to check it. If the helper page is not running, it tells you so and restarts it. If your sign-in did not stick, it tells you and asks you to try once more. You will never see a bare error code or a message that says the cause is unknown for one of these ordinary setup states; if you do, that is a bug, and we want to hear about it.
+
+## Getting help
+
+For help, email hello@meetmorrow.app or see meetmorrow.app/support. Include the Morrow for Muse version, which Muse can tell you, and the step where setup stopped. Do not send student information: no student names, records, or screenshots that show students, and no passwords.

@@ -132,6 +132,11 @@ Settings and undo:
   plain words: what changed and what it means for you.
 - The deletion confirmations setting says what it does: deletions ask
   first. It never covered other kinds of changes.
+- In Edit mode, a change the assistant showed you and you approved now
+  runs. Morrow refused every one of them as already sent, and a
+  deletion you said yes to was refused again while "always confirm
+  deletions" was on. Your yes to the deletion you were shown is the
+  confirmation.
 - Three settings that promised things Morrow does not do are gone:
   batched approvals, bulk action confirmations, and cleanup of test
   objects.
@@ -145,6 +150,14 @@ Messages:
 
 - When Canvas refuses a value, you are told what Canvas said and that
   nothing changed.
+- When Canvas says your account may not do something (for example a TA
+  changing a setting only a teacher can change), cannot find an item
+  (a renamed page, a deleted assignment), or refuses a request for
+  another reason, you are told what Canvas said and that nothing
+  changed. These got a message that said the change might have
+  applied and promised an engineering follow-up.
+- A failure Morrow cannot classify no longer promises a follow-up that
+  never comes. It gives the support address instead.
 - When changes are paused because your Canvas sign-in expired, you
   are told to sign in again on the helper page. This also happens when
   the sign-in expires just as Morrow starts work in a course. While
@@ -216,6 +229,29 @@ Installing and the docs:
   change stopped with "cannot import name 'executor' from 'dispatch'",
   because the command loaded that package before its own files. Every
   command now loads its own files first.
+- Upgrading works as the install guide says. Its unpack commands, run a
+  second time, moved the new release inside the installed folder, so
+  nothing was upgraded and the installer refused the folder. The same
+  commands now install and upgrade in place and keep your Canvas
+  address, your sign-in, and the folder's id. The guide installs the
+  student-data package as a step, names `unzip` as a prerequisite, and
+  starts a helper the installer skipped by running the installer again,
+  which checks your Canvas address first.
+- The setup, consent, and disconnect pages, and the assistant's
+  instructions, say how to get help: email hello@meetmorrow.app or see
+  meetmorrow.app/support, with the Morrow for Muse version and the step
+  that failed, and never with student information.
+- The list of what this version does names "Show me my courses" and
+  reading your own Canvas profile. Both were tested live, but the list
+  called them untested, so the assistant could hesitate on the first
+  thing you ask. It also counts 115 tested reads, not 113.
+- The release zip includes the license (MIT) at the top of the
+  folder, so anyone reviewing the zip has the license with it.
+- A restored backup works. The backup left out the key that checks
+  your approvals, settings, and Edit mode, so after a restore Morrow
+  refused every change. It also left out your student labels, the
+  Canvas account you signed in with, your settings, and your Edit
+  mode. The backup now holds all of them.
 - The example commands in the assistant's instructions and the install
   guide run as written. They put the Canvas address option after the
   command, where Morrow refused it, so every example read and change
@@ -297,6 +333,38 @@ Technical notes:
   lane, not only on the https lane. A body the lane cannot encode
   raises `WriteNotAttempted`, so its claim is released instead of being
   journaled as a write that may have applied.
+- The failure catalog gains `canvas-not-permitted` (401
+  "unauthorized", 403), `canvas-not-found` (404), and
+  `canvas-refused-request` (any other standard 4xx), each only for a
+  refusal the executor classified as fail-fast (it sets
+  `operation_kind`). A 401 "unauthenticated" is never "not permitted".
+  The translator reads Canvas's words from every 4xx body except the
+  CSRF 422. The `unknown` fallback and the funnel's degraded message
+  point to hello@meetmorrow.app instead of an engineering review.
+  `failures/test_canvas_refusals.py` checks every standard 4xx status.
+- `modes/state.py` journals `mode.write_admitted` and
+  `mode.write_refused` with `for_op_id`, not `op_id`: the gate runs
+  before the executor claims the op id, and an `op_id` field put the
+  id in the journal's op-id index, so the claim refused every Edit-mode
+  `approve-write` (and any retry after a mode refusal) with
+  `DuplicateOpId`. `_approve_plan_write` passes the educator's reply as
+  `destructive_confirmed` when the prepared request is destructive.
+  SKILL.md documents `--destructive-confirmed` for edit-mode deletions.
+  `dispatch/test_edit_mode_approve_write.py` covers both.
+- `scripts/carve.py` ships the repository's `LICENSE` at the tree
+  root (`REPO_FILES`), listed in `pack/carve-manifest.json` and in the
+  zip; the carve fails when it is missing or untracked, or when
+  `morrow-for-muse/LICENSE` would shadow it.
+- `dispatch/state_backup.py` backs up and restores the approval signing
+  keyring (`secrets/`), the source vault Morrow writes
+  (`morrow_source_vault.json` with its `.key` and `.echo`, restored to
+  the current vault path), the pinned account (`browser_lane.json`,
+  `principal_pin.json`), `settings/`, and `modes/`. A signing key moved
+  out with `MORROW_APPROVAL_SIGNING_KEY` stays out, and create says so.
+  Restore makes missing state folders 0700, and a backed-up name may
+  hold a colon (the user id) but never starts with a drive letter.
+  `dispatch/test_state_backup_restore.py` seeds an install, backs it
+  up, deletes the home, restores, and approves a change.
 - `dispatch/executor.py` accepts `--canvas-base` before or after the
   subcommand (`build_parser`), and the error funnel skips the values of
   top-level options when it names the step. `dispatch/test_documented_commands.py`
@@ -325,7 +393,8 @@ Technical notes:
   `PrincipalMismatch`, `AccountCheckFailed`, `HelperNotReached`,
   `ItemBanksNotReached`, and `RequestNotSendable`. New failure modes
   `canvas-account-check-failed`, `helper-browser-not-reached`, and
-  `item-banks-not-reached`; with the two prepared-write modes, the catalog has 99 modes. An Item Banks
+  `item-banks-not-reached`. With the two prepared-write modes and the
+  three Canvas refusal modes, the catalog has 102 modes. An Item Banks
   page-program outcome other than the program's own is now
   `ItemBankSdkMaybeAttempted` (uncertain), never "not sent".
 - `reauth/state_machine.py` `paused_ops()` (one entry per op, newest

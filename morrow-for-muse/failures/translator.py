@@ -414,9 +414,11 @@ def _coerce_evidence(raw_error) -> dict:
             if request_id:
                 evidence["request_id"] = str(request_id)
 
-        # validation_messages: what the provider said about a refused
-        # value (400/422 without the CSRF marker).
-        if evidence.get("http_status") in (400, 422) \
+        # validation_messages: what the provider said when it refused
+        # the request (any 4xx without the CSRF marker): a refused
+        # value, a permission refusal, or an item it could not find.
+        status = evidence.get("http_status")
+        if isinstance(status, int) and 400 <= status < 500 \
                 and "unprocessable_content" not in evidence["body_text"] \
                 and "validation_messages" not in evidence:
             messages = _validation_messages(evidence["body_text"])

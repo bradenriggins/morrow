@@ -24,6 +24,9 @@ morrow-for-muse/, then:
   6. with --zip, writes morrow-muse-connector-<version>.zip next to the
      tree (the archive INSTALL.md names).
 
+The repository's LICENSE (see REPO_FILES) ships at the tree root too:
+the software's license lives outside morrow-for-muse/.
+
 Publication is atomic: the tree is staged beside --out and renamed
 into place only after every check passes. Nothing is ever written
 inside the source tree. Stdlib only.
@@ -72,6 +75,8 @@ DEV_ONLY = (
     # the pytest suite's scratch-HOME isolation
     "conftest.py",
 )
+# Files git tracks at the repository root that ship at the tree root.
+REPO_FILES = ("LICENSE",)
 # pytest-only test modules: they rely on conftest.py to stay out of the
 # live home, so run from an installed tree they would write the
 # educator's live journal. Only the install suites, which isolate
@@ -136,6 +141,25 @@ def shipped_files():
     return sorted(files)
 
 
+def repo_files():
+    """{rel: source path} for REPO_FILES. Refuses a missing or untracked
+    file, and a file of the same name under morrow-for-muse/."""
+    out = {}
+    for rel in REPO_FILES:
+        src = os.path.join(REPO, rel)
+        tracked = subprocess.run(
+            ["git", "-C", REPO, "ls-files", "--error-unmatch", "--", rel],
+            capture_output=True).returncode == 0
+        if not tracked or not os.path.isfile(src):
+            raise SystemExit("CARVE FAIL: the repository's %s is missing "
+                             "or not tracked by git" % rel)
+        if os.path.exists(os.path.join(SRC, rel)):
+            raise SystemExit("CARVE FAIL: morrow-for-muse/%s would shadow "
+                             "the repository's %s" % (rel, rel))
+        out[rel] = src
+    return out
+
+
 def normalize_markdown(text, allowed):
     def sub(m):
         host = (m.group(1) + m.group(2) + ".instructure.com").lower()
@@ -196,7 +220,9 @@ def carve(out_dir, make_zip=False, run_gate=True):
     if version != pack_version:
         raise SystemExit("CARVE FAIL: VERSION %r != pack/version.txt %r"
                          % (version, pack_version))
-    files = shipped_files()
+    sources = {rel: os.path.join(SRC, rel) for rel in shipped_files()}
+    sources.update(repo_files())
+    files = sorted(sources)
     allowed = _allowed_hosts()
     parent = os.path.dirname(os.path.abspath(out_dir))
     os.makedirs(parent, exist_ok=True)
@@ -206,7 +232,7 @@ def carve(out_dir, make_zip=False, run_gate=True):
     try:
         normalized = []
         for rel in files:
-            src, dst = os.path.join(SRC, rel), os.path.join(stage, rel)
+            src, dst = sources[rel], os.path.join(stage, rel)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             if rel.endswith(".md"):
                 with open(src, encoding="utf-8") as fh:
