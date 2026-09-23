@@ -1,7 +1,13 @@
 version: 2
+
+# Each ecosystem raises at most two pull requests a week: one with every
+# minor and patch update, and one with every major update, which usually
+# needs code changes and is reviewed apart.
 updates:
   - package-ecosystem: npm
-    directory: /desktop
+    directories:
+      - /desktop
+      - /desktop/installer
     schedule:
       interval: weekly
       day: monday
@@ -9,16 +15,19 @@ updates:
       timezone: America/Chicago
     versioning-strategy: increase-if-necessary
     open-pull-requests-limit: 10
-
-  - package-ecosystem: npm
-    directory: /desktop/installer
-    schedule:
-      interval: weekly
-      day: monday
-      time: "09:15"
-      timezone: America/Chicago
-    versioning-strategy: increase-if-necessary
-    open-pull-requests-limit: 10
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      npm-major:
+        patterns: ["*"]
+        update-types: [major]
+    ignore:
+      # The Node type definitions follow the Node release the desktop payload
+      # embeds (NODE_VERSION in desktop/scripts/package-mcp-bundle.mjs).
+      # Raise both together.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: pip
     directory: /morrow-for-muse
@@ -28,6 +37,19 @@ updates:
       time: "09:30"
       timezone: America/Chicago
     open-pull-requests-limit: 10
+    groups:
+      pip-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      pip-major:
+        patterns: ["*"]
+        update-types: [major]
+    ignore:
+      # numpy 2.5 and later need Python 3.12. Morrow for Muse supports
+      # Python 3.11 (morrow-for-muse/install.sh), and requirements-dev.txt
+      # is hash-locked for 3.11 and 3.12.
+      - dependency-name: numpy
+        versions: [">=2.5"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -37,3 +59,10 @@ updates:
       time: "09:45"
       timezone: America/Chicago
     open-pull-requests-limit: 10
+    groups:
+      actions-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      actions-major:
+        patterns: ["*"]
+        update-types: [major]
