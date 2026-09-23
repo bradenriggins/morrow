@@ -953,6 +953,12 @@ export function categoriesForBinding(binding, operations) {
   return categorySpecsForBinding(binding, operations).map(publicCategory);
 }
 
+/** The selected category ids whose actions remove course content on this course connection. */
+export function destructiveCategoryIds(enabledCategories, binding, operations) {
+  const available = new Map(categorySpecsForBinding(binding, operations).map((spec) => [spec.id, spec]));
+  return (Array.isArray(enabledCategories) ? enabledCategories : []).filter((id) => available.get(id)?.destructive === true);
+}
+
 function selectedCategories(enabledCategories, binding, operations) {
   if (!Array.isArray(enabledCategories) || enabledCategories.some((entry) => typeof entry !== "string")) throw new Error("edit_policy_categories_invalid");
   const selected = [...new Set(enabledCategories)].sort();

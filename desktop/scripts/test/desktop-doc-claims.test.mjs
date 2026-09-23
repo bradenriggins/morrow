@@ -302,6 +302,10 @@ test("the README names the desktop artifacts the build configuration actually pr
   for (const doc of ["README.md", "LIMITATIONS.md"]) {
     assert.match(read(doc), /unsigned/i, `${doc} must state that the desktop build is unsigned`);
   }
+  // The Windows build note names the version this checkout builds, not an older release.
+  const desktopVersion = JSON.parse(read("installer/package.json")).version;
+  assert.match(flat("installer/WINDOWS-DEPLOYMENT.md"), new RegExp(`Every Morrow Desktop release so far, including ${desktopVersion.replaceAll(".", "\\.")}, is unsigned\\.`),
+    "installer/WINDOWS-DEPLOYMENT.md must name the current version in its unsigned build note");
   assert.match(readme, /Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature/,
     "README.md must state that nothing carries an Apple identity and that the macOS app is ad-hoc signed");
   assert.equal(typeof config.afterPack, "function", "the unsigned macOS bundle must be ad-hoc sealed after packing");
@@ -318,6 +322,17 @@ test("the README names the Bridge ZIP the package script writes and no Bridge ve
     .map((match) => match[1] || match[2])
     .filter((version) => version !== manifestVersion);
   assert.deepEqual(stale, [], `README.md names a Bridge version other than the manifest's ${manifestVersion}`);
+});
+
+test("the source route loads connector/extension, the only folder setup gives a pairing secret", () => {
+  // Every Bridge release file set leaves out the active-folder marker, so a folder extracted from
+  // the Bridge ZIP has no pairing secret and can never pair with a Morrow run from source.
+  assert.match(read("scripts/package-mcp-bundle.mjs"), /\.filter\(\(path\) => path !== "morrow-bridge-active-folder\.json"\)/);
+  assert.match(read("scripts/source-bridge-folder.mjs"), /morrow-bridge-active-folder\.json/);
+  const readme = flat("README.md");
+  assert.doesNotMatch(readme, /select the extracted folder/, "README.md must not send a source install to the extracted ZIP");
+  assert.match(readme, /A folder extracted from it has no pairing secret, so it cannot connect to a Morrow you run from source\. From source, always load `connector\/extension`\./);
+  assert.doesNotMatch(flat("LIMITATIONS.md"), /locally built deterministic archive/, "LIMITATIONS.md must not offer the ZIP as a source install route");
 });
 
 test("the README leads with the desktop app and keeps the archive and source routes under engineering evidence", () => {
@@ -455,8 +470,11 @@ test("the data-removal action the Windows guide describes is the one the policy 
     assert.deepEqual(claiming, [], "the retention policy marks nothing removable, so no document may name a data-removal action");
   }
   assert.match(guide, /It never removes an assistant's own configuration file\./);
-  assert.match(guide, /Settings, Apps, Installed apps, Morrow, More, Uninstall/,
-    "the guide must state the removal step this platform uses, which the policy names as windows_settings_apps");
+  // removeBlackboardData deletes <home>/.morrow/blackboard-learn.json, which is outside both folders.
+  assert.match(guide, /It then removes only paths inside Morrow's own user-data folder, the Blackboard credential folder, and the Blackboard configuration file\./,
+    "the guide must name every place the data removal deletes");
+  assert.match(guide, /Windows 11: Settings, Apps, Installed apps, Morrow, More, Uninstall\. Windows 10: Settings, Apps, Apps & features, Morrow, Uninstall/,
+    "the guide must state the removal step this platform uses, which the policy names as windows_settings_apps, on both supported Windows versions");
 });
 
 test("every section that states a Windows desktop result keeps its unverified qualifier", () => {

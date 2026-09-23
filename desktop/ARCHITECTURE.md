@@ -135,7 +135,7 @@ The Morrow desktop app is an Electron application in `installer/`. It sets Morro
 
 It owns:
 
-- assistant detection, and the Morrow entry in the configuration of each assistant it set up: it writes that entry, writes it again for every configured assistant when the materials folder changes, and removes it on request, each time only while the file on disk still matches the file Morrow wrote;
+- assistant detection, and the Morrow entry in the configuration of each assistant it set up: it writes that entry, writes it again for every configured assistant when the materials folder changes, and removes it on request, each time finding its own entry by its marker and changing only that entry, and refusing a `morrow` entry it did not write or a file that changes while Morrow writes it;
 - verification of the sealed MCP payload against its manifest of file digests, which with a gateway health answer is the only way the runtime reports `ready`;
 - the app-owned Morrow Bridge folder that Chrome loads, its staged updates, and its rollback copies;
 - the optional Blackboard tenant configuration and credential files, written with restricted permissions and confirmed by reading their digests back, for a Blackboard route with no live-tenant evidence;

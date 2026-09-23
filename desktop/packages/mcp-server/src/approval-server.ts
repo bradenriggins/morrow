@@ -195,16 +195,26 @@ export interface ApprovalOperationController {
    * still satisfies this interface unchanged; a miss just leaves the course name off the row.
    */
   connectionName?(sourceBindingId: string | null): string | null | undefined;
+  /**
+   * Edit asked for in a conversation (`morrow_request_edit_access`). The page names the courses
+   * and the kinds of change, and `approveEditAccess` is reached only after the same Morrow Bridge
+   * signature an approval needs, so neither the assistant nor another local program can turn Edit
+   * on. `approveEditAccess` answers `approved: true` only for the call that started the save.
+   */
+  editAccessGet?(editAccessId: string): JsonObject;
+  approveEditAccess?(editAccessId: string): JsonObject;
+  runApprovedEditAccess?(editAccessId: string, signal: AbortSignal): Promise<unknown>;
+  cancelEditAccess?(editAccessId: string): JsonObject;
 }
 
 interface ApprovalTarget {
-  readonly kind: "operations" | "batches";
+  readonly kind: "operations" | "batches" | "edit-access";
   readonly id: string;
   readonly action?: "approve" | "cancel" | "status";
 }
 
 function approvalPath(pathname: string): ApprovalTarget | null {
-  const match = /^\/(operations|batches)\/([^/]+?)(?:\/(approve|cancel|status))?$/.exec(pathname);
+  const match = /^\/(operations|batches|edit-access)\/([^/]+?)(?:\/(approve|cancel|status))?$/.exec(pathname);
   if (!match) return null;
   try {
     return {
@@ -1269,7 +1279,58 @@ function recentChangesContent(controller: ApprovalOperationController): string {
   return `<header class="hero"><h1>Recent changes</h1><p>Most recent first. A change that was cancelled or never sent says so and has nothing to undo.</p></header><section class="section recent-section">${list}</section>`;
 }
 
-function presenceRequiredPage(reviewPath: string): string {
+const EDIT_ACCESS_ENDED: Readonly<Record<string, readonly [string, string]>> = {
+  applying: ["Turning on Edit", "Morrow is saving Edit in Morrow Bridge. This page updates automatically. Keep Chrome open."],
+  enabled: ["Edit is on", "Edit is on for these courses. It stays on until you return them to Plan in Morrow Bridge. Return to your assistant."],
+  unconfirmed: ["Check each course", "Morrow could not confirm Edit for every course. Open Plan and Edit settings in Morrow Bridge to see what each course has now."],
+  not_sent: ["Edit was not turned on", "A course connection changed before Morrow could save Edit, so nothing changed. Return to your assistant and ask again."],
+  declined: ["Kept in Plan", "Morrow kept these courses in Plan. Nothing changed."],
+  expired: ["Review expired", "Morrow did not turn on Edit. Return to your assistant and ask again if you still want Edit."],
+};
+
+function editAccessStatusContent(view: JsonObject): string {
+  const [title, detail] = EDIT_ACCESS_ENDED[String(view.state)]
+    ?? ["Check this request", "This Edit access review can no longer be answered here. Return to your assistant and ask again."];
+  return `<section class="outcome"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(detail)}</p></section>`;
+}
+
+/** Each course, its site, and the kinds of change the review names for it. */
+function editAccessCourses(view: JsonObject): string {
+  const label = view.state === "awaiting_approval" ? "Changes Morrow can make without asking"
+    : view.state === "enabled" ? "Changes Morrow now makes without asking"
+      : "Changes your assistant asked for";
+  const selections = Array.isArray(view.selections) ? view.selections.map(object) : [];
+  return selections.map((selection) => {
+    const actions = (Array.isArray(selection.actions) ? selection.actions : []).map(object);
+    return `<section class="section"><dl class="destination"><div><dt>Course</dt><dd>${escapeHtml(String(selection.courseName ?? ""))}</dd></div><div><dt>Site</dt><dd>${escapeHtml(String(selection.site ?? ""))}</dd></div></dl><p class="preview-label">${label}</p><div class="formatted-preview"><ul>${actions.map((action) => `<li>${escapeHtml(String(action.label ?? ""))}</li>`).join("")}</ul></div></section>`;
+  }).join("");
+}
+
+// The nonce is issued only for a page that shows the form, as for an operation review.
+function editAccessPage(target: ApprovalTarget, view: JsonObject, grant: () => string, active: boolean): string {
+  const courses = editAccessCourses(view);
+  if (view.state !== "awaiting_approval") {
+    return pageShell("Edit access", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${editAccessStatusContent(view)}</div>${courses}`, active);
+  }
+  const selections = Array.isArray(view.selections) ? view.selections.map(object) : [];
+  const unchecked = [...new Set(selections.flatMap((selection) => (Array.isArray(selection.actions) ? selection.actions : [])
+    .map(object).filter((action) => action.unchecked === true).map((action) => String(action.label ?? ""))))];
+  const uncheckedNote = unchecked.length
+    ? `<p class="warning">Morrow cannot check the saved result for ${unchecked.length} selected action${unchecked.length === 1 ? "" : "s"}: ${escapeHtml(unchecked.join(", "))}. Morrow reports those results as unconfirmed.</p>`
+    : "";
+  const expiry = Number(view.expiresAt);
+  const expiresAt = Number.isFinite(expiry)
+    ? new Date(expiry).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+    : "15 minutes after it opened";
+  const path = `/${target.kind}/${escapeHtml(encodeURIComponent(target.id))}`;
+  const nonce = escapeHtml(grant());
+  return pageShell("Turn on Edit?", `<header class="hero"><h1>Turn on Edit?</h1><p>Your assistant asked Morrow to make these kinds of change without asking you each time.</p>${uncheckedNote}</header>${courses}<footer class="decision"><div class="next-step"><p>Edit stays on for these courses until you return them to Plan in Morrow Bridge.</p><p class="presence-note">Turn on Edit here in Chrome with Morrow Bridge connected. A request from another program cannot turn it on.</p></div><div class="actions"><form method="post" action="${path}/approve"><input type="hidden" name="nonce" value="${nonce}"><button class="approve" type="submit">Turn on Edit</button></form><form method="post" action="${path}/cancel"><input type="hidden" name="nonce" value="${nonce}"><button class="cancel" type="submit">Keep Plan</button></form></div><details><summary>Technical details</summary><p class="details-help">This review can be answered until ${escapeHtml(expiresAt)}. After that, ask your assistant again.</p></details></footer>`);
+}
+
+function presenceRequiredPage(reviewPath: string, editAccess = false): string {
+  if (editAccess) {
+    return pageShell("Turn on Edit in Chrome", `<section class="outcome"><h1>Turn on Edit in Chrome</h1><p>Morrow did not turn on Edit. Morrow accepts Turn on Edit only from a click on this page in Chrome with Morrow Bridge connected, not from a program that sends the form itself.</p><p><a href="${escapeHtml(reviewPath)}">Open the review again</a>, check that Morrow Bridge is connected, and select Turn on Edit there.</p></section>`);
+  }
   return pageShell("Approve this change in Chrome", `<section class="outcome"><h1>Approve this change in Chrome</h1><p>Morrow did not approve anything. Morrow accepts an approval only from a click on the review page in Chrome with Morrow Bridge connected, not from a program that sends the form itself.</p><p><a href="${escapeHtml(reviewPath)}">Open the review again</a>, check that Morrow Bridge is connected, and select the button there.</p></section>`);
 }
 
@@ -1555,6 +1616,30 @@ export class LoopbackApprovalServer {
         else sendJson(response, 404, { schema: "morrow.problem.v1", code: "not_found" });
         return;
       }
+      if (method === "GET" && (!target.action || target.action === "status") && target.kind === "edit-access") {
+        const view = this.controller.editAccessGet?.(target.id);
+        if (!view) throw new Error("edit access review is unavailable");
+        const nonceKey = `${target.kind}:${target.id}`;
+        const active = this.work.has(nonceKey) || view.state === "applying";
+        if (target.action === "status") {
+          sendJson(response, 200, { html: editAccessStatusContent(view), active, states: {} });
+          return;
+        }
+        let nonce: string | null = null;
+        const body = editAccessPage(target, view, () => (nonce = this.issueNonce(nonceKey, true)), active);
+        if (nonce) {
+          try {
+            this.controller.announceApprovalPresence?.();
+          } catch { /* the page still loads; the Bridge asks the person to reload when it has no key */ }
+        }
+        sendHtml(
+          response,
+          200,
+          body,
+          nonce ? `${approvalCookieName(nonce)}=${nonce}; HttpOnly; SameSite=Strict; Path=/${target.kind}/${encodeURIComponent(target.id)}; Max-Age=900` : undefined,
+        );
+        return;
+      }
       if (method === "GET" && (!target.action || target.action === "status")) {
         const snapshot = target.kind === "batches" && target.action === "status"
           ? this.controller.batchApprovalStatus?.(target.id)
@@ -1639,13 +1724,33 @@ export class LoopbackApprovalServer {
         // person can still approve in Chrome.
         if (target.action === "approve" && !exactSecret(presence, reviewApprovalProof(this.presenceKey, url.pathname, formNonce!))) {
           if (String(request.headers.accept || "").includes("text/html")) {
-            sendHtml(response, 403, presenceRequiredPage(`/${target.kind}/${encodeURIComponent(target.id)}`));
+            sendHtml(response, 403, presenceRequiredPage(`/${target.kind}/${encodeURIComponent(target.id)}`, target.kind === "edit-access"));
           } else sendJson(response, 403, { schema: "morrow.problem.v1", code: "approval_presence_required" });
           return;
         }
         this.revokeTargetNonces(nonceKey);
-        if (this.stopping.signal.aborted || (target.action === "approve" && target.kind === "batches" && !this.controller.runApprovedBatch)) {
+        if (this.stopping.signal.aborted
+          || (target.action === "approve" && target.kind === "batches" && !this.controller.runApprovedBatch)
+          || (target.action === "approve" && target.kind === "edit-access" && !this.controller.runApprovedEditAccess)) {
           throw new Error("review execution is unavailable");
+        }
+        if (target.kind === "edit-access") {
+          const answered = target.action === "approve"
+            ? this.controller.approveEditAccess?.(target.id)
+            : this.controller.cancelEditAccess?.(target.id);
+          if (!answered) throw new Error("edit access review is unavailable");
+          const spent = `${approvalCookieName(formNonce!)}=; HttpOnly; SameSite=Strict; Path=/${target.kind}/${encodeURIComponent(target.id)}; Max-Age=0`;
+          if (target.action === "approve" && answered.approved !== true) {
+            sendHtml(response, 409, pageShell("Edit access", editAccessStatusContent(answered)), spent);
+            return;
+          }
+          if (target.action === "approve") {
+            const work = Promise.resolve().then(() => this.controller.runApprovedEditAccess!(target.id, this.stopping.signal));
+            this.work.set(nonceKey, work.catch(() => undefined).finally(() => this.work.delete(nonceKey)));
+          }
+          response.writeHead(303, { location: `/${target.kind}/${encodeURIComponent(target.id)}`, "cache-control": "no-store", "set-cookie": spent });
+          response.end();
+          return;
         }
         const result = target.kind === "batches"
           ? target.action === "approve"

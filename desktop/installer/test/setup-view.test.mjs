@@ -371,8 +371,9 @@ test("the data-retention section names every place, what it removes, and the ste
   assert.match(view.body, /data-action="remove-data"/);
 
   const windows = retentionView(state({ retention: { uninstall: "windows_settings_apps", locations: RETENTION_LOCATIONS } }));
-  // Microsoft's steps: Start > Settings > Apps > Installed apps, then the app's More > Uninstall.
-  assert.match(windows.body, /open Settings, select Apps, then Installed apps, find Morrow, select More, and select Uninstall\./);
+  // Microsoft's steps. Windows 11: Start > Settings > Apps > Installed apps, then the app's More > Uninstall.
+  // Windows 10: Start > Settings > Apps > Apps & features, then select the app and Uninstall.
+  assert.match(windows.body, /Then quit Morrow and open Settings, then Apps\. On Windows 11, select Installed apps, find Morrow, select More, then Uninstall\. On Windows 10, select Apps &amp; features, select Morrow, then Uninstall\./);
   assert.equal(/Trash/.test(windows.body), false);
 
   // Chrome loaded the Bridge from the folder listed above only when Chrome loaded
@@ -529,6 +530,9 @@ test("the repair state offers the repair alone, with no setup to change", () => 
   const view = actionView(current, { chosenAssistantId: null });
   assert.deepEqual(actions(view.body), ["repair", "check-setup-state"]);
   assert.equal(view.body.includes(MATERIALS), false, "the folder cannot be changed from a state Morrow cannot read");
+  // Repair rewrites Morrow's own entry by its marker, also in a file edited since, so it promises only that.
+  assert.match(view.body, /It writes Morrow&#39;s own entry in each assistant&#39;s settings file again and leaves the rest of that file as it is\./);
+  assert.doesNotMatch(view.body, /newer assistant setting/);
   // Settings shows nothing to change either, so a repaired computer cannot
   // reach the folder or assistant list through either view.
   assert.equal(setupManagementView(current), null);
@@ -634,6 +638,23 @@ test("an assistant on this computer that is not set up can be set up after setup
   assert.match(settings.body, /<h3>Claude Desktop<\/h3><p>Not set up yet\.<\/p>/);
   // An assistant that is not on this computer is not offered as a choice.
   assert.equal(settings.body.includes("Claude Code"), false);
+});
+
+test("an assistant whose project folder is gone names that folder and offers Remove, not Set up", () => {
+  const stale = { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, needsWorkspace: true, detected: true, configured: false, projectFolder: "/Home/Courses/Fall course", projectFolderMissing: true };
+  const withAnother = setupManagementView(state({
+    ...CONNECTED_COURSE,
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }, stale],
+    materialsFolder: MATERIALS
+  }));
+  assert.match(withAnother.body, /<h3>Claude Code<\/h3><p class="path-text">\/Home\/Courses\/Fall course<\/p><p>Morrow cannot find the project folder Claude Code was set up in\. If it is on a drive that is not connected, connect the drive, then select Check status\. Otherwise select Remove, then set up Claude Code in the project you use now\.<\/p>/);
+  assert.match(withAnother.body, /data-action="remove-assistant" data-assistant-id="claude-code"/);
+  assert.doesNotMatch(withAnother.body, /data-action="install-assistant" data-assistant-id="claude-code"/);
+
+  // With no other assistant set up, Settings still offers the Remove.
+  const alone = setupManagementView(state({ lifecycle: "ready_for_assistant", assistants: [{ ...CHATGPT, detected: true }, stale], materialsFolder: MATERIALS }));
+  assert.ok(alone, "Settings offers the setup to change");
+  assert.match(alone.body, /data-action="remove-assistant" data-assistant-id="claude-code"/);
 });
 
 test("the completed course connection shows the three status lines, then three example requests, each with its own Copy button", () => {
@@ -862,6 +883,28 @@ test("setup asks the teacher to quit and reopen the assistant before it says to 
   const connected = actionView(connectedCourse({ connected: true }));
   assert.equal(connected.title, "Your course is connected.");
   assert.match(connected.copy, /Continue in ChatGPT/);
+});
+
+test("the reopen step for a project assistant names its project folder, and Claude Code's approval", () => {
+  const project = (id, title, projectFolder) => actionView(state({
+    ...connectedCourseFields(),
+    selectedAssistantId: id,
+    assistants: [{ id, title, tier: "advanced", supported: true, needsWorkspace: true, detected: true, configured: true, connected: false, selected: true, projectFolder }],
+  }));
+  const claudeCode = project("claude-code", "Claude Code", "/Home/Courses/Fall biology");
+  assert.equal(claudeCode.title, "Quit and reopen your assistant.");
+  assert.equal(claudeCode.copy, "Claude Code reads Morrow's entry only from the project folder you chose, and only when it starts there.");
+  assert.match(claudeCode.body, /<li>Quit <strong>Claude Code<\/strong> completely\.<\/li><li>Open <strong>Claude Code<\/strong> in the project folder <span class="path-text">\/Home\/Courses\/Fall biology<\/span>\. When Claude Code asks whether to use the morrow server from this project, approve it\.<\/li><li>Return here and select <strong>Check Claude Code<\/strong>\.<\/li>/);
+  assert.doesNotMatch(claudeCode.body, /start a new chat/);
+
+  const gemini = project("gemini-cli", "Gemini CLI", "/Home/Courses/Spring chemistry");
+  assert.equal(gemini.copy, "Gemini CLI reads Morrow's entry only from the project folder you chose, and only when it starts there.");
+  assert.match(gemini.body, /<li>Quit <strong>Gemini CLI<\/strong> completely\.<\/li><li>Start <strong>Gemini CLI<\/strong> in the project folder <span class="path-text">\/Home\/Courses\/Spring chemistry<\/span>\.<\/li><li>Return here and select <strong>Check Gemini CLI<\/strong>\.<\/li>/);
+
+  // A desktop app keeps the desktop wording.
+  assert.match(actionView(connectedCourse()).body, /<li>Open <strong>ChatGPT<\/strong> again and start a new chat\.<\/li>/);
+  // A check that finds no session points back at those steps instead of repeating the desktop wording.
+  assert.equal(errorDetails("assistant_not_connected").recovery, "Quit the assistant completely, then open it again as the steps on this screen say. Then select the Check button that names your assistant.");
 });
 
 test("a failed assistant check names the button the panel shows, not a Check again button it does not have", () => {

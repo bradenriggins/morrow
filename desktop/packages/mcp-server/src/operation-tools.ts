@@ -46,6 +46,8 @@ const OPERATION_APPLYING_STATES: ReadonlySet<string> = new Set(["approved", "dis
 const REVIEW_OPEN_ATTENTION = "The person has not approved yet. Say that the review is still open. Call morrow_operation_wait again when they are ready. Do not call it more than 6 times in a row.";
 const APPLYING_ATTENTION = "The person approved. Morrow is still applying what they approved. Call morrow_operation_wait again to wait for the result.";
 const WORKING_ATTENTION = "Morrow is still working on this. Call morrow_operation_wait again to wait for the result.";
+const EDIT_ACCESS_OPEN_ATTENTION = "The person has not turned on Edit yet. Say that the Edit access review is still open. Call morrow_operation_wait again when they are ready. Do not call it more than 6 times in a row.";
+const EDIT_ACCESS_APPLYING_ATTENTION = "The person selected Turn on Edit. Morrow is saving it in Morrow Bridge. Call morrow_operation_wait again to wait for the result.";
 const EDIT_CHANGE_NOT_SENT = "Edit already allows this change, and nothing has sent it yet. Send it with morrow_operation_dispatch. If it belongs to a group, run the group with morrow_batch_run instead.";
 const EDIT_BATCH_NOT_STARTED = "Edit already allows these changes, and nothing has sent them yet. Run them with morrow_batch_run.";
 const APPROVED_BATCH_NOT_RUNNING = "The person approved these changes, and nothing is sending them now. Run them with morrow_batch_run.";
@@ -92,9 +94,17 @@ function editAllowed(record: JsonObject): boolean {
 /** Reads the current state of the one id the caller named, from whichever store holds it. An
  * operation id is read with `operationGet`, the same call `morrow_operation_get` makes. A batch id
  * needs `batchApprovalStatus`, read from the batch's own `state` field, because a batch has no single
- * outer operation record of its own. Work a person approved is started by the review page; work
- * that Edit allows, or a group's next window, is started only by the assistant's own call. */
-function readWaitSnapshot(runtime: GatewayRuntime, composition: OperationToolComposition, operationId: string | undefined, batchId: string | undefined): WaitSnapshot {
+ * outer operation record of its own. An Edit access id is read from the runtime's open Edit access
+ * reviews. Work a person approved is started by the review page; work that Edit allows, or a
+ * group's next window, is started only by the assistant's own call. */
+function readWaitSnapshot(runtime: GatewayRuntime, composition: OperationToolComposition, operationId: string | undefined, batchId: string | undefined, editAccessId?: string): WaitSnapshot {
+  if (editAccessId !== undefined) {
+    const record = runtime.editAccessReviewResult(editAccessId);
+    const state = typeof record.state === "string" ? record.state : "unknown";
+    if (state === "awaiting_approval") return { record, state, phase: "review_open", attention: EDIT_ACCESS_OPEN_ATTENTION };
+    if (state === "applying") return { record, state, phase: "applying", attention: EDIT_ACCESS_APPLYING_ATTENTION };
+    return { record, state, phase: "ended" };
+  }
   if (operationId !== undefined) {
     const record = runtime.operationGet(operationId);
     const state = typeof record.state === "string" ? record.state : "unknown";
@@ -154,24 +164,25 @@ export function registerOperationTools(
     "morrow_operation_wait",
     {
       title: "Wait for a review to be answered",
-      description: "Poll one saved operation or batch and return as soon as a person answers its review or Morrow finishes the work, or when the wait ends, whichever is first. When nothing is running work that is ready to start, it returns at once and names the call that starts it. Call this instead of asking the person whether they are done. It never sends a request to the source provider, and it never starts or changes the operation it watches.",
+      description: "Poll one saved operation, batch, or Edit access review and return as soon as a person answers its review or Morrow finishes the work, or when the wait ends, whichever is first. When nothing is running work that is ready to start, it returns at once and names the call that starts it. Call this instead of asking the person whether they are done. It never sends a request to the source provider, and it never starts or changes the operation it watches.",
       inputSchema: z.object({
         operation_id: z.string().min(8).max(160).optional(),
         batch_id: z.string().min(1).max(160).optional(),
+        edit_access_id: z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional(),
         max_wait_seconds: z.number().int().min(1).max(50).default(25),
-      }).refine((input) => (input.operation_id === undefined) !== (input.batch_id === undefined), {
-        message: "Name exactly one of operation_id or batch_id.",
+      }).refine((input) => [input.operation_id, input.batch_id, input.edit_access_id].filter((value) => value !== undefined).length === 1, {
+        message: "Name exactly one of operation_id, batch_id, or edit_access_id.",
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ operation_id, batch_id, max_wait_seconds }, context: ServerContext) => {
-      const id = (operation_id ?? batch_id) as string;
+    async ({ operation_id, batch_id, edit_access_id, max_wait_seconds }, context: ServerContext) => {
+      const id = (operation_id ?? batch_id ?? edit_access_id) as string;
       try {
         const startedAt = Date.now();
         const deadlineAt = startedAt + max_wait_seconds * 1000;
         const progressToken = context.mcpReq._meta?.progressToken;
         let lastProgressAt = startedAt;
-        let snapshot = readWaitSnapshot(runtime, composition, operation_id, batch_id);
+        let snapshot = readWaitSnapshot(runtime, composition, operation_id, batch_id, edit_access_id);
         while ((snapshot.phase === "review_open" || snapshot.phase === "applying") && Date.now() < deadlineAt && !context.mcpReq.signal.aborted) {
           const now = Date.now();
           if (progressToken !== undefined && now - lastProgressAt >= WAIT_PROGRESS_INTERVAL_MS) {
@@ -188,7 +199,7 @@ export function registerOperationTools(
           }
           await waitDelay(Math.min(WAIT_POLL_INTERVAL_MS, Math.max(0, deadlineAt - Date.now())), context.mcpReq.signal);
           if (context.mcpReq.signal.aborted) break;
-          snapshot = readWaitSnapshot(runtime, composition, operation_id, batch_id);
+          snapshot = readWaitSnapshot(runtime, composition, operation_id, batch_id, edit_access_id);
         }
         const seconds = Math.round((Date.now() - startedAt) / 1000);
         const timedOut = !context.mcpReq.signal.aborted && (snapshot.phase === "review_open" || snapshot.phase === "applying");

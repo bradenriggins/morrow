@@ -729,6 +729,31 @@ describe("Canvas connector gateway path", () => {
       }
     }, CASE_TIMEOUT_MS);
 
+    it("refuses to turn on, from a conversation, an Edit action that removes content", async () => {
+      const removal = { id: "module_item_removal", group: "Canvas · Modules", label: "Remove a module item", description: "Remove one module item.", availability: "edit", destructive: true, tier: "destructive" };
+      const supportedAction = { id: "action:canvas:canvas_update_create_page_courses", group: "Canvas · Pages", label: "Update/create page", description: "Update a page.", availability: "edit" };
+      activeEditOptions = [removal, supportedAction];
+      bridge!.updateBindings([{ ...binding(), courseName: "Biology", editCategories: [removal, supportedAction]
+        .map((category) => ({ id: category.id, label: category.label, description: category.description })) }]);
+      await bindingsApplied();
+      try {
+        const refusal = runtime.prepareBrowserEditAccess("edit", [{ sourceBindingId, enabledCategories: [removal.id, supportedAction.id] }]);
+        await expect(refusal).rejects.toBeInstanceOf(EditCategoryUnavailableError);
+        await expect(refusal).rejects.toMatchObject({
+          categoryId: removal.id,
+          reason: "Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.",
+        });
+        const prepared = await runtime.prepareBrowserEditAccess("edit", [{ sourceBindingId, enabledCategories: [supportedAction.id] }]);
+        expect(prepared.selections[0]?.enabledCategories.map((category) => category.id)).toEqual([supportedAction.id]);
+        // Returning the course to Plan never names a category, so it stays open.
+        expect((await runtime.prepareBrowserEditAccess("plan", [{ sourceBindingId }])).mode).toBe("plan");
+      } finally {
+        activeEditOptions = [];
+        bridge!.updateBindings([binding()]);
+        await bindingsApplied();
+      }
+    }, CASE_TIMEOUT_MS);
+
     it("carries a Bridge edit option's WI-3.1 facts into the prepared Edit access selection", async () => {
       const factfulAction = {
         id: "action:canvas:canvas_update_create_page_courses",

@@ -14,8 +14,8 @@ MORROW_INSTALLER_PAYLOAD=<absolute-payload-path> MORROW_SIGNED_RELEASE=0 \
   pnpm --dir installer --ignore-workspace package:win
 ```
 
-The output is `Morrow-<version>-win-x64.exe`. Version `1.0.0` is an unsigned
-release. Automatic updates remain disabled. Use the complete NSIS installer;
+The output is `Morrow-<version>-win-x64.exe`. Every Morrow Desktop release so
+far, including 1.0.5, is unsigned. Automatic updates remain disabled. Use the complete NSIS installer;
 do not deploy an unpacked app or a separately copied `MorrowPayload` directory.
 
 ## The Morrow Bridge delivery route
@@ -82,14 +82,16 @@ The action asks for a confirmation that lists every path it will remove and
 every path it will not. It first takes Morrow's own `morrow` entry out of each
 assistant configuration file Morrow wrote and leaves the rest of that file; if it
 cannot, it stops, names the file, and removes nothing. It then removes only paths
-inside Morrow's own user-data folder and inside the Blackboard credential folder.
+inside Morrow's own user-data folder, the Blackboard credential folder, and the
+Blackboard configuration file.
 It keeps the `Assistant settings backups` folder. It never removes an
 assistant's own configuration file. After the removal it reads each path again
 and reports which are gone and which are still on the computer.
 
-Removing the application itself stays a Windows step: Settings, Apps,
-Installed apps, Morrow, More, Uninstall, or the uninstaller the installed copy
-registered for the current user. `installer/test/installer-controller.test.cjs` proves the in-app removal
+Removing the application itself stays a Windows step. Windows 11: Settings,
+Apps, Installed apps, Morrow, More, Uninstall. Windows 10: Settings, Apps, Apps &
+features, Morrow, Uninstall. The uninstaller the installed copy registered for
+the current user does the same. `installer/test/installer-controller.test.cjs` proves the in-app removal
 on macOS. `scripts/test/desktop-windows-smoke.mjs` runs the Windows uninstaller
 and then compares State, Materials, backups, and the assistant configuration
 byte for byte against the reading it took before the uninstall. The harness

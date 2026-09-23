@@ -231,6 +231,11 @@ function assistantDetail(assistant) {
 function assistantRow(assistant) {
   const title = escapeHtml(assistant.title);
   const identifier = escapeHtml(assistant.id);
+  // The assistant reads Morrow's entry only inside the project folder it was set up in. With that
+  // folder gone there is nothing to repair, so the row names the folder and offers Remove alone.
+  if (assistant.projectFolderMissing === true) {
+    return `<div class="materials-row materials-row-stacked"><div><h3>${title}</h3><p class="path-text">${escapeHtml(assistant.projectFolder)}</p><p>Morrow cannot find the project folder ${title} was set up in. If it is on a drive that is not connected, connect the drive, then select Check status. Otherwise select Remove, then set up ${title} in the project you use now.</p></div><div class="inline-actions"><button class="secondary-button" type="button" data-action="remove-assistant" data-assistant-id="${identifier}" aria-label="Remove Morrow from ${title}">Remove</button></div></div>`;
+  }
   const actions = [];
   if (assistant.pending === true) {
     actions.push('<button class="secondary-button" type="button" data-action="open-claude-desktop">Open Claude Desktop</button>');
@@ -261,9 +266,11 @@ function assistantRow(assistant) {
  */
 export function setupManagementView(current) {
   if (current?.lifecycle === "repair_required" || current?.runtime?.status === "repair_required") return null;
-  if (!configuredAssistant(current) && !pendingAssistant(current)) return null;
-  const assistants = (Array.isArray(current?.assistants) ? current.assistants : [])
-    .filter((assistant) => assistant?.configured === true || assistant?.pending === true
+  const all = Array.isArray(current?.assistants) ? current.assistants : [];
+  const projectFolderMissing = all.some((assistant) => assistant?.projectFolderMissing === true);
+  if (!configuredAssistant(current) && !pendingAssistant(current) && !projectFolderMissing) return null;
+  const assistants = all
+    .filter((assistant) => assistant?.configured === true || assistant?.pending === true || assistant?.projectFolderMissing === true
       || (assistant?.detected === true && assistant?.supported !== false));
   return { title: "Setup you can change", body: `${materialsRow(current)}${assistants.map(assistantRow).join("")}` };
 }
@@ -338,7 +345,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
       summary: "Morrow needs repair",
       title: "Repair Morrow before you connect a course.",
       copy: "Morrow did not confirm that its local runtime is ready. No course connection or course action will start from this state.",
-      body: '<div class="blocked-box"><strong>Setup needs repair</strong><p>Repair checks the files inside Morrow and restores what it can. It replaces the Morrow Bridge folder from the copy Morrow ships when the folder on this computer does not match it, and it writes your assistant setting again. It leaves a newer assistant setting alone, and it changes nothing in your course.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
+      body: '<div class="blocked-box"><strong>Setup needs repair</strong><p>Repair checks the files inside Morrow and restores what it can. It replaces the Morrow Bridge folder from the copy Morrow ships when the folder on this computer does not match it. It writes Morrow&#39;s own entry in each assistant&#39;s settings file again and leaves the rest of that file as it is. It changes nothing in your course.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
     };
   }
   if (current.assistantsNeedRepoint === true) return repointPanel();
@@ -428,7 +435,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
       summary: "Morrow Bridge is not ready to open",
       title: "Morrow Bridge is not ready to open.",
       copy: "Morrow could not verify its Bridge folder. Repair Morrow to restore the folder from the copy included with the app.",
-      body: '<div class="info-box"><strong>Repair the local setup</strong><p>Repair checks Morrow, restores its Bridge folder, and checks your assistant setup. It preserves newer assistant settings and makes no course changes.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
+      body: '<div class="info-box"><strong>Repair the local setup</strong><p>Repair checks Morrow and restores its Bridge folder. It writes Morrow&#39;s own entry in each assistant&#39;s settings file again and leaves the rest of that file as it is. It makes no course changes.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
     };
   }
   if (needsBridge(current) && bridge.delivery === "developer_temporary") {
@@ -512,11 +519,23 @@ function restartPanel(assistant, current) {
   const which = configured.length > 1
     ? `<div class="info-box"><strong>Reopen each assistant</strong><p>Morrow can tell that an assistant opened Morrow, but it cannot tell which one. Quit and reopen each assistant you set up: ${assistantTitles(configured)}.</p></div>`
     : "";
+  // Claude Code and Gemini CLI read Morrow's entry only in the project folder chosen at setup, and
+  // Claude Code uses a project's server only after the person approves it there.
+  const folder = typeof assistant.projectFolder === "string" && assistant.projectFolder.length > 0
+    ? `<span class="path-text">${escapeHtml(assistant.projectFolder)}</span>`
+    : null;
+  const reopen = folder && assistant.id === "claude-code"
+    ? `<li>Quit <strong>${title}</strong> completely.</li><li>Open <strong>${title}</strong> in the project folder ${folder}. When ${title} asks whether to use the morrow server from this project, approve it.</li>`
+    : folder
+      ? `<li>Quit <strong>${title}</strong> completely.</li><li>Start <strong>${title}</strong> in the project folder ${folder}.</li>`
+      : `<li>Quit <strong>${title}</strong> completely. Closing its window is not enough.</li><li>Open <strong>${title}</strong> again and start a new chat.</li>`;
   return {
     summary: `Quit and reopen ${assistant.title}`,
     title: "Quit and reopen your assistant.",
-    copy: `${assistant.title} reads its settings only when it starts. It cannot use Morrow until you open it again.`,
-    body: `${which}<ol class="instructions"><li>Quit <strong>${title}</strong> completely. Closing its window is not enough.</li><li>Open <strong>${title}</strong> again and start a new chat.</li><li>Return here and select <strong>Check ${title}</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
+    copy: folder
+      ? `${assistant.title} reads Morrow's entry only from the project folder you chose, and only when it starts there.`
+      : `${assistant.title} reads its settings only when it starts. It cannot use Morrow until you open it again.`,
+    body: `${which}<ol class="instructions">${reopen}<li>Return here and select <strong>Check ${title}</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
   };
 }
 
@@ -546,7 +565,8 @@ const UNINSTALL_FIRST_STEP = "To remove the Morrow application, first select Rem
 const UNINSTALL_CLAUDE_STEP = "Also remove Morrow in Claude Desktop under Settings, Extensions.";
 const UNINSTALL_STEPS = Object.freeze({
   move_to_trash: "Then quit Morrow and move it to the Trash.",
-  windows_settings_apps: "Then quit Morrow, open Settings, select Apps, then Installed apps, find Morrow, select More, and select Uninstall.",
+  // Windows 11 and Windows 10 name the Settings page and its buttons differently.
+  windows_settings_apps: "Then quit Morrow and open Settings, then Apps. On Windows 11, select Installed apps, find Morrow, select More, then Uninstall. On Windows 10, select Apps & features, select Morrow, then Uninstall.",
   unknown: "Then quit Morrow and remove it the way this computer removes an application."
 });
 

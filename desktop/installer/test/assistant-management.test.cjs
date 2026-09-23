@@ -140,9 +140,14 @@ function controller(root, overrides = {}) {
       calls.push(args);
       if (args[0] === "mcp" && args[1] === "install") {
         const workspaceRoot = args[args.indexOf("--workspace-root") + 1];
+        const project = args.includes("--client-project") ? args[args.indexOf("--client-project") + 1] : null;
+        // client-config refuses a project folder that is not there, with no refusal line, as the real command does.
+        if (project !== null && !await fs.stat(project).then((info) => info.isDirectory(), () => false)) {
+          return { code: 1, stdout: "", stderr: `[morrow] projectRoot does not exist as a directory: ${project}\n` };
+        }
         const target = args[2] === "codex"
           ? path.join(root, "Home", ".codex", "config.toml")
-          : path.join(args[args.indexOf("--client-project") + 1], ".mcp.json");
+          : args[2] === "gemini" ? path.join(project, ".gemini", "settings.json") : path.join(project, ".mcp.json");
         let current = await fs.readFile(target, "utf8").catch(() => "");
         if (typeof beforeClientInstall === "function") {
           await beforeClientInstall({ args, target, current });
@@ -598,6 +603,8 @@ test("recovery completes one removal when interruption happened after the tombst
     assert.equal(tombstone.afterSha256, sha256(Buffer.from(expected)));
     throw new Error("simulated interruption before mutation");
   };
+  // The process ends there, so nothing clears the recovery record.
+  installer.clearAssistantRemovalTombstone = async () => { throw new Error("simulated end of the process"); };
 
   try {
     await assert.rejects(() => installer.removeAssistant("claude-code"), /simulated interruption before mutation/);
@@ -641,6 +648,7 @@ test("recovery refuses a tombstone retargeted away from the recorded assistant f
   };
   await installer.writeRecord(originalRecord);
   installer.writeAssistantConfiguration = async () => { throw new Error("pause with valid tombstone"); };
+  installer.clearAssistantRemovalTombstone = async () => { throw new Error("simulated end of the process"); };
   await assert.rejects(() => installer.removeAssistant("claude-code"), /pause with valid tombstone/);
   const tombstone = JSON.parse(await fs.readFile(installer.assistantRemovalPath, "utf8"));
   tombstone.target = foreign;
@@ -653,6 +661,115 @@ test("recovery refuses a tombstone retargeted away from the recorded assistant f
   assert.equal(await fs.readFile(target, "utf8"), content);
   assert.equal(await fs.readFile(foreign, "utf8"), foreignContent);
   assert.deepEqual(JSON.parse(await fs.readFile(restarted.recordPath, "utf8")), originalRecord);
+});
+
+test("a removal refused because Codex wrote its file during the removal leaves no recovery record", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const table = codexTable(path.join(root, "Materials"));
+  const recorded = await writeFile(target, `model = "gpt-6"\n\n${table}`);
+  const originalRecord = { ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: recorded } } };
+  await installer.writeRecord(originalRecord);
+  // Codex writes its file after Morrow read it and before Morrow replaces it.
+  const write = installer.writeAssistantConfiguration.bind(installer);
+  installer.writeAssistantConfiguration = async (...args) => {
+    await fs.appendFile(target, "\n[tui.notices]\nhide = true\n");
+    return write(...args);
+  };
+
+  await assert.rejects(() => installer.removeAssistant("codex"), (error) => error.code === "assistant_configuration_changed");
+
+  assert.equal(await fs.readFile(target, "utf8"), `model = "gpt-6"\n\n${table}\n[tui.notices]\nhide = true\n`, "Morrow left that file exactly as it is");
+  assert.equal(await fs.lstat(installer.assistantRemovalPath).then(() => true, () => false), false);
+  assert.deepEqual(await installer.record(), originalRecord, "the removal did not happen, so the record still lists Codex");
+  installer.ensureRuntime = async () => installer.paths;
+  installer.runtimeSnapshot = async () => readyRuntime();
+  assert.notEqual((await installer.state({ recheckAssistants: true })).lifecycle, "repair_required");
+
+  // The person follows the refusal's own steps: they take Morrow's table out, then select Remove again.
+  await fs.writeFile(target, (await fs.readFile(target, "utf8")).replace(table, ""));
+  installer.writeAssistantConfiguration = write;
+  await installer.removeAssistant("codex");
+  assert.deepEqual((await installer.record()).configured, {});
+});
+
+test("Repair finishes a removal whose record was committed, after Codex rewrote its file again", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const recorded = await writeFile(target, `model = "gpt-6"\n\n${codexTable(path.join(root, "Materials"))}`);
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: recorded } } });
+  // The process ends after the record commit and before the recovery record is cleared.
+  installer.clearAssistantRemovalTombstone = async () => { throw new Error("simulated end of the process"); };
+  await assert.rejects(() => installer.removeAssistant("codex"), /simulated end of the process/);
+  assert.equal(await fs.readFile(target, "utf8"), "model = \"gpt-6\"\n");
+  // Later, Codex trusts a project and rewrites its own settings file.
+  const trusted = "model = \"gpt-6\"\n\n[projects.\"/Users/t/course\"]\ntrust_level = \"trusted\"\n";
+  await fs.writeFile(target, trusted);
+
+  const { installer: restarted } = controller(root);
+  assert.equal((await restarted.state()).lifecycle, "repair_required");
+  let writes = 0;
+  const write = restarted.writeAssistantConfiguration.bind(restarted);
+  restarted.writeAssistantConfiguration = async (...args) => { writes += 1; return write(...args); };
+  const repaired = await restarted.repairInstallerRecord();
+
+  assert.deepEqual(repaired.configured, {});
+  assert.equal(writes, 0, "Codex's newer file is left exactly as it is");
+  assert.equal(await fs.readFile(target, "utf8"), trusted);
+  assert.equal(await fs.lstat(restarted.assistantRemovalPath).then(() => true, () => false), false);
+  assert.deepEqual((await restarted.record()).configured, {});
+});
+
+test("Repair finishes an interrupted removal from the file Codex rewrote since, and keeps Codex's edit", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const table = codexTable(path.join(root, "Materials"));
+  const recorded = await writeFile(target, `model = "gpt-6"\n\n${table}`);
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: recorded } } });
+  // The process ends after the recovery record is written and before the file changes.
+  installer.writeAssistantConfiguration = async () => { throw new Error("simulated end of the process"); };
+  installer.clearAssistantRemovalTombstone = async () => { throw new Error("simulated end of the process"); };
+  await assert.rejects(() => installer.removeAssistant("codex"), /simulated end of the process/);
+  // Later, Codex trusts a project. Morrow's table is still in its file.
+  await fs.writeFile(target, `model = "gpt-6"\n\n${table}\n[projects."/Users/t/course"]\ntrust_level = "trusted"\n`);
+
+  const { installer: restarted } = controller(root);
+  assert.equal((await restarted.state()).lifecycle, "repair_required");
+  const repaired = await restarted.repairInstallerRecord();
+
+  assert.deepEqual(repaired.configured, {});
+  assert.equal(await fs.readFile(target, "utf8"), "model = \"gpt-6\"\n\n[projects.\"/Users/t/course\"]\ntrust_level = \"trusted\"\n");
+  assert.equal(await fs.lstat(restarted.assistantRemovalPath).then(() => true, () => false), false);
+});
+
+test("Repair keeps the assistant listed when an interrupted removal cannot be finished", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const table = codexTable(path.join(root, "Materials"));
+  const recorded = await writeFile(target, `model = "gpt-6"\n\n${table}`);
+  const originalRecord = { ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: recorded } } };
+  await installer.writeRecord(originalRecord);
+  installer.writeAssistantConfiguration = async () => { throw new Error("simulated end of the process"); };
+  installer.clearAssistantRemovalTombstone = async () => { throw new Error("simulated end of the process"); };
+  await assert.rejects(() => installer.removeAssistant("codex"), /simulated end of the process/);
+
+  // Codex writes its file again while Repair removes Morrow's table.
+  const { installer: restarted } = controller(root);
+  const write = restarted.writeAssistantConfiguration.bind(restarted);
+  restarted.writeAssistantConfiguration = async (...args) => {
+    await fs.appendFile(target, "\n[tui.notices]\nhide = true\n");
+    return write(...args);
+  };
+  const repaired = await restarted.repairInstallerRecord();
+
+  assert.deepEqual(repaired, originalRecord, "the removal did not happen, so Codex stays listed");
+  assert.equal(await fs.readFile(target, "utf8"), `model = "gpt-6"\n\n${table}\n[tui.notices]\nhide = true\n`);
+  assert.equal(await fs.lstat(restarted.assistantRemovalPath).then(() => true, () => false), false);
+  assert.deepEqual(await restarted.record(), originalRecord);
 });
 
 test("removing Codex recognizes the quoted Morrow table written by valid TOML", async () => {
@@ -947,6 +1064,102 @@ test("changing the materials folder writes the new folder into every configured 
     assert.equal(call.includes("--replace-morrow-entry"), true);
     assert.equal(call.includes("--expected-config-sha256"), false);
   }
+});
+
+test("Repair skips a project assistant whose project folder is gone, and repairs the assistants after it", async () => {
+  const root = await temporaryRoot();
+  const materials = path.join(root, "Materials");
+  const gone = path.join(root, "Fall course");
+  const kept = path.join(root, "Spring course");
+  for (const directory of [materials, gone, kept]) await fs.mkdir(directory, { recursive: true });
+  const claudeCode = path.join(gone, ".mcp.json");
+  const gemini = path.join(kept, ".gemini", "settings.json");
+  const entry = `${JSON.stringify(claudeCodeEntry(materials), null, 2)}\n`;
+  const configured = {
+    "claude-code": { target: claudeCode, sha256: await writeFile(claudeCode, entry) },
+    "gemini-cli": { target: gemini, sha256: await writeFile(gemini, entry) }
+  };
+  const { installer, calls } = controller(root);
+  await installer.writeRecord({ ...freshRecord(), materialsFolder: materials, selectedAssistantId: "claude-code", configured });
+  // The educator deletes the Claude Code project folder when the term ends.
+  await fs.rm(gone, { recursive: true });
+
+  await installer.repairAssistantConfiguration(await installer.record());
+
+  assert.deepEqual(calls.filter((entry) => entry[0] === "mcp").map((entry) => entry[2]), ["gemini"]);
+  assert.equal(await fs.stat(gone).then(() => true, () => false), false, "Morrow does not make the deleted folder again");
+  const record = await installer.record();
+  assert.deepEqual(record.configured["claude-code"], configured["claude-code"], "the entry stays listed so it can be removed");
+  assert.equal(record.configured["gemini-cli"].sha256, sha256(await fs.readFile(gemini)));
+});
+
+test("changing the materials folder leaves out a project assistant whose project folder is gone", async () => {
+  const root = await temporaryRoot();
+  const first = path.join(root, "Materials");
+  const chosen = path.join(root, "Fall biology");
+  const gone = path.join(root, "Fall course");
+  for (const directory of [first, chosen, gone]) await fs.mkdir(directory, { recursive: true });
+  const codex = path.join(root, "Home", ".codex", "config.toml");
+  const claudeCode = path.join(gone, ".mcp.json");
+  const configured = {
+    codex: { target: codex, sha256: await writeFile(codex, codexTable(first)) },
+    "claude-code": { target: claudeCode, sha256: await writeFile(claudeCode, `${JSON.stringify(claudeCodeEntry(first), null, 2)}\n`) }
+  };
+  const { installer, calls } = controller(root, {
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) }
+  });
+  await installer.writeRecord({ ...freshRecord(), materialsFolder: first, selectedAssistantId: "codex", configured });
+  await fs.rm(gone, { recursive: true });
+
+  assert.equal(await installer.configureWorkspace(null), true);
+
+  const canonical = await fs.realpath(chosen);
+  assert.deepEqual(calls.map((entry) => entry[2]), ["codex"]);
+  const record = await installer.record();
+  assert.equal(record.materialsFolder, canonical);
+  assert.equal((await fs.readFile(codex, "utf8")).includes(`cwd = "${canonical}"`), true);
+  assert.deepEqual(record.configured["claude-code"], configured["claude-code"]);
+});
+
+test("an assistant whose project folder is gone is named by that folder, and Remove takes it off the list", async () => {
+  const root = await temporaryRoot();
+  const materials = path.join(root, "Materials");
+  const gone = path.join(root, "Fall course");
+  const kept = path.join(root, "Spring course");
+  for (const directory of [materials, gone, kept]) await fs.mkdir(directory, { recursive: true });
+  const claudeCode = path.join(gone, ".mcp.json");
+  const gemini = path.join(kept, ".gemini", "settings.json");
+  const entry = `${JSON.stringify(claudeCodeEntry(materials), null, 2)}\n`;
+  const { installer } = controller(root);
+  await installer.writeRecord({
+    ...freshRecord(),
+    materialsFolder: materials,
+    selectedAssistantId: "claude-code",
+    configured: {
+      "claude-code": { target: claudeCode, sha256: await writeFile(claudeCode, entry) },
+      "gemini-cli": { target: gemini, sha256: await writeFile(gemini, entry) }
+    }
+  });
+  await fs.rm(gone, { recursive: true });
+  installer.ensureRuntime = async () => installer.paths;
+  installer.runtimeSnapshot = async () => readyRuntime();
+
+  const before = await installer.state();
+  const claudeRow = before.assistants.find((assistant) => assistant.id === "claude-code");
+  assert.equal(claudeRow.configured, false);
+  assert.equal(claudeRow.projectFolderMissing, true);
+  assert.equal(claudeRow.projectFolder, gone);
+  const geminiRow = before.assistants.find((assistant) => assistant.id === "gemini-cli");
+  assert.equal(geminiRow.projectFolderMissing, false);
+  assert.equal(geminiRow.projectFolder, kept);
+  assert.equal(before.assistants.find((assistant) => assistant.id === "codex").projectFolder, null);
+
+  await installer.removeAssistant("claude-code");
+
+  assert.deepEqual(Object.keys((await installer.record()).configured), ["gemini-cli"]);
+  const after = (await installer.state()).assistants.find((assistant) => assistant.id === "claude-code");
+  assert.equal(after.projectFolderMissing, false);
+  assert.equal(after.projectFolder, null);
 });
 
 test("choosing the folder that is already in use records the choice and rewrites no assistant", async () => {

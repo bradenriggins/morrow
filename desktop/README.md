@@ -348,7 +348,7 @@ The app presents three stages and shows one next action at a time:
 2. **Set up Morrow Bridge.** Select **Show Bridge folder**. Morrow opens the folder Chrome must load and shows its full path with a **Copy path** button. In Chrome, open the three-dot menu, select **Extensions**, then **Manage Extensions**, turn on **Developer mode**, select **Load unpacked**, and select that folder. The folder is hidden by default: on a Mac, press Command+Shift+G in Chrome's folder picker and paste the path; on Windows, paste the path into the picker's address bar. Open Morrow Bridge and select **Connect Morrow**. Morrow connects only the Morrow Bridge that Chrome loaded from the folder Morrow shows. This temporary Chrome step stands until Morrow Bridge has a Chrome Web Store listing. A managed Chrome profile can block it, and Morrow does not work around that restriction.
 3. **Open and connect your course.** Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge identifies the platform and shows **Connect this course**. Select that button and allow the exact platform address Chrome shows. In Morrow Bridge, select **Open Plan and Edit settings**, then select **Connect** next to a course under **Your courses**. Each course starts in Plan. Morrow then reads the course it names once to confirm the connection. That read changes nothing in the course.
 
-When the course is connected, Morrow asks you to quit and reopen the assistant you chose, because an assistant reads its settings only when it starts. Open it again, start a new chat, then select **Check** in Morrow. Morrow shows the final "Continue in your assistant" step only after that assistant's own Morrow session has connected once.
+When the course is connected, Morrow asks you to quit and reopen the assistant you chose, because an assistant reads its settings only when it starts. Open it again, start a new chat, then select **Check** in Morrow. Claude Code and Gemini CLI read Morrow's entry only in the project folder you chose at setup, so Morrow names that folder: start the assistant there, and approve the morrow server when Claude Code asks. Morrow shows the final "Continue in your assistant" step only after that assistant's own Morrow session has connected once.
 
 Morrow creates a default materials folder. Choosing another folder is optional, and you can change it after setup.
 
@@ -360,7 +360,7 @@ The app keeps the same window for the rest of the installation's life. It carrie
 
 - **Repair Morrow**, which checks the files inside Morrow, replaces the Morrow Bridge folder from the copy Morrow ships when the folder does not match it, and writes Morrow's entry again into every assistant it set up, so each one points at this copy of Morrow. Morrow finds its own entry by what it is, so an assistant that rewrote the rest of its settings file since is not a problem. It leaves a server of the same name that Morrow did not write alone and changes nothing in your course.
 - **What stays on this computer**, which names the exact path of every place this installation keeps data, marks which of them Morrow can remove, and states the step this computer uses to remove the application itself. **Remove Morrow's data** first shows a confirmation listing every path it will remove and every path it will keep. It then takes Morrow's own entry out of each assistant settings file Morrow changed, so those assistants stop starting a Morrow that is gone, and stops without removing anything if it cannot. It keeps the **Assistant settings backups** folder. Claude Desktop keeps its own copy of the Morrow extension, which Morrow does not remove; the list and the confirmation name it and say to remove Morrow in Claude Desktop under Settings, Extensions. It then reads each path again and reports which are gone and which are still there.
-- To remove the application, select **Remove Morrow's data** first. If you set up Claude Desktop, also remove Morrow in Claude Desktop under Settings, Extensions. Then quit Morrow and move it to the Trash (Mac) or uninstall it from Settings, Apps, Installed apps (Windows).
+- To remove the application, select **Remove Morrow's data** first. If you set up Claude Desktop, also remove Morrow in Claude Desktop under Settings, Extensions. Then quit Morrow and move it to the Trash (Mac), or uninstall it from Settings, Apps, Installed apps (Windows 11) or Settings, Apps, Apps & features (Windows 10).
 - Changing the materials folder and removing an assistant after setup. When the materials folder is moved, renamed, deleted, or on a drive that is not connected, Home names it and offers **Choose folder**, and **Make the folder again** for Morrow's own folder.
 - Manual installation of a newer unsigned build. Automatic updates remain disabled in unsigned releases.
 
@@ -431,16 +431,17 @@ choose the `connector/extension` folder. Your organization must allow this.
 If managed Chrome blocks Developer mode or this extension, Morrow cannot
 connect through that browser. Do not bypass your organization's restrictions.
 
-To build a ZIP of the extension:
+To build the Bridge release ZIP:
 
 ```bash
 pnpm package:connector
 ```
 
-Extract `artifacts/connector/morrow-canvas-connector-v<version>.zip`, where
-`<version>` is the Bridge version in `connector/extension/manifest.json`. Use
-**Load unpacked** to select the extracted folder that contains `manifest.json`,
-not the ZIP file. Keep that folder in place while the extension is installed.
+It writes `artifacts/connector/morrow-canvas-connector-v<version>.zip`, where
+`<version>` is the Bridge version in `connector/extension/manifest.json`. The
+ZIP is a release artifact, not a way to install Morrow Bridge. A folder
+extracted from it has no pairing secret, so it cannot connect to a Morrow you
+run from source. From source, always load `connector/extension`.
 
 Each desktop release ships with the Bridge version its [changelog](CHANGELOG.md) names. Update the desktop app and Bridge together, reload the unpacked extension, then reconnect them. An older Bridge does not carry the complete 1.0 operation set.
 

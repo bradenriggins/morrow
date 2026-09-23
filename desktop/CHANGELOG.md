@@ -74,7 +74,7 @@ This release fixes the problems a full review of Morrow found before release. Te
 - Check connection says when Morrow could not read your course, with the step to fix it. It no longer calls that course connected.
 - Selecting Check Bridge before Chrome reloaded Morrow Bridge names the reload step.
 - Blackboard error steps name only the fields and buttons the form shows. The saved connection note says a new secret needs the application key too.
-- The Windows uninstall steps follow Settings, Apps, Installed apps, then More and Uninstall.
+- The Windows uninstall steps name the Settings page each version shows: Installed apps, then More and Uninstall on Windows 11, and Apps & features, then Uninstall on Windows 10.
 - "What stays on this computer" lists only what is on this computer, and says which part Remove Morrow's data removes and which part Morrow never removes.
 - Repair Morrow finishes when Claude Desktop is set up. It used to stop with "Morrow has work in progress".
 - Morrow starts more reliably on a slow or busy computer. Its course connection starts faster, and Morrow waits the full 30 seconds its first start is allowed instead of giving up after 15.

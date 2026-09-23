@@ -560,6 +560,15 @@ function configuredProject(assistant, home, target) {
   return clientConfigTarget(assistant, home, project) === target ? { project } : null;
 }
 
+/**
+ * Whether the project folder an assistant was set up in is still a folder.
+ * client-config cannot write into a folder that is gone, and Morrow never
+ * makes one again: the educator may have deleted it on purpose.
+ */
+async function projectFolderPresent(project) {
+  return fs.stat(project).then((info) => info.isDirectory(), () => false);
+}
+
 class InstallerController {
   constructor(deps) {
     this.app = deps.app;
@@ -1203,10 +1212,13 @@ class InstallerController {
   /**
    * Writes the materials folder into every assistant this installation
    * configured, so each assistant starts Morrow in the exact folder Morrow
-   * uses. Each client file is replaced only while its complete bytes still
-   * match the digest Morrow recorded. The installer record changes only after
-   * every assistant was written and read back. A failure restores each earlier
-   * file only if nothing else changed it after Morrow's write.
+   * uses. Morrow finds its own entry in each settings file by its marker and
+   * rewrites only that entry, so the rest of the file stays as the assistant
+   * or the person left it. An assistant whose project folder is gone is left
+   * out, and setup names that folder and offers Remove. The installer record
+   * changes only after every assistant was written and read back. A failure
+   * restores each earlier file only if nothing else changed it after Morrow's
+   * write.
    */
   async bindConfiguredAssistants(bindings, materials) {
     const staged = [];
@@ -1216,6 +1228,7 @@ class InstallerController {
           staged.push(await this.stageClaudeDesktopSetup(assistant, entry, materials));
           continue;
         }
+        if (project && !await projectFolderPresent(project)) continue;
         const installed = await this.installClientConfiguration(assistant, entry.target, project, materials, {
           rebind: true,
           updateRecord: false
@@ -1732,11 +1745,9 @@ class InstallerController {
   }
 
   /**
-   * Removes Morrow's own entry from one assistant configuration file and keeps
-   * the rest of that file as it is. It writes only while the file on disk is
-   * still exactly the file Morrow wrote, so an edit made after that is refused
-   * and the file is left untouched. The file is read again afterwards: the
-   * removal is proven by what that file says, not by the write call.
+   * One assistant configuration file without Morrow's own entry, found by its
+   * marker, with the rest of the file kept as it is. `null` when the file holds
+   * no Morrow entry. A `morrow` entry Morrow did not write is refused.
    */
   async configurationWithoutMorrow(assistant, content, target = null) {
     const module = await this.clientConfigModule().catch(() => { throw errorDetails("setup_failed"); });
@@ -1762,6 +1773,13 @@ class InstallerController {
     }
   }
 
+  /**
+   * Removes Morrow's own entry from one assistant configuration file and keeps
+   * the rest of that file as it is, including edits made after Morrow wrote it.
+   * The write is refused when the file changes while Morrow writes it. The
+   * file is read again afterwards: the removal is proven by what that file
+   * says, not by the write call.
+   */
   async removeClientConfiguration(assistant, entry, recordBefore, recordAfter) {
     const target = entry?.target;
     if (typeof target !== "string" || !path.isAbsolute(target) || typeof entry.sha256 !== "string") throw errorDetails("setup_failed");
@@ -1791,9 +1809,34 @@ class InstallerController {
       recordBeforeSha256: installerRecordDigest(recordBefore, this.home),
       recordAfterSha256: installerRecordDigest(recordAfter, this.home),
     });
-    await this.writeAssistantConfiguration(target, next, beforeSha256);
-    await this.confirmAssistantConfigurationRemoved(assistant, target, afterSha256);
+    try {
+      await this.writeAssistantConfiguration(target, next, beforeSha256);
+      await this.confirmAssistantConfigurationRemoved(assistant, target, afterSha256);
+    } catch (error) {
+      // The recovery record is for a process that ends mid-removal. While the
+      // file still holds Morrow's entry, the removal did not happen and the
+      // record was never changed, so nothing is left for Repair to finish.
+      if (await this.morrowEntryRemains(assistant, target) === true) {
+        await this.clearAssistantRemovalTombstone(tombstone).catch(() => {});
+      }
+      throw error;
+    }
     return tombstone;
+  }
+
+  /**
+   * Whether one assistant settings file still holds Morrow's own entry, from
+   * what the file says now: true or false, or null when Morrow cannot tell.
+   * A file that is gone holds no entry.
+   */
+  async morrowEntryRemains(assistant, target) {
+    try {
+      const content = await readConfigurationFile(target);
+      if (content === null) return await fs.lstat(target).then(() => null, () => false);
+      return await this.configurationWithoutMorrow(assistant, content.toString("utf8"), target) !== null;
+    } catch {
+      return null;
+    }
   }
 
   async assistantConfigurationGeneration(target, expectedSha256) {
@@ -1908,8 +1951,9 @@ class InstallerController {
     if (!assistant || assistant.id === "claude-desktop") throw new Error("assistant_removal_recovery_required");
 
     const recordSha256 = installerRecordDigest(record, this.home);
+    // The record is committed only after the file was read back without
+    // Morrow's entry. Whatever the assistant wrote into its file since is its own.
     if (recordSha256 === tombstone.recordAfterSha256) {
-      await this.confirmAssistantConfigurationRemoved(assistant, tombstone.target, tombstone.afterSha256);
       await this.clearAssistantRemovalTombstone(tombstone);
       return record;
     }
@@ -1926,19 +1970,26 @@ class InstallerController {
       throw new Error("assistant_removal_recovery_required");
     }
 
-    const current = await readConfigurationFile(tombstone.target);
-    if (current === null) throw new Error("assistant_removal_recovery_required");
-    const currentSha256 = fileHash(current);
-    if (currentSha256 === tombstone.beforeSha256) {
-      const next = await this.configurationWithoutMorrow(assistant, current.toString("utf8"), tombstone.target);
-      if (next === null || fileHash(Buffer.from(next, "utf8")) !== tombstone.afterSha256) {
-        throw new Error("assistant_removal_recovery_required");
-      }
-      await this.writeAssistantConfiguration(tombstone.target, next, tombstone.beforeSha256);
-    } else if (currentSha256 !== tombstone.afterSha256) {
-      throw new Error("assistant_removal_recovery_required");
+    // The assistant may have rewritten its file since the removal began, so
+    // what the file says now decides, not the digests the removal recorded.
+    let remains = await this.morrowEntryRemains(assistant, tombstone.target);
+    if (remains === true) {
+      try {
+        const current = await readConfigurationFile(tombstone.target);
+        const next = current === null ? null
+          : await this.configurationWithoutMorrow(assistant, current.toString("utf8"), tombstone.target);
+        if (next !== null) {
+          await this.writeAssistantConfiguration(tombstone.target, next, fileHash(current));
+          await this.confirmAssistantConfigurationRemoved(assistant, tombstone.target, fileHash(Buffer.from(next, "utf8")));
+        }
+      } catch {}
+      remains = await this.morrowEntryRemains(assistant, tombstone.target);
     }
-    await this.confirmAssistantConfigurationRemoved(assistant, tombstone.target, tombstone.afterSha256);
+    if (remains !== false) {
+      // The removal did not happen. The assistant stays listed and can be removed again.
+      await this.clearAssistantRemovalTombstone(tombstone);
+      return record;
+    }
 
     await this.writeRecord(recordAfter);
     const committed = await this.readInstallerRecord();
@@ -2432,7 +2483,8 @@ class InstallerController {
    * assistant file this installation configured, so each one points at this
    * copy of Morrow and its materials folder, including after Morrow moved.
    * Morrow replaces only an entry that carries its own marker: a server of
-   * that name someone else wrote is reported and left exactly as it is.
+   * that name someone else wrote is reported and left exactly as it is. A
+   * Claude Code or Gemini CLI setup whose project folder is gone is skipped.
    * Claude Desktop is configured by an approval inside that application, so
    * repair leaves it to the person and does not open another application.
    */
@@ -2447,6 +2499,8 @@ class InstallerController {
       if (!entry || assistant.id === "claude-desktop") continue;
       const located = configuredProject(assistant, this.home, entry.target);
       if (!located) continue;
+      // Setup names a project folder that is gone and offers Remove; the other assistants are still repaired.
+      if (located.project && !await projectFolderPresent(located.project)) continue;
       const materials = await this.effectiveWorkspace(record);
       if (!materials) throw errorDetails("workspace_required");
       await this.installClientConfiguration(assistant, entry.target, located.project, materials, {
@@ -2505,8 +2559,8 @@ class InstallerController {
   /**
    * Removes the Morrow data this installation owns. It runs only after an
    * explicit confirmation that names every path, it removes only the places
-   * inside Morrow's own user-data folder and the Blackboard credential folder,
-   * and it reports what is gone by reading each path again rather than from the
+   * inside Morrow's own user-data folder, the Blackboard credential folder, and
+   * the Blackboard configuration file, and it reports what is gone by reading each path again rather than from the
    * removal calls. It never removes an assistant's own configuration file.
    *
    * Removing the application itself is a step of this computer, not of Morrow.
@@ -3154,9 +3208,12 @@ class InstallerController {
         : null;
       const present = claude ? claude.installed === true : await this.assistantConfigurationPresent(assistant, entry, materials);
       const moved = !claude && present !== true && await this.assistantEntryMoved(assistant, entry);
+      const projectFolder = entry && assistant.needsProject ? configuredProject(assistant, this.home, entry.target)?.project ?? null : null;
       return {
         moved,
         ...assistant,
+        projectFolder,
+        projectFolderMissing: projectFolder !== null && !await projectFolderPresent(projectFolder),
         detected: await this.detectedAssistant(assistant),
         configured: present,
         // Claude Desktop counts as configured only after its session connected.

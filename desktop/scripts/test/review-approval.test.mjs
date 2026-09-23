@@ -45,6 +45,17 @@ test("signs only for its own content script in the top frame of a review at the 
   assert.deepEqual(missing, { ok: false, code: "review_approval_key_missing" });
 });
 
+test("signs a click on Morrow's Edit access review the same way, and only for that page", async () => {
+  const editAccessPath = `/edit-access/${randomBytes(32).toString("base64url")}`;
+  const editSender = { ...sender, url: `${presence.origin}${editAccessPath}` };
+  assert.equal(reviewPagePath(`${presence.origin}${editAccessPath}`, presence), editAccessPath);
+  const signed = await signReviewApproval({ approvePath: `${editAccessPath}/approve`, nonce }, editSender, presence, EXTENSION_ID);
+  assert.deepEqual(signed, { ok: true, presence: serverProof(presence.key, `${editAccessPath}/approve`, nonce) });
+  const otherPage = await signReviewApproval({ approvePath: `${pagePath}/approve`, nonce }, editSender, presence, EXTENSION_ID);
+  assert.deepEqual(otherPage, { ok: false, code: "review_approval_request_invalid" });
+  assert.equal(reviewPagePath(`${presence.origin}/edit-access`, presence), null);
+});
+
 test("accepts only a loopback review origin and a 32-byte key", () => {
   assert.deepEqual(parseReviewApprovalPresence(presence), presence);
   for (const bad of [
