@@ -2798,8 +2798,9 @@ class InstallerController {
   async firstSafeRead() {
     const materials = await this.effectiveWorkspace();
     const runtime = await this.runtimeSnapshot(materials);
-    if (runtime.firstPreview.available !== "yes" || !this.runtimeMonitor) return runtime;
-    await this.runtimeMonitor.firstSafeRead();
+    if (runtime.firstPreview.available !== "yes" || !this.runtimeMonitor) throw errorDetails("first_read_failed");
+    const read = await this.runtimeMonitor.firstSafeRead();
+    if (read?.completed !== true) throw errorDetails("first_read_failed");
     return this.runtimeMonitor.snapshot();
   }
 

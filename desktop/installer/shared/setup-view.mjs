@@ -140,7 +140,7 @@ export function progress(current) {
     : firstPreviewReady
       ? `${course}; first read ready`
       : courseReady
-        ? `${course}; first read not started`
+        ? "Open your course in Chrome"
         : "Open Canvas or Moodle in Chrome";
   return [
     { label: "Assistant", detail: repairRequired ? "Waiting for repair" : restart && active === 0 ? `Quit and reopen ${restart.title}` : assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? "Finish approval in Claude Desktop" : "Choose an installed assistant", status: repairRequired ? "pending" : restart && active === 0 ? "current" : assistant ? "done" : "current" },
@@ -415,10 +415,13 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
       body: '<button class="primary-button" type="button" data-action="run-first-read">Check connection</button>',
     };
   }
+  // A connected course Morrow cannot read now: none is readable yet, or its
+  // read just failed. Either way the course is not usable, so it is never
+  // called connected here.
   return {
-    title: "Your selected course is connected.",
-    copy: `${course} is connected. Morrow will show when its first read is available.`,
-    body: '<div class="info-box"><strong>First read is still preparing</strong><p>Check status again before you ask Morrow to inspect the course.</p></div>',
+    title: "Morrow cannot read your course yet.",
+    copy: "Open your Canvas or Moodle course in Chrome and make sure you are signed in, then select Check status.",
+    body: '<div class="info-box"><strong>Morrow reads your course once to confirm the connection</strong><p>This read does not change the course.</p></div>',
   };
 }
 

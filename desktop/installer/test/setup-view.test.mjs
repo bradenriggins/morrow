@@ -430,7 +430,9 @@ const TWO_ASSISTANTS = Object.freeze({
 test("two configured assistants are both shown as set up, and the panel keeps the course step", () => {
   const current = state(TWO_ASSISTANTS);
   const view = actionView(current, { chosenAssistantId: "claude-desktop" });
-  assert.equal(view.title, "Your selected course is connected.");
+  assert.equal(view.title, "Morrow cannot read your course yet.");
+  assert.equal(view.copy, "Open your Canvas or Moodle course in Chrome and make sure you are signed in, then select Check status.");
+  assert.doesNotMatch(`${view.title} ${view.copy} ${view.body}`, /is connected|not started/, "a course Morrow cannot read is never called connected");
   assert.equal(step(current, "Assistant").status, "done");
   assert.equal(step(current, "Assistant").detail, "ChatGPT, Claude Desktop");
   // Home carries neither assistant row now: that moved to Settings (D8).

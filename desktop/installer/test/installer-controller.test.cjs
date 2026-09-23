@@ -11,6 +11,7 @@ const test = require("node:test");
 const { pathToFileURL } = require("node:url");
 const { bridgeDeliveryMode, createInstallerController, readCommandOutput, readMacApplicationBundleIdentifier, runBoundedCommand } = require("../shared/installer-controller.cjs");
 const { freshRecord } = require("../shared/state-policy.cjs");
+const { errorDetails } = require("../shared/contract.cjs");
 
 const installerRoot = path.resolve(__dirname, "..");
 // ensureRuntime() hardens the state directory through the real gateway-core
@@ -946,6 +947,49 @@ test("state() reports the Chrome load state the Bridge itself answered", async (
   assert.equal(unconfirmed.bridge.loadedInChrome, "unknown");
 
   await installer.closeRuntimeMonitor();
+});
+
+test("Check connection reports a course read that did not complete instead of answering as if it had", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const snapshot = (firstPreview) => ({
+    schema: "morrow.installer-runtime.v1",
+    health: { attempted: true, gatewayReady: true, bridgeConnected: true, canRestart: "yes" },
+    bindings: { runtimeVerifiedCourseCount: 1, selectedCourseName: "Biology 101", firstPreviewCourseName: "Biology 101" },
+    firstPreview
+  });
+  let observed = snapshot({ available: "yes", completed: false });
+  let reads = 0;
+  let answer = { available: "no", completed: false };
+  installer.effectiveWorkspace = async () => path.join(root, "Materials");
+  installer.runtimeSnapshot = async () => observed;
+  installer.runtimeMonitor = {
+    firstSafeRead: async () => {
+      reads += 1;
+      observed = snapshot(answer);
+      return { schema: "morrow.installer-first-read.v1", completed: answer.completed };
+    },
+    snapshot: () => observed
+  };
+
+  // Canvas answered, but not for this course: the read did not complete.
+  await assert.rejects(installer.firstSafeRead(), (error) => error.code === "first_read_failed");
+  // The read failed on the way: the session in Chrome expired.
+  observed = snapshot({ available: "yes", completed: true });
+  answer = { available: "unknown", completed: false };
+  await assert.rejects(installer.firstSafeRead(), (error) => error.code === "first_read_failed");
+  // No course can be read right now, so Morrow does not start a read.
+  observed = snapshot({ available: "no", completed: false });
+  await assert.rejects(installer.firstSafeRead(), (error) => error.code === "first_read_failed");
+  assert.equal(reads, 2);
+
+  observed = snapshot({ available: "yes", completed: false });
+  answer = { available: "yes", completed: true };
+  assert.equal((await installer.firstSafeRead()).firstPreview.completed, true);
+  assert.equal(reads, 3);
+  const failure = errorDetails("first_read_failed");
+  assert.equal(failure.message, "Morrow could not read your course.");
+  assert.equal(failure.recovery, "Open the course in Chrome and make sure you are signed in, then select Check connection again.");
 });
 
 // A monitor whose start never finishes on its own. The test releases it, so a

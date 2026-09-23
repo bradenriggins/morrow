@@ -126,6 +126,10 @@ const PUBLIC_ERRORS = Object.freeze({
     message: "Morrow could not show the Morrow Bridge folder.",
     recovery: "Close Morrow and open it again, then select Show Bridge folder. If Morrow still cannot show it, reinstall Morrow."
   },
+  first_read_failed: {
+    message: "Morrow could not read your course.",
+    recovery: "Open the course in Chrome and make sure you are signed in, then select Check connection again."
+  },
   bridge_check_failed: {
     message: "Morrow could not confirm Morrow Bridge.",
     recovery: "Select Repair Morrow, then load or reload the Bridge folder in Chrome and select Check Bridge."
