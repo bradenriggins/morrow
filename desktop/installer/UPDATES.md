@@ -255,7 +255,8 @@ provide all of these inputs:
   artifacts, with current SHA-512 metadata.
 - A current supported `electron-updater` version that includes the Windows
   signature verification fix. Do not use a version affected by
-  GHSA-9jxc-qjr9-vjx.
+  [GHSA-9jxc-qjr9-vjxq](https://github.com/advisories/GHSA-9jxc-qjr9-vjxq),
+  which is `electron-updater` 6.3.0-alpha.5 and earlier.
 - A fresh installed-app proof on each target platform: no update, newer update,
   offline check, cancelled download, corrupt checksum, invalid publisher,
   downgrade, wrong architecture, a volume without room for the artifact, active

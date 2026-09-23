@@ -237,6 +237,20 @@ test("the local receipts the desktop documents cite are present, or the run has 
   if (absent.length > 0) t.diagnostic(`local receipts not present in this checkout:\n  ${absent.join("\n  ")}`);
 });
 
+test("every GitHub security advisory a desktop document names is a whole advisory ID linked to its own page", () => {
+  // GitHub advisory IDs are three groups of four characters from this alphabet.
+  const advisory = /^GHSA(?:-[23456789cfghjmpqrvwx]{4}){3}$/;
+  const refused = [];
+  for (const doc of DOCS) {
+    const text = read(doc);
+    for (const [name] of text.matchAll(/\bGHSA-[A-Za-z0-9-]*[A-Za-z0-9]/g)) {
+      if (!advisory.test(name)) refused.push(`${doc}: ${name} is not a whole advisory ID`);
+      else if (!text.includes(`[${name}](https://github.com/advisories/${name})`)) refused.push(`${doc}: ${name} does not link to its advisory`);
+    }
+  }
+  assert.deepEqual(refused, [], "a release owner must be able to open the advisory a document names");
+});
+
 test("the README names the desktop artifacts the build configuration actually produces", (t) => {
   const config = loadBuildConfig(t);
   const version = JSON.parse(read("installer/package.json")).version;
