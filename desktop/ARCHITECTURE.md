@@ -187,7 +187,7 @@ A Blackboard read replaces steps 3 to 5: the Blackboard child checks the integra
 6. The effect broker reserves one durable effect receipt before provider dispatch.
 7. The dispatching child consumes that receipt once and sends one provider request.
 8. That child performs the frozen fresh readback.
-9. Morrow records `verified`, `unconfirmed`, `failed`, or `applied_or_unknown` from evidence. It never maps an HTTP success alone to verified success.
+9. Morrow records `verified`, `unconfirmed`, `failed`, or `applied_or_unknown` from evidence. It never maps an HTTP success alone to verified success. A fresh readback has three outcomes, kept apart: it shows the approved result (`verified`), it proves the provider holds another result (the change is `failed` with verification `mismatch`, and it releases its target), or it compares nothing (the record stays unresolved with verification `unconfirmed`).
 
 An uncertain send is not replayed. Reconciliation runs the readback only. An unresolved record holds its provider object until it is settled; the refusal names the operation that holds it. When Morrow retained no read comparator it cannot settle the record itself, so `morrow_operation_close_unresolved` lets a person close it after reading the item with Morrow: it requires that read's exact result digest and an explicit person confirmation, records `closed_by_person`, and sends nothing. Undo is a new planned and approved corrective operation.
 

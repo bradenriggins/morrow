@@ -17,6 +17,7 @@ const CATALOG_PATH = resolve(ROOT, "artifacts/canvas-api/canvas-api-catalog.json
 const SOURCE_BINDING_ID = "canvas:recovery-account";
 const EXTENSION_ID = "a".repeat(32);
 const TOKEN = "gateway-connector-secret-".repeat(3);
+const CONNECTOR_RECOVERY_UNRESOLVED = "The Canvas read did not prove this change. The saved request stays open and Morrow will not send it again. Open the item in Canvas and check it yourself, then ask Morrow for a new review if it still needs the change.";
 
 async function availablePort(): Promise<number> {
   const server = createServer();
@@ -234,33 +235,37 @@ describe("Canvas unresolved-operation recovery", () => {
       expect(runtime.effects.get(second)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
       expect(writeCommands).toBe(1);
 
-      // 3. Canvas does not hold the requested result: the record stays unresolved.
+      // 3. Canvas holds a different result than the approved change: the read proves the change
+      //    did not save as approved, so the record says it failed and is not left as unchecked.
       const mismatched = await runtime.reconcileOperation(first);
+      expect(mismatched.isError).not.toBe(true);
       expect(structured(mismatched)).toMatchObject({
-        phase: "readback_unconfirmed",
-        effectState: "applied_or_unknown",
+        status: "failed",
+        phase: "readback_mismatch",
+        effectState: "failed",
+        verification: { status: "mismatch" },
+        attention: ["readback_did_not_match_frozen_comparator"],
         data: { verification: { status: "mismatch", evidence: "requested_field_mismatch:assignment_name" } },
       });
-      expect(runtime.effects.get(first).state).toBe("applied_or_unknown");
+      expect(structured(mismatched).limitations).toContain(
+        "Morrow read Canvas again after this change, and Canvas does not hold the approved result. The request is closed as failed and Morrow will not send it again. Open the item in Canvas, then ask Morrow for a new review if it still needs the change.",
+      );
+      expect(structured(mismatched).limitations).not.toContain(CONNECTOR_RECOVERY_UNRESOLVED);
+      expect(runtime.effects.get(first)).toMatchObject({ state: "failed", verificationStatus: "mismatch" });
       expect(writeCommands).toBe(1);
 
-      // 4. Canvas holds the requested result: the record settles to verified.
+      // 4. A settled change is not checked again, and it still says what the read proved.
       assignments["88"] = { ...assignments["88"]!, name: "Cell transport reflection v2" };
       const settled = await runtime.reconcileOperation(first);
       expect(structured(settled)).toMatchObject({
-        phase: "verified_readback",
-        effectState: "verified",
-        verification: { status: "verified" },
-        data: {
-          schema: "morrow.canvas-operation-recovery.v1",
-          resentWrite: false,
-          verification: { status: "verified", readTool: "canvas_get_single_assignment" },
-        },
+        phase: "readback_mismatch",
+        effectState: "failed",
+        verification: { status: "mismatch" },
       });
-      expect(runtime.effects.get(first)).toMatchObject({ state: "verified", verificationStatus: "verified" });
+      expect(runtime.effects.get(first)).toMatchObject({ state: "failed", verificationStatus: "mismatch" });
       expect(writeCommands).toBe(1);
 
-      // 5. Only a verified settlement releases the target lock.
+      // 5. A settled readback, verified or proved different, releases the target lock.
       const released = await runtime.dispatchOperation(second);
       expect(released.isError).not.toBe(true);
       expect(structured(released)).toMatchObject({ effectState: "verified" });
@@ -458,7 +463,8 @@ describe("Canvas unresolved-operation recovery", () => {
       // The check only reads. It never sends the deletion again.
       expect(writeCommands).toBe(1);
 
-      // A record the collection still holds is never called deleted.
+      // A record the collection still holds is never called deleted: the read proves the deletion
+      // did not happen, so the change failed.
       listedQuizzes = [quiz];
       const other = await runtime.call("canvas_delete_quiz", {
         course_id: "42",
@@ -469,8 +475,10 @@ describe("Canvas unresolved-operation recovery", () => {
       runtime.approveOperation(openId);
       await runtime.dispatchOperation(openId);
       listedQuizzes = [quiz];
-      await runtime.reconcileOperation(openId);
-      expect(runtime.effects.get(openId).state).toBe("applied_or_unknown");
+      expect(structured(await runtime.reconcileOperation(openId) as JsonObject)).toMatchObject({
+        phase: "readback_mismatch", effectState: "failed", verification: { status: "mismatch" },
+      });
+      expect(runtime.effects.get(openId)).toMatchObject({ state: "failed", verificationStatus: "mismatch" });
     } finally {
       await bridge?.close();
       await morrow.close();
@@ -553,8 +561,10 @@ describe("Canvas unresolved-operation recovery", () => {
       runtime.approveOperation(openId);
       await runtime.dispatchOperation(openId);
       unread = [{ id: "5", subject: "unread" }];
-      await runtime.reconcileOperation(openId);
-      expect(runtime.effects.get(openId).state).toBe("applied_or_unknown");
+      expect(structured(await runtime.reconcileOperation(openId) as JsonObject)).toMatchObject({
+        phase: "readback_mismatch", effectState: "failed", verification: { status: "mismatch" },
+      });
+      expect(runtime.effects.get(openId)).toMatchObject({ state: "failed", verificationStatus: "mismatch" });
     } finally {
       await bridge?.close();
       await morrow.close();

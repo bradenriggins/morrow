@@ -138,7 +138,8 @@ function createServer() {
     async ({ value, course_id, page_id, _morrow }, context) => {
       note(sourceToolName);
       await waitForDelay(context.mcpReq.signal);
-      if (sourceToolIsWrite && course_id && value !== undefined) {
+      // A source can answer a write as done and keep something else. This value stands for that.
+      if (sourceToolIsWrite && course_id && value !== undefined && value !== "kept something else") {
         pageValues.set(course_id, { value, ...(page_id !== undefined ? { page_id } : {}) });
       }
       return {

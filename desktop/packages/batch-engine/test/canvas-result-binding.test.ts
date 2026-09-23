@@ -160,7 +160,7 @@ function interruptAfterVerifiedEffect(input: {
   broker.recordReadback(
     effect.operationId,
     readbackDigest,
-    true,
+    "verified",
     envelope ? { ...envelope } : undefined,
   );
   broker.close();

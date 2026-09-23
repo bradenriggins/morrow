@@ -90,14 +90,15 @@ import {
   GatewayOperationJournal,
   ProviderEffectBroker,
   ProviderEffectTargetConflictError,
-  CORRECTABLE_EFFECT_OPERATION_STATES,
   EFFECT_TARGET_IDENTITY_VERSION,
+  isCorrectableEffectOperation,
   ProviderEffectTargetIdentityVersionError,
   ProviderEffectTargetScopeUnknownError,
   classifySourceResult,
   effectOperationProjection,
   operationRecordProjection,
   type EffectOperationRecord,
+  type EffectReadbackOutcome,
   type EffectBatchRevocation,
   type EffectAuthoritySnapshot,
   type EffectAuthorization,
@@ -1596,6 +1597,12 @@ const CONNECTOR_RECOVERY_DUPLICATE_LIMITATION = "Canvas holds more than one reco
 const CONNECTOR_RECOVERY_READ_ONLY_NOTE = "This check only reads Canvas. It never sends the change again.";
 const CONNECTOR_READBACK_NOT_SENT_LIMITATION = "Morrow has not sent this change to Canvas, so there is no saved result to check.";
 const PERSON_CLOSED_LIMITATION = "Morrow did not check this change itself. It is closed because a person read the item and confirmed the saved state.";
+const READBACK_MISMATCH_LIMITATION = "Morrow read Canvas again after this change, and Canvas does not hold the approved result. The request is closed as failed and Morrow will not send it again. Open the item in Canvas, then ask Morrow for a new review if it still needs the change.";
+
+/** A read verdict as the effect journal records it. Anything but a proof either way is unconfirmed. */
+function readbackOutcome(status: unknown): EffectReadbackOutcome {
+  return status === "verified" || status === "mismatch" ? status : "unconfirmed";
+}
 const PERSON_CLOSE_READ_REQUIRED_LIMITATION = "Read the item with Morrow first, then close this request with the digest that read returns. Morrow closes nothing on a description of the result.";
 
 function requestedNewQuizFromArguments(args: JsonObject): JsonObject {
@@ -3326,19 +3333,22 @@ export class GatewayRuntime {
     additionalLimitations: readonly string[] = [],
   ): JsonObject {
     this.noteEffectState(record);
-    const verificationStatus = record.verificationStatus === "verified"
-      ? "verified"
+    const verificationStatus = record.verificationStatus === "verified" || record.verificationStatus === "mismatch"
+      ? record.verificationStatus
       : record.readback ? "unconfirmed" : "not_requested";
-    const stateLimitations = record.state === "awaiting_inner_approval"
-      ? ["The source still requires its own human approval. Morrow did not infer provider completion."]
-      : record.state === "awaiting_verification"
-        ? ["A fresh, frozen readback comparator is required before Morrow can report verified."]
-        : record.state === "applied_or_unknown"
-          ? ["Morrow will not replay this operation because the provider effect may have occurred."]
-          : record.state === "closed_by_person"
-            ? [PERSON_CLOSED_LIMITATION]
-            : [];
     const mapping = this.toolByPublicName.get(record.publicToolName);
+    const provider = mapping?.capability?.provider;
+    const stateLimitations = record.state === "failed" && record.verificationStatus === "mismatch"
+      ? [READBACK_MISMATCH_LIMITATION.replaceAll("Canvas", provider ? `${provider.slice(0, 1).toUpperCase()}${provider.slice(1)}` : "Canvas")]
+      : record.state === "awaiting_inner_approval"
+        ? ["The source still requires its own human approval. Morrow did not infer provider completion."]
+        : record.state === "awaiting_verification"
+          ? ["A fresh, frozen readback comparator is required before Morrow can report verified."]
+          : record.state === "applied_or_unknown"
+            ? ["Morrow will not replay this operation because the provider effect may have occurred."]
+            : record.state === "closed_by_person"
+              ? [PERSON_CLOSED_LIMITATION]
+              : [];
     const reviewAttention = record.state === "awaiting_approval"
       ? [
           `Review and approve: ${this.plainOperationLabel(record, mapping)} in ${this.operationCourseName(record)}`,
@@ -7962,8 +7972,9 @@ export class GatewayRuntime {
     }) as JsonObject;
   }
 
-  private operationVerificationStatus(record: EffectOperationRecord): "not_requested" | "unconfirmed" | "verified" {
+  private operationVerificationStatus(record: EffectOperationRecord): "not_requested" | "unconfirmed" | "verified" | "mismatch" {
     return record.verificationStatus === "verified" || record.verificationStatus === "unconfirmed"
+      || record.verificationStatus === "mismatch"
       ? record.verificationStatus
       : "not_requested";
   }
@@ -9488,14 +9499,14 @@ export class GatewayRuntime {
         const readbackSettled = this.effects.recordReadback(
           settled.operationId,
           readbackDigest,
-          verified,
+          readbackOutcome(verification.status),
           resultBindingEnvelope ? { ...resultBindingEnvelope } : undefined,
         );
-        return this.effectResult(
+        return this.readbackResult(
           readbackSettled,
-          verified ? "verified_readback" : "readback_unconfirmed",
           result,
-          !verified && verification.reason === "no_safe_readback_route" ? [CANVAS_UNCHECKABLE_CHANGE_LIMITATION] : [],
+          result,
+          verification.reason === "no_safe_readback_route" ? [CANVAS_UNCHECKABLE_CHANGE_LIMITATION] : [],
         );
       }
       return this.verifyOperation(settled.operationId);
@@ -9566,6 +9577,10 @@ export class GatewayRuntime {
 
   async verifyOperation(operationId: string): Promise<JsonObject> {
     const operation = this.effects.get(operationId);
+    // A read already proved this change did not save as approved. It is settled and not read again.
+    if (operation.state === "failed" && operation.verificationStatus === "mismatch") {
+      return this.effectResult(operation, "readback_mismatch");
+    }
     if (!operation.readback) {
       return this.effectResult(operation, "verification_unsupported");
     }
@@ -9609,12 +9624,15 @@ export class GatewayRuntime {
     const fresh = this.resolveResultArtifact(await this.callSourceOwned(mapping.publicName, readbackArguments));
     if (fresh.isError === true) return this.effectResult(operation, "verification_failed", fresh);
     const readbackDigest = sha256Json(resultComparable(fresh));
+    // A Blackboard comparator answers only whether it found the reviewed result. It says false
+    // for a copy still running and for a create it cannot tell from an older item, so a false
+    // answer proves nothing either way.
     const settled = this.effects.recordReadback(
       operation.operationId,
       readbackDigest,
-      readbackDigest === operation.readback.expectedDigest,
+      readbackDigest === operation.readback.expectedDigest ? "verified" : "unconfirmed",
     );
-    return this.effectResult(settled, "verified_readback", fresh);
+    return this.readbackResult(settled, fresh, fresh, []);
   }
 
   async settleInnerOperation(
@@ -9629,6 +9647,9 @@ export class GatewayRuntime {
 
   async reconcileOperation(operationId: string): Promise<JsonObject> {
     const operation = this.effects.get(operationId);
+    if (operation.state === "failed" && operation.verificationStatus === "mismatch") {
+      return this.effectResult(operation, "readback_mismatch");
+    }
     const effectMapping = this.toolByPublicName.get(operation.publicToolName);
     if (effectMapping && isCanvasConnector(effectMapping) && !hasExactConnectorReadbackPolicy(operation, effectMapping)) {
       return this.effectResult(operation, "reconciliation_requires_provider_evidence");
@@ -9949,10 +9970,14 @@ export class GatewayRuntime {
     if (fresh.isError === true) return this.effectResult(operation, "verification_failed", fresh);
     const observed = isJsonObject(fresh.structuredContent) ? fresh.structuredContent : null;
     const requested = requestedReadbackFields(request, identityKeys);
-    const verified = observed !== null && requested.length > 0
-      && requested.every(([key, value]) => Object.hasOwn(observed, key) && sha256Json(observed[key]) === sha256Json(value));
-    const settled = this.effects.recordReadback(operation.operationId, sha256Json(resultComparable(fresh)), verified);
-    return this.effectResult(settled, "verified_readback", fresh);
+    // Only a read that holds every requested field can prove anything; one that lacks a field
+    // proves neither the change nor its absence.
+    const complete = observed !== null && requested.length > 0 && requested.every(([key]) => Object.hasOwn(observed, key));
+    const outcome: EffectReadbackOutcome = !complete
+      ? "unconfirmed"
+      : requested.every(([key, value]) => sha256Json(observed![key]) === sha256Json(value)) ? "verified" : "mismatch";
+    const settled = this.effects.recordReadback(operation.operationId, sha256Json(resultComparable(fresh)), outcome);
+    return this.readbackResult(settled, fresh, fresh, []);
   }
 
   private async connectorReadbackReconciliationResult(operation: EffectOperationRecord): Promise<JsonObject> {
@@ -10118,14 +10143,9 @@ export class GatewayRuntime {
     const settled = this.effects.recordReadback(
       operation.operationId,
       sha256Json(verdict.verification),
-      verdict.verification.status === "verified",
+      readbackOutcome(verdict.verification.status),
     );
-    return verdict.verification.status === "verified"
-      ? this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE])
-      : this.effectResult(settled, "readback_unconfirmed", { structuredContent: evidence }, [
-        CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION,
-        CONNECTOR_RECOVERY_READ_ONLY_NOTE,
-      ]);
+    return this.recoveryReadbackResult(settled, evidence);
   }
 
   /**
@@ -10166,14 +10186,35 @@ export class GatewayRuntime {
     const settled = this.effects.recordReadback(
       operation.operationId,
       sha256Json(verification),
-      verification.status === "verified",
+      readbackOutcome(verification.status),
     );
-    return verification.status === "verified"
-      ? this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE])
-      : this.effectResult(settled, "readback_unconfirmed", { structuredContent: evidence }, [
-        CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION,
-        CONNECTOR_RECOVERY_READ_ONLY_NOTE,
-      ]);
+    return this.recoveryReadbackResult(settled, evidence);
+  }
+
+  /**
+   * The answer to a recorded readback, named by what the read showed: the approved result, a
+   * different saved result, or nothing Morrow could compare. The three are never reported as one.
+   */
+  private readbackResult(
+    record: EffectOperationRecord,
+    verifiedResult: JsonObject | undefined,
+    unsettledResult: JsonObject | undefined,
+    unconfirmedLimitations: readonly string[],
+    notes: readonly string[] = [],
+  ): JsonObject {
+    if (record.verificationStatus === "verified") return this.effectResult(record, "verified_readback", verifiedResult, notes);
+    if (record.verificationStatus === "mismatch") return this.effectResult(record, "readback_mismatch", unsettledResult, notes);
+    return this.effectResult(record, "readback_unconfirmed", unsettledResult, [...unconfirmedLimitations, ...notes]);
+  }
+
+  private recoveryReadbackResult(record: EffectOperationRecord, evidence: JsonObject): JsonObject {
+    return this.readbackResult(
+      record,
+      this.canvasRecoveryOutcome(evidence),
+      { structuredContent: evidence },
+      [CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION],
+      [CONNECTOR_RECOVERY_READ_ONLY_NOTE],
+    );
   }
 
   private canvasRecoveryOutcome(evidence: JsonObject): JsonObject {
@@ -10323,10 +10364,8 @@ export class GatewayRuntime {
           }
         }
         evidence.verification = verification;
-        const settled = this.effects.recordReadback(operation.operationId, sha256Json(verification), verification.status === "verified");
-        return verification.status === "verified"
-          ? this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE])
-          : this.effectResult(settled, "readback_unconfirmed", { structuredContent: evidence }, [CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION, CONNECTOR_RECOVERY_READ_ONLY_NOTE]);
+        const settled = this.effects.recordReadback(operation.operationId, sha256Json(verification), readbackOutcome(verification.status));
+        return this.recoveryReadbackResult(settled, evidence);
       }
       scan = collection
         ? this.canvasDuplicateScan(descriptor, collection, window)
@@ -10389,14 +10428,9 @@ export class GatewayRuntime {
       const settled = this.effects.recordReadback(
         operation.operationId,
         sha256Json(outcome),
-        outcome.status === "verified",
+        readbackOutcome(outcome.status),
       );
-      return outcome.status === "verified"
-        ? this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE])
-        : this.effectResult(settled, "readback_unconfirmed", { structuredContent: evidence }, [
-          CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION,
-          CONNECTOR_RECOVERY_READ_ONLY_NOTE,
-        ]);
+      return this.recoveryReadbackResult(settled, evidence);
     }
     if (scan?.outcome === "single" && descriptor.collection) {
       const verification = {
@@ -10407,7 +10441,7 @@ export class GatewayRuntime {
         evidence: "fresh_collection_holds_one_record_created_in_operation_window",
       };
       evidence.verification = structuredClone(verification) as unknown as JsonObject;
-      const settled = this.effects.recordReadback(operation.operationId, sha256Json(verification), true);
+      const settled = this.effects.recordReadback(operation.operationId, sha256Json(verification), "verified");
       return this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE]);
     }
     return this.effectResult(operation, "readback_unconfirmed", { structuredContent: evidence }, [
@@ -10422,7 +10456,7 @@ export class GatewayRuntime {
     correctionArguments: Readonly<Record<string, unknown>>,
   ): JsonObject {
     const original = this.effects.get(operationId);
-    if (!CORRECTABLE_EFFECT_OPERATION_STATES.has(original.state)) {
+    if (!isCorrectableEffectOperation(original)) {
       throw new Error("Only an operation Morrow may have sent can take a correction");
     }
     const mapping = this.toolByPublicName.get(correctionTool);

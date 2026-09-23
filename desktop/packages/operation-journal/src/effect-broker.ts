@@ -24,6 +24,15 @@ export const EFFECT_OPERATION_STATES = Object.freeze([
 
 export type EffectOperationState = typeof EFFECT_OPERATION_STATES[number];
 
+/**
+ * What a fresh read of the provider showed after a change: the approved result, a proven other
+ * result, or nothing Morrow could compare.
+ */
+export type EffectReadbackOutcome = "verified" | "mismatch" | "unconfirmed";
+const READBACK_OUTCOMES: readonly EffectReadbackOutcome[] = ["verified", "mismatch", "unconfirmed"];
+
+export type EffectVerificationStatus = "not_requested" | EffectReadbackOutcome;
+
 export const EFFECT_TARGET_IDENTITY_VERSION = "morrow.effect-target.v5";
 
 export interface FrozenReadbackPlan {
@@ -102,7 +111,7 @@ export interface EffectOperationRecord {
   readonly hasResultBindingArtifact: boolean;
   readonly personObservedStateDigest: string | null;
   readonly personCloseCausalSequence: number | null;
-  readonly verificationStatus: "not_requested" | "unconfirmed" | "verified" | null;
+  readonly verificationStatus: EffectVerificationStatus | null;
   readonly attention: readonly string[];
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -160,7 +169,7 @@ interface EffectRow {
   result_binding_artifact_json: string | null;
   person_observed_state_digest: string | null;
   person_close_causal_sequence: number | null;
-  verification_status: "not_requested" | "unconfirmed" | "verified" | null;
+  verification_status: EffectVerificationStatus | null;
   attention_json: string;
   created_at: string;
   updated_at: string;
@@ -199,6 +208,17 @@ const NOTHING_SENT_STATES: readonly EffectOperationState[] = ["awaiting_approval
 export const CORRECTABLE_EFFECT_OPERATION_STATES: ReadonlySet<EffectOperationState> = new Set(
   EFFECT_OPERATION_STATES.filter((state) => !NOTHING_SENT_STATES.includes(state)),
 );
+
+/**
+ * Whether Morrow may have sent this change, so a correction can be planned for it. A change a
+ * fresh read proved the provider saved differently failed after it was sent.
+ */
+export function isCorrectableEffectOperation(
+  record: { readonly state: EffectOperationState; readonly verificationStatus: EffectVerificationStatus | null },
+): boolean {
+  return CORRECTABLE_EFFECT_OPERATION_STATES.has(record.state)
+    || (record.state === "failed" && record.verificationStatus === "mismatch");
+}
 
 function encodeOperationListCursor(row: Pick<EffectRow, "created_at" | "operation_id">): string {
   return Buffer.from(JSON.stringify({ createdAt: row.created_at, operationId: row.operation_id }), "utf8").toString("base64url");
@@ -534,7 +554,7 @@ function effectOperationsTableDdl(name: string, options: EffectOperationsTableOp
         result_binding_artifact_json TEXT,
         person_observed_state_digest TEXT,
         person_close_causal_sequence INTEGER CHECK(person_close_causal_sequence >= 1),
-        verification_status TEXT CHECK(verification_status IN ('not_requested','unconfirmed','verified')),
+        verification_status TEXT CHECK(verification_status IN ('not_requested','unconfirmed','verified','mismatch')),
         attention_json TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -647,19 +667,21 @@ export class ProviderEffectBroker {
 
   /**
    * SQLite keeps a CHECK constraint inside the table definition, so a database
-   * written before closed_by_person existed would refuse the new state. The
-   * table is rebuilt once from the single definition above. Every row is copied
-   * column for column, so an existing record keeps its state, its receipts and
-   * its attention; the only change is that one more state is now allowed.
+   * written before closed_by_person, or before the mismatch readback outcome,
+   * existed would refuse the new value. The table is rebuilt once from the
+   * single definition above. Every row is copied column for column, so an
+   * existing record keeps its state, its receipts and its attention; the only
+   * change is that the new values are now allowed.
    */
   private ensureOperationStateConstraint(): void {
     const table = this.database.prepare(`
       SELECT sql FROM sqlite_master WHERE type='table' AND name='provider_effect_operations'
     `).get() as { sql: string } | undefined;
-    if (!table || table.sql.includes("'closed_by_person'")) return;
+    if (!table || (table.sql.includes("'closed_by_person'") && table.sql.includes("'mismatch'"))) return;
     const columns = EFFECT_OPERATION_COLUMNS.join(", ");
+    const legacyNullableIdentity = !/\btarget_identity_digest TEXT NOT NULL\b/u.test(table.sql);
     this.transaction(() => {
-      this.database.exec(effectOperationsTableDdl("provider_effect_operations_next", { legacyNullableIdentity: true }));
+      this.database.exec(effectOperationsTableDdl("provider_effect_operations_next", { legacyNullableIdentity }));
       this.database.exec(`
         INSERT INTO provider_effect_operations_next(${columns})
         SELECT ${columns} FROM provider_effect_operations;
@@ -1383,13 +1405,21 @@ export class ProviderEffectBroker {
     });
   }
 
+  /**
+   * Records what a fresh read of the provider showed. A verified read settles the change. A read
+   * that proves the provider saved something other than the approved change settles it as
+   * failed, so it releases its target and is never reported as merely unchecked. A read Morrow
+   * could not compare leaves the change unresolved and holding its target.
+   */
   recordReadback(
     operationIdValue: string,
     readbackDigestValue: string,
-    verified: boolean,
+    outcome: EffectReadbackOutcome,
     resultBindingArtifactEnvelope?: JsonObject,
   ): EffectOperationRecord {
     const operationId = identifier(operationIdValue, "operation id");
+    if (!READBACK_OUTCOMES.includes(outcome)) throw new TypeError("readback outcome is invalid");
+    const verified = outcome === "verified";
     if (resultBindingArtifactEnvelope !== undefined && !verified) {
       throw new Error("a result binding artifact requires verified readback");
     }
@@ -1404,7 +1434,7 @@ export class ProviderEffectBroker {
       if (!UNRESOLVED_STATES.includes(current.state)) {
         throw new Error(`operation cannot verify from ${current.state}`);
       }
-      const state: EffectOperationState = verified ? "verified" : current.state;
+      const state: EffectOperationState = verified ? "verified" : outcome === "mismatch" ? "failed" : current.state;
       this.database.prepare(`
         UPDATE provider_effect_operations
         SET state=?, readback_digest=?, result_binding_artifact_json=?, verification_status=?, attention_json=?,
@@ -1413,10 +1443,10 @@ export class ProviderEffectBroker {
         state,
         digest(readbackDigestValue, "readback digest"),
         artifactJson,
-        verified ? "verified" : "unconfirmed",
-        JSON.stringify(verified ? [] : ["readback_did_not_match_frozen_comparator"]),
+        outcome,
+        JSON.stringify(verified ? [] : outcome === "mismatch" ? ["readback_did_not_match_frozen_comparator"] : ["readback_unavailable"]),
         now,
-        verified ? now : null,
+        outcome === "unconfirmed" ? null : now,
         operationId,
       );
       return this.get(operationId);

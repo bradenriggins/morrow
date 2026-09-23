@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   EFFECT_TARGET_IDENTITY_VERSION,
+  isCorrectableEffectOperation,
   ProviderEffectBroker,
   ProviderEffectParentAuthorityError,
   ProviderEffectTargetConflictError,
@@ -245,7 +246,7 @@ describe("ProviderEffectBroker", () => {
     broker.approve(original.operationId);
     broker.reserveDispatch(original.operationId);
     broker.settleResponse(original.operationId, { upstreamResultDigest: "c".repeat(64) });
-    broker.recordReadback(original.operationId, readback.expectedDigest, true);
+    broker.recordReadback(original.operationId, readback.expectedDigest, "verified");
 
     expect(create(broker, { ...shared, requestedBy: { clientName: "A retry", clientVersion: "1" } }))
       .toMatchObject({ operationId: original.operationId, state: "verified", verificationStatus: "verified" });
@@ -309,8 +310,8 @@ describe("ProviderEffectBroker", () => {
     broker.approve(verified.operationId);
     broker.reserveDispatch(verified.operationId);
     broker.settleResponse(verified.operationId, { upstreamResultDigest: "c".repeat(64) });
-    expect(broker.recordReadback(verified.operationId, "d".repeat(64), false).state).toBe("awaiting_verification");
-    expect(broker.recordReadback(verified.operationId, "b".repeat(64), true).state).toBe("verified");
+    expect(broker.recordReadback(verified.operationId, "d".repeat(64), "unconfirmed").state).toBe("awaiting_verification");
+    expect(broker.recordReadback(verified.operationId, "b".repeat(64), "verified").state).toBe("verified");
 
     const innerApproval = create(broker, {
       authority: authorityForTarget("6"),
@@ -322,7 +323,7 @@ describe("ProviderEffectBroker", () => {
       upstreamResultDigest: "f".repeat(64),
       innerApprovalRequired: true,
     });
-    expect(() => broker.recordReadback(innerApproval.operationId, "e".repeat(64), true)).toThrow();
+    expect(() => broker.recordReadback(innerApproval.operationId, "e".repeat(64), "verified")).toThrow();
 
     const correction = create(broker, { authority: authorityForTarget("5"), correctionOf: verified.operationId });
     expect(correction.correctionOf).toBe(verified.operationId);
@@ -470,12 +471,12 @@ describe("ProviderEffectBroker", () => {
     const next = create(restarted, { authority: target, sourceOperationId: "operation:restart-b" });
     restarted.approve(next.operationId);
     expect(() => restarted.reserveDispatch(next.operationId)).toThrow(ProviderEffectTargetConflictError);
-    expect(restarted.recordReadback(sent.operationId, "8".repeat(64), true)).toMatchObject({ state: "verified" });
+    expect(restarted.recordReadback(sent.operationId, "8".repeat(64), "verified")).toMatchObject({ state: "verified" });
     expect(restarted.reserveDispatch(next.operationId)).toMatchObject({ state: "dispatching" });
     restarted.close();
   });
 
-  it("clears a locked target through a verified readback or a person-confirmed close-out, and not otherwise", () => {
+  it("clears a locked target through a verified or mismatched readback or a person-confirmed close-out, and not otherwise", () => {
     const broker = new ProviderEffectBroker({ path: ":memory:" });
     const readback = { tool: "canvas_page_get", arguments: { page_id: "42" }, expectedDigest: "b".repeat(64) };
     const sent = (target: string, suffix: string) => {
@@ -503,7 +504,7 @@ describe("ProviderEffectBroker", () => {
     broker.settleResponse(verifiedWrite, { upstreamResultDigest: "c".repeat(64) });
     const afterVerified = queued("4", "verified");
     expect(() => broker.reserveDispatch(afterVerified)).toThrow(ProviderEffectTargetConflictError);
-    expect(broker.recordReadback(verifiedWrite, readback.expectedDigest, true)).toMatchObject({
+    expect(broker.recordReadback(verifiedWrite, readback.expectedDigest, "verified")).toMatchObject({
       state: "verified", verificationStatus: "verified", attention: [],
     });
     expect(broker.reserveDispatch(afterVerified)).toMatchObject({ state: "dispatching" });
@@ -536,18 +537,39 @@ describe("ProviderEffectBroker", () => {
     expect(closed.terminalAt).toBe(closed.updatedAt);
     expect(broker.reserveDispatch(afterPersonClose)).toMatchObject({ state: "dispatching" });
 
-    // Exit 3: the fresh readback did not match, so the record stays unresolved
-    // and keeps holding its target.
+    // Exit 3: the fresh readback proves the provider saved something other than
+    // the approved change. The change failed, and the record says so: it is not
+    // verified and not left as a change Morrow could not check.
+    const mismatchedWrite = sent("7", "mismatched");
+    broker.settleResponse(mismatchedWrite, { upstreamResultDigest: "d".repeat(64) });
+    const afterMismatch = queued("7", "mismatched");
+    expect(() => broker.reserveDispatch(afterMismatch)).toThrow(ProviderEffectTargetConflictError);
+    const mismatched = broker.recordReadback(mismatchedWrite, "f".repeat(64), "mismatch");
+    expect(mismatched).toMatchObject({
+      state: "failed",
+      verificationStatus: "mismatch",
+      readbackDigest: "f".repeat(64),
+      attention: ["readback_did_not_match_frozen_comparator"],
+    });
+    expect(mismatched.terminalAt).toBe(mismatched.updatedAt);
+    expect(broker.reserveDispatch(afterMismatch)).toMatchObject({ state: "dispatching" });
+    // A mismatched change was sent, so it can still take a correction.
+    expect(isCorrectableEffectOperation(mismatched)).toBe(true);
+    expect(isCorrectableEffectOperation({ state: "failed", verificationStatus: null })).toBe(false);
+
+    // No exit: the fresh readback could not be compared, so the record stays
+    // unresolved and keeps holding its target.
     const unresolvedWrite = sent("6", "unresolved");
     broker.settleResponse(unresolvedWrite, { upstreamResultDigest: "d".repeat(64) });
-    expect(broker.recordReadback(unresolvedWrite, "e".repeat(64), false)).toMatchObject({
+    expect(broker.recordReadback(unresolvedWrite, "e".repeat(64), "unconfirmed")).toMatchObject({
       state: "awaiting_verification",
       verificationStatus: "unconfirmed",
-      attention: ["readback_did_not_match_frozen_comparator"],
+      attention: ["readback_unavailable"],
       terminalAt: null,
     });
     const afterUnresolved = queued("6", "unresolved");
     expect(() => broker.reserveDispatch(afterUnresolved)).toThrow(ProviderEffectTargetConflictError);
+    expect(() => broker.recordReadback(unresolvedWrite, "e".repeat(64), true as never)).toThrow(/readback outcome/);
 
     // A settled record is never reopened, and a close-out without a real digest
     // is refused before anything is written.
@@ -624,6 +646,43 @@ describe("ProviderEffectBroker", () => {
     const reopened = new ProviderEffectBroker({ path });
     expect(reopened.get("op:legacy-uncertain").state).toBe("closed_by_person");
     reopened.close();
+  });
+
+  it("adds the mismatch readback outcome to a database written before it, keeping every saved row and constraint", () => {
+    const root = mkdtempSync(join(tmpdir(), "morrow-effects-mismatch-migration-"));
+    roots.push(root);
+    const path = join(root, "operations.sqlite3");
+    const first = new ProviderEffectBroker({ path });
+    const readback = { tool: "canvas_page_get", arguments: { page_id: "42" }, expectedDigest: "b".repeat(64) };
+    const saved = create(first, { authority: authorityForTarget("8"), readback });
+    first.approve(saved.operationId);
+    first.reserveDispatch(saved.operationId);
+    first.settleResponse(saved.operationId, { upstreamResultDigest: "c".repeat(64) });
+    first.close();
+    // Rewrite the table as the previous release defined it: the same columns, a
+    // readback outcome that allows no mismatch, and identities that must be set.
+    const database = new DatabaseSync(path);
+    const sql = (database.prepare("SELECT sql FROM sqlite_master WHERE name='provider_effect_operations'").get() as { sql: string }).sql;
+    const previous = sql.replace("'not_requested','unconfirmed','verified','mismatch'", "'not_requested','unconfirmed','verified'")
+      .replace("CREATE TABLE provider_effect_operations", "CREATE TABLE provider_effect_operations_previous");
+    expect(previous).not.toContain("'mismatch'");
+    expect(previous).toContain("target_identity_digest TEXT NOT NULL");
+    database.exec(`${previous}; INSERT INTO provider_effect_operations_previous SELECT * FROM provider_effect_operations;
+      DROP TABLE provider_effect_operations; ALTER TABLE provider_effect_operations_previous RENAME TO provider_effect_operations;`);
+    expect(() => database.prepare("UPDATE provider_effect_operations SET verification_status='mismatch'").run()).toThrow(/CHECK constraint/);
+    database.close();
+
+    const reopened = new ProviderEffectBroker({ path });
+    expect(reopened.get(saved.operationId)).toMatchObject({ state: "awaiting_verification", verificationStatus: "unconfirmed" });
+    expect(reopened.recordReadback(saved.operationId, "f".repeat(64), "mismatch")).toMatchObject({
+      state: "failed", verificationStatus: "mismatch",
+    });
+    reopened.close();
+    const check = new DatabaseSync(path);
+    const migrated = (check.prepare("SELECT sql FROM sqlite_master WHERE name='provider_effect_operations'").get() as { sql: string }).sql;
+    check.close();
+    expect(migrated).toContain("'mismatch'");
+    expect(migrated).toContain("target_identity_digest TEXT NOT NULL");
   });
 
   it("keeps unversioned dispatched effects as a global connector barrier without treating old drafts as sent", () => {

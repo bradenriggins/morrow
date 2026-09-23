@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { brandHead, brandHeader, serveBrandAsset } from "@morrow/bridge-loopback";
 import { canvasOperationMap, loadCanvasApiCatalog } from "@morrow/canvas-api-catalog";
-import { CORRECTABLE_EFFECT_OPERATION_STATES, type EffectOperationState } from "@morrow/operation-journal";
+import { isCorrectableEffectOperation, type EffectOperationState, type EffectVerificationStatus } from "@morrow/operation-journal";
 import type { ApprovalReviewContext, ApprovalReviewReadCache } from "./approval-context.js";
 import { escapeHtml, formattedTextPreview } from "./approval-preview.js";
 import { BLACKBOARD_CONTENT_PATCH_APPLY_TOOL } from "./blackboard-content-patch.js";
@@ -362,7 +362,7 @@ const EFFECT_STATES = new Set([
   "awaiting_approval", "approved", "dispatching", "awaiting_inner_approval", "awaiting_verification",
   "verified", "failed", "applied_or_unknown", "cancelled", "closed_by_person",
 ]);
-const VERIFICATION_STATES = new Set(["not_requested", "unconfirmed", "verified"]);
+const VERIFICATION_STATES = new Set(["not_requested", "unconfirmed", "verified", "mismatch"]);
 const OPERATION_ID = /^[A-Za-z0-9_.:@-]{1,160}$/;
 const EFFECT_RECEIPT_ID = /^effect:[a-f0-9-]{36}$/;
 
@@ -919,6 +919,7 @@ function stateContent(state: string, platform = "Canvas", attention: readonly un
     interrupted: ["Work stopped", "Morrow is not running this request now. Return to your assistant and ask Morrow to check the saved result before trying again."],
   };
   const noChangeSent = state === "failed" && attention.includes("dispatch_failed_before_send");
+  const savedOtherwise = state === "failed" && attention.includes("readback_did_not_match_frozen_comparator");
   const sameTargetBlocked = state === "approved" && attention.includes("provider_effect_target_conflict");
   const historicalTargetScopeBlocked = state === "approved" && attention.includes("provider_effect_target_scope_unknown");
   const [title, detail] = historicalTargetScopeBlocked
@@ -930,6 +931,8 @@ function stateContent(state: string, platform = "Canvas", attention: readonly un
     // change Canvas refused with a status that saved nothing. The wording must
     // stay true for both.
     ? ["No change was sent", "Morrow did not change anything in Canvas. Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review."]
+    : savedOtherwise
+    ? ["Did not save as approved", "Morrow sent this change and read Canvas again. Canvas does not hold the result you approved. Morrow will not send this change again. Open the item in Canvas, then ask your assistant for a new review if it still needs the change."]
     : content[state] || ["Check this request", "The request has changed or can no longer be approved here. Return to your assistant and ask Morrow to check its current status."];
   return `<section class="outcome"><h1>${title}</h1><p>${detail.replaceAll("Canvas", platform)}</p></section>`;
 }
@@ -938,7 +941,8 @@ function statePage(state: string, platform?: string): string {
   return pageShell("Request status", stateContent(state, platform));
 }
 
-export function operationStatus(state: string, platform = "Canvas"): string {
+export function operationStatus(state: string, platform = "Canvas", verification?: unknown): string {
+  if (state === "failed" && verification === "mismatch") return "Did not save as approved";
   const names: Record<string, string> = {
     awaiting_approval: "Not started", approved: "Not started", dispatching: "In progress",
     awaiting_verification: "Needs checking", applied_or_unknown: "Needs checking",
@@ -1168,7 +1172,7 @@ function html(
     const metadata = (rowWhere !== title ? rowWhere : "") || [request.item_entry_interaction_type_slug ? readableName(String(request.item_entry_interaction_type_slug).replaceAll("-", " ")) : name,
       typeof request.item_points_possible === "number" ? `${request.item_points_possible} points` : ""].filter(Boolean).join(" · ");
     const sensitive = warnings[String(object(entry.risk).approvalClass)];
-    return `<details class="change-item" data-search="${escapeHtml(`${title} ${where} ${name} ${kind}`.toLocaleLowerCase())}"><summary><span class="change-number">${index + 1}</span><span class="change-heading"><strong>${escapeHtml(title)}</strong><span class="change-context">${escapeHtml(metadata)}</span>${state !== "awaiting_approval" ? `<span data-operation-status>${operationStatus(String(operations[index]?.state), platformName(entry.tool))}</span>` : ""}</span><span class="change-kind${kind === "Remove" ? " removal" : ""}">${kind}</span></summary>${sensitive ? `<p class="item-warning">${escapeHtml(sensitive)}</p>` : ""}${content}</details>`;
+    return `<details class="change-item" data-search="${escapeHtml(`${title} ${where} ${name} ${kind}`.toLocaleLowerCase())}"><summary><span class="change-number">${index + 1}</span><span class="change-heading"><strong>${escapeHtml(title)}</strong><span class="change-context">${escapeHtml(metadata)}</span>${state !== "awaiting_approval" ? `<span data-operation-status>${operationStatus(String(operations[index]?.state), platformName(entry.tool), operations[index]?.verificationStatus)}</span>` : ""}</span><span class="change-kind${kind === "Remove" ? " removal" : ""}">${kind}</span></summary>${sensitive ? `<p class="item-warning">${escapeHtml(sensitive)}</p>` : ""}${content}</details>`;
   }).join("");
   const reviewContent = batch ? `<section class="batch-review"><div class="change-list-controls" hidden><label for="change-search">Find a change</label><input id="change-search" type="search" placeholder="Search titles or courses" autocomplete="off"></div><div class="change-list">${changed}</div><nav class="change-pagination" aria-label="Review pages" hidden><p id="changes-count" role="status" aria-live="polite"></p><div><button id="changes-previous" type="button" class="secondary">Previous</button><button id="changes-next" type="button" class="secondary">Next</button></div></nav></section>` : changed;
   if (state !== "awaiting_approval") {
@@ -1245,12 +1249,15 @@ function recentChangeRow(operation: JsonObject, index: number, controller: Appro
   const statusUrl = `/operations/${encodeURIComponent(operationId)}`;
   const state = String(operation.state || "");
   const reverseRequest = `Reverse change ${operationId}.`;
-  // A correction can be planned only for a change Morrow may have sent. A cancelled or failed
-  // change never reached the platform, so it offers no undo request the assistant would refuse.
-  const reverse = CORRECTABLE_EFFECT_OPERATION_STATES.has(state as EffectOperationState)
+  // A correction can be planned only for a change Morrow may have sent. A cancelled change, or one
+  // that failed before it reached the platform, offers no undo request the assistant would refuse.
+  const reverse = isCorrectableEffectOperation({
+    state: state as EffectOperationState,
+    verificationStatus: operation.verificationStatus as EffectVerificationStatus | null,
+  })
     ? `<p>To undo this, ask your assistant: <code>${escapeHtml(reverseRequest)}</code></p><button type="button" class="recent-reverse-copy" data-copy-text="${escapeHtml(reverseRequest)}">Copy the request</button>`
     : "<p>Nothing was sent, so there is nothing to undo.</p>";
-  return `<li class="recent-row"><span class="recent-number">${index + 1}</span><span class="recent-heading"><strong>${escapeHtml(reviewTitle(tool))}</strong><span class="recent-context">${escapeHtml(context)}</span></span><span class="recent-meta"><span class="recent-time">${escapeHtml(recentChangeTime(operation))}</span><span class="recent-state">${escapeHtml(operationStatus(state, platform))}</span></span><span class="recent-links"><a href="${escapeHtml(statusUrl)}">See this change</a><span class="recent-reverse">${reverse}</span></span></li>`;
+  return `<li class="recent-row"><span class="recent-number">${index + 1}</span><span class="recent-heading"><strong>${escapeHtml(reviewTitle(tool))}</strong><span class="recent-context">${escapeHtml(context)}</span></span><span class="recent-meta"><span class="recent-time">${escapeHtml(recentChangeTime(operation))}</span><span class="recent-state">${escapeHtml(operationStatus(state, platform, operation.verificationStatus))}</span></span><span class="recent-links"><a href="${escapeHtml(statusUrl)}">See this change</a><span class="recent-reverse">${reverse}</span></span></li>`;
 }
 
 /**

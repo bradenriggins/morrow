@@ -14,6 +14,7 @@ This release fixes the problems a full review of Morrow found before release. Te
 - Morrow Bridge pairs with Morrow only when you select Connect Morrow, and only with a proof from the Bridge folder Morrow set up. Another program on your computer can no longer connect itself to Morrow in place of Morrow Bridge and then approve changes. The Chrome page that asked you to allow the connection is gone.
 - Edit access has no time limit. Old timed grants fall back to Plan and are never extended.
 - A review that is waiting ends when its Morrow connection ends.
+- When Morrow reads the learning platform after a change and the platform does not hold the approved result, the change shows Did not save as approved and the assistant is told it failed. Before, it showed Needs checking, as if Morrow could not read the result. A change Morrow could not compare still shows Needs checking.
 - Routine Edit and the publish choice no longer create a Canvas page, or publish a new front page, without your review. When the page is not there, or Morrow cannot read it, the change waits for your review.
 - The Routine edits description names every change the routine set makes with no review, including making Canvas folders, moving files between folders, and moving module items. It describes only the platforms you selected.
 - The date choice is named Change due dates and availability dates, and says what it changes on each platform.

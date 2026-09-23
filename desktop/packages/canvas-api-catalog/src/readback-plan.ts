@@ -852,7 +852,8 @@ export function evaluateBrowserReadback(
     ? targetRecords(readResult.data, plan.targetId, targetField, plan.targetPath, envelope)
     : targetScope(readResult.data, plan.targetPath, envelope);
   if (plan.targetId && records.length === 0) return verification("mismatch", plan, "target_missing_from_readback");
-  if (plan.targetId && records.length > 1) return verification("mismatch", plan, "target_ambiguous_in_readback");
+  // Two records with the target's id prove neither the change nor its absence.
+  if (plan.targetId && records.length > 1) return verification("unconfirmed", plan, "target_ambiguous_in_readback");
   // Without a target id the read answers about one record only. Several records prove
   // nothing about the one that was written.
   if (!plan.targetId && records.length !== 1) return verification("unconfirmed", plan, "readback_target_unresolved");
