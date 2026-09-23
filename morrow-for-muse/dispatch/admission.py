@@ -870,6 +870,40 @@ def _render_path(url_template: str, params: dict) -> str:
     return _SLOT_RE.sub(fill, path)
 
 
+# The course segment of a rendered Canvas or New Quizzes path. A slot
+# left unfilled ({id}) is not a course.
+_COURSE_SEGMENT_RE = re.compile(
+    r"/api/(?:quiz/)?v1/courses/([^/?#{}]+)(?=[/?#]|$)")
+
+
+def write_target_course_id(entry: dict, params: dict) -> str | None:
+    """The course a request targets.
+
+    The course is the /courses/<id> segment of the rendered request
+    path (the request URL, then each multi_step URL), whatever the slot
+    is called: PUT /api/v1/courses/{id} targets course {id} just as
+    /api/v1/courses/{course_id}/pages/... targets {course_id}.
+    params.course_id is the fallback for routes whose path names no
+    course (Item Bank and other non-course URLs). The course-resolution
+    guard, the provider identity GET, the approval target, and the mode
+    journal all read the course from here."""
+    urls = []
+    request = entry.get("request") if isinstance(entry, dict) else None
+    if isinstance(request, dict) and request.get("url"):
+        urls.append(str(request["url"]))
+    steps = entry.get("multi_step") if isinstance(entry, dict) else None
+    for step in steps or []:
+        if isinstance(step, dict) and step.get("url"):
+            urls.append(str(step["url"]))
+    for url in urls:
+        match = _COURSE_SEGMENT_RE.search(_render_path(url, params))
+        if match:
+            return match.group(1)
+    if isinstance(params, dict) and params.get("course_id") is not None:
+        return str(params["course_id"])
+    return None
+
+
 def request_subject(entry: dict, params: dict) -> dict:
     """The exact request an approval covers: method, URL template, the
     rendered path, query, and body (param references resolved), plus
@@ -943,8 +977,9 @@ def mint_approval(entry: dict, params: dict, tenant_base: str | None = None,
     educator reviewed: {"course_id": ..., "course_name": ..., "term":
     ...}. It is stamped into the record (and covered by the tamper
     seal) alongside the tenant, so the reviewing educator sees the
-    target they are signing for. course_id falls back to
-    params.course_id when the caller does not name it explicitly.
+    target they are signing for. course_id falls back to the course
+    the request path targets (write_target_course_id) when the caller
+    does not name it explicitly.
     """
     if ttl_seconds <= 0 or ttl_seconds > MAX_APPROVAL_TTL_SECONDS:
         raise ValueError("ttl_seconds must be within (0, %d]"
@@ -977,9 +1012,10 @@ def mint_approval(entry: dict, params: dict, tenant_base: str | None = None,
     # W4-P0-11: human-readable write target for the reviewing educator.
     # Covered by the tamper seal like every other field.
     declared_target = dict(target_identity) if isinstance(target_identity, dict) else {}
-    if declared_target.get("course_id") is None and isinstance(params, dict):
-        if params.get("course_id") is not None:
-            declared_target["course_id"] = params.get("course_id")
+    if declared_target.get("course_id") is None:
+        write_cid = write_target_course_id(entry, params)
+        if write_cid is not None:
+            declared_target["course_id"] = write_cid
     target_block = {}
     if tenant_base:
         target_block["tenant"] = tenant_base
@@ -1524,8 +1560,8 @@ def _verify_record_target(record: dict, params: dict,
     this dispatch (W4-P0-11). Raises ApprovalMismatch when the record's
     tenant or course_id disagrees with the dispatch's.
 
-    W4-P0-11 hardening: a course-scoped write (params carry course_id)
-    MUST carry a target block naming the reviewed tenant, course_id,
+    W4-P0-11 hardening: a course-scoped write (its path targets a
+    course, see write_target_course_id) MUST carry a target block naming the reviewed tenant, course_id,
     and course_name; a record without one is refused, not admitted on
     trust. Non-course writes may omit the block, but when present it is
     still cross-checked. The course_name/term comparison against the
@@ -1533,7 +1569,7 @@ def _verify_record_target(record: dict, params: dict,
     executor's verify_write_target_identity, which has both; admission
     binds the block to the dispatch's tenant and course here."""
     target = record.get("target")
-    params_cid = params.get("course_id") if isinstance(params, dict) else None
+    params_cid = write_target_course_id(entry, params)
     if not isinstance(target, dict) or not target:
         if params_cid is not None:
             raise ApprovalMismatch(
@@ -2026,7 +2062,7 @@ def check_mode_authority(entry: dict, params: dict,
     ctx = mode_ctx if isinstance(mode_ctx, dict) else {}
     user_id = ctx.get("user_id")
     entry_name = entry.get("name")
-    course_id = params.get("course_id") if isinstance(params, dict) else None
+    course_id = write_target_course_id(entry, params)
     resolution = ctx.get("course_resolution")
     conversation_id = ctx.get("conversation_id")
     if not user_id:

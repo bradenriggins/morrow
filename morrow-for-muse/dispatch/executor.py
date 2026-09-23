@@ -125,6 +125,7 @@ try:
         touches_learner_data as admission_touches_learner_data,
         request_subject as admission_request_subject,
         request_digest as admission_request_digest,
+        write_target_course_id as admission_write_target_course_id,
     )
 except ImportError:  # run as a script: dispatch/ itself is on sys.path
     from admission import (
@@ -134,6 +135,7 @@ except ImportError:  # run as a script: dispatch/ itself is on sys.path
         touches_learner_data as admission_touches_learner_data,
         request_subject as admission_request_subject,
         request_digest as admission_request_digest,
+        write_target_course_id as admission_write_target_course_id,
     )
 
 # W4-P1-17: the morrow state root (and the stable tree UUID) has ONE
@@ -6198,7 +6200,8 @@ def recompute_before_state(entry, params, plan, session, pack, config,
 #   - Classic Canvas (/api/v1): assignment_groups, discussion_topics,
 #     assignments, modules, quizzes, pages. POST to a collection derives
 #     the member URL from the create response's id (or page url);
-#     PUT/PATCH to a member route re-reads that route.
+#     PUT/PATCH to a member route re-reads that route. A course update
+#     (PUT /api/v1/courses/{id}) re-reads the course.
 #   - New Quiz (/api/quiz/v1): quizzes collection + quiz member,
 #     quizzes/{id}/items collection + item member. Create responses carry
 #     the member in the "id" field; PUT/PATCH already name the member.
@@ -6227,6 +6230,10 @@ _WRITE_READBACK_MEMBER_RE = re.compile(
     r"(?:/api/v1/courses/\d+/(?:assignment_groups|discussion_topics|"
     r"assignments|modules|quizzes|pages)/[^/]+"
     r"|/api/quiz/v1/courses/\d+/quizzes/\d+(?:/items/\d+)?)$")
+# A course update (C-128) is read back with the course GET. Updates
+# only: a course DELETE may conclude the course, which the course GET
+# still serves, so it has no delete readback here.
+_COURSE_READBACK_MEMBER_RE = re.compile(r"/api/v1/courses/\d+$")
 
 
 # W3-P2-22: Item Bank readback derivation. The SDK lane's bank create
@@ -6299,6 +6306,8 @@ def _readback_target(method, url, result_payload):
     if _IB_READBACK_BANK_MEMBER_RE.search(path):
         return target
     if _WRITE_READBACK_MEMBER_RE.search(path):
+        return target
+    if _COURSE_READBACK_MEMBER_RE.search(path):
         return target
     return None
 
@@ -7083,28 +7092,16 @@ def _release_claim_quietly(op_id, claim_token, reason):
 def _write_target_course_id(entry: dict, params: dict) -> str | None:
     """The course id the write will actually target.
 
-    From params.course_id first (params are substituted into path
-    templates by build_request), then from a /courses/<id> path in the
-    request URL or any multi_step step URL. The frozen plan's declared
-    target is deliberately NOT consulted here: the provider precheck
-    must GET the course the write will hit, then compare it against the
-    plan's declared target. Consulting the plan for the GET target
-    would let a typo'd params.course_id slip past.
+    The /courses/<id> segment of the rendered request path (request
+    URL, then each multi_step URL), else params.course_id; see
+    admission.write_target_course_id, which admission uses for the same
+    write. The frozen plan's declared target is deliberately NOT
+    consulted here: the provider precheck must GET the course the write
+    will hit, then compare it against the plan's declared target.
+    Consulting the plan for the GET target would let a typo'd course id
+    slip past.
     """
-    if isinstance(params, dict) and params.get("course_id") is not None:
-        return str(params["course_id"])
-    urls = []
-    request = entry.get("request") or {}
-    if request.get("url"):
-        urls.append(str(request["url"]))
-    for step in entry.get("multi_step") or []:
-        if isinstance(step, dict) and step.get("url"):
-            urls.append(str(step["url"]))
-    for url in urls:
-        match = re.search(r"/courses/(\d+)", url)
-        if match:
-            return match.group(1)
-    return None
+    return admission_write_target_course_id(entry, params)
 
 
 def _declared_target(plan) -> dict:
