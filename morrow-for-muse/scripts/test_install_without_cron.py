@@ -159,6 +159,14 @@ def test_install_without_cron_twice_and_after_an_older_release_ran(rig):
     assert rc == 0, out[-3000:]
     assert "keepalive runs as a supervised background loop" in out
     assert "Install complete." in out
+    # The closing summary repeats the learner vault warning when this
+    # Python cannot run the vault (scripts/test_install_vault_check.py).
+    from privacy import core
+    summary = out.split("--- 10/10", 1)[1]
+    if core.learner_vault_problem():
+        assert "student data will not work" in summary, summary
+    else:
+        assert "student data will not work" not in out
     assert os.path.isfile(os.path.join(tree, ".morrow-tree-id")), \
         "a fresh install mints the stable tree id"
     state = _state_dir(rig)

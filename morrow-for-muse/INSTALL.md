@@ -17,9 +17,18 @@ prior knowledge of the project.
   `/opt/meta-chromium/chrome`, which ships in the Muse VM image. If your
   VM does not provide it, place a Chromium binary at
   `transport/chromium/chrome` inside this tree before installing.
-- Python 3.11 or newer (`python3 --version`). The tree is stdlib-only;
-  nothing needs pip. (Python 3.10 is refused: it reaches security
-  end-of-life in October 2026 per PEP 619.)
+- Python 3.11 or newer (`python3 --version`). (Python 3.10 is refused:
+  it reaches security end-of-life in October 2026 per PEP 619.)
+- The Python package `cryptography` for anything that touches student
+  data: finding a student by name, the failed-students question,
+  rosters, grades, and submissions. Morrow keeps student names and ids
+  in an encrypted learner vault, and the vault needs this package.
+  Without it the install works, everything else works, and Morrow
+  refuses all student data. Install it hash-pinned from this tree:
+  `python3 -m pip install --require-hashes -r requirements-optional.txt`.
+  Install step 1 checks for it and prints a warning (repeated at the
+  end) when it is missing or older than the pinned version. Everything
+  else in the tree is Python's standard library.
 - The command-line tools the installer and keepalive use: `curl`, `ss`,
   `pgrep`, `flock`, and `openssl` (the helper's TLS selftest makes a
   throwaway certificate). Install step 1 stops and names a missing
@@ -185,18 +194,21 @@ authentication. A compromised or malicious process running as your
 user is equivalent to use of the proxy credential. Do not run
 untrusted code as the same user on the install VM.
 
-Optional dependency: the learner-privacy vault's file-backed
-encryption needs the `cryptography` package, installed hash-pinned:
+The `cryptography` package (see Prerequisites): the encrypted learner
+vault needs it, installed hash-pinned:
 
-    pip install -r requirements-optional.txt
+    python3 -m pip install --require-hashes -r requirements-optional.txt
 
 The file pins `cryptography==50.0.1` (plus its `cffi`/`pycparser`
 closure) with `--require-hashes`, so pip verifies every downloaded
 artifact against the published SHA-256 hashes before installing;
 a tampered mirror fails the install loudly instead of silently.
-Without the package, file-backed vault operations refuse with a
-clear error; in-memory vaults, redaction, and all other privacy
-features work normally.
+Without the package (or with a version older than the pin), every
+student-data request is refused with a clear message: finding a
+student by name, the failed-students question, rosters, grades, and
+submissions. Nothing about students is ever sent to the assistant
+unprotected. Everything that does not touch student data works
+normally.
 
 ## Step 3: set your tenant
 

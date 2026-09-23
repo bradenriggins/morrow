@@ -38,7 +38,10 @@
 #   (<tree>.bak-* incl. .PARTIAL), and failed trees (<tree>.failed-*).
 #
 # What it does, in order:
-#   1. python3 check (>= 3.11; 3.10 refused: security EOL Oct 2026)
+#   1. python3 check (>= 3.11; 3.10 refused: security EOL Oct 2026).
+#      Warns (here and in the closing summary) when the 'cryptography'
+#      package the learner vault needs is missing or too old: student
+#      data will not work until it is installed.
 #   2. Integrity + upgrade: verify the tree against
 #      pack/carve-manifest.json (sha256 per file; drift fails loudly
 #      naming the files). Mint the stable tree id (.morrow-tree-id) on
@@ -343,6 +346,38 @@ PY_OK="$(python3 -c 'import sys; print("yes" if sys.version_info >= (3, 11) else
 [ "${PY_OK}" = "yes" ] \
   || fail "python3" "python3 >= 3.11 required (found: ${PY_VER}). Python 3.10 reaches security end-of-life in October 2026 (PEP 619) and will stop receiving security fixes; install Python 3.11 or newer and rerun."
 note "ok: ${PY_VER}"
+# All student-data work needs the encrypted learner vault, which needs
+# the 'cryptography' package. Without it the install still works and
+# Morrow refuses student data (fail closed), so this warns instead of
+# failing, here and again in the closing summary.
+VAULT_PROBLEM="$(cd / && python3 -c "
+import sys
+sys.path.insert(0, '${TREE}')
+from privacy.core import learner_vault_problem
+print(learner_vault_problem() or '')
+" 2>&1)" || VAULT_PROBLEM="the learner vault check could not run: $(printf '%s' "${VAULT_PROBLEM}" | tail -1)"
+vault_warning() {
+  printf '%s\n' \
+    "================================================================" \
+    "WARNING: student data will not work until 'cryptography' is installed." \
+    "" \
+    "Morrow keeps student names and ids in an encrypted learner vault," \
+    "and the vault needs the Python package 'cryptography'. Without it," \
+    "Morrow refuses everything that touches student data: finding a" \
+    "student by name, the failed-students question, rosters, grades," \
+    "and submissions. Everything else works." \
+    "" \
+    "Reason: ${VAULT_PROBLEM}" \
+    "" \
+    "Install it (hash-pinned) from ${TREE}, then rerun this installer:" \
+    "    python3 -m pip install --require-hashes -r requirements-optional.txt" \
+    "================================================================"
+}
+if [ -n "${VAULT_PROBLEM}" ]; then
+  vault_warning
+else
+  note "ok: learner vault ready (cryptography installed)"
+fi
 
 # -- 2. integrity + upgrade -----------------------------------------------
 step "2/10 integrity and upgrade"
@@ -1184,6 +1219,9 @@ mv -f "${_version_tmp}" "${INSTALLED_VERSION_FILE}" \
 unset _manifest_tmp _version_tmp _had_manifest _had_version
 
 note ""
+if [ -n "${VAULT_PROBLEM}" ]; then
+  vault_warning
+fi
 note "Install complete. What is next for you:"
 note "  1. If CANVAS_BASE is still unset, set it in ${ENV_FILE} and rerun this installer."
 note "  2. Sign in once through the helper page (the notice above repeats until you are signed in)."

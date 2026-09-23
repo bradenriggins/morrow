@@ -51,6 +51,7 @@ DEV_ONLY = (
     "scripts/install-robustness-selftest.sh", "scripts/carve.py",
     "scripts/test_carve.py", "scripts/install-e2e.sh",
     "scripts/test_install_without_cron.py",
+    "scripts/test_install_vault_check.py",
     # rig-only session capture; production never runs it (SKILL.md)
     "session/capture.py",
     # the 2026-09-20 VM deployment record and its userspace scheduler

@@ -25,7 +25,12 @@ One script, idempotent (safe to run twice):
 bash install.sh
 ```
 
-It checks python3 (>= 3.11; 3.10 refused, security EOL Oct 2026), locates Chromium, probes egress
+It checks python3 (>= 3.11; 3.10 refused, security EOL Oct 2026) and
+warns when the `cryptography` package is missing (without it, every
+student-data request is refused: working by name, the failed-students
+question, rosters, grades; if the educator asks for one of those, tell
+them the operator must run `python3 -m pip install --require-hashes -r
+requirements-optional.txt` in this tree), locates Chromium, probes egress
 (`transport/egress.py`: authenticated proxy, bare proxy, or direct),
 creates the effective `MORROW_HOME` state layout, creates
 `helper/profile/` on first install (an existing profile is never wiped,

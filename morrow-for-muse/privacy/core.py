@@ -135,6 +135,18 @@ def _require_aesgcm():
             % (installed,))
     return AESGCM
 
+
+def learner_vault_problem():
+    """Why the encrypted learner vault cannot run with this Python, or
+    None when it can. All student-data work needs the vault (working by
+    name, the failed-students question, rosters, grades); install.sh
+    reports the problem at install time."""
+    try:
+        _require_aesgcm()
+    except PrivacyError as exc:
+        return str(exc)
+    return None
+
 # How deep a provider answer may nest before the privacy walk refuses it.
 MAX_PRIVACY_OUTPUT_DEPTH = 32
 
