@@ -104,7 +104,7 @@ import {
   type GatewayOperationRecord,
   type GatewayOperationState,
 } from "@morrow/operation-journal";
-import { StdioMcpUpstream } from "@morrow/upstream-mcp";
+import { StdioMcpUpstream, UpstreamNotDispatchedError } from "@morrow/upstream-mcp";
 import { FileStageStore, MAX_STAGED_FILE_BYTES, type FileStageBinding, type FileStageScope } from "./file-staging.js";
 import { validItemBankFanOutReceipt } from "./item-bank-fan-out.js";
 import { itemBankFanOutPlanRefusal } from "./item-bank-repair.js";
@@ -3837,8 +3837,7 @@ export class GatewayRuntime {
     try {
       result = await upstream.callTool("morrow_browser_edit_policy_set", command, { safeToRetry: false });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      outcome = message.includes("disconnected before dispatch") ? "not_sent" : "unknown";
+      outcome = error instanceof UpstreamNotDispatchedError ? "not_sent" : "unknown";
       const latest = await this.currentEditAccessBindings(selectedIds).catch(() => ({ bindings: [] as readonly JsonObject[] }));
       return { mode: prepared.mode, command: null, bindings: latest.bindings, outcome };
     }
@@ -10528,6 +10527,22 @@ export class GatewayRuntime {
         },
       }, mapping, this.catalog.digest, failed, this.config.profile);
     }
+    const safeToRetry = mapping.upstreamId === "meridian" && mapping.annotations?.readOnlyHint === true;
+    // A source that closed while this call prepared is refused here, before the operation is marked
+    // dispatched, because callTool would refuse it without sending. Nothing awaits between this
+    // check and callTool, so the connection cannot close in between.
+    if (!safeToRetry && !upstream.health().connected) {
+      const failed = this.journal.recordFailedBeforeSend(prepared.record.operationId, new UpstreamNotDispatchedError(upstream.id));
+      return attachOperationMeta({
+        content: [{ type: "text", text: `The source for ${publicName} is unavailable.` }],
+        isError: true,
+        structuredContent: {
+          schema: "morrow.problem.v1",
+          code: "upstream_unavailable",
+          source: mapping.upstreamId,
+        },
+      }, mapping, this.catalog.digest, failed, this.config.profile);
+    }
     const dispatched = this.journal.markDispatched(prepared.record.operationId);
     try {
       if (options.privateAttachment) dispatchedArguments.privateAttachment = options.privateAttachment;
@@ -10536,8 +10551,7 @@ export class GatewayRuntime {
       const result = await upstream.callTool(mapping.upstreamName, dispatchedArguments, {
         signal: options.signal,
         ...(options.upstreamTimeoutMs === undefined ? {} : { timeoutMs: options.upstreamTimeoutMs }),
-        safeToRetry: mapping.upstreamId === "meridian"
-          && mapping.annotations?.readOnlyHint === true,
+        safeToRetry,
       });
       if (!isJsonObject(result)) throw new Error("upstream_result_invalid");
       const source = classifySourceResult(result);

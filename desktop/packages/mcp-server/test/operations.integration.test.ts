@@ -14,7 +14,7 @@ import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 
-function config(options: { readonly delayMs?: number } = {}) {
+function config(options: { readonly delayMs?: number; readonly reconnectBackoffMs?: number } = {}) {
   return parseGatewayConfig({
     schema: "morrow.upstreams.v1",
     profile: "private-full",
@@ -32,6 +32,9 @@ function config(options: { readonly delayMs?: number } = {}) {
         priority: 50,
         required: true,
         enabled: true,
+        ...(options.reconnectBackoffMs ? {
+          supervision: { startupAttempts: 1, reconnectAttempts: 1, initialBackoffMs: options.reconnectBackoffMs, maxBackoffMs: options.reconnectBackoffMs },
+        } : {}),
         outputPrivacy: {
           canvas_page_get: {
             allowedFields: ["source", "course_id", "value", "page_id"],
@@ -113,6 +116,32 @@ describe("outer provider effects", () => {
         state: "applied_or_unknown",
         attention: expect.arrayContaining(["provider_effect_may_have_landed"]),
       });
+    } finally {
+      await runtime.close();
+    }
+  }, 20_000);
+
+  // A source process that closed is reconnected only after a backoff. A change approved in that gap
+  // never leaves Morrow, so it is settled as not sent, and its target is not locked for a check.
+  it("settles a change as not sent when its source disconnected before dispatch", async () => {
+    const runtime = await GatewayRuntime.connect(config({ reconnectBackoffMs: 30_000 }), { journalPath: ":memory:" });
+    try {
+      const planned = runtime.planOperation("morrow_legacy_only", {
+        value: "offline-source",
+        course_id: "101",
+        _morrow: { operation_id: "operation:offline-source-1234" },
+      });
+      const id = operationId(planned);
+      runtime.approveOperation(id);
+      const upstream = (runtime as unknown as { upstreams: ReadonlyMap<string, { health(): { connected: boolean } }> }).upstreams.get("morrow-legacy")!;
+      await (upstream as unknown as { client: { close(): Promise<void> } }).client.close();
+      expect(upstream.health().connected).toBe(false);
+
+      const dispatched = await runtime.dispatchOperation(id);
+      expect(dispatched.structuredContent).toMatchObject({ effectState: "failed" });
+      const record = runtime.operationGet(id);
+      expect(record.state).toBe("failed");
+      expect(record.attention).not.toContain("provider_effect_may_have_landed");
     } finally {
       await runtime.close();
     }
