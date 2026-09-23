@@ -110,6 +110,8 @@ def test_dev_only_surface_does_not_ship(carved):
     for rel in ("moodle", "lanes", "qr-proof", "learners/evidence",
                 "proof-battery/evidence", "dispatch/live_proof_modes.py",
                 "session/capture.py", "requirements-dev.txt",
+                # CI's hash-locked pytest; the install suites need none
+                "requirements-test.txt",
                 "scripts/carve.py", "bin/keepalive-moodle.sh",
                 "bin/keepalive-canvas.sh", "bin/scheduler.py", "DEPLOY.md",
                 # pytest-only: the suite's HOME isolation and its check

@@ -48,7 +48,7 @@ DIST_NAME = "morrow-muse-connector"
 # Prefixes (directories end with "/") and exact paths never shipped.
 DEV_ONLY = (
     "moodle/", "lanes/", "qr-proof/", "platform-asks/", "learners/evidence/",
-    "requirements-dev.txt",
+    "requirements-dev.txt", "requirements-test.txt",
     "scripts/install-robustness-selftest.sh", "scripts/carve.py",
     "scripts/install-e2e.sh",
     # rig-only session capture; production never runs it (SKILL.md)
