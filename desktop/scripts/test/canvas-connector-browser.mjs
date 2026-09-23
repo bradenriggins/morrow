@@ -1318,7 +1318,7 @@ try {
   assert.equal(await firstInstallSetupGuide.locator("#setup-content").isHidden(), true);
   await captureSetupGuide(firstInstallSetupGuide, "setup-guide-course-data-consent");
   await firstInstallSetupGuide.getByRole("button", { name: "Agree and continue", exact: true }).click();
-  await firstInstallSetupGuide.getByText("No assistant has approved this connection yet", { exact: true }).waitFor();
+  await firstInstallSetupGuide.getByText("Morrow Bridge is not set up to work with Morrow yet", { exact: true }).waitFor();
   await firstInstallSetupGuide.getByText("Morrow version is checked when Morrow Bridge connects", { exact: true }).waitFor();
   await firstInstallSetupGuide.getByText("No first read is completed yet", { exact: true }).waitFor();
   await firstInstallSetupGuide.getByRole("heading", { name: "Open Morrow", exact: true }).waitFor();
