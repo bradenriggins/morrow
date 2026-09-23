@@ -550,7 +550,7 @@ const CANVAS_CONTENT_GUARD_OPERATIONS = Object.freeze([
   Object.freeze({ kind: "new_quiz_answer_feedback_image_alt", toolName: "canvas_update_quiz_item", key: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item" }),
   Object.freeze({ kind: "new_quiz_feedback_image_alt", toolName: "canvas_update_quiz_item", key: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item" }),
 ]);
-const state = { socket: null, generation: 0, courseDataAuthorityGeneration: 0, accepted: null, authenticationProblem: null, catalog: null, operations: new Map(), handshakeDeadline: null, reconnectTimer: null, reconnectAttempt: 0, writeQueues: new Map(), storageQueue: Promise.resolve(), pairingFetchControllers: new Set(), bridgeCommands: new Map(), privateChat: null, privateChatClosed: null, reviewsWaiting: 0, reviews: [] };
+const state = { socket: null, generation: 0, courseDataAuthorityGeneration: 0, accepted: null, authenticationProblem: null, versionMismatch: false, catalog: null, operations: new Map(), handshakeDeadline: null, reconnectTimer: null, reconnectAttempt: 0, writeQueues: new Map(), storageQueue: Promise.resolve(), pairingFetchControllers: new Set(), bridgeCommands: new Map(), privateChat: null, privateChatClosed: null, reviewsWaiting: 0, reviews: [] };
 const canvasUploadObservers = new Map();
 // siteAnchorId -> the last course-site match, or the probe that is finding one now.
 const anchorVerifications = new Map();
@@ -2851,6 +2851,7 @@ async function connectBridge() {
         await handleBridgeMessage(message, { socket, authorityGeneration });
         if (!await bridgeConnectionAuthorityCurrent(socket, authorityGeneration)) return;
         state.authenticationProblem = null;
+        state.versionMismatch = false;
         phase = "active";
         clearBridgeHandshakeDeadline(socket);
         resetBridgeReconnect();
@@ -2870,8 +2871,17 @@ async function connectBridge() {
   };
   socket.onclose = (event) => {
     if (state.socket !== socket) return;
+    // Morrow expects a different Morrow Bridge build. An update and a reload fix that, not a new
+    // connection approval, so it is not an authentication problem. The reconnect alarm tries again.
+    if (event.code === 4403 && event.reason === "bridge_version_mismatch") {
+      state.versionMismatch = true;
+      state.authenticationProblem = null;
+      retireBridgeSocket(socket, { reconnect: false });
+      return;
+    }
     if (event.code === 4403 && ["bridge_identity_refused", "bridge_server_identity_refused", "bridge_ready_mismatch"].includes(event.reason)) {
       state.authenticationProblem = event.reason;
+      state.versionMismatch = false;
       retireBridgeSocket(socket, { reconnect: false });
       return;
     }
@@ -5809,7 +5819,6 @@ async function handleBridgeMessage(message, owner) {
       generation: message.generation,
       extensionId: message.acceptedExtensionId,
       catalogDigest: message.catalogDigest,
-      runtimeRevision: RUNTIME_REVISION,
     };
     state.generation = message.generation;
     return;
@@ -6183,16 +6192,15 @@ async function connectCourseTab(requestedTabId, expectedUrl, expectedCourseConne
 }
 
 /**
- * Whether the Morrow this connection reached is the same build as this Chrome extension. Morrow
- * names the connector identity it accepted in its ready answer, and this compares that answer with
- * what the extension is now: this exact extension, this connector revision, and this exact list of
- * course actions. An open connection on its own never stands for that.
+ * Whether the Morrow this connection reached accepted this Chrome extension and this exact list of
+ * course actions. Morrow names both in its ready answer, and this compares that answer with what the
+ * extension is now. Morrow checks the connector revision itself before it answers: a different
+ * build is closed as bridge_version_mismatch and never reaches this point.
  */
 function runtimeHealthy(connected) {
   const accepted = state.accepted;
   if (!connected || !accepted || accepted.generation !== state.generation) return false;
   return accepted.extensionId === chrome.runtime.id
-    && accepted.runtimeRevision === RUNTIME_REVISION
     && Boolean(state.catalog?.catalogDigest)
     && accepted.catalogDigest === state.catalog.catalogDigest;
 }
@@ -6220,6 +6228,7 @@ async function status() {
     pairing: stored.pairing?.status === "pending",
     connecting: state.socket?.readyState === WebSocket.CONNECTING || (state.socket?.readyState === WebSocket.OPEN && state.generation === 0),
     authenticationFailed: Boolean(state.authenticationProblem),
+    versionMismatch: !connected && state.versionMismatch === true,
     connected,
     runtimeHealthy: runtimeHealthy(connected),
     firstCourseRead,
@@ -6324,6 +6333,7 @@ async function disconnectConnector() {
   state.generation = 0;
   state.accepted = null;
   state.authenticationProblem = null;
+  state.versionMismatch = false;
   clearBridgeReviews();
   socket?.close(1000, "user_disconnected");
   await chrome.alarms.clear("morrow-pairing");

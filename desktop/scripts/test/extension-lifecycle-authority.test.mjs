@@ -1573,6 +1573,30 @@ async function pairingExactSchemaScenario() {
   assert.equal(value.FakeWebSocket.instances.length, 0);
 }
 
+// Morrow closes a connection from a Bridge build it does not expect as a version mismatch, which is
+// not a refused connection: the popup and the setup guide ask for a reload, not a new approval.
+async function versionMismatchScenario() {
+  const value = fixture();
+  await importWorker("version-mismatch");
+  const refused = await eventually(() => value.FakeWebSocket.instances[0]);
+  refused.open();
+  await eventually(() => refused.sent.find((message) => message.schema === "morrow.bridge.authenticate.v1"));
+  refused.close(4403, "bridge_version_mismatch");
+  const mismatch = await sendRuntime(value, { type: "morrow_status" }, popupSender());
+  assert.deepEqual(
+    [mismatch.result.paired, mismatch.result.connected, mismatch.result.authenticationFailed, mismatch.result.versionMismatch, mismatch.result.runtimeHealthy],
+    [true, false, false, true, false],
+  );
+  // The next accepted connection, after the reload or the update, clears the state.
+  value.alarmFired.listeners[0]({ name: "morrow-bridge-reconnect" });
+  await authenticate(value, 9, 1);
+  const healthy = await sendRuntime(value, { type: "morrow_status" }, popupSender());
+  assert.deepEqual(
+    [healthy.result.connected, healthy.result.authenticationFailed, healthy.result.versionMismatch, healthy.result.runtimeHealthy],
+    [true, false, false, true],
+  );
+}
+
 const otherOrigin = "https://other.instructure.com";
 const otherAnchorId = "canvas:account:g2";
 
@@ -1667,6 +1691,7 @@ const scenarios = {
   "pairing-stalled-cancellation": pairingStalledCancellationScenario,
   "pairing-offer-exact-schema": pairingOfferExactSchemaScenario,
   "pairing-exact-schema": pairingExactSchemaScenario,
+  "version-mismatch": versionMismatchScenario,
 };
 
 async function runScenario(name) {
@@ -1903,6 +1928,10 @@ test("pairing refuses an offer with fields outside the exact schema", async () =
 
 test("pairing ignores an approved status with fields outside the exact schema", async () => {
   await isolatedScenario("pairing-exact-schema");
+});
+
+test("a version mismatch names a reload, not a refused connection", async () => {
+  await isolatedScenario("version-mismatch");
 });
 
 // A shipped page must work with the fields the worker really sends, not a fixture's guess at them.

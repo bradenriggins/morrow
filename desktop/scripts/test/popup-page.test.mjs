@@ -257,6 +257,20 @@ test("a version-mismatched Bridge exposes only setup recovery", async () => {
   assert.deepEqual(page.messages("morrow_connect_course_prepare"), []);
 });
 
+test("a Bridge whose version Morrow refused offers the setup guide, not a new connection", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: false, authenticationFailed: false, versionMismatch: true, runtimeHealthy: false, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
+    handlers: { morrow_open_setup: () => ({ opened: true }) },
+  });
+  assert.equal(view(page).connection, "Reload needed");
+  assert.equal(view(page).primary, "Open setup guide");
+  assert.equal(view(page).primaryDisabled, false);
+  assert.equal(view(page).detail, "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome.");
+  await page.click("#primary");
+  assert.deepEqual(page.messages("morrow_open_setup"), [{ type: "morrow_open_setup" }]);
+  assert.deepEqual(page.messages("morrow_pair"), []);
+});
+
 test("the popup states when it last saw the course site, or that it cannot say", async () => {
   const page = await openPopup({ status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }) });
   assert.equal(page.query("#account-last-checked").getAttribute("datetime"), new Date(LAST_SEEN).toISOString());

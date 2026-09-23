@@ -762,12 +762,16 @@ export class LoopbackBridgeServer {
             return;
           }
           if (
-            request.runtimeRevision !== this.expectedRuntimeRevision
-            || request.catalogDigest !== this.expectedCatalogDigest
-            || (originId && request.extensionId !== originId)
+            (originId && request.extensionId !== originId)
             || (this.allowedExtensionIds.size > 0 && !this.allowedExtensionIds.has(request.extensionId))
           ) {
             socket.close(4403, "bridge_identity_refused");
+            return;
+          }
+          // A different build is fixed by an update and a reload, not by a new connection approval,
+          // so the Bridge is told which one it is. POST /pair already refuses the same mismatch.
+          if (request.runtimeRevision !== this.expectedRuntimeRevision || request.catalogDigest !== this.expectedCatalogDigest) {
+            socket.close(4403, "bridge_version_mismatch");
             return;
           }
           const serverNonce = randomBytes(32).toString("hex");

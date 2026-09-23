@@ -89,8 +89,10 @@ export function currentPlatform(status, detectedProvider = null) {
   return providerName(currentBinding(status)?.provider || currentSiteAnchor(status)?.provider);
 }
 
+// Morrow refused this Bridge build (versionMismatch), or a connection is open but Morrow's answer
+// does not match this extension. An update and a reload fix both, not a new connection approval.
 export function runtimeNeedsReload(status) {
-  return status?.connected === true && status.runtimeHealthy !== true;
+  return status?.versionMismatch === true || (status?.connected === true && status.runtimeHealthy !== true);
 }
 
 export function canChooseCourses(status, binding = currentBinding(status), anchor = currentSiteAnchor(status)) {
@@ -224,7 +226,7 @@ export function detailText(status, detectedProvider = null) {
 
 export function controlState(status, { actionInFlight = false, detectedProvider = null } = {}) {
   if (!status) return { primaryDisabled: actionInFlight, primaryBusy: actionInFlight, secondaryDisabled: true };
-  const waiting = Boolean(status.pairing || (status.authenticationFailed !== true && !canChooseCourses(status) && status.paired && !status.connected));
+  const waiting = Boolean(status.pairing || (status.authenticationFailed !== true && !runtimeNeedsReload(status) && !canChooseCourses(status) && status.paired && !status.connected));
   const needsDetectedCourse = status.paired === true && status.connected === true
     && !canChooseCourses(status) && currentBinding(status)?.runtimeVerified !== true;
   return {

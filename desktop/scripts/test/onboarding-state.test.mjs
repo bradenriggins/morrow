@@ -142,6 +142,19 @@ test("the version check separates a matching Morrow from one this connection can
     "Morrow matches this Morrow Bridge version and its list of course actions");
   // A status with no version answer at all is not treated as a match.
   assert.equal(setupGuideState({ ...connected }).ready, false);
+  // A saved connection reconnects by itself after the reload, so no step asks for Connect Morrow.
+  assert.doesNotMatch(mismatch.detail, /Connect Morrow/);
+});
+
+test("a Morrow that refused this Bridge version asks for a reload, not for Morrow to be opened again", () => {
+  const state = setupGuideState({ paired: true, connected: false, versionMismatch: true, runtimeHealthy: false, bindings: [], siteAnchors: [] });
+  assert.equal(state.open, "runtime");
+  assert.equal(state.heading, "Morrow needs a reload");
+  assert.equal(state.title, "Reload Morrow Bridge");
+  assert.equal(textOf(state, "connection"), "Morrow Bridge reached Morrow, and Morrow expects a different version");
+  assert.equal(textOf(state, "runtime"), "Morrow reports a different version from this Morrow Bridge");
+  assert.match(state.detail, /reload Morrow Bridge on the Chrome extensions page/);
+  assert.doesNotMatch(state.detail, /Connect Morrow/);
 });
 
 // "Ready to use" is the claim a person acts on, so only a read that happened can raise it, and the

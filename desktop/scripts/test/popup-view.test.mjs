@@ -48,6 +48,19 @@ test("a connected socket with an unhealthy runtime asks for a Bridge reload", ()
   assert.match(detailText(status), /reload Morrow Bridge/i);
 });
 
+// Morrow closes a connection from a Bridge build it does not expect with its own reason. A new
+// connection approval cannot fix that; an update and a reload can.
+test("a Morrow that refused this Bridge version asks for a Bridge reload, not a new connection", () => {
+  const status = { paired: true, pairing: false, connecting: false, connected: false, authenticationFailed: false, versionMismatch: true, runtimeHealthy: false, bindings: [binding()], siteAnchors: [anchor()], bindingCount: 1 };
+  assert.equal(runtimeNeedsReload(status), true);
+  assert.equal(statusValue(status), "Reload needed");
+  assert.equal(courseValue(status), "Not available");
+  assert.equal(primaryLabel(status), "Open setup guide");
+  assert.equal(controlState(status).primaryDisabled, false);
+  assert.match(detailText(status), /versions do not match/i);
+  assert.doesNotMatch(detailText(status), /Reconnect Morrow|approve the new connection/);
+});
+
 test("a refused server identity offers re-pairing without discarding selected courses", () => {
   const status = statuses[5];
   assert.equal(statusValue(status), "Reconnect needed");

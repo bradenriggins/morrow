@@ -115,6 +115,9 @@ function readState(status) {
   const pairing = status?.pairing === true;
   const connecting = status?.connecting === true;
   const connected = status?.connected === true;
+  // Morrow closes a connection from a Bridge build it does not expect with its own reason, so the
+  // connection reached Morrow and the version result is known even though it closed.
+  const versionMismatch = !connected && status?.versionMismatch === true;
   // Morrow Bridge compares versions through the connection, so a closed connection reports no
   // version result at all rather than a failed one.
   const runtimeHealthy = connected && status?.runtimeHealthy === true;
@@ -133,21 +136,23 @@ function readState(status) {
     },
     {
       id: "connection",
-      done: connected,
+      done: connected || versionMismatch,
       text: connected
         ? "Morrow Bridge is connected to Morrow"
-        : pairing
-          ? "Morrow Bridge connects after you allow this connection"
-          : connecting
-            ? "Morrow Bridge is connecting to Morrow"
-            : "Morrow Bridge is not connected to Morrow",
+        : versionMismatch
+          ? "Morrow Bridge reached Morrow, and Morrow expects a different version"
+          : pairing
+            ? "Morrow Bridge connects after you allow this connection"
+            : connecting
+              ? "Morrow Bridge is connecting to Morrow"
+              : "Morrow Bridge is not connected to Morrow",
     },
     {
       id: "runtime",
       done: runtimeHealthy,
       text: runtimeHealthy
         ? "Morrow matches this Morrow Bridge version and its list of course actions"
-        : connected
+        : connected || versionMismatch
           ? "Morrow reports a different version from this Morrow Bridge"
           : "Morrow version is checked when Morrow Bridge connects",
     },
@@ -208,7 +213,7 @@ function readState(status) {
   if (open === "runtime") return {
     ...state,
     title: "Reload Morrow Bridge",
-    detail: "Morrow and Morrow Bridge report different versions. Update Morrow, then reload Morrow Bridge on the Chrome extensions page and select Connect Morrow again.",
+    detail: "Morrow and Morrow Bridge report different versions. Update Morrow, then reload Morrow Bridge on the Chrome extensions page and open the Morrow Bridge popup.",
     canOpenSettings: false,
   };
   if (open === "course" && readySites === 0) return {

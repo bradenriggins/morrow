@@ -369,6 +369,43 @@ describe("LoopbackBridgeServer", () => {
     expect(server.health()).toMatchObject({ connected: false, extensionId: null, bindingCount: 0 });
   });
 
+  // A different Morrow or Morrow Bridge version is fixed by an update and a reload, not by a new
+  // connection approval, so it closes with its own reason.
+  it("names a version mismatch apart from a refused identity", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+    });
+    servers.push(server);
+    const address = await server.start();
+    const refusal = async (fields: { runtimeRevision?: string; catalogDigest?: string; extensionId?: string }) => {
+      const socket = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, {
+        origin: `chrome-extension://${extensionId}`,
+      });
+      sockets.push(socket);
+      await once(socket, "open");
+      const closed = once(socket, "close");
+      socket.send(serializeBridgeMessage({
+        schema: BRIDGE_SCHEMAS.authenticate,
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        clientNonce: randomBytes(32).toString("hex"),
+        extensionId,
+        runtimeRevision: revision,
+        catalogDigest: digest,
+        sentAt: Date.now(),
+        ...fields,
+      }));
+      const [code, reason] = await closed;
+      return `${code} ${reason.toString()}`;
+    };
+    await expect(refusal({ runtimeRevision: "8".repeat(40) })).resolves.toBe("4403 bridge_version_mismatch");
+    await expect(refusal({ catalogDigest: "b".repeat(64) })).resolves.toBe("4403 bridge_version_mismatch");
+    await expect(refusal({ extensionId: "b".repeat(32) })).resolves.toBe("4403 bridge_identity_refused");
+  });
+
   it("tells its owner each time a Bridge connection becomes active, after the ready answer", async () => {
     const activations: boolean[] = [];
     const server: LoopbackBridgeServer = new LoopbackBridgeServer({

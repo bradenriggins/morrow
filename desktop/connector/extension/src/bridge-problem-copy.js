@@ -24,7 +24,7 @@ const COPY = {
   bridge_version_mismatch: {
     title: "Morrow and Morrow Bridge versions do not match",
     detail: "The Morrow app on this computer refused the connection because it expects a different Morrow Bridge.",
-    action: "Update Morrow, then reload Morrow Bridge on the Chrome extensions page and select Connect Morrow again.",
+    action: "Update Morrow, then reload Morrow Bridge on the Chrome extensions page and open the Morrow Bridge popup.",
   },
   bridge_port_in_use: {
     title: "Another Morrow is already using this connection",

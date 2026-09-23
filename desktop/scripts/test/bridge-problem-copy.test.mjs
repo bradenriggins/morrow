@@ -104,6 +104,13 @@ test("no code names a control or a cause the Morrow Bridge pages do not have", (
   for (const code of PROBLEM_CODES) assert.doesNotMatch(problemText(code), retired, code);
 });
 
+// Morrow Bridge reconnects by itself with a saved connection once it is reloaded, and the popup
+// shows no Connect Morrow button while one is saved.
+test("a version mismatch sends the educator to the popup after the reload, not to Connect Morrow", () => {
+  assert.doesNotMatch(problemText("bridge_version_mismatch"), /Connect Morrow/);
+  assert.match(problemText("bridge_version_mismatch"), /reload Morrow Bridge on the Chrome extensions page/);
+});
+
 test("each code reads as its own state rather than one repeated sentence", () => {
   const titles = PROBLEM_CODES.map((code) => problemCopy(code).title);
   assert.equal(new Set(titles).size, titles.length, "two codes share one title, so one of them names no state of its own");
