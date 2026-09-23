@@ -72,6 +72,29 @@ describe("BatchSourceSettlementStore", () => {
     store.close();
   });
 
+  it("records each dispatch result as its own settlement, never collapsing a sent failure", () => {
+    const store = new BatchSourceSettlementStore({ path: ":memory:" });
+    store.initialize("bat:test-dispatch", [
+      { childId: "course:40", sourceId: "canvas-session" },
+      { childId: "course:41", sourceId: "canvas-session" },
+      { childId: "course:42", sourceId: "canvas-session" },
+    ]);
+    expect(store.markDispatchResult("bat:test-dispatch", "course:40", "failed", "op:40-12345678")).toMatchObject({ state: "failed_no_effect" });
+    expect(store.markDispatchResult("bat:test-dispatch", "course:41", "unknown", "op:41-12345678")).toMatchObject({ state: "inspection_required" });
+    // The change went out and a fresh read proved the LMS holds another result.
+    expect(store.markDispatchResult("bat:test-dispatch", "course:42", "failed_effect_possible", "op:42-12345678")).toMatchObject({
+      state: "failed_effect_possible",
+      stageGatewayOperationId: "op:42-12345678",
+    });
+    expect(store.summary("bat:test-dispatch")).toMatchObject({
+      failedNoEffect: 1,
+      inspectionRequired: 1,
+      failedEffectPossible: 1,
+      requiresAttention: true,
+    });
+    store.close();
+  });
+
   it("preserves ambiguous and effect-possible failure states", () => {
     expect(sourceSettlementStateFromTask({
       taskId: "task-1",

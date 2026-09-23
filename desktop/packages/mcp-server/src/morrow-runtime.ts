@@ -591,12 +591,20 @@ const EFFECT_STATES_THAT_MAY_HAVE_REACHED_THE_PROVIDER: ReadonlySet<string> = ne
   "applied_or_unknown",
 ]);
 
+/** A staged change that reached the LMS, where a fresh read proved the LMS holds another result. */
+function sentAndMismatched(operation: JsonObject | null): boolean {
+  return isJsonObject(operation) && operation.state === "failed" && operation.verificationStatus === "mismatch";
+}
+
+/** A child's result, and for a staged change that failed after it was sent, the settlement to record. */
+type ChildOutcome = BatchExecutionResult & { readonly dispatchSettlement?: "failed_effect_possible" };
+
 function childResult(
   runtime: GatewayRuntime,
   batch: BatchRecord,
   child: BatchChildRecord,
   result: JsonObject,
-): BatchExecutionResult {
+): ChildOutcome {
   const meta = gatewayMeta(result);
   const operationId = gatewayOperationId(result) || "";
   const operation = operationId
@@ -616,6 +624,21 @@ function childResult(
   const retainedArtifact = verifiedCanvasCreateArtifact(child, result);
   const resultDigest = sha256Json(retainedArtifact || result);
   const ratePolicy = canvasRatePolicy(result);
+
+  // The change was sent and the LMS holds another result: it failed, and it may have changed the
+  // course. Neither "needs checking" nor "no effect" is true of it.
+  if (batch.mode === "stage_writes" && operationId.startsWith("op:") && sentAndMismatched(operation)) {
+    return {
+      state: "failed",
+      resultDigest,
+      gatewayOperationId: operationId,
+      gatewayOperationState,
+      ...(sourceResultState ? { sourceResultState } : {}),
+      errorDigest: sha256Text("verification_mismatch"),
+      ...(ratePolicy ? { ratePolicy } : {}),
+      dispatchSettlement: "failed_effect_possible",
+    };
+  }
 
   if (gatewayOperationState === "source_unknown") {
     return {
@@ -983,10 +1006,16 @@ export class MorrowRuntime {
               child.gatewayOperationId || undefined,
             );
           } else if (child.state === "failed") {
+            let operation: JsonObject | null = null;
+            try {
+              operation = child.gatewayOperationId ? this.gateway.operationGet(child.gatewayOperationId) : null;
+            } catch {
+              // A child whose effect record is gone keeps the failure it recorded.
+            }
             this.sourceSettlements.markDispatchResult(
               batchId,
               child.childId,
-              "failed",
+              sentAndMismatched(operation) ? "failed_effect_possible" : "failed",
               child.gatewayOperationId || undefined,
             );
           }
@@ -1952,7 +1981,7 @@ export class MorrowRuntime {
                 { signal: input.signal, bound: false, toolName: NATIVE_COURSE_AUDIT_TOOL },
               )
             : await this.gateway.callSourceOwned(child.publicToolName, forwarded, { signal: input.signal });
-        const outcome = isNativeCourseInventoryChild(child)
+        const { dispatchSettlement, ...outcome }: ChildOutcome = isNativeCourseInventoryChild(child)
           ? nativeCourseInventoryResult(resultValue)
           : isNativeCourseAuditChild(child)
           ? nativeCourseAuditResult(resultValue)
@@ -1979,7 +2008,7 @@ export class MorrowRuntime {
               this.sourceSettlements.markDispatchResult(
                 batch.batchId,
                 child.childId,
-                outcome.state === "unknown" ? "unknown" : "failed",
+                dispatchSettlement ?? (outcome.state === "unknown" ? "unknown" : "failed"),
                 outcome.gatewayOperationId,
               );
             }

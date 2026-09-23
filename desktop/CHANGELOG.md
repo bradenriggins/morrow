@@ -24,6 +24,7 @@ This release fixes the problems a full review of Morrow found before release. Te
 - In Plan, a course's detail says that "Edit. Routine edits." turns on every routine edit, and that Customize or "do not ask again" on a review turns on a single kind.
 - When a course connection closes before a change goes out, or Morrow cannot first read the course's Edit access, Morrow says nothing was sent. It no longer says the platform may have received the change and holds that item for a check.
 - In a group of changes, a change whose answer from the learning platform was lost shows Needs checking instead of Did not finish, and the group pauses before its next change.
+- In a group of changes, a change that the learning platform did not save as approved is reported to your assistant as failed, as its review page shows, and the group pauses before its next change. It used to be reported as one that needs checking.
 - Recent changes offers a Reverse change request only for a change that was sent. A cancelled or failed request says nothing was sent, so there is nothing to undo.
 - While a review of a group of changes is open, or Morrow is applying approved work, the assistant keeps waiting. It says you approved only when you did.
 - After your computer sleeps, Chrome restarts, or Morrow Bridge reloads, the popup lists the reviews that still wait, and an open review tab can approve again.
