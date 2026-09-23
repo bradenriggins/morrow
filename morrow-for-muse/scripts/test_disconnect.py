@@ -20,6 +20,12 @@ Failure modes this suite pins down (written before the fix):
   7. (round-4 audit M5) with no crontab on the machine, disconnect
      must still run (supervision is the background loop, which it
      stops) instead of refusing.
+  8. (final sweep 2026-09-23) a disconnect run without --yes (the
+     normal agent run) printed "UNINSTALL FAIL: nothing was changed",
+     so the agent told the educator that uninstalling failed for a
+     disconnect that correctly waited for a yes. Every stop names the
+     mode, and a missing yes reads as not confirmed. A completed
+     uninstall printed "Uninstall complete" twice; it prints it once.
 
 The real crontab is never touched: a fake `crontab` on PATH stores the
 table in a scratch file, and a fake `ss` reports no listeners. The
@@ -169,7 +175,36 @@ def test_non_interactive_disconnect_without_yes_names_the_flag(rig):
     assert proc.returncode != 0
     assert "--yes" in out
     assert "aborted by user" not in out
+    assert "UNINSTALL" not in out and "FAIL" not in out, out
+    assert "DISCONNECT STOPPED: not confirmed" in proc.stderr, out
+    assert "nothing was changed" in proc.stderr, out
     assert os.path.exists(os.path.join(rig["profile"], "Cookies"))
+
+
+def _run_uninstall(rig, *args):
+    return subprocess.run(["bash", os.path.join(rig["tree"], "scripts",
+                                                "uninstall.sh")]
+                          + list(args),
+                          env=rig["env"], capture_output=True, text=True,
+                          timeout=120, stdin=subprocess.DEVNULL)
+
+
+def test_non_interactive_uninstall_without_yes_says_not_confirmed(rig):
+    proc = _run_uninstall(rig)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0
+    assert "UNINSTALL STOPPED: not confirmed" in proc.stderr, out
+    assert "scripts/uninstall.sh --yes" in proc.stderr, out
+    assert "FAIL" not in out, out
+    assert os.path.isdir(rig["tree"])
+
+
+def test_a_completed_uninstall_says_so_once(rig):
+    proc = _run_uninstall(rig, "--yes")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert not os.path.exists(rig["tree"]), out
+    assert out.count("Uninstall complete") == 1, out
 
 
 # consent.md describes the disconnect in plain words and names no
