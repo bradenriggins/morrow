@@ -22,6 +22,10 @@ audit round 4, H3a/H3b, 2026-09-22):
      only; the record ends with the conversation; the journal never
      holds the name.
   9. bin/morrow routes `students find` to this tool.
+ 10. The check that no stored file holds the name searched every byte
+     for "Jane", including the vault ciphertext, a random run of
+     base64url that holds "Jane" by chance with no leak. A stored name
+     stands as its own word; the check matches it that way.
 
 Needs the optional 'cryptography' package (labels come from the
 encrypted vault); skips without it except the routing test.
@@ -31,6 +35,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -75,6 +80,23 @@ SECTIONS = [{"id": 11, "name": "Period 2"}, {"id": 12, "name": "Period 4"},
 SECRETS = ("98765", "55123", "70001", "70002", "70003", "jdoe", "rsmith",
            "crivera", "mchen", "@school.edu", "20231234", "S-4411",
            "Robert", "Smith", "Mia", "Chen", "Doe, Jane")
+
+
+_WORD_RE = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def found_in(text, needles):
+    """The needles that occur in text.
+
+    A needle made only of letters, digits, "_" and "-" counts only as a
+    whole word. Ciphertext, HMACs, digests, keys, and op ids are long
+    random runs of exactly those characters, so a short name or id can
+    sit inside one by chance with no leak. A needle with any other
+    character ("jane.doe@", "Doe, Jane") cannot occur inside such a run
+    and counts anywhere."""
+    words = set(_WORD_RE.findall(text))
+    return [n for n in needles
+            if (n in words if _WORD_RE.fullmatch(n) else n in text)]
 
 
 def fake_canvas(roster=ROSTER, sections=SECTIONS):
@@ -206,14 +228,32 @@ def test_ending_the_conversation_in_settings_ends_the_echo(home):
     assert wire.apply_name_echo(text, BASE, COURSE, CONV) == text
 
 
+def _files_holding(root, needles):
+    hits = {}
+    for dirpath, _dirs, files in os.walk(root):
+        for name in files:
+            path = os.path.join(dirpath, name)
+            with open(path, "rb") as fh:
+                data = fh.read()
+            found = found_in(data.decode("utf-8", "replace"), needles)
+            if found:
+                hits[os.path.relpath(path, root)] = found
+    return hits
+
+
+def test_stored_name_search_ignores_random_runs(home):
+    with open(os.path.join(home, "vault.json"), "w") as fh:
+        json.dump({"ciphertext": "hCn1HQlmx07kJaneV4X-q7XGMnGXJI0Og"}, fh)
+    assert _files_holding(home, ("Jane",)) == {}
+    with open(os.path.join(home, "leak.json"), "w") as fh:
+        json.dump({"shown": "Jane Doe (Student A2)"}, fh)
+    assert _files_holding(home, ("Jane",)) == {"leak.json": ["Jane"]}
+
+
 def test_echo_store_and_journal_hold_no_plaintext_name(home):
     from dispatch import executor as ex
     _find("Jane Doe")
-    for dirpath, _dirs, files in os.walk(home):
-        for name in files:
-            with open(os.path.join(dirpath, name), "rb") as fh:
-                data = fh.read()
-            assert b"Jane" not in data, os.path.join(dirpath, name)
+    assert _files_holding(home, ("Jane",)) == {}
     with open(ex.JOURNAL_PATH, encoding="utf-8") as fh:
         events = [json.loads(line) for line in fh if line.strip()]
     assert any(e.get("event") == "privacy.name_echo_recorded"

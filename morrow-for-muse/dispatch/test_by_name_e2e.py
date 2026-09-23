@@ -30,7 +30,6 @@ The run writes a repeatable artifact of the flow to
 
 import json
 import os
-import re
 import shutil
 import sys
 
@@ -47,7 +46,8 @@ from dispatch import executor as ex  # noqa: E402
 import dispatch.admission as admission_mod  # noqa: E402
 from dispatch.test_direct_lane_hardening import (  # noqa: E402,F401
     BASE, _pack, hermetic)
-from learners.test_students_find import ROSTER, fake_canvas  # noqa: E402
+from learners.test_students_find import (  # noqa: E402
+    ROSTER, fake_canvas, found_in)
 from modes import errors as mode_errors  # noqa: E402
 
 USER = "byname-educator"
@@ -162,23 +162,6 @@ def _journal_text():
             return fh.read()
     except FileNotFoundError:
         return ""
-
-
-_WORD_RE = re.compile(r"[A-Za-z0-9_-]+")
-
-
-def found_in(text, needles):
-    """The needles that occur in text.
-
-    A needle made only of letters, digits, "_" and "-" counts only as a
-    whole word. Ciphertext, HMACs, digests, keys, and op ids are long
-    random runs of exactly those characters, so a short name or id can
-    sit inside one by chance with no leak. A needle with any other
-    character ("jane.doe@", "Doe, Jane") cannot occur inside such a run
-    and counts anywhere."""
-    words = set(_WORD_RE.findall(text))
-    return [n for n in needles
-            if (n in words if _WORD_RE.fullmatch(n) else n in text)]
 
 
 def _leaks(value, introduced=("Jane Doe",)):
