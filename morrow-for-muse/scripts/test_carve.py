@@ -214,6 +214,19 @@ def test_no_shipped_file_invokes_a_dev_only_script(carved):
     assert not missing, missing
 
 
+def test_shipped_chromium_selftest_reads_only_shipped_code(carved):
+    # transport/README.md names local_chromium_selftest.py as the coverage
+    # for the proxy allowlist, and it ships; its allowlist scan must not
+    # open session/capture.py, which the carve leaves out.
+    probe = ("import local_chromium_selftest as t\n"
+             "t._t_proxy_generic_call_methods_allowlisted()\n"
+             "raise SystemExit(1 if t.FAIL else 0)\n")
+    result = subprocess.run([sys.executable, "-c", probe],
+                            cwd=os.path.join(carved, "transport"),
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_env_template_promises_only_what_keepalive_honors():
     # keepalive.sh always pins the helper profile to <tree>/helper/profile,
     # so the tree env template must not offer LOGIN_HELPER_PROFILE_DIR as
