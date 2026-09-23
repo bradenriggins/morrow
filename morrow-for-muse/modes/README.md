@@ -127,7 +127,7 @@ hook needs for its audit block and usage journaling.
 
 `dispatch/admission.py::check_mode_authority(entry, params, approval,
 mode_ctx)` sits in the `admit()` gate chain behind the optional
-`mode_ctx` parameter. The full harness contract:
+`mode_ctx` parameter. The full contract:
 
 ```python
 mode_ctx = {"user_id": "<id>",
@@ -141,10 +141,17 @@ mode_ctx = {"user_id": "<id>",
 admit(entry, params, tenant_base=..., mode_ctx=mode_ctx)
 ```
 
-The Muse harness supplies `user_id` (env `MORROW_USER_ID`) and
-`conversation_id` (env `MORROW_CONVERSATION_ID`) for every dispatch;
-`dispatch_entry`, `dispatch_catalog_op`, and `dispatch_undo` all accept
-and forward `mode_ctx`. Missing `user_id` fails closed to the legacy
+No harness sets either id; the executor CLI fills them.
+`user_id` is `--user-id`, else `MORROW_USER_ID`, else the Canvas
+account pinned at first sign-in, as `canvas:<account id>@<Canvas host>`
+(`config/identity.default_user_id`, which `morrow mode`, `morrow
+settings`, and `morrow query` use too), so one educator has one id in
+every conversation. `conversation_id` is `--conversation-id`, else
+`MORROW_CONVERSATION_ID`: SKILL.md tells the agent to make a new one at
+the start of each Muse conversation and pass it to every command in
+that conversation. `dispatch_entry`, `dispatch_catalog_op`, and
+`dispatch_undo` all accept and forward `mode_ctx`. Missing `user_id`
+(no flag, no variable, no pinned account) fails closed to the legacy
 plan-mode approval path.
 
 - Reads: `(None, None)`, unchanged.

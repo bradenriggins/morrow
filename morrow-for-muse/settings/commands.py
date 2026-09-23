@@ -49,8 +49,10 @@ CLI:
   python3 settings/commands.py settings get KEY --user-id U
   python3 settings/commands.py settings set KEY VALUE --user-id U
   (bin/morrow mode ... and bin/morrow settings ... run the same thing.)
-  --user-id defaults to MORROW_USER_ID and --conversation-id to
-  MORROW_CONVERSATION_ID. Output is one JSON object; exit 0 when ok.
+  --user-id defaults to MORROW_USER_ID, then the Canvas account pinned
+  at first sign-in (config/identity.default_user_id); --conversation-id
+  defaults to MORROW_CONVERSATION_ID. Output is one JSON object; exit 0
+  when ok.
 
 No em dashes anywhere in the messages: commas, colons, or parentheses
 only.
@@ -65,6 +67,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 ".."))
+from config.identity import default_user_id  # noqa: E402
 from modes import state as mode_state  # noqa: E402
 from settings.store import (  # noqa: E402
     SETTINGS_SCHEMA,
@@ -554,7 +557,7 @@ def _parser():
     sub = p.add_subparsers(dest="group", required=True)
 
     def ids(sp):
-        sp.add_argument("--user-id", default=os.environ.get("MORROW_USER_ID"))
+        sp.add_argument("--user-id", default=None)
         sp.add_argument("--conversation-id",
                         default=os.environ.get("MORROW_CONVERSATION_ID"))
 
@@ -582,10 +585,15 @@ def _parser():
 
 def main(argv=None):
     args = _parser().parse_args(argv)
+    args.user_id = args.user_id or default_user_id()
     if not args.user_id:
         print(json.dumps({"ok": False, "status": "error", "mode": "plan",
-                          "message": "No user id: pass --user-id or set "
-                                     "MORROW_USER_ID."}))
+                          "message": "Nothing changed: Morrow keeps your "
+                                     "mode and settings with your Canvas "
+                                     "account, and it has not confirmed "
+                                     "which account is yours yet. Sign in "
+                                     "to Canvas on the helper page "
+                                     "first."}))
         return 2
     try:
         if args.group == "mode" and args.action == "status":

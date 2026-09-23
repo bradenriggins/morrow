@@ -89,7 +89,8 @@ def educator_zone(user_id, reader, course_id):
     course's time zone in Canvas, then the educator's Canvas profile.
     Raises TimezoneUnknown when none is set; never falls back to a
     fixed zone."""
-    uid = user_id or os.environ.get("MORROW_USER_ID")
+    from config.identity import default_user_id
+    uid = user_id or default_user_id()
     if uid:
         try:
             from settings import store as _settings
@@ -334,19 +335,23 @@ def _translate(operation, exc):
 def run_query(course_id, quiz, below_percent=None, below_points=None,
               letter_f=False, reader=None, tenant_base=None,
               now_utc=None, synthetic_rows=None, progress=None,
-              timezone=None, user_id=None):
+              timezone=None, user_id=None, conversation_id=None):
     """Run the full chain.
 
     course_id: Canvas course id.
     quiz: the quiz window, "last_week" or "this_week".
     timezone: the educator's IANA time zone when they named one; else
         user_id's `timezone` setting (user_id defaults to
-        MORROW_USER_ID), the course's zone, or the Canvas profile's.
+        MORROW_USER_ID, then the Canvas account pinned at first
+        sign-in), the course's zone, or the Canvas profile's.
     below_percent / below_points / letter_f: at most one explicit fail
         threshold; none means the assignment's own default.
     reader: a LiveReader (default: create and health-check one).
     tenant_base: tenant origin for the privacy binding (default:
         CANVAS_BASE from the environment, then the tree's helper/env).
+    conversation_id: the Muse conversation, so a student the educator
+        named in it is shown by that name next to the label (default:
+        MORROW_CONVERSATION_ID, read in query/present.py).
     synthetic_rows: when set, a list of synthetic (fixture) submission
         dicts used INSTEAD of live submissions; the result is loudly
         labeled synthetic and never touches the learner vault.
@@ -531,7 +536,8 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                     "short_name": user.get("short_name"),
                 })
             projected = _present.project_live(
-                str(course_id), learner_rows, tenant_base)
+                str(course_id), learner_rows, tenant_base,
+                conversation_id=conversation_id)
             label_by_qord = {p["qord"]: p["display_name"] for p in projected}
             display_rows = []
             for i, (sub, cls) in enumerate(failed_rows):
@@ -613,9 +619,15 @@ def main(argv):
                          "one (default: their timezone setting, then the "
                          "course's zone in Canvas, then their Canvas "
                          "profile)")
-    ap.add_argument("--user-id", default=os.environ.get("MORROW_USER_ID"),
+    ap.add_argument("--user-id", default=None,
                     help="the educator, for their timezone setting "
-                         "(default: MORROW_USER_ID)")
+                         "(default: MORROW_USER_ID, then the Canvas "
+                         "account pinned at first sign-in)")
+    ap.add_argument("--conversation-id",
+                    default=os.environ.get("MORROW_CONVERSATION_ID"),
+                    help="the Muse conversation id, so a student the "
+                         "educator named in it is shown by that name "
+                         "(default: MORROW_CONVERSATION_ID)")
     ap.add_argument("--progress", action="store_true",
                     help="QOL-3: print chain progress lines to stderr as "
                          "each stage completes (stdout stays clean for "
@@ -635,7 +647,8 @@ def main(argv):
                            letter_f=args.letter_f,
                            tenant_base=args.canvas_base,
                            progress=progress, timezone=args.timezone,
-                           user_id=args.user_id)
+                           user_id=args.user_id,
+                           conversation_id=args.conversation_id)
     except ChainFailure as exc:
         # TranslatedError is a dataclass, not an exception: the
         # raisable carrier is ChainFailure, which wraps the

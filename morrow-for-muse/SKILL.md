@@ -312,7 +312,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py plan-write \
   --params '{"course_id": "89585", "url_or_id": "week-1"}' \
   --body '{"wiki_page": {"title": "Week 1 Overview"}}' \
   --backend chromium \
-  --user-id "$MORROW_USER_ID" --conversation-id "$MORROW_CONVERSATION_ID"
+  --conversation-id "<this conversation's id>"
 ```
 
 It prints one JSON object: `op_id`, `course` (`id`, `name`, `term`),
@@ -325,7 +325,7 @@ The educator replies "Yes, do it". You run:
 PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py approve-write \
   --op-id <op_id from plan-write> --authorization "Yes, do it" \
   --backend chromium \
-  --user-id "$MORROW_USER_ID" --conversation-id "$MORROW_CONVERSATION_ID"
+  --conversation-id "<this conversation's id>"
 ```
 
 The result's `outcome` is `verified` or `unverified` (relay
@@ -479,12 +479,12 @@ both modes.
   the tree, and survive restarts and reinstalls.
 - Commands (the CLI prints one JSON object with `ok`, `status`, `mode`,
   and `message`; the Python API in `settings/commands.py` returns the
-  same dict). `--user-id` defaults to `MORROW_USER_ID` and
-  `--conversation-id` to `MORROW_CONVERSATION_ID`:
-  - `morrow mode status --user-id U --conversation-id C`: the mode in
-    force and where it comes from.
-  - `morrow mode set plan --user-id U --conversation-id C`: edit off,
-    plan everywhere.
+  same dict). Pass this conversation's id as `--conversation-id C` to
+  each one (see "Where the two ids come from" below):
+  - `morrow mode status --conversation-id C`: the mode in force and
+    where it comes from.
+  - `morrow mode set plan --conversation-id C`: edit off, plan
+    everywhere.
   - `morrow mode set plan --this-conversation ...`: plan for this
     conversation only.
   - `morrow mode set edit ...` (add `--this-conversation` for this
@@ -506,19 +506,32 @@ both modes.
   threshold. You choose the arguments from what the educator said; if
   they mean a quiz that is not last week's or this week's, ask which
   quiz first. Weeks are the educator's weeks: the query uses their
-  `timezone` setting (pass `--user-id`), else the course's time zone in
+  `timezone` setting, else the course's time zone in
   Canvas, else their Canvas profile's. When the educator names a time
   zone, pass `--timezone <IANA name>`. If none is known the query asks
   for it (mode `query-timezone-unknown`): save their answer with
   `morrow settings set timezone <name>` and run it again. Names in the
   result are de-identified (a student the educator named in this
   conversation shows by that name next to the label).
-- Every dispatch must carry the educator's identity for the mode gate:
-  pass `--user-id` and `--conversation-id` to `dispatch/executor.py`
-  (or set `MORROW_USER_ID` and `MORROW_CONVERSATION_ID`). Without a
-  user id the write gate is plan (every write needs approval). Without
-  a conversation id, per-conversation edit overrides cannot apply and
-  any plan override makes the write plan.
+- Where the two ids come from. The user id is the educator's
+  signed-in Canvas account: every command uses the account pinned at
+  first sign-in (`canvas:<account id>@<Canvas host>`), so the educator
+  has one id in every conversation and you never pass `--user-id`
+  (it and `MORROW_USER_ID` override the account, for scripted setups
+  only). Before an account is pinned there is no user id: every write
+  needs approval, and `morrow mode` and `morrow settings` change
+  nothing until the educator signs in. The conversation id is yours to
+  make: at the start of each Muse conversation, make one new
+  conversation id (a random UUID, for example from `python3 -c
+  'import uuid; print(uuid.uuid4())'`) and pass it as
+  `--conversation-id` to every Morrow command in that conversation
+  (`dispatch/executor.py`, `morrow mode`, `morrow settings`, `morrow
+  students find`, `morrow query`). Never reuse a conversation id in
+  another conversation, and never use a fixed one: "edit mode for this
+  conversation" and the names the educator typed belong to it, so a
+  reused id carries them into the next conversation. Without a
+  conversation id, per-conversation edit overrides cannot apply and any
+  plan override makes the write plan.
 - Other knobs, all user-settable: `verbosity` (concise | balanced |
   detailed, default balanced), `failure_verbosity` (concise | detailed,
   default detailed), `proactivity` (reactive | suggestive, default
@@ -730,11 +743,10 @@ leave that part out, or ask the educator to write it.
 
 The educator names students; you never guess which one they mean.
 
-1. The educator names a student. Run
-   `morrow students find --course C "<the name exactly as the educator
-   typed it>"` (pass `--conversation-id`, or set
-   `MORROW_CONVERSATION_ID`). It reads the course roster through the
-   login helper and prints one JSON object.
+1. The educator names a student. Run `morrow students find --course C
+   --conversation-id <this conversation's id> "<the name exactly as the
+   educator typed it>"`. It reads the course roster through the login
+   helper and prints one JSON object.
 2. `status: resolved`: one student matched. Use `student` (the
    label) or `shown_as` ("Jane Doe (Student A3)") wherever a write
    needs that student. From now on in this conversation, outputs show

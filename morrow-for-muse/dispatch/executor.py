@@ -8225,10 +8225,11 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
          "course_resolution": {"course_id": ..., "confidence": 0-1,
                                "user_confirmed": bool, ...},
          "destructive_confirmed": "<verbatim educator yes>"}
-    The Muse harness supplies user_id (and conversation_id when a
-    conversation is in scope) for every dispatch; without user_id the
-    gate fails closed to the legacy plan-mode approval path. See
-    modes/README.md for the integrator contract.
+    The CLI fills user_id from --user-id, MORROW_USER_ID, or the Canvas
+    account pinned at first sign-in, and conversation_id from the
+    agent's --conversation-id; without user_id the gate fails closed to
+    the legacy plan-mode approval path. See modes/README.md for the
+    integrator contract.
     """
     # W4-P0-10: derive the effect class from the entry's blocks before
     # anything trusts the manifest's "effects" field.
@@ -9844,12 +9845,14 @@ def _load_approval(path: str | None) -> dict | None:
 def _mode_ctx_from_args(args) -> dict | None:
     """Build the Plan/Edit mode_ctx from CLI flags (or None).
 
-    user_id defaults to MORROW_USER_ID; conversation_id defaults to
-    MORROW_CONVERSATION_ID. Returns None when no user identity is
-    available, in which case the admission gate fails closed to the
-    legacy plan-mode approval path.
+    user_id defaults to MORROW_USER_ID, then the Canvas account pinned
+    at first sign-in (config/identity.default_user_id); conversation_id
+    defaults to MORROW_CONVERSATION_ID. Returns None when no user
+    identity is available, in which case the admission gate fails
+    closed to the legacy plan-mode approval path.
     """
-    user_id = getattr(args, "user_id", None) or os.environ.get("MORROW_USER_ID")
+    from config.identity import default_user_id
+    user_id = getattr(args, "user_id", None) or default_user_id()
     if not user_id:
         return None
     ctx = {"user_id": user_id}
@@ -10395,12 +10398,13 @@ def build_parser():
                             "admitted on this path.")
 
     def add_mode_ctx(p):
-        # Plan/Edit mode gate (modes workstream). The harness supplies
-        # the calling user's identity; without --user-id the gate fails
+        # Plan/Edit mode gate (modes workstream). With no user id at all
+        # (no flag, no MORROW_USER_ID, no pinned account) the gate fails
         # closed to the legacy plan-mode approval path.
         p.add_argument("--user-id", default=None,
-                       help="mode gate: the calling user's id "
-                            "(env MORROW_USER_ID is the default)")
+                       help="mode gate: the calling user's id (default: "
+                            "env MORROW_USER_ID, then the Canvas account "
+                            "pinned at first sign-in)")
         p.add_argument("--conversation-id", default=None,
                        help="mode gate: the Muse conversation id, for "
                             "conversation-scoped grants "

@@ -96,6 +96,12 @@ Changes to your courses:
 
 Settings and undo:
 
+- Your mode and settings belong to your Canvas account. Morrow needed
+  the assistant to name you with an id that nothing gave it, so "use
+  edit mode" could fail, or stop applying in the next conversation.
+  Now Morrow uses the Canvas account you signed in with. The assistant
+  starts a new conversation id for each conversation, so "edit mode for
+  this conversation" ends with that conversation.
 - Turning on edit mode, or changing a setting, is confirmed once, in
   plain words: what changed and what it means for you.
 - The deletion confirmations setting says what it does: deletions ask
@@ -206,6 +212,15 @@ Technical notes:
   request (the entry and params before label resolution, which the
   gates and the journal already use), and the report's note says labels
   are restored only when the change is sent.
+- `config/identity.default_user_id()` gives `morrow mode`, `morrow
+  settings`, `morrow query`, and the executor's write gate the user id
+  when none is passed: `MORROW_USER_ID`, else the account pinned at
+  first sign-in as `canvas:<account id>@<Canvas host>`. With neither,
+  the settings commands change nothing and say to sign in, and writes
+  need approval. `morrow query` takes `--conversation-id`. SKILL.md
+  tells the agent to make a new conversation id for each conversation
+  and never reuse one, and modes/README.md no longer says a harness
+  supplies the ids.
 - `transport/local_chromium.py` `api()` runs a change's page-context
   program again only when CDP says its world was gone before it ran
   ("Cannot find context with specified id"). Any other context loss
