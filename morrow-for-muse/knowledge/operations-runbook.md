@@ -131,7 +131,9 @@ readback and cleanup:
   `is_announcement`, on any route, and creating an announcement
   external feed (C-25) are never-dispatch (posting an announcement
   notifies every student in the course; a standing product
-  exclusion).
+  exclusion). So is any request, on any route, that sets
+  `notify_of_update` (Canvas notifies every student of the change) or
+  `as_user_id` (Canvas acts as that person).
 
 Not v1 claims at all: Moodle (proven in a sandbox, not packaged),
 Blackboard (no implementation exists), learner-data operations

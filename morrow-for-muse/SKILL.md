@@ -609,7 +609,10 @@ tenant, with no override flag: never-dispatch routes (the standing
 exclusions: announcements, messages to people, support tickets,
 subaccount-affecting operations; any request that sets
 `is_announcement` on any route, and creating an announcement external
-feed, are refused as announcements), catalog-unsupported rows, failed
+feed, are refused as announcements; any request that sets
+`notify_of_update`, which notifies every student of the change, or
+`as_user_id`, which makes Canvas act as that person, is refused on any
+route), catalog-unsupported rows, failed
 rows, evidence-hold rows (course delete or conclude, C-108; the four
 Item Bank quiz-entry routes; and the discussion writes C-139 create,
 C-167 update, C-141 delete, and C-238 date change), and

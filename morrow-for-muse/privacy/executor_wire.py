@@ -822,8 +822,12 @@ def _key_segment(key):
 
 
 def is_learner_id_key(key, parent_key=None):
-    """True when a value under key (inside parent_key) is a learner id."""
+    """True when a value under key (inside parent_key) is a learner id.
+    as_user_id is Canvas masquerading, never a learner position: a label
+    there must not become someone for Canvas to act as."""
     segment = _key_segment(key)
+    if segment == "as_user_id":
+        return False
     if person_key_kind(segment) == "ids":
         return True
     return segment == "id" and parent_key is not None and \

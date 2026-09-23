@@ -30,6 +30,18 @@ after an approval (or in Edit mode) the untested change ran:
 Each refusal happens before approval, on every lane, and reads to the
 educator as a task that is on hold in this version (evidence-hold).
 
+The consent page also lists what Morrow will not do "even if you ask"
+(muse engine round 2, 2026-09-23). Two request fields did it anyway on
+live-proven routes, and are refused on every route before approval with
+no override, like an announcement (never-dispatch):
+  7. Acting as someone else: as_user_id makes Canvas act as that person
+     (masquerading). It rode on any route, a read included (a GET body
+     becomes its query string), and a student label there was turned
+     into the student's real id.
+  8. Sending messages to people: notify_of_update makes Canvas notify
+     every student in the course of the change (assignment, page, and
+     classic quiz edits). Set to false, it sends nothing and still runs.
+
 Hermetic: fake Canvas session; journal, approvals, settings, grants,
 and the signing key live in pytest's tmp_path.
 """
@@ -81,6 +93,17 @@ MODULE_ITEM_UPDATE = ("canvas_update_module_item", "PUT",
                       "/api/v1/courses/{course_id}/modules/{module_id}/"
                       "items/{id}",
                       {"course_id": "101", "module_id": "7", "id": "70"})
+QUIZ_CREATE = ("canvas_create_quiz", "POST",
+               "/api/v1/courses/{course_id}/quizzes", {"course_id": "101"})
+QUIZ_UPDATE = ("canvas_edit_quiz", "PUT",
+               "/api/v1/courses/{course_id}/quizzes/{id}",
+               {"course_id": "101", "id": "55"})
+ASSIGNMENTS_READ = ("canvas_list_assignments_assignments", "GET",
+                    "/api/v1/courses/{course_id}/assignments",
+                    {"course_id": "101"})
+PAGE_READ = ("canvas_show_page_courses", "GET",
+             "/api/v1/courses/{course_id}/pages/{url_or_id}",
+             {"course_id": "101", "url_or_id": "welcome"})
 
 REFUSED = [
     ("front-page-json", PAGE_UPDATE, {"wiki_page": {"front_page": True}}),
@@ -119,6 +142,12 @@ ADMITTED = [
                      "submission_types": ["online_text_entry"]}}),
     ("question-group", GROUP_CREATE,
      {"quiz_groups": [{"name": "Pool", "pick_count": 2}]}),
+    ("assignment-edit-quietly", ASSIGNMENT_UPDATE,
+     {"assignment": {"name": "Essay", "notify_of_update": False}}),
+    ("page-edit-quietly", PAGE_UPDATE,
+     {"wiki_page[title]": "Week 1", "wiki_page[notify_of_update]": "0"}),
+    ("quiz-edit-quietly", QUIZ_UPDATE,
+     {"quiz": {"title": "Q", "notify_of_update": "false"}}),
 ]
 
 
@@ -151,6 +180,111 @@ def test_an_untested_field_is_refused_before_approval(hermetic, case, op,
                          ids=[c[0] for c in ADMITTED])
 def test_the_tested_part_of_the_route_still_runs(case, op, body):
     admission_mod.check_policy_gates(_entry(op, body), vault_ready=True)
+
+
+# -- acting as someone else, and notifying students ---------------------------
+
+NEVER = [
+    ("act-as-student-page-edit", PAGE_UPDATE,
+     {"body": {"as_user_id": "Student A1",
+               "wiki_page": {"title": "Week 1"}}}),
+    ("act-as-by-id", PAGE_UPDATE,
+     {"body": {"as_user_id": 98765, "wiki_page": {"title": "Week 1"}}}),
+    ("act-as-by-sis-id", ASSIGNMENT_UPDATE,
+     {"body": {"as_user_id": "sis_user_id:20231234",
+               "assignment": {"name": "Essay"}}}),
+    ("act-as-form-body", PAGE_UPDATE,
+     {"body": "as_user_id=98765&wiki_page%5Btitle%5D=Week+1"}),
+    ("act-as-read-query", ASSIGNMENTS_READ,
+     {"query": {"as_user_id": "98765"}}),
+    ("act-as-read-body", PAGE_READ, {"body": {"as_user_id": "98765"}}),
+    ("notify-assignment-edit", ASSIGNMENT_UPDATE,
+     {"body": {"assignment": {"name": "Essay",
+                              "notify_of_update": True}}}),
+    ("notify-assignment-create", ASSIGNMENT_CREATE,
+     {"body": {"assignment": {"name": "Essay",
+                              "notify_of_update": "true"}}}),
+    ("notify-page-edit", PAGE_UPDATE,
+     {"body": {"wiki_page": {"title": "Week 1",
+                             "notify_of_update": True}}}),
+    ("notify-page-form", PAGE_UPDATE,
+     {"body": {"wiki_page[notify_of_update]": "1"}}),
+    ("notify-quiz-edit", QUIZ_UPDATE,
+     {"body": {"quiz": {"title": "Q", "notify_of_update": 1}}}),
+    ("notify-quiz-create", QUIZ_CREATE,
+     {"body": {"quiz": {"title": "Q", "notify_of_update": "on"}}}),
+]
+
+
+def _op_entry(op, extra):
+    name, method, path, _params = op
+    return ex.catalog_descriptor_to_entry(name, method, path, None,
+                                          "canvas", None, extra)
+
+
+@pytest.mark.parametrize("case, op, extra", NEVER, ids=[c[0] for c in NEVER])
+def test_what_morrow_never_does_is_refused_before_anything_is_sent(
+        hermetic, case, op, extra):
+    from failures.translator import translate
+    name, method, path, params = op
+    session = FakeSession()
+    with pytest.raises(admission_mod.NeverDispatch) as info:
+        ex.dispatch_catalog_op(name, method, path, None, dict(params),
+                               extra=dict(extra), session=session,
+                               dry_run=True)
+    assert session.calls == []
+    assert "Nothing was sent" in str(info.value)
+    kind = "never-dispatch-read" if method == "GET" else "never-dispatch"
+    assert translate("changing the course", info.value).mode_id == kind
+    with pytest.raises(admission_mod.NeverDispatch):
+        admission_mod.check_policy_gates(_op_entry(op, extra),
+                                         vault_ready=True)
+
+
+def test_acting_as_someone_else_in_a_url_query_is_refused():
+    entry = _op_entry(PAGE_READ, None)
+    entry["request"]["url"] += "?as_user_id=98765"
+    with pytest.raises(admission_mod.NeverDispatch):
+        admission_mod.check_never_dispatch(entry, admission_mod.load_policy())
+
+
+def test_each_refusal_says_what_morrow_never_does():
+    policy = admission_mod.load_policy()
+    for body, words in (
+            ({"as_user_id": "98765"}, "anyone other than you"),
+            ({"wiki_page": {"notify_of_update": True}},
+             "never sends messages")):
+        with pytest.raises(admission_mod.NeverDispatch) as info:
+            admission_mod.check_never_dispatch(
+                _op_entry(PAGE_UPDATE, {"body": body}), policy)
+        assert words in str(info.value), str(info.value)
+
+
+def test_plan_write_refuses_acting_as_someone_else_before_the_educator_is_asked(
+        edit_mode):
+    session = edit_mode(_canvas(assignment=ESSAY))
+    name, method, path, params = ASSIGNMENT_UPDATE
+    code, out = _cli(["plan-write", "--name", name, "--method", method,
+                      "--path", path, "--params", json.dumps(params),
+                      "--body", json.dumps({"as_user_id": "98765",
+                                            "assignment": {
+                                                "name": "Essay"}})]
+                     + _who())
+    assert code != 0, out
+    assert "NeverDispatch" in out, out
+    assert session.calls == []
+    pending = os.path.join(ex.MORROW_HOME, ex.PENDING_WRITES_DIRNAME)
+    assert not os.path.isdir(pending) or os.listdir(pending) == []
+
+
+def test_edit_mode_refuses_a_notice_to_every_student(edit_mode):
+    session = edit_mode(_canvas(assignment=ESSAY))
+    code, out = _publish(ASSIGNMENT_UPDATE,
+                         {"assignment": {"name": "Essay",
+                                         "notify_of_update": True}})
+    assert code != 0, out
+    assert "NeverDispatch" in out, out
+    assert session.calls == []
 
 
 # -- publishing through the assignment or the module item ---------------------
