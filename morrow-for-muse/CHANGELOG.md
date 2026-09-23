@@ -51,6 +51,32 @@ In plain words:
 - The release no longer ships the retired form relay or internal audit
   notes, and the docs no longer mention a Moodle lane or ask for a
   Canvas token.
+- Renaming a course or changing its late policy now names the course
+  in the approval, checks the course before the change, and, for a
+  rename, reads the course back after it.
+- A course whose name mixes languages (for example "Русский язык
+  (Russian Language I)" or "Statistics: μ and σ") can be changed. A
+  name that mixes alphabets inside one word, the way a lookalike name
+  does, is still refused.
+- Item Banks work for a school whose Canvas runs on its own web
+  address (for example canvas.school.edu).
+- After a change to several due date overrides, or to the dates of
+  several assignments, Morrow reads back each item it changed. Canvas
+  applies a change to the dates of several assignments in the
+  background, so a date that has not moved yet is reported as
+  unconfirmed, never as failed.
+- Deleting a classic quiz is confirmed by the quiz leaving the
+  course's quiz list, so a successful delete is no longer reported as
+  failed.
+- The assistant can change the dates of several assignments at once.
+  When Morrow refuses a request's own input, you are told that nothing
+  was sent.
+- The deletion confirmations setting says what it does: deletions ask
+  first. It never covered other kinds of changes.
+- A change refused before it was sent no longer stays listed as
+  unfinished.
+- Morrow closes the Item Banks tabs it opens in the helper browser
+  when it finishes.
 
 ## 0.4.0 (2026-09-22)
 
