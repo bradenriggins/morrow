@@ -3,7 +3,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
+const { execFileSync, spawn } = require("node:child_process");
 const { once } = require("node:events");
 const test = require("node:test");
 const {
@@ -32,9 +32,16 @@ function inspectClaudeDesktopConnection(setup, options = inspectionOptionsBySetu
   return inspectClaudeDesktopConnectionRaw(setup, options);
 }
 
+const STUBBORN_DESCENDANT_SCRIPT = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)";
+
 async function fixture(t, options = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-claude-desktop-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  // A process a test started from this folder ends before the folder goes, so none outlives it.
+  const beforeRemove = [];
+  t.after(async () => {
+    for (const stop of beforeRemove) await stop();
+    await fs.rm(root, { recursive: true, force: true });
+  });
   const workspace = path.join(root, "Materials with spaces");
   const state = path.join(root, "State");
   await fs.mkdir(workspace);
@@ -47,7 +54,7 @@ async function fixture(t, options = {}) {
   await fs.writeFile(upstreams, JSON.stringify({ privateFixtureValue: "must-not-be-bundled" }));
   const stubbornServer = options.stubbornTree ? [
     'const { spawn } = require("node:child_process");',
-    `const descendant = spawn(process.execPath, ["-e", ${JSON.stringify("process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)")}], { stdio: "ignore" });`,
+    `const descendant = spawn(process.execPath, ["-e", ${JSON.stringify(STUBBORN_DESCENDANT_SCRIPT)}], { stdio: "ignore" });`,
     `fs.writeFileSync(${JSON.stringify(descendantPath)}, String(descendant.pid));`,
     'process.on("SIGTERM", () => {});',
     'setInterval(() => {}, 1000);',
@@ -104,6 +111,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     runtimeManifest: await fs.realpath(runtimeManifest),
     upstreams: await fs.realpath(upstreams),
     descendantPath,
+    stopBeforeRemove: (stop) => beforeRemove.push(stop),
     setup,
     extracted,
     managedLauncherPath,
@@ -135,6 +143,44 @@ async function waitFor(predicate, ...processes) {
     }
     await new Promise((resolve) => setTimeout(resolve, CONNECTION_OBSERVATION_INTERVAL_MS));
   }
+}
+
+/**
+ * The running processes this folder's stubborn-tree fixture started: every server that runs this
+ * folder's server.cjs, and the recorded descendant while it still runs the fixture's script. A
+ * process is named by its command line, so a reused pid is never taken for one of them.
+ */
+function stubbornTreeProcesses(root, descendantPid) {
+  const own = Number(execFileSync("ps", ["-o", "pgid=", "-p", String(process.pid)], { encoding: "utf8" }).trim());
+  const server = `${path.basename(root)}${path.sep}server.cjs`;
+  return execFileSync("ps", ["-axo", "pid=,pgid=,command="], { encoding: "utf8" }).split("\n")
+    .map((line) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line))
+    .filter(Boolean)
+    .map((match) => ({ pid: Number(match[1]), pgid: Number(match[2]), command: match[3] }))
+    .filter((row) => row.command.includes(server) || (row.pid === descendantPid && row.command.includes(STUBBORN_DESCENDANT_SCRIPT)))
+    .map((row) => ({ ...row, pgid: row.pgid === own ? null : row.pgid }));
+}
+
+/**
+ * Ends every process the stubborn-tree fixture can leave, whatever the test reached. The launcher
+ * starts the server in its own process group, and the server and its descendant ignore SIGTERM,
+ * so killing the launcher alone leaves both running for good. The launcher goes first, so it
+ * starts nothing more; then each server group, found by command line, since a failure can come
+ * before the launcher records the server in its receipt.
+ */
+async function stopStubbornTree(child, input) {
+  if (!processEnded(child)) {
+    const closed = once(child, "close");
+    child.kill("SIGKILL");
+    await closed;
+  }
+  const descendantPid = Number(await fs.readFile(input.descendantPath, "utf8").catch(() => ""));
+  const remaining = () => stubbornTreeProcesses(input.root, descendantPid);
+  for (const row of remaining()) {
+    try { process.kill(row.pgid === null ? row.pid : -row.pgid, "SIGKILL"); } catch {}
+    try { process.kill(row.pid, "SIGKILL"); } catch {}
+  }
+  await waitFor(() => remaining().length === 0);
 }
 
 /** Waits until `child` has written `text` to stdout, collected in `chunks`; fails if it closes first. */
@@ -275,7 +321,8 @@ test("the managed Claude launcher terminates its complete stubborn server proces
   const input = await fixture(t, { stubbornTree: true });
   const launcher = path.join(input.extracted, "server", "launch.cjs");
   const child = spawn(process.execPath, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => { if (child.exitCode === null) child.kill("SIGKILL"); });
+  // Registered before the first wait: a failure anywhere below still ends the whole tree.
+  input.stopBeforeRemove(() => stopStubbornTree(child, input));
   child.stdout.resume();
   child.stderr.resume();
   await handshake(child);
