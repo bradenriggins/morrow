@@ -1020,22 +1020,45 @@
     },
     {
       "id": "write-halt-active",
-      "title": "Write halt is active (manual lever engaged)",
+      "title": "Changes are paused by an operator (manual write halt)",
       "surface": "canvas",
       "severity_hint": "medium",
-      "root_cause": "Verified: the manual write_halt lever is the only production path that sets the halt; the reauth state machine's impose_halt is dead code on every production path, so the halt is engaged manually, not by session events.",
-      "is_not": "This is not a provider failure and not session death; it is a deliberate stop.",
-      "agent_message": "What was attempted: I held back {operation} because the write halt is currently engaged. What the evidence showed: the active halt flag, which stops every write at the gate while leaving reads alone. What this means: someone (or a safety routine) deliberately paused writes, and I will not work around it. What happens next: the halt stays on until you clear it; tell me when to lift it and I will resume the queued work.",
-      "auto_action": "Refuse all writes at the gate; keep reads working; never bypass the halt.",
-      "escalate_when": "Always surface when a requested write is halted, with who or what engaged the halt if known.",
+      "root_cause": "The write_halt file under MORROW_HOME is present and was not imposed by the re-auth machinery after a session death (its reason is not session_expiry, or it cannot be read), so an operator placed it by hand. Every write is refused at the gate while it stands; reads keep working. Only whoever placed it lifts it, on the computer where Morrow runs.",
+      "is_not": "This is not a provider failure, not session death, and not something the educator's words can lift.",
+      "agent_message": "What was attempted: I held back {operation} because changes are paused. What the evidence showed: someone who looks after this Morrow setup paused all changes on the computer where it runs (reference {correlation_id}). What this means: nothing was changed, and I will not work around the pause. What happens next: the pause stays until whoever set it removes it there. I cannot lift it, and nothing you tell me lifts it; please ask the person who looks after your Morrow setup.",
+      "auto_action": "Refuse all writes at the gate; keep reads working; never bypass or remove the halt; tell the educator who can lift it",
+      "escalate_when": "Always surface when a requested write is halted by hand, so the person who looks after the setup can decide",
       "signature": {
         "write_halt_active": {
           "truthy": true
         }
       },
-      "signature_notes": "behavior: \"every write gate refuses; reads unaffected\"; gap_note: \"the halt/quarantine/notify re-auth machinery has zero production callers, so expiry never auto-arms the halt; expiry currently surfaces as a loud exception instead\"; state: \"write_halt_active=true (write_halt file present)\"",
+      "signature_notes": "behavior: \"every write gate refuses; reads unaffected\"; state: \"write_halt file present, reason not session_expiry (halt_cause=manual)\"; the session-expiry halt has its own mode (write-halt-session-expired)",
       "severity_hint_inventory": "user-action",
       "placeholders": [
+        "operation"
+      ]
+    },
+    {
+      "id": "write-halt-session-expired",
+      "title": "Changes are paused because the Canvas sign-in expired",
+      "surface": "canvas",
+      "severity_hint": "medium",
+      "root_cause": "When the Canvas session dies, the re-auth machinery (reauth/state_machine.py on_expiry_detected) pauses every write (the write_halt file, reason session_expiry) and parks the op in the quarantine ledger. The pause lifts only when the educator signs in again on the helper page and `reauth/state_machine.py resume` verifies that the account is the pinned one; a parked op needs the educator's approval again after that.",
+      "is_not": "This is not a pause the educator's words can lift, not a provider failure, and not a change that applied.",
+      "agent_message": "What was attempted: I held back {operation}. What the evidence showed: changes are paused because your Canvas sign-in expired (reference {correlation_id}). What this means: nothing was changed, and I will not work around the pause. What happens next: Sign in again on the helper page. I will check that it is still your account, and then ask you before re-running anything.",
+      "auto_action": "Point the educator to the helper page to sign in again; then run `reauth/state_machine.py resume`, which checks the account and lifts the pause; then ask the educator before re-running any paused change (for a Plan-mode write, run plan-write again)",
+      "escalate_when": "resume refuses because the account that signed in is not the pinned account",
+      "signature": {
+        "write_halt_active": {
+          "truthy": true
+        },
+        "halt_cause": "session_expired"
+      },
+      "signature_notes": "classification: \"WriteHaltActive with halt_cause=session_expired\"; triggers: [\"the halt imposed by on_expiry_detected\", \"an op quarantined after a session death\"]; lifted_by: \"verified resume only\"",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "correlation_id",
         "operation"
       ]
     },

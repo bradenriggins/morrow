@@ -261,7 +261,8 @@ def _coerce_evidence(raw_error) -> dict:
         status = getattr(exc, "status", None)
         if isinstance(status, int) and not isinstance(status, bool):
             evidence["http_status"] = status
-        for attr in ("route_path", "provider", "operation_kind"):
+        for attr in ("route_path", "provider", "operation_kind",
+                     "halt_cause"):
             value = getattr(exc, attr, None)
             if value is not None:
                 evidence[attr] = value

@@ -7300,10 +7300,14 @@ def _check_write_gates(entry: dict, params: dict, plan, op_id, kind="dispatch",
         from reauth import state_machine as _rsm
         _allowed, _reason = _rsm.check_write_allowed()
         if not _allowed:
-            raise WriteHaltActive(
-                "write halt is active (%s): %s (manual lever per "
-                "INSTALL.md and SKILL.md); every write is refused while "
-                "the halt stands" % (WRITE_HALT_PATH, _reason))
+            halted = WriteHaltActive(
+                "write halt is active (%s): %s; every write is refused "
+                "while the halt stands" % (WRITE_HALT_PATH, _reason))
+            # For the failure translator: a session-expiry halt lifts
+            # only after the educator signs in again and resume
+            # verifies the account; any other halt is an operator's.
+            halted.halt_cause = _rsm.halt_cause() or "manual"
+            raise halted
     if is_write and kind != "undo" and not resume and plan is None \
             and not plan_not_required:
         raise MissingFrozenPlan(
@@ -7323,11 +7327,13 @@ def _check_write_gates(entry: dict, params: dict, plan, op_id, kind="dispatch",
         from reauth import state_machine as _rsm_q
         _qstatus = _rsm_q.op_quarantine_status(str(op_id))
         if _qstatus in ("quarantined", "awaiting_approval"):
-            raise WriteHaltActive(
+            parked = WriteHaltActive(
                 "op %s is quarantined (status %s) after a session "
                 "death: re-dispatch needs the educator's explicit "
                 "approval (reauth approve --op-id %s) after verified "
                 "resume; nothing auto-resumes" % (op_id, _qstatus, op_id))
+            parked.halt_cause = "session_expired"
+            raise parked
     if resume:
         # Second phase of a two-phase dispatch: the request phase already
         # claimed this op_id. Re-validate ownership via the claim token;

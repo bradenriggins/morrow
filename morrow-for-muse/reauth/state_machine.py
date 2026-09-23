@@ -391,6 +391,22 @@ def is_write_halted():
     return os.path.exists(HALT_PATH)
 
 
+def halt_cause():
+    """Why writes are paused: "session_expired" when the re-auth
+    machinery imposed the halt after a session death, "manual" for a
+    halt file placed any other way (or unreadable), None when writes
+    are not paused. Only a verified resume lifts a session-expiry
+    halt."""
+    if not os.path.exists(HALT_PATH):
+        return None
+    try:
+        with open(HALT_PATH) as f:
+            reason = str((json.load(f) or {}).get("reason") or "")
+    except (ValueError, OSError, AttributeError):
+        return "manual"
+    return "session_expired" if reason == "session_expiry" else "manual"
+
+
 def impose_halt(detection, reason="session_expiry"):
     # W4-P2-5: a fresh death ages out any superseded session.json.prev
     # left behind by an earlier incomplete re-auth cycle before the new

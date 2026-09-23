@@ -2,7 +2,7 @@
 """Full test suite for the Morrow error translation layer.
 
 Covers failures/translator.py + failures/catalog.py + failures/catalog.json:
-  1. per-mode tests: every one of the 88 catalog modes gets a synthetic
+  1. per-mode tests: every one of the 89 catalog modes gets a synthetic
      raw error; asserts the right mode_id, the four message anchors, all
      placeholders filled, no em dashes, no shrug language, and the
      escalate flag matching the catalog.
@@ -347,6 +347,13 @@ def _quiz_ambiguous_case():
         "America/Chicago", query="last week's quiz")
 
 
+def _session_expired_halt():
+    """The halt the re-auth machinery imposes after a session death."""
+    exc = WriteHaltActive("write halt is active: session_expiry")
+    exc.halt_cause = "session_expired"
+    return exc
+
+
 MODE_CASES = {
     "query-arguments-invalid":
         lambda: _qchain.QueryArgumentsInvalid(
@@ -533,6 +540,7 @@ MODE_CASES = {
     },
     "form-lane-fail-closed": lambda: {"gate": "FormTransportUnavailable"},
     "write-halt-active": lambda: WriteHaltActive("halt engaged"),
+    "write-halt-session-expired": _session_expired_halt,
     "write-approval-missing": lambda: {"gate": "WriteApprovalMissing"},
     "learner-data-gated": lambda: {"gate": "LearnerDataGated"},
     "catalog-effect-mismatch": lambda: {"gate": "CatalogEffectMismatch"},
@@ -619,8 +627,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_88_modes(self):
-        self.assertEqual(88, len(CATALOG.entries))
+    def test_catalog_has_89_modes(self):
+        self.assertEqual(89, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):
