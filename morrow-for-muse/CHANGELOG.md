@@ -58,8 +58,9 @@ In plain words:
   (Russian Language I)" or "Statistics: μ and σ") can be changed. A
   name that mixes alphabets inside one word, the way a lookalike name
   does, is still refused.
-- Item Banks work for a school whose Canvas runs on its own web
-  address (for example canvas.school.edu).
+- Item Banks no longer refuse a school whose Canvas runs on its own
+  web address (for example canvas.school.edu). This is tested with a
+  stand-in for such a school, not yet on a live one.
 - After a change to several due date overrides, or to the dates of
   several assignments, Morrow reads back each item it changed. Canvas
   applies a change to the dates of several assignments in the
