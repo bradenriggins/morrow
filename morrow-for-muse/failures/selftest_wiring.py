@@ -66,14 +66,14 @@ def _csrf_raw_error():
 def main():
     # ---- 1. 422-CSRF through the agent-facing error path. ----
     payload = agent_error_payload(
-        "create assignment in Biology 101", _csrf_raw_error())
+        "creating an assignment in Biology 101", _csrf_raw_error())
     _check(payload["mode_id"] == "canvas-csrf-422-writes-only",
            "expected canvas-csrf-422-writes-only, got %r"
            % payload["mode_id"])
     for anchor in ANCHORS:
         _check(anchor in payload["message"],
                "message missing anchor %r" % anchor)
-    _check(payload["attempted"] == "create assignment in Biology 101",
+    _check(payload["attempted"] == "creating an assignment in Biology 101",
            "attempted field wrong: %r" % payload["attempted"])
     _check(isinstance(payload["escalate"], bool),
            "escalate must be a bool")
@@ -157,8 +157,11 @@ def main():
     for anchor in ANCHORS:
         _check(anchor in cli_payload.get("message", ""),
                "CLI message missing anchor %r" % anchor)
-    _check(cli_payload.get("attempted") == "execute /nonexistent-entry.json",
+    # The educator reads plain words, never the command line or a path.
+    _check(cli_payload.get("attempted") == "the task you asked for",
            "CLI attempted field wrong: %r" % cli_payload.get("attempted"))
+    _check("nonexistent-entry" not in cli_payload.get("message", ""),
+           "CLI message repeats a command-line value")
     _check(str(cli_payload.get("engineering_detail", "")).startswith(
         ENGINEERING_LABEL),
         "CLI engineering detail must carry the untrusted-data label")

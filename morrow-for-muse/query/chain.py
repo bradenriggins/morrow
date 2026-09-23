@@ -159,8 +159,8 @@ def _translate_helper_failure(exc):
         evidence = dict(base, error="ExecutorError",
                         detail="login helper endpoint is down: " + msg)
     else:
-        return _translate("helper health check", exc)
-    return _translate("helper health check", evidence)
+        return _translate("checking the helper", exc)
+    return _translate("checking the helper", evidence)
 
 
 _SUBMISSIONS_READ = {
@@ -310,7 +310,7 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
         except Exception:
             pass
 
-    operation = "find students who failed %s's quiz" % (
+    operation = "finding students who failed %s's quiz" % (
         str(quiz).replace("_", " "))
     own_reader = False
     try:

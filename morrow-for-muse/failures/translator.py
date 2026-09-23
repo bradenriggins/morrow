@@ -613,8 +613,11 @@ def match_catalog(catalog: Catalog, evidence: dict):
 def translate(operation, raw_error, catalog=None, catalog_path=None) -> TranslatedError:
     """Translate a raw failure into a specific, actionable message.
 
-    operation: human name of what was attempted (e.g. "create assignment
-    in Biology 101"). catalog: a loaded Catalog, or catalog_path for the
+    operation: what was attempted, as a phrase in the educator's words
+    that every message template reads correctly ("creating an
+    assignment in Biology 101", "reading the assignments in course
+    101"), never an op id or an internal name. catalog: a loaded
+    Catalog, or catalog_path for the
     loader. Returns a TranslatedError carrying the mode id, the four
     message parts as fields, and the fully rendered agent_message.
 

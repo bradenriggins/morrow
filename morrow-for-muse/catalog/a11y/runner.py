@@ -212,6 +212,14 @@ def _utcnow():
     return datetime.now(timezone.utc).isoformat()
 
 
+_A11Y_LABELS = {
+    "audit": "checking a course item for accessibility problems",
+    "plan": "planning an accessibility repair",
+    "list-targets": "listing what the accessibility check covers",
+    "list-planners": "listing the accessibility repairs",
+}
+
+
 def _funnel(operation, exc):
     """Translate any failure through the tree's error funnel."""
     return agent_error_payload(operation, exc)
@@ -666,7 +674,9 @@ def main(argv=None):
             print(json.dumps(plan, indent=2))
             return 0
     except Exception as exc:
-        payload = _funnel("a11y %s" % (args.command or "runner"), exc)
+        payload = _funnel(_A11Y_LABELS.get(args.command,
+                                            "the accessibility check you "
+                                            "asked for"), exc)
         print(json.dumps(payload), file=sys.stderr)
         return 2
     return 0

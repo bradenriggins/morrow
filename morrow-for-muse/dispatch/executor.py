@@ -9399,6 +9399,9 @@ def _mode_ctx_from_args(args) -> dict | None:
 # --------------------------------------------------------------------------
 
 PENDING_WRITES_DIRNAME = "pending_writes"
+# approve-write sets this on an exception it raises: the change in the
+# educator's words, for the failure message (_funnel_operation).
+OPERATION_LABEL_ATTR = "morrow_operation_label"
 
 
 def pending_write_path(op_id: str) -> str:
@@ -9548,6 +9551,11 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         # only): the names the educator typed, next to their labels.
         display = _wire.apply_name_echo(display, tenant_base, course_id,
                                         conversation_id)
+    where = None
+    if target:
+        where = 'the course "%s"' % target["course_name"]
+    elif course_id is not None:
+        where = "course %s" % course_id
     _write_private_json(pending_write_path(op_id), {
         "version": 1,
         "op_id": op_id,
@@ -9555,6 +9563,8 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         "descriptor": {"name": name, "method": method,
                        "path": path_template, "provider": provider,
                        "params": params, "body": body},
+        "operation_label": _describe_operation(method, path_template,
+                                               where),
         "plan": plan,
         "approval": record,
     })
@@ -9584,7 +9594,22 @@ def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
     gate, the approval bound to the exact request, single use). The
     course resolution is the course the educator saw named in the
     approval display; the provider name is re-verified before the
-    write."""
+    write. A failure carries the change as the educator approved it
+    (OPERATION_LABEL_ATTR)."""
+    label = {"text": "the change you approved"}
+    try:
+        return _approve_plan_write(op_id, authorization, session, pack,
+                                   mode_ctx, channel, label)
+    except Exception as exc:
+        try:
+            setattr(exc, OPERATION_LABEL_ATTR, label["text"])
+        except Exception:
+            pass
+        raise
+
+
+def _approve_plan_write(op_id, authorization, session, pack, mode_ctx,
+                        channel, label):
     try:
         from dispatch.admission import approval_used, sign_approval
     except ImportError:  # run as a script: dispatch/ itself is on sys.path
@@ -9600,6 +9625,12 @@ def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
             "already, it expired, or it was never prepared); run "
             "plan-write again" % op_id)
     descriptor = doc.get("descriptor") or {}
+    if isinstance(doc.get("operation_label"), str) \
+            and doc["operation_label"]:
+        label["text"] = doc["operation_label"]
+    elif descriptor.get("method") and descriptor.get("path"):
+        label["text"] = _describe_operation(descriptor["method"],
+                                            descriptor["path"])
     plan_path = path[:-len(".json")] + ".plan.json"
     _write_private_json(plan_path, doc.get("plan") or {})
     plan = load_frozen_plan(plan_path, descriptor.get("name"))
@@ -10327,40 +10358,62 @@ def main(argv=None):
 # purpose (raw text is never the primary message again).
 # --------------------------------------------------------------------------
 
-def _funnel_operation(argv):
-    """Human operation label for the error translation layer.
+def _describe_operation(method, path, where=None):
+    try:
+        from dispatch.approval_display import describe_operation
+    except ImportError:  # run as a script: dispatch/ itself is on sys.path
+        from approval_display import describe_operation
+    return describe_operation(method, path, where)
 
-    Built from the CLI subcommand plus stable identifiers only (entry
-    path, catalog op name, op id). Flag VALUES such as --params are
-    never included: they can carry educator content.
+
+def _funnel_operation(argv, exc=None):
+    """What was attempted, in the words the educator reads: "changing a
+    page in course 101". approve-write labels its own failures with the
+    course name the educator approved (OPERATION_LABEL_ATTR). Otherwise
+    the label comes from the method and path template; the only flag
+    value read is a numeric course_id. Op ids, command and operation
+    names, and file paths never become the label.
     """
+    label = getattr(exc, OPERATION_LABEL_ATTR, None)
+    if isinstance(label, str) and label:
+        return label
     tokens = list(argv or [])
 
-    def _flag(*names):
+    def _flag(name):
         for i, token in enumerate(tokens):
-            for name in names:
-                if token == name and i + 1 < len(tokens):
-                    return tokens[i + 1]
-                if token.startswith(name + "="):
-                    return token[len(name) + 1:]
+            if token == name and i + 1 < len(tokens):
+                return tokens[i + 1]
+            if token.startswith(name + "="):
+                return token[len(name) + 1:]
         return None
 
     subcommand = next((t for t in tokens if not t.startswith("-")), None)
-    target = _flag("--entry") or _flag("--name")
-    op_id = _flag("--op-id")
-    if subcommand in ("execute", "catalog", "undo", "plan-write"):
-        label = subcommand
-        if target:
-            label += " %s" % target
-        elif op_id:
-            label += " op %s" % op_id
-        return label
+    if subcommand in ("catalog", "plan-write"):
+        method, path = _flag("--method"), _flag("--path")
+        if not (method and path):
+            return "the Canvas request you asked for"
+        try:
+            course_id = str(json.loads(_flag("--params") or "{}")
+                            .get("course_id", ""))
+        except (ValueError, AttributeError):
+            course_id = ""
+        where = "course %s" % course_id if course_id.isdigit() else None
+        return _describe_operation(method, path, where)
+    if subcommand == "approve-write":
+        return "the change you approved"
+    if subcommand == "execute":
+        return "the task you asked for"
+    if subcommand == "undo":
+        return "undoing an earlier change"
     if subcommand:
-        return "executor %s%s" % (
-            subcommand, (" op " + op_id) if op_id else "")
-    if op_id:
-        return "executor op %s" % op_id
-    return "(unnamed executor operation)"
+        return "a Morrow maintenance step"
+    return "the step you asked for"
+
+
+def _agent_error(argv, exc):
+    """The agent-facing payload for an exception escaping main()."""
+    from failures.funnel import agent_error_payload
+    return agent_error_payload(_funnel_operation(argv, exc), exc)
 
 
 if __name__ == "__main__":
@@ -10371,9 +10424,7 @@ if __name__ == "__main__":
     except Exception as exc:
         # Agent-facing error funnel: translate before the agent sees it.
         try:
-            from failures.funnel import agent_error_payload
-            payload = agent_error_payload(
-                _funnel_operation(sys.argv[1:]), exc)
+            payload = _agent_error(sys.argv[1:], exc)
         except Exception:
             # The translation layer itself failed: degrade to the old
             # shape rather than a traceback.

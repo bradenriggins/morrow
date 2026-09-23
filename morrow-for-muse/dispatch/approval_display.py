@@ -180,9 +180,15 @@ _FIELDS = {
     "submission_types": "Submission types",
 }
 _SKIP_PATH = {"api", "v1", "quiz"}
+# An item inside a quiz or an item bank is a question, not a module item.
+_NOUNS_UNDER = {("quizzes", "items"): "quiz question",
+                ("banks", "items"): "item bank question",
+                ("items_bank", "items"): "item bank question"}
 
 
-def _noun(segment):
+def _noun(segment, parent=None):
+    if (parent, segment) in _NOUNS_UNDER:
+        return _NOUNS_UNDER[(parent, segment)]
     if segment in _NOUNS:
         return _NOUNS[segment]
     word = segment.replace("_", " ")
@@ -193,21 +199,30 @@ def _article(noun):
     return "an" if noun[:1] in "aeiou" else "a"
 
 
-def _change_sentence(request):
-    """"Change the page \"week-1\"", "Create an assignment", ..."""
-    method = str((request or {}).get("method") or "").upper()
-    action = _ACTIONS.get(method, "Change")
-    parts = [p for p in str((request or {}).get("path") or "").split("/")
+def _path_segments(path):
+    """[(segment, noun, identifier or None)] for a request path, the
+    course segment left out: the course is named separately."""
+    parts = [p for p in str(path or "").split("?", 1)[0].split("/")
              if p and p not in _SKIP_PATH]
-    pairs = []
+    out = []
     i = 0
     while i < len(parts):
         if parts[i] == "courses" and i + 1 < len(parts):
             i += 2
             continue
         ident = parts[i + 1] if i + 1 < len(parts) else None
-        pairs.append((_noun(parts[i]), ident))
+        parent = out[-1][0] if out else None
+        out.append((parts[i], _noun(parts[i], parent), ident))
         i += 2
+    return out
+
+
+def _change_sentence(request):
+    """"Change the page \"week-1\"", "Create an assignment", ..."""
+    method = str((request or {}).get("method") or "").upper()
+    action = _ACTIONS.get(method, "Change")
+    pairs = [(noun, ident) for _seg, noun, ident in
+             _path_segments((request or {}).get("path"))]
     if not pairs:
         return "%s something in the course" % action
     noun, ident = pairs[-1]
@@ -218,6 +233,42 @@ def _change_sentence(request):
     if len(pairs) > 1 and pairs[-2][1] is not None:
         sentence += ' in the %s "%s"' % pairs[-2]
     return sentence
+
+
+_GERUNDS = {"GET": "reading", "HEAD": "reading", "POST": "creating",
+            "PUT": "changing", "PATCH": "changing", "DELETE": "deleting"}
+
+
+def describe_operation(method, path, where=None):
+    """What a request does, as the phrase a failure message names:
+    "changing a page", "reading the assignments in course 101". Built
+    from the method and the path template only: no value the request
+    carries (a page body, a student label) is repeated. where names
+    the course ('the course "Biology 101"' or "course 101")."""
+    verb = _GERUNDS.get(str(method or "").upper(), "changing")
+    segments = _path_segments(path)
+    if [s[0] for s in segments] == ["users"] and segments[0][2] == "self":
+        phrase = "%s your own Canvas profile" % (
+            "reading" if verb == "reading" else "changing")
+    elif not segments:
+        phrase = "%s the course" % verb
+    else:
+        seg, noun, ident = segments[-1]
+        known = seg in _NOUNS or (
+            len(segments) > 1 and (segments[-2][0], seg) in _NOUNS_UNDER)
+        if ident is None and not known and verb == "creating":
+            # A POST to an action on its parent (".../quizzes/{id}/reorder").
+            parents = [s for s in segments[:-1] if s[2] is not None]
+            if parents:
+                noun = parents[-1][1]
+                phrase = "changing %s %s" % (_article(noun), noun)
+            else:
+                phrase = "changing the course"
+        elif ident is not None or verb == "creating":
+            phrase = "%s %s %s" % (verb, _article(noun), noun)
+        else:
+            phrase = "%s the %s" % (verb, seg.replace("_", " "))
+    return "%s in %s" % (phrase, where) if where else phrase
 
 
 def _field_name(key):

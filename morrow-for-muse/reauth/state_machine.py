@@ -1483,7 +1483,7 @@ def cmd_approve():
         # four-part message, never the raw refusal text.
         try:
             from failures.funnel import agent_error_text
-            print(agent_error_text("approve quarantined op %s" % op_id, exc))
+            print(agent_error_text("approving a paused change", exc))
         except Exception:
             print(f"refused: {exc}")
         return False
@@ -1493,7 +1493,7 @@ def cmd_approve():
     try:
         from failures.funnel import agent_error_text
         print(agent_error_text(
-            "approve quarantined op %s" % op_id,
+            "approving a paused change",
             {"error": "ApprovalRefused",
              "detail": "op_id=%s is not awaiting_approval (status=%s)"
                        % (op_id, op_quarantine_status(op_id))}))
@@ -1522,7 +1522,7 @@ def cmd_notify():
     except OSError as exc:
         try:
             from failures.funnel import agent_error_text
-            print(agent_error_text("read educator notification", exc))
+            print(agent_error_text("reading the notice about paused changes", exc))
         except Exception:
             print(f"could not read the educator notification: {exc}")
         return False
