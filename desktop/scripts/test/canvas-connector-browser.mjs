@@ -46,7 +46,9 @@ const SIGNAL_DOCUMENTS = Object.freeze([
 async function captureThemes(page, name, width = 900, { allowTechnicalTerms = false } = {}) {
   await page.setViewportSize({ width, height: 760 });
   const mark = page.locator(".brand img, .brand-wordmark img").first();
-  assert.equal(await mark.evaluate((image) => image.complete && image.naturalWidth > 0), true);
+  // A page just loaded can show its heading before the mark arrives. decode() settles when the
+  // image loads or fails, so a missing or broken mark still fails here.
+  assert.equal(await mark.evaluate((image) => image.decode().then(() => image.naturalWidth > 0, () => false)), true);
   if (!allowTechnicalTerms) {
     const technicalTerm = /.{0,80}\b(?:MCP|nonce|digest|dispatch|binding|frozen)\b.{0,80}/i.exec(await page.locator("body").innerText());
     assert.equal(technicalTerm, null, `${name} shows a technical term: ${technicalTerm?.[0]}`);
