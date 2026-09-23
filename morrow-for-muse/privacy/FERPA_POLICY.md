@@ -94,6 +94,12 @@ Without the encrypted vault there are no labels: the roster's forms are
 hidden one way (`[hidden: student name]`), and a write whose text still
 carries one is refused.
 
+The failed-students answer (`query/chain.py`) reads the course outside
+the executor and does the same: it reads the course roster before any
+quiz, labels every quiz title it shows (the answer, the progress lines,
+and the "which quiz" list), and stops when the roster cannot be read. A
+synthetic run hides the names one way and never touches the vault.
+
 ## Working by name
 
 The educator can work with a student by name, and the data stays
@@ -334,9 +340,6 @@ the wired vault file above.
   when it means something else ("Brown v. Board" in a course with a
   student named Brown reads `Student A4 (last name) v. Board`). It is
   restored exactly when saved back.
-- The failed-students answer (`query/`) shows the quiz's title as
-  Canvas has it: it reads the course outside the executor, without
-  the roster pass.
 - Bare numeric ids in arbitrary prose or CSV text are not always
   recognized. Contextual forms are redacted: `user_id=912345`, any
   URL path segment or query value equal to a rostered learner id

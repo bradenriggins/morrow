@@ -265,6 +265,63 @@ class _GatedReader:
         return getattr(self._reader, name)
 
 
+_ROSTER_READS = (
+    "/api/v1/courses/%s/users?enrollment_type[]=student"
+    "&enrollment_state[]=active&enrollment_state[]=invited"
+    "&enrollment_state[]=rejected&enrollment_state[]=completed"
+    "&enrollment_state[]=inactive&include[]=email&per_page=100",
+    "/api/v1/courses/%s/enrollments?type[]=StudentEnrollment"
+    "&state[]=deleted&per_page=100",
+)
+
+
+def _course_text_projector(reader, tenant_base, course_id, synthetic):
+    """project(value) for the course text this chain shows (quiz
+    titles): every student on the course roster becomes a course label,
+    as the executor does for course content (privacy/course_content.py).
+    The roster read is Morrow's own privacy read, never shown, so it
+    goes to the underlying reader like the executor's does. A synthetic
+    run never touches the learner vault: names are hidden one way."""
+    from dispatch import executor as _ex
+    from privacy import executor_wire as _wire
+    inner = getattr(reader, "_reader", reader)
+    lists = []
+    for template in _ROSTER_READS:
+        status, items, note = inner.get_paginated(template % course_id)
+        if status != 200 or note or not isinstance(items, list):
+            raise _ex.CourseRosterUnavailable(
+                "The student list of course %s could not be read (%s), so "
+                "no quiz from the course was shown: quiz titles can name "
+                "students." % (course_id, note or "HTTP %s" % status))
+        lists.append(items)
+    try:
+        identities = _wire.roster_identities(lists[0], lists[1])
+    except ValueError as exc:
+        raise _ex.CourseRosterUnavailable(
+            "The student list of course %s was not usable (%s), so no quiz "
+            "from the course was shown." % (course_id, exc))
+
+    def project(value):
+        return _wire.project_course_text(tenant_base, course_id, value,
+                                         identities,
+                                         use_vault=not synthetic)
+    return project
+
+
+def _project_quiz_error(exc, project):
+    """Label the quiz titles a quiz-resolution refusal carries."""
+    evidence = getattr(exc, "resolution_evidence", None)
+    if isinstance(evidence, dict):
+        exc.resolution_evidence = project(evidence)
+    for attr in ("nearest", "candidates"):
+        rows = getattr(exc, attr, None)
+        if isinstance(rows, list):
+            setattr(exc, attr, [tuple(project(list(row)))
+                                if isinstance(row, tuple) else project(row)
+                                for row in rows])
+    exc.args = tuple(project(list(exc.args)))
+
+
 def _translate(operation, exc):
     """Route a chain failure through failures/translator.py.
 
@@ -367,13 +424,18 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                 user_id, reader, course_id)
         except TimezoneUnknown as exc:
             raise _translate(operation, exc)
+        # Quiz titles can name a student: read the course roster first
+        # and label every title the chain shows.
+        course_text = _course_text_projector(
+            reader, tenant_base, course_id, synthetic_rows is not None)
         try:
             quiz, assignment, ctx = _qr.resolve(
                 reader, course_id, parsed["quiz_ref"], tz, now_utc=now_utc)
         except (_qr.QuizNotFound, _qr.QuizAmbiguous,
                 _qr.UnsupportedQuizRef) as exc:
+            _project_quiz_error(exc, course_text)
             raise _translate(operation, exc)
-        _prog("quiz_resolved", str(quiz.get("title", "")))
+        _prog("quiz_resolved", str(course_text(quiz.get("title", ""))))
 
         assignment = assignment or {}
         # New Quizzes carry grading metadata on the quiz record itself.
@@ -486,7 +548,7 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
             raise _translate(operation, RuntimeError(
                 "quiz resolution returned no window"))
         report = {
-            "quiz_title": quiz.get("title"),
+            "quiz_title": course_text(quiz.get("title")),
             "quiz_id": quiz.get("id"),
             "window": "%s..%s (%s)" % (
                 _qr.local_ymd(win_start, tz), _qr.local_ymd(win_end, tz),

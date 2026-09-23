@@ -51,6 +51,8 @@ class _Reader:
 
     def get_paginated(self, path):
         self.paths.append(path)
+        if path.split("?", 1)[0].endswith(("/users", "/enrollments")):
+            return 200, [], None  # the course roster the chain reads first
         if "/quiz/v1/" in path:
             return 200, [], None
         if "/quizzes" in path:

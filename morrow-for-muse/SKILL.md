@@ -808,9 +808,6 @@ Honest limitations (not defects, but know them):
 - Course content is labeled through the course roster, so a name the
   roster does not know is not labeled: a nickname (above), or someone
   who was never a student in the course.
-- The failed-students answer (`morrow failed-students`) shows the
-  quiz's title as Canvas has it: it reads the course outside the
-  executor, without the roster pass.
 - A name lookup confirms enrollment: when `students find` returns a
   label for a name, it confirms that a student with that name is
   enrolled in the course, even if the educator never typed that name

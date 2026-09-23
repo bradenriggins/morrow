@@ -28,6 +28,8 @@ class FakeReader:
         self.assignments = assignments
 
     def get_paginated(self, path):
+        if path.split("?", 1)[0].endswith(("/users", "/enrollments")):
+            return 200, [], None  # the course roster the chain reads first
         if "/quizzes" in path:
             return 200, self.quizzes, None
         if "/assignments" in path:

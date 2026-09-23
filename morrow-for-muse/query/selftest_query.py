@@ -140,6 +140,8 @@ class FakeReader:
         self.nq_error = nq_error
 
     def get_paginated(self, path):
+        if path.split("?", 1)[0].endswith(("/users", "/enrollments")):
+            return 200, [], None  # the course roster the chain reads first
         if path.startswith("/api/quiz/v1/"):
             if self.nq_error:
                 raise self.nq_error

@@ -67,7 +67,6 @@ SKILL.md "Working by name"; policy: `privacy/FERPA_POLICY.md`.
   roster never mentions survives redaction in free text.
 - Course content is labeled through the course roster, so a name the
   roster does not know (a nickname, someone never enrolled) is not.
-- The failed-students answer shows the quiz's title as Canvas has it.
 
 ## When de-id applies
 

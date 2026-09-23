@@ -82,9 +82,8 @@ with two limits you should know:
   lookup is recorded on your Muse computer (which course, which
   conversation, and whether it matched; never the name itself), so a
   guess leaves a trail.
-- Two things are not hidden: a name Canvas does not list for the
-  student (a nickname such as "Bobby" for Robert), and, when you ask
-  who failed a quiz, the quiz's name, which shows as Canvas has it.
+- A name Canvas does not list for the student, such as a nickname
+  ("Bobby" for Robert), is not hidden.
 
 Apart from those limits, the assistant never sees the names of
 students you did not name, and this cannot be turned off. To check who a label is, tell the assistant

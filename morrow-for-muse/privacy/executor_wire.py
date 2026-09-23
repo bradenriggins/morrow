@@ -398,6 +398,26 @@ def _project_course_content(entry, result, tenant_base, lane_context,
     return out
 
 
+def project_course_text(tenant_base, course_id, value, identities,
+                        use_vault=True, provider="canvas"):
+    """value with every student of one course labeled, for a typed tool
+    that reads a course outside the executor (the failed-students
+    answer). identities is the course roster that tool read
+    (roster_identities). use_vault=False, or no encrypted vault, hides
+    each form one way and never touches the vault."""
+    origin = _exact_origin(tenant_base, ValueError)
+    if not use_vault or _privacy_core.AESGCM is None:
+        return _content.project_value(value,
+                                      _content.prepare_hidden(identities))
+    token = _COURSE_ROSTERS.set({})
+    try:
+        remember_course_roster(origin, course_id, identities)
+        return _project_with_course_roster(value, origin, course_id,
+                                           provider, None, True)
+    finally:
+        _COURSE_ROSTERS.reset(token)
+
+
 def learner_scope(tenant_base, course_id, provider=None, principal=None):
     """The exact vault scope the boundary labels one course's learners
     under. Every labeler and resolver must use this one shape, or a
