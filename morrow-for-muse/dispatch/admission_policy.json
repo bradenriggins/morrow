@@ -137,10 +137,13 @@
    "/conversations",
    "/blueprint_templates",
    "/features/flags",
-   "/csp_settings",
    "/api/sis/",
    "/submission_users/message"
   ],
+  "write_url_substrings": [
+   "/csp_settings"
+  ],
+  "write_url_substrings_note": "These URL patterns refuse changes only: any request that is not a GET or HEAD, and every request of an operation that is not a read. Changing CSP settings affects account security (C-93 is also named in tool_names); reading a course's CSP settings changes nothing, and C-94 is a live-proven read.",
   "request_flags": {
    "is_announcement": "posts an announcement and notifies every student in the course; Morrow for Muse never posts announcements, even when asked"
   },

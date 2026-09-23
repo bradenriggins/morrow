@@ -485,29 +485,73 @@ def _request_flag_hit(entry: dict, flags) -> str | None:
     return None
 
 
+_READ_METHODS = ("GET", "HEAD")
+
+
+def _url_blocks(entry: dict):
+    """(block, url with query) for every request-issuing block, the same
+    blocks extract_urls scans."""
+    for value in (entry or {}).values():
+        if isinstance(value, dict):
+            blocks = [value]
+        elif isinstance(value, list):
+            blocks = [v for v in value if isinstance(v, dict)]
+        else:
+            continue
+        for block in blocks:
+            if block.get("url"):
+                yield block, _url_with_query(block)
+
+
+def _block_reads_only(block: dict) -> bool:
+    return str(block.get("method") or "GET").upper() in _READ_METHODS \
+        and not isinstance(block.get("browser"), dict)
+
+
+def _entry_reads_only(entry: dict) -> bool:
+    """True only when the entry is a read and every block it sends is a
+    GET or HEAD request."""
+    return entry.get("effects") == "read" and all(
+        _block_reads_only(block) for block, _url in _url_blocks(entry))
+
+
+def _never_dispatch_refusal(message, entry):
+    refusal = NeverDispatch(message)
+    # For the failure translator: a refused read is told as a read.
+    refusal.operation_kind = "read" if _entry_reads_only(entry) else "write"
+    return refusal
+
+
 def check_never_dispatch(entry: dict, policy: dict) -> None:
-    """Refuse standing-excluded and catalog-excluded operations. No override."""
+    """Refuse standing-excluded and catalog-excluded operations. No override.
+
+    url_substrings refuse every request to a matching URL.
+    write_url_substrings refuse only changes: any request that is not a
+    GET or HEAD, and every request of an entry that is not a read."""
     name = entry.get("name") or ""
     nd = policy.get("never_dispatch", {})
     if name in nd.get("tool_names", []):
-        raise NeverDispatch(
+        raise _never_dispatch_refusal(
             "operation %r is on the never-dispatch list (catalog excluded / "
             "standing exclusion); it cannot be dispatched by any caller. "
-            "Nothing was sent." % name)
-    for url in extract_urls(entry):
+            "Nothing was sent." % name, entry)
+    changes = entry.get("effects") != "read"
+    for block, url in _url_blocks(entry):
         hit = _url_hits_any(url, nd.get("url_substrings", []))
+        if not hit and (changes or not _block_reads_only(block)):
+            hit = _url_hits_any(url, nd.get("write_url_substrings", []))
         if hit:
-            raise NeverDispatch(
+            raise _never_dispatch_refusal(
                 "operation %r targets a never-dispatch URL pattern %r "
                 "(standing exclusion: messages to people, support tickets, "
                 "subaccount-affecting operations). Nothing was sent."
-                % (name, hit))
+                % (name, hit), entry)
     flags = nd.get("request_flags") or {}
     flag = _request_flag_hit(entry, flags)
     if flag:
-        raise NeverDispatch(
+        raise _never_dispatch_refusal(
             "operation %r sets %s, which %s. Nothing was sent."
-            % (name, flag, flags[flag]))
+            % (name, flag, flags[flag]), entry)
 
 
 def check_unsupported(entry: dict, policy: dict) -> None:

@@ -261,8 +261,12 @@ def _coerce_evidence(raw_error) -> dict:
         status = getattr(exc, "status", None)
         if isinstance(status, int) and not isinstance(status, bool):
             evidence["http_status"] = status
+        # nothing_sent: dispatch/executor.py main marks a failure raised
+        # before it claimed a write. catalog_*: the live-proven row a
+        # CatalogNameMismatch names.
         for attr in ("route_path", "provider", "operation_kind",
-                     "halt_cause"):
+                     "halt_cause", "nothing_sent", "catalog_name",
+                     "catalog_method", "catalog_path"):
             value = getattr(exc, attr, None)
             if value is not None:
                 evidence[attr] = value

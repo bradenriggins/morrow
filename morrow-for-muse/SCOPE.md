@@ -151,7 +151,7 @@ live battery marks them live-proven in
   (course-scoped labels such as `Student A1`) before the agent or the
   journal sees it. Everywhere else (the raw HTTPS lane, or no
   `cryptography`) they are refused (`LearnerDataGated`). The educator
-  works by name through `morrow students find` and writes by label (SKILL.md
+  works by name through `bin/morrow students find` and writes by label (SKILL.md
   "Working by name"). Proof status: the by-name flow and the opened
   people-bearing rows are proven against synthetic Canvas fixtures in
   the source tree's end-to-end tests; they have not yet been exercised

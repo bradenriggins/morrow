@@ -531,6 +531,21 @@ class CatalogNotProven(ExecutorError):
     errors instead."""
 
 
+class CatalogNameMismatch(CatalogNotProven):
+    """The task name and the request are not one catalog row, but one of
+    them is a live-proven row: an unknown name for a live-proven method
+    and path, or a name paired with another row's method and path.
+    Refused like any CatalogNotProven, before anything is sent;
+    catalog_name, catalog_method, and catalog_path name the live-proven
+    row the dispatch should use."""
+
+    def __init__(self, message, catalog_name, catalog_method, catalog_path):
+        super().__init__(message)
+        self.catalog_name = catalog_name
+        self.catalog_method = catalog_method
+        self.catalog_path = catalog_path
+
+
 class CatalogEffectMismatch(ExecutorError):
     """The caller-declared effect class contradicts the catalog row's own
     R/W column. The catalog is authoritative: a caller can never declare
@@ -3286,6 +3301,12 @@ def find_journal_op(op_id: str):
         return found
 
 
+# Write claims taken in this process. No change reaches the provider
+# before claim_op_id returns, so a CLI failure raised while this count is
+# unchanged sent nothing (main marks it nothing_sent for the translator).
+_WRITE_CLAIMS = [0]
+
+
 def claim_op_id(op_id: str, kind: str, entry_name: str, effects: str,
                 params_digest: str) -> str:
     """Atomically check-and-claim an op_id under the journal lock.
@@ -3360,6 +3381,8 @@ def claim_op_id(op_id: str, kind: str, entry_name: str, effects: str,
                 "journal; refusing to dispatch again (use a fresh op_id)"
                 % op_id)
         _append_record_locked(record)
+    if effects != "read" or kind == "undo":
+        _WRITE_CLAIMS[0] += 1
     return token
 
 
@@ -7534,7 +7557,7 @@ def _verify_plan_request(entry: dict, params: dict, plan,
                 "%s no longer names the student the educator approved: "
                 "this course's student labels were cleared and issued "
                 "again after the approval was prepared. Nothing was sent. "
-                "Run `morrow students find` again, then prepare a new "
+                "Run `bin/morrow students find` again, then prepare a new "
                 "approval with plan-write." % ", ".join(changed))
         subject = dict(subject, learner_tokens=current)
     if admission_request_digest(subject) != plan.request_digest:
@@ -9085,6 +9108,50 @@ def catalog_descriptor_for(name: str):
     return _load_operation_catalog().get(name)
 
 
+def _live_row_for(method: str, path_template: str):
+    """(tool name, descriptor) of the live-proven row with this method
+    and path template (slot names ignored), or None."""
+    key = _normalized_catalog_key(method, path_template)
+    for row_name, desc in sorted(_load_operation_catalog().items()):
+        if desc["status"] == "live-proven" and _normalized_catalog_key(
+                desc["method"], desc["path"]) == key:
+            return row_name, desc
+    return None
+
+
+def _catalog_name_refusal(name: str, method: str, path_template: str):
+    """The refusal for a catalog dispatch whose name and request are not
+    one row. When the method and path are a live-proven row, or else the
+    name is one, the refusal is CatalogNameMismatch naming that row, so
+    the agent runs it again under the right name instead of telling the
+    educator the task is untested. Otherwise it is CatalogNotProven."""
+    method_u = str(method or "").upper()
+    descriptor = catalog_descriptor_for(name)
+    if descriptor is None:
+        detail = ("operation %r is not a dispatchable row in "
+                  "proof-battery/OPERATION_CATALOG.md; only live-proven "
+                  "operations run. Refusing." % name)
+    else:
+        detail = ("operation %r is in the catalog as %s %s, but the "
+                  "dispatch asked for %s %s; a proven name cannot be "
+                  "paired with arbitrary CLI arguments" % (
+                      name, descriptor["method"], descriptor["path"],
+                      method_u, path_template))
+    row = _live_row_for(method_u, path_template)
+    if row is None and descriptor is not None \
+            and descriptor["status"] == "live-proven":
+        row = (name, descriptor)
+    if row is None:
+        return CatalogNotProven(detail)
+    row_name, row_desc = row
+    return CatalogNameMismatch(
+        "%s. Nothing was sent. The live-proven row to use is %s: --name "
+        "%s --method %s --path '%s'" % (
+            detail.rstrip("."), row_desc["id"], row_name,
+            row_desc["method"], row_desc["path"]),
+        row_name, row_desc["method"], row_desc["path"])
+
+
 def _journal_catalog_refusal(name, method, path_template, params, status,
                              detail):
     """Journal a catalog-gate refusal under its own event id.
@@ -9157,23 +9224,15 @@ def _catalog_provenance_gate(entry: dict, name: str, method: str,
                                      label, str(exc))
             raise
     descriptor = catalog_descriptor_for(name)
-    if descriptor is None:
-        detail = ("operation %r is not a dispatchable row in "
-                  "proof-battery/OPERATION_CATALOG.md; only live-proven "
-                  "operations run. Refusing." % name)
-        _journal_catalog_refusal(name, method, path_template, params,
-                                 "unknown", detail)
-        raise CatalogNotProven(detail)
-    if descriptor["method"] != str(method or "").upper() or \
+    if descriptor is None or \
+            descriptor["method"] != str(method or "").upper() or \
             descriptor["path"] != path_template:
-        detail = ("operation %r is in the catalog as %s %s, but the dispatch "
-                  "asked for %s %s; a proven name cannot be paired with "
-                  "arbitrary CLI arguments" % (
-                      name, descriptor["method"], descriptor["path"],
-                      str(method or "").upper(), path_template))
-        _journal_catalog_refusal(name, method, path_template, params,
-                                 "descriptor_mismatch", detail)
-        raise CatalogNotProven(detail)
+        refusal = _catalog_name_refusal(name, method, path_template)
+        _journal_catalog_refusal(
+            name, method, path_template, params,
+            "unknown" if descriptor is None else "descriptor_mismatch",
+            str(refusal))
+        raise refusal
     status = descriptor["status"]
     if status == "live-proven":
         return status
@@ -9292,10 +9351,9 @@ def catalog_descriptor_to_entry(name: str, method: str, path_template: str,
         effect_class = canonical
     else:
         if effect_class is None:
-            raise ExecutorError(
-                "effect_class is required for %r: it is not a catalog row, "
-                "so no effect class can be derived from the catalog"
-                % (name,))
+            # No effect class can be derived for a name the catalog does
+            # not know, and the provenance gate refuses the name anyway.
+            raise _catalog_name_refusal(name, method, path_template)
     if effect_class not in ("read", "write", "plan"):
         raise ExecutorError("effect_class must be 'read', 'write', or 'plan', got %r" % effect_class)
     default_slots = {"canvas": "canvas_pat", "quiz_api": "canvas_pat"}
@@ -9764,6 +9822,18 @@ def _load_params(text: str) -> dict:
     return obj
 
 
+def _caller_op_id(value, flag: str = "--op-id") -> str:
+    """An op id argument, checked before anything is read or sent."""
+    try:
+        return check_uuid(value)
+    except (TypeError, ValueError, AttributeError):
+        # The value is not echoed: an agent may paste other text here.
+        raise CallerInputError(
+            "%s is not an op id: pass the op id exactly as Morrow printed "
+            "it (letters, digits, and dashes only), with no brackets, "
+            "quotes, or other text. Nothing was sent." % flag) from None
+
+
 def _load_body(text: str):
     """The request body from --body: a JSON object, or a JSON array of
     objects (the bulk date update, C-37, takes a bare array)."""
@@ -10094,10 +10164,10 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         entry = catalog_descriptor_to_entry(name, method, path_template,
                                             None, provider, None, extra)
     if entry.get("effects") != "write":
-        raise ExecutorError(
+        raise CallerInputError(
             "plan-write prepares writes only; %r is a %s operation (run "
-            "it with the catalog command, no approval needed)"
-            % (name, entry.get("effects")))
+            "it with the catalog command, no approval needed). Nothing "
+            "was sent." % (name, entry.get("effects")))
     enforce_effect_class(entry)
     _catalog_provenance_gate(entry, name, method, path_template, params,
                              session=session)
@@ -10228,6 +10298,7 @@ def _approve_plan_write(op_id, authorization, session, pack, mode_ctx,
                         channel, label):
     from dispatch.admission import (approval_used, sign_approval,
                                     _is_destructive)
+    op_id = _caller_op_id(op_id)
     expire_write_ceremony_files(quiet=True)
     path = pending_write_path(op_id)
     try:
@@ -10757,9 +10828,28 @@ def build_parser():
 
 
 def main(argv=None):
+    """Run one CLI command. A failure raised before this run claimed a
+    write carries nothing_sent=True, so the failure translator never
+    tells the educator that a change might have been made."""
+    claims_before = _WRITE_CLAIMS[0]
+    try:
+        return _run_cli(argv)
+    except Exception as exc:
+        if _WRITE_CLAIMS[0] == claims_before:
+            try:
+                exc.nothing_sent = True
+            except Exception:
+                pass
+        raise
+
+
+def _run_cli(argv=None):
     # W5-P2-1: graceful SIGTERM/SIGINT handling for the whole CLI.
     _install_shutdown_handlers()
     args = build_parser().parse_args(argv)
+    for flag, attr in (("--op-id", "op_id"), ("--of-op-id", "of_op_id")):
+        if getattr(args, attr, None) is not None:
+            setattr(args, attr, _caller_op_id(getattr(args, attr), flag))
     # Only the shipped pack runs from the CLI: a caller-chosen pack would
     # let the caller pin any entry it authored, so there is no --pack
     # flag and no environment override.

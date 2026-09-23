@@ -11,29 +11,33 @@
 # re-verifies every step and repairs drift (missing cron entry, missing
 # profile dir), but it never duplicates and never deletes your state.
 #
-# Upgrade: INSTALL.md step 1 copies the new release over the installed
-# tree (keeping helper/env, helper/profile, and .morrow-tree-id), then
-# this installer runs. On a version change it backs the tree up to a
-# timestamped directory, then removes files the new version no longer
-# ships (diffed against the previous install's manifest, loudly
-# logged). The backup is the tree as this installer found it: the new
-# release's files plus the previous release's leftovers. The previous
-# release's own files are already gone, so no step of this installer
-# can bring that release back. If the upgrade fails afterwards, the
-# backup is restored automatically, which undoes this installer's
-# changes, but ONLY from a verified-complete backup: the installer
-# records a per-file SHA-256 manifest at backup time and re-verifies it
-# before any restore. A backup interrupted mid-write (e.g. disk full)
-# is NEVER restored over the tree; the tree is left in place, the
-# partial backup is quarantined as <tree>.bak-<ts>.PARTIAL, and the
-# failure names the recovery steps. After a restore, fixing the cause
-# and running this installer again finishes the upgrade.
-# A failed FRESH install (no backup) rolls back everything the run
-# created (state dirs, helper/env, helper/profile, the cron entry),
-# itemized, instead of leaving a half-install. Upgrade backups keep a
-# bounded retention: the 3 most recent are kept, older ones pruned.
-# scripts/uninstall.sh removes the tree, the state dir, backups
-# (<tree>.bak-* incl. .PARTIAL), and failed trees (<tree>.failed-*).
+# Upgrade: in place only (INSTALL.md, "Upgrading"). Copy the new release
+#   over the existing tree with INSTALL.md's Step 1 commands, then run
+#   this installer from the tree. Do not unzip into a fresh directory:
+#   helper/env (the Canvas address) and helper/profile (the sign-in) live
+#   inside the tree, so a fresh tree starts without them and the educator
+#   must sign in again. On a version change the installer backs the tree
+#   up to a timestamped directory first, then removes files the new
+#   version no longer ships (diffed against the previous install's
+#   manifest, loudly logged). The backup is the tree as this installer
+#   found it: the new release's files plus the previous release's
+#   leftovers. The copy already replaced the previous release's own
+#   files, so no step of this installer can bring that release back. If
+#   the upgrade fails afterwards, the backup is restored automatically,
+#   which undoes this installer's changes, but ONLY from a
+#   verified-complete backup: the installer records a per-path SHA-256
+#   manifest of the backup at backup time and re-verifies it before any
+#   restore. A backup interrupted mid-write (e.g. disk full) is NEVER
+#   restored over the tree; the tree is left in place, the partial
+#   backup is quarantined as <tree>.bak-<ts>.PARTIAL, and the failure
+#   names the recovery steps. After a restore, fixing the cause and
+#   running this installer again finishes the upgrade.
+#   A failed FRESH install (no backup) rolls back everything the run
+#   created (state dirs, helper/env, helper/profile, the cron entry),
+#   itemized, instead of leaving a half-install. Upgrade backups keep
+#   a bounded retention: the 3 most recent are kept, older ones pruned.
+#   scripts/uninstall.sh removes the tree, the state dir, backups
+#   (<tree>.bak-* incl. .PARTIAL), and failed trees (<tree>.failed-*).
 #
 # What it does, in order:
 #   1. python3 check (>= 3.11; 3.10 refused: security EOL Oct 2026).
@@ -1058,7 +1062,7 @@ if [ -z "${CANVAS_BASE:-}" ] && [ -f "${LEGACY_ENV_FILE}" ]; then
 fi
 if [ -z "${CANVAS_BASE:-}" ]; then
   note "CANVAS_BASE is not set yet: skipping the helper launch."
-  note "Set it in ${ENV_FILE}, then rerun this installer (or wait for the next keepalive run). The one-time sign-in comes after."
+  note "Set it in ${ENV_FILE}, then rerun this installer: it checks the address before it starts the helper. The one-time sign-in comes after."
 else
   if [ -n "${_SHELL_CANVAS_BASE}" ] \
     && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?CANVAS_BASE=' "${ENV_FILE}" 2>/dev/null; then

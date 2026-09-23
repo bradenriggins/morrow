@@ -116,6 +116,39 @@ def _cli(exc_factory):
     return exc_factory(cs)
 
 
+def _never_dispatch(name):
+    desc = ex.catalog_descriptor_for(name)
+    entry = ex.catalog_descriptor_to_entry(name, desc["method"],
+                                           desc["path"])
+    try:
+        admission.check_never_dispatch(entry, admission.load_policy())
+    except admission.NeverDispatch as exc:
+        return exc
+    raise AssertionError("%s was admitted" % name)
+
+
+def _name_refusal(name, method, path):
+    try:
+        ex.catalog_descriptor_to_entry(name, method, path)
+    except ex.CatalogNotProven as exc:
+        return exc
+    raise AssertionError("%s was accepted" % name)
+
+
+def _approval_refusal(status):
+    """The evidence reauth/state_machine.py cmd_approve passes when an op
+    is not awaiting approval."""
+    from reauth import state_machine as rsm
+    return rsm.approval_refusal_evidence("op-12345678", status)
+
+
+def _before_the_claim(exc):
+    """What dispatch/executor.py main marks on a failure raised before
+    it claimed a write."""
+    exc.nothing_sent = True
+    return exc
+
+
 REACHABLE = {
     "canvas-csrf-token-missing": lambda: __import__(
         "transport.local_chromium", fromlist=["x"]).CsrfTokenMissing(
@@ -131,6 +164,14 @@ REACHABLE = {
         "operation 'canvas_update_discussion' is on evidence hold"),
     "never-dispatch": lambda: admission.NeverDispatch(
         "operation posts an announcement"),
+    "never-dispatch-read": lambda: _never_dispatch(
+        "canvas_get_blueprint_information"),
+    "catalog-name-mismatch": lambda: _name_refusal(
+        "get_settings", "GET", "/api/v1/courses/{course_id}/settings"),
+    "paused-change-not-resumed": lambda: _approval_refusal("quarantined"),
+    "paused-change-already-approved": lambda: _approval_refusal("approved"),
+    "paused-change-not-waiting": lambda: _approval_refusal(None),
+    "unknown-nothing-sent": lambda: _before_the_claim(RuntimeError("boom")),
     "course-roster-unavailable": lambda: ex.CourseRosterUnavailable(
         "the course roster read failed"),
     "catalog-not-proven": lambda: ex.CatalogNotProven(
@@ -337,6 +378,10 @@ PRODUCED = {
     "plan_mode_write_without_approval": None,
     "ambiguous_course_write_refused": None, "mode_settings_tamper": None,
     "destructive_write_confirmation_required": None,
+    "nothing_sent": (True,), "catalog_name": None, "catalog_method": None,
+    "catalog_path": None,
+    "quarantine_status": ("quarantined", "approved", "none",
+                          "session_quarantined"),
 }
 # Signatures whose keys the shipped code produces, but never together.
 NEVER_TOGETHER = {

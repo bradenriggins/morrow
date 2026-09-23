@@ -216,6 +216,27 @@ class NeverDispatch(Exception):
     pass
 
 
+class NeverDispatchRead(Exception):
+    """dispatch/admission.py check_never_dispatch on a read: the refusal
+    carries operation_kind "read"."""
+    operation_kind = "read"
+
+
+NeverDispatchRead.__name__ = "NeverDispatch"
+
+
+class CatalogNameMismatch(Exception):
+    """dispatch/executor.py: the task name and the request are not one
+    tested row; the refusal names the row to use."""
+
+    def __init__(self, message, catalog_name, catalog_method,
+                 catalog_path):
+        super().__init__(message)
+        self.catalog_name = catalog_name
+        self.catalog_method = catalog_method
+        self.catalog_path = catalog_path
+
+
 class CourseRosterUnavailable(Exception):
     pass
 
@@ -532,6 +553,34 @@ MODE_CASES = {
     "new-quiz-guard-refused": lambda: NewQuizRefused(
         "draw update requires a positive whole question count; got 0"),
     "catalog-not-proven": lambda: {"gate": "CatalogNotProven"},
+    "catalog-name-mismatch": lambda: CatalogNameMismatch(
+        "operation 'get_settings' is not a catalog row; the live-proven "
+        "row for GET /api/v1/courses/{course_id}/settings is "
+        "'canvas_get_course_settings'", "canvas_get_course_settings",
+        "GET", "/api/v1/courses/{course_id}/settings"),
+    "never-dispatch-read": lambda: NeverDispatchRead(
+        "operation 'canvas_get_blueprint_information' targets a "
+        "never-dispatch URL pattern '/blueprint_templates'. Nothing was "
+        "sent."),
+    # reauth/state_machine.py cmd_approve: an op that is not awaiting
+    # approval, by its newest ledger status.
+    "paused-change-not-resumed": lambda: {
+        "error": "ApprovalRefused", "quarantine_status": "quarantined",
+        "nothing_sent": True,
+        "detail": "op_id=op-1 is not awaiting_approval (status=quarantined)"},
+    "paused-change-already-approved": lambda: {
+        "error": "ApprovalRefused", "quarantine_status": "approved",
+        "nothing_sent": True,
+        "detail": "op_id=op-1 is not awaiting_approval (status=approved)"},
+    "paused-change-not-waiting": lambda: {
+        "error": "ApprovalRefused", "quarantine_status": "none",
+        "nothing_sent": True,
+        "detail": "op_id=op-1 is not awaiting_approval (status=None)"},
+    # A failure no mode names, raised before the executor claimed a
+    # write (dispatch/executor.py main sets nothing_sent).
+    "unknown-nothing-sent": lambda: {
+        "error": "RuntimeError", "nothing_sent": True,
+        "detail": "the course read broke in a new way"},
     "manifest-entry-not-pinned": lambda: ManifestPinMismatch(
         "entry name 'morrow_plan_page_image_alt_repair' is not pinned in "
         "the pack; refusing to run"),
@@ -726,8 +775,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_89_modes(self):
-        self.assertEqual(89, len(CATALOG.entries))
+    def test_catalog_has_95_modes(self):
+        self.assertEqual(95, len(CATALOG.entries))
 
     def test_retired_lane_modes_stay_retired(self):
         for mode_id, factory in sorted(RETIRED_LANE_CASES.items()):

@@ -63,6 +63,9 @@ Changes to your courses:
   no exception. In 0.4.0, the assistant could offer to run a task we
   had not tested if you approved it, although the consent page said
   Morrow refuses such a task even if you ask. That option is gone.
+- The assistant can read a course's content security settings, one of
+  the 115 tested reads. Morrow refused that read along with changes to
+  those settings; only a change is refused now.
 - The approval you read before a change is in plain words: the
   course, the change, every value that will be sent, and whether
   Morrow can undo it. A course rename and a change to the dates of
@@ -199,6 +202,24 @@ Messages:
   Morrow never sends it again on its own. When a request needs student
   records and the package that hides student names is missing, the
   message names the command that installs it.
+- When the assistant uses a wrong name for a tested task, Morrow stops
+  before sending anything, gives the assistant the right name, and you
+  are told nothing was sent. Before, you heard that the task was not
+  tested, or that a change might have been made.
+- When the assistant passes a prepared change's reference with extra
+  characters (for example angle brackets), or asks to prepare a read
+  as a change, you are told nothing was sent. Before, you heard that
+  a change might have been made.
+- Approving a paused change before you sign back in, approving it
+  twice, or approving one that is not waiting tells you why and that
+  nothing was sent. It was reported as a failure Morrow could not
+  explain.
+- A failure Morrow cannot classify that happens before Morrow sends a
+  change says that nothing changed in Canvas. It said a change might
+  have been made.
+- A read Morrow never does in this version, such as a blueprint
+  course's links, is described as a read. It was described as a
+  change, with an offer to help you write it.
 
 Installing and the docs:
 
@@ -298,6 +319,22 @@ Installing and the docs:
 - The shipped `transport/local_chromium_selftest.py` runs in the
   release: its allowlist check no longer opens a file the release
   leaves out.
+- The installer's own notes match the install guide: upgrade by
+  copying the new release over the installed folder (a new folder
+  loses your Canvas address and sign-in), and 3 backups are kept.
+  When your Canvas address is not set, it says to set it and run the
+  installer again, which checks the address before it starts the
+  helper. It no longer suggests waiting for the helper to start on its
+  own, which skips that check.
+- The installer's network check tries your school's Canvas address
+  from `helper/env`. It tried example.com, so a computer that needs a
+  proxy to reach your school passed the check.
+- Installing no longer leaves an empty test folder
+  (`helper/.selftest-warn-profile`) in the installed folder.
+- The assistant's instructions give Morrow's commands as
+  `bin/morrow ...`, run from the installed folder. A bare `morrow` is
+  not on the computer's command path, so those commands failed with
+  "command not found".
 
 Technical notes:
 
@@ -451,6 +488,16 @@ Technical notes:
   `render_educator_display(..., time_zone=)`.
 - `dispatch/executor.py` puts the tree root on `sys.path` before its
   first tree import.
+- `dispatch/executor.py`: `CatalogNameMismatch` (a `CatalogNotProven`)
+  names the live-proven row when a dispatch's name and request are not
+  one row; an op id argument that is not an id, and plan-write for a
+  read, raise `CallerInputError`; `main` marks a failure raised before
+  any write claim `nothing_sent`. `dispatch/admission_policy.json`
+  `never_dispatch.write_url_substrings` refuses changes only
+  (`/csp_settings`). The failure catalog gains `catalog-name-mismatch`,
+  `never-dispatch-read`, `paused-change-not-resumed`,
+  `paused-change-already-approved`, `paused-change-not-waiting`, and
+  `unknown-nothing-sent`.
 
 ## 0.4.0 (2026-09-22)
 

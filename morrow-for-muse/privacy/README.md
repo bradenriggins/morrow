@@ -82,7 +82,7 @@ dispatch only on the Chromium lane with the encrypted vault; the raw
 HTTPS lane, and any lane without `cryptography`, refuses them
 (`LearnerDataGated`). `transport/browser_backend.py::_project_learner_result`
 delegates to the same function for the proof-battery lane. Working by
-name: `learners/find.py` (`morrow students find`) issues labels and
+name: `learners/find.py` (`bin/morrow students find`) issues labels and
 records the name echo; `dispatch_entry` resolves labels in a write to
 real ids after the mode gate and relabels everything afterwards. See
 FERPA_POLICY.md for the honest scope.

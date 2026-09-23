@@ -47,7 +47,7 @@ they become agent-visible or journaled:
 
 ## Working by name
 
-The educator names a student; the agent runs `morrow students find
+The educator names a student; the agent runs `bin/morrow students find
 --course C "<name as typed>"` (`learners/find.py`), confirms any
 ambiguous or close-spelling match with the educator (never picks),
 and writes by label. The executor resolves the label to the real
@@ -132,5 +132,5 @@ have in mind and run `students find` with that name. Consult
 - `privacy/core.py` (the engine and the encrypted vault)
 - `dispatch/admission.py` (`LearnerDataGated`, the refusal side of
   the gate)
-- `learners/find.py` (`morrow students find`) and
+- `learners/find.py` (`bin/morrow students find`) and
   `privacy/name_echo.py` (working by name)

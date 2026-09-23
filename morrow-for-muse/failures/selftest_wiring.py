@@ -15,7 +15,9 @@ Proves, standalone (exit 0 on success, loud non-zero on failure):
 5. The REAL executor CLI funnel (dispatch/executor.py __main__) wires
    through the translator: a failing CLI run exits 2 with the
    structured JSON on stderr (mode_id, correlation_id, four anchors,
-   escalate, labeled engineering detail).
+   escalate, labeled engineering detail). The run fails before it
+   claims any write, so the mode is unknown-nothing-sent: the message
+   says nothing was sent, never that a change might have been made.
 
 Synthetic evidence only: no provider calls, no live writes.
 """
@@ -147,10 +149,13 @@ def main():
            % cli_payload.get("error"))
     _check("detail" not in cli_payload,
            "'detail' must be gone: raw text is never the primary message")
-    _check(cli_payload.get("mode_id") == "unknown",
-           "CLI unknown mode expected, got %r" % cli_payload.get("mode_id"))
-    _check(cli_payload.get("escalate") is True,
-           "CLI unknown must escalate")
+    _check(cli_payload.get("mode_id") == "unknown-nothing-sent",
+           "CLI unknown-nothing-sent mode expected, got %r"
+           % cli_payload.get("mode_id"))
+    _check("might have made a change" not in cli_payload.get("message", ""),
+           "a failure before any write claim says a change might exist")
+    _check("hello@meetmorrow.app" in cli_payload.get("message", ""),
+           "an unrecognized failure must give the support address")
     _check(re.fullmatch(r"[0-9a-f]{12}",
                         cli_payload.get("correlation_id") or ""),
            "CLI payload needs a correlation id")

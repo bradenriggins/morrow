@@ -39,9 +39,11 @@ from .translator import translate
 ENGINEERING_LABEL = "[untrusted provider data] "
 # Label for Morrow's own check of a command's arguments (or its missing
 # --yes), refused before anything was sent: the detail is not provider
-# text.
+# text. A CatalogNameMismatch detail names the catalog row to run
+# instead.
 LOCAL_CHECK_LABEL = "[Morrow input check] "
-_LOCAL_CHECK_CLASSES = frozenset({"CallerInputError", "ConfirmationRequired"})
+_LOCAL_CHECK_CLASSES = frozenset(
+    {"CallerInputError", "ConfirmationRequired", "CatalogNameMismatch"})
 
 _ENGINEERING_LIMIT = 500
 _EVIDENCE_LIMIT = 320

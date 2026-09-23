@@ -106,7 +106,7 @@ The educator can work with a student by name, and the data stays
 de-identified everywhere else:
 
 1. The educator names a student. The agent runs the typed tool
-   `morrow students find --course C "<name as typed>"`
+   `bin/morrow students find --course C "<name as typed>"`
    (`learners/find.py`). It reads the course roster through the login
    helper and answers with labels only: one label for an exact or
    unambiguous match; every candidate, with non-identifying details
@@ -243,7 +243,7 @@ no setting. The model sees course-scoped labels, and a name only when
 the educator typed it (the name echo). Real names appear only on
 Morrow's own local surfaces for the educator; Morrow for Muse has no
 local surface that lists a roster, so the educator works by name: they
-name a student, and `morrow students find` returns that student's
+name a student, and `bin/morrow students find` returns that student's
 label. The sealed educator reveal record that earlier releases offered
 was removed in the final sweep of 2026-09-22: it handed every real name
 in a course read to the agent, and so to the model. The old `<tree-state-dir>` consent file and the

@@ -103,7 +103,7 @@ preemptively and never on every run: a healthy session needs no page.
    keeps it up: from cron when the machine has cron, otherwise from a
    supervised background loop (`helper/supervisor.py`; the Muse VM has
    no cron daemon). After a reboot on a machine without cron, run
-   `bin/morrow start` (any `morrow` command also restarts the loop).
+   `bin/morrow start` (any `bin/morrow` command also restarts the loop).
    The connector's Chromium IS the helper's Chromium: one profile
    (`helper/profile/`), one browser, one CDP port. Never launch a second
    one; a launcher that finds 19223 live attaches to it.
@@ -348,6 +348,10 @@ PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py approve-write \
   --conversation-id "<this conversation's id>"
 ```
 
+Replace each `<...>` placeholder whole, angle brackets included:
+`--op-id` takes the bare `op_id` plan-write printed, and its `message`
+spells out the exact command.
+
 The result's `outcome` is `verified` or `unverified` (relay
 `unverified` as unconfirmed, never as done). The course resolution is
 the course the educator saw named in the display; Canvas's name for it
@@ -458,7 +462,7 @@ both modes.
   lapses to plan mode.
 - Turning edit off means plan everywhere: `default_mode` goes back to
   plan and every grant and per-conversation override is cleared
-  (`morrow mode set plan`, which runs
+  (`bin/morrow mode set plan`, which runs
   `modes.state.switch_mode(user_id, "plan")`). It applies at once, with
   no confirmation round trip.
 - You decide what the educator means; no Morrow code reads the
@@ -470,7 +474,7 @@ both modes.
   request. Relay the command's `message`: it states the true resulting
   mode, read back after the change.
 - Changing the saved default ends every per-conversation override:
-  `morrow mode set edit` (or `plan`) without `--this-conversation`
+  `bin/morrow mode set edit` (or `plan`) without `--this-conversation`
   takes effect in every conversation at once, including one that had
   its own mode. A per-conversation override ("use plan mode for this
   conversation", "use edit mode for this conversation") set after that
@@ -495,7 +499,7 @@ both modes.
   need approval in either mode, and edit never surfaces per-write
   approval, including for destructive writes. `confirm_destructive_writes`
   is an opt-in guardrail (default off, matching the model; the
-  educator can turn it on: `morrow settings set
+  educator can turn it on: `bin/morrow settings set
   confirm_destructive_writes true`). While it is on, an edit-mode
   deletion runs only with the educator's yes to that deletion:
   `approve-write` with their reply, or `catalog` with
@@ -512,19 +516,21 @@ both modes.
   the tree, and survive restarts and reinstalls.
 - Commands (the CLI prints one JSON object with `ok`, `status`, `mode`,
   and `message`; the Python API in `settings/commands.py` returns the
-  same dict). Pass this conversation's id as `--conversation-id C` to
-  each one (see "Where the two ids come from" below):
-  - `morrow mode status --conversation-id C`: the mode in force and
+  same dict). Run each one from this tree's root: `bin/morrow` is not
+  on PATH, so a bare `morrow` is "command not found". Pass this
+  conversation's id as `--conversation-id C` to each one (see "Where the
+  two ids come from" below):
+  - `bin/morrow mode status --conversation-id C`: the mode in force and
     where it comes from.
-  - `morrow mode set plan --conversation-id C`: edit off, plan
+  - `bin/morrow mode set plan --conversation-id C`: edit off, plan
     everywhere.
-  - `morrow mode set plan --this-conversation ...`: plan for this
+  - `bin/morrow mode set plan --this-conversation ...`: plan for this
     conversation only.
-  - `morrow mode set edit ...` (add `--this-conversation` for this
+  - `bin/morrow mode set edit ...` (add `--this-conversation` for this
     conversation only): edit mode takes effect at once. The result says
     that writes now apply without asking until edit mode is turned off;
     relay it.
-  - `morrow settings show|get KEY|set KEY VALUE`: booleans are `true`
+  - `bin/morrow settings show|get KEY|set KEY VALUE`: booleans are `true`
     or `false`. A set takes effect at once and is journaled. "Stop
     asking me to confirm deletions" is `settings set
     confirm_destructive_writes false`; "always confirm deletions" is
@@ -533,7 +539,7 @@ both modes.
     its integrity check: tell the educator they are in plan mode and
     relay the repair steps in `message`.
 - Failed-students question ("who failed last week's quiz", "which
-  students scored under 70%"): run `morrow query --course C --quiz
+  students scored under 70%"): run `bin/morrow query --course C --quiz
   last-week|this-week`, with at most one of `--below-percent N`,
   `--below-points N`, or `--letter-f` when the educator named a
   threshold. You choose the arguments from what the educator said; if
@@ -543,7 +549,7 @@ both modes.
   Canvas, else their Canvas profile's. When the educator names a time
   zone, pass `--timezone <IANA name>`. If none is known the query asks
   for it (mode `query-timezone-unknown`): save their answer with
-  `morrow settings set timezone <name>` and run it again. Names in the
+  `bin/morrow settings set timezone <name>` and run it again. Names in the
   result are de-identified (a student the educator named in this
   conversation shows by that name next to the label).
 - Where the two ids come from. The user id is the educator's
@@ -552,19 +558,19 @@ both modes.
   has one id in every conversation and you never pass `--user-id`
   (it and `MORROW_USER_ID` override the account, for scripted setups
   only). Before an account is pinned there is no user id: every write
-  needs approval, and `morrow mode` and `morrow settings` change
+  needs approval, and `bin/morrow mode` and `bin/morrow settings` change
   nothing until the educator signs in. The conversation id is yours to
   make: at the start of each Muse conversation, make one new
   conversation id (a random UUID, for example from `python3 -c
   'import uuid; print(uuid.uuid4())'`) and pass it as
   `--conversation-id` to every Morrow command in that conversation
-  (`dispatch/executor.py`, `morrow mode`, `morrow settings`, `morrow
-  students find`, `morrow query`). Never reuse a conversation id in
-  another conversation, and never use a fixed one: "edit mode for this
-  conversation" and the names the educator typed belong to it, so a
-  reused id carries them into the next conversation. Without a
-  conversation id, per-conversation edit overrides cannot apply and any
-  plan override makes the write plan.
+  (`dispatch/executor.py`, `bin/morrow mode`, `bin/morrow settings`,
+  `bin/morrow students find`, `bin/morrow query`). Never reuse a
+  conversation id in another conversation, and never use a fixed one:
+  "edit mode for this conversation" and the names the educator typed
+  belong to it, so a reused id carries them into the next
+  conversation. Without a conversation id, per-conversation edit
+  overrides cannot apply and any plan override makes the write plan.
 - Other knobs, all user-settable: `verbosity` (concise | balanced |
   detailed, default balanced), `failure_verbosity` (concise | detailed,
   default detailed), `proactivity` (reactive | suggestive, default
@@ -572,7 +578,7 @@ both modes.
   (brief | full, default full), `default_course_id` (course id or
   empty, default empty), and `timezone` (IANA name or empty, default
   empty; the failed-students query uses it). Every one of these except
-  `timezone` is an instruction to you: read it with `morrow settings
+  `timezone` is an instruction to you: read it with `bin/morrow settings
   show` and follow it as you work; no code enforces it. Educator docs:
   `settings/README.md`.
 
@@ -776,7 +782,7 @@ leave that part out, or ask the educator to write it.
 
 The educator names students; you never guess which one they mean.
 
-1. The educator names a student. Run `morrow students find --course C
+1. The educator names a student. Run `bin/morrow students find --course C
    --conversation-id <this conversation's id> "<the name exactly as the
    educator typed it>"`. It reads the course roster through the login
    helper and prints one JSON object.

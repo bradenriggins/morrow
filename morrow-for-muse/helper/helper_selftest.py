@@ -1787,7 +1787,10 @@ sys.exit(0 if all(RES) else 1)
 
     # W5-P2-3: LOGIN_HELPER_BIND_PUBLIC=1 without TLS prints the loud
     # cleartext warning at import; without the opt-in there is no
-    # warning. Subprocess so env cannot leak.
+    # warning. Subprocess so env cannot leak. Both probes make their
+    # profile dir in the scratch HOME, never in the tree.
+    _warn_profile = os.path.join(os.environ["HOME"],
+                                 ".selftest-warn-profile")
     _WARN_PROBE = ("import importlib.util, os, sys; "
                    "os.environ['LOGIN_HELPER_BIND'] = '192.0.2.1'; "
                    "os.environ['LOGIN_HELPER_BIND_PUBLIC'] = '1'; "
@@ -1800,19 +1803,21 @@ sys.exit(0 if all(RES) else 1)
                    "m = importlib.util.module_from_spec(spec); "
                    "spec.loader.exec_module(m)").replace(
         "__SERVER__", os.path.join(HERE, "server.py")).replace(
-        "__P__", os.path.join(HERE, ".selftest-warn-profile"))
-    _w = subprocess.run([sys.executable, "-c", _WARN_PROBE],
-                        capture_output=True, text=True, timeout=60)
-    shutil.rmtree(os.path.join(HERE, ".selftest-warn-profile"),
-                  ignore_errors=True)
-    check("W5-P2-3 public bind prints cleartext WARNING",
-          "WARNING" in _w.stderr and "CLEARTEXT" in _w.stderr)
+        "__P__", _warn_profile)
     _NOWARN_PROBE = _WARN_PROBE.replace(
         "os.environ['LOGIN_HELPER_BIND_PUBLIC'] = '1'; ", "").replace(
         "os.environ['LOGIN_HELPER_BIND'] = '192.0.2.1'; ",
         "os.environ['LOGIN_HELPER_BIND'] = '127.0.0.1'; ")
-    _nw = subprocess.run([sys.executable, "-c", _NOWARN_PROBE],
-                         capture_output=True, text=True, timeout=60)
+    try:
+        _w = subprocess.run([sys.executable, "-c", _WARN_PROBE],
+                            capture_output=True, text=True, timeout=60)
+        shutil.rmtree(_warn_profile, ignore_errors=True)
+        _nw = subprocess.run([sys.executable, "-c", _NOWARN_PROBE],
+                             capture_output=True, text=True, timeout=60)
+    finally:
+        shutil.rmtree(_warn_profile, ignore_errors=True)
+    check("W5-P2-3 public bind prints cleartext WARNING",
+          "WARNING" in _w.stderr and "CLEARTEXT" in _w.stderr)
     check("W5-P2-3 no warning without the public opt-in",
           _nw.returncode == 0 and "CLEARTEXT" not in _nw.stderr)
 

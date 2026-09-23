@@ -33,8 +33,9 @@ Statuses mean:
 
 ## The dispatch rule (the part that bites)
 
-The gate checks the catalog row BEFORE anything else
-(`_catalog_provenance_gate` in `dispatch/executor.py`):
+A catalog dispatch is refused before anything is sent unless it
+passes the catalog row checks (`_catalog_provenance_gate` in
+`dispatch/executor.py`):
 
 1. The `--name` must be a real catalog tool name. An unknown name raises
    `CatalogNotProven`. The name is not free text.
@@ -46,8 +47,16 @@ The gate checks the catalog row BEFORE anything else
    `failed`, `unsupported`, or `excluded` raise `CatalogNotProven`. No
    flag and no approval changes that.
 
-Then the absolute refusals run: `never_dispatch` rows (blueprint, CSP, SIS, conversations,
-feature flags, the quiz submission-users message), `unsupported`,
+When the name is unknown or belongs to another row, and the method and
+path (or else the name) are a live-proven row, the refusal is
+`CatalogNameMismatch`, a `CatalogNotProven` whose evidence names that
+row (`catalog_name`, `catalog_method`, `catalog_path`). Nothing was
+sent: run the command again with that row.
+
+The same gate also runs the absolute refusals: `never_dispatch` rows
+(blueprint, SIS, conversations, feature flags, the quiz
+submission-users message, and any change to CSP settings; reading a
+course's CSP settings, C-94, is a live-proven read), `unsupported`,
 `evidence-hold`, and `learner-data` (URL substrings `/users/`,
 `/enrollments`, `/submissions`, `/gradebook`, `/grades`, `/analytics`,
 `/ai_conversations`, `/ai_experiences`; `/users/self` excepted).
