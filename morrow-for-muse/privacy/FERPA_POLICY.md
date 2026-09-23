@@ -375,10 +375,9 @@ the wired vault file above.
   "<name> (label)" form). A label in free text (a page body, a title)
   becomes the text its marker names (see "Course content"), never the
   id.
-- Initial-last names ("M. Jackson") are not redacted: the alias
-  set covers full-name, given-name, and reversed ("Jackson,
-  Mary") forms only. A production ingress layer would block on
-  the education-record fact; this egress half currently does not.
+- An initial next to a last name ("M. Jackson") keeps the initial:
+  the last name is labeled like any last name used alone, and the
+  initial is not (`privacy/source_privacy_selftest.py` pins it).
 - "canvas id <id>" is not a contextual id pattern; `/users/<id>`,
   `user_id=<id>`, whole-string ids, structured identity fields,
   and numeric identity values are.

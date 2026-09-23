@@ -40,11 +40,16 @@ Student privacy:
   assignment submission, or to a profile showed the student's Canvas
   ID number. Now it shows the student's label, and Morrow puts the
   number back when it saves the content.
-- Some names are still not hidden, and the consent page lists them: a
-  name Canvas does not list for the student, such as a nickname; a
-  course named for its student, such as an independent study; and a
-  page's web address, which keeps the words of the page's title in
-  small letters.
+- Some student details are still not hidden, and the consent page
+  lists them: a name Canvas does not list for the student, such as a
+  nickname; a first or last name used alone and written in small
+  letters, because in small letters it is usually an ordinary word;
+  the name of someone who was never a student in that course; a course
+  named for its student, such as an independent study; a page's web
+  address, which keeps the words of the page's title in small letters;
+  an ID number written as plain text, such as "Canvas ID 912345" in a
+  page; and other details written about a student, such as a birth
+  date.
 - The consent page says that on some Muse computers, the network that
   carries traffic out of the computer can read that traffic, including
   your Canvas sign-in and the course pages Morrow loads.
