@@ -34,9 +34,9 @@ This is a monorepo. Each product lives in its own directory, ships on its own ve
 - `desktop/`: Morrow Desktop. The app, the Bridge extension, the MCP server, the installer, and product docs.
 - `morrow-for-muse/`: Morrow for Muse. The connector, Morrow Direct, the dispatch engine, the privacy boundary, and the proof battery.
 - `docs/`: family-level docs, the [product overview](docs/products.md) and [versioning](docs/versioning.md).
-- `.github/workflows/`: CI with path filters. Changes under `desktop/**` run the desktop suite on Linux, and its installer suites and every desktop test Linux skips on Windows and on macOS. Changes under `morrow-for-muse/**` run the Muse suite. The repository text gates (no em dash, no retired phrase, the platform facts in this README and `docs/products.md`, the security policy and issue templates) run on every change. The required `check` job aggregates the gates and every suite.
+- `.github/workflows/`: CI with path filters. Changes under `desktop/**` run the desktop suite on Linux, and its installer suites and every desktop test Linux skips on Windows and on macOS. Changes under `morrow-for-muse/**` run the Muse suite. A change to a root file a product reads, such as `.gitattributes` or `LICENSE`, runs that product's suites; [versioning](docs/versioning.md#ci-path-filters) lists them. The repository text gates (no em dash, no retired phrase, the platform facts in this README and `docs/products.md`, the security policy and issue templates, and the path filters for root files) run on every change. The required `check` job aggregates the gates and every suite.
 
-To run the same suites before each commit, install the pre-commit hook once from the repository root: `git config core.hooksPath desktop/.githooks`. It runs the desktop gate when a commit changes `desktop/` or `.github/`, and the Muse suite when a commit changes `morrow-for-muse/`.
+To run the same suites before each commit, install the pre-commit hook once from the repository root: `git config core.hooksPath desktop/.githooks`. It runs the suites CI would run for the commit: the desktop gate when it changes `desktop/`, the Muse suite when it changes `morrow-for-muse/`, both when it changes `.github/`, and each product's suite when it changes a root file that product reads.
 
 ## Versioning
 

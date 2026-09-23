@@ -1,7 +1,8 @@
 name: ci
 
 # Monorepo CI. The `changes` job detects which products a push/PR touches;
-# each product suite runs only when its directory changed. The
+# each product suite runs only when its directory, or a root file it reads,
+# changed. The
 # `check-repository` job runs the repository text gates on every change,
 # because they read every tracked file, including the root documents and
 # Morrow for Muse. The `check` job aggregates every job and keeps the
@@ -25,6 +26,9 @@ jobs:
       muse: ${{ steps.filter.outputs.muse }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A root file a product reads is in that product's filter:
+      # desktop/scripts/test/lib/ci-path-filters.mjs says which suite reads
+      # each one, and ci-path-filters.test.mjs holds these filters to it.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
@@ -32,14 +36,20 @@ jobs:
             desktop:
               - 'desktop/**'
               - '.github/**'
+              - '.gitattributes'
+              - 'docs/versioning.md'
             muse:
               - 'morrow-for-muse/**'
               - '.github/**'
+              - '.gitattributes'
+              - '.gitignore'
+              - 'LICENSE'
 
-  # No em dash and no retired phrase anywhere in the repository, and the
+  # No em dash and no retired phrase anywhere in the repository, the
   # security policy and issue templates keep security reports and student
-  # information out of public issues. These gates need only Node, so they run
-  # from the repository root with nothing to install.
+  # information out of public issues, and every root file a product reads
+  # runs that product's suites. These gates need only Node, so they run from
+  # the repository root with nothing to install.
   check-repository:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -48,7 +58,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.23.2
-      - run: node --test desktop/scripts/test/no-em-dash.test.mjs desktop/scripts/test/product-claims.test.mjs desktop/scripts/test/repository-policy.test.mjs
+      - run: node --test desktop/scripts/test/no-em-dash.test.mjs desktop/scripts/test/product-claims.test.mjs desktop/scripts/test/repository-policy.test.mjs desktop/scripts/test/ci-path-filters.test.mjs
 
   check-desktop:
     needs: changes
