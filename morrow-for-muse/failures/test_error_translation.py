@@ -2,7 +2,7 @@
 """Full test suite for the Morrow error translation layer.
 
 Covers failures/translator.py + failures/catalog.py + failures/catalog.json:
-  1. per-mode tests: every one of the 87 catalog modes gets a synthetic
+  1. per-mode tests: every one of the 88 catalog modes gets a synthetic
      raw error; asserts the right mode_id, the four message anchors, all
      placeholders filled, no em dashes, no shrug language, and the
      escalate flag matching the catalog.
@@ -363,6 +363,10 @@ MODE_CASES = {
     "quiz-resolution-ambiguous": _quiz_ambiguous_case,
     "quiz-resolution-no-match": _quiz_no_match_case,
     "canvas-csrf-422-writes-only": _csrf_422_dict,
+    "canvas-write-refused-invalid": lambda: {
+        "http_status": 422, "provider": "canvas", "operation_kind": "write",
+        "body_text": '{"errors":{"title":[{"message":"is too long"}]}}',
+    },
     "canvas-rate-limit-429": lambda: {
         "provider": "canvas", "http_status": 429,
         "rate_limit_remaining": 0.0, "retry_after_present": True,
@@ -615,8 +619,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_87_modes(self):
-        self.assertEqual(87, len(CATALOG.entries))
+    def test_catalog_has_88_modes(self):
+        self.assertEqual(88, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):

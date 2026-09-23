@@ -8121,6 +8121,11 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
             # provider call, the failure is pre-network, it is a read, or
             # it is a fail-fast / pre-send refusal. Release the claim
             # (journaled) so the op_id stays reusable, then re-raise.
+            if isinstance(exc, ProviderHttpError):
+                # For the failure translator: which provider refused,
+                # and whether it refused a write (nothing was saved).
+                exc.provider = entry.get("provider") or "canvas"
+                exc.operation_kind = "write" if is_write else "read"
             try:
                 release_op_id(op_id, claim_token,
                               "request-phase failure before any effect "

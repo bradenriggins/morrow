@@ -86,6 +86,42 @@
       ]
     },
     {
+      "id": "canvas-write-refused-invalid",
+      "title": "Canvas did not accept a value in the change, so nothing changed",
+      "surface": "canvas",
+      "severity_hint": "low",
+      "root_cause": "Canvas answers a write it will not save with HTTP 400 or 422 and an errors body that names the field and the reason (for example {\"errors\": {\"title\": [{\"message\": \"is too long\"}]}}). The executor fails fast on a 4xx: Canvas refused the request, so nothing was saved, and the op id is released for a new attempt.",
+      "is_not": "This is not a missing security token (that 422 carries unprocessable_content and has its own mode), not session death, and not a change that might have applied.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Canvas did not accept this change and said: {validation_messages} (reference {correlation_id}). What this means: nothing changed in Canvas. What happens next: I can fix the value and ask you to approve the change again.",
+      "auto_action": "Tell the educator what Canvas said, correct the value, run plan-write again, and ask for a new approval; never resend the same request",
+      "escalate_when": "never; Canvas refused a value and nothing changed",
+      "signature": {
+        "http_status": {
+          "in": [
+            400,
+            422
+          ]
+        },
+        "operation_kind": "write",
+        "provider": {
+          "in": [
+            "canvas",
+            "item-banks"
+          ]
+        },
+        "validation_messages": {
+          "truthy": true
+        }
+      },
+      "signature_notes": "classification: \"ProviderHttpError on a write\"; fixed_behavior: \"fail fast on 4xx, nothing saved, op id released\"; triggers: [\"a 400 or 422 whose body carries an errors list or map\"]; not: [\"the CSRF 422 (unprocessable_content)\"]",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "correlation_id",
+        "operation",
+        "validation_messages"
+      ]
+    },
+    {
       "id": "canvas-rate-limit-429",
       "title": "Canvas 429 rate limiting",
       "surface": "canvas",
@@ -1692,7 +1728,7 @@
       "severity_hint": "high",
       "root_cause": "Contract, not a mechanism: any failure the catalog does not recognize must still produce a structured, evidence-grounded message and a preserved forensic record.",
       "is_not": "This is not a license to guess the cause. The message states exactly what was checked and what is unknown.",
-      "agent_message": "What was attempted: {operation} on {tenant} failed in a way I do not have a classified pattern for, so I am reporting exactly what I know instead of guessing. What the evidence showed: the provider's response (status {status_code}, request id {request_id}), the session health (logged in: {logged_in}, browser alive: {chromium_alive}), the write-halt state ({write_halt_active}), and the transport's {attempt_count} attempts, all captured in the journal under {op_id} (reference {correlation_id}). What this means: I have ruled out the known failure patterns but have not identified the cause, so I will not retry anything that might have applied. What happens next: I am preserving the full evidence bundle for engineering review and parking the operation safely; you will get a concrete next step once the cause is identified.",
+      "agent_message": "What was attempted: {operation}{where}. It failed in a way I do not have a classified pattern for, so I am reporting exactly what I know instead of guessing. What the evidence showed: {known_evidence} (reference {correlation_id}). What this means: I have ruled out the known failure patterns but have not identified the cause, so I will not retry anything that might have applied. What happens next: I am preserving the full evidence bundle for engineering review and parking the operation safely; you will get a concrete next step once the cause is identified.",
       "auto_action": "Capture the full evidence bundle to the journal and engineering log; park the op; never blind-retry. If the op was write-class and possibly applied, reconcile via readback before any re-dispatch.",
       "escalate_when": "Always surface to the educator with the evidence summary and the concrete next step; route the full bundle to engineering.",
       "signature": {},
@@ -1700,16 +1736,10 @@
       "severity_hint_inventory": "engineering",
       "fallback": true,
       "placeholders": [
-        "attempt_count",
-        "chromium_alive",
         "correlation_id",
-        "logged_in",
-        "op_id",
+        "known_evidence",
         "operation",
-        "request_id",
-        "status_code",
-        "tenant",
-        "write_halt_active"
+        "where"
       ]
     },
     {
