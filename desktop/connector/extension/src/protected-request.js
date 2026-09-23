@@ -54,16 +54,20 @@ const NOT_NAME_WORDS = new Set(("monday tuesday wednesday thursday friday saturd
   + "part question questions answer answers extra credit late due draft group groups team teams for on in at by to from "
   + "with about after before during all any each every some most more less first second third last next").split(" "));
 
+// A generational suffix ends a name but is never the family name.
+const NAME_SUFFIX = /^(?:jr|sr|ii|iii|iv|v)\.?$/u;
+
 function learnerNameAliases(identity) {
   const name = normalize(identity.name);
   const aliases = new Set([name]);
   const comma = /^([^,]+),\s*(.+)$/u.exec(name);
-  if (comma) {
+  if (comma && !NAME_SUFFIX.test(comma[2])) {
     aliases.add(`${comma[2]} ${comma[1]}`);
     aliases.add(comma[1]);
     aliases.add(comma[2].split(/\s+/u)[0]);
   } else {
-    const parts = name.split(" ");
+    const parts = name.replace(/,/gu, " ").split(" ").filter(Boolean);
+    while (parts.length > 1 && NAME_SUFFIX.test(parts.at(-1))) parts.pop();
     if (parts.length > 1) {
       aliases.add(`${parts.at(-1)} ${parts.slice(0, -1).join(" ")}`);
       aliases.add(parts[0]);

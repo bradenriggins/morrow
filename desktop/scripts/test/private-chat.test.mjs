@@ -254,6 +254,16 @@ test("local protection does not turn common words that match a lone name part in
   assert.doesNotMatch(surname, /Grant/u);
 });
 
+test("local protection takes the family name before a suffix such as Jr. and leaves the suffix as written", () => {
+  const suffixed = sourceProtectedRoster([{ id: 7, name: "Marisol Okonkwo Jr." }, { id: 8, name: "Henry Ford II" }]);
+  const protectSuffixed = (text, assertedIdentifiers) => protectLocalRequest({
+    sourceBindingId: "canvas:course-1", courseId: "1", text, assertedIdentifiers,
+    roster: suffixed, rosterComplete: true, rosterFreshAt: NOW, now: NOW,
+  }).protectedText;
+  assert.match(protectSuffixed("Okonkwo and Ford presented.", ["Okonkwo", "Ford"]), /^Student A\d+ and Student A\d+ presented\.$/u);
+  assert.match(protectSuffixed("Henry Ford II presented on World War II.", ["Henry Ford II"]), /^Student A\d+ presented on World War II\.$/u);
+});
+
 test("local protection reports name-like words it could not match instead of passing them silently", () => {
   const nickname = protectCourse("Jane Doe (goes by Janey) and Bobby Smith are failing", ["Jane Doe"]);
   assert.deepEqual(nickname.unmatchedNames, ["Janey", "Bobby Smith"]);
