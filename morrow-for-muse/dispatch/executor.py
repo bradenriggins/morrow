@@ -125,6 +125,13 @@ from datetime import datetime, timedelta, timezone
 _EXEC_TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _EXEC_TREE_ROOT not in sys.path:
     sys.path.insert(0, _EXEC_TREE_ROOT)
+# Run as a script or with -m, this file is __main__, and the Chromium lane
+# imports it again as dispatch.executor. The lane's errors would then be
+# the second copy's classes, and no except clause here would catch them.
+# The CLI therefore always runs in the dispatch.executor copy.
+if __name__ == "__main__":
+    from dispatch import executor as _executor
+    raise SystemExit(_executor._script_main(sys.argv[1:]))
 from dispatch.admission import (  # noqa: E402
     admit, persist_signed_record, consume_approval, check_policy_gates,
     load_policy, check_never_dispatch, check_unsupported,
@@ -11259,19 +11266,20 @@ def _agent_error(argv, exc):
     return agent_error_payload(_funnel_operation(argv, exc), exc)
 
 
-if __name__ == "__main__":
+def _script_main(argv):
+    """The CLI entry for every documented way to start the executor."""
     try:
-        sys.exit(main())
+        return main(argv)
     except SystemExit:
         raise
     except Exception as exc:
         # Agent-facing error funnel: translate before the agent sees it.
         try:
-            payload = _agent_error(sys.argv[1:], exc)
+            payload = _agent_error(argv, exc)
         except Exception:
             # The translation layer itself failed: degrade to the old
             # shape rather than a traceback.
             payload = {"error": type(exc).__name__,
                        "detail": _provider_detail(exc, 500)}
         print(json.dumps(payload), file=sys.stderr)
-        sys.exit(2)
+        return 2
