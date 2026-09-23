@@ -153,6 +153,30 @@ test("the newest release notes speak to educators, with technical notes last and
   assert.deepEqual(problems, [], `${heading[0]}: say what the educator sees, or move the item under ### Technical notes`);
 });
 
+// Written before the fix (final sweep 2026-09-23): 1.0.5 replaced the assistant's Edit prompt with a
+// review page that only a click in Chrome answers, and refused removals from a conversation. An
+// educator who used 1.0.4 meets both, and the 1.0.5 notes said neither.
+const APPROVAL_SERVER = "packages/mcp-server/src/approval-server.ts";
+const EDIT_ACCESS_REVIEW = "packages/mcp-server/src/edit-access-review.ts";
+
+test("the newest release notes say how Edit is turned on from a conversation", () => {
+  const button = /<h1>Turn on Edit\?<\/h1>[\s\S]*?<button class="approve" type="submit">([^<]+)<\/button>/.exec(read(APPROVAL_SERVER))?.[1];
+  assert.ok(button, `${APPROVAL_SERVER} must render the Edit access review's approve button`);
+  const refusal = /export const DESTRUCTIVE_EDIT_REFUSAL = "([^"]+)";/.exec(read(EDIT_ACCESS_REVIEW))?.[1];
+  assert.ok(refusal, `${EDIT_ACCESS_REVIEW} must export the removal refusal`);
+  const changelog = read("CHANGELOG.md");
+  const heading = /^## \d+\.\d+\.\d+ \(\d{4}-\d\d-\d\d\)$/m.exec(changelog);
+  const next = changelog.indexOf("\n## ", heading.index + 1);
+  const section = changelog.slice(heading.index, next === -1 ? changelog.length : next);
+  const approvals = section.split(/^(?=### )/m).find((part) => part.startsWith("### Approvals and Edit access\n"));
+  assert.ok(approvals, `${heading[0]} must keep its Approvals and Edit access subsection`);
+  const bullet = collapse(approvals.split(/^- /m).find((item) => /\bassistant asks to turn on Edit\b/.test(item)) ?? "");
+  assert.ok(bullet, `${heading[0]} must say what happens when your assistant asks to turn on Edit`);
+  assert.ok(bullet.includes(`select ${button}`), `the notes must name the review page's ${button} button`);
+  assert.match(bullet, /\bin Chrome\b/, "the notes must say the review opens in Chrome");
+  assert.ok(bullet.includes(refusal), `the notes must say what Morrow answers for a removal: ${refusal}`);
+});
+
 test("the documented platform coverage matches the packages that ship", (t) => {
   if (present(BLACKBOARD_PACKAGE)) {
     for (const doc of ["ARCHITECTURE.md", "LIMITATIONS.md"]) {
