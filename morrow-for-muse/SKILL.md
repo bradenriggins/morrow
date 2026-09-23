@@ -348,6 +348,10 @@ PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py approve-write \
   --conversation-id "<this conversation's id>"
 ```
 
+Replace each `<...>` placeholder whole, angle brackets included:
+`--op-id` takes the bare `op_id` plan-write printed, and its `message`
+spells out the exact command.
+
 The result's `outcome` is `verified` or `unverified` (relay
 `unverified` as unconfirmed, never as done). The course resolution is
 the course the educator saw named in the display; Canvas's name for it

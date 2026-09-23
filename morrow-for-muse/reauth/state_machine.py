@@ -1517,10 +1517,20 @@ def cmd_quarantine():
           f"(writes_allowed={allowed}; {reason})")
 
 
+def approval_refusal_evidence(op_id, status):
+    """The failure translator's evidence for an approve refused because
+    the op is not awaiting approval. Approving never sends a change."""
+    return {"error": "ApprovalRefused",
+            "quarantine_status": status or "none",
+            "nothing_sent": True,
+            "detail": "op_id=%s is not awaiting_approval (status=%s)"
+                      % (op_id, status)}
+
+
 def cmd_approve():
     op_id = _arg("--op-id", None)
     authorization = _arg("--authorization", None)
-    if not op_id or not authorization:
+    if not op_id or not (authorization or "").strip():
         print('usage: state_machine.py approve --op-id <op_id> '
               '--authorization "the educator\'s verbatim approval words"')
         print("W6-P2-A5: the educator must actually say the words; the "
@@ -1531,6 +1541,7 @@ def cmd_approve():
     except ValueError as exc:
         # Agent-facing error funnel: the agent sees the translated
         # four-part message, never the raw refusal text.
+        exc.nothing_sent = True
         try:
             from failures.funnel import agent_error_text
             print(agent_error_text("approving a paused change", exc))
@@ -1540,16 +1551,14 @@ def cmd_approve():
     if ok:
         print(f"approved op_id={op_id} for re-dispatch")
         return True
+    status = op_quarantine_status(op_id)
     try:
         from failures.funnel import agent_error_text
-        print(agent_error_text(
-            "approving a paused change",
-            {"error": "ApprovalRefused",
-             "detail": "op_id=%s is not awaiting_approval (status=%s)"
-                       % (op_id, op_quarantine_status(op_id))}))
+        print(agent_error_text("approving a paused change",
+                               approval_refusal_evidence(op_id, status)))
     except Exception:
         print(f"refused: op_id={op_id} is not awaiting_approval "
-              f"(status={op_quarantine_status(op_id)})")
+              f"(status={status})")
     return False
 
 

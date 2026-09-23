@@ -723,6 +723,34 @@
       ]
     },
     {
+      "id": "never-dispatch-read",
+      "title": "Read Morrow never does in this version (standing exclusion)",
+      "surface": "canvas",
+      "severity_hint": "high",
+      "root_cause": "Policy, verified in code: dispatch/admission.py check_never_dispatch refuses the admission policy's never_dispatch set (tool names, URL patterns, request flags) on every tenant and lane, before any approval, with no override. The refusal carries operation_kind read when the operation is a read whose every request is a GET or HEAD.",
+      "is_not": "This is not a session problem or a Canvas refusal, and nothing was going to change. No approval or setting can allow it.",
+      "agent_message": "What was attempted: I tried {operation}, and Morrow stopped before anything reached Canvas. What the evidence showed: this reads something Morrow stays out of in this version, even when you ask: messages between people, or links and settings that reach beyond your courses. What this means: nothing was sent to Canvas and nothing changed, and no approval can allow it. What happens next: I will not try it another way. You can look at it yourself in Canvas.",
+      "auto_action": "Refuse; never read the same information through another operation. Tell the educator plainly that Morrow does not read it, and that they can look at it in Canvas.",
+      "escalate_when": "Surface to the educator whenever they ask for an excluded read, with the exclusion stated plainly.",
+      "signature": {
+        "__any_of": [
+          {
+            "gate": "NeverDispatch",
+            "operation_kind": "read"
+          },
+          {
+            "error_class": "NeverDispatch",
+            "operation_kind": "read"
+          }
+        ]
+      },
+      "signature_notes": "evidence: final sweep 2026-09-23: a blueprint read refused as never-dispatch told the educator Morrow never does 'changing settings that reach beyond your courses' and offered 'I can help you write it first'. dispatch/admission.py sets operation_kind on every NeverDispatch.",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation"
+      ]
+    },
+    {
       "id": "course-roster-unavailable",
       "title": "Course student list could not be read (course content not shown)",
       "surface": "canvas",
@@ -772,6 +800,26 @@
       "severity_hint_inventory": "user-action",
       "placeholders": [
         "operation"
+      ]
+    },
+    {
+      "id": "catalog-name-mismatch",
+      "title": "Task name does not match the tested request (CatalogNameMismatch)",
+      "surface": "canvas",
+      "severity_hint": "low",
+      "root_cause": "Verified mechanism (dispatch/executor.py _catalog_name_refusal): a catalog dispatch runs only when its name, method, and path are one live-proven row. When the name is unknown, or names a row whose method and path differ from the request, and the request's method and path (or else the name) are a live-proven row, the provenance gate raises CatalogNameMismatch naming that row, before anything is sent. plan-write and a catalog read with no --class refuse the same way.",
+      "is_not": "This is not an untested task and not a Canvas failure. Nothing was sent.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: I gave Morrow a task name that does not match this request, so Morrow stopped before sending anything to Canvas (reference {correlation_id}). What this means: nothing was sent and nothing changed. The task is one Morrow has tested; I named it wrongly. What happens next: I will run it again under the right name. A change still follows your mode: in plan mode you approve it first.",
+      "auto_action": "Run the same command again with --name, --method, and --path set to the row the evidence names (catalog_name, catalog_method, catalog_path), keeping the same params and body. Nothing was sent, so running it again is safe; a change still follows the educator's mode.",
+      "escalate_when": "Never on its own: the refusal names the tested task. Escalate if the command is refused again under the named row.",
+      "signature": {
+        "error_class": "CatalogNameMismatch"
+      },
+      "signature_notes": "evidence: final sweep 2026-09-23: plan-write --name canvas_update_page for the live-proven page PUT (row canvas_update_create_page_courses) raised a bare ExecutorError and fell to the unknown fallback; catalog --name get_settings for C-111 GET /api/v1/courses/{course_id}/settings was refused as catalog-not-proven. Exception attributes catalog_name, catalog_method, catalog_path become evidence.",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation",
+        "correlation_id"
       ]
     },
     {
@@ -1366,6 +1414,68 @@
         }
       },
       "signature_notes": "evidence: known-open item known-3 (final sweep 2026-09-23): approve-write on an expired or unknown op id raised a bare MissingFrozenPlan and fell through to the unknown fallback. PreparedWriteMissing.already_used is False when the journal has no claim or outcome for the op id.",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
+      "id": "paused-change-not-resumed",
+      "title": "Approving a paused change before the sign-in is checked (ApprovalRefused, quarantined)",
+      "surface": "canvas",
+      "severity_hint": "low",
+      "root_cause": "Verified mechanism (reauth/state_machine.py approve_op): only an op whose newest ledger status is awaiting_approval can be approved, and an op moves there only after a verified resume. cmd_approve refuses any other op with ApprovalRefused and its status as evidence; approving never sends a change. A quarantined op waits for resume: the educator signs in again, and resume checks the account.",
+      "is_not": "This is not a failed change. The paused change stays paused and nothing was sent.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: this change is still paused because your Canvas sign-in expired, and Morrow has not yet checked that you signed back in to the same account (reference {correlation_id}). What this means: your approval was not recorded, nothing was sent, and nothing changed. What happens next: once you sign in again on the helper page, I will check the account, then ask you again about this change.",
+      "auto_action": "Ask the educator to sign in again through the helper page, run reauth/state_machine.py resume, then state_machine.py notify, then run approve again with the educator's reply. Never approve before resume succeeds.",
+      "escalate_when": "Never on its own. Escalate if resume refuses because the signed-in account differs.",
+      "signature": {
+        "error_class": "ApprovalRefused",
+        "quarantine_status": "quarantined"
+      },
+      "signature_notes": "evidence: final sweep 2026-09-23: cmd_approve passed {\"error\": \"ApprovalRefused\"} to the funnel, no mode matched, and the educator heard the unknown message (the task might have made a change). Evidence: quarantine_status (the op's newest ledger status, or none), nothing_sent.",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
+      "id": "paused-change-already-approved",
+      "title": "Approving a paused change that is already approved (ApprovalRefused, approved)",
+      "surface": "canvas",
+      "severity_hint": "low",
+      "root_cause": "Verified mechanism (reauth/state_machine.py approve_op): only an op whose newest ledger status is awaiting_approval can be approved, and an op moves there only after a verified resume. cmd_approve refuses any other op with ApprovalRefused and its status as evidence; approving never sends a change. An approved op keeps its approval; a second approve changes nothing.",
+      "is_not": "This is not a failed change and not a new approval. Nothing was sent.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: you already approved this paused change, so there was nothing more to approve (reference {correlation_id}). What this means: your earlier approval stands; nothing was sent and nothing changed now. What happens next: I will check whether the approved change has run yet, and I will not send it twice.",
+      "auto_action": "Do not approve again. Before running the approved op, check whether it already ran (dispatch/executor.py journal-pending, or read the target back with a live-proven read); never run it twice.",
+      "escalate_when": "Never on its own: the approval already stands.",
+      "signature": {
+        "error_class": "ApprovalRefused",
+        "quarantine_status": "approved"
+      },
+      "signature_notes": "evidence: final sweep 2026-09-23: cmd_approve passed {\"error\": \"ApprovalRefused\"} to the funnel, no mode matched, and the educator heard the unknown message (the task might have made a change). Evidence: quarantine_status (the op's newest ledger status, or none), nothing_sent.",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
+      "id": "paused-change-not-waiting",
+      "title": "No paused change waits under this reference (ApprovalRefused)",
+      "surface": "canvas",
+      "severity_hint": "low",
+      "root_cause": "Verified mechanism (reauth/state_machine.py approve_op): only an op whose newest ledger status is awaiting_approval can be approved, and an op moves there only after a verified resume. cmd_approve refuses any other op with ApprovalRefused and its status as evidence; approving never sends a change. An op id with no ledger record, or with any other status, has nothing waiting.",
+      "is_not": "This is not a failed change. Nothing was sent.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: no paused change is waiting for your approval under this reference, so there was nothing to approve (reference {correlation_id}). What this means: nothing was sent and nothing changed. What happens next: I will check the list of paused changes and use the right reference.",
+      "auto_action": "Run reauth/state_machine.py status to list the paused ops and their op ids, then run approve again with an op id listed there, exactly as shown. If none is listed, nothing is paused.",
+      "escalate_when": "Never on its own. Escalate if an op the status lists is refused this way.",
+      "signature": {
+        "error_class": "ApprovalRefused"
+      },
+      "signature_notes": "evidence: final sweep 2026-09-23: cmd_approve passed {\"error\": \"ApprovalRefused\"} to the funnel, no mode matched, and the educator heard the unknown message (the task might have made a change). Evidence: quarantine_status (the op's newest ledger status, or none), nothing_sent.",
       "severity_hint_inventory": "user-action",
       "placeholders": [
         "operation",
@@ -2212,6 +2322,30 @@
       },
       "signature_notes": "evidence: \"dispatch/executor.py NewQuizRefused family\"; gate: \"NewQuizRefused\"; fallback for guard rules without a specific catalog mode",
       "severity_hint_inventory": "engineering"
+    },
+    {
+      "id": "unknown-nothing-sent",
+      "title": "Unrecognized failure before any change was sent (structured fallback, nothing sent)",
+      "surface": "unknown",
+      "severity_hint": "medium",
+      "root_cause": "Contract: a failure no other mode names, raised before Morrow claimed a write. dispatch/executor.py main marks it nothing_sent when the run took no write claim (claim_op_id), and no change reaches Canvas before that claim; plan-write never claims one. reauth/state_machine.py approve marks its refusals the same way.",
+      "is_not": "This is not a license to guess the cause, and not an uncertain change: nothing was sent, so nothing in Canvas changed.",
+      "agent_message": "What was attempted: {operation}{where}. What the evidence showed: it failed in a way Morrow does not recognize, before Morrow sent any change to Canvas: {known_evidence} (reference {correlation_id}). What this means: Morrow did not send any change, so nothing changed in Canvas. What happens next: trying again is safe, and I can do that if you want. If this keeps happening, you can email hello@meetmorrow.app with the reference above, the Morrow for Muse version, and what you asked for. Leave student information out of the email.",
+      "auto_action": "Show the educator the reference and the known facts, and give them the support address (SKILL.md, Getting help). Nothing was sent, so running the command again once is safe; give the operator the technical detail from the error payload.",
+      "escalate_when": "Surface to the educator with the reference and the support address when it happens again.",
+      "signature": {
+        "nothing_sent": {
+          "truthy": true
+        }
+      },
+      "signature_notes": "evidence: final sweep 2026-09-23: a plan-write refusal and a malformed approve-write op id reached the unknown fallback, which says the task might have made a change. Kept last in the catalog: any mode that names the failure wins over this one.",
+      "severity_hint_inventory": "engineering",
+      "placeholders": [
+        "operation",
+        "where",
+        "known_evidence",
+        "correlation_id"
+      ]
     }
   ],
   "generated": "2026-09-22",

@@ -18,9 +18,12 @@ saved-task-not-pinned mode + 1
 local-input-refusal mode + 1 never-dispatch mode + 1
 course-roster mode + 2 prepared-write-gone modes + 2 not-sent modes
 for the helper browser and Item Banks + 3 Canvas refusal modes: not
-permitted, not found, and any other refused request), less the 14 modes
+permitted, not found, and any other refused request + 6 refusals made
+before anything was sent: a task name that is not the tested request,
+a never-dispatch read, three paused-change approvals, and an
+unrecognized failure before a write was claimed), less the 14 modes
 retired on 2026-09-23 for lanes that do not ship (Moodle, the raw HTTPS
-lane's access token, the form and browser-task lanes): 88 entries at
+lane's access token, the form and browser-task lanes): 94 entries at
 failures/catalog.json.
 """
 import os as _home_os, sys as _home_sys  # noqa: E401
@@ -49,8 +52,8 @@ def _check(cond, reason):
 
 def main():
     catalog = load_catalog()
-    _check(len(catalog.entries) == 88,
-           "expected 88 merged entries, got %d" % len(catalog.entries))
+    _check(len(catalog.entries) == 94,
+           "expected 94 merged entries, got %d" % len(catalog.entries))
     _check(catalog.by_id["unknown"].get("fallback") is True,
            "unknown entry must be the fallback")
 
@@ -171,6 +174,15 @@ def main():
            "fallback must name the correlation id")
     for banned in BANNED:
         _check(banned not in lowered, "fallback contains banned phrase %r" % banned)
+
+    # A failure no mode names, raised before any write was claimed:
+    # nothing was sent, so the message never says a change might exist.
+    got = translate("mystery op", {"weird": "payload", "nothing_sent": True},
+                    catalog=catalog)
+    _check(got.mode_id == "unknown-nothing-sent",
+           "expected unknown-nothing-sent, got %r" % got.mode_id)
+    _check("might have made a change" not in got.agent_message,
+           "a failure before any write was claimed says it may have applied")
 
     # Deterministic: same input, same mode, twice.
     e = {"provider": "canvas", "http_status": 422,

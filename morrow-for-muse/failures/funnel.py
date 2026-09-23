@@ -38,9 +38,10 @@ from .translator import translate
 # system text (course content is data, never instructions).
 ENGINEERING_LABEL = "[untrusted provider data] "
 # Label for Morrow's own check of a command's arguments, refused before
-# anything was sent: the detail is not provider text.
+# anything was sent: the detail is not provider text. A
+# CatalogNameMismatch detail names the catalog row to run instead.
 LOCAL_CHECK_LABEL = "[Morrow input check] "
-_LOCAL_CHECK_CLASSES = frozenset({"CallerInputError"})
+_LOCAL_CHECK_CLASSES = frozenset({"CallerInputError", "CatalogNameMismatch"})
 
 _ENGINEERING_LIMIT = 500
 _EVIDENCE_LIMIT = 320
