@@ -1791,9 +1791,34 @@ class InstallerController {
       recordBeforeSha256: installerRecordDigest(recordBefore, this.home),
       recordAfterSha256: installerRecordDigest(recordAfter, this.home),
     });
-    await this.writeAssistantConfiguration(target, next, beforeSha256);
-    await this.confirmAssistantConfigurationRemoved(assistant, target, afterSha256);
+    try {
+      await this.writeAssistantConfiguration(target, next, beforeSha256);
+      await this.confirmAssistantConfigurationRemoved(assistant, target, afterSha256);
+    } catch (error) {
+      // The recovery record is for a process that ends mid-removal. While the
+      // file still holds Morrow's entry, the removal did not happen and the
+      // record was never changed, so nothing is left for Repair to finish.
+      if (await this.morrowEntryRemains(assistant, target) === true) {
+        await this.clearAssistantRemovalTombstone(tombstone).catch(() => {});
+      }
+      throw error;
+    }
     return tombstone;
+  }
+
+  /**
+   * Whether one assistant settings file still holds Morrow's own entry, from
+   * what the file says now: true or false, or null when Morrow cannot tell.
+   * A file that is gone holds no entry.
+   */
+  async morrowEntryRemains(assistant, target) {
+    try {
+      const content = await readConfigurationFile(target);
+      if (content === null) return await fs.lstat(target).then(() => null, () => false);
+      return await this.configurationWithoutMorrow(assistant, content.toString("utf8"), target) !== null;
+    } catch {
+      return null;
+    }
   }
 
   async assistantConfigurationGeneration(target, expectedSha256) {
@@ -1908,8 +1933,9 @@ class InstallerController {
     if (!assistant || assistant.id === "claude-desktop") throw new Error("assistant_removal_recovery_required");
 
     const recordSha256 = installerRecordDigest(record, this.home);
+    // The record is committed only after the file was read back without
+    // Morrow's entry. Whatever the assistant wrote into its file since is its own.
     if (recordSha256 === tombstone.recordAfterSha256) {
-      await this.confirmAssistantConfigurationRemoved(assistant, tombstone.target, tombstone.afterSha256);
       await this.clearAssistantRemovalTombstone(tombstone);
       return record;
     }
@@ -1926,19 +1952,26 @@ class InstallerController {
       throw new Error("assistant_removal_recovery_required");
     }
 
-    const current = await readConfigurationFile(tombstone.target);
-    if (current === null) throw new Error("assistant_removal_recovery_required");
-    const currentSha256 = fileHash(current);
-    if (currentSha256 === tombstone.beforeSha256) {
-      const next = await this.configurationWithoutMorrow(assistant, current.toString("utf8"), tombstone.target);
-      if (next === null || fileHash(Buffer.from(next, "utf8")) !== tombstone.afterSha256) {
-        throw new Error("assistant_removal_recovery_required");
-      }
-      await this.writeAssistantConfiguration(tombstone.target, next, tombstone.beforeSha256);
-    } else if (currentSha256 !== tombstone.afterSha256) {
-      throw new Error("assistant_removal_recovery_required");
+    // The assistant may have rewritten its file since the removal began, so
+    // what the file says now decides, not the digests the removal recorded.
+    let remains = await this.morrowEntryRemains(assistant, tombstone.target);
+    if (remains === true) {
+      try {
+        const current = await readConfigurationFile(tombstone.target);
+        const next = current === null ? null
+          : await this.configurationWithoutMorrow(assistant, current.toString("utf8"), tombstone.target);
+        if (next !== null) {
+          await this.writeAssistantConfiguration(tombstone.target, next, fileHash(current));
+          await this.confirmAssistantConfigurationRemoved(assistant, tombstone.target, fileHash(Buffer.from(next, "utf8")));
+        }
+      } catch {}
+      remains = await this.morrowEntryRemains(assistant, tombstone.target);
     }
-    await this.confirmAssistantConfigurationRemoved(assistant, tombstone.target, tombstone.afterSha256);
+    if (remains !== false) {
+      // The removal did not happen. The assistant stays listed and can be removed again.
+      await this.clearAssistantRemovalTombstone(tombstone);
+      return record;
+    }
 
     await this.writeRecord(recordAfter);
     const committed = await this.readInstallerRecord();

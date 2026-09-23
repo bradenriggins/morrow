@@ -598,6 +598,8 @@ test("recovery completes one removal when interruption happened after the tombst
     assert.equal(tombstone.afterSha256, sha256(Buffer.from(expected)));
     throw new Error("simulated interruption before mutation");
   };
+  // The process ends there, so nothing clears the recovery record.
+  installer.clearAssistantRemovalTombstone = async () => { throw new Error("simulated end of the process"); };
 
   try {
     await assert.rejects(() => installer.removeAssistant("claude-code"), /simulated interruption before mutation/);
@@ -641,6 +643,7 @@ test("recovery refuses a tombstone retargeted away from the recorded assistant f
   };
   await installer.writeRecord(originalRecord);
   installer.writeAssistantConfiguration = async () => { throw new Error("pause with valid tombstone"); };
+  installer.clearAssistantRemovalTombstone = async () => { throw new Error("simulated end of the process"); };
   await assert.rejects(() => installer.removeAssistant("claude-code"), /pause with valid tombstone/);
   const tombstone = JSON.parse(await fs.readFile(installer.assistantRemovalPath, "utf8"));
   tombstone.target = foreign;
@@ -653,6 +656,115 @@ test("recovery refuses a tombstone retargeted away from the recorded assistant f
   assert.equal(await fs.readFile(target, "utf8"), content);
   assert.equal(await fs.readFile(foreign, "utf8"), foreignContent);
   assert.deepEqual(JSON.parse(await fs.readFile(restarted.recordPath, "utf8")), originalRecord);
+});
+
+test("a removal refused because Codex wrote its file during the removal leaves no recovery record", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const table = codexTable(path.join(root, "Materials"));
+  const recorded = await writeFile(target, `model = "gpt-6"\n\n${table}`);
+  const originalRecord = { ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: recorded } } };
+  await installer.writeRecord(originalRecord);
+  // Codex writes its file after Morrow read it and before Morrow replaces it.
+  const write = installer.writeAssistantConfiguration.bind(installer);
+  installer.writeAssistantConfiguration = async (...args) => {
+    await fs.appendFile(target, "\n[tui.notices]\nhide = true\n");
+    return write(...args);
+  };
+
+  await assert.rejects(() => installer.removeAssistant("codex"), (error) => error.code === "assistant_configuration_changed");
+
+  assert.equal(await fs.readFile(target, "utf8"), `model = "gpt-6"\n\n${table}\n[tui.notices]\nhide = true\n`, "Morrow left that file exactly as it is");
+  assert.equal(await fs.lstat(installer.assistantRemovalPath).then(() => true, () => false), false);
+  assert.deepEqual(await installer.record(), originalRecord, "the removal did not happen, so the record still lists Codex");
+  installer.ensureRuntime = async () => installer.paths;
+  installer.runtimeSnapshot = async () => readyRuntime();
+  assert.notEqual((await installer.state({ recheckAssistants: true })).lifecycle, "repair_required");
+
+  // The person follows the refusal's own steps: they take Morrow's table out, then select Remove again.
+  await fs.writeFile(target, (await fs.readFile(target, "utf8")).replace(table, ""));
+  installer.writeAssistantConfiguration = write;
+  await installer.removeAssistant("codex");
+  assert.deepEqual((await installer.record()).configured, {});
+});
+
+test("Repair finishes a removal whose record was committed, after Codex rewrote its file again", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const recorded = await writeFile(target, `model = "gpt-6"\n\n${codexTable(path.join(root, "Materials"))}`);
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: recorded } } });
+  // The process ends after the record commit and before the recovery record is cleared.
+  installer.clearAssistantRemovalTombstone = async () => { throw new Error("simulated end of the process"); };
+  await assert.rejects(() => installer.removeAssistant("codex"), /simulated end of the process/);
+  assert.equal(await fs.readFile(target, "utf8"), "model = \"gpt-6\"\n");
+  // Later, Codex trusts a project and rewrites its own settings file.
+  const trusted = "model = \"gpt-6\"\n\n[projects.\"/Users/t/course\"]\ntrust_level = \"trusted\"\n";
+  await fs.writeFile(target, trusted);
+
+  const { installer: restarted } = controller(root);
+  assert.equal((await restarted.state()).lifecycle, "repair_required");
+  let writes = 0;
+  const write = restarted.writeAssistantConfiguration.bind(restarted);
+  restarted.writeAssistantConfiguration = async (...args) => { writes += 1; return write(...args); };
+  const repaired = await restarted.repairInstallerRecord();
+
+  assert.deepEqual(repaired.configured, {});
+  assert.equal(writes, 0, "Codex's newer file is left exactly as it is");
+  assert.equal(await fs.readFile(target, "utf8"), trusted);
+  assert.equal(await fs.lstat(restarted.assistantRemovalPath).then(() => true, () => false), false);
+  assert.deepEqual((await restarted.record()).configured, {});
+});
+
+test("Repair finishes an interrupted removal from the file Codex rewrote since, and keeps Codex's edit", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const table = codexTable(path.join(root, "Materials"));
+  const recorded = await writeFile(target, `model = "gpt-6"\n\n${table}`);
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: recorded } } });
+  // The process ends after the recovery record is written and before the file changes.
+  installer.writeAssistantConfiguration = async () => { throw new Error("simulated end of the process"); };
+  installer.clearAssistantRemovalTombstone = async () => { throw new Error("simulated end of the process"); };
+  await assert.rejects(() => installer.removeAssistant("codex"), /simulated end of the process/);
+  // Later, Codex trusts a project. Morrow's table is still in its file.
+  await fs.writeFile(target, `model = "gpt-6"\n\n${table}\n[projects."/Users/t/course"]\ntrust_level = "trusted"\n`);
+
+  const { installer: restarted } = controller(root);
+  assert.equal((await restarted.state()).lifecycle, "repair_required");
+  const repaired = await restarted.repairInstallerRecord();
+
+  assert.deepEqual(repaired.configured, {});
+  assert.equal(await fs.readFile(target, "utf8"), "model = \"gpt-6\"\n\n[projects.\"/Users/t/course\"]\ntrust_level = \"trusted\"\n");
+  assert.equal(await fs.lstat(restarted.assistantRemovalPath).then(() => true, () => false), false);
+});
+
+test("Repair keeps the assistant listed when an interrupted removal cannot be finished", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const table = codexTable(path.join(root, "Materials"));
+  const recorded = await writeFile(target, `model = "gpt-6"\n\n${table}`);
+  const originalRecord = { ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: recorded } } };
+  await installer.writeRecord(originalRecord);
+  installer.writeAssistantConfiguration = async () => { throw new Error("simulated end of the process"); };
+  installer.clearAssistantRemovalTombstone = async () => { throw new Error("simulated end of the process"); };
+  await assert.rejects(() => installer.removeAssistant("codex"), /simulated end of the process/);
+
+  // Codex writes its file again while Repair removes Morrow's table.
+  const { installer: restarted } = controller(root);
+  const write = restarted.writeAssistantConfiguration.bind(restarted);
+  restarted.writeAssistantConfiguration = async (...args) => {
+    await fs.appendFile(target, "\n[tui.notices]\nhide = true\n");
+    return write(...args);
+  };
+  const repaired = await restarted.repairInstallerRecord();
+
+  assert.deepEqual(repaired, originalRecord, "the removal did not happen, so Codex stays listed");
+  assert.equal(await fs.readFile(target, "utf8"), `model = "gpt-6"\n\n${table}\n[tui.notices]\nhide = true\n`);
+  assert.equal(await fs.lstat(restarted.assistantRemovalPath).then(() => true, () => false), false);
+  assert.deepEqual(await restarted.record(), originalRecord);
 });
 
 test("removing Codex recognizes the quoted Morrow table written by valid TOML", async () => {
