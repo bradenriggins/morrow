@@ -36,6 +36,21 @@ In plain words:
 - The docs no longer describe an undo command. This release has no
   automatic undo, and each approval says so. To reverse a change,
   Morrow prepares the reverse change as a new change you approve.
+- When something fails, you are told what was tried in plain words
+  ("changing a page in the course "Biology 101""), never an internal
+  command name or id.
+- Turning on edit mode, or changing a setting, is confirmed once, in
+  plain words: what changed and what it means for you.
+- The installer warns when the `cryptography` package is missing.
+  Without it, Morrow refuses everything that touches student data
+  (working by name, the failed-students question, rosters, grades), so
+  the warning names the one command that fixes it.
+- The consent, setup, and disconnect pages use plain words. To sign
+  out, open the helper page and use Canvas's own menu: Account, then
+  Logout.
+- The release no longer ships the retired form relay or internal audit
+  notes, and the docs no longer mention a Moodle lane or ask for a
+  Canvas token.
 
 ## 0.4.0 (2026-09-22)
 
