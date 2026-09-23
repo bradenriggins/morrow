@@ -333,7 +333,7 @@ function failedProblem(
     || (["canvas_request_not_sent", "canvas_binding_required", "canvas_content_guard_unavailable", "moodle_binding_required", "moodle_expected_digest_required", "moodle_binding_course_mismatch", "course_binding_required", "course_binding_course_mismatch", "course_binding_mismatch", "course_scope_required",
       "canvas_semantic_target_course_mismatch", "canvas_semantic_target_input_refused", "canvas_semantic_target_resolution_stale",
       "multi_context_object_not_supported", "stale_bridge_command", "operation_catalog_mismatch",
-      "edit_policy_authorization_invalid", "edit_policy_stale", "edit_policy_guard_ambiguous", "edit_policy_rule_refused",
+      "edit_policy_authorization_invalid", "edit_policy_stale", "edit_policy_guard_ambiguous", "edit_policy_rule_refused", "edit_policy_page_missing",
       "edit_policy_canvas_content_guard_required", "edit_policy_canvas_content_guard_refused", "edit_policy_page_guard_required",
       "edit_policy_item_bank_guard_required", "edit_policy_fields_refused", "new_quiz_settings_review_required", "new_quiz_lifecycle_review_required", "new_quiz_effect_review_required",
       "private_attachment_refused", "request_cancelled_before_dispatch",

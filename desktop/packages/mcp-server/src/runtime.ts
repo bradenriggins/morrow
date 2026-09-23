@@ -1113,6 +1113,25 @@ function isBlackboardContentPatchVerify(mapping: CatalogTool): boolean {
 
 const REVIEW_AUTHORIZATION: EffectAuthorization = { kind: "review" };
 
+// Canvas's two "Update/create page" routes create the page when it does not exist: a page route
+// whose url_or_id names no page creates that page, and the front page route creates a published
+// page and sets it as the front page when the course has none. Edit access changes only what
+// exists, so an Edit change on either route is sent with no review only after a fresh read of its
+// page finds it. A guarded content repair reads its page in Canvas before it sends anything.
+const CANVAS_PAGE_UPSERT_READS: ReadonlyMap<string, { readonly read: string; readonly target: readonly string[] }> = new Map([
+  ["canvas_update_create_page_courses", { read: "canvas_show_page_courses", target: ["course_id", "url_or_id"] }],
+  ["canvas_update_create_front_page_courses", { read: "canvas_show_front_page_courses", target: ["course_id"] }],
+]);
+
+function canvasPageFound(result: JsonObject): boolean {
+  if (result.isError === true || !isJsonObject(result.structuredContent)) return false;
+  const content = result.structuredContent;
+  const browser = content.schema === "morrow.canvas-connector.result.v1" && content.ok === true
+    && content.commandKind === "invoke_read" && isJsonObject(content.result) ? content.result : null;
+  return Boolean(browser && browser.ok === true && browser.sent === true
+    && isJsonObject(browser.data) && exactDecimalId(browser.data.page_id));
+}
+
 function browserEditFields(mapping: CatalogTool, request: JsonObject): readonly string[] {
   const pathFields = new Set([...(mappingOperationKey(mapping) || "").matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)]
     .map((match) => match[1]!));
@@ -3525,10 +3544,45 @@ export class GatewayRuntime {
     const current = permission && !Array.isArray(permission.rules)
       ? await this.browserEditOptions(bindingsTool, binding, options)
       : binding;
+    const authorization = currentEditAuthorization(mapping, request, current);
     return {
-      authorization: currentEditAuthorization(mapping, request, current),
+      authorization: authorization.kind === "edit_scope" && await this.editChangeWouldCreatePage(mapping, request, options)
+        ? REVIEW_AUTHORIZATION
+        : authorization,
       bindingScope: this.effectBindingScope(mapping, request, current),
     };
+  }
+
+  /**
+   * True unless a fresh read finds the page an unguarded Edit change on a Canvas "Update/create
+   * page" route names. A read that fails for any reason counts as not found, so the change goes to
+   * review rather than risk a page Canvas creates.
+   */
+  private async editChangeWouldCreatePage(
+    mapping: CatalogTool,
+    request: JsonObject,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<boolean> {
+    const upsert = CANVAS_PAGE_UPSERT_READS.get(mapping.upstreamName);
+    const control = isJsonObject(request._morrow) ? request._morrow : {};
+    if (!upsert || control.canvas_content_guard !== undefined || control.page_guard !== undefined) return false;
+    const reads = this.catalog.tools.filter((candidate) => candidate.upstreamId === mapping.upstreamId
+      && candidate.upstreamName === upsert.read && candidate.annotations?.readOnlyHint === true
+      && candidate.capability?.route.backend === "canvas-connector");
+    const sourceBindingId = legacyRouting(request).sourceBindingId;
+    if (reads.length !== 1 || !sourceBindingId) return true;
+    const readArguments: JsonObject = { _morrow: { source_binding_id: sourceBindingId } };
+    for (const field of upsert.target) {
+      const value = request[field];
+      if (typeof value !== "string" || !value) return true;
+      readArguments[field] = value;
+    }
+    try {
+      return !canvasPageFound(this.resolveResultArtifact(await this.callSourceOwned(reads[0]!.publicName, readArguments, options)));
+    } catch {
+      options.signal?.throwIfAborted();
+      return true;
+    }
   }
 
   private async currentEffectAuthority(

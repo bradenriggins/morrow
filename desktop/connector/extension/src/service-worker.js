@@ -4769,6 +4769,42 @@ async function editScopeProblem(command, binding, operation) {
   return null;
 }
 
+// Canvas's two "Update/create page" routes create the page when it does not exist: a page route
+// whose url_or_id names no page creates that page, and the front page route creates a published
+// page and sets it as the front page when the course has none. Edit access changes only what
+// exists, so an Edit change on either route is sent only after a read of its page, immediately
+// before the change, finds it. A guarded content repair reads its page in Canvas itself.
+const CANVAS_PAGE_UPSERT_READS = Object.freeze({
+  "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses": Object.freeze({
+    toolName: "canvas_show_page_courses",
+    key: "GET /v1/courses/{course_id}/pages/{url_or_id}#show_page_courses",
+    argumentNames: Object.freeze(["course_id", "url_or_id"]),
+  }),
+  "PUT /v1/courses/{course_id}/front_page#update_create_front_page_courses": Object.freeze({
+    toolName: "canvas_show_front_page_courses",
+    key: "GET /v1/courses/{course_id}/front_page#show_front_page_courses",
+    argumentNames: Object.freeze(["course_id"]),
+  }),
+});
+
+async function editScopePageMissingProblem(command, binding, operation) {
+  const read = operation.provider === "canvas" ? CANVAS_PAGE_UPSERT_READS[operation.key] : undefined;
+  const args = command.arguments || {};
+  if (!read || command.kind !== "invoke_write" || command.outerGrant?.authorization?.kind !== "edit_scope"
+    || args.morrow_canvas_content_guard || args.morrow_page_guard) return null;
+  const missing = problem("edit_policy_page_missing", "Morrow sent nothing: Edit access changes only a page that already exists, and Canvas does not hold this page, so the change would create it. Check the page address, or add a new page with the page create action.", true);
+  const readOperation = state.operations.get(read.toolName);
+  if (!readOperation || readOperation.key !== read.key || readOperation.readOnly !== true
+    || read.argumentNames.some((name) => typeof args[name] !== "string" || !args[name])) return missing;
+  try {
+    const page = await executeOperation(binding, internalCanvasCourseRead(binding, readOperation),
+      Object.fromEntries(read.argumentNames.map((name) => [name, args[name]])), command.expiresAt);
+    return page?.ok === true && page.data && typeof page.data === "object" && decimalId(page.data.page_id) ? null : missing;
+  } catch {
+    return missing;
+  }
+}
+
 /**
  * True for an operation that carries a Canvas API route. The Canvas browser
  * catalog holds Morrow's own in-page routes instead, and the admission model
@@ -5723,6 +5759,12 @@ async function handleQueuedWrite(command) {
   if (await bridgeCommandCancelled(command)) return "known";
   if (beforeSend.failure) {
     sendResult(command, false, null, beforeSend.failure);
+    return "known";
+  }
+  const pageMissing = await editScopePageMissingProblem(command, beforeSend.binding, beforeSend.operation);
+  if (await bridgeCommandCancelled(command)) return "known";
+  if (pageMissing) {
+    sendResult(command, false, null, pageMissing);
     return "known";
   }
   return await sendExecution(command, beforeSend.binding, beforeSend.operation, beforeSend.privateAttachment, beforeSend.privateConversation, beforeSend.privateAttachments);

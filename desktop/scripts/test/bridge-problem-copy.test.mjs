@@ -48,7 +48,7 @@ const CHROME_RUNTIME_TEXT = [
 // states a person must be able to read, so each one is explained here rather than left generic.
 const OPERATION_CODES = [
   "bridge_port_in_use", "canvas_binding_required", "course_binding_mismatch", "course_scope_required",
-  "edit_policy_stale", "edit_policy_rule_refused", "edit_policy_canvas_content_guard_required",
+  "edit_policy_stale", "edit_policy_rule_refused", "edit_policy_page_missing", "edit_policy_canvas_content_guard_required",
   "write_outcome_unknown", "bridge_maintenance_unavailable", "canvas_file_storage_access_required",
   "effect_receipt_refused", "provider_effect_target_conflict",
 ];

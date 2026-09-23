@@ -250,6 +250,11 @@ const COPY = {
     detail: "Morrow sent nothing. The change is not one of the change types selected for this course.",
     action: "Open Plan and Edit settings to see the selected change types, or keep the change in Plan for your review.",
   },
+  edit_policy_page_missing: {
+    title: "That page is not in the course",
+    detail: "Morrow sent nothing. Canvas would create this page, and Edit access changes only a page that already exists.",
+    action: "Ask your assistant to check the page's name, or to add it as a new page.",
+  },
   edit_policy_canvas_content_guard_required: {
     title: "That content repair needs the current page content",
     detail: "Morrow sent nothing. A Canvas content repair is sent only with the exact content it was prepared from.",

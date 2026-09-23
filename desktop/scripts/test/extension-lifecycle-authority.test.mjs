@@ -901,6 +901,83 @@ async function courseDisconnectScenario() {
 }
 
 // Plan and Edit settings saves Edit access with no duration, and the saved grant has no end time.
+// Canvas's "Update/create page" routes create a page Canvas does not hold, and the front page route
+// creates a published front page when the course has none. Edit access changes only a page that
+// exists, so the Bridge reads the page right before an Edit change on either route and sends
+// nothing when Canvas does not hold it. A reviewed change is not read first.
+async function editScopePageCreateScenario() {
+  const lesson = { page_id: "91", url: "lesson", title: "Cell structure", body: "<p>Cells have membranes.</p>", published: true, front_page: false };
+  const calls = [];
+  const value = fixture({
+    tabMessage: async ({ message }) => {
+      if (message?.type === "morrow_canvas_probe") return { ok: true, profile: { origin: courseOrigin, id: "7" } };
+      if (message?.type !== "morrow_canvas_execute") return null;
+      const toolName = message.operation?.toolName;
+      const args = message.arguments || {};
+      if (toolName === "canvas_show_page_courses") {
+        calls.push(`read:${args.url_or_id}`);
+        return args.url_or_id === "lesson"
+          ? { ok: true, sent: true, status: 200, truncated: false, data: lesson }
+          : { ok: false, sent: true, status: 404, error: { message: "page not found" } };
+      }
+      if (toolName === "canvas_show_front_page_courses") {
+        calls.push("read:front_page");
+        return { ok: false, sent: true, status: 404, error: { message: "No front page has been set" } };
+      }
+      if (toolName === "canvas_update_create_page_courses" || toolName === "canvas_update_create_front_page_courses") {
+        calls.push(`write:${args.url_or_id || "front_page"}`);
+        return { ok: true, sent: true, status: 200, truncated: false, data: { ...lesson, url: args.url_or_id || "front", title: args.wiki_page_title } };
+      }
+      throw new Error(`unexpected Canvas operation ${toolName}`);
+    },
+  });
+  await importWorker("edit-scope-page-create");
+  const socket = await authenticate(value);
+  const saved = await sendRuntime(value, { type: "morrow_edit_policy_save", sourceBindingId: bindingId, enabledCategories: ["canvas_pages_text"] }, settingsSender());
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  const editScope = { kind: "edit_scope", policyDigest: saved.result.editPermission.scopeDigest, policyRevision: saved.result.editPermission.revision };
+  const send = async (id, fields, authorization = editScope) => {
+    const command = bridgeCommand({
+      requestId: `request-${id}`,
+      operationId: `operation-${id}`,
+      kind: "invoke_write",
+      outerGrant: { effectReceiptId: `effect:${id}`, authorization },
+      ...fields,
+    });
+    socket.receive(command);
+    return await eventually(() => socket.sent.find((message) => message.schema === "morrow.bridge.result.v1" && message.requestId === command.requestId));
+  };
+  const page = (urlOrId) => ({
+    toolName: "canvas_update_create_page_courses",
+    operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses",
+    arguments: { course_id: "42", url_or_id: urlOrId, wiki_page_title: "Unit 7" },
+  });
+
+  const missing = await send("page-missing", page("new-unit-7"));
+  assert.equal(missing.ok, false, JSON.stringify(missing));
+  assert.equal(missing.problem.code, "edit_policy_page_missing");
+  assert.deepEqual(calls, ["read:new-unit-7"]);
+
+  calls.length = 0;
+  const frontPage = await send("front-page-missing", {
+    toolName: "canvas_update_create_front_page_courses",
+    operationKey: "PUT /v1/courses/{course_id}/front_page#update_create_front_page_courses",
+    arguments: { course_id: "42", wiki_page_title: "Welcome" },
+  });
+  assert.equal(frontPage.ok, false, JSON.stringify(frontPage));
+  assert.equal(frontPage.problem.code, "edit_policy_page_missing");
+  assert.deepEqual(calls, ["read:front_page"]);
+
+  calls.length = 0;
+  await send("page-exists", page("lesson"));
+  assert.equal(calls[0], "read:lesson");
+  assert.ok(calls.includes("write:lesson"), JSON.stringify(calls));
+
+  calls.length = 0;
+  await send("page-reviewed", page("new-unit-8"), { kind: "review" });
+  assert.equal(calls[0], "write:new-unit-8", "a reviewed change is sent as the educator approved it");
+}
+
 async function settingsSaveUntimedScenario() {
   const value = fixture();
   await importWorker("settings-save-untimed");
@@ -1698,6 +1775,7 @@ const scenarios = {
   "policy-duration-refused": policySetDurationRefusedScenario,
   "policy-merge-legacy": policySetMergeLegacyTimedScenario,
   "settings-save-untimed": settingsSaveUntimedScenario,
+  "edit-scope-page-create": editScopePageCreateScenario,
   "popup-edit-status": popupEditStatusScenario,
   "course-disconnect": courseDisconnectScenario,
   "reviews-socket": () => reviewsFollowConnectionScenario("socket"),
@@ -1930,6 +2008,10 @@ test("connecting a course writes its optional fields into courseMeta keyed by or
 
 test("consent withdrawal fences a late Settings course selection", async () => {
   await isolatedScenario("settings-selection-consent");
+});
+
+test("an Edit change on a Canvas Update/create page route is sent only when Canvas holds the page", async () => {
+  await isolatedScenario("edit-scope-page-create");
 });
 
 test("consent withdrawal fences a late Settings Edit-policy save", async () => {
