@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
-import { REMEMBERABLE_EDIT_CATEGORIES, type GatewayRuntime } from "../src/runtime.js";
+import { EditCategoryUnavailableError, REMEMBERABLE_EDIT_CATEGORIES, type GatewayRuntime } from "../src/runtime.js";
 import { planPageImageAltRepair } from "../src/page-correction.js";
 import { planNewQuizSettings } from "../src/new-quiz-settings.js";
 import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
@@ -356,6 +356,24 @@ describe("Runtime: the offer and the grant (WI-4.3)", () => {
         merge: true,
         selections: [{ sourceBindingId, expectedPolicyRevision: 0, enabledCategories: ["canvas_pages_text"] }],
       }]);
+    } finally {
+      activeEditOptions = [];
+    }
+  }, CASE_TIMEOUT_MS);
+
+  it("refuses Edit from a conversation for an action that needs a field choice, because the grant would change nothing", async () => {
+    activeEditOptions = [{
+      id: "action:canvas:canvas_edit_assignment", group: "Canvas · Assignments", label: "Edit an assignment",
+      description: "Edit an assignment. This action can change 49 different settings. Morrow does not grant all of them at once, so selecting it alone does not let Morrow change any of them.",
+      availability: "edit", tier: "standard", destructive: false, requiresFieldSelection: true,
+    }];
+    try {
+      const refused = runtime.prepareBrowserEditAccess("edit", [{ sourceBindingId, enabledCategories: ["action:canvas:canvas_edit_assignment"] }]);
+      await expect(refused).rejects.toBeInstanceOf(EditCategoryUnavailableError);
+      await expect(refused).rejects.toMatchObject({
+        categoryId: "action:canvas:canvas_edit_assignment",
+        reason: "This action can change many different settings, so Edit does not cover it, and Morrow asks before each change. A task bundle in Morrow Bridge Plan and Edit settings may cover the change you need.",
+      });
     } finally {
       activeEditOptions = [];
     }

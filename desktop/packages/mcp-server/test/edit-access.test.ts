@@ -402,6 +402,11 @@ describe("Edit asked for in a conversation", () => {
         mode: "edit",
         selections: [{ ...prepared.selections[0]!, enabledCategories: [{ id: "action:canvas:canvas_delete_assignment", label: "Delete an assignment", description: "Removes it.", destructive: true, unchecked: false }] }],
       }, test.baseUrl())).toThrow(/removes content/);
+      // Nor one whose grant would let Morrow change nothing until its fields are chosen.
+      expect(() => reviews.create({
+        mode: "edit",
+        selections: [{ ...prepared.selections[0]!, enabledCategories: [{ id: "action:canvas:canvas_edit_assignment", label: "Edit an assignment", description: "Edit an assignment.", destructive: false, unchecked: false, requiresFieldSelection: true }] }],
+      }, test.baseUrl())).toThrow(/field choice/);
       expect(test.apply).not.toHaveBeenCalled();
     } finally {
       await test.close();

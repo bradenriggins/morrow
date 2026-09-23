@@ -22,6 +22,12 @@ const EDIT_ACCESS_ID = /^[A-Za-z0-9_-]{43}$/;
 /** The sentence the tool, the review page and the Bridge settings all use for a removal action. */
 export const DESTRUCTIVE_EDIT_REFUSAL = "Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.";
 
+/**
+ * Why a conversation cannot ask for an action whose Bridge option needs a field choice: its grant
+ * allows no field, so Edit on it alone would change nothing, and settings never offers it either.
+ */
+export const FIELD_SELECTION_EDIT_REFUSAL = "This action can change many different settings, so Edit does not cover it, and Morrow asks before each change. A task bundle in Morrow Bridge Plan and Edit settings may cover the change you need.";
+
 export type EditAccessReviewState =
   | "awaiting_approval"
   | "applying"
@@ -168,8 +174,8 @@ export class EditAccessReviews {
     if (!baseUrl) throw new EditAccessReviewUnavailableError();
     if (prepared.mode !== "edit" || prepared.selections.length === 0
       || prepared.selections.some((selection) => selection.enabledCategories.length === 0
-        || selection.enabledCategories.some((category) => category.destructive))) {
-      throw new Error("An Edit access review needs at least one selected action and no action that removes content.");
+        || selection.enabledCategories.some((category) => category.destructive || category.requiresFieldSelection === true))) {
+      throw new Error("An Edit access review needs at least one selected action, no action that removes content, and no action that needs a field choice.");
     }
     this.prune();
     if (this.reviews.size >= MAX_EDIT_ACCESS_REVIEWS) {
