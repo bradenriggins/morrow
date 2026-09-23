@@ -45,6 +45,13 @@ import subprocess
 import sys
 import time
 
+# Script mode (`python3 helper/supervisor.py`) puts helper/ first on
+# sys.path; the tree root goes first so an installed package named
+# `transport` is never imported in the tree's place.
+_TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _TREE_ROOT not in sys.path:
+    sys.path.insert(0, _TREE_ROOT)
+
 INTERVAL_SECONDS = 300
 STATE_NAME = "keepalive-supervisor.json"
 LOG_NAME = "keepalive-supervisor.log"
@@ -68,9 +75,6 @@ def _state_dir(tree):
     override = os.environ.get("MORROW_TREE_STATE_DIR")
     if override:
         return override
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if root not in sys.path:
-        sys.path.insert(0, root)
     from transport.local_chromium import tree_state_dir
     return tree_state_dir(os.path.realpath(tree))
 

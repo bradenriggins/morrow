@@ -1375,6 +1375,52 @@
       ]
     },
     {
+      "id": "prepared-write-already-used",
+      "title": "The prepared write was already sent with its approval (PreparedWriteMissing, already used)",
+      "surface": "canvas",
+      "severity_hint": "low",
+      "root_cause": "Verified mechanism (dispatch/executor.py _approve_plan_write): once approve-write uses an approval, it deletes the prepared write, and the journal holds the op's claim or outcome. An approval is single use, so a second approve-write for the same op id finds nothing waiting and refuses before it contacts Canvas.",
+      "is_not": "This is not a failed write and not a Canvas error. This request sent nothing. The earlier approval's result was reported when it ran.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow's records show this change was already sent, or tried, with your earlier approval, and each approval is used only once, so nothing was sent this time (reference {correlation_id}). What this means: approving the same change again never sends it twice. What happens next: I will read the course to see what it holds now, and if the change is not there and you still want it, I will prepare it again for your approval.",
+      "auto_action": "Do not run approve-write again for this op id. Read the target back to see whether the change is in place. If it is not and the educator still wants it, run plan-write again and ask for a new approval.",
+      "escalate_when": "Never on its own: the refusal is the single-use rule working. Escalate if the course shows neither the change nor its earlier attempt and a new plan-write keeps failing.",
+      "signature": {
+        "error_class": "PreparedWriteMissing",
+        "prepared_write_used": {
+          "eq": true
+        }
+      },
+      "signature_notes": "evidence: known-open item known-3 (final sweep 2026-09-23): approve-write on a used prepared write raised a bare MissingFrozenPlan and fell through to the unknown fallback. PreparedWriteMissing.already_used is True when find_journal_op(op_id) or claim_is_live(op_id) finds the op in the journal.",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
+      "id": "prepared-write-not-waiting",
+      "title": "No prepared write is waiting under this op id, and it was never sent (PreparedWriteMissing)",
+      "surface": "canvas",
+      "severity_hint": "low",
+      "root_cause": "Verified mechanism (dispatch/executor.py): plan-write keeps a prepared write for one hour, and the next plan-write or approve-write deletes an expired one. approve-write for an op id with no prepared write and no journal record refuses before it contacts Canvas.",
+      "is_not": "This is not a failed write: the journal holds no claim or outcome for this op id, so the change was never sent.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: the change I prepared for your approval is no longer waiting, and Morrow's records show it was never sent. A prepared change waits one hour (reference {correlation_id}). What this means: nothing was sent and nothing changed in the course. What happens next: I will prepare the change again and show it to you, and it goes only after you approve it.",
+      "auto_action": "Run plan-write again for the same change, show the educator the new approval_display, and run approve-write only with their new reply.",
+      "escalate_when": "Never on its own. Escalate if a write prepared again is also reported as not waiting within the hour.",
+      "signature": {
+        "error_class": "PreparedWriteMissing",
+        "prepared_write_used": {
+          "eq": false
+        }
+      },
+      "signature_notes": "evidence: known-open item known-3 (final sweep 2026-09-23): approve-write on an expired or unknown op id raised a bare MissingFrozenPlan and fell through to the unknown fallback. PreparedWriteMissing.already_used is False when the journal has no claim or outcome for the op id.",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
       "id": "session-flapping-multi-uncertain",
       "title": "One dead session produces N uncertain writes (no sticky dead-session flag)",
       "surface": "helper",

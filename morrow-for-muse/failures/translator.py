@@ -293,6 +293,9 @@ def _coerce_evidence(raw_error) -> dict:
             evidence["uncertain_write"] = True
         if class_name in _WRITE_NOT_ATTEMPTED_NAMES:
             evidence["write_not_attempted"] = True
+        if class_name == "PreparedWriteMissing":
+            evidence["prepared_write_used"] = bool(
+                getattr(exc, "already_used", False))
         # Mode-system admission refusals (modes/ package, workstream A;
         # ModeSettingsTamper is the settings/ package, workstream B).
         # Sets a machine-checkable flag and merges scalar exception

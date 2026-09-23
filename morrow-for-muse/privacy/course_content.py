@@ -128,8 +128,9 @@ def _letters(text):
 
 
 def _name_parts(name):
-    """(given, surname) of a roster name, each "" when not plausible."""
-    normalized = " ".join(str(name).split())
+    """(given, surname) of a roster name, each "" when not plausible.
+    Generational suffixes (Jr., III) are neither."""
+    normalized = _core._without_name_suffixes(str(name))
     if "," in normalized:
         last, _, first = normalized.partition(",")
         given = first.split()[0] if first.split() else ""
@@ -183,6 +184,8 @@ def _other_spellings(identity):
     candidates = [a for a in identity.get("aliases") or []
                   if isinstance(a, str) and a.strip()]
     name = forms.get(FULL)
+    if name:
+        candidates.append(_core._without_name_suffixes(name))
     if name and "," not in name:
         given, surname = _name_parts(name)
         if given and surname:

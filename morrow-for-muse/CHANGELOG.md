@@ -31,6 +31,11 @@ Student privacy:
   names students, the preview showed those students' real names,
   emails, and logins. Now the preview keeps each student's label, and
   Morrow puts the real text back only when it sends the change.
+- A student whose name ends in Jr., Sr., II, III, or IV has the last
+  name hidden when it is used alone. Morrow took the ending for the last
+  name, so for "Martin Luther King Jr." the name "King" reached the
+  assistant as written, and a "Jr." elsewhere in the course was hidden
+  instead.
 - Some names are still not hidden, and the consent page lists them: a
   name Canvas does not list for the student, such as a nickname; a
   course named for its student, such as an independent study; and a
@@ -131,6 +136,11 @@ Messages:
   was sent.
 - A change refused before it was sent no longer stays listed as
   unfinished.
+- When you approve a change that is no longer waiting, nothing is sent,
+  and you are told why: it was already sent with your earlier approval
+  (the assistant reads the course before it prepares it again), or it
+  was never sent (a prepared change waits one hour). It was reported as
+  a failure Morrow could not explain.
 
 Installing and the docs:
 
@@ -161,6 +171,16 @@ Installing and the docs:
   installer's own checks still ship, and they keep to a scratch folder.
 - The troubleshooting guide names the Python version the installer
   needs: 3.11 or newer.
+- The docs say so wherever they name a file the release leaves out,
+  such as the proof records, the Moodle code, and the old sign-in
+  capture script. Some named them as if they were in the installed
+  folder, and the operations runbook sent the assistant to a defects
+  file that does not exist.
+- Morrow's commands run on a computer that has another Python package
+  named `dispatch` (Homebrew's Python can have one). Approving a
+  change stopped with "cannot import name 'executor' from 'dispatch'",
+  because the command loaded that package before its own files. Every
+  command now loads its own files first.
 - The example commands in the assistant's instructions and the install
   guide run as written. They put the Canvas address option after the
   command, where Morrow refused it, so every example read and change
@@ -241,6 +261,17 @@ Technical notes:
   top-level options when it names the step. `dispatch/test_documented_commands.py`
   parses every executor command in the docs' code blocks and
   install.sh's operator check.
+- The retired form-host server (`transport/form_host_server.py`, its
+  selftest, and `transport/form-host/`) is deleted. Nothing used it and
+  the release already left it out, but its selftest started servers it
+  could not stop on macOS (it looked for them in /proc), so they kept
+  running for hours after a test run.
+- pytest runs every selftest script the install suites do not run (22
+  scripts, `test_selftest_scripts.py`), each the way
+  `scripts/install-suites.sh` runs a suite, and fails a script that
+  leaves a process running. Nothing ran them before. The Chromium and
+  keepalive selftests pass on macOS: a check that needs Linux's /proc
+  uses a stand-in there, or is skipped when there is nothing to read.
 
 ## 0.4.0 (2026-09-22)
 

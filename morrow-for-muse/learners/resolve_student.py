@@ -75,6 +75,13 @@ import sys
 import unicodedata
 import urllib.parse
 
+# Script mode (`python3 learners/resolve_student.py`) puts learners/ first
+# on sys.path; the tree root goes first so an installed package named
+# `privacy` is never imported in the tree's place.
+_TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _TREE_ROOT not in sys.path:
+    sys.path.insert(0, _TREE_ROOT)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -782,10 +789,6 @@ def vault_label_for(tenant_base, course_id, candidates):
     everywhere. Raises when no label can be issued (for example, the
     optional vault dependency is missing): the caller fails closed.
     """
-    here = os.path.dirname(os.path.abspath(__file__))
-    repo = os.path.dirname(here)
-    if repo not in sys.path:
-        sys.path.insert(0, repo)
     from privacy import executor_wire
     # Every identifier the roster knows goes into the vault record, so a
     # later read that mentions this student's email or login in free

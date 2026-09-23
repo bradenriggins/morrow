@@ -63,11 +63,6 @@ DEV_ONLY = (
     "dispatch/live_proof_modes.py", "dispatch/live_proof_new_quiz.py",
     "dispatch/live_proof_write_hardening.py", "failures/live_verify.py",
     "learners/live_verify_reads.py", "learners/live_verify_resolution.py",
-    # the retired form relay: no product code calls it (SCOPE.md: no
-    # form-relay code ships); browser_backend_selftest.py checks it stays
-    # stopped
-    "transport/form_host_server.py", "transport/form_host_server_selftest.py",
-    "transport/form-host/",
     # internal audit and integration notes (status as of past waves)
     "audit/", "INTEGRATION_NOTES.md",
     # dev harnesses that are not install suites (install.sh step 9)

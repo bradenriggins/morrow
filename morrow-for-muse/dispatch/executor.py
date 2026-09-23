@@ -117,34 +117,25 @@ import contextvars
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
-try:
-    from dispatch.admission import (
-        admit, persist_signed_record, consume_approval, check_policy_gates,
-        load_policy, check_never_dispatch, check_unsupported,
-        check_evidence_holds, check_learner_data, check_unproven_override,
-        touches_learner_data as admission_touches_learner_data,
-        request_subject as admission_request_subject,
-        request_digest as admission_request_digest,
-        write_target_course_id as admission_write_target_course_id,
-    )
-except ImportError:  # run as a script: dispatch/ itself is on sys.path
-    from admission import (
-        admit, persist_signed_record, consume_approval, check_policy_gates,
-        load_policy, check_never_dispatch, check_unsupported,
-        check_evidence_holds, check_learner_data, check_unproven_override,
-        touches_learner_data as admission_touches_learner_data,
-        request_subject as admission_request_subject,
-        request_digest as admission_request_digest,
-        write_target_course_id as admission_write_target_course_id,
-    )
-
 # W4-P1-17: the morrow state root (and the stable tree UUID) has ONE
-# source of truth: config/paths. Insert the tree root so this module
-# works both as `python3 dispatch/executor.py` and as
-# `python3 -m dispatch.executor`.
+# source of truth: config/paths. The tree root goes first on sys.path
+# before any tree import, so this module works both as
+# `python3 dispatch/executor.py` and as `python3 -m dispatch.executor`.
+# Script mode puts dispatch/ first, not the tree root, and an installed
+# package named `dispatch` (pyobjc's libdispatch on Homebrew Python)
+# would otherwise be imported in the tree's place.
 _EXEC_TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _EXEC_TREE_ROOT not in sys.path:
     sys.path.insert(0, _EXEC_TREE_ROOT)
+from dispatch.admission import (  # noqa: E402
+    admit, persist_signed_record, consume_approval, check_policy_gates,
+    load_policy, check_never_dispatch, check_unsupported,
+    check_evidence_holds, check_learner_data, check_unproven_override,
+    touches_learner_data as admission_touches_learner_data,
+    request_subject as admission_request_subject,
+    request_digest as admission_request_digest,
+    write_target_course_id as admission_write_target_course_id,
+)
 from config.paths import morrow_home, read_tree_uuid  # noqa: E402
 # W6-P2-7: one-shot journal-secret uses go through a zeroizable buffer
 # (see config/secretbuf.py for the honest residual statement).
@@ -180,6 +171,18 @@ class ManifestPinMismatch(ExecutorError):
 
 class MissingFrozenPlan(ExecutorError):
     pass
+
+
+class PreparedWriteMissing(MissingFrozenPlan):
+    """approve-write found no prepared write waiting under the op id, so
+    it sent nothing. already_used is True when the journal holds the
+    op's claim or outcome: the change was sent, or tried, with an
+    earlier approval. False means it was never sent (it expired, or it
+    was never prepared)."""
+
+    def __init__(self, message, already_used):
+        super().__init__(message)
+        self.already_used = bool(already_used)
 
 
 class WriteHaltActive(ExecutorError):
@@ -2685,6 +2688,12 @@ def _journal_state_locked():
             "(it rebuilds the index once the journal verifies); do not "
             "re-claim op_ids meanwhile."
             % (_journal_index_path(), JOURNAL_PATH))
+    if idx is None:
+        # Nothing journaled yet: no journal, no index, and (checked above)
+        # no secret. A rebuild here would mint the secret and index with
+        # no journal file, which every later read and claim takes for a
+        # deleted journal. The first append creates all three.
+        return {"op_ids": _retired_op_ids(), "locations": {}}
     return _rebuild_index_locked()
 
 
@@ -9970,14 +9979,9 @@ def prepare_plan_write(name: str, method: str, path_template: str,
     and the plan binds each label to its vault token (final muse audit
     M1/M2): the typed name stays in the encrypted name-echo store, and
     approve-write refuses when a label names a different issue."""
-    try:
-        from dispatch.admission import mint_approval
-        from dispatch.approval_display import (render_approval_display,
-                                               render_educator_display)
-    except ImportError:  # run as a script: dispatch/ itself is on sys.path
-        from admission import mint_approval
-        from approval_display import (render_approval_display,
-                                      render_educator_display)
+    from dispatch.admission import mint_approval
+    from dispatch.approval_display import (render_approval_display,
+                                           render_educator_display)
     expire_write_ceremony_files(quiet=True)
     params = dict(params or {})
     extra = {"body": body} if body is not None else None
@@ -10102,20 +10106,23 @@ def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
 
 def _approve_plan_write(op_id, authorization, session, pack, mode_ctx,
                         channel, label):
-    try:
-        from dispatch.admission import approval_used, sign_approval
-    except ImportError:  # run as a script: dispatch/ itself is on sys.path
-        from admission import approval_used, sign_approval
+    from dispatch.admission import approval_used, sign_approval
     expire_write_ceremony_files(quiet=True)
     path = pending_write_path(op_id)
     try:
         with open(path, "r", encoding="utf-8") as fh:
             doc = json.load(fh)
     except (OSError, ValueError):
-        raise MissingFrozenPlan(
-            "no prepared write %s is waiting for approval (it was sent "
-            "already, it expired, or it was never prepared); run "
-            "plan-write again" % op_id)
+        already_used = find_journal_op(op_id) is not None \
+            or claim_is_live(op_id)
+        raise PreparedWriteMissing(
+            "no prepared write %s is waiting for approval (%s); run "
+            "plan-write again" % (
+                op_id, "the journal holds its claim or outcome: it was "
+                "sent, or tried, with an earlier approval" if already_used
+                else "the journal has no record of it: it expired or was "
+                "never prepared, and was never sent"),
+            already_used)
     descriptor = doc.get("descriptor") or {}
     if isinstance(doc.get("operation_label"), str) \
             and doc["operation_label"]:
@@ -10181,10 +10188,7 @@ APPROVAL_RECORD_RETENTION = timedelta(hours=24)
 
 
 def _approvals_dir():
-    try:
-        from dispatch import admission as _adm
-    except ImportError:  # run as a script: dispatch/ itself is on sys.path
-        import admission as _adm
+    from dispatch import admission as _adm
     return _adm.APPROVALS_DIR
 
 
@@ -10854,10 +10858,7 @@ def main(argv=None):
 # --------------------------------------------------------------------------
 
 def _describe_operation(method, path, where=None):
-    try:
-        from dispatch.approval_display import describe_operation
-    except ImportError:  # run as a script: dispatch/ itself is on sys.path
-        from approval_display import describe_operation
+    from dispatch.approval_display import describe_operation
     return describe_operation(method, path, where)
 
 

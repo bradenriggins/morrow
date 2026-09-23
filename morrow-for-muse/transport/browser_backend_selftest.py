@@ -505,22 +505,15 @@ def main():
           rec["verification"] == "skipped" and not rec["uncertain"])
 
     # -- form renderer lifecycle: no local server, no relay ----------------
-    # The ephemeral form-host server is retired: _shutdown_form_host() is a
-    # no-op, and dispatching a read must not start any server or reference
-    # any local renderer. The form lane (and the relay page it ran
-    # through) was retired 2026-09-21.
+    # The ephemeral form-host server is deleted: _shutdown_form_host() is a
+    # no-op, and a read's brief must not reference any local renderer. The
+    # form lane (and the relay page it ran through) was retired 2026-09-21.
     bb._shutdown_form_host()
     check("form-host shutdown is a harmless no-op", True)
-    from transport import form_host_server as _fhs
-
-    def _server_running():
-        st = _fhs._read_state()
-        return bool(st and _fhs._pid_alive(int(st["pid"])))
 
     op_id = str(uuid.uuid4())
     bb.dispatch_browser_entry(READ_ENTRY, {"course_id": "89585"}, LANE_STATE,
                               {}, op_id=op_id, brief_dir=BRIEF_DIR)
-    check("read dispatch starts no form-host server", not _server_running())
     with open(bb._brief_path(BRIEF_DIR, op_id, "request"),
               encoding="utf-8") as fh:
         _rbrief = fh.read()
@@ -1952,14 +1945,6 @@ def main():
           _leftover == [], repr(_leftover))
 
     print()
-    # Defensive: the product stops the ephemeral form-host server at every
-    # terminal complete, but tests must not leak it if an assertion aborted
-    # a run mid-flight.
-    try:
-        from transport import form_host_server as _fhs
-        _fhs.stop_server()
-    except Exception:
-        pass
     if FAILED:
         print("FAILED: %d (%s)" % (len(FAILED), ", ".join(FAILED)))
         raise SystemExit(1)

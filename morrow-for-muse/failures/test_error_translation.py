@@ -2,7 +2,7 @@
 """Full test suite for the Morrow error translation layer.
 
 Covers failures/translator.py + failures/catalog.py + failures/catalog.json:
-  1. per-mode tests: every one of the 91 catalog modes gets a synthetic
+  1. per-mode tests: every catalog mode gets a synthetic
      raw error; asserts the right mode_id, the four message anchors, all
      placeholders filled, no em dashes, no shrug language, and the
      escalate flag matching the catalog.
@@ -180,6 +180,15 @@ class UncertainWrite(Exception):
 
 class WriteNotAttempted(Exception):
     pass
+
+
+class PreparedWriteMissing(Exception):
+    """dispatch/executor.py: approve-write found no prepared write
+    waiting; already_used says whether the journal holds the op."""
+
+    def __init__(self, message, already_used):
+        super().__init__(message)
+        self.already_used = already_used
 
 
 class VerificationFailed(Exception):
@@ -586,6 +595,10 @@ MODE_CASES = {
         "verify block failed for op x: readback title is 'A', expected "
         "'B' (journaled as failed)"),
     "write-not-attempted": lambda: WriteNotAttempted("never dispatched"),
+    "prepared-write-already-used": lambda: PreparedWriteMissing(
+        "no prepared write is waiting for approval", True),
+    "prepared-write-not-waiting": lambda: PreparedWriteMissing(
+        "no prepared write is waiting for approval", False),
     "session-flapping-multi-uncertain": lambda: {
         "session_dead_signal": True, "uncertain_count": 3,
         "single_dead_session": True,
@@ -657,8 +670,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_93_modes(self):
-        self.assertEqual(93, len(CATALOG.entries))
+    def test_catalog_has_95_modes(self):
+        self.assertEqual(95, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):
