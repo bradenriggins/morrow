@@ -770,9 +770,13 @@ def main():
         # The test's own scratch dirs (.selftest-*) are not shipped; the
         # deny-list guards the shipped tree, so skip them here. (Earlier
         # sections run the server against scratch profiles that leave
-        # log files behind; those must not trip this check.)
+        # log files behind; those must not trip this check.) The live
+        # profile is not shipped either: once the helper's Chromium has
+        # run it holds Cookies, Login Data, and *.db, and install.sh
+        # leaves it out of its secrets gate the same way.
         rel_root = os.path.relpath(root, HERE)
-        if rel_root.split(os.sep)[0].startswith(".selftest-"):
+        top = rel_root.split(os.sep)[0]
+        if top.startswith(".selftest-") or top == "profile":
             continue
         for f in files:
             rel = os.path.relpath(os.path.join(root, f), HERE)

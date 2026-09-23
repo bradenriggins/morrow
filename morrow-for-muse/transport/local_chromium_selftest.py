@@ -1174,11 +1174,15 @@ def _t_verify_helper_holder_unreachable():
 
 def _t_tree_profile_default():
     def _run():
-        def _go():
+        # config.selftest_home points the profile at scratch; this
+        # read-only check needs it unset.
+        saved = os.environ.pop("LOGIN_HELPER_PROFILE_DIR", None)
+        try:
             assert lc.tree_helper_profile_dir() == os.path.join(
                 lc.tree_root(), "helper", "profile")
-        _with_env({k: v for k, v in os.environ.items()
-                   if k != "LOGIN_HELPER_PROFILE_DIR"}, _go)
+        finally:
+            if saved is not None:
+                os.environ["LOGIN_HELPER_PROFILE_DIR"] = saved
     check("tree-profile-default", _run)
 
 

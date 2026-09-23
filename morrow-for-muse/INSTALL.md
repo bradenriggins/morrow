@@ -176,8 +176,10 @@ it does, in order:
 8. **Secrets gate.** Runs `scripts/verify-no-secrets.sh` against the
    tree, enforcing `pack/deny-list.txt` (no profiles, logs, session
    material, secret-shaped content, or non-example tenant hostnames).
-   Runs BEFORE the helper launches, so a dirty tree never starts a
-   browser. Any violation fails the install.
+   Your live sign-in in `helper/profile/` is left out, and your own
+   Canvas address may appear in `helper/env`; every other check still
+   reads `helper/env`. Runs BEFORE the helper launches, so a dirty
+   tree never starts a browser. Any violation fails the install.
 9. **Selftest suites.** Runs all 23 selftest suites from this tree
    (transport, dispatch, privacy, helper, reauth). Any failure fails the
    install and names the suite. Test scratch is removed afterwards.
@@ -434,20 +436,24 @@ The Step 1 commands copy the new release over the existing
 Canvas address, your sign-in, and the tree id. Do not unzip into a
 fresh directory: `helper/env` and the sign-in in `helper/profile/` live
 inside the tree, so a fresh tree starts without the Canvas address, and
-the educator must sign in again. Keep the previous release zip: the
-installer's backup covers its own changes, not the files the copy
-replaced. The installer:
+the educator must sign in again. The copy replaces the previous
+release's files before the installer runs, so the installer cannot
+bring the previous release back. The installer:
 
 - Verifies the tree against `pack/carve-manifest.json` (SHA-256 of
   every shipped file) before touching anything.
 - On a version change (see `pack/version.txt`), backs up the existing
   tree to a timestamped directory outside the tree (excluding
   `helper/profile/`), then removes stale files the new version no
-  longer ships (loudly logged). If the install fails midway, it
-  restores from the backup, but ONLY from a verified-complete backup:
+  longer ships (loudly logged). The backup is the tree as the
+  installer found it: the new release plus any files the previous
+  release left behind. If the install fails midway, it restores that
+  backup, which undoes the installer's own changes (the tree still
+  holds the new release), but ONLY from a verified-complete backup:
   the installer records a per-path SHA-256 manifest of the backup at
   backup time and re-verifies it with `sha256sum -c` before any
-  restore. A backup
+  restore. Fix what failed and run `bash install.sh` again to finish
+  the upgrade. A backup
   interrupted mid-write (e.g. disk full) is NEVER restored over the
   tree; the tree is left in place, the partial backup is quarantined
   as `<tree>.bak-<ts>.PARTIAL`, and the failure names the recovery

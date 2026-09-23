@@ -3,10 +3,11 @@
 #
 # Packaging secrets gate for the Morrow for Muse connector. Enforces
 # pack/deny-list.txt against a tree (default: the tree this script ships
-# in). install.sh runs it as the last install step with
-# VERIFY_EXCLUDE="helper/profile" (the runtime profile the installer
-# itself creates); the carve script enforces the same deny-list without
-# exclusions before a distribution is accepted.
+# in). install.sh runs it in step 8 with VERIFY_EXCLUDE="helper/profile"
+# (the runtime profile the installer itself creates) and
+# VERIFY_TENANT_EXEMPT="helper/env" (the educator's own Canvas address);
+# the carve script enforces the same deny-list without exclusions before
+# a distribution is accepted.
 #
 # [paths] matching is case-insensitive and Unicode-aware: each path is
 # NFKC-normalized, invisible characters (zero-width spaces, soft hyphen,
@@ -120,6 +121,24 @@ is_verify_excluded() { # $1 = rel path
   return 1
 }
 
+# VERIFY_TENANT_EXEMPT: colon-separated tree-relative files the tenant
+# rule skips. install.sh sets this to helper/env: the educator writes
+# their school's Canvas address there, so a real tenant host is its
+# purpose. Every other rule still applies to these files, so session
+# material or a credential written there still fails the gate. The
+# carve-time gate sets neither variable, and helper/env never ships.
+is_tenant_exempt() { # $1 = rel path
+  local rel="$1" e
+  [ -n "${VERIFY_TENANT_EXEMPT:-}" ] || return 1
+  local old_ifs="$IFS"
+  IFS=':'
+  for e in ${VERIFY_TENANT_EXEMPT}; do
+    [ "${rel}" = "${e}" ] && { IFS="$old_ifs"; return 0; }
+  done
+  IFS="$old_ifs"
+  return 1
+}
+
 is_exempt() { # $1 = rel path; true if in [content_exempt]
   local rel="$1" e
   for e in "${exempts[@]}"; do
@@ -191,6 +210,7 @@ while IFS= read -r -d '' f; do
   # "{tenant}.quiz-api.instructure.com") names no tenant: its leading
   # placeholder is captured with the host and the match is skipped.
   # A real hostname can never start with %, }, or a dot.
+  is_tenant_exempt "${rel}" && continue
   while IFS= read -r host; do
     [ -z "${host}" ] && continue
     case "${host}" in %*|\}*|.*) continue ;; esac
