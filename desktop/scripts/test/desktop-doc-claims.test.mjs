@@ -271,6 +271,19 @@ test("the README names the desktop artifacts the build configuration actually pr
   assert.equal(typeof config.afterPack, "function", "the unsigned macOS bundle must be ad-hoc sealed after packing");
 });
 
+test("the README names the Bridge ZIP the package script writes and no Bridge version the manifest does not carry", () => {
+  const manifestVersion = JSON.parse(read("connector/extension/manifest.json")).version;
+  assert.match(read("scripts/package-canvas-connector.mjs"), /morrow-canvas-connector-v\$\{manifest\.version\}\.zip/,
+    "the package script names the ZIP from the Bridge manifest version");
+  const readme = read("README.md");
+  assert.ok(readme.includes("artifacts/connector/morrow-canvas-connector-v<version>.zip"),
+    "README.md must name the ZIP the package script writes, with the manifest version as <version>");
+  const stale = [...readme.matchAll(/morrow-canvas-connector-v(\d+\.\d+\.\d+)\.zip|\bBridge (\d+\.\d+\.\d+)\b/g)]
+    .map((match) => match[1] || match[2])
+    .filter((version) => version !== manifestVersion);
+  assert.deepEqual(stale, [], `README.md names a Bridge version other than the manifest's ${manifestVersion}`);
+});
+
 test("the README leads with the desktop app and keeps the archive and source routes under engineering evidence", () => {
   const readme = read("README.md");
   const sections = headingSections(readme);

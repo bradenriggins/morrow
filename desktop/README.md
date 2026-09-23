@@ -437,11 +437,12 @@ To build a ZIP of the extension:
 pnpm package:connector
 ```
 
-Extract `artifacts/connector/morrow-canvas-connector-v1.0.6.zip`. Use **Load
-unpacked** to select the extracted folder that contains `manifest.json`, not the
-ZIP file. Keep that folder in place while the extension is installed.
+Extract `artifacts/connector/morrow-canvas-connector-v<version>.zip`, where
+`<version>` is the Bridge version in `connector/extension/manifest.json`. Use
+**Load unpacked** to select the extracted folder that contains `manifest.json`,
+not the ZIP file. Keep that folder in place while the extension is installed.
 
-Bridge 1.0.6 is the current release. Update the desktop app and Bridge together, reload the unpacked extension, then reconnect them. An older Bridge does not carry the complete 1.0 operation set.
+Each desktop release ships with the Bridge version its [changelog](CHANGELOG.md) names. Update the desktop app and Bridge together, reload the unpacked extension, then reconnect them. An older Bridge does not carry the complete 1.0 operation set.
 
 Configure Morrow in any of these clients. Compatible clients on the same computer share one Morrow runtime and Chrome Bridge connection. Keep their Morrow configuration consistent. Avoid competing edits to the same course content:
 
