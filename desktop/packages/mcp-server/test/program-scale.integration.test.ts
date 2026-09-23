@@ -697,7 +697,7 @@ describe("program-scale runtime proof", () => {
       expect(state.writeCommands).toBe(1);
       const writeChild = runtime.batchGet({ batchId: writeBatchId, limit: 1 }).children[0]!;
       expect(writeChild).toMatchObject({
-        state: "failed",
+        state: "unknown",
         attemptCount: 1,
         gatewayOperationState: "applied_or_unknown",
       });
@@ -717,7 +717,7 @@ describe("program-scale runtime proof", () => {
       expect(state.writeCommands).toBe(1);
     }, CASE_TIMEOUT_MS);
 
-    it("keeps the uncertain write settled across a restart and sends it nowhere again", async () => {
+    it("keeps the uncertain write as one that needs checking across a restart and sends it nowhere again", async () => {
       await bridge.closed();
       await closeAssistant(assistantA);
       assistantA = null;
@@ -728,8 +728,9 @@ describe("program-scale runtime proof", () => {
       assistantA = await openClient(runtime, "program-scale-unknown-recovery");
       const beforeUnknownResume = state.writeCommands;
       const unknownResume = structured(await clientA().callTool({ name: "morrow_batch_resume", arguments: writeRunInput }));
-      expect(unknownResume).toMatchObject({ processed: 0, batch: { state: "failed", failedChildren: 1 } });
+      expect(unknownResume).toMatchObject({ processed: 0, batch: { state: "paused", unknownChildren: 1, failedChildren: 0 } });
       expect(state.writeCommands).toBe(beforeUnknownResume);
+      expect(runtime.batchGet({ batchId: String(writeRunInput.batch_id), limit: 1 }).children[0]).toMatchObject({ state: "unknown" });
     }, CASE_TIMEOUT_MS);
   });
 });
