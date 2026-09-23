@@ -250,6 +250,14 @@ test("Check Bridge returns safe installer errors even when the runtime or state 
   assert.equal(unreloaded.recovery, "In Chrome, open Manage Extensions and select Reload on Morrow Bridge, then select Check Bridge.");
   assert.doesNotMatch(JSON.stringify(unreloaded), /Repair|private/);
 
+  // The Update panel offers only Update Bridge, so a failed update names that
+  // control and Chrome's own Reload, never Repair Morrow or Check Bridge.
+  failure = Object.assign(new Error("private staging detail"), { code: "bridge_update_failed" });
+  const notUpdated = (await check()).error;
+  assert.deepEqual(notUpdated, errorDetails("bridge_update_failed"));
+  assert.match(notUpdated.recovery, /select Update Bridge again/);
+  assert.doesNotMatch(JSON.stringify(notUpdated), /Repair|Check Bridge|private/);
+
   for (const error of [
     Object.assign(new Error("private MCP detail"), { code: -32603 }),
     { code: "unknown_runtime_error", message: "private runtime detail", recovery: "private internal path" },

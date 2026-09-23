@@ -171,6 +171,27 @@ test("a ready installation exposes its sealed Bridge update", () => {
   assert.equal(step(current, "Morrow Bridge").detail, "Update available");
 });
 
+// Updating a Bridge in Chrome needs a connected Bridge. With none connected,
+// Check Bridge on the Chrome steps replaces the folder itself, so those steps
+// stay on screen and no panel offers a step that cannot finish.
+test("a Bridge update waits for a connected Bridge, and the Chrome steps stay until then", () => {
+  const current = state({ ...READY_ASSISTANT, bridgeUpdateAvailable: true, bridgeFolderPath: "/Users/example/Library/Application Support/Morrow/Bridge" });
+  assert.equal(current.bridge.updateAvailable, true);
+  const view = actionView(current, { chosenAssistantId: "codex", platform: "darwin" });
+  assert.equal(view.title, "Add Morrow Bridge.");
+  assert.deepEqual(actions(view.body), ["copy-example-prompt", "reveal-bridge-folder", "check-bridge", "repair"]);
+  assert.equal(statusSummary(current), "Set up Morrow Bridge in Chrome");
+  assert.equal(step(current, "Morrow Bridge").detail, "Add in Chrome");
+  assert.equal(awaitingBridgeFolder(current), true, "the folder step is timed as the step on screen");
+
+  for (const connected of [{ bridgeLoadedInChrome: true }, { bridgePaired: true }]) {
+    const offered = state({ ...READY_ASSISTANT, ...connected, bridgeUpdateAvailable: true });
+    assert.equal(actionView(offered, { chosenAssistantId: "codex" }).title, "Update Morrow Bridge.");
+    assert.equal(step(offered, "Morrow Bridge").detail, "Update available");
+    assert.equal(awaitingBridgeFolder(offered), false);
+  }
+});
+
 test("Bridge delivery is unavailable", () => {
   const current = state({ ...READY_ASSISTANT, lifecycle: "bridge_delivery_unavailable", bridgeDelivery: "unavailable" });
   const view = actionView(current, { chosenAssistantId: "codex" });
@@ -903,7 +924,8 @@ test("the header live region announces the same step the action panel shows, for
     state({ ...READY_ASSISTANT, runtimeStatus: "uncertain" }),
     state({ ...READY_ASSISTANT, bridgeDelivery: "unavailable" }),
     state({ ...READY_ASSISTANT, bridgeManualChromeReloadRequired: true }),
-    state({ ...READY_ASSISTANT, bridgeUpdateAvailable: true }),
+    // A connected Bridge has a newer release to take.
+    state({ ...PAIRED, bridgeUpdateAvailable: true }),
     // The Bridge folder is not verified.
     state({ ...READY_ASSISTANT, bridgeFolderReady: false }),
     state(READY_ASSISTANT),

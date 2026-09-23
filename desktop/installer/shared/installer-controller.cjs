@@ -23,6 +23,32 @@ const RESTART_REFUSALS = Object.freeze({
 function restartRefusalCode(reason) {
   return (typeof reason === "string" && RESTART_REFUSALS[reason]) || "active_or_uncertain_operations";
 }
+
+/**
+ * Whether the runtime reports a Bridge connected right now: true, false, or
+ * "unknown" when this monitor cannot say.
+ */
+function reportedBridgeConnection(monitor) {
+  let connected;
+  try { connected = monitor?.snapshot?.()?.health?.bridgeConnected; } catch { connected = undefined; }
+  return typeof connected === "boolean" ? connected : "unknown";
+}
+
+// A refusal that already names what holds Morrow keeps its own words when an
+// update of a connected Bridge stops. Any other failure is the update failing.
+const NAMED_MAINTENANCE_REFUSALS = new Set([
+  "runtime_repair_required",
+  "active_or_uncertain_operations",
+  "runtime_request_in_flight",
+  "runtime_change_running",
+  "runtime_other_client_connected"
+]);
+
+function bridgeUpdateRefusal(error) {
+  // The Bridge refuses to pause while it is in the middle of course work.
+  if (error?.code === "bridge_quiesce_busy") return errorDetails("active_or_uncertain_operations");
+  return errorDetails(NAMED_MAINTENANCE_REFUSALS.has(error?.code) ? error.code : "bridge_update_failed");
+}
 const { DATA_REMOVAL_SCHEMA, freshRecord, insideDirectory, inspectRecord, readPrivateRegularFile, retentionSnapshot } = require("./state-policy.cjs");
 const {
   bridgeInstallationStatus,
@@ -1466,9 +1492,14 @@ class InstallerController {
       const monitor = await this.bridgeMonitor();
       if (record.manualChromeReloadRequired) return this.completePendingBridgeUpdate(record, monitor);
       if (comparison <= 0) return record;
-      const status = await this.currentBridgeStatus(record, monitor);
-      if (status.installType !== "development") return record;
-      return this.stageBridgeUpdate(record, release, monitor);
+      if (reportedBridgeConnection(monitor) === false) return this.replaceUnconnectedBridge();
+      try {
+        const status = await this.currentBridgeStatus(record, monitor);
+        if (status.installType !== "development") return record;
+        return await this.stageBridgeUpdate(record, release, monitor);
+      } catch (error) {
+        throw bridgeUpdateRefusal(error);
+      }
     })();
     this.bridgeReconciliation = pending;
     try {
@@ -1476,6 +1507,25 @@ class InstallerController {
     } finally {
       if (this.bridgeReconciliation === pending) this.bridgeReconciliation = null;
     }
+  }
+
+  /**
+   * Replaces an older app-owned Bridge folder with the sealed release while the
+   * runtime reports no Bridge connected: Chrome has not loaded the folder, or
+   * Chrome is closed. No Bridge runs these files for Morrow, so there is nothing
+   * to pause or reload, and this is the replacement Repair makes. The new folder
+   * carries a new active-folder challenge, so a Chrome that loads it proves
+   * again which folder it loaded. It holds the runtime's maintenance lease, so
+   * it is refused while an assistant or an approved change is using Morrow.
+   */
+  async replaceUnconnectedBridge() {
+    return this.withDesktopMutation(async () => {
+      await this.discardUnusableBridgeInstallation();
+      this.bridgeInitialization = null;
+      this.bridgeInstallation = null;
+      await initializeBridgeDirectory({ ...this.bridgeReleaseOptions(), initialChallenge: this.bridgeChallenge() });
+      return this.verifiedBridgeInstallation();
+    }, { fromBridgeReconciliation: true });
   }
 
   async ensureBridgeDirectory() {
@@ -2176,7 +2226,7 @@ class InstallerController {
     return this.appLocation() === "ok" ? null : "app_location_unsupported";
   }
 
-  maintenanceAdmission({ pendingBridgeUpdate = false } = {}) {
+  maintenanceAdmission({ pendingBridgeUpdate = false, fromBridgeReconciliation = false } = {}) {
     // A staged Bridge update keeps its own lease until Chrome reloads the Bridge. Finishing that
     // update is the one step that lease exists for, so it does not count as other work here.
     const ownBridgeLease = pendingBridgeUpdate && this.bridgeLeaseId !== null
@@ -2184,7 +2234,7 @@ class InstallerController {
     if ((this.restartLeases.size !== 0 && !ownBridgeLease) || (this.bridgeLeaseId !== null && !ownBridgeLease)
       || this.dataRemovalInProgress !== null || this.dataRemovalGuard !== null
       || this.desktopMutationInProgress !== null || this.desktopMutationGuard !== null
-      || this.bridgeReconciliation !== null) return "active_or_uncertain_operations";
+      || (this.bridgeReconciliation !== null && !fromBridgeReconciliation)) return "active_or_uncertain_operations";
     return null;
   }
 
@@ -2584,9 +2634,13 @@ class InstallerController {
     if (this.desktopMutationGuard === guard) this.desktopMutationGuard = null;
   }
 
-  /** Serializes one file mutation under exact owner maintenance authority. */
-  async withDesktopMutation(action) {
-    const refused = this.maintenanceAdmission();
+  /**
+   * Serializes one file mutation under exact owner maintenance authority. A
+   * Bridge reconciliation that makes the mutation itself passes
+   * `fromBridgeReconciliation`, so its own marker does not refuse it.
+   */
+  async withDesktopMutation(action, { fromBridgeReconciliation = false } = {}) {
+    const refused = this.maintenanceAdmission({ fromBridgeReconciliation });
     if (refused) throw errorDetails(refused);
     const pending = (async () => {
       let guard = await this.acquireDesktopMutationGuard();

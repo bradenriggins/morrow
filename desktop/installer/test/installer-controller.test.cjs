@@ -1669,6 +1669,129 @@ test("repair replaces an older app-owned Bridge from the sealed release", async 
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(stateDirectory, "Backups", backups[0]), "utf8")), before);
 });
 
+// The runtime reports no Bridge connected: Chrome has not loaded the folder, or
+// Chrome is closed. No Chrome is running these files for Morrow, so there is no
+// Bridge to fence or reload, and Update Bridge replaces the folder itself.
+test("Update Bridge replaces an older Bridge folder directly while no Bridge is connected", async () => {
+  const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const manifestSha256 = await completePayload(root, { maintenance: MAINTENANCE_MODULE, runtimeMonitor: RECORDING_MONITOR });
+  let bridgeReleaseSha256 = await writeBridgeRelease(root, "1.0.0");
+  const installer = controller(root, {
+    trustedMcpRuntimeManifestSha256: () => manifestSha256,
+    trustedBridgeReleaseManifestSha256: () => bridgeReleaseSha256,
+  });
+  const stateDirectory = path.join(root, "UserData", "State");
+  const bridgeDirectory = path.join(root, "UserData", "Bridge");
+  await fs.mkdir(stateDirectory, { recursive: true });
+  await fs.writeFile(path.join(stateDirectory, "morrow.upstreams.json"), "{}\n");
+  await installer.initializeBridgeAtStartup();
+  const before = JSON.parse(await fs.readFile(path.join(stateDirectory, "bridge-installation.json"), "utf8"));
+
+  bridgeReleaseSha256 = await writeBridgeRelease(root, "1.0.1");
+  globalThis.__morrowRepairOrder = [];
+  const offered = await installer.state({ recheckAssistants: true });
+  assert.equal(offered.bridge.updateAvailable, true);
+  assert.equal(offered.bridge.paired, false, "the runtime reports no Bridge connected");
+
+  // The recording runtime has no Bridge to ask, so any question to a Bridge fails this test.
+  const replaced = await installer.reconcileBridgeRelease();
+  assert.equal(replaced.version, "1.0.1");
+  const after = JSON.parse(await fs.readFile(path.join(stateDirectory, "bridge-installation.json"), "utf8"));
+  assert.equal(after.extensionVersion, "1.0.1");
+  assert.equal(after.pendingUpdate, null, "nothing waits for a Chrome reload");
+  assert.notEqual(after.activeFolderChallenge.challengeId, before.activeFolderChallenge.challengeId);
+  assert.equal(await fs.readFile(path.join(bridgeDirectory, "src", "service-worker.js"), "utf8"), 'export const version = "1.0.1";\n');
+  const marker = JSON.parse(await fs.readFile(path.join(bridgeDirectory, "morrow-bridge-active-folder.json"), "utf8"));
+  assert.equal(marker.manifestVersion, "1.0.1");
+  assert.equal(marker.challengeId, after.activeFolderChallenge.challengeId);
+  assert.equal(globalThis.__morrowRepairOrder.includes("closed"), false, "the runtime keeps running through the replacement");
+  assert.equal(installer.restartLeases.size, 0, "the maintenance lease is released");
+  assert.equal(installer.maintenanceAdmission(), null);
+
+  const current = await installer.state({ recheckAssistants: true });
+  assert.equal(current.bridge.updateAvailable, false);
+  assert.equal(current.bridge.folderReady, true);
+  assert.equal(current.bridge.loadedInChrome, "unknown");
+});
+
+test("Update Bridge never replaces the folder under a connected Bridge", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const installed = bridgeInstallation();
+  const status = bridgeStatusAnswer(installed.activeFolderChallenge);
+  const monitor = {
+    snapshot: () => ({ health: { ...READY_HEALTH, bridgeConnected: true } }),
+    bridgeMaintenance: async () => status,
+  };
+  installer.verifiedBridgeInstallation = async () => installed;
+  installer.packagedBridgeRelease = async () => ({ version: "1.0.1" });
+  installer.bridgeMonitor = async () => monitor;
+  installer.replaceUnconnectedBridge = async () => { throw new Error("must not replace the folder of a connected Bridge"); };
+  const staged = bridgeInstallation({ manualChromeReloadRequired: true });
+  let stages = 0;
+  installer.stageBridgeUpdate = async (record, release, used) => {
+    stages += 1;
+    assert.equal(record, installed);
+    assert.equal(release.version, "1.0.1");
+    assert.equal(used, monitor);
+    return staged;
+  };
+  assert.equal(await installer.reconcileBridgeRelease(), staged);
+  assert.equal(stages, 1);
+
+  // A runtime that cannot say whether a Bridge is connected is asked the Bridge itself.
+  monitor.snapshot = () => ({ health: { ...READY_HEALTH, bridgeConnected: "unknown" } });
+  assert.equal(await installer.reconcileBridgeRelease(), staged);
+  assert.equal(stages, 2);
+});
+
+test("an update of a connected Bridge that fails names the steps the Update panel offers", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const installed = bridgeInstallation();
+  let answer = async () => bridgeStatusAnswer(installed.activeFolderChallenge, { nonce: "nonce-fedcba9876543210" });
+  const monitor = {
+    snapshot: () => ({ health: { ...READY_HEALTH, bridgeConnected: true } }),
+    bridgeMaintenance: async () => answer(),
+  };
+  installer.verifiedBridgeInstallation = async () => installed;
+  installer.packagedBridgeRelease = async () => ({ version: "1.0.1" });
+  installer.bridgeMonitor = async () => monitor;
+  installer.replaceUnconnectedBridge = async () => { throw new Error("must not replace the folder of a connected Bridge"); };
+  let staging = async () => { throw new Error("must not stage"); };
+  installer.stageBridgeUpdate = async () => staging();
+
+  const refused = async () => {
+    let caught = null;
+    await installer.reconcileBridgeRelease().catch((error) => { caught = error; });
+    assert.ok(caught, "the update was expected to fail");
+    return caught;
+  };
+  // Chrome answers for a folder that is not this installation's.
+  assert.deepEqual(await refused(), errorDetails("bridge_update_failed"));
+  // The Bridge does not answer although the runtime reports it connected.
+  answer = async () => { throw Object.assign(new Error("local_owner_bridge_maintenance_unavailable"), { code: "local_owner_bridge_maintenance_unavailable" }); };
+  assert.deepEqual(await refused(), errorDetails("bridge_update_failed"));
+
+  answer = async () => bridgeStatusAnswer(installed.activeFolderChallenge);
+  staging = async () => { throw Object.assign(new Error("private staging detail"), { code: "bridge_stage_invalid" }); };
+  assert.deepEqual(await refused(), errorDetails("bridge_update_failed"));
+  // A Bridge in the middle of course work refuses to pause. That is work in progress.
+  staging = async () => { throw Object.assign(new Error("bridge_quiesce_busy"), { code: "bridge_quiesce_busy" }); };
+  assert.deepEqual(await refused(), errorDetails("active_or_uncertain_operations"));
+  // A refusal that already names what holds Morrow keeps its own words.
+  for (const code of ["runtime_other_client_connected", "runtime_request_in_flight", "runtime_change_running", "active_or_uncertain_operations"]) {
+    staging = async () => { throw errorDetails(code); };
+    assert.deepEqual(await refused(), errorDetails(code));
+  }
+
+  const failure = errorDetails("bridge_update_failed");
+  assert.equal(failure.message, "Morrow could not update Morrow Bridge.");
+  assert.match(failure.recovery, /Update Bridge/);
+  assert.doesNotMatch(failure.recovery, /Repair Morrow|Check Bridge/, "the Update panel offers neither control");
+});
+
 test("repair never replaces changed Bridge bytes under an unchanged Chrome version", async () => {
   const root = await temporaryRoot();
   const manifestSha256 = await completePayload(root, { maintenance: MAINTENANCE_MODULE, runtimeMonitor: RECORDING_MONITOR });

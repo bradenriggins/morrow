@@ -79,6 +79,16 @@ function needsBridge(current) {
   return bridge.delivery === "available" || bridge.delivery === "developer_temporary";
 }
 
+/**
+ * Whether the Update panel is offered. Updating a Bridge in Chrome needs a
+ * connected Bridge to pause and reload it. With none connected, Check Bridge
+ * on the Chrome steps replaces the folder itself, so the update waits.
+ */
+function bridgeUpdateOffered(current) {
+  const bridge = current?.bridge || {};
+  return bridge.updateAvailable === true && (bridge.loadedInChrome === true || bridge.paired === true);
+}
+
 // The header's live region announces the summary of the panel on screen. The
 // panel decision carries it, so the two cannot name different steps.
 export function statusSummary(current) {
@@ -96,7 +106,7 @@ export function progress(current) {
   const courseReady = verifiedCourse(current);
   const blocked = deliveryBlocked(current);
   const reloadRequired = bridge.manualChromeReloadRequired === true;
-  const updateAvailable = bridge.updateAvailable === true;
+  const updateAvailable = bridgeUpdateOffered(current);
   const loaded = bridge.loadedInChrome === true || bridge.paired === true;
   const paired = bridge.paired === true;
   const firstPreviewReady = previewReady(current);
@@ -276,7 +286,7 @@ export function awaitingBridgeFolder(current) {
   return Boolean(current) && current.appLocation !== "move_required" && current.assistantsNeedRepoint !== true
     && current.lifecycle !== "repair_required" && current.runtime?.status === "ready"
     && configuredAssistant(current) !== null && !deliveryBlocked(current)
-    && current.bridge?.manualChromeReloadRequired !== true && current.bridge?.updateAvailable !== true
+    && current.bridge?.manualChromeReloadRequired !== true && !bridgeUpdateOffered(current)
     && needsBridge(current) && current.bridge?.folderReady === true && current.bridge?.delivery === "developer_temporary";
 }
 
@@ -367,7 +377,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
       body: '<ol class="instructions"><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>.</li><li>Find <strong>Morrow Bridge</strong> on that page and select <strong>Reload</strong>.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button><button class="secondary-button" type="button" data-action="restore-bridge">Restore previous Bridge</button></div>',
     };
   }
-  if (bridge.updateAvailable === true) {
+  if (bridgeUpdateOffered(current)) {
     return {
       summary: "Update Morrow Bridge",
       title: "Update Morrow Bridge.",

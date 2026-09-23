@@ -487,6 +487,22 @@ function noInput(input) {
   if (input.length !== 0) throw errorDetails("setup_failed");
 }
 
+// The refusals Morrow's maintenance fence answers with. Each names what holds
+// Morrow and how to free it, so a step that fixes its own failure text still
+// forwards these unchanged.
+const MAINTENANCE_REFUSALS = Object.freeze([
+  "runtime_repair_required",
+  "active_or_uncertain_operations",
+  "runtime_request_in_flight",
+  "runtime_change_running",
+  "runtime_other_client_connected",
+]);
+
+/** The error one step answers with: a known refusal keeps its own text, anything else the step's fixed text. */
+function knownRefusalOr(error, codes, fallback) {
+  return codes.includes(error?.code) ? errorDetails(error.code) : errorDetails(fallback);
+}
+
 /**
  * The failure answer for one setup action. The state is read again so the
  * setup page shows what Morrow has now, and falls back to the fixed repair
@@ -869,16 +885,7 @@ async function startMorrow(lifecycle) {
       return respond();
     } catch (error) {
       // A known refusal keeps its own fixed public text; anything else stays generic.
-      return failed([
-        "runtime_repair_required",
-        "active_or_uncertain_operations",
-        "runtime_request_in_flight",
-        "runtime_change_running",
-        "runtime_other_client_connected",
-        "bridge_reload_unconfirmed",
-      ].includes(error?.code)
-        ? errorDetails(error.code)
-        : errorDetails("bridge_check_failed"));
+      return failed(knownRefusalOr(error, [...MAINTENANCE_REFUSALS, "bridge_reload_unconfirmed", "bridge_update_failed"], "bridge_check_failed"));
     }
   });
   ipcMain.handle("installer:check-for-updates", async (event, ...input) => {

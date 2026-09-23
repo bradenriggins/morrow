@@ -142,6 +142,12 @@ const PUBLIC_ERRORS = Object.freeze({
     message: "Morrow could not confirm Morrow Bridge.",
     recovery: "Select Repair Morrow, then load or reload the Bridge folder in Chrome and select Check Bridge."
   },
+  // The Update panel offers only Update Bridge, so this names only that control
+  // and the Reload control Chrome shows.
+  bridge_update_failed: {
+    message: "Morrow could not update Morrow Bridge.",
+    recovery: "In Chrome, open Manage Extensions and select Reload on Morrow Bridge. Then return here and select Update Bridge again."
+  },
   blackboard_configuration_invalid: {
     message: "Morrow could not save the Blackboard connection.",
     recovery: "Check the Blackboard web address and the application key and secret from your administrator, then save again."
