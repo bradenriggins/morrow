@@ -2376,6 +2376,21 @@ try {
   await settings.getByRole("button", { name: "Refresh connected courses" }).click();
   await settings.locator('[data-binding-id$=":c42"] .course-row-state').filter({ hasText: /^Edit\. 1 kind of edit\.$/ }).waitFor();
   assert.doesNotMatch(await settings.locator("#course-list").innerText(), /\buntil\b/);
+  // In a narrow window the Edit banner stacks like every other text and button row, so its sentence
+  // uses the full banner width instead of wrapping into a column beside the button.
+  await settings.locator("#edit-access-banner:not([hidden])").waitFor();
+  for (const width of [390, 700]) {
+    await settings.setViewportSize({ width, height: 760 });
+    const banner = await settings.locator("#edit-access-banner").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        textWidth: element.querySelector("p").getBoundingClientRect().width,
+        innerWidth: element.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight),
+      };
+    });
+    assert.ok(banner.textWidth >= banner.innerWidth - 1, `the Edit banner sentence wraps early at ${width}px: ${Math.round(banner.textWidth)} of ${Math.round(banner.innerWidth)}px`);
+  }
+  await settings.setViewportSize({ width: 900, height: 760 });
   // The popup may read Edit status and return a course to Plan. Every grant, course read and
   // connection change stays with settings, and the popup never receives Private Chat.
   const popupEditStatus = await popup.evaluate(async () => await chrome.runtime.sendMessage({ type: "morrow_edit_policy_status" }));
