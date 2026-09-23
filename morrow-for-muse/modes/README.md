@@ -144,8 +144,8 @@ admit(entry, params, tenant_base=..., mode_ctx=mode_ctx)
 No harness sets either id; the executor CLI fills them.
 `user_id` is `--user-id`, else `MORROW_USER_ID`, else the Canvas
 account pinned at first sign-in, as `canvas:<account id>@<Canvas host>`
-(`config/identity.default_user_id`, which `morrow mode`, `morrow
-settings`, and `morrow query` use too), so one educator has one id in
+(`config/identity.default_user_id`, which `bin/morrow mode`, `bin/morrow
+settings`, and `bin/morrow query` use too), so one educator has one id in
 every conversation. `conversation_id` is `--conversation-id`, else
 `MORROW_CONVERSATION_ID`: SKILL.md tells the agent to make a new one at
 the start of each Muse conversation and pass it to every command in
@@ -231,7 +231,7 @@ lives inside the deploy tree. `user_id` is restricted to
   the settings audit; the safe direction needs no confirmation). It
   returns the re-resolved mode, so callers report what is in force.
   The typed commands in `settings/commands.py` (`mode_set`,
-  `mode_status`, `setting_set`; CLI `morrow mode ...` and `morrow
+  `mode_status`, `setting_set`; CLI `bin/morrow mode ...` and `bin/morrow
   settings ...`) are the agent's entry point. No code parses the
   educator's words: the agent decides what the educator means.
 

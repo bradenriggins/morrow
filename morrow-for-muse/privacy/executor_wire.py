@@ -729,7 +729,7 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
 
 # ---------------------------------------------------------------------------
 # Working by name (round-4 privacy audit H3). The educator types a name;
-# `morrow students find` resolves it to a course label and records the
+# `bin/morrow students find` resolves it to a course label and records the
 # name as educator-introduced for that conversation (privacy/name_echo).
 # Outputs echo that name next to the label in that conversation only;
 # writes carry labels, and the executor turns them into real ids at the
@@ -1006,8 +1006,8 @@ def _lookup_learner_refs(value, tenant_base, course_id, conversation_id,
     if not os.path.exists(path):
         raise error_cls(
             "no student labels have been issued on this machine yet; run "
-            "`morrow students find` for course %s first. Nothing was sent."
-            % course_id)
+            "`bin/morrow students find` for course %s first. Nothing was "
+            "sent." % course_id)
     from privacy import name_echo as _echo
     introduced = None
     vault = _privacy_core.LearnerVault(path)
@@ -1026,15 +1026,16 @@ def _lookup_learner_refs(value, tenant_base, course_id, conversation_id,
                                         echo.group(1)):
                     raise error_cls(
                         "%s is not the student the educator named in this "
-                        "conversation for course %s; run `morrow students "
-                        "find` again for this course. Nothing was sent."
+                        "conversation for course %s; run `bin/morrow "
+                        "students find` again for this course. Nothing was "
+                        "sent."
                         % (label, course_id))
             try:
                 identity, token = vault.resolve_with_token(scope, label)
             except _privacy_core.PrivacyError:
                 raise error_cls(
                     "%s was never issued in course %s (labels belong to one "
-                    "course); run `morrow students find` for this course "
+                    "course); run `bin/morrow students find` for this course "
                     "and use the label it returns. Nothing was sent."
                     % (label, course_id))
             found[text] = (label, identity, token)

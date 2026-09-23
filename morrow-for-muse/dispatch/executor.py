@@ -7551,7 +7551,7 @@ def _verify_plan_request(entry: dict, params: dict, plan,
                 "%s no longer names the student the educator approved: "
                 "this course's student labels were cleared and issued "
                 "again after the approval was prepared. Nothing was sent. "
-                "Run `morrow students find` again, then prepare a new "
+                "Run `bin/morrow students find` again, then prepare a new "
                 "approval with plan-write." % ", ".join(changed))
         subject = dict(subject, learner_tokens=current)
     if admission_request_digest(subject) != plan.request_digest:

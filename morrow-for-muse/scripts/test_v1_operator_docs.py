@@ -160,3 +160,74 @@ def test_first_run_is_for_the_educator_not_a_test_run():
         e2e = fh.read()
     assert "8901" in e2e and "19223" in e2e
     assert "scripts/install-e2e.sh" in carve.DEV_ONLY
+
+
+# Final sweep 2026-09-23 (written before the fix, item
+# morrow-command-not-on-path): SKILL.md told the agent to run `morrow mode
+# ...`, `morrow settings ...`, `morrow students find ...`, and `morrow
+# query ...`, and refusals told it to run `morrow students find`. No
+# install step puts `morrow` on PATH, so each failed with "command not
+# found" (exit 127). The command is `bin/morrow`, run from the tree root.
+_BARE_MORROW = re.compile(r"(?<![\w/.-])morrow (mode|settings|students|"
+                          r"query|start|disconnect|doctor|version|failure|"
+                          r"audit|plan|dispatch)\b")
+
+
+def _agent_pages():
+    return ["SKILL.md", "SCOPE.md", "FIRST_RUN.md", "INSTALL.md",
+            "privacy/FERPA_POLICY.md"] + sorted(
+        os.path.relpath(p, TREE)
+        for p in glob.glob(os.path.join(TREE, "knowledge", "*.md")))
+
+
+def test_every_morrow_command_an_agent_reads_is_bin_morrow():
+    bare = []
+    for rel in _agent_pages():
+        for span in re.findall(r"`([^`]+)`", _flat(rel)):
+            if _BARE_MORROW.search(span):
+                bare.append((rel, span))
+    with open(os.path.join(TREE, "failures", "catalog.json"),
+              encoding="utf-8") as fh:
+        for entry in json.load(fh)["entries"]:
+            for field in ("agent_message", "auto_action"):
+                for span in re.findall(r"`([^`]+)`", entry.get(field, "")):
+                    if _BARE_MORROW.search(span):
+                        bare.append((entry["id"], span))
+    assert bare == []
+    assert "`bin/morrow mode status --conversation-id C`" in \
+        _flat("SKILL.md")
+
+
+def test_a_label_refusal_names_the_command_that_runs(tmp_path,
+                                                      monkeypatch):
+    from privacy import executor_wire
+    monkeypatch.setenv("MORROW_SOURCE_VAULT_PATH",
+                       str(tmp_path / "no-vault.json"))
+    pytest.importorskip("cryptography")
+
+    class Refused(Exception):
+        pass
+    with pytest.raises(Refused) as caught:
+        executor_wire.resolve_learner_labels(
+            {"user_id": "Student A1"}, "https://school.instructure.com",
+            "101", "conv-1", error_cls=Refused)
+    assert "`bin/morrow students find`" in str(caught.value)
+    assert not _BARE_MORROW.search(str(caught.value).replace(
+        "bin/morrow", ""))
+
+
+def test_the_documented_mode_command_runs_from_the_tree_root(tmp_path):
+    import subprocess
+    env = dict(os.environ, HOME=str(tmp_path),
+               MORROW_HOME=str(tmp_path / ".morrow"),
+               MORROW_HELPER_ENV_FILE=str(tmp_path / "helper-env"),
+               PYTHONDONTWRITEBYTECODE="1")
+    env.pop("MORROW_TREE_STATE_DIR", None)
+    proc = subprocess.run(
+        [sys.executable, "bin/morrow", "mode", "status",
+         "--conversation-id", "conv-1"],
+        cwd=TREE, env=env, capture_output=True, text=True, timeout=120)
+    # Before sign-in no account is pinned, so the command refuses (exit
+    # 2) with its JSON message; it is found and it runs.
+    assert proc.returncode != 127, proc.stderr
+    assert json.loads(proc.stdout)["message"]
