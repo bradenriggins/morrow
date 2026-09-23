@@ -102,7 +102,7 @@ function resultClosed(state: Pick<PrivateChatRequestState, "sessionId" | "turns"
 
 function resultLimitReached(state: PrivateChatRequestState): CallToolResult {
   return {
-    content: [{ type: "text", text: `Private Chat reached its ${REPLY_LIMIT}-message limit. Morrow showed the last reply in the drawer and ended the chat. To continue, the educator closes the drawer and asks you to start a new Private Chat.` }],
+    content: [{ type: "text", text: `Private Chat reached its ${REPLY_LIMIT}-message limit, so Morrow ended the chat after the last reply. To continue, the educator closes the drawer and asks you to start a new Private Chat.` }],
     structuredContent: {
       schema: "morrow.private-chat.v1",
       status: "limit_reached",

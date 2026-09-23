@@ -60,7 +60,7 @@ function endlessChat() {
   return { runtime, calls };
 }
 
-const LIMIT_TEXT = "Private Chat reached its 100-message limit. Morrow showed the last reply in the drawer and ended the chat. To continue, the educator closes the drawer and asks you to start a new Private Chat.";
+const LIMIT_TEXT = "Private Chat reached its 100-message limit, so Morrow ended the chat after the last reply. To continue, the educator closes the drawer and asks you to start a new Private Chat.";
 
 /** The last reply is delivered without taking another message, so no educator message goes unanswered. */
 function expectEndedAtLimit(calls: readonly JsonObject[]) {
