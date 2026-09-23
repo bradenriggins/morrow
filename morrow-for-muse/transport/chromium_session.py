@@ -249,8 +249,10 @@ def _decode_body(body_bytes, headers):
     """Recover the transport-level body from the executor's body_bytes.
 
     Returns (data, as_json). The executor JSON-encodes dict bodies by
-    default, so JSON objects round-trip as JSON; explicit form-encoded
-    bodies decode back to a flat field dict.
+    default, so JSON objects round-trip as JSON, and so does the bulk
+    date update's array of objects; explicit form-encoded bodies decode
+    back to a flat field dict. A body the lane cannot encode raises
+    WriteNotAttempted: it is refused before anything is sent.
     """
     if body_bytes is None:
         return None, False
@@ -266,13 +268,17 @@ def _decode_body(body_bytes, headers):
     try:
         obj = json.loads(body_bytes.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
-        raise ex.ExecutorError(
+        raise ex.WriteNotAttempted(
             "chromium backend cannot encode a non-JSON request body; "
-            "failing closed")
+            "nothing was sent") from None
     if isinstance(obj, dict):
         return obj, True
-    raise ex.ExecutorError(
-        "chromium backend needs a JSON object request body; failing closed")
+    if isinstance(obj, list) and obj and all(
+            isinstance(item, dict) for item in obj):
+        return obj, True
+    raise ex.WriteNotAttempted(
+        "chromium backend sends a JSON object or a JSON array of objects "
+        "as the request body; nothing was sent")
 
 
 class ChromiumSession:

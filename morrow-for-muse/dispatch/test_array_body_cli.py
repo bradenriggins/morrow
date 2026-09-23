@@ -17,6 +17,17 @@ Failure mode this suite pins down (written before the fix; final sweep
   mode: Morrow checked the request before sending anything, nothing
   changed, and the detail is labeled as Morrow's own check.
 
+Failure mode added in the final sweep (2026-09-23), written before the
+fix: the CLI fix above was tested on the https lane only. On the
+Chromium lane, the only v1 lane, transport/chromium_session.py
+_decode_body refused any body that was not a JSON object, after the
+approval burned and the write was marked attempted, so the refusal was
+journaled as a write that may have applied, its claim stayed pending,
+and the educator heard "I will not retry anything that might have
+applied". C-37 could never be sent. The lane now sends a JSON array of
+objects as JSON, and a body it cannot encode is refused as
+WriteNotAttempted: nothing was sent and the claim is released.
+
 Hermetic: fake provider session; journal, approvals, settings, and the
 signing key live in pytest's tmp_path.
 """
@@ -167,3 +178,106 @@ def test_other_json_arguments_are_local_input_refusals(session, flag, value):
     with pytest.raises(ex.CallerInputError):
         _run(argv)
     assert session.calls == []
+
+
+# ------------------------------------------------ the Chromium lane --
+
+class PageTab:
+    """ChromiumSession's transport: records every page-context call."""
+
+    def __init__(self):
+        self.calls = []
+
+    def api(self, method, path, data=None, as_json=False, timeout=60,
+            max_bytes=None):
+        self.calls.append((method, path, data, as_json))
+        status, _headers, raw = _canvas()(method, path, None)
+        bare = path.split("?")[0]
+        if bare == "/api/v1/users/self":
+            status, raw = 200, json.dumps({"id": 1, "name": "Teacher"})
+        elif bare.endswith(("/users", "/enrollments")):
+            status, raw = 200, "[]"
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        return status, {}, raw
+
+
+@pytest.fixture
+def page_tab(monkeypatch):
+    from reauth import state_machine as rsm
+    # The lane module exactly as the executor's CLI imports it.
+    cs = ex._chromium_session_mod()
+    monkeypatch.setattr(rsm, "pinned_principal",
+                        lambda: {"id": 1, "name": "Teacher", "base": BASE})
+    tab = PageTab()
+
+    def load(cls, base_url=None):
+        sess = cs.ChromiumSession(BASE, transport=tab)
+        sess._check_expiry_warning = lambda: None
+        return sess
+    monkeypatch.setattr(cs.ChromiumSession, "load", classmethod(load))
+    return tab
+
+
+def _page_puts(tab):
+    return [c for c in tab.calls if c[0] == "PUT"]
+
+
+def test_catalog_sends_an_array_body_on_the_chromium_lane(page_tab):
+    from settings import store
+    store.set_setting(USER, "default_mode", "edit", educator_confirmed=True)
+    argv = _catalog_argv(json.dumps(BULK))
+    argv[argv.index("https")] = "chromium"
+    code, out = _run(argv)
+    assert code == 0, out
+    assert json.loads(out)["outcome"] == "verified"
+    assert _page_puts(page_tab) == [
+        ("PUT", "/api/v1/courses/101/assignments/bulk_update", BULK, True)]
+    assert ex.journal_pending_ops() == []
+
+
+def test_plan_write_and_approve_send_an_array_body_on_the_chromium_lane(
+        page_tab):
+    code, out = _run(["plan-write", "--name", NAME, "--method", "PUT",
+                      "--path", PATH,
+                      "--params", json.dumps({"course_id": "101"}),
+                      "--body", json.dumps(BULK), "--backend", "chromium",
+                      "--user-id", USER, "--conversation-id", CONV])
+    assert code == 0, out
+    assert _page_puts(page_tab) == []
+    code, out = _run(["approve-write", "--op-id", json.loads(out)["op_id"],
+                      "--authorization", "Yes", "--backend", "chromium",
+                      "--user-id", USER, "--conversation-id", CONV])
+    assert code == 0, out
+    assert json.loads(out)["outcome"] == "verified"
+    assert [c[2] for c in _page_puts(page_tab)] == [BULK]
+
+
+@pytest.mark.parametrize("body", [b"[1, 2]", b'"text"', b"7", b"{not json",
+                                  b"[]"])
+def test_a_body_the_chromium_lane_cannot_encode_is_not_sent(page_tab, body):
+    sess = ex._chromium_session_mod().ChromiumSession.load()
+    with pytest.raises(ex.WriteNotAttempted) as info:
+        sess.raw_request("PUT", BASE + "/api/v1/courses/101/assignments/5",
+                         {"Content-Type": "application/json"}, body,
+                         is_write=True)
+    assert "nothing was sent" in str(info.value)
+    assert _page_puts(page_tab) == []
+
+
+def test_a_refused_body_releases_the_claim(page_tab, monkeypatch):
+    # The executor never builds such a body from the CLI; a caller that
+    # hands one to the lane must still get "nothing was sent".
+    from settings import store
+    cs = ex._chromium_session_mod()
+    store.set_setting(USER, "default_mode", "edit", educator_confirmed=True)
+    monkeypatch.setattr(ex, "prevalidate_write_request",
+                        lambda *a, **k: None)
+    with pytest.raises(ex.WriteNotAttempted):
+        ex.dispatch_catalog_op(
+            NAME, "PUT", PATH, None, {"course_id": "101"}, pack=_pack(),
+            session=cs.ChromiumSession.load(), extra={"body": [1, 2]},
+            mode_ctx={"user_id": USER, "conversation_id": CONV,
+                      "course_resolution": json.loads(RESOLUTION)})
+    assert _page_puts(page_tab) == []
+    assert ex.journal_pending_ops() == []

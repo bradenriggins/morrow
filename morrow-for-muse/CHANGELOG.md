@@ -204,6 +204,11 @@ Technical notes:
   raises `ApiCallMaybeSent`, which the Chromium session journals as an
   uncertain write. A read still retries once. Only a response path of
   `/login` or under `/login/` means a dead session.
+- `transport/chromium_session.py` `_decode_body` sends a JSON array of
+  objects as JSON, so the bulk date update (C-37) runs on the Chromium
+  lane, not only on the https lane. A body the lane cannot encode
+  raises `WriteNotAttempted`, so its claim is released instead of being
+  journaled as a write that may have applied.
 - `dispatch/executor.py` accepts `--canvas-base` before or after the
   subcommand (`build_parser`), and the error funnel skips the values of
   top-level options when it names the step. `dispatch/test_documented_commands.py`
