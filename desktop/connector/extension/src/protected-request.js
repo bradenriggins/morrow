@@ -434,7 +434,9 @@ export function protectLocalRequest(input) {
   if (typeof input.text !== "string" || !input.text.trim() || input.text.length > MAX_REQUEST_CHARS) {
     fail("protected_request_text_invalid");
   }
-  if (!Array.isArray(input.assertedIdentifiers) || input.assertedIdentifiers.length === 0 || input.assertedIdentifiers.length > 100) {
+  // The list names the students the educator wrote. A message that names none, such as a follow-up,
+  // lists none; the class list still protects every student detail in its text.
+  if (!Array.isArray(input.assertedIdentifiers) || input.assertedIdentifiers.length > 100) {
     fail("protected_request_identifiers_required");
   }
   const roster = input.roster.map(exactIdentity).sort((left, right) => left.id.localeCompare(right.id, "en", { numeric: true }));

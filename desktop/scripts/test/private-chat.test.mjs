@@ -193,6 +193,18 @@ test("local protection matches a rostered name written without its accents, on b
   assert.equal(accented, asserted);
 });
 
+// A follow-up such as "Make it shorter" names no student, so it needs no list. The roster still
+// protects every student detail the text holds, listed or not.
+test("a message that lists no student is protected by the class list alone", () => {
+  assert.equal(protectCourse("Make it shorter and friendlier.", []).protectedText, "Make it shorter and friendlier.");
+  assert.match(protectCourse("Now write one for Jane Doe too.", []).protectedText, /^Now write one for Student A\d+ too\.$/u);
+  assert.match(protectCourse("Copy jane.doe@school.edu on it.", []).protectedText, /^Copy Student A\d+ on it\.$/u);
+  assert.throws(() => protectCourse("Copy someone@else.edu on it.", []), /protected_request_identifier_unknown/u);
+  assert.deepEqual(protectCourse("Ask Bobby Smith to review it.", []).unmatchedNames, ["Bobby Smith"]);
+  // A list that is given is still checked entry by entry.
+  assert.throws(() => protectCourse("Make it shorter.", ["Jane Doe"]), /protected_request_assertion_missing/u);
+});
+
 test("local protection replaces a rostered platform id written after a person word or bare", () => {
   const result = protectCourse("Jane Doe is user 98765 and 55123", ["Jane Doe"]);
   assert.doesNotMatch(result.protectedText, /98765|55123/u);
@@ -534,6 +546,16 @@ test("Private Chat shows the last reply at the limit, ends the chat, and takes n
   assert.deepEqual(restarted.messages, []);
 });
 
+test("Private Chat sends a follow-up that names no student with no list", async () => {
+  const { api, sent, command } = privateChatWorker();
+  await api.handlePrivateChatExchange(command({ action: "listen" }));
+  assert.deepEqual(JSON.parse(JSON.stringify(await api.submitPrivateChatMessage("canvas:course-1", "Make it shorter and friendlier.", []))), { status: "sent" });
+  const message = sent.at(-1);
+  assert.equal(message.ok, true);
+  assert.equal(message.result.status, "message");
+  assert.equal(message.result.protectedText, "Make it shorter and friendlier.");
+});
+
 test("Private Chat asks the educator to confirm name-like words it could not match before sending", async () => {
   const { api, sent, command } = privateChatWorker();
   await api.handlePrivateChatExchange(command({ action: "listen" }));
@@ -657,4 +679,31 @@ test("the drawer names why a message was not sent, and keeps it for the next try
   // The copy names a real next step for each state, and no two states share one.
   assert.match(problemText("private_chat_course_unavailable"), /open the course/i);
   assert.match(problemText("private_chat_exchange_changed"), /start Private Chat again/);
+});
+
+// The student list is for the students a message names. A message that names none sends with an
+// empty list; the drawer asks only for a course and a message.
+test("the drawer sends a message that lists no student, and still asks for a course and a message", async () => {
+  const binding = { sourceBindingId: "canvas:course-1", provider: "canvas", origin: "https://canvas.example.edu", courseId: "1", courseName: "Biology", runtimeVerified: true, editPolicyRevision: 0 };
+  const privateChat = {
+    schema: "morrow.private-chat.status.v1", transportAvailable: true,
+    clients: [{ id: "assistant-1", name: "Desktop assistant", protocolVersion: "2025-06-18", sampling: true, pushSampling: true }],
+  };
+  const page = await loadExtensionPage("settings/settings.html", {
+    handlers: {
+      morrow_edit_policy_status: () => ({ bindings: [binding], catalogDigest: "c".repeat(64), siteAnchors: [], bindingLimit: 500, privateChat }),
+      morrow_private_chat_send: () => ({ status: "sent" }),
+      morrow_private_chat_close: () => ({ status: "closed" }),
+    },
+  });
+  await page.click("#private-chat-open");
+  await page.click("#private-chat-send");
+  assert.equal(page.messages("morrow_private_chat_send").length, 0);
+  assert.equal(page.text("#private-chat-status"), "Choose a course and enter a message.");
+  await page.type("#private-chat-message", "Make it shorter and friendlier.");
+  await page.click("#private-chat-send");
+  assert.deepEqual(page.messages("morrow_private_chat_send"), [{
+    type: "morrow_private_chat_send", sourceBindingId: "canvas:course-1", text: "Make it shorter and friendlier.", assertedIdentifiers: [],
+  }]);
+  assert.match(page.text('label[for="private-chat-identifiers"] small'), /leave this empty/u);
 });

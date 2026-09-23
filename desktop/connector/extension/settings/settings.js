@@ -355,8 +355,8 @@ async function sendPrivateChatMessage() {
   const binding = privateChatCourses().find((candidate) => candidate.sourceBindingId === privateChatCourse.value);
   const identifiers = privateChatIdentifiers.value.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean);
   const text = privateChatMessage.value;
-  if (!binding || !text.trim() || identifiers.length === 0) {
-    privateChatStatus.textContent = "Choose a course, enter a message, and list each student name or ID used in it.";
+  if (!binding || !text.trim()) {
+    privateChatStatus.textContent = "Choose a course and enter a message.";
     announce(privateChatStatus.textContent);
     return;
   }

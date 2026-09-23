@@ -2064,7 +2064,7 @@ async function submitPrivateChatMessage(sourceBindingId, text, assertedIdentifie
   if (!chat || !command) throw new Error("private_chat_start_required");
   if (typeof sourceBindingId !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(sourceBindingId)
     || typeof text !== "string" || !text.trim() || text.length > 100_000
-    || !Array.isArray(assertedIdentifiers) || assertedIdentifiers.length < 1 || assertedIdentifiers.length > 100
+    || !Array.isArray(assertedIdentifiers) || assertedIdentifiers.length > 100
     || assertedIdentifiers.some((value) => typeof value !== "string" || !value.trim() || value.length > 500)
     || !Array.isArray(confirmedNames) || confirmedNames.length > 100
     || confirmedNames.some((value) => typeof value !== "string" || !value.trim() || value.length > 500)) {
