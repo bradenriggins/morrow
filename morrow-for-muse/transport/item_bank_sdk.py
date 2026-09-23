@@ -255,7 +255,8 @@ def _is_quiz_lti_host(host: str, tenant_host=None, labels=()) -> bool:
     Structural check (always): the host is
     <account>.quiz-lti[-<region>]...instructure.com. A bare substring
     match would trust "https://evil.example/?x=quiz-lti", and a suffix
-    match would trust "school.quiz-lti-iad-prod.instructure.com.evil.example".
+    match would trust a real quiz-lti host name with ".evil.example"
+    appended.
     Tenant binding (when tenant_host is known): <account> is one of the
     tenant's own accounts (quiz_account_labels: the tenant's
     *.instructure.com first label, plus labels, the accounts its
