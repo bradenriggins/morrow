@@ -431,16 +431,17 @@ choose the `connector/extension` folder. Your organization must allow this.
 If managed Chrome blocks Developer mode or this extension, Morrow cannot
 connect through that browser. Do not bypass your organization's restrictions.
 
-To build a ZIP of the extension:
+To build the Bridge release ZIP:
 
 ```bash
 pnpm package:connector
 ```
 
-Extract `artifacts/connector/morrow-canvas-connector-v<version>.zip`, where
-`<version>` is the Bridge version in `connector/extension/manifest.json`. Use
-**Load unpacked** to select the extracted folder that contains `manifest.json`,
-not the ZIP file. Keep that folder in place while the extension is installed.
+It writes `artifacts/connector/morrow-canvas-connector-v<version>.zip`, where
+`<version>` is the Bridge version in `connector/extension/manifest.json`. The
+ZIP is a release artifact, not a way to install Morrow Bridge. A folder
+extracted from it has no pairing secret, so it cannot connect to a Morrow you
+run from source. From source, always load `connector/extension`.
 
 Each desktop release ships with the Bridge version its [changelog](CHANGELOG.md) names. Update the desktop app and Bridge together, reload the unpacked extension, then reconnect them. An older Bridge does not carry the complete 1.0 operation set.
 

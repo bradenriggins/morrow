@@ -324,6 +324,17 @@ test("the README names the Bridge ZIP the package script writes and no Bridge ve
   assert.deepEqual(stale, [], `README.md names a Bridge version other than the manifest's ${manifestVersion}`);
 });
 
+test("the source route loads connector/extension, the only folder setup gives a pairing secret", () => {
+  // Every Bridge release file set leaves out the active-folder marker, so a folder extracted from
+  // the Bridge ZIP has no pairing secret and can never pair with a Morrow run from source.
+  assert.match(read("scripts/package-mcp-bundle.mjs"), /\.filter\(\(path\) => path !== "morrow-bridge-active-folder\.json"\)/);
+  assert.match(read("scripts/source-bridge-folder.mjs"), /morrow-bridge-active-folder\.json/);
+  const readme = flat("README.md");
+  assert.doesNotMatch(readme, /select the extracted folder/, "README.md must not send a source install to the extracted ZIP");
+  assert.match(readme, /A folder extracted from it has no pairing secret, so it cannot connect to a Morrow you run from source\. From source, always load `connector\/extension`\./);
+  assert.doesNotMatch(flat("LIMITATIONS.md"), /locally built deterministic archive/, "LIMITATIONS.md must not offer the ZIP as a source install route");
+});
+
 test("the README leads with the desktop app and keeps the archive and source routes under engineering evidence", () => {
   const readme = read("README.md");
   const sections = headingSections(readme);
