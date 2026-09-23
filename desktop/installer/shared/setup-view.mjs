@@ -251,6 +251,16 @@ const HOME_STATUS_ROWS = Object.freeze([
   { label: "Courses", word: "Connected", action: "run-first-read", actionLabel: "Check connection" },
 ]);
 
+const EXAMPLE_REQUESTS = Object.freeze([
+  "Find images with no alternative text in this course.",
+  "Move the due date of the first assignment one week later.",
+  "Summarize the modules in this course and flag anything that needs review.",
+]);
+
+function examplePrompt(text) {
+  return `<div class="prompt"><span class="prompt-text">${escapeHtml(text)}</span><div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="${escapeHtml(text)}">Copy</button></div></div>`;
+}
+
 function homeStatusLines() {
   return `<ul class="home-status">${HOME_STATUS_ROWS.map((row) => `<li class="home-status-row"><span class="home-status-label">${escapeHtml(row.label)}</span><span class="home-status-word">${escapeHtml(row.word)}</span><button class="secondary-button" type="button" data-action="${row.action}">${row.actionLabel}</button></li>`).join("")}</ul>`;
 }
@@ -403,7 +413,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
       summary: "First read complete",
       title: "Your course is connected.",
       copy: `Morrow read ${course} successfully. Continue in ${assistant.title} and ask what you want to do.`,
-      body: `${homeStatusLines()}<h3>Try asking</h3><div class="prompt">Find images with no alternative text in this course.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Find images with no alternative text in this course.">Copy</button></div></div><div class="prompt">Move the due date of the first assignment one week later.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Move the due date of the first assignment one week later.">Copy</button></div></div><div class="prompt">Summarize the modules in this course and flag anything that needs review.<div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="Summarize the modules in this course and flag anything that needs review.">Copy</button></div></div>`,
+      body: `${homeStatusLines()}<h3>Try asking</h3>${EXAMPLE_REQUESTS.map(examplePrompt).join("")}`,
     };
   }
   if (previewReady(current)) {

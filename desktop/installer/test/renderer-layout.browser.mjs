@@ -32,7 +32,7 @@ const TYPES = {
   ".svg": "image/svg+xml",
   ".ttf": "font/ttf"
 };
-const WIDTHS = [1180, 1000, 900, 760, 700, 440, 320];
+const WIDTHS = [1180, 1000, 940, 900, 760, 700, 440, 320];
 const BASE = {
   lifecycle: "assistant_ready",
   assistants: [{ id: "codex", title: "ChatGPT", tier: "primary", supported: true, detected: true, configured: true, connected: true, selected: true }],
@@ -329,6 +329,30 @@ try {
     }
   }
   console.log("paths   a long Bridge or Materials folder path wraps inside its row at 320px");
+
+  // The three example requests share one layout at every width: the Copy
+  // button sits at the right edge of each row beside its text, and only the
+  // narrowest windows put every button under its text together.
+  const examples = await openSetup(browser, "darwin", COURSE_CONNECTED);
+  for (const width of WIDTHS) {
+    await examples.setViewportSize({ width, height: 900 });
+    const rows = await examples.evaluate(() => [...document.querySelectorAll(".prompt")].map((row) => {
+      const box = row.getBoundingClientRect();
+      const text = row.querySelector(".prompt-text").getBoundingClientRect();
+      const button = row.querySelector("button").getBoundingClientRect();
+      return { below: button.top >= text.bottom - 0.5, rightGap: box.right - button.right, textInside: text.right <= box.right + 0.5 };
+    }));
+    assert.equal(rows.length, 3, `three example requests at ${width}px`);
+    const below = rows.map((row) => row.below);
+    assert.ok(below.every((value) => value === below[0]), `the Copy buttons must share one placement at ${width}px, not ${JSON.stringify(below)}`);
+    assert.equal(below[0], width <= 440, `the Copy buttons sit ${width <= 440 ? "under" : "beside"} their text at ${width}px`);
+    if (!below[0]) {
+      const gaps = rows.map((row) => row.rightGap);
+      assert.ok(Math.max(...gaps) - Math.min(...gaps) <= 0.5, `the Copy buttons must share one right edge at ${width}px, not ${JSON.stringify(gaps)}`);
+    }
+    for (const row of rows) assert.equal(row.textInside, true, `an example request stays inside its row at ${width}px`);
+    console.log(`${String(width).padStart(4)}px  examples Copy ${below[0] ? "under" : "beside"} every request`);
+  }
 
   // A Copy button says Copied for about 2 seconds, and a screen reader hears it once.
   const copying = await openSetup(browser, "darwin", COURSE_CONNECTED);

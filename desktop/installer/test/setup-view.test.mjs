@@ -549,7 +549,7 @@ test("the completed course connection shows the three status lines, then three e
     "Summarize the modules in this course and flag anything that needs review."
   ];
   for (const prompt of prompts) {
-    assert.ok(view.body.includes(`<div class="prompt">${prompt}`), `the body names the request: ${prompt}`);
+    assert.ok(view.body.includes(`<div class="prompt"><span class="prompt-text">${prompt}</span>`), `the body names the request in its own text column: ${prompt}`);
     assert.match(
       view.body,
       new RegExp(`data-action="copy-example-prompt" data-prompt="${prompt.replace(/[.]/g, "\\.")}">Copy</button>`),
