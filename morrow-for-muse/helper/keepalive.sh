@@ -68,6 +68,10 @@
 #    under ~/.morrow/trees/<tree-id>/keepalive.lock (W2-P1-30): two trees
 #    keepalives never contend, and no runtime residue lands in the
 #    package tree.
+#  * Logs live in the same per-tree state dir: keepalive.log (this
+#    script) and server.log (the helper server's output), each with its
+#    rotated archives. Never in the tree: install.sh's secrets gate and
+#    integrity walk read the tree as release content.
 #
 # Exit codes:
 #  * 0: healthy (helper responding, logged_in:true); a lock-contended run
@@ -205,7 +209,8 @@ tree_id() {
     return
   fi
   if [ -f "${TREE_ROOT}/.morrow-tree-id" ]; then
-    log "WARNING: ${TREE_ROOT}/.morrow-tree-id is not a UUID; falling back to legacy path-slug tree id"
+    printf 'keepalive: WARNING: %s/.morrow-tree-id is not a UUID; falling back to legacy path-slug tree id\n' \
+      "${TREE_ROOT}" >&2
   fi
   tree_id_bounded
 }
@@ -267,7 +272,8 @@ case "${STATUS_URL}" in
     ;;
 esac
 PROFILE_DIR="${HELPER_DIR}/profile"
-KEEPALIVE_LOG="${HELPER_DIR}/keepalive.log"
+KEEPALIVE_LOG="${TREE_STATE_DIR}/keepalive.log"
+SERVER_LOG="${TREE_STATE_DIR}/server.log"
 # W5-P2-2: keepalive.log rotation. Size-based, checked on every log()
 # call: at 1 MiB the log shifts to keepalive.log.1 (..2, ..3, oldest
 # dropped). Copy-truncate is unnecessary here (log() opens the file
@@ -997,7 +1003,7 @@ recover_helper() {
   # default, and the inherited flock then wedges every future keepalive run
   # ("another keepalive run holds the lock; skipping") forever, leaving the
   # supervisor permanently blind. 9>&- applies to the child only.
-  nohup python3 "${HELPER_DIR}/server.py" >> server.log 2>&1 9>&- &
+  nohup python3 "${HELPER_DIR}/server.py" >> "${SERVER_LOG}" 2>&1 9>&- &
   _server_pid=$!
   disown 2>/dev/null || true
   log "helper relaunched (pid ${_server_pid}); waiting ${RESTART_WAIT}s"

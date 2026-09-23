@@ -183,15 +183,16 @@ def morrow_home():
     return _mh()
 
 
-def tree_state_dir():
-    """Per-tree runtime state dir (keepalive lock, journals). Not the
-    package tree (no runtime residue in shipped installs) and not the
-    bare ~/.morrow root (no cross-tree contention). Honors
-    MORROW_TREE_STATE_DIR when set."""
+def tree_state_dir(root=None):
+    """Per-tree runtime state dir (keepalive lock and logs, journals,
+    helper token). Not the package tree (no runtime residue in shipped
+    installs) and not the bare ~/.morrow root (no cross-tree
+    contention). Honors MORROW_TREE_STATE_DIR when set. root defaults
+    to the tree this module ships in."""
     override = os.environ.get("MORROW_TREE_STATE_DIR")
     if override:
         return override
-    return os.path.join(morrow_home(), "trees", tree_id())
+    return os.path.join(morrow_home(), "trees", tree_id(root))
 
 
 def tree_helper_profile_dir():

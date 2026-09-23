@@ -92,7 +92,10 @@ test_shipped() {
     # the deploy copy's skew check recycles instead of adopting. The live
     # copy predates the marker, so the extra field is harmless there.
     BODY_HEALTHY_V="{\"logged_in\": true, \"chromium_alive\": true, \"starting\": false, \"helper_version\": \"${TREE_VERSION:-unknown}\"}"
-    HELPER_DIR="${SCRATCH}"           # recover_helper's cd + server.log land here
+    # Runtime logs resolve under the tree state dir, never the tree
+    # (install.sh's secrets gate and integrity walk read the tree).
+    _ka_log_real="${KEEPALIVE_LOG}"; _srv_log_real="${SERVER_LOG}"
+    HELPER_DIR="${SCRATCH}"           # recover_helper's cd lands here
     CANVAS_BASE="https://example.instructure.com"
     PROBE_BODY=""
     probe_status() { status_body="${PROBE_BODY}"; return 0; }
@@ -101,6 +104,11 @@ test_shipped() {
     t() { # $1=name $2=expected $3=actual
       if [ "$2" = "$3" ]; then pass; else fail "${label}" "$1" "$2" "$3"; fi
     }
+
+    t "keepalive.log lives in the tree state dir" \
+      "${TREE_STATE_DIR}/keepalive.log" "${_ka_log_real}"
+    t "server.log lives in the tree state dir" \
+      "${TREE_STATE_DIR}/server.log" "${_srv_log_real}"
 
     # --- genuine_signout(): true only for the exact sign-out state ------
     got="$(genuine_signout "${BODY_SIGNOUT}")"

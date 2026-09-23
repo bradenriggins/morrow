@@ -233,6 +233,12 @@ before anything else, and under the limits the auth matrix is unchanged.
   call carries its own shorter timeout (10-20s), so a stuck handler is
   released when its CDP call times out. Each connection serves exactly
   one request, so the deadline is per-request.
+- **Where the logs live:** `server.log` (this server's output) and
+  `keepalive.log` (the keepalive runs), with their rotated archives,
+  live in the tree's state dir, `~/.morrow/trees/<tree id>/` (the same
+  place as the helper token), never in the tree. The keepalive
+  background loop keeps `keepalive-supervisor.json` and
+  `keepalive-supervisor.log` there too.
 - **Log rotation:** `server.log` rotates when it passes **1 MiB**,
   keeping **4** archives (`server.log.1` newest through `server.log.4`),
   so the log can never grow past about 5 MiB. Rotation is copytruncate

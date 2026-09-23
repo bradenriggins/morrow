@@ -45,7 +45,7 @@ def _copy_tree(dest):
     state (profiles, logs, scratch)."""
     ignore = shutil.ignore_patterns("profile", "*.log", ".selftest-*",
                                     "__pycache__", "*.pid")
-    for part in ("bin", "scripts", "helper", "config"):
+    for part in ("bin", "scripts", "helper", "config", "transport"):
         shutil.copytree(os.path.join(TREE, part), os.path.join(dest, part),
                         ignore=ignore)
     return dest

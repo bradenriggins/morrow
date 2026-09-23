@@ -41,8 +41,12 @@
 #   1. python3 check (>= 3.11; 3.10 refused: security EOL Oct 2026)
 #   2. Integrity + upgrade: verify the tree against
 #      pack/carve-manifest.json (sha256 per file; drift fails loudly
-#      naming the files). On a version change: back up the tree, remove
-#      files the new version no longer ships (manifest diff, logged).
+#      naming the files). Mint the stable tree id (.morrow-tree-id) on
+#      the first install. Runtime files live in the tree's state dir
+#      (${MORROW_HOME}/trees/<tree id>/); logs and loop state that an
+#      older release wrote into helper/ are moved there, loudly. On a
+#      version change: back up the tree, remove files the new version
+#      no longer ships (manifest diff, logged).
 #   3. Chromium locate (transport/chromium/chrome, vendor/chromium/chrome,
 #      then /opt/meta-chromium/chrome)
 #   4. Egress probe (transport/egress.py: authenticated proxy, bare proxy,
@@ -67,8 +71,9 @@
 #      location); MORROW_CRON=0 skips this if you arrange your own
 #      scheduler)
 #   8. Secrets gate: scripts/verify-no-secrets.sh against this tree.
-#      Any deny-list violation fails the install. It runs BEFORE the
-#      helper launch so installer-created runtime logs can never trip it.
+#      Any deny-list violation fails the install. No runtime file is
+#      ever written into the tree (logs and loop state live in the
+#      state dir), so a rerun after the helper ran passes it too.
 #   9. All 23 selftest suites from this tree. Any failure fails the
 #      install and names the suite. Test scratch (.selftest-work) is
 #      removed afterwards so it never lingers in the install.
@@ -381,8 +386,12 @@ if [ -n "${_PYCACHE_GONE}" ]; then
 fi
 unset _PYCACHE_GONE
 python3 - "${TREE}" "${INSTALLED_MANIFEST_FILE}" "${_UPGRADE}" <<'PYEOF' || fail "integrity" "tree drifted from its carve manifest (see above)"
-import hashlib, json, os, sys
+import hashlib, json, os, re, sys
 tree = sys.argv[1]
+# Same pattern as helper/supervisor.py _LEGACY_RUNTIME.
+LEGACY_RUNTIME = re.compile(
+    r"^(?:(?:keepalive|server|keepalive-supervisor)\.log(?:\.[0-9]+)?"
+    r"|keepalive-supervisor\.json(?:\.lock)?)$")
 # On a version change, files listed in the previous install's manifest
 # but absent from the new one are known-stale, queued for the migration
 # step's loud removal below. They are not drift.
@@ -440,13 +449,11 @@ def _is_allowed_extra(rel):
     # upgrade). It is runtime identity, not drift.
     if rel == ".morrow-tree-id":
         return True
-    # *.log directly under helper/: runtime logs.
-    if rel.startswith("helper/") and "/" not in rel[7:] \
-            and rel.endswith(".log"):
-        return True
-    # The keepalive background loop's state (no cron on this machine).
-    if rel in ("helper/keepalive-supervisor.json",
-               "helper/keepalive-supervisor.json.lock"):
+    # Runtime files an older release wrote into helper/ (keepalive's
+    # and the helper server's logs with their rotated archives, the
+    # keepalive loop's state and log). They are moved to the tree's
+    # state dir right after this walk, before any gate reads the tree.
+    if rel.startswith("helper/") and LEGACY_RUNTIME.match(rel[7:]):
         return True
     # Test scratch: .selftest-* anywhere, .selftest-work/ dirs.
     parts = rel.split("/")
@@ -477,12 +484,6 @@ if extras:
 print("integrity ok: no disallowed extra files")
 PYEOF
 note "tree version: ${TREE_VERSION}"
-# W4-P1-16: stable tree identity. Minted once (atomically: temp file +
-# rename, so a crashed install can never leave a half-written id) and
-# preserved verbatim afterwards: copies, moves, and upgrades keep the
-# same id, so the journal location (and op-id idempotency) follows the
-# tree instead of its path. Runs after the integrity walk so a minted
-# id is never mistaken for drift; the allowlist above exempts it.
 # P1-15 / P2-1: upgrade migration. The last successful install records
 # its version and manifest under MORROW_HOME (outside the tree, so an
 # unzip-over upgrade cannot destroy the record). _UPGRADE was decided
@@ -532,36 +533,6 @@ if [ "${_UPGRADE}" = "1" ]; then
   done < <(find "$(dirname "${TREE}")" -maxdepth 1 \
     -name "$(basename "${TREE}").bak-*" -print0 2>/dev/null | sort -z -r)
   unset _keep_n _seen_n _old_bak
-TREE_ID_FILE="${TREE}/.morrow-tree-id"
-if [ -f "${TREE_ID_FILE}" ]; then
-  note "existing tree id kept at .morrow-tree-id (moves, copies, and upgrades preserve it)"
-else
-  python3 - "${TREE_ID_FILE}" <<'PYEOF' \
-    || fail "tree-id" "cannot mint ${TREE_ID_FILE}"
-import os, sys, uuid
-# W4-P1-16: the canonical file form is the 32-hex-char uuid (no
-# dashes), matching config/paths.py mint_tree_uuid and the
-# 32-hex-only reader in helper/keepalive.sh _tree_uuid. Dashed ids
-# would be rejected by keepalive and silently fall back to the
-# legacy path slug, defeating the stable identity.
-target = sys.argv[1]
-tmp = target + ".tmp.%d" % os.getpid()
-with open(tmp, "w", encoding="utf-8") as f:
-    f.write(uuid.uuid4().hex + "\n")
-os.chmod(tmp, 0o644)
-os.replace(tmp, target)
-PYEOF
-  _track_created "file:${TREE_ID_FILE}"
-  note "minted stable tree id at .morrow-tree-id (0644, non-secret; survives tree moves and renames)"
-fi
-# W4-P1-12: tree-specific cron marker. Each tree's keepalive entry carries
-# its own tree ID, so concurrent installers for different trees preserve
-# each other's entries (the old generic marker caused one installer to
-# delete the other's entry as "stale").
-TREE_ID="$(tr -d '[:space:]' < "${TREE_ID_FILE}" 2>/dev/null || true)"
-if [ -n "${TREE_ID}" ]; then
-  CRON_MARKER="# morrow-muse-connector-keepalive ${TREE_ID}"
-fi
   # P1-15: remove files the new version no longer ships. Stale = in the
   # previous install's manifest but not in this tree's manifest. Each
   # removal is logged loudly. Stale directories are removed only when
@@ -612,6 +583,58 @@ elif [ -n "${_INSTALLED_VERSION}" ]; then
 else
   note "no previous install record; fresh-install path"
 fi
+# W4-P1-16: stable tree identity, on every install (fresh, reinstall,
+# and upgrade). Minted once (atomically: temp file + rename, so a
+# crashed install can never leave a half-written id) and preserved
+# verbatim afterwards: copies, moves, and upgrades keep the same id, so
+# the state dir, the journal location, and op-id idempotency follow the
+# tree instead of its path. Runs after the integrity walk so a minted id
+# is never mistaken for drift; the allowlist above exempts it. (It runs
+# after the upgrade backup, so a restored backup keeps the id too.)
+TREE_ID_FILE="${TREE}/.morrow-tree-id"
+if [ -f "${TREE_ID_FILE}" ]; then
+  note "existing tree id kept at .morrow-tree-id (moves, copies, and upgrades preserve it)"
+else
+  python3 - "${TREE_ID_FILE}" <<'PYEOF' \
+    || fail "tree-id" "cannot mint ${TREE_ID_FILE}"
+import os, sys, uuid
+# W4-P1-16: the canonical file form is the 32-hex-char uuid (no
+# dashes), matching config/paths.py mint_tree_uuid and the
+# 32-hex-only reader in helper/keepalive.sh _tree_uuid. Dashed ids
+# would be rejected by keepalive and silently fall back to the
+# legacy path slug, defeating the stable identity.
+target = sys.argv[1]
+tmp = target + ".tmp.%d" % os.getpid()
+with open(tmp, "w", encoding="utf-8") as f:
+    f.write(uuid.uuid4().hex + "\n")
+os.chmod(tmp, 0o644)
+os.replace(tmp, target)
+PYEOF
+  _track_created "file:${TREE_ID_FILE}"
+  note "minted stable tree id at .morrow-tree-id (0644, non-secret; survives tree moves and renames)"
+fi
+# W4-P1-12: tree-specific cron marker. Each tree's keepalive entry carries
+# its own tree ID, so concurrent installers for different trees preserve
+# each other's entries (the old generic marker caused one installer to
+# delete the other's entry as "stale").
+TREE_ID="$(tr -d '[:space:]' < "${TREE_ID_FILE}" 2>/dev/null || true)"
+if [ -n "${TREE_ID}" ]; then
+  CRON_MARKER="# morrow-muse-connector-keepalive ${TREE_ID}"
+fi
+# Runtime files live in this tree's state dir, never in the tree: the
+# secrets gate (step 8) and the integrity walk read the tree as release
+# content. Same resolution as helper/keepalive.sh and the transport.
+TREE_STATE_DIR="${MORROW_TREE_STATE_DIR:-${MORROW_HOME}/trees/${TREE_ID}}"
+# An older release wrote keepalive's and the helper's logs (with their
+# rotated archives) and the keepalive loop's state into helper/. Move
+# them to the state dir, loudly, and stop a loop recorded there.
+_retired="$(python3 "${TREE}/helper/supervisor.py" retire-legacy 2>&1)" \
+  || fail "runtime-files" "could not move an older release's runtime files out of helper/: ${_retired}"
+case "${_retired}" in
+  *'"moved": []'*) ;;
+  *) note "moved runtime files an older release left in helper/ to ${TREE_STATE_DIR}: ${_retired}" ;;
+esac
+unset _retired
 
 # -- 3. Chromium ----------------------------------------------------------
 step "3/10 chromium locate"
@@ -910,22 +933,30 @@ _DEAD_EOF
 else
   # No cron on this machine: the supervised background loop. Its first
   # keepalive run comes one interval after start (step 10 launches the
-  # helper now).
+  # helper now). Its state and log live in the tree's state dir. A
+  # rerun keeps a loop that already runs, and a failed rerun leaves it
+  # running.
+  _had_state_dir=0; [ -d "${TREE_STATE_DIR}" ] && _had_state_dir=1
   if _loop_out="$(python3 "${TREE}/helper/supervisor.py" install-loop 2>&1)"; then
-    _track_created "supervisor"
+    [ "${_had_state_dir}" = "0" ] && _track_created "dir:${TREE_STATE_DIR}"
+    case "${_loop_out}" in
+      *'"started": true'*) _track_created "supervisor" ;;
+    esac
     note "no cron on this machine: keepalive runs as a supervised background loop every 5 minutes (${_loop_out})"
     note "after a reboot, run 'bin/morrow start' (the first morrow command also restarts it)"
   else
     fail "supervision" "could not start the keepalive background loop: ${_loop_out}"
   fi
-  unset _loop_out
+  unset _loop_out _had_state_dir
 fi
 unset _SUPERVISION
 
-# -- 8. secrets gate (BEFORE any runtime logs exist) --------------------------
+# -- 8. secrets gate -----------------------------------------------------------
 step "8/10 secrets gate"
-# P0-12: the gate runs BEFORE the helper launch, so the installer's own
-# runtime logs (helper/keepalive.log, helper/server.log) can never trip it.
+# P0-12: the gate runs BEFORE the helper launch, so a dirty tree never
+# starts a browser. Runtime logs and the keepalive loop's state live in
+# the tree's state dir, never in the tree, so they cannot trip it on a
+# fresh install or on a rerun after the helper ran.
 # The gate runs against the installed tree, excluding the runtime
 # helper/profile the installer itself just created (it is empty on
 # first install and holds the educator's live session on reinstalls;
@@ -1108,7 +1139,7 @@ else:
       ;;
     *)
       note "WARNING: the helper did not come up (keepalive exit ${KEEP_RC})."
-      note "Check ${TREE}/helper/keepalive.log and ${TREE}/helper/server.log, then run ${TREE}/helper/keepalive.sh by hand."
+      note "Check ${TREE_STATE_DIR}/keepalive.log and ${TREE_STATE_DIR}/server.log, then run ${TREE}/helper/keepalive.sh by hand."
       ;;
   esac
 fi

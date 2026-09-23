@@ -972,7 +972,8 @@ _ensure_stdout_append()
 
 def _stdout_log_path():
     """Best-effort path of the regular file stdout is appended to (the
-    keepalive launch redirects stdout to <helper dir>/server.log).
+    keepalive launch redirects stdout to server.log in the tree's state
+    dir, <MORROW_HOME>/trees/<tree id>/).
     Returns None when stdout is not a regular file (console, pipe: dev
     runs), in which case rotation is skipped."""
     try:

@@ -88,7 +88,11 @@ it does, in order:
    `PYTHONDONTWRITEBYTECODE=1` so no `__pycache__/` is written into
    the tree.
 2. **Integrity and upgrade.** Verifies the tree against
-   `pack/carve-manifest.json` (every shipped file's SHA-256). On a
+   `pack/carve-manifest.json` (every shipped file's SHA-256). Mints the
+   tree's stable id (`.morrow-tree-id`) on the first install. Logs and
+   other runtime files live in the tree's state dir,
+   `~/.morrow/trees/<tree id>/`, never in the tree; logs an older
+   release left in `helper/` are moved there (loudly logged). On a
    version change (see `pack/version.txt`), backs up the existing tree
    (excluding `helper/profile/`) to a timestamped directory outside
    the tree, then removes stale files from the old version that the new
@@ -415,8 +419,10 @@ integrity source of truth.
 
 Tree-scoping: configuration lives in the tree's own `helper/env`
 (`CANVAS_BASE` and optional profile/port/production pins); runtime
-state (keepalive lock, op journal, version marker) lives under the
-effective `MORROW_HOME`. The legacy global `~/.morrow/env` is honored
+state (keepalive lock, op journal, version marker, and the logs:
+`keepalive.log`, `server.log`, and the keepalive background loop's
+`keepalive-supervisor.log`) lives under the effective `MORROW_HOME`,
+in `trees/<tree id>/` for this tree's own files. The legacy global `~/.morrow/env` is honored
 for `CANVAS_BASE` only. After upgrading from a pre-tree-scoping
 release, move any `LOGIN_HELPER_*` vars from `~/.morrow/env` into
 `helper/env`.

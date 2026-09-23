@@ -22,6 +22,7 @@ import stat
 import subprocess
 import sys
 import time
+import uuid
 
 import pytest
 
@@ -36,6 +37,7 @@ from helper import supervisor as sup  # noqa: E402
 def _fake_tree(tmp_path):
     tree = tmp_path / "tree"
     (tree / "helper").mkdir(parents=True)
+    (tree / ".morrow-tree-id").write_text(uuid.uuid4().hex + "\n")
     shutil.copy(os.path.join(HERE, "supervisor.py"),
                 str(tree / "helper" / "supervisor.py"))
     ticks = tmp_path / "ticks.log"
@@ -213,3 +215,67 @@ def test_helper_down_recovery_works_without_cron():
     for field in ("root_cause", "agent_message"):
         assert "cron-based" not in mode[field], field
         assert "background loop" in mode[field], field
+
+
+def _tree_state_dir(tree):
+    tree_id = (tree / ".morrow-tree-id").read_text().strip()
+    return os.path.join(os.environ["MORROW_HOME"], "trees", tree_id)
+
+
+def test_loop_state_and_log_live_in_the_state_dir_not_the_tree(tmp_path):
+    """Final sweep 2026-09-22: the loop's state and log landed in
+    <tree>/helper/, and install.sh's secrets gate (*.log) and integrity
+    walk read them as release content, so no install without cron
+    could pass. Runtime files belong in the tree's state dir."""
+    tree, ticks = _fake_tree(tmp_path)
+    sup.mark_installed(str(tree))
+    first = sup.ensure(str(tree), interval=0.3, first_delay=0.0)
+    try:
+        assert _wait(lambda: ticks.exists())
+    finally:
+        sup.stop(str(tree))
+    state = _tree_state_dir(tree)
+    assert os.path.isfile(os.path.join(state, "keepalive-supervisor.json"))
+    assert os.path.isfile(os.path.join(state, "keepalive-supervisor.log"))
+    assert sorted(os.listdir(str(tree / "helper"))) == [
+        "keepalive.sh", "supervisor.py"]
+    assert first["started"] is True
+
+
+def test_retire_legacy_stops_an_old_loop_and_moves_its_files(tmp_path):
+    """An older release kept the loop's state and every runtime log in
+    helper/. Retiring them stops the loop recorded there (its code
+    reads only the old state file), keeps the install choice, and
+    moves the logs into the state dir so no install gate sees them."""
+    tree, _ticks = _fake_tree(tmp_path)
+    helper = tree / "helper"
+    old = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)",
+         "supervisor.py", "run", "--tree", os.path.realpath(str(tree))],
+        start_new_session=True)
+    try:
+        (helper / "keepalive-supervisor.json").write_text(json.dumps(
+            {"method": "loop", "installed": True, "pid": old.pid}))
+        (helper / "keepalive-supervisor.json.lock").write_text("")
+        logs = {"keepalive-supervisor.log": "sup\n",
+                "keepalive.log": "ka\n", "keepalive.log.1": "ka1\n",
+                "server.log": "srv\n", "server.log.3": "srv3\n"}
+        for name, text in logs.items():
+            (helper / name).write_text(text)
+        out = sup.retire_legacy(str(tree))
+        assert out["stopped_loop"] == old.pid
+        assert old.wait(timeout=10) is not None
+        assert sorted(os.listdir(str(helper))) == [
+            "keepalive.sh", "supervisor.py"]
+        state = _tree_state_dir(tree)
+        for name, text in logs.items():
+            with open(os.path.join(state, name)) as fh:
+                assert fh.read() == text, name
+        status = sup.status(str(tree))
+        assert status["installed"] is True and status["running"] is False
+        assert sup.retire_legacy(str(tree)) == {"stopped_loop": None,
+                                                "moved": []}
+    finally:
+        if old.poll() is None:
+            old.kill()
+            old.wait()
