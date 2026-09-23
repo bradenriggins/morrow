@@ -64,7 +64,7 @@ def _nothing_sent(payload):
     assert payload["mode_id"] != "unknown", payload
     assert MAYBE_APPLIED not in message
     assert "nothing" in message.lower()
-    assert "—" not in message
+    assert "\u2014" not in message
     assert "(unknown" not in message
     return message
 

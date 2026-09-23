@@ -66,7 +66,7 @@ def _refusal(text, mode_id):
     assert MAYBE_APPLIED not in text
     assert "hello@meetmorrow.app" not in text
     assert "nothing" in text.lower()
-    assert "—" not in text
+    assert "\u2014" not in text
     assert "(unknown" not in text
 
 

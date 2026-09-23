@@ -143,7 +143,7 @@ def test_a_never_dispatch_read_is_told_as_a_read():
     assert "write it" not in text
     assert "changing" not in text
     assert "nothing was sent" in text.lower()
-    assert "—" not in text
+    assert "\u2014" not in text
 
 
 def test_a_never_dispatch_change_keeps_the_change_message():
