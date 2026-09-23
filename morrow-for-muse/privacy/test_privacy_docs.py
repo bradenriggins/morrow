@@ -58,10 +58,12 @@ def test_docs_state_the_by_name_limits_honestly():
     skill = _flat("SKILL.md")
     consent = _flat("content/consent.md")
     policy = _flat("privacy/FERPA_POLICY.md")
-    for text in (skill, consent):
+    # consent.md is the educator's page: "recorded", not "journaled".
+    for text, recorded in ((skill, "every lookup is journaled"),
+                           (consent, "every lookup is recorded")):
         assert "only ever learns the names you type" not in text
         assert "confirms that a student with that name is enrolled" in text
-        assert "every lookup is journaled" in text
+        assert recorded in text
         assert "page body" in text
     limits = skill[skill.index("Honest limitations"):]
     limits = limits[:limits.index("## Never")]

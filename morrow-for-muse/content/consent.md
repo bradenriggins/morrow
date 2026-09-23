@@ -1,91 +1,85 @@
 # Before we connect: what you are agreeing to
 
-*Plain-language summary for a busy, non-technical educator. This
-is the whole deal; there is no fine print hiding behind it. Shown
-before any sign-in happens.*
+*A plain summary for a busy educator. This is the whole deal; there is
+no fine print behind it. Muse shows it to you before you sign in.*
 
 ## What Morrow can do
 
-Morrow can do a defined set of Canvas tasks when you ask it to. The
-dispatch catalog lists 457 Canvas operations (437 course-level, 20
-Item Bank). Of those, 209 are live-proven through the Chromium lane
-(195 course-level, 14 Item Bank), and 10 of the 11 New Quiz creation
-sequence steps, which run on those operations, are live-proven as
-well (step 7, whole-quiz archive, is unsupported by the provider).
-The 209 live-proven operations are what this build will dispatch, and
-anything not live-proven it refuses rather than guessing (checked 2026-09-22
-against proof-battery/OPERATION_CATALOG.md). Live-proven examples
-include listing your courses, assignments, and enrollments; creating
-draft quizzes and assignments; managing modules and pages; and
-reading course files. Morrow acts with exactly the permissions
-your own account has. Nothing more.
+Morrow does Canvas tasks when you ask it to. It can do more than 200
+Canvas tasks that we have tested on a real Canvas site, for example:
+listing your courses and assignments; creating assignments, classic
+quizzes, pages, and modules; editing pages; and reading course files.
+It refuses anything we have not tested, instead of guessing. Morrow
+acts with exactly the permissions your own Canvas account has. Nothing
+more.
 
-What it will not do in v1, even if you ask:
+What it will not do in this version, even if you ask:
 
 - post announcements, send messages to people, or open support
-  tickets (these are standing exclusions);
-- change anything at the subaccount level or outside the
-  live-proven catalog rows;
+  tickets;
+- change anything above your courses (such as settings for your whole
+  school), or anything we have not tested;
 - act as anyone other than you.
 
-For every change, Morrow shows you a receipt: what was created, a
-link to it, and whether it can be undone.
+After every change, Morrow reads it back from Canvas and tells you
+one of three things: the change is saved as asked, Morrow could not
+confirm it, or it did not work. This version cannot undo a change
+automatically. To reverse a change, Morrow makes the opposite change
+as a new change, and in plan mode it asks you first.
 
 ## What Morrow cannot do
 
-Morrow cannot act without your instruction, and it cannot grant
-itself new permissions. If you ask for something it cannot verify is
-within your permissions and within the proven catalog, it refuses
-rather than guessing.
+Morrow cannot act without your instruction, and it cannot give itself
+more permissions. If you ask for something it cannot confirm is within
+your permissions and among the tasks we have tested, it refuses rather
+than guessing.
 
-And whether it asks before changing things depends on your mode,
-and the mode is the only thing that decides. In plan mode (the
-default), Morrow asks your permission before every change in Canvas.
-The exact layout of the approval prompt on your screen can vary;
-asking first is the product commitment in plan mode, regardless of
-how it looks. In edit mode, you have told Morrow it may make changes
-without asking each time. That is the entire difference between the
-two modes: reads never need approval in either one, and every other
-protection, student-data privacy, refusing unproven operations, and
-never guessing which course you mean, works exactly the same in
-both. You choose the mode by talking to the agent ("use edit mode",
-"use edit mode for this conversation", "turn off edit mode"). Edit
-mode has no time limit: it stays on until you turn it off, and
-turning it off puts you back in plan mode everywhere. If Morrow is ever unsure which course you mean, it asks you
-to confirm the course instead of guessing, in either mode.
+Whether it asks before changing things depends on your mode, and only
+the mode decides. In plan mode (the default), Morrow asks your
+permission before every change in Canvas. The request can look
+different on your screen from time to time; asking first is the
+promise. In edit mode, you have told Morrow it may make changes
+without asking each time. That is the only difference between the two
+modes: reads never need approval in either one, and everything else
+(your students' privacy, refusing untested tasks, and never guessing
+which course you mean) works the same in both. You choose the mode by
+talking to Muse ("use edit mode", "use edit mode for this
+conversation", "turn off edit mode"). Edit mode has no time limit: it
+stays on until you turn it off, and turning it off puts you back in
+plan mode everywhere. If Morrow is ever unsure which course you mean,
+it asks you to confirm the course instead of guessing, in either mode.
 
 ## Your students' privacy
 
-Student data is de-identified by default. When Morrow reads rosters,
-submissions, or grades, the agent sees stable labels like "Student
-A1" instead of names, emails, logins, or Canvas ID numbers (including
-the ones inside links), and the journal records the same labels,
-never the names. The labels stay consistent across sessions on this
-computer.
+Student details are hidden from the assistant. When Morrow reads
+rosters, submissions, or grades, the assistant sees labels like
+"Student A1" instead of names, emails, logins, or Canvas ID numbers
+(including the ones inside links). Morrow's own records on your Muse
+computer use the same labels, never the names. A student keeps the
+same label every time on this computer.
 
 You can still work with a student by name. When you name a student
-("extend Jane Doe's due date by two days"), the agent looks that name
-up in your course roster and, for the rest of that conversation,
-shows that student as "Jane Doe (Student A3)". If more than one
-student could match, the agent asks you which one you mean. It never
-guesses.
+("extend Jane Doe's due date by two days"), Morrow looks that name up
+in your course roster and, for the rest of that conversation, shows
+that student as "Jane Doe (Student A3)". If more than one student
+could match, it asks you which one you mean. It never guesses.
 
-One thing Morrow cannot do: it cannot intercept what you type to
-Muse. The names you type reach the Muse model, because you typed
-them. Morrow keeps every other student identifier in Canvas records
-(the names you did not type, emails, logins, and ID numbers) away from
-the model, with two limits you should know:
+One thing Morrow cannot do: it cannot hide what you type to Muse. The
+names you type reach the Muse assistant, because you typed them.
+Morrow keeps every other student detail in Canvas (the names you did
+not type, emails, logins, and ID numbers) away from the assistant,
+with two limits you should know:
 
-- Looking up a name tells the agent something. When the agent looks a
-  name up and gets a label back, that confirms that a student with that
-  name is enrolled in the course. The agent could look up a name you
-  did not type. Nothing technical stops that, but every lookup is
-  journaled (which course, which conversation, whether it matched, and
-  a sealed fingerprint of the name, never the name itself), so you can
-  review lookups afterwards.
-- Course content is not de-identified. If a page body, announcement,
-  discussion post, or file names a student, the agent reads that name
-  as written.
+- Looking up a name tells the assistant something. When the assistant
+  looks a name up and gets a label back, that confirms that a student
+  with that name is enrolled in the course. The assistant could look
+  up a name you did not type. Nothing technical stops that, but every
+  lookup is recorded on your Muse computer (which course, which
+  conversation, and whether it matched; never the name itself), so a
+  guess leaves a trail.
+- Course content is not hidden. If a page body, announcement,
+  discussion post, or file names a student, the assistant reads that
+  name as written.
 
 The assistant never sees the names of students you did not name, and
 this cannot be turned off. To check who a label is, tell the assistant
@@ -94,39 +88,38 @@ tells you whether it is the same label.
 
 ## Where your sign-in lives
 
-> **The warning that matters most:** your sign-in is the session
-> cookie in the helper Chromium profile (`<tree>/helper/profile/`)
-> on your Muse's own computer. **Anyone with access to that profile
-> directory on this computer could act as your Canvas session.**
-> Guard this computer's login the way you would guard your Canvas
-> password.
+> **The warning that matters most:** your Canvas sign-in is kept in
+> the helper's private browser on your Muse computer. **Anyone who can
+> get into that computer's files could act as you in Canvas.** Guard
+> this computer's login the way you would guard your Canvas password.
 
-Morrow stores no Canvas credential, no password, and no API token
-anywhere. Your sign-in is the session cookie in the helper Chromium
-profile (`<tree>/helper/profile/`) on your Muse's own computer. You
-typed your password into the Canvas sign-in page during setup; Morrow
-never saw it and never saved it. That directory lives only
-on your Muse's own computer, never in a download or update.
+Morrow stores no Canvas password and no access token anywhere. Your
+sign-in is kept by the helper's private browser on your Muse computer,
+the same way your own browser stays signed in. You typed your password
+into the Canvas sign-in page during setup; Morrow never saw it and
+never saved it. Your sign-in stays on your Muse computer only, never
+in a download or update.
 
 ## How to revoke
 
-- Sign out of Canvas inside the helper browser. That ends the
-  session Morrow uses.
+- Sign out on the helper page: open the helper page (Muse can show it
+  to you) and use Canvas's own menu: Account, then Logout. That ends
+  the sign-in Morrow uses.
 - For a full disconnect, say "disconnect Morrow from Canvas". Muse
-  asks you to confirm, then runs `bin/morrow disconnect --yes`, which
-  stops the helper, removes its restart schedule (otherwise it would
-  restart the signed-in helper within five minutes), deletes the
-  helper profile (`<tree>/helper/profile/`, which holds the session
-  cookies), and checks each step before it reports done.
+  asks you to confirm, then stops the helper, removes its restart
+  schedule (otherwise it would restart the signed-in helper within
+  five minutes), deletes the helper's private browser (which holds your
+  sign-in), and checks each step before it tells you it is done.
 
-Logging out of Canvas on your laptop or phone does not reliably end
-the helper's own session, because Canvas sessions are per-device.
-There is no token to delete: v1 creates no API token, so there is
-no "Morrow for Muse" entry in your Canvas account's Approved
-Integrations.
+Signing out of Canvas on your laptop or phone does not end the
+helper's own sign-in, because each device has its own Canvas sign-in.
+There is no access token to delete: this version creates none, so
+there is no "Morrow for Muse" entry under Approved Integrations in
+your Canvas account.
 
 Once disconnected, Morrow cannot reach Canvas at all. Reconnecting
-means going through the short setup again. (Full steps: `revoke.md`.)
+means going through the short setup again. (The "Disconnecting Morrow"
+page has every step.)
 
 ## Your school's rules
 

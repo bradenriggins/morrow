@@ -8482,8 +8482,8 @@ def _journal_record(entry_name, kind, effects, params, plan, op_id,
         # unverifiable / unsupported / absent, with detail). A digest
         # that implies a guard always says here whether the guard ran.
         "before_state": before_state,
-        # W6-P1-H1: per-change undoability disclosure, enforcing the
-        # consent.md promise ("whether it can be undone"). The
+        # W6-P1-H1: per-change undoability disclosure (consent.md: this
+        # version cannot undo a change automatically). The
         # pre-dispatch half of the promise is the approval display
         # (dispatch/approval_display.py renders the Undo line); this is
         # the receipt half, journaled with every completion.

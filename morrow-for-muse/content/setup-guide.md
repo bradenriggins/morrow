@@ -18,7 +18,7 @@ That is the whole setup command. Everything below happens as a conversation; you
 
 ## Step 2: Read the consent moment
 
-Before anything connects, Muse shows you the consent page (`content/consent.md`): what Morrow can and cannot do, where your sign-in lives, how to revoke it, your school's policy, and the training-data default. Read it. It is one page and it is the whole deal. Nothing connects until you say so.
+Before anything connects, Muse shows you the consent page: what Morrow can and cannot do, where your sign-in lives, how to revoke it, your school's policy, and the training-data default. Read it. It is one page and it is the whole deal. Nothing connects until you say so.
 
 ## Step 3: Tell Muse your school's Canvas address
 
@@ -30,7 +30,7 @@ Muse opens your school's Canvas login page in the login helper: a private browse
 
 ## Step 5: Muse verifies it is really you
 
-The moment you finish signing in, Muse checks the connection by reading your own Canvas profile (your name, from your account) and confirms it matches. This is the setup-complete gate: a successful profile read means the connection works. If the check shows a login page instead, the sign-in did not stick; Muse asks you to try once more, then stops and tells you exactly what it found instead of looping forever.
+The moment you finish signing in, Muse checks the connection by reading your own Canvas profile (your name, from your account) and confirms it matches. When that check passes, setup is complete and the connection works. If the check shows a login page instead, the sign-in did not stick; Muse asks you to try once more, then stops and tells you exactly what it found instead of looping forever.
 
 ## Step 6: Your first real task
 
@@ -38,7 +38,7 @@ Ask for something small and harmless first, so you can see how Morrow works befo
 
 > Show me my courses.
 
-That is a read: it changes nothing. Then try something slightly bigger, like listing the assignments in one course. In plan mode (the default), Morrow asks your permission before every change it makes in Canvas. When it finishes, you get a receipt: what was created, a link to it, and whether it can be undone.
+That is a read: it changes nothing. Then try something slightly bigger, like listing the assignments in one course. In plan mode (the default), Morrow asks your permission before every change it makes in Canvas. After each change, Morrow reads it back from Canvas and tells you whether it is saved as asked, whether Morrow could not confirm it, or whether it did not work. This version cannot undo a change automatically; to reverse one, Morrow makes the opposite change, and asks you first in plan mode.
 
 ## Step 7: Choose how much Morrow asks you
 

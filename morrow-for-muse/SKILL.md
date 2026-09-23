@@ -121,7 +121,17 @@ preemptively and never on every run: a healthy session needs no page.
    writes are refused until the account is pinned. To disconnect, tell the educator
    what will be removed, get their yes in chat, then run
    `bin/morrow disconnect --yes` (without a terminal, a run without
-   `--yes` changes nothing and says so).
+   `--yes` changes nothing and says so). To reconnect after a
+   disconnect, rerun `bash install.sh` in this tree, then steps 3 and 4.
+
+Sign-out without disconnecting: there is no command that signs the
+educator out. When they ask to sign out of Canvas, show them the
+helper page and tell them to use Canvas's own menu there: Account,
+then Logout. `/status` then reports `"logged_in": false`: that is the
+sign-out they asked for, not a failure. When they want to sign back
+in, show the helper page again; if writes were paused while they were
+signed out, run `reauth/state_machine.py resume` after they sign in
+(see the lifecycle below).
 
 ## Reading /status: the fields and what they mean
 

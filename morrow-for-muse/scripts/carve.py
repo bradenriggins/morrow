@@ -83,6 +83,8 @@ DEV_ONLY = (
     # pytest-only: the conftest missing-cryptography warning check, and
     # the doc catalog-count check (it reads DEPLOY.md, which does not ship)
     "test_optional_dependency_warning.py", "test_doc_catalog_counts.py",
+    # pytest-only: the educator pages check (it imports the count check)
+    "test_educator_pages.py",
 )
 # proof-battery/ is dev evidence except the catalog the executor reads
 # and the one driver integration_selftest checks for hygiene.

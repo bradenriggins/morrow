@@ -172,15 +172,19 @@ def test_non_interactive_disconnect_without_yes_names_the_flag(rig):
     assert os.path.exists(os.path.join(rig["profile"], "Cookies"))
 
 
-@pytest.mark.parametrize("doc", ["content/revoke.md", "content/consent.md",
-                                 "SKILL.md"])
-def test_documented_agent_path_uses_yes(doc):
+# consent.md describes the disconnect in plain words and names no
+# command; a doc that names the command names the --yes form.
+@pytest.mark.parametrize("doc,names_command", [
+    ("content/revoke.md", True), ("content/consent.md", False),
+    ("SKILL.md", True)])
+def test_documented_agent_path_uses_yes(doc, names_command):
     with open(os.path.join(TREE, doc), encoding="utf-8") as fh:
         text = fh.read()
     runs = [line for line in text.splitlines()
             if "bin/morrow disconnect" in line]
-    assert runs, doc
-    assert "bin/morrow disconnect --yes" in text, doc
+    assert bool(runs) == names_command, doc
+    if names_command:
+        assert "bin/morrow disconnect --yes" in text, doc
     assert "bin/morrow disconnect`" not in text.replace(
         "bin/morrow disconnect --yes`", ""), doc
 
