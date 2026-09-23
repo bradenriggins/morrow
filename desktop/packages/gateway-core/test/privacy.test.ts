@@ -1169,8 +1169,28 @@ describe("bidirectional roster dictionary", () => {
     expect(redactKnownLearnerText("Write a long answer on this page.", ctx)).toBe("Write a long answer on this page.");
     expect(redactKnownLearnerText("Long and PAGE replied to d'Angelo.", ctx)).toBe(`${long} and ${page} replied to ${angelo}.`);
     expect(redactKnownLearnerText("jordan long replied.", ctx)).toBe(`${long} replied.`);
-    // A given name keeps matching in any case, and so does a family name the roster gives in its own field.
-    expect(redactKnownLearnerText("lee met the hall monitor.", ctx)).toBe(`${lee} met the ${hall} monitor.`);
+    // A family name the roster gives in its own field keeps matching in any case.
+    expect(redactKnownLearnerText("Lee met the hall monitor.", ctx)).toBe(`${lee} met the ${hall} monitor.`);
+  });
+  it("replaces a lone given name only where it is written with a capital letter", () => {
+    const roster = new LearnerRoster();
+    roster.register(scope, [
+      { id: "711", name: "Will Okafor" },
+      { id: "712", name: "Grace Hopper" },
+      { id: "713", name: "Cher" },
+      { id: "714", name: "하늘 민준" },
+    ]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [will, grace, cher, minjun] = ["Will Okafor", "Grace Hopper", "Cher", "하늘 민준"].map((name) => redactKnownLearnerText(name, ctx));
+    // Written in small letters, a given name used alone is usually an ordinary word too, and a
+    // label there would come back as the student's full name in text the assistant saves.
+    expect(redactKnownLearnerText("You will see the grace period on this page.", ctx)).toBe("You will see the grace period on this page.");
+    expect(redactKnownLearnerText("Will and GRACE replied.", ctx)).toBe(`${will} and ${grace} replied.`);
+    expect(redactKnownLearnerText("will okafor replied.", ctx)).toBe(`${will} replied.`);
+    // A one-word roster name is the whole name, not a part of it, so it matches in any case.
+    expect(redactKnownLearnerText("cher replied.", ctx)).toBe(`${cher} replied.`);
+    // A script with no capital letters cannot mark a name, so a lone name part in it always matches.
+    expect(redactKnownLearnerText("민준 replied. 하늘 agreed.", ctx)).toBe(`${minjun} replied. ${minjun} agreed.`);
   });
   it("neutralizes a pasted label outside the roster and refuses it only in the strict projection", () => {
     const roster = new LearnerRoster(); roster.register(scope, [{ id: "17", name: "Ada Lovelace" }]);

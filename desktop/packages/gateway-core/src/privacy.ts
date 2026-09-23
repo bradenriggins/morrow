@@ -541,9 +541,10 @@ function nameWords(value: string): string[] {
 interface LearnerNameAliases {
   readonly aliases: readonly string[];
   /**
-   * A one-word family name used alone. Written in small letters it is usually
-   * an ordinary word, such as long or page, and a label there would come back
-   * as the student's full name in text the assistant saves.
+   * A one-word given or family name used alone. Written in small letters it is
+   * usually an ordinary word, such as will, grace, long, or page, and a label
+   * there would come back as the student's full name in text the assistant
+   * saves. A one-word roster name is the whole name and is not listed here.
    */
   readonly capitalized: ReadonlySet<string>;
 }
@@ -566,8 +567,8 @@ function learnerNameAliases(identity: LearnerIdentity): LearnerNameAliases {
   if (familyFirst) aliases.add(`${familyFirst[2]} ${familyFirst[1]}`);
   else if (words.length === 2) aliases.add(`${words[1]} ${words[0]}`);
   if (given && family) aliases.add(`${given} ${family}`);
-  const capitalized = new Set([family, familyWords.at(-1) ?? ""]
-    .filter((part) => aliases.has(part) && !part.includes(" ") && part !== given));
+  const capitalized = new Set([given, family, familyWords.at(-1) ?? ""]
+    .filter((part) => aliases.has(part) && !part.includes(" ") && part !== name));
   return { aliases: [...aliases], capitalized };
 }
 
@@ -778,7 +779,9 @@ function replaceKnownAliases(
   for (const match of view.text.matchAll(matcher)) {
     if (references.some((reference) => match.index! >= reference.index! && match.index! < reference.index! + reference[0].length)) continue;
     const alias = aliases.get(normalizeAlias(match[0]));
-    if (alias?.capitalized === true && !/\p{Lu}/u.test(match[0])) continue;
+    // A script with no capital letters cannot mark a name, so only a match written in small
+    // letters of a cased script is left as the ordinary word it usually is.
+    if (alias?.capitalized === true && !/[\p{Lu}\p{Lt}]/u.test(match[0]) && /\p{Ll}/u.test(match[0])) continue;
     const source = sourceRangeForView(view, match.index!, match.index! + match[0].length);
     if (!source) continue;
     replacements.push({

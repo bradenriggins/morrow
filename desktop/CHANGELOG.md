@@ -45,6 +45,7 @@ This release fixes every Critical and High defect found in the adversarial audit
 - Learner ids inside grade, submission, and profile links are replaced with labels.
 - Each student has one label everywhere. Real names reach the educator only through Morrow Bridge in their own tab (Private Chat and the review tab). Every HTTP endpoint serves labels only.
 - Private Chat reads a sentence start correctly through quotes and line breaks.
+- A first name used alone, such as Will or Grace, is replaced only where it is written with a capital letter, as a family name already was. In small letters it is usually an ordinary word, and replacing it put the student's full name into text the assistant saved. A name part in a script with no capital letters, such as Korean, is now replaced wherever it appears.
 
 ### Interface
 
