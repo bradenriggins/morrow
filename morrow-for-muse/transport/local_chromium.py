@@ -2436,8 +2436,9 @@ class LocalChromiumTransport:
         tab settled on the tenant origin - never the page's default
         realm. A page that replaces window.fetch cannot forge the
         result. The world is cached per tab and recreated when its
-        execution context dies (navigation); a lost context retries once
-        with a fresh world.
+        execution context dies (navigation). A read retries once with a
+        fresh world; a change retries only when its world was gone before
+        the program ran, and otherwise raises ApiCallMaybeSent.
         """
         tab = _tab or self._tenant_tab()
         tab_id = (tab or {}).get("id")
@@ -2452,12 +2453,20 @@ class LocalChromiumTransport:
             raw = self.cdp.evaluate(tab, js, await_promise=True,
                                     timeout=timeout, context_id=context_id)
         except (RuntimeError, CDPError) as exc:
-            if "context" not in str(exc).lower() \
-                    and "navigated or closed" not in str(exc):
+            text = str(exc)
+            if "context" not in text.lower() \
+                    and "navigated or closed" not in text:
                 raise
-            # The world's execution context died (navigation, crash):
-            # recreate once and retry. Anything else propagates.
+            # The world's execution context died (navigation, crash).
             self._api_worlds.pop(tab_id, None)
+            # A world that was already gone refused the program before it
+            # ran. Any other context loss can land after the fetch left
+            # the browser, so only a read runs again.
+            if method.upper() != "GET" and _STALE_WORLD not in text:
+                raise ApiCallMaybeSent(
+                    "%s %s: the tab navigated or closed while the request "
+                    "was in flight (%s); Canvas may have received it, so "
+                    "it is not sent again" % (method.upper(), url, text))
             context_id = self._new_api_world(tab)
             raw = self.cdp.evaluate(tab, js, await_promise=True,
                                     timeout=timeout, context_id=context_id)
@@ -2481,7 +2490,7 @@ class LocalChromiumTransport:
                 "Canvas redirected the API call to a login page; the "
                 "browser session is dead (sign in again through the "
                 "login helper).")
-        if "/login" in (resp.get("url") or ""):
+        if _is_sign_in_path(resp.get("url")):
             raise SessionDead(
                 "Canvas served a login page for the API call; the "
                 "browser session is dead (sign in again through the "
@@ -2509,6 +2518,24 @@ class LocalChromiumTransport:
             headers["x-morrow-truncated"] = (
                 "body truncated at %s bytes" % max_bytes)
         return resp["status"], headers, resp["body"]
+
+
+# CDP's answer when Runtime.evaluate names a world that no longer exists:
+# the program never started.
+_STALE_WORLD = "Cannot find context with specified id"
+
+
+def _is_sign_in_path(url):
+    """True when url is Canvas's own sign-in page (/login or /login/...),
+    never a course page whose address merely starts with "login"."""
+    path = urllib.parse.urlsplit(str(url or "")).path
+    return path == "/login" or path.startswith("/login/")
+
+
+class ApiCallMaybeSent(RuntimeError):
+    """A change's page-context program lost its tab mid-call: the fetch
+    may have reached Canvas, so it is never sent again. The caller
+    treats it as an uncertain write."""
 
 
 class SessionDead(RuntimeError):

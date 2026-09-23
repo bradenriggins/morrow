@@ -82,6 +82,13 @@ Changes to your courses:
 - "Last week's quiz" uses your time zone: your timezone setting, then
   the course's time zone, then your Canvas profile. If none is set,
   Morrow asks.
+- A change is never sent twice. If the helper's Canvas tab moved to
+  another page while Morrow was sending a change, Morrow sent it again,
+  so Canvas could end up with two copies. Now Morrow reports the change
+  as unconfirmed and does not send it again.
+- A course page whose title starts with "Login" (for example "Login
+  Help") can be read and changed. Morrow took it for Canvas's sign-in
+  page, paused every change, and said your Canvas connection expired.
 
 Settings and undo:
 
@@ -191,6 +198,12 @@ Technical notes:
 - `test_release_version.py` requires every current-version statement
   (`pack/version.txt`, `pack/pack.json`, SKILL.md, INSTALL.md, the
   install selftest stub, and this changelog) to name `VERSION`.
+- `transport/local_chromium.py` `api()` runs a change's page-context
+  program again only when CDP says its world was gone before it ran
+  ("Cannot find context with specified id"). Any other context loss
+  raises `ApiCallMaybeSent`, which the Chromium session journals as an
+  uncertain write. A read still retries once. Only a response path of
+  `/login` or under `/login/` means a dead session.
 - `dispatch/executor.py` accepts `--canvas-base` before or after the
   subcommand (`build_parser`), and the error funnel skips the values of
   top-level options when it names the step. `dispatch/test_documented_commands.py`
