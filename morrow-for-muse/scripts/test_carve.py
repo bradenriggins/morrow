@@ -13,6 +13,12 @@ Failure modes pinned down (written before the fix):
   5. Test scratch (vault keys, a Cookies file) was committed under
      privacy/.selftest-work/. No scratch may be tracked, and git must
      ignore it so it cannot be committed again.
+  6. The release shipped the pytest-only test modules but not
+     conftest.py, which keeps them out of the live home. Run from the
+     installed tree (modes/README.md said to), they wrote the live
+     journal's generation high-water, and the live journal then refused
+     every read as a STALE restore (final sweep 2026-09-23). Only the
+     install suites ship; each keeps itself out of the live home.
 
 The full install proof (install.sh run from the carved tree into a
 scratch HOME/MORROW_HOME, then disconnect and uninstall) runs in a
@@ -124,6 +130,32 @@ def test_dev_only_surface_does_not_ship(carved):
         assert os.path.exists(os.path.join(carved, rel)), rel
 
 
+def test_no_pytest_only_module_ships(carved):
+    import re
+    suites = set(carve.install_suites())
+    shipped = []
+    for root, _dirs, files in os.walk(carved):
+        for name in files:
+            rel = os.path.relpath(os.path.join(root, name), carved)
+            if re.fullmatch(r"test_.*\.py|.*_test\.py|conftest\.py", name) \
+                    and rel not in suites:
+                shipped.append(rel)
+    assert shipped == [], shipped
+
+
+def test_no_shipped_doc_says_to_run_pytest(carved):
+    said = []
+    for root, _dirs, files in os.walk(carved):
+        for name in files:
+            if not name.endswith(".md") or name == "CHANGELOG.md":
+                continue
+            path = os.path.join(root, name)
+            with open(path, encoding="utf-8") as fh:
+                if "pytest" in fh.read():
+                    said.append(os.path.relpath(path, carved))
+    assert said == [], said
+
+
 def test_every_install_suite_ships(carved):
     for suite in carve.install_suites():
         assert os.path.isfile(os.path.join(carved, suite)), suite
@@ -145,7 +177,8 @@ def test_shipped_docs_name_no_missing_file_as_shipped(carved):
     path_re = re.compile(r"(?<![\w/.-])((?:[a-z_]+/)+[a-z_.-]+\.(?:py|sh))\b")
     stale = []
     for rel in ("failures/catalog.json", "SCOPE.md", "SKILL.md",
-                "INSTALL.md", "FIRST_RUN.md"):
+                "INSTALL.md", "FIRST_RUN.md", "modes/README.md",
+                "privacy/FERPA_POLICY.md"):
         with open(os.path.join(carved, rel), encoding="utf-8") as fh:
             text = fh.read()
         for match in path_re.finditer(text):

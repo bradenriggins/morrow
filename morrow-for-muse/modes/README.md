@@ -251,11 +251,15 @@ mode-aware message.
 
 ## Tests
 
-`modes/test_modes.py` (pytest, stdlib only in the package) plus
 `modes/test_modes_integration.py` (modes + settings + admission gate,
-real packages, no fakes). Run from the deploy tree root:
+real packages, no fakes) is one of the install suites and keeps itself
+out of the live home. Run it from the deploy tree root:
 
-    python3 -m pytest modes/test_modes.py modes/test_modes_integration.py -q
+    python3 modes/test_modes_integration.py
+
+The unit tests, `modes/test_modes.py`, stay in the source
+repository and are not in the release: they need that repository's
+conftest.py to stay out of the live home.
 
 Test state roots live under `modes/.test-state/` and
 `modes/.selftest-work/` (never `/tmp`) and are removed after the run.

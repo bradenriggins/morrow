@@ -308,8 +308,9 @@ the wired vault file above.
   `learner_data` section): whole path segments that name a people
   resource (`url_segments`, `url_segment_suffixes`), then the
   `url_substrings` net, plus the catalog `[LEARNER-DATA]` flag.
-  `dispatch/test_learner_classification.py` fails when a live-proven
-  row whose path names a people resource is not classified. Course
+  A source repository test, `dispatch/test_learner_classification.py`
+  (not in the release), fails when a live-proven row whose path names a
+  people resource is not classified. Course
   content (pages, quizzes, assignments, modules) is not learner data;
   it passes through the course roster instead (see "Course content"),
   and is restored exactly when saved back. Person fields on content (a

@@ -9,7 +9,8 @@ morrow-for-muse/, then:
 
   1. drops the dev-only surface (see DEV_ONLY): live-test drivers,
      proof evidence with real tenant hosts, the Moodle/lanes research
-     code, dev test harnesses that are not install suites;
+     code, dev test harnesses that are not install suites, and every
+     test_*.py that is not an install suite (scripts/install-suites.sh);
   2. normalizes tenant hosts in Markdown ONLY (docs carry provenance
      notes; code is never rewritten: a code file that names a real
      tenant fails the gate and the carve);
@@ -49,9 +50,7 @@ DEV_ONLY = (
     "moodle/", "lanes/", "qr-proof/", "platform-asks/", "learners/evidence/",
     "requirements-dev.txt",
     "scripts/install-robustness-selftest.sh", "scripts/carve.py",
-    "scripts/test_carve.py", "scripts/install-e2e.sh",
-    "scripts/test_install_without_cron.py",
-    "scripts/test_install_vault_check.py", "scripts/test_v1_operator_docs.py",
+    "scripts/install-e2e.sh",
     # rig-only session capture; production never runs it (SKILL.md)
     "session/capture.py",
     # the 2026-09-20 VM deployment record and its userspace scheduler
@@ -75,17 +74,14 @@ DEV_ONLY = (
     "transport/selftest.py", "transport/browser_backend_selftest.py",
     "transport/item_bank_sdk_selftest.py",
     "provision/provision_selftest.py", "provision/launch_driver_selftest.py",
-    # tests the dev-only moodle/ package; lives in dispatch/ so pytest does
-    # not put moodle/ on sys.path and shadow reauth
-    "dispatch/test_moodle_redirect_host.py",
-    # pytest-only: the suite's scratch-HOME isolation and its check
-    "conftest.py", "test_suite_isolation.py",
-    # pytest-only: the conftest missing-cryptography warning check, and
-    # the doc catalog-count check (it reads DEPLOY.md, which does not ship)
-    "test_optional_dependency_warning.py", "test_doc_catalog_counts.py",
-    # pytest-only: the educator pages check (it imports the count check)
-    "test_educator_pages.py",
+    # the pytest suite's scratch-HOME isolation
+    "conftest.py",
 )
+# pytest-only test modules: they rely on conftest.py to stay out of the
+# live home, so run from an installed tree they would write the
+# educator's live journal. Only the install suites, which isolate
+# themselves, ship.
+TEST_MODULE = re.compile(r"(^|/)(test_[^/]*|[^/]*_test)\.py$")
 # proof-battery/ is dev evidence except the catalog the executor reads
 # and the one driver integration_selftest checks for hygiene.
 PROOF_BATTERY_SHIPPED = ("proof-battery/OPERATION_CATALOG.md",
@@ -121,6 +117,7 @@ def _allowed_hosts():
 
 
 def shipped_files():
+    suites = set(install_suites())
     out = subprocess.run(["git", "-C", SRC, "ls-files", "-z", "--", "."],
                          capture_output=True, check=True).stdout
     files = []
@@ -134,6 +131,8 @@ def shipped_files():
             continue
         if any(rel == p or (p.endswith("/") and rel.startswith(p))
                for p in DEV_ONLY):
+            continue
+        if TEST_MODULE.search(rel) and rel not in suites:
             continue
         if rel.startswith("proof-battery/") \
                 and rel not in PROOF_BATTERY_SHIPPED:
