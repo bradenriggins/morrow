@@ -17,7 +17,7 @@ It drives the shipped gateway, the shipped bridge protocol, the shipped page exe
 
 `--target=fixture` is the default and serves a local HTTPS Moodle fixture for the one write class named below. Nothing reaches a Moodle site. `--target=site --site=<https origin> --chrome-profile=<directory> --course-id=<id>` runs the same path against an authorized disposable Moodle site, which this machine does not have.
 
-`--fixture-fault=lost-response` makes the fixture save the change and answer nothing. The proof then ends `failed` with `applied_or_unknown`, one dispatch, and a refused replay. A saved change with no answer is never a passed proof.
+`--fixture-fault=lost-response` makes the fixture save the change and answer nothing. The proof then ends `failed` with `applied_or_unknown`, one dispatch, and a refused replay. When a connection Chrome reused closes before any answer, Chrome sends the same form once more on a new connection on its own, so the fixture records that one dispatch as two identical POSTs and the receipt counts the copy in `browserResends`. A saved change with no answer is never a passed proof.
 
 ## Required proof fields
 
@@ -28,7 +28,7 @@ A receipt is complete when it carries all of these. The harness writes each one:
 | `target` | The exact site, installation subpath, signed-in principal and course the write bound to. |
 | `exactTargetBeforeChange` | The fresh read of the exact target, with the snapshot digest the change was bound to. |
 | `requestReview` | The frozen request, its approval (a Playwright click on Approve, signed by the harness in the Bridge role), its authorization, the refusal of a dispatch before approval, and the refusal of an approval posted without the Bridge signature. |
-| `dispatch` | One dispatch: `dispatchAttempt: 1`, one bridge write command, and one provider POST or AJAX call. |
+| `dispatch` | One dispatch: `dispatchAttempt: 1`, one bridge write command, and one provider POST or AJAX call. On the fixture, `browserResends` counts the identical copies Chrome sent on its own after a connection closed with no answer. |
 | `authoritativeSavedResult` | The fresh read after the change, from Moodle's own saved state, and the fields that changed. |
 | `replay` | The refusal of the repeated dispatch, and the unchanged dispatch count after it. |
 | `roleAndCapability` | The role of the account that ran it and the Moodle capability the catalog states for the operation. |

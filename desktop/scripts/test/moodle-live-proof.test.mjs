@@ -76,7 +76,10 @@ test("the harness proves one Moodle write against the local fixture and reaches 
     assert.equal(receipt.requestReview.frozenArguments.content, content);
     assert.equal(receipt.requestReview.frozenArguments.expected_digest, receipt.exactTargetBeforeChange.snapshotDigest);
 
-    assert.deepEqual(receipt.dispatch, { state: "verified", dispatchAttempt: 1, bridgeWriteCommands: 1, providerPosts: 1 });
+    assert.deepEqual(receipt.dispatch, {
+      state: "verified", dispatchAttempt: 1, bridgeWriteCommands: 1,
+      providerPosts: 1, distinctProviderPostBodies: 1, providerPostConnections: 1, browserResends: 0,
+    });
     assert.equal(receipt.replay.refused, true);
     assert.equal(receipt.replay.dispatchAttemptAfterReplay, 1);
     assert.deepEqual(receipt.operationJournal.writeEffects, [{ publicToolName: "moodle_update_label", state: "verified", dispatchAttempt: 1 }]);
@@ -122,6 +125,11 @@ test("a saved change with no answer is recorded as unknown, never as a passed pr
     assert.equal(receipt.dispatch.dispatchAttempt, 1, "an unknown outcome is never dispatched again");
     assert.equal(receipt.dispatch.bridgeWriteCommands, 1, "an unknown outcome is never sent again");
     assert.ok(receipt.dispatch.providerPosts >= 1, "the fixture must record the POST the change sent");
+    // Chrome sends a request again on its own when a reused connection closes before any answer.
+    // That copy is byte for byte the one form Morrow sent once, and it arrives on a new connection.
+    assert.equal(receipt.dispatch.distinctProviderPostBodies, 1, "Morrow sent one form, whatever Chrome repeated");
+    assert.equal(receipt.dispatch.browserResends, receipt.dispatch.providerPosts - 1);
+    assert.equal(receipt.dispatch.providerPostConnections, receipt.dispatch.providerPosts, "each copy Chrome sent arrived on its own connection");
     assert.equal(receipt.replay.refused, true);
     assert.equal(receipt.replay.dispatchAttemptAfterReplay, 1);
     const write = receipt.bridgeCommands.find((command) => command.kind === "invoke_write");

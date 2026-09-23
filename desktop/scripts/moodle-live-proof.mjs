@@ -191,7 +191,10 @@ async function startFixtureSite(directory, fault) {
   ], { stdio: "ignore" });
   const requests = [];
   const posts = [];
+  const postRecords = [];
   const refusedPosts = [];
+  const connections = new WeakMap();
+  let connectionCount = 0;
   const state = { name: FIXTURE_CLASS.moduleName, content: FIXTURE_CLASS.content, visible: true };
   let editorItemId = 500;
   // Moodle saves the whole form. A POST that drops one of these would silently
@@ -273,8 +276,11 @@ async function startFixtureSite(directory, fault) {
       return;
     }
     if (url.pathname === "/course/modedit.php" && request.method === "POST") {
-      const values = new URLSearchParams(await requestBody(request));
+      const body = await requestBody(request);
+      const values = new URLSearchParams(body);
       posts.push(values);
+      if (!connections.has(request.socket)) connections.set(request.socket, ++connectionCount);
+      postRecords.push({ body, connection: connections.get(request.socket) });
       const dropped = Object.entries(protectedControls()).filter(([field, value]) => values.get(field) !== value).map(([field]) => field);
       if (dropped.length || !/^[1-9][0-9]*$/.test(values.get("introeditor[itemid]") || "")) {
         refusedPosts.push(dropped.length ? dropped : ["introeditor[itemid]"]);
@@ -301,8 +307,25 @@ async function startFixtureSite(directory, fault) {
     protectedControls: Object.keys(protectedControls()),
     requests,
     posts,
+    postRecords,
     refusedPosts,
     close: () => new Promise((done, fail) => server.close((error) => error ? fail(error) : done())),
+  };
+}
+
+/**
+ * What the fixture received for one dispatch. Chrome sends a request again on its own, on a new
+ * connection, when a reused connection closes before any answer. That copy is byte for byte the
+ * form Morrow sent, so the POSTs Chrome repeated are the extra copies of one body. A second
+ * dispatch would read the form again and carry a new editor item id.
+ */
+function providerPostRecord(records) {
+  const distinctBodies = new Set(records.map((record) => record.body)).size;
+  return {
+    providerPosts: records.length,
+    distinctProviderPostBodies: distinctBodies,
+    providerPostConnections: new Set(records.map((record) => record.connection)).size,
+    browserResends: distinctBodies === 1 ? records.length - 1 : 0,
   };
 }
 
@@ -590,7 +613,10 @@ async function approveThroughReviewPage(url, context, connector) {
       await route.continue({ postData: body.toString() });
     }, { times: 1 });
     const response = reviewPage.waitForResponse((candidate) => candidate.url() === `${url}/approve` && candidate.request().method() === "POST");
-    await form.getByRole("button").first().click();
+    // The approval's own answer is the event this waits for. The page it leads to names the change
+    // with a live read, which waits while the approved change runs, and the proof waits for that
+    // change to settle on its own.
+    await form.getByRole("button").first().click({ noWaitAfter: true });
     return { reviewStatus: loaded?.status() ?? 0, unsignedApproveStatus: unsigned.status(), approveStatus: (await response).status(), html };
   } finally {
     await reviewPage.close().catch(() => undefined);
@@ -835,7 +861,7 @@ async function runProof(options) {
       state: settled.state,
       dispatchAttempt: settled.dispatchAttempt,
       bridgeWriteCommands: commands.filter((entry) => entry.kind === "invoke_write" && entry.toolName === operation.toolName).length,
-      ...(fixture ? { providerPosts: fixture.posts.length } : {}),
+      ...(fixture ? providerPostRecord(fixture.postRecords) : {}),
     };
     receipt.replay = {
       refused: replay.isError === true,
@@ -952,7 +978,7 @@ function buildChecklist() {
     "",
     "`--target=fixture` is the default and serves a local HTTPS Moodle fixture for the one write class named below. Nothing reaches a Moodle site. `--target=site --site=<https origin> --chrome-profile=<directory> --course-id=<id>` runs the same path against an authorized disposable Moodle site, which this machine does not have.",
     "",
-    "`--fixture-fault=lost-response` makes the fixture save the change and answer nothing. The proof then ends `failed` with `applied_or_unknown`, one dispatch, and a refused replay. A saved change with no answer is never a passed proof.",
+    "`--fixture-fault=lost-response` makes the fixture save the change and answer nothing. The proof then ends `failed` with `applied_or_unknown`, one dispatch, and a refused replay. When a connection Chrome reused closes before any answer, Chrome sends the same form once more on a new connection on its own, so the fixture records that one dispatch as two identical POSTs and the receipt counts the copy in `browserResends`. A saved change with no answer is never a passed proof.",
     "",
     "## Required proof fields",
     "",
@@ -963,7 +989,7 @@ function buildChecklist() {
     "| `target` | The exact site, installation subpath, signed-in principal and course the write bound to. |",
     "| `exactTargetBeforeChange` | The fresh read of the exact target, with the snapshot digest the change was bound to. |",
     "| `requestReview` | The frozen request, its approval (a Playwright click on Approve, signed by the harness in the Bridge role), its authorization, the refusal of a dispatch before approval, and the refusal of an approval posted without the Bridge signature. |",
-    "| `dispatch` | One dispatch: `dispatchAttempt: 1`, one bridge write command, and one provider POST or AJAX call. |",
+    "| `dispatch` | One dispatch: `dispatchAttempt: 1`, one bridge write command, and one provider POST or AJAX call. On the fixture, `browserResends` counts the identical copies Chrome sent on its own after a connection closed with no answer. |",
     "| `authoritativeSavedResult` | The fresh read after the change, from Moodle's own saved state, and the fields that changed. |",
     "| `replay` | The refusal of the repeated dispatch, and the unchanged dispatch count after it. |",
     "| `roleAndCapability` | The role of the account that ran it and the Moodle capability the catalog states for the operation. |",
