@@ -49,6 +49,11 @@ Failure modes this suite pins down (written before the code):
      the projection refuses content from a course it cannot identify
      instead of passing it through. (Round-2 finding, 2026-09-23,
      written before the fix.)
+ 11. plan-write now names the object a change names by its title (the
+     page "Week 1", not "week-1"). A title can name a student, so the
+     title reaches the agent with labels, and the prepared write on
+     disk keeps no name. (Round-2 finding, 2026-09-23, written before
+     the fix.)
 
 The run writes a repeatable artifact of the flow to
 .selftest-work/course-content-e2e-artifact.json (labels only).
@@ -478,6 +483,25 @@ def test_content_from_a_course_the_projection_cannot_identify_is_refused():
         wire._project_course_content(
             entry, {"receipt": {"body": BODY}}, BASE, {},
             error_cls=ex.ExecutorError)
+
+
+# -- 11 -----------------------------------------------------------------------
+
+def test_an_object_title_that_names_a_student_is_shown_with_a_label():
+    session = Canvas(page_title="Make-up plan for Jane Doe")
+    name, method, path = UPDATE
+    prepared = ex.prepare_plan_write(
+        name, method, path, dict(PAGE_PARAMS),
+        {"wiki_page": {"published": True}}, session, _pack())
+    text = prepared["approval_display"]
+    assert _leaks(text) == [], text
+    assert 'Change the page "Make-up plan for Student A' in text, text
+    with open(ex.pending_write_path(prepared["op_id"]),
+              encoding="utf-8") as fh:
+        assert _leaks(fh.read()) == []
+    order = session.paths()
+    assert order.index(("GET", "/api/v1/courses/1/users")) \
+        < order.index(("GET", "/api/v1/courses/1/pages/week-1"))
 
 
 def _artifact(record):

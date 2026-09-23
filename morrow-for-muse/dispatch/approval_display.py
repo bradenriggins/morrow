@@ -39,7 +39,10 @@ Usage (agent / connector UX):
 import hashlib
 import json
 import os
+import re
 import sys
+import urllib.parse
+from datetime import date, datetime, timezone
 
 _TREE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _TREE not in sys.path:
@@ -167,6 +170,12 @@ _NOUNS = {
     "calendar_events": "calendar event", "outcome_groups":
     "outcome group", "outcomes": "outcome", "items_bank": "item bank",
     "banks": "item bank", "users": "student",
+    "external_feeds": "external feed", "external_tools": "external tool",
+    "blackout_dates": "blackout date", "content_exports": "content export",
+    "content_migrations": "content import", "group_categories": "group set",
+    "rubric_associations": "rubric attachment",
+    "tabs": "course navigation link", "bank_entries": "item bank entry",
+    "shared_banks": "item bank share",
 }
 _FIELDS = {
     "title": "Title", "name": "Name", "body": "Content",
@@ -178,6 +187,8 @@ _FIELDS = {
     "posted_grade": "Grade", "comment": "Comment",
     "text_comment": "Comment", "workflow_state": "State",
     "submission_types": "Submission types",
+    "start_at": "Starts", "end_at": "Ends", "start_date": "Start date",
+    "end_date": "End date",
 }
 _SKIP_PATH = {"api", "v1", "quiz"}
 # Batch routes act on several objects at once: the last path word is an
@@ -190,7 +201,138 @@ _BATCH_CHANGES = {
 # An item inside a quiz or an item bank is a question, not a module item.
 _NOUNS_UNDER = {("quizzes", "items"): "quiz question",
                 ("banks", "items"): "item bank question",
-                ("items_bank", "items"): "item bank question"}
+                ("items_bank", "items"): "item bank question",
+                ("quizzes", "groups"): "question group"}
+# Routes whose last path word is an action, or whose effect the path
+# words do not say, read as what they do. {slot} is the object's name,
+# or its id in quotes when Morrow could not read a name; {slot_raw} is
+# the bare value. The second phrase is the failure label: no values.
+_ROUTE_WORDS = {
+    ("POST", "/api/v1/courses/{course_id}/assignments/{assignment_id}/"
+             "duplicate"):
+        ("Copy the assignment {assignment_id}", "copying an assignment"),
+    ("PUT", "/api/v1/courses/{course_id}/blackout_dates"):
+        ("Replace all of the course's blackout dates with this list (a "
+         "blackout date not on it is deleted)",
+         "replacing the blackout dates"),
+    ("POST", "/api/v1/courses/{course_id}/calendar_events/"
+             "timetable_events"):
+        ("Replace the course's timetable events with this list",
+         "replacing the timetable events"),
+    ("POST", "/api/v1/courses/{course_id}/content_exports"):
+        ("Start an export of the course's content",
+         "starting a content export"),
+    ("POST", "/api/v1/courses/{course_id}/content_migrations"):
+        ("Start an import of content into the course",
+         "starting a content import"),
+    ("POST", "/api/v1/courses/{course_id}/preview_html"):
+        ("Preview this HTML the way the course shows it (nothing in the "
+         "course changes)", "previewing HTML"),
+    ("PUT", "/api/v1/courses/{course_id}/settings"):
+        ("Change the course settings", "changing the settings"),
+    ("POST", "/api/v1/courses/{course_id}/files"):
+        ("Upload a file to the course", "uploading a file"),
+    ("POST", "/api/v1/users/self/favorites/courses/{id}"):
+        ("Add the course {id} to your favorites",
+         "adding a course to your favorites"),
+    ("DELETE", "/api/v1/users/self/favorites/courses/{id}"):
+        ("Remove the course {id} from your favorites",
+         "removing a course from your favorites"),
+    ("DELETE", "/api/v1/courses/{course_id}/usage_rights"):
+        ("Remove the usage rights of files",
+         "removing the usage rights of files"),
+    ("PUT", "/api/v1/courses/{course_id}/usage_rights"):
+        ("Set the usage rights of files", "setting the usage rights of files"),
+    ("PATCH", "/api/v1/courses/{id}/late_policy"):
+        ("Change the course's late policy",
+         "changing the late policy"),
+    ("PUT", "/api/v1/courses/{course_id}/discussion_topics/"
+            "{discussion_topic_id}/date_details"):
+        ("Change the dates of the discussion {discussion_topic_id}",
+         "changing the dates of a discussion"),
+    ("PUT", "/api/v1/courses/{course_id}/pages/{url_or_id}/date_details"):
+        ("Change the dates of the page {url_or_id}",
+         "changing the dates of a page"),
+    ("PUT", "/api/v1/courses/{course_id}/quizzes/{quiz_id}/date_details"):
+        ("Change the dates of the quiz {quiz_id}",
+         "changing the dates of a quiz"),
+    ("POST", "/api/v1/courses/{course_id}/modules/{module_id}/items"):
+        ("Add an item to the module {module_id}",
+         "adding an item to a module"),
+    ("PUT", "/api/v1/courses/{course_id}/modules/{module_id}/items/{id}/"
+            "done"):
+        ("Mark the item {id} in the module {module_id} as done",
+         "marking a module item as done"),
+    ("POST", "/api/v1/courses/{course_id}/modules/{module_id}/items/{id}/"
+             "mark_read"):
+        ("Mark the item {id} in the module {module_id} as read",
+         "marking a module item as read"),
+    ("PUT", "/api/v1/courses/{course_id}/modules/{id}/relock"):
+        ("Lock the module {id} again, so each student's progress is "
+         "checked again against its requirements",
+         "locking a module again"),
+    ("PUT", "/api/v1/courses/{course_id}/modules/{context_module_id}/"
+            "assignment_overrides"):
+        ("Change the date overrides of the module {context_module_id}",
+         "changing the date overrides of a module"),
+    ("POST", "/api/v1/courses/{course_id}/pages/{url_or_id}/duplicate"):
+        ("Copy the page {url_or_id}", "copying a page"),
+    ("POST", "/api/v1/courses/{course_id}/pages/{url_or_id}/revisions/"
+             "{revision_id}"):
+        ("Restore the page {url_or_id} to its earlier version "
+         "{revision_id_raw} (this replaces what the page says now)",
+         "restoring an earlier version of a page"),
+    ("POST", "/api/v1/courses/{course_id}/quizzes/{quiz_id}/groups/{id}/"
+             "reorder"):
+        ("Reorder the questions in the question group {id} of the quiz "
+         "{quiz_id}", "reordering the questions in a question group"),
+    ("POST", "/api/v1/courses/{course_id}/quizzes/{id}/reorder"):
+        ("Reorder the questions of the quiz {id}",
+         "reordering the questions of a quiz"),
+    ("POST", "/api/v1/courses/{course_id}/quizzes/{id}/"
+             "validate_access_code"):
+        ("Check an access code for the quiz {id} (nothing in the quiz "
+         "changes)", "checking an access code for a quiz"),
+    ("POST", "/api/v1/courses/{course_id}/rubric_associations"):
+        ("Attach a rubric", "attaching a rubric"),
+    ("POST", "/api/banks/{bank_id}/bank_entries"):
+        ("Add an entry to the item bank {bank_id}",
+         "adding an entry to an item bank"),
+    ("POST", "/api/banks/{bank_id}/shared_banks"):
+        ("Share the item bank {bank_id}", "sharing an item bank"),
+    ("PATCH", "/api/banks/{bank_id}/shared_banks/{shared_bank_id}"):
+        ("Change how the item bank {bank_id} is shared",
+         "changing how an item bank is shared"),
+}
+_BASE_SLOT_RE = re.compile(r"^\{[a-z_]+_base\}")
+_SLOT_RE = re.compile(r"^\{([A-Za-z0-9_]+)\}$")
+
+
+def _route(path):
+    """A path or URL template without its base slot or query:
+    "/api/v1/courses/{course_id}/pages/{url_or_id}"."""
+    text = _BASE_SLOT_RE.sub("", str(path or "").split("?", 1)[0])
+    return "/" + text.strip("/")
+
+
+def _slot_values(request):
+    """{slot: value} for the request's URL template, read from its
+    rendered path; {} when the two do not line up."""
+    template = _route((request or {}).get("url"))
+    rendered = _route((request or {}).get("path"))
+    tparts, rparts = template.split("/"), rendered.split("/")
+    if len(tparts) != len(rparts):
+        return {}
+    values = {}
+    for slot, value in zip(tparts, rparts):
+        match = _SLOT_RE.match(slot)
+        if match and not _SLOT_RE.match(value):
+            values[match.group(1)] = urllib.parse.unquote(value)
+    return values
+
+
+def _route_words(method, path):
+    return _ROUTE_WORDS.get((str(method or "").upper(), _route(path)))
 
 
 def _noun(segment, parent=None):
@@ -199,7 +341,28 @@ def _noun(segment, parent=None):
     if segment in _NOUNS:
         return _NOUNS[segment]
     word = segment.replace("_", " ")
+    if word.endswith("ies"):
+        return word[:-3] + "y"
     return word[:-1] if word.endswith("s") else word
+
+
+def unknown_words(method, path):
+    """The path words of a route that have no plain name here, so the
+    educator would read a guess built from them. [] for a route with its
+    own words."""
+    if _route_words(method, path):
+        return []
+    segments = _path_segments(_route(path))
+    if segments and _BATCH_CHANGES.get((segments[-1][0], segments[-1][2])):
+        return []
+    unknown = []
+    parent = None
+    for seg, _noun_text, ident in segments:
+        if seg not in _NOUNS and (parent, seg) not in _NOUNS_UNDER \
+                and not (seg == "users" and ident == "self"):
+            unknown.append(seg)
+        parent = seg
+    return unknown
 
 
 def _article(noun):
@@ -224,12 +387,30 @@ def _path_segments(path):
     return out
 
 
-def _change_sentence(request):
-    """"Change the page \"week-1\"", "Create an assignment", ..."""
+def _change_sentence(request, names=None):
+    """"Change the page \"Week 1\"", "Create an assignment", ...
+
+    names maps a path slot to the name Morrow read for its object (the
+    assignment's title); an object Morrow could not name is shown by
+    its id."""
     method = str((request or {}).get("method") or "").upper()
+    values = _slot_values(request)
+    shown = dict(values)
+    shown.update({slot: name for slot, name in (names or {}).items()
+                  if isinstance(name, str) and name.strip()})
+    words = _route_words(method, (request or {}).get("url"))
+    if words:
+        mapping = {}
+        for slot in re.findall(r"\{([A-Za-z0-9_]+)\}",
+                               _route((request or {}).get("url"))):
+            mapping[slot] = '"%s"' % shown.get(slot, "?")
+            mapping[slot + "_raw"] = values.get(slot, "?")
+        return words[0].format_map(mapping)
     action = _ACTIONS.get(method, "Change")
+    by_value = {values[slot]: shown[slot] for slot in values}
     segments = _path_segments((request or {}).get("path"))
-    pairs = [(noun, ident) for _seg, noun, ident in segments]
+    pairs = [(noun, by_value.get(ident, ident) if ident is not None
+              else None) for _seg, noun, ident in segments]
     if not pairs:
         if method == "POST":
             return "%s something in the course" % action
@@ -257,6 +438,9 @@ def describe_operation(method, path, where=None):
     from the method and the path template only: no value the request
     carries (a page body, a student label) is repeated. where names
     the course ('the course "Biology 101"' or "course 101")."""
+    words = _route_words(method, path)
+    if words:
+        return "%s in %s" % (words[1], where) if where else words[1]
     verb = _GERUNDS.get(str(method or "").upper(), "changing")
     segments = _path_segments(path)
     batch = _BATCH_CHANGES.get((segments[-1][0], segments[-1][2])) \
@@ -305,28 +489,84 @@ def _plain_value(value):
     return str(value)
 
 
-def _value_lines(value, indent=""):
-    """Every value in a request body as "Name: value" lines, whole."""
+_DAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+         "Saturday", "Sunday")
+_MONTHS = ("January", "February", "March", "April", "May", "June", "July",
+           "August", "September", "October", "November", "December")
+_DATETIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
+                          r"(?:Z|[+-]\d{2}:?\d{2})")
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _is_time_field(key):
+    key = str(key)
+    return key.endswith(("_at", "_date")) or key == "date"
+
+
+def _zone(name):
+    """(tzinfo, the name shown) for an IANA zone name; UTC when the name
+    is missing or unknown."""
+    if isinstance(name, str) and name.strip():
+        try:
+            from zoneinfo import ZoneInfo
+            return ZoneInfo(name.strip()), name.strip()
+        except Exception:
+            pass
+    return timezone.utc, "UTC"
+
+
+def _plain_time(value, zone):
+    """A Canvas date or date-time as the educator reads it:
+    "Wednesday, September 30, 2026 at 7:59 PM (America/New_York)". A
+    value in another shape is shown as it is."""
+    text = str(value)
+    try:
+        if _DATETIME_RE.fullmatch(text):
+            tzinfo, name = zone
+            when = datetime.fromisoformat(
+                text.replace("Z", "+00:00")).astimezone(tzinfo)
+            return "%s, %s %d, %d at %d:%02d %s (%s)" % (
+                _DAYS[when.weekday()], _MONTHS[when.month - 1], when.day,
+                when.year, when.hour % 12 or 12, when.minute,
+                "AM" if when.hour < 12 else "PM", name)
+        if _DATE_RE.fullmatch(text):
+            day = date.fromisoformat(text)
+            return "%s, %s %d, %d" % (_DAYS[day.weekday()],
+                                      _MONTHS[day.month - 1], day.day,
+                                      day.year)
+    except ValueError:
+        pass
+    return text
+
+
+def _value_lines(value, indent="", zone=None):
+    """Every value in a request body as "Name: value" lines, whole.
+    Dates and times are shown in zone ((tzinfo, name)); the audit
+    detail keeps the values exactly as sent."""
+    zone = zone or _zone(None)
     lines = []
     if isinstance(value, dict):
         # A lone wrapper ({"wiki_page": {...}}) adds nothing to read.
         if len(value) == 1 and isinstance(next(iter(value.values())),
                                           dict) and not indent:
-            return _value_lines(next(iter(value.values())), indent)
+            return _value_lines(next(iter(value.values())), indent, zone)
         for key in sorted(value):
             item = value[key]
             if isinstance(item, dict) or (
                     isinstance(item, list)
                     and any(isinstance(v, (dict, list)) for v in item)):
                 lines.append("%s%s:" % (indent, _field_name(str(key))))
-                lines.extend(_value_lines(item, indent + "  "))
+                lines.extend(_value_lines(item, indent + "  ", zone))
             else:
+                shown = _plain_time(item, zone) \
+                    if _is_time_field(key) and isinstance(item, str) \
+                    else _plain_value(item)
                 lines.append("%s%s: %s" % (indent, _field_name(str(key)),
-                                            _plain_value(item)))
+                                            shown))
     elif isinstance(value, list):
         for n, item in enumerate(value, 1):
             lines.append("%s%d." % (indent, n))
-            lines.extend(_value_lines(item, indent + "  "))
+            lines.extend(_value_lines(item, indent + "  ", zone))
     elif value is not None:
         lines.append("%s%s" % (indent, _plain_value(value)))
     return lines
@@ -345,14 +585,20 @@ def _open_minutes(record):
     return minutes if minutes > 0 else None
 
 
-def render_educator_display(record, params, entry=None):
+def render_educator_display(record, params, entry=None, time_zone=None):
     """What the educator reads before approving, in plain words: the
-    course, the change, every value that will be sent (whole, never
-    shortened), whether Morrow can undo it, and how to approve. The
-    request shown is the one the approval binds (_bound_request)."""
+    course, the change and the object it changes (by the name Morrow
+    read for it), every value that will be sent (whole, never
+    shortened, dates in time_zone, else UTC), whether Morrow can undo
+    it, and how to approve. The request shown is the one the approval
+    binds (_bound_request)."""
     record = record or {}
     request = _bound_request(record, params, entry)
     target = record.get("target") or {}
+    names = {}
+    if target.get("object_slot") and target.get("object_name"):
+        names[target["object_slot"]] = target["object_name"]
+    zone = _zone(time_zone)
     lines = []
     where = []
     if target.get("course_name"):
@@ -365,10 +611,10 @@ def render_educator_display(record, params, entry=None):
         where.append("on %s" % str(target.get("tenant")).split("://")[-1])
     lines.append("Morrow wants to make this change%s:"
                  % ((" in " + " ".join(where)) if where else ""))
-    lines.append(_change_sentence(request) + ".")
-    shown = _value_lines((request or {}).get("body"))
+    lines.append(_change_sentence(request, names) + ".")
+    shown = _value_lines((request or {}).get("body"), zone=zone)
     if (request or {}).get("query"):
-        shown.extend(_value_lines((request or {}).get("query")))
+        shown.extend(_value_lines((request or {}).get("query"), zone=zone))
     if shown:
         lines.append("")
         lines.append("What it sends:")

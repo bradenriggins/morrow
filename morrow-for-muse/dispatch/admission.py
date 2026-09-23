@@ -1104,7 +1104,8 @@ def mint_approval(entry: dict, params: dict, tenant_base: str | None = None,
     target_block = {}
     if tenant_base:
         target_block["tenant"] = tenant_base
-    for key in ("course_id", "course_name", "term"):
+    for key in ("course_id", "course_name", "term", "object_slot",
+                "object_name"):
         if declared_target.get(key) is not None:
             target_block[key] = declared_target[key]
     if target_block:

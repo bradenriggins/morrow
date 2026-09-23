@@ -278,13 +278,20 @@ a frozen plan, an approval record, or a course resolution by hand:
 
 1. `plan-write` prepares the write and sends nothing. It reads the
    course from Canvas (the course name the educator will see comes from
-   Canvas, not from you), builds the frozen plan and the approval bound
-   to the exact request (method, path, query, and body), and prints
-   `approval_display`: in plain words, the course (as Canvas names it),
-   the change, every value that will be sent, whether Morrow can undo
-   it, and how to approve. It also prints `audit_detail`: the same
-   request as the method, path, JSON body, params, and integrity
-   codes, for reviewers.
+   Canvas, not from you) and, when the write names a page, assignment,
+   module, quiz, discussion, or item bank, reads that object too, so
+   the approval names it by its title (for example: Delete the
+   assignment "Week 3 Quiz"), never only by its number. If the object cannot be read,
+   nothing is prepared: check the id with the educator. It builds the
+   frozen plan and the approval bound to the exact request (method,
+   path, query, and body), and prints `approval_display`: in plain
+   words, the course (as Canvas names it), the change, every value that
+   will be sent (dates in the educator's time zone: their `timezone`
+   setting, else the course's, else UTC, always named), whether Morrow
+   can undo it, and how to approve. It also prints `audit_detail`: the
+   same request as the method, path, JSON body, params, and integrity
+   codes, for reviewers. `approve-write` reads the object again and
+   refuses, sending nothing, if it was renamed or replaced since.
 2. Show the educator `approval_display` exactly as printed (it is
    produced by `dispatch/approval_display.py`) and ask them to approve
    it. Never relay `audit_detail`: it is the technical record of the
