@@ -110,3 +110,53 @@ def test_skill_md_shows_the_plain_display_and_never_the_audit_detail():
         text = " ".join(fh.read().split())
     assert "audit_detail" in text
     assert "never relay `audit_detail`" in text.lower()
+
+
+def _plain_change(name, method, path, params, body):
+    entry = ex.catalog_descriptor_to_entry(name, method, path, "write",
+                                           extra={"body": body})
+    record = mint_approval(entry, params, BASE, target_identity=TARGET)
+    return approval_display.render_educator_display(record, params,
+                                                    entry=entry)
+
+
+def test_course_level_and_batch_changes_read_as_plain_actions():
+    """A course rename, a batch override update, and a bulk date update
+    name the change, never a route word (final sweep 2026-09-22)."""
+    cases = [
+        (("canvas_update_course", "PUT", "/api/v1/courses/{id}",
+          {"id": "101"}, {"course": {"name": "Bio 101 (Fall)"}}),
+         "Change the course.", ("something in the course",)),
+        (("canvas_batch_update_overrides_in_course", "PUT",
+          "/api/v1/courses/{course_id}/assignments/overrides",
+          {"course_id": "101"},
+          {"assignment_overrides": [{"id": 1, "assignment_id": 5,
+                                     "due_at": "2026-10-01T23:59:00Z"}]}),
+         "Change the due date overrides of several assignments.",
+         ('"overrides"',)),
+        (("canvas_bulk_update_assignment_dates", "PUT",
+          "/api/v1/courses/{course_id}/assignments/bulk_update",
+          {"course_id": "101"},
+          [{"id": 5, "all_dates": [{"base": True,
+                                    "due_at": "2026-10-01T23:59:00Z"}]}]),
+         "Change the dates of several assignments.", ("bulk_update",)),
+    ]
+    for (name, method, path, params, body), sentence, banned in cases:
+        text = _plain_change(name, method, path, params, body)
+        assert sentence in text, text
+        for word in banned:
+            assert word not in text, (word, text)
+        assert "Due date: 2026-10-01T23:59:00Z" in text or \
+            "Name: Bio 101 (Fall)" in text
+
+
+def test_failure_labels_for_batch_changes_are_plain():
+    assert approval_display.describe_operation(
+        "PUT", "/api/v1/courses/{course_id}/assignments/bulk_update") \
+        == "changing the dates of several assignments"
+    assert approval_display.describe_operation(
+        "PUT", "/api/v1/courses/{course_id}/assignments/overrides") \
+        == "changing the due date overrides of several assignments"
+    assert approval_display.describe_operation(
+        "PUT", "/api/v1/courses/{id}", 'the course "Bio 101"') \
+        == 'changing the course "Bio 101"'

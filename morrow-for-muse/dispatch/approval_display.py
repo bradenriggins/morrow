@@ -180,6 +180,13 @@ _FIELDS = {
     "submission_types": "Submission types",
 }
 _SKIP_PATH = {"api", "v1", "quiz"}
+# Batch routes act on several objects at once: the last path word is an
+# action, not the name of one object.
+_BATCH_CHANGES = {
+    ("assignments", "overrides"):
+        "the due date overrides of several assignments",
+    ("assignments", "bulk_update"): "the dates of several assignments",
+}
 # An item inside a quiz or an item bank is a question, not a module item.
 _NOUNS_UNDER = {("quizzes", "items"): "quiz question",
                 ("banks", "items"): "item bank question",
@@ -221,10 +228,15 @@ def _change_sentence(request):
     """"Change the page \"week-1\"", "Create an assignment", ..."""
     method = str((request or {}).get("method") or "").upper()
     action = _ACTIONS.get(method, "Change")
-    pairs = [(noun, ident) for _seg, noun, ident in
-             _path_segments((request or {}).get("path"))]
+    segments = _path_segments((request or {}).get("path"))
+    pairs = [(noun, ident) for _seg, noun, ident in segments]
     if not pairs:
-        return "%s something in the course" % action
+        if method == "POST":
+            return "%s something in the course" % action
+        return "%s the course" % action
+    batch = _BATCH_CHANGES.get((segments[-1][0], segments[-1][2]))
+    if batch:
+        return "%s %s" % (action, batch)
     noun, ident = pairs[-1]
     if ident is not None:
         sentence = '%s the %s "%s"' % (action, noun, ident)
@@ -247,11 +259,16 @@ def describe_operation(method, path, where=None):
     the course ('the course "Biology 101"' or "course 101")."""
     verb = _GERUNDS.get(str(method or "").upper(), "changing")
     segments = _path_segments(path)
+    batch = _BATCH_CHANGES.get((segments[-1][0], segments[-1][2])) \
+        if segments else None
     if [s[0] for s in segments] == ["users"] and segments[0][2] == "self":
         phrase = "%s your own Canvas profile" % (
             "reading" if verb == "reading" else "changing")
     elif not segments:
-        phrase = "%s the course" % verb
+        # The request acts on the course itself: name it once.
+        return "%s %s" % (verb, where) if where else "%s the course" % verb
+    elif batch:
+        phrase = "%s %s" % (verb, batch)
     else:
         seg, noun, ident = segments[-1]
         known = seg in _NOUNS or (
