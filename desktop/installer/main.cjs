@@ -870,6 +870,7 @@ async function startMorrow(lifecycle) {
         "runtime_request_in_flight",
         "runtime_change_running",
         "runtime_other_client_connected",
+        "bridge_reload_unconfirmed",
       ].includes(error?.code)
         ? errorDetails(error.code)
         : errorDetails("bridge_check_failed"));

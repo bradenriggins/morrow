@@ -130,6 +130,10 @@ const PUBLIC_ERRORS = Object.freeze({
     message: "Morrow could not read your course.",
     recovery: "Open the course in Chrome and make sure you are signed in, then select Check connection again."
   },
+  bridge_reload_unconfirmed: {
+    message: "Chrome has not reloaded Morrow Bridge yet.",
+    recovery: "In Chrome, open Manage Extensions and select Reload on Morrow Bridge, then select Check Bridge."
+  },
   bridge_check_failed: {
     message: "Morrow could not confirm Morrow Bridge.",
     recovery: "Select Repair Morrow, then load or reload the Bridge folder in Chrome and select Check Bridge."
