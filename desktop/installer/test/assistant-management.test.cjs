@@ -482,6 +482,7 @@ test("JSON assistant removal uses the shared offset-preserving JSONC remover", a
   });
   const calls = [];
   installer.clientConfigModule = async () => ({
+    restrictToCurrentAccount() {},
     withoutMorrowClientJson(value, container, serverName, options) {
       calls.push([value, container, serverName, options]);
       if (value === content) return expected;

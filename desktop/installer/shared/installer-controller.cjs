@@ -643,8 +643,10 @@ class InstallerController {
     }
     await mkdirPrivate(this.paths.state);
     const stateDirectory = await fs.lstat(this.paths.state);
+    // Mode bits describe the file system this process runs on, as the record
+    // read through readPrivateRegularFile already assumes.
     if (!stateDirectory.isDirectory() || stateDirectory.isSymbolicLink()
-      || (this.platform !== "win32" && (stateDirectory.mode & 0o077) !== 0)) {
+      || (process.platform !== "win32" && (stateDirectory.mode & 0o077) !== 0)) {
       throw new Error("record_directory_invalid");
     }
   }
