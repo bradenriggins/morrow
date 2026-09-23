@@ -330,6 +330,27 @@ describe("ProviderEffectBroker", () => {
     broker.close();
   });
 
+  it("settles a failure whose detail is a thrown value, so nothing stays dispatching", () => {
+    const broker = new ProviderEffectBroker({ path: ":memory:" });
+    const settledWith = (detail: unknown, target: string) => {
+      const operation = create(broker, { authority: authorityForTarget(target) });
+      broker.approve(operation.operationId);
+      broker.reserveDispatch(operation.operationId);
+      return broker.settleFailure(operation.operationId, detail, false);
+    };
+    const roster = settledWith(new Error("learner_roster_source_unavailable"), "5");
+    expect(roster).toMatchObject({ state: "failed" });
+    expect(roster.attention[0]).toBe("dispatch_failed_before_send");
+    expect(roster.terminalAt).not.toBeNull();
+    const token = settledWith(new TypeError("learner_token_unavailable"), "6");
+    expect(token.attention.at(-1)).toMatch(/^[0-9a-f]{64}$/u);
+    expect(token.attention.at(-1)).not.toBe(roster.attention.at(-1));
+    expect(settledWith(undefined, "7")).toMatchObject({ state: "failed" });
+    expect(settledWith(new Map([["kind", "not json"]]), "8")).toMatchObject({ state: "failed" });
+    expect(broker.hasActiveOperations()).toBe(false);
+    broker.close();
+  });
+
   it("records cancellation after reservation only while provider dispatch is still disproved", () => {
     const broker = new ProviderEffectBroker({ path: ":memory:" });
     const operation = create(broker);

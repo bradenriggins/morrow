@@ -59,6 +59,7 @@ async function fakeSsh(
   statePrefix: string,
   crashTool = "",
   failStartupOnce = false,
+  failOperationLaunch = false,
 ): Promise<string> {
   const path = join(directory, "ssh");
   const startupMarker = `${statePrefix}.startup`;
@@ -67,10 +68,19 @@ async function fakeSsh(
     "set -eu",
     "test \"$1\" = \"-T\"",
     "if printf '%s' \"$3\" | grep -q '^sh -s --'; then",
+    // The remote shell reads its script from standard input, as `sh -s` does.
+    "  cat > /dev/null",
     `  printf '%s\\nclean\\n' ${shellQuote(revision)}`,
     "  exit 0",
     "fi",
     `printf '%s\\n' "$3" >> ${shellQuote(`${statePrefix}.commands`)}`,
+    ...(failOperationLaunch
+      ? [
+          "if printf '%s' \"$3\" | grep -q CHCP_TEAM_TASK_CONTRACT_DIGEST; then",
+          "  exit 23",
+          "fi",
+        ]
+      : []),
     ...(failStartupOnce
       ? [
           `if test ! -f ${shellQuote(startupMarker)}; then`,
@@ -295,6 +305,40 @@ describe("ExamplePlatform SSH runtime adapter", () => {
             heldToolCount: 2,
           },
         });
+      } finally {
+        await runtime.close();
+      }
+    } finally {
+      process.env.PATH = previousPath;
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it("settles a write whose operation child cannot start as failed with nothing sent", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-meridian-unstarted-"));
+    const previousPath = process.env.PATH;
+    try {
+      const truth = await sourceTruth(directory);
+      const statePrefix = join(directory, "unstarted");
+      await fakeSsh(directory, statePrefix, "", false, true);
+      process.env.PATH = `${directory}:${previousPath || ""}`;
+      const runtime = await GatewayRuntime.connect(config(truth, ":memory:", true), { journalPath: ":memory:" });
+      try {
+        const planned = await runtime.call("canvas_page_update", {
+          course_id: "101",
+          body: "never sent",
+        });
+        const operationId = (planned.structuredContent as { operationId: string }).operationId;
+        runtime.approveOperation(operationId);
+        const result = await runtime.dispatchOperation(operationId);
+        expect(result.structuredContent).toMatchObject({
+          schema: "morrow.result.v1",
+          effectState: "failed",
+        });
+        expect((result.structuredContent as { attention: string[] }).attention).toContain("dispatch_failed_before_send");
+        expect(runtime.hasActiveWork()).toBe(false);
+        const calls = await readFile(`${statePrefix}.calls`, "utf8").catch(() => "");
+        expect(calls).not.toContain("canvas_page_update");
       } finally {
         await runtime.close();
       }

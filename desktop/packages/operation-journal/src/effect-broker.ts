@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { normalizeRequestedBy, sha256Json, type JsonObject, type RequestedByIdentity } from "@morrow/contracts";
+import { normalizeRequestedBy, sha256Json, sha256Text, type JsonObject, type RequestedByIdentity } from "@morrow/contracts";
 import { openExactPrivateSqliteDatabase } from "@morrow/gateway-core";
 import {
   ensureCausalSequenceTable,
@@ -307,6 +307,20 @@ function digest(value: unknown, label: string): string {
   const text = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (!DIGEST.test(text)) throw new TypeError(`${label} must be a SHA-256 digest`);
   return text;
+}
+
+/**
+ * A caller may hand over whatever it caught, and a thrown value is not JSON.
+ * Recording a failure must never fail on its detail, or the operation would
+ * stay dispatching and hold its target although nothing was sent.
+ */
+function failureDetailDigest(detail: unknown): string {
+  if (detail instanceof Error) return sha256Json({ error: `${detail.name}:${detail.message}` });
+  try {
+    return sha256Json(detail);
+  } catch {
+    return sha256Text(String(detail));
+  }
 }
 
 function jsonObject(value: unknown, label: string): JsonObject {
@@ -1248,7 +1262,7 @@ export class ProviderEffectBroker {
         mayHaveApplied ? "provider_effect_may_have_landed" : "dispatch_failed_before_send",
         ...(named ? [named] : []),
         ...(status ? [status] : []),
-        sha256Json(detail),
+        failureDetailDigest(detail),
       ];
       this.database.prepare(`
         UPDATE provider_effect_operations
