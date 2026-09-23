@@ -140,6 +140,71 @@ describe("WI-2.4: the reviews that wait, pushed to the Bridge popup", () => {
     expect(runtime.operationGet(id)).toMatchObject({ state: "cancelled" });
   }, CASE_TIMEOUT_MS);
 
+  // A reconnect (laptop sleep, a Chrome restart, a Bridge reload) clears the Bridge's review list,
+  // badge and approval key, so every new connection receives the present list again.
+  it("sends the present list and the approval key again to a Bridge that reconnects", async () => {
+    directory = mkdtempSync(join(tmpdir(), "morrow-ui-state-"));
+    const port = await reserveLoopbackPort();
+    runtime = await GatewayRuntime.connect(connectorConfig(directory, port));
+    runtime.setApprovalBaseUrl("http://127.0.0.1:4317");
+    const presence = { origin: "http://127.0.0.1:4317", key: "q".repeat(43) };
+    runtime.setApprovalPresence(presence);
+    const root = resolve("../..");
+    const browserDigest = bridgeCatalogDigestForTests(root);
+    const sourceBindingId = "canvas:ui-state-reconnect-test";
+    const binding = {
+      sourceBindingId, provider: "canvas", origin: "https://school.instructure.com",
+      courseId: "42", principalFingerprint: "c".repeat(64), sessionGeneration: 1,
+      catalogDigest: browserDigest, runtimeVerified: true, editPolicyRevision: 0, editOptionsAvailable: true,
+    };
+    const connect = async () => {
+      const client = await connectBridgeTestClient({
+        port, token: "gateway-connector-secret-".repeat(3), extensionId: "a".repeat(32), catalogDigest: browserDigest, bindings: [binding],
+      });
+      const uiStates: BridgeCommand[] = [];
+      client.onCommand((command) => {
+        if (command.kind === "ui_state") {
+          uiStates.push(command);
+          client.respond(command, {});
+          return;
+        }
+        client.respondProblem(command, { schema: "morrow.bridge.problem.v1", code: "unexpected_command", message: "unexpected command in this case", recoverable: false });
+      });
+      return { client, uiStates };
+    };
+    const received = (uiStates: BridgeCommand[], predicate: (command: BridgeCommand) => boolean) => vi.waitFor(() => {
+      const found = uiStates.find(predicate);
+      if (!found) throw new Error("no matching ui_state yet");
+      return found;
+    }, { timeout: 10_000, interval: 20 });
+
+    let connection = await connect();
+    bridge = connection.client;
+    await assertPortListening(port);
+    const planned = await runtime.call("canvas_edit_assignment", {
+      course_id: "42", id: "88", assignment_due_at: "2026-09-10T17:00:00Z",
+      _morrow: { source_binding_id: sourceBindingId },
+    });
+    const id = operationId(planned);
+    const review = { url: `http://127.0.0.1:4317/operations/${id}`, label: expect.stringContaining("course 42") };
+    await received(connection.uiStates, (command) => command.uiState?.reviews.length === 1);
+
+    await bridge.close();
+    connection = await connect();
+    bridge = connection.client;
+    const replayed = await received(connection.uiStates, () => true);
+    expect(replayed.uiState).toEqual({ reviews: [review], presence });
+    expect(runtime.operationGet(id)).toMatchObject({ state: "awaiting_approval" });
+
+    // A review that ends while no Bridge is connected is not listed again on the next connection.
+    await bridge.close();
+    runtime.cancelOperation(id);
+    connection = await connect();
+    bridge = connection.client;
+    const current = await received(connection.uiStates, () => true);
+    expect(current.uiState).toEqual({ reviews: [], presence });
+  }, CASE_TIMEOUT_MS);
+
   it("hands the approval key to the Bridge with each push, and again when a review page opens", async () => {
     directory = mkdtempSync(join(tmpdir(), "morrow-ui-state-"));
     const port = await reserveLoopbackPort();

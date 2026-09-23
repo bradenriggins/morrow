@@ -414,6 +414,7 @@ export class CanvasConnectorRuntime {
     const canvasBrowserCatalog = loadCanvasBrowserCatalog();
     const moodleCatalog = loadMoodleBrowserCatalog();
     const catalogDigest = bridgeCatalogDigest(catalog, canvasBrowserCatalog, moodleCatalog);
+    let runtime: CanvasConnectorRuntime | undefined;
     const bridge = new LoopbackBridgeServer({
       token: config.token,
       expectedRuntimeRevision: config.runtimeRevision,
@@ -422,6 +423,7 @@ export class CanvasConnectorRuntime {
       port: config.port,
       pairingEnabled: true,
       onPairApproved: config.approveExtensionId,
+      onActivated: () => runtime?.resendUiState(),
     });
     try {
       await bridge.start();
@@ -431,7 +433,8 @@ export class CanvasConnectorRuntime {
       // The Morrow that holds the port is not touched.
       if (!(error instanceof BridgePortInUseError)) throw error;
     }
-    return new CanvasConnectorRuntime(catalog, canvasBrowserCatalog, moodleCatalog, bridge);
+    runtime = new CanvasConnectorRuntime(catalog, canvasBrowserCatalog, moodleCatalog, bridge);
+    return runtime;
   }
 
   health(): JsonObject {
@@ -527,10 +530,24 @@ export class CanvasConnectorRuntime {
    * Pushes the present list of reviews waiting for the person to the Bridge
    * popup (D1b). The Bridge never opens one of these by itself.
    */
+  /**
+   * The newest review list, approval key and learner names Morrow asked this
+   * connector to show. It is kept even when no Bridge is connected, so the next
+   * connection receives the present state rather than none.
+   */
+  private latestUiState: BridgeUiState | null = null;
+
+  resendUiState(): void {
+    const uiState = this.latestUiState;
+    if (!uiState) return;
+    void this.bridge.invoke({ kind: "ui_state", uiState, operationId: `ui-state:${randomUUID()}` }).catch(() => undefined);
+  }
+
   async uiState(input: BridgeUiState): Promise<JsonObject> {
     let uiState: BridgeUiState;
     try {
       uiState = normalizeBridgeUiState(input);
+      this.latestUiState = uiState;
     } catch {
       return {
         schema: "morrow.browser-ui-state.v1",

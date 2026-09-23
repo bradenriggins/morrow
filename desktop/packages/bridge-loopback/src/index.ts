@@ -111,6 +111,12 @@ export interface LoopbackBridgeOptions {
   readonly writeReceiptCapacity?: number;
   readonly pairingEnabled?: boolean;
   readonly onPairApproved?: (extensionId: string) => void | Promise<void>;
+  /**
+   * Runs each time a Bridge connection becomes the active one, after its ready
+   * answer is sent. A Bridge forgets its popup state when a connection ends, so
+   * the owner resends that state here.
+   */
+  readonly onActivated?: () => void;
 }
 
 export interface BridgeInvocation {
@@ -376,6 +382,7 @@ export class LoopbackBridgeServer {
   private readonly allowMissingOriginForTests: boolean;
   private readonly pairingEnabled: boolean;
   private readonly onPairApproved: ((extensionId: string) => void | Promise<void>) | undefined;
+  private readonly onActivated: (() => void) | undefined;
   private readonly pending = new Map<string, PendingRequest>();
   private pendingCommandBytes = 0;
   private readonly pairingRequests = new Map<string, PairingRequest>();
@@ -422,6 +429,7 @@ export class LoopbackBridgeServer {
     this.allowMissingOriginForTests = options.allowMissingOriginForTests === true;
     this.pairingEnabled = options.pairingEnabled === true;
     this.onPairApproved = options.onPairApproved;
+    this.onActivated = options.onActivated;
 
     this.httpServer = createServer((request, response) => {
       void this.handleHttp(request, response).catch(() => {
@@ -830,6 +838,11 @@ export class LoopbackBridgeServer {
       catalogDigest: hello.catalogDigest,
       connectedAt,
     });
+    try {
+      this.onActivated?.();
+    } catch {
+      // The owner's resend is best effort. It never ends the connection it follows.
+    }
   }
 
   private handleClientMessage(socket: WebSocket, value: unknown): void {

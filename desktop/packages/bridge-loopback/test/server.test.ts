@@ -369,6 +369,31 @@ describe("LoopbackBridgeServer", () => {
     expect(server.health()).toMatchObject({ connected: false, extensionId: null, bindingCount: 0 });
   });
 
+  it("tells its owner each time a Bridge connection becomes active, after the ready answer", async () => {
+    const activations: boolean[] = [];
+    const server: LoopbackBridgeServer = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+      onActivated: () => {
+        activations.push(server.health().connected);
+        throw new Error("an owner failure never ends the connection it follows");
+      },
+    });
+    servers.push(server);
+    const first = await connect(server, []);
+    expect(activations).toEqual([true]);
+    const firstClosed = once(first, "close");
+    first.close();
+    await firstClosed;
+    const second = await connect(server, []);
+    expect(activations).toEqual([true, true]);
+    expect(second.readyState).toBe(WebSocket.OPEN);
+    expect(server.health()).toMatchObject({ connected: true });
+  });
+
   it("refuses a binary WebSocket frame even when its bytes contain valid Bridge JSON", async () => {
     const server = new LoopbackBridgeServer({
       token,
