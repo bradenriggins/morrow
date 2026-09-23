@@ -1085,10 +1085,36 @@ def _fold_match_text(text):
     return "".join(folded), index_map
 
 
+# Generational suffixes: never a given name or a surname. Roman numerals
+# stop at IV so a real surname such as "Vi" is never dropped.
+_NAME_SUFFIXES = frozenset({"jr", "sr", "jnr", "snr", "ii", "iii", "iv"})
+
+
+def _without_name_suffixes(name):
+    """The name without its generational suffixes ("Martin Luther King
+    Jr." -> "Martin Luther King", "King, Jr., Martin" -> "King, Martin").
+    The first word is never a suffix, and a suffix stays when dropping it
+    would leave a single word."""
+    kept = []
+    for i, token in enumerate(name.split()):
+        if i and token.strip(".,").lower() in _NAME_SUFFIXES:
+            # "King Jr., Martin": the suffix carried the name's comma.
+            if token.endswith(",") and not kept[-1].endswith(","):
+                kept[-1] += ","
+            continue
+        kept.append(token)
+    if len([t for t in kept if t.strip(",")]) < 2:
+        return " ".join(name.split())
+    kept[-1] = kept[-1].rstrip(",")
+    return " ".join(kept)
+
+
 def _surname_of_name(normalized):
     """Last whitespace-separated token of a normalized full name, when it
     is a plausible surname (2+ letters, and the name is not a single
-    word). Comma form ("Thornton, Alice"): the token before the comma."""
+    word). Comma form ("Thornton, Alice"): the token before the comma.
+    Generational suffixes (Jr., III) are never the surname."""
+    normalized = _without_name_suffixes(normalized)
     if "," in normalized:
         head = normalized.split(",", 1)[0].strip().split()
         candidate = head[-1] if head else ""
@@ -1106,14 +1132,18 @@ def _learner_name_aliases(identity):
     name = identity.get("name")
     if not name:
         return []
-    normalized = _normalize_alias(name)
-    if not normalized or len(normalized) > 500:
+    full = _normalize_alias(name)
+    if not full or len(full) > 500:
         return []
+    aliases = {full}
+    # Given name, surname, and reordered forms come from the name without
+    # its generational suffix (Jr., III), which also names the student.
+    normalized = _without_name_suffixes(full)
+    aliases.add(normalized)
     if "," in normalized:
-        given = normalized.split(",", 1)[1].strip().split()[0]
+        given = (normalized.split(",", 1)[1].strip().split() or [""])[0]
     else:
         given = normalized.split()[0]
-    aliases = {normalized}
     letters = sum(1 for c in given if unicodedata.category(c).startswith("L"))
     if letters >= 2:
         aliases.add(given)

@@ -31,6 +31,11 @@ Student privacy:
   names students, the preview showed those students' real names,
   emails, and logins. Now the preview keeps each student's label, and
   Morrow puts the real text back only when it sends the change.
+- A student whose name ends in Jr., Sr., II, III, or IV has the last
+  name hidden when it is used alone. Morrow took the ending for the last
+  name, so for "Martin Luther King Jr." the name "King" reached the
+  assistant as written, and a "Jr." elsewhere in the course was hidden
+  instead.
 - Some names are still not hidden, and the consent page lists them: a
   name Canvas does not list for the student, such as a nickname; a
   course named for its student, such as an independent study; and a
