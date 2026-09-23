@@ -37,11 +37,11 @@ Morrow Desktop 1.0.5 is unsigned. An unsigned build has no update feed (`publish
 
 ## CI path filters
 
-`.github/workflows/ci.yml` detects which products changed:
+`.github/workflows/ci.yml` runs the repository text gates on every change: no em dash in any tracked file, no retired phrase on any product-facing page, and the platform facts in the root README and `docs/products.md`. It then detects which products changed:
 
 - `desktop/**` changed: the desktop suite runs on Linux (`pnpm check`, browser harnesses, installer suites). Morrow Desktop ships for Windows and macOS, not Linux, so the installer suites also run on Windows (`windows-2022`) and on macOS on Apple silicon (`macos-14`), the runners `desktop-release.yml` packages on, together with every desktop test that Linux skips.
 - `morrow-for-muse/**` changed: the Muse suite runs (`pytest`, then the install suites on a carved release tree).
 - `.github/**` changed (workflow edits): every suite runs.
-- None of these changed (root docs, root README): every suite skips, and the required `check` still reports success.
+- None of these changed (root docs, root README): every product suite skips, and the required `check` reports success once the repository text gates pass.
 
 A change spanning both products runs both suites.

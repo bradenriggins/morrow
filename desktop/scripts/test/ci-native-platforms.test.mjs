@@ -219,7 +219,40 @@ test("the required check fails whenever a changed product's job on any platform 
 
   const museOnly = {
     outputs: { desktop: "false", muse: "true" },
-    results: Object.fromEntries(check.needs.map((id) => [id, id === "check-muse" || id === "changes" ? "success" : "skipped"])),
+    results: Object.fromEntries(check.needs.map((id) => [id, ["check-muse", "changes", REPOSITORY_JOB].includes(id) ? "success" : "skipped"])),
   };
   assert.equal(aggregate(check, museOnly), 0, "desktop jobs that skip because the desktop did not change pass the check");
+});
+
+/**
+ * The repository text gates read every tracked file, the root documents and Morrow for Muse
+ * included. A change to a root document or to Muse alone skips the desktop suite, so the gates run
+ * in their own job on every change, from the repository root, with nothing to install.
+ */
+const REPOSITORY_JOB = "check-repository";
+const REPOSITORY_GATES = ["desktop/scripts/test/no-em-dash.test.mjs", "desktop/scripts/test/product-claims.test.mjs"];
+
+test("the repository text gates run on every change, and the required check needs them", () => {
+  const body = job(ci, REPOSITORY_JOB);
+  assert.doesNotMatch(body, /^ {4}if:/m, `${REPOSITORY_JOB} must run for every change`);
+  assert.doesNotMatch(body, /working-directory:/, `${REPOSITORY_JOB} must run from the repository root`);
+  assert.match(body, /^ {4}timeout-minutes: \d+$/m, `${REPOSITORY_JOB} must be time-bounded`);
+  assert.match(body, /^ {10}node-version: 22\.23\.2$/m, `${REPOSITORY_JOB} must use the Node release the other jobs use`);
+  assert.deepEqual(commands(body), [`node --test ${REPOSITORY_GATES.join(" ")}`]);
+  for (const gate of REPOSITORY_GATES) {
+    const source = readFileSync(new URL(gate, repositoryRoot), "utf8");
+    assert.doesNotMatch(source, /^import .* from "(?!node:|\.)/m, `${gate} must need nothing that ${REPOSITORY_JOB} does not install`);
+  }
+
+  const check = aggregator();
+  assert.ok(check.needs.includes(REPOSITORY_JOB), `the check job must wait for ${REPOSITORY_JOB}`);
+  const rootDocumentOnly = {
+    outputs: { desktop: "false", muse: "false" },
+    results: Object.fromEntries(check.needs.map((id) => [id, ["changes", REPOSITORY_JOB].includes(id) ? "success" : "skipped"])),
+  };
+  assert.equal(aggregate(check, rootDocumentOnly), 0, "a root-document change passes when the repository text gates pass");
+  for (const result of ["failure", "cancelled", "skipped"]) {
+    const status = aggregate(check, { ...rootDocumentOnly, results: { ...rootDocumentOnly.results, [REPOSITORY_JOB]: result } });
+    assert.equal(status, 1, `the check must fail when ${REPOSITORY_JOB} is ${result}, whichever products changed`);
+  }
 });

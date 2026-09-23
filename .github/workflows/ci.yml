@@ -1,11 +1,13 @@
 name: ci
 
 # Monorepo CI. The `changes` job detects which products a push/PR touches;
-# each product suite runs only when its directory changed. The `check` job
-# aggregates every suite and keeps the required status-check name stable,
-# so branch protection keeps working when a change touches one product only
-# (the other suite skips, and `check` still reports). A workflow change runs
-# every suite.
+# each product suite runs only when its directory changed. The
+# `check-repository` job runs the repository text gates on every change,
+# because they read every tracked file, including the root documents and
+# Morrow for Muse. The `check` job aggregates every job and keeps the
+# required status-check name stable, so branch protection keeps working when
+# a change touches one product only (the other suite skips, and `check` still
+# reports). A workflow change runs every suite.
 
 on:
   pull_request:
@@ -33,6 +35,19 @@ jobs:
             muse:
               - 'morrow-for-muse/**'
               - '.github/**'
+
+  # No em dash and no retired phrase anywhere in the repository. These gates
+  # need only Node, so they run from the repository root with nothing to
+  # install.
+  check-repository:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.2
+      - run: node --test desktop/scripts/test/no-em-dash.test.mjs desktop/scripts/test/product-claims.test.mjs
 
   check-desktop:
     needs: changes
@@ -157,13 +172,14 @@ jobs:
         run: bash "$RUNNER_TEMP/carve/morrow-muse-connector/scripts/install-suites.sh" --show-failures
 
   check:
-    needs: [changes, check-desktop, check-desktop-windows, check-desktop-macos, check-muse]
+    needs: [changes, check-repository, check-desktop, check-desktop-windows, check-desktop-macos, check-muse]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate product suites
         env:
           CHANGES: ${{ needs.changes.result }}
+          REPOSITORY: ${{ needs.check-repository.result }}
           DESKTOP_CHANGED: ${{ needs.changes.outputs.desktop }}
           DESKTOP: ${{ needs.check-desktop.result }}
           DESKTOP_WINDOWS: ${{ needs.check-desktop-windows.result }}
@@ -178,6 +194,11 @@ jobs:
             exit 1
           fi
           fail=0
+          # The repository text gates run on every change, whatever changed.
+          if [ "$REPOSITORY" != "success" ]; then
+            echo "repository text gates result: $REPOSITORY"
+            fail=1
+          fi
           for pair in \
             "desktop:$DESKTOP_CHANGED:$DESKTOP" \
             "desktop-windows:$DESKTOP_CHANGED:$DESKTOP_WINDOWS" \
@@ -193,7 +214,7 @@ jobs:
             fi
           done
           if [ "$fail" = "1" ]; then
-            echo "A product suite did not pass."
+            echo "The repository text gates or a product suite did not pass."
             exit 1
           fi
           echo "Every changed product's suite passed."

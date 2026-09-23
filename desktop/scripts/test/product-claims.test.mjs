@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { RETIRED_PHRASES, findRetiredPhrases } from "./lib/retired-claims.mjs";
 
 /**
@@ -75,6 +77,25 @@ function anchors(markdown) {
 test("the claim documents use none of the retired phrases", () => {
   const found = CLAIM_DOCS.flatMap((doc) =>
     findRetiredPhrases(read(doc)).map((hit) => `${doc}:${hit.line} "${hit.phrase}" in: ${hit.sentence}`),
+  );
+  assert.deepEqual(found, [], "these phrases are retired; scripts/test/lib/retired-claims.mjs says what each one got wrong");
+});
+
+// The dated working records under docs/implementation and docs/research quote retired wording to
+// explain why it was retired. Every other Markdown or HTML page in the repository, including the
+// root README, docs/ and Morrow for Muse, is product-facing and is held to the same list.
+const INTERNAL_RECORDS = /^desktop\/docs\/(?:implementation|research)\//u;
+
+test("no product-facing page anywhere in the repository uses a retired phrase", () => {
+  const repositoryRoot = new URL("../", root);
+  const listed = spawnSync("git", ["-C", fileURLToPath(repositoryRoot), "ls-files", "-z", "--", "*.md", "*.html"], { encoding: "utf8" });
+  assert.equal(listed.status, 0, listed.stderr);
+  const pages = listed.stdout.split("\0").filter((path) => path && !INTERNAL_RECORDS.test(path));
+  for (const page of ["README.md", "docs/products.md", "docs/versioning.md", "desktop/README.md", "morrow-for-muse/SKILL.md", "morrow-for-muse/content/consent.md"]) {
+    assert.ok(pages.includes(page), `the retired-phrase scan must read ${page}`);
+  }
+  const found = pages.flatMap((page) =>
+    findRetiredPhrases(readFileSync(new URL(page, repositoryRoot), "utf8")).map((hit) => `${page}:${hit.line} "${hit.phrase}" in: ${hit.sentence}`),
   );
   assert.deepEqual(found, [], "these phrases are retired; scripts/test/lib/retired-claims.mjs says what each one got wrong");
 });

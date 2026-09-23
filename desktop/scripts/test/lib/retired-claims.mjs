@@ -1,9 +1,10 @@
 /**
  * The phrases Morrow retired from every product-facing surface, read by the document gate
- * (`scripts/test/product-claims.test.mjs`). The website carried its own copy of this gate until the
- * website moved to its own repository; this file is not a test: `pnpm scripts:test` globs
- * `scripts/test/*.test.mjs`, so it stays out of that glob by living in `lib/` and by keeping
- * `.test.` out of its name.
+ * (`scripts/test/product-claims.test.mjs`). That gate checks the desktop claim documents and every
+ * product-facing Markdown or HTML page in the repository, including the root README, docs/ and
+ * Morrow for Muse. The website lives in its own repository and is not checked here. This file is not
+ * a test: `pnpm scripts:test` globs `scripts/test/*.test.mjs`, so it stays out of that glob by living
+ * in `lib/` and by keeping `.test.` out of its name.
  *
  * Each phrase named a state or a product that Morrow no longer is:
  * - "Development preview" and "private preview" described the product as a preview. Morrow
