@@ -1561,9 +1561,9 @@ def _verify_record_target(record: dict, params: dict,
     tenant or course_id disagrees with the dispatch's.
 
     W4-P0-11 hardening: a course-scoped write (its path targets a
-    course, see write_target_course_id) MUST carry a target block naming the reviewed tenant, course_id,
-    and course_name; a record without one is refused, not admitted on
-    trust. Non-course writes may omit the block, but when present it is
+    course, see write_target_course_id) MUST carry a target block
+    naming the reviewed tenant, course_id, and course_name; a record
+    without one is refused, not admitted on trust. Non-course writes may omit the block, but when present it is
     still cross-checked. The course_name/term comparison against the
     frozen plan and the provider-verified identity happens in the
     executor's verify_write_target_identity, which has both; admission

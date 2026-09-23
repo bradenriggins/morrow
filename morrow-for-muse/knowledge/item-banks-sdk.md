@@ -31,8 +31,9 @@ holds auth material:
    fallback `{canvas_base}/courses/{course_id}/banks`). The app's own
    traffic is watched for the first request to the tenant-bound
    quiz-api host (`<account>.quiz-api-<region>.instructure.com`, for
-   one of the tenant's own accounts) carrying an Authorization header; that header (plus
-   the AuthType header) is the captured `banks.build` credential.
+   one of the tenant's own accounts) carrying an Authorization header;
+   that header (plus the AuthType header) is the captured `banks.build`
+   credential.
    Request headers, not the `/api/sdk_tokens/banks.build` response
    body: on the `/banks` route the app issues its API calls from a Web
    Worker, and `Network.getResponseBody` cannot serve a
