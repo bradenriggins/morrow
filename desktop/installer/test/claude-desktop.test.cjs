@@ -114,16 +114,51 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   return result;
 }
 
-const CONNECTION_OBSERVATION_TIMEOUT_MS = 5_000;
 const CONNECTION_OBSERVATION_INTERVAL_MS = 20;
 
-async function waitFor(predicate) {
-  const deadline = Date.now() + CONNECTION_OBSERVATION_TIMEOUT_MS;
-  do {
+function processEnded(child) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+/**
+ * Waits until `predicate` holds. A busy computer only makes it wait longer:
+ * it fails when a process it names ends first, and the bounded test runner
+ * ends a wait that never settles.
+ */
+async function waitFor(predicate, ...processes) {
+  for (;;) {
     if (await predicate()) return;
+    const ended = processes.find(processEnded);
+    if (ended) {
+      if (await predicate()) return;
+      assert.fail(`process ${ended.pid} ended before the expected connection state was observed`);
+    }
     await new Promise((resolve) => setTimeout(resolve, CONNECTION_OBSERVATION_INTERVAL_MS));
-  } while (Date.now() < deadline);
-  assert.fail("expected connection state was not observed");
+  }
+}
+
+/** Waits until `child` has written `text` to stdout, collected in `chunks`; fails if it closes first. */
+function outputIncludes(child, chunks, text) {
+  return new Promise((resolve, reject) => {
+    const written = () => Buffer.concat(chunks).toString().includes(text);
+    const check = () => {
+      if (!written()) return;
+      cleanup();
+      resolve();
+    };
+    const closed = () => {
+      cleanup();
+      if (written()) resolve();
+      else reject(new Error(`the launcher closed before it wrote ${text}`));
+    };
+    const cleanup = () => {
+      child.stdout.off("data", check);
+      child.off("close", closed);
+    };
+    child.stdout.on("data", check);
+    child.once("close", closed);
+    check();
+  });
 }
 
 /** A process id whose process has ended, so nothing is running under it now. */
@@ -143,8 +178,8 @@ function runningProcess(t) {
 async function writeReceipt(input, receipt) {
   const { setup } = input;
   const metadata = JSON.parse(await fs.readFile(path.join(path.dirname(setup.receiptPath), "setup.json"), "utf8"));
-  return fs.writeFile(setup.receiptPath, `${JSON.stringify({ schema: "morrow.claude-desktop-connection.v4",
-    installationId: setup.installationId, launcherSha256: metadata.launcherSha256,
+  return fs.writeFile(setup.receiptPath, `${JSON.stringify({ schema: "morrow.claude-desktop-connection.v5",
+    installationId: setup.installationId, launcherSha256: metadata.launcherSha256, claudeProcessCheck: "complete", claudeProcess: null,
     launcherPath: await fs.realpath(path.join(input.extracted, "server", "launch.cjs")),
     clientInfo: { name: "morrow-extension-test", version: "1.0.0" }, protocolVersion: "2025-11-25", ...receipt })}\n`);
 }
@@ -164,14 +199,18 @@ async function activateSetup(input, setup, extra = {}) {
 }
 
 async function handshake(child, { complete = true } = {}) {
-  let output = "";
-  const receive = (chunk) => { output += chunk.toString(); };
+  const chunks = [];
+  const receive = (chunk) => { chunks.push(chunk); };
   child.stdout.on("data", receive);
+  const answered = outputIncludes(child, chunks, "\n");
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {
     protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "morrow-extension-test", version: "1.0.0" }
   } }) + "\n");
-  await waitFor(() => output.includes("\n"));
-  child.stdout.off("data", receive);
+  try {
+    await answered;
+  } finally {
+    child.stdout.off("data", receive);
+  }
   if (complete) child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
 }
 
@@ -212,10 +251,10 @@ test("native Claude bundle uses the client Node runtime and requires a completed
   await handshake(child, { complete: false });
   assert.deepEqual(await inspectClaudeDesktopConnection(input.setup), { installed: false, running: false });
   child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
-  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed);
-  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).running === true);
+  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed, child);
+  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).running === true, child);
   child.stdin.write('{"jsonrpc":"2.0","id":2,"method":"test/paths"}\n');
-  await waitFor(() => Buffer.concat(output).toString().includes('"id":2'));
+  await outputIncludes(child, output, '"id":2');
   const lines = Buffer.concat(output).toString().trim().split("\n").map(JSON.parse);
   assert.equal(lines[0].result.serverInfo.name, "morrow");
   assert.deepEqual(lines.find((line) => line.id === 2).result, { workspace: input.workspace, upstreams: input.upstreams });
@@ -240,20 +279,17 @@ test("the managed Claude launcher terminates its complete stubborn server proces
   child.stdout.resume();
   child.stderr.resume();
   await handshake(child);
-  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed);
+  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed, child);
   await waitFor(async () => {
     try { return Number.isSafeInteger(Number(await fs.readFile(input.descendantPath, "utf8"))); } catch { return false; }
-  });
+  }, child);
   const receipt = JSON.parse(await fs.readFile(input.setup.receiptPath, "utf8"));
   const descendantPid = Number(await fs.readFile(input.descendantPath, "utf8"));
   assert.equal(processAlive(receipt.proxyPid), true);
   assert.equal(processAlive(descendantPid), true);
   const stopped = once(child, "close");
   child.stdin.end();
-  await Promise.race([
-    stopped,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("managed launcher process tree did not stop")), 5_000).unref()),
-  ]);
+  await stopped;
   await waitFor(() => !processAlive(receipt.proxyPid) && !processAlive(descendantPid));
 });
 
@@ -265,10 +301,7 @@ test("the managed Claude launcher refuses malformed UTF-8 before recording a con
   child.stderr.resume();
   const stopped = once(child, "close");
   await handshake(child, { complete: false });
-  await Promise.race([
-    stopped,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("malformed launcher stream stayed active")), 4_000).unref()),
-  ]);
+  await stopped;
   await assert.rejects(() => fs.stat(input.setup.receiptPath), { code: "ENOENT" });
 });
 
@@ -337,7 +370,7 @@ test("a process id reused after the recorded connection is not reported as runni
   assert.deepEqual(await inspectClaudeDesktopConnection(setup), { installed: true, running: false });
 
   await writeReceipt(input, { launcherPid: process.pid, proxyPid: reused.pid, connectedAt: new Date().toISOString() });
-  await waitFor(async () => (await inspectClaudeDesktopConnection(setup)).running === true);
+  await waitFor(async () => (await inspectClaudeDesktopConnection(setup)).running === true, reused);
 
   await writeReceipt(input, { launcherPid: process.pid, proxyPid: reused.pid, connectedAt: "not a time" });
   assert.deepEqual(await inspectClaudeDesktopConnection(setup), { installed: false, running: false });
@@ -382,15 +415,133 @@ for (const invalidJsonRpc of [false, true]) {
     child.stdout.on("data", (chunk) => output.push(chunk));
     child.stderr.on("data", () => {});
     await handshake(child);
-    await waitFor(() => Buffer.concat(output).toString().includes("\n"));
+    await outputIncludes(child, output, "\n");
     assert.equal(JSON.parse(Buffer.concat(output).toString()).result.serverInfo.name, "mor🌾row");
-    if (!invalidJsonRpc) await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed);
+    if (!invalidJsonRpc) await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed, child);
     assert.equal((await inspectClaudeDesktopConnection(input.setup)).installed, !invalidJsonRpc);
     const stopped = once(child, "close");
     child.stdin.end();
     await stopped;
   });
 }
+
+const proofSimulation = path.join(__dirname, "fixtures", "claude-proof-simulation.cjs");
+
+/** Starts the fixture launcher with its Claude process proof answered as `mode` says (see the fixture). */
+function launchWithProof(t, input, mode) {
+  const log = path.join(input.root, `proof-questions-${crypto.randomUUID()}.log`);
+  const child = spawn(process.execPath, ["--require", proofSimulation, path.join(input.extracted, "server", "launch.cjs")], {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, MORROW_TEST_CLAUDE_PROOF: mode, MORROW_TEST_CLAUDE_PROOF_LOG: log },
+  });
+  t.after(() => { if (!processEnded(child)) child.kill(); });
+  const output = [];
+  child.stdout.on("data", (chunk) => output.push(chunk));
+  child.stderr.resume();
+  const questions = async () => (await fs.readFile(log, "utf8").catch(() => "")).split("\n").filter(Boolean).length;
+  return { child, output, questions };
+}
+
+async function receiptOf(input) {
+  try { return JSON.parse(await fs.readFile(input.setup.receiptPath, "utf8")); } catch { return null; }
+}
+
+async function closeLauncher(child) {
+  const stopped = once(child, "close");
+  child.stdin.end();
+  await stopped;
+}
+
+test("messages keep flowing while the Claude process proof runs, one proof at a time, and the receipt waits for its answer", async (t) => {
+  const input = await fixture(t);
+  const gate = path.join(input.root, "proof-gate");
+  const { child, output, questions } = launchWithProof(t, input, `gate:${gate}`);
+  await handshake(child);
+  await waitFor(async () => (await questions()) === 1, child);
+  child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+  child.stdin.write('{"jsonrpc":"2.0","id":2,"method":"test/paths"}\n');
+  await outputIncludes(child, output, '"id":2');
+  assert.equal(await receiptOf(input), null, "no receipt is written before the proof answers");
+  assert.equal(await questions(), 1, "a second initialized notification starts no second proof");
+
+  await fs.writeFile(gate, "");
+  await waitFor(async () => (await receiptOf(input)) !== null, child);
+  const receipt = await receiptOf(input);
+  assert.equal(receipt.claudeProcessCheck, "complete");
+  assert.equal(receipt.claudeProcess.processId, 4242);
+  assert.deepEqual(await inspectClaudeDesktopConnection(input.setup), { installed: true, running: true });
+  assert.equal(await questions(), 1);
+  await closeLauncher(child);
+});
+
+test("a Claude process proof that answers after 3.5 seconds, within the 10 second limit, proves the connection", async (t) => {
+  const input = await fixture(t);
+  const { child, questions } = launchWithProof(t, input, "delay:3500");
+  await handshake(child);
+  await waitFor(async () => (await receiptOf(input)) !== null, child);
+  const receipt = await receiptOf(input);
+  assert.equal(receipt.claudeProcessCheck, "complete");
+  assert.equal(receipt.claudeProcess.processId, 4242);
+  assert.equal((await inspectClaudeDesktopConnection(input.setup)).installed, true);
+  assert.equal(await questions(), 1);
+  await closeLauncher(child);
+});
+
+for (const [mode, description] of [
+  ["hang", "never answers within 10 seconds"],
+  ["malformed", "answers with text that is not JSON"],
+  ["wrong-shape", "answers with JSON that is not a proof"],
+]) {
+  test(`a Claude process proof that ${description} is recorded unverified, shown as still checking, and never as connected`, async (t) => {
+    const input = await fixture(t);
+    const { child, questions } = launchWithProof(t, input, mode);
+    await handshake(child);
+    await waitFor(async () => (await receiptOf(input)) !== null, child);
+    let receipt = await receiptOf(input);
+    assert.equal(receipt.claudeProcessCheck, "unverified");
+    assert.equal(receipt.claudeProcess, null);
+    assert.deepEqual(await inspectClaudeDesktopConnection(input.setup), { installed: false, running: true, checking: true });
+    if (mode !== "hang") {
+      // The launcher asks again, and a second unverified answer claims nothing either.
+      await waitFor(async () => (await questions()) >= 2 && (await receiptOf(input)) !== null, child);
+      receipt = await receiptOf(input);
+      assert.equal(receipt.claudeProcessCheck, "unverified");
+      assert.equal(receipt.claudeProcess, null);
+    }
+    await closeLauncher(child);
+    assert.deepEqual(await inspectClaudeDesktopConnection(input.setup), { installed: false, running: false },
+      "a closed launcher cannot finish its check, so its unverified receipt proves nothing");
+  });
+}
+
+test("the launcher asks again after an unverified answer, and a later proof proves the connection", async (t) => {
+  const input = await fixture(t);
+  const { child, questions } = launchWithProof(t, input, "malformed-then-proof");
+  await handshake(child);
+  await waitFor(async () => (await receiptOf(input))?.claudeProcessCheck === "unverified", child);
+  await waitFor(async () => (await receiptOf(input))?.claudeProcessCheck === "complete", child);
+  assert.equal((await receiptOf(input)).claudeProcess.processId, 4242);
+  assert.equal(await questions(), 2);
+  assert.equal((await inspectClaudeDesktopConnection(input.setup)).installed, true);
+  await closeLauncher(child);
+});
+
+test("a receipt must say whether its Claude process proof answered, and an unverified one carries no proof", async (t) => {
+  const input = await fixture(t);
+  const launcherPid = await endedProcessId();
+  const proxyPid = await endedProcessId();
+  const connectedAt = new Date().toISOString();
+  await writeReceipt(input, { launcherPid, proxyPid, connectedAt });
+  assert.deepEqual(await inspectClaudeDesktopConnection(input.setup), { installed: true, running: false });
+  for (const change of [
+    { claudeProcessCheck: undefined },
+    { claudeProcessCheck: "pending" },
+    { claudeProcessCheck: "unverified", claudeProcess: { platform: "win32", processId: 4 } },
+  ]) {
+    await writeReceipt(input, { launcherPid, proxyPid, connectedAt, ...change });
+    assert.deepEqual(await inspectClaudeDesktopConnection(input.setup), { installed: false, running: false }, JSON.stringify(change));
+  }
+});
 
 test("native removal of the installed launcher closes its proxy and clears the connection receipt", async (t) => {
   const input = await fixture(t);
@@ -400,10 +551,10 @@ test("native removal of the installed launcher closes its proxy and clears the c
   child.stdout.resume();
   child.stderr.resume();
   await handshake(child);
-  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed);
+  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed, child);
   const stopped = once(child, "close");
   await fs.unlink(launcher);
-  await Promise.race([stopped, new Promise((_, reject) => setTimeout(() => reject(new Error("removed extension stayed active")), 4000).unref())]);
+  await stopped;
 
   // Claude removed the extension, so this setup is no longer installed.
   await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed === false);
@@ -417,7 +568,7 @@ test("a closed client's receipt stops proving installation when its launcher is 
   t.after(() => { if (child.exitCode === null) child.kill(); });
   child.stderr.resume();
   await handshake(child);
-  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed);
+  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed, child);
   const stopped = once(child, "close");
   child.stdin.end();
   await stopped;
@@ -436,7 +587,7 @@ test("an arbitrary copied launcher cannot refresh the managed connection receipt
   t.after(() => { if (first.exitCode === null) first.kill(); });
   first.stderr.resume();
   await handshake(first);
-  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed);
+  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed, first);
   const secondDirectory = path.join(input.root, "Reinstalled by assistant");
   await fs.mkdir(secondDirectory);
   const secondLauncher = path.join(secondDirectory, "launch.cjs");
@@ -461,7 +612,7 @@ test("replacing Morrow setup revokes the running old workspace and prevents its 
   t.after(() => { if (child.exitCode === null) child.kill(); });
   child.stderr.resume();
   await handshake(child);
-  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed);
+  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed, child);
   const stopped = once(child, "close");
   await fs.rm(path.dirname(input.setup.bundlePath), { recursive: true });
   await stopped;
@@ -481,7 +632,7 @@ test("the installer record alone activates one generation and revokes a stale re
   processA.stdout.resume();
   processA.stderr.resume();
   await handshake(processA);
-  await waitFor(async () => (await inspect(input)).installed);
+  await waitFor(async () => (await inspect(input)).installed, processA);
 
   await activateSetup(input, input.setup, { selectedAssistantId: "claude-desktop" });
   await new Promise((resolve) => setTimeout(resolve, 1_200));
@@ -510,7 +661,7 @@ test("the installer record alone activates one generation and revokes a stale re
   const stoppedA = once(processA, "close");
   await activateSetup(input, setupB, { selectedAssistantId: "claude-desktop" });
   assert.deepEqual(await inspect(input), { installed: false, running: false }, "A's valid receipt became stale at the record commit");
-  await Promise.race([stoppedA, new Promise((_, reject) => setTimeout(() => reject(new Error("stale generation A stayed active")), 4_000).unref())]);
+  await stoppedA;
 
   const reopenedA = spawn(process.execPath, [launcherA], { stdio: ["pipe", "pipe", "pipe"] });
   reopenedA.stderr.resume();
@@ -522,12 +673,12 @@ test("the installer record alone activates one generation and revokes a stale re
   processB.stderr.resume();
   await handshake(processB);
   const optionsB = { ...input.inspectionOptions, managedLauncherPath: launcherB };
-  await waitFor(async () => (await inspectClaudeDesktopConnectionRaw(setupB, optionsB)).installed);
+  await waitFor(async () => (await inspectClaudeDesktopConnectionRaw(setupB, optionsB)).installed, processB);
 
   const stoppedB = once(processB, "close");
   await activateSetup(input, null);
   assert.deepEqual(await inspectClaudeDesktopConnectionRaw(setupB, optionsB), { installed: false, running: false });
-  await Promise.race([stoppedB, new Promise((_, reject) => setTimeout(() => reject(new Error("removed generation B stayed active")), 4_000).unref())]);
+  await stoppedB;
 });
 
 test("a missing, linked, malformed, or oversized installer record fails before server spawn", async (t) => {

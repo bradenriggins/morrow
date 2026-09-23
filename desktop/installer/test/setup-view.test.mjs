@@ -84,6 +84,26 @@ test("Claude Desktop is waiting for approval", () => {
   assert.equal(step(current, "Assistant").detail, "Finish approval in Claude Desktop");
 });
 
+test("Claude Desktop connected and Morrow is still confirming the Claude app, so it says it is checking, not waiting for approval", () => {
+  const current = state({
+    lifecycle: "assistant_pending",
+    assistants: [{ ...CLAUDE_DESKTOP, detected: true, configured: false, pending: true, checking: true, selected: true }],
+    selectedAssistantId: "claude-desktop"
+  });
+  assert.equal(current.assistants[0].checking, true, "the state carries the check");
+  const view = actionView(current, { chosenAssistantId: "claude-desktop" });
+  assert.equal(view.title, "Morrow is checking the Claude Desktop connection.");
+  assert.match(view.copy, /Morrow keeps checking on its own/);
+  assert.doesNotMatch(`${view.title} ${view.copy} ${view.body}`, /approv|Install Extension|not connected/i);
+  assert.deepEqual(actions(view.body), ["check-claude-desktop", "open-claude-desktop"]);
+  assert.equal(statusSummary(current), "Checking the Claude Desktop connection");
+  assert.equal(step(current, "Assistant").detail, "Checking the Claude Desktop connection");
+  assert.match(setupManagementView(current).body, /Morrow is checking the connection to Claude Desktop\./);
+  assert.doesNotMatch(setupManagementView(current).body, /Waiting for your approval/);
+  const unchecked = state({ assistants: [{ ...CLAUDE_DESKTOP, detected: true, pending: true, selected: true }] });
+  assert.equal(unchecked.assistants[0].checking, false);
+});
+
 test("the local runtime is not ready yet", () => {
   const current = state({ ...READY_ASSISTANT, runtimeStatus: "uncertain" });
   const view = actionView(current, { chosenAssistantId: "codex" });

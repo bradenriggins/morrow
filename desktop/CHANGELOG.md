@@ -30,6 +30,8 @@ This release fixes every Critical and High defect found in the adversarial audit
 - The exact Bridge folder is shown with a Copy button. Long folder paths wrap.
 - Claude Desktop detection is real, including the Microsoft Store (MSIX) install on Windows.
 - Removal keeps a settings file's own permissions and refuses a read-only file.
+- On a busy Windows computer, confirming the Claude Desktop app could take longer than Morrow waited, and Morrow then asked for approval in Claude Desktop again. Morrow now waits up to 10 seconds, says it is still checking, and checks again on its own. Messages between Claude Desktop and Morrow keep flowing during the check.
+- Morrow starts faster on Windows: it checks each private file once per start instead of once per read.
 - The app says where unsigned builds get updates. The Mac note now says that moving Morrow to Applications can ask for an administrator password.
 
 ### Privacy

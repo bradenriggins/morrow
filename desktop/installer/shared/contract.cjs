@@ -214,6 +214,9 @@ function installerState(input) {
     detected: assistant.detected === true,
     configured: assistant.configured === true,
     pending: assistant.pending === true,
+    // Claude Desktop connected, and Morrow is still confirming the Claude app
+    // that started it. The launcher keeps asking until it can say.
+    checking: assistant.checking === true,
     // The assistant's own Morrow session reached the runtime at least once since
     // it was set up. Until then the assistant has not reloaded its settings.
     connected: assistant.connected === true,

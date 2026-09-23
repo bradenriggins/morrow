@@ -94,6 +94,7 @@ const COURSE_READY = Object.freeze({ ...PAIRED, runtimeVerifiedCourseCount: 1, s
 const INSTALLER_STATES = new Map([
   ["repair", installer({ lifecycle: "repair_required" })],
   ["claude-pending", installer({ assistants: [{ ...CLAUDE_DESKTOP, detected: true, pending: true, selected: true }], selectedAssistantId: "claude-desktop" })],
+  ["claude-checking", installer({ assistants: [{ ...CLAUDE_DESKTOP, detected: true, pending: true, checking: true, selected: true }], selectedAssistantId: "claude-desktop" })],
   ["no-assistant", installer({ assistants: [{ ...CHATGPT, detected: true }] })],
   ["runtime-not-ready", installer({ ...ASSISTANT_READY, runtimeStatus: "starting" })],
   ["delivery-blocked", installer({ ...ASSISTANT_READY, bridgeDelivery: "unavailable" })],

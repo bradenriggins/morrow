@@ -128,7 +128,7 @@ export function progress(current) {
         ? "Open your course in Chrome"
         : "Open Canvas or Moodle in Chrome";
   return [
-    { label: "Assistant", detail: repairRequired ? "Waiting for repair" : restart && active === 0 ? `Quit and reopen ${restart.title}` : assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? "Finish approval in Claude Desktop" : "Choose an installed assistant", status: repairRequired ? "pending" : restart && active === 0 ? "current" : assistant ? "done" : "current" },
+    { label: "Assistant", detail: repairRequired ? "Waiting for repair" : restart && active === 0 ? `Quit and reopen ${restart.title}` : assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? pending.checking === true ? "Checking the Claude Desktop connection" : "Finish approval in Claude Desktop" : "Choose an installed assistant", status: repairRequired ? "pending" : restart && active === 0 ? "current" : assistant ? "done" : "current" },
     { label: "Morrow Bridge", detail: bridgeDetail, status: blocked ? "blocked" : active === 1 ? "current" : paired ? "done" : "pending" },
     { label: "Course", detail: courseDetail, status: firstPreviewCompleted ? "done" : active === 2 ? "current" : "pending" },
   ].map((step, index) => ({ ...step, current: index === active && step.status !== "done" }));
@@ -148,7 +148,7 @@ function assistantCards(current, chosenAssistantId) {
     const available = assistant.detected === true && assistant.supported !== false;
     const configured = assistant.configured === true;
     const pending = assistant.pending === true;
-    const detail = configured ? "Morrow is set up here." : pending ? "Finish approval in Claude Desktop." : available ? assistant.id === "claude-desktop" ? "Ready to set up. You approve it in Claude Desktop." : "Ready to set up." : assistant.detected === true ? "Not available in this Morrow version." : notFoundDetail(assistant);
+    const detail = configured ? "Morrow is set up here." : pending ? assistant.checking === true ? "Morrow is checking the connection to Claude Desktop." : "Finish approval in Claude Desktop." : available ? assistant.id === "claude-desktop" ? "Ready to set up. You approve it in Claude Desktop." : "Ready to set up." : assistant.detected === true ? "Not available in this Morrow version." : notFoundDetail(assistant);
     return `<button class="assistant-card" type="button" data-action="choose-assistant" data-assistant-id="${escapeHtml(assistant.id)}" aria-pressed="${selected}"${available ? "" : " disabled"}>
       <span class="assistant-title">${escapeHtml(assistant.title)}</span>
       ${configured ? '<span class="assistant-badge">Ready</span>' : ""}
@@ -194,7 +194,7 @@ function materialsRow(current, { optionalDisclosure = false } = {}) {
 /** What one assistant row says about that assistant, in the words it can prove. */
 function assistantDetail(assistant) {
   if (assistant.configured === true) return "Morrow is set up in this assistant.";
-  if (assistant.pending === true) return "Waiting for your approval in Claude Desktop.";
+  if (assistant.pending === true) return assistant.checking === true ? "Morrow is checking the connection to Claude Desktop." : "Waiting for your approval in Claude Desktop.";
   if (assistant.detected !== true) return "Not found on this computer.";
   return "Not set up yet.";
 }
@@ -317,6 +317,14 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
   // A second assistant waiting for approval must not take the steps of the
   // assistant that is already set up away, so this is the panel only while no
   // assistant is configured.
+  if (pending?.id === "claude-desktop" && pending.checking === true && !assistant) {
+    return {
+      summary: "Checking the Claude Desktop connection",
+      title: "Morrow is checking the Claude Desktop connection.",
+      copy: "Claude Desktop started Morrow, and Morrow is confirming that the Claude Desktop app on this computer started it. On a busy computer this can take a minute. Morrow keeps checking on its own. Select Check setup to see the result.",
+      body: '<div class="inline-actions"><button class="primary-button" type="button" data-action="check-claude-desktop">Check setup</button><button class="secondary-button" type="button" data-action="open-claude-desktop">Open Claude Desktop</button></div>',
+    };
+  }
   if (pending?.id === "claude-desktop" && !assistant) {
     return {
       summary: "Finish setting up Claude Desktop",

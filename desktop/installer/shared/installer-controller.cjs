@@ -3051,6 +3051,7 @@ class InstallerController {
         // Claude Desktop counts as configured only after its session connected.
         connected: present === true && (assistant.id === "claude-desktop" || connectedIds.has(assistant.id)),
         pending: assistant.id === "claude-desktop" && entry && present !== true,
+        checking: claude?.checking === true,
         selected: record.selectedAssistantId === assistant.id,
         needsWorkspace: true
       };
