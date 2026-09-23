@@ -376,17 +376,22 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
     const createdId = decimalId(plainObject(body) ? body.id : "");
     if (!createdId) throw new Error("canvas_hot_spot_create_response_invalid");
 
+    const unverified = (status, reason) => ({
+      schema: "morrow.canvas-new-quiz-hot-spot.v1",
+      ok: false, sent: true, outcomeUnknown: true, status: createStatus,
+      verification: { schema: "morrow.browser-verification.v1", status, reason },
+      error: reason,
+    });
     // Nothing above is treated as proof. What Canvas saved is read back: the
     // question by the id Canvas returned, and the complete saved list again.
+    // Another question added or removed ahead of this one moves it, so its
+    // position is compared only once the list shows nothing else changed.
+    const unpositioned = { ...item };
+    delete unpositioned.position;
     const saved = await canvasJson(`${quizPath}/items/${encodeURIComponent(createdId)}`);
     if (!plainObject(saved) || decimalId(saved.id) !== createdId || saved.entry_type !== "Item"
-      || !requestedShapeMatches(saved, item)) {
-      return {
-        schema: "morrow.canvas-new-quiz-hot-spot.v1",
-        ok: false, sent: true, outcomeUnknown: true, status: createStatus,
-        verification: { schema: "morrow.browser-verification.v1", status: "mismatch", reason: "canvas_hot_spot_item_readback_mismatch" },
-        error: "canvas_hot_spot_item_readback_mismatch",
-      };
+      || !requestedShapeMatches(saved, unpositioned)) {
+      return unverified("mismatch", "canvas_hot_spot_item_readback_mismatch");
     }
     const after = await membership();
     const beforeIds = before.map((entry) => entry.id);
@@ -395,14 +400,16 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
     const removed = beforeIds.filter((id) => !afterIds.includes(id));
     const createdMembership = after.find((entry) => entry.id === createdId);
     const requestedPosition = Number.isSafeInteger(item.position) && item.position >= 1 ? item.position : null;
-    if (after.length !== before.length + 1 || additions.length !== 1 || additions[0] !== createdId || removed.length !== 0
-      || !createdMembership || (requestedPosition !== null && createdMembership.position !== requestedPosition)) {
-      return {
-        schema: "morrow.canvas-new-quiz-hot-spot.v1",
-        ok: false, sent: true, outcomeUnknown: true, status: createStatus,
-        verification: { schema: "morrow.browser-verification.v1", status: "mismatch", reason: "canvas_hot_spot_membership_mismatch" },
-        error: "canvas_hot_spot_membership_mismatch",
-      };
+    if (!createdMembership) return unverified("mismatch", "canvas_hot_spot_membership_mismatch");
+    // The list holds the approved question. A second new question, which can be
+    // a copy Chrome sent on its own or a colleague's, or a removed one, proves
+    // nothing about this one change, so it stays unconfirmed.
+    if (beforeIds.includes(createdId)) return unverified("unconfirmed", "canvas_hot_spot_create_answer_not_new");
+    if (additions.length > 1) return unverified("unconfirmed", "canvas_hot_spot_duplicate_effect_suspected");
+    if (removed.length > 0) return unverified("unconfirmed", "canvas_hot_spot_list_changed_concurrently");
+    if (!requestedShapeMatches(saved, item)) return unverified("mismatch", "canvas_hot_spot_item_readback_mismatch");
+    if (requestedPosition !== null && createdMembership.position !== requestedPosition) {
+      return unverified("mismatch", "canvas_hot_spot_membership_mismatch");
     }
     return {
       schema: "morrow.canvas-new-quiz-hot-spot.v1",

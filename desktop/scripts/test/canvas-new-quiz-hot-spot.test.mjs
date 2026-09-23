@@ -100,14 +100,14 @@ async function runInPage(input, routes) {
   }
 }
 
-function routes({ items = SAVED, created = { id: "13" }, saved: savedItem, createdPosition = items.length + 1, createStatus = 200, uploadUrlBody = { url: SIGNED_UPLOAD_URL } } = {}) {
+function routes({ items = SAVED, created = { id: "13" }, saved: savedItem, createdPosition = items.length + 1, createStatus = 200, uploadUrlBody = { url: SIGNED_UPLOAD_URL }, after: savedAfter } = {}) {
   const readback = savedItem === undefined
     ? {
         id: "13", ...TEMPLATE,
         entry: { ...TEMPLATE.entry, interaction_data: { ...TEMPLATE.entry.interaction_data, image_url: UNSIGNED_UPLOAD_URL } },
       }
     : savedItem;
-  const after = [...items, { id: "13", position: createdPosition, entry_type: "Item" }];
+  const after = savedAfter ?? [...items, { id: "13", position: createdPosition, entry_type: "Item" }];
   let listReads = 0;
   return (url, method) => {
     const href = url.pathname;
@@ -322,6 +322,41 @@ test("complete compares every supplied author field, answer shape, coordinates, 
   const wrongMembershipPosition = await runInPage(completeInput(), routes({ saved: matching, createdPosition: 4 }));
   assert.equal(wrongMembershipPosition.result.ok, false);
   assert.equal(wrongMembershipPosition.result.error, "canvas_hot_spot_membership_mismatch");
+});
+
+// The saved list proves a mismatch only when it lacks the approved question. Chrome can send the
+// create a second time on its own, and a colleague can add or remove a question at the same
+// moment; the question is then saved, and the list proves nothing either way about this change.
+test("a saved question next to a second new question or a removed one is unconfirmed, never a mismatch", async () => {
+  const matching = {
+    id: "13", ...TEMPLATE,
+    entry: { ...TEMPLATE.entry, interaction_data: { image_url: UNSIGNED_UPLOAD_URL } },
+  };
+  const row = (id, position) => ({ id, position, entry_type: "Item" });
+  const cases = [
+    ["a second copy after it", [row("11", 1), row("12", 2), row("13", 3), row("14", 4)], matching, "canvas_hot_spot_duplicate_effect_suspected"],
+    ["a question added ahead of it", [row("11", 1), row("12", 2), row("14", 3), row("13", 4)], { ...matching, position: 4 }, "canvas_hot_spot_duplicate_effect_suspected"],
+    ["a question removed", [row("11", 1), row("13", 2)], { ...matching, position: 2 }, "canvas_hot_spot_list_changed_concurrently"],
+  ];
+  for (const [name, after, saved, reason] of cases) {
+    const { result, requests } = await runInPage(completeInput(), routes({ saved, after }));
+    assert.equal(result.ok, false, name);
+    assert.equal(result.sent, true, name);
+    assert.equal(result.outcomeUnknown, true, name);
+    assert.deepEqual(result.verification, { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason }, name);
+    assert.equal(result.error, reason, name);
+    assert.equal(requests.filter((entry) => entry.method === "POST").length, 1, name);
+  }
+
+  const absent = await runInPage(completeInput(), routes({ after: [row("11", 1), row("12", 2), row("14", 3)] }));
+  assert.equal(absent.result.verification.status, "mismatch");
+  assert.equal(absent.result.error, "canvas_hot_spot_membership_mismatch");
+  const otherContent = await runInPage(completeInput(), routes({
+    saved: { ...matching, points_possible: 9 },
+    after: [row("11", 1), row("12", 2), row("13", 3), row("14", 4)],
+  }));
+  assert.equal(otherContent.result.verification.status, "mismatch");
+  assert.equal(otherContent.result.error, "canvas_hot_spot_item_readback_mismatch");
 });
 
 test("a wrong course, quiz or signed-in person is refused before anything is sent", async () => {
