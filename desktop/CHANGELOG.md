@@ -62,5 +62,6 @@ This release fixes every Critical and High defect found in the adversarial audit
 ### Not verified for this release
 
 - Live Canvas, Moodle, or Blackboard runs of the new flows.
+- Connect Morrow in a real Chrome profile with the Bridge folder an installed app set up. The browser harness runs the same step in Chrome for Testing with a fixture folder.
 - Windows-specific paths (Store Claude Desktop detection, locked files) on a real Windows host.
 - Signed builds: signing secrets do not exist yet, so this release is unsigned.
