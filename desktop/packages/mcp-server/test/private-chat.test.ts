@@ -3,7 +3,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import type { JsonObject } from "@morrow/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { createMorrowServer } from "../src/server.js";
-import { PrivateChatWaitEndedError, type GatewayRuntime } from "../src/runtime.js";
+import { PrivateChatBridgeProblemError, PrivateChatWaitEndedError, type GatewayRuntime } from "../src/runtime.js";
 
 function fixture({ closeImmediately = false, continueOnce = false } = {}) {
   const calls: JsonObject[] = [];
@@ -285,6 +285,53 @@ describe("Morrow Private Chat", () => {
       expect((result.content as { text: string }[])[0]!.text).toBe(
         "Private Chat unavailable. No message was sent in time, so Morrow stopped waiting and cleared the drawer. Ask the assistant to start Private Chat again.",
       );
+    } finally { await client.close(); await server.close(); }
+  });
+
+  // Each Bridge reason gets the step that fixes it. Only a real validation failure says "could not validate".
+  it.each([
+    ["bridge_unavailable", "Morrow Bridge is not connected to Morrow. Open Chrome and open the Morrow Bridge popup, which shows the step that connects it. Then ask the assistant to start Private Chat again.", "bridge_unavailable"],
+    ["bridge_port_in_use", "Another Morrow is already connected to Morrow Bridge, so this Morrow cannot open Private Chat. Close the other Morrow, or use one Morrow for all your assistants.", "bridge_port_in_use"],
+    ["bridge_outcome_unknown", "Morrow Bridge stopped answering, so Morrow ended Private Chat. Close the Private Chat drawer if it is still open, then ask the assistant to start Private Chat again.", "bridge_outcome_unknown"],
+    ["bridge_request_capacity", "Morrow Bridge is busy with its current requests. Ask the assistant to start Private Chat again after they finish.", "bridge_request_capacity"],
+    ["private_chat_busy", "Another Private Chat is already open in Morrow Bridge. Close that Private Chat drawer, then ask the assistant to start Private Chat again.", "private_chat_busy"],
+    ["private_chat_scope_changed", "Morrow Bridge could not continue this Private Chat. Close the Private Chat drawer if it is still open, then ask the assistant to start Private Chat again.", undefined],
+    ["", "Morrow Bridge could not continue this Private Chat. Close the Private Chat drawer if it is still open, then ask the assistant to start Private Chat again.", undefined],
+  ])("names the Bridge's %j reason instead of a validation failure", async (code, text, sourceCode) => {
+    const runtime = {
+      catalog: { tools: [] },
+      config: { upstreams: [] },
+      redactMcpEgress: async (value: JsonObject) => value,
+      privateChatExchange: async () => { throw new PrivateChatBridgeProblemError(code); },
+    } as unknown as GatewayRuntime;
+    const client = new Client({ name: "Codex", version: "1" }, { capabilities: { sampling: {} }, versionNegotiation: { mode: { pin: "2026-07-28" } } });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const server = serveStdio(() => createMorrowServer(runtime), { transport: b });
+    await client.connect(a);
+    try {
+      const result = await client.callTool({ name: "morrow_private_chat", arguments: {} }, { allowInputRequired: true });
+      expect(result.isError).toBe(true);
+      expect((result.content as { text: string }[])[0]!.text).toBe(`Private Chat unavailable. ${text}`);
+      expect(result.structuredContent).toEqual({ schema: "morrow.problem.v1", code: "private_chat_unavailable", ...(sourceCode ? { sourceCode } : {}) });
+    } finally { await client.close(); await server.close(); }
+  });
+
+  it("keeps the validation sentence for a relay result Morrow could not validate", async () => {
+    const runtime = {
+      catalog: { tools: [] },
+      config: { upstreams: [] },
+      redactMcpEgress: async (value: JsonObject) => value,
+      privateChatExchange: async () => { throw new Error("The Private Chat relay returned an invalid protected message."); },
+    } as unknown as GatewayRuntime;
+    const client = new Client({ name: "Codex", version: "1" }, { capabilities: { sampling: {} }, versionNegotiation: { mode: { pin: "2026-07-28" } } });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const server = serveStdio(() => createMorrowServer(runtime), { transport: b });
+    await client.connect(a);
+    try {
+      const result = await client.callTool({ name: "morrow_private_chat", arguments: {} }, { allowInputRequired: true });
+      expect(result.isError).toBe(true);
+      expect((result.content as { text: string }[])[0]!.text).toBe("Private Chat unavailable. Morrow could not validate the local relay or assistant response.");
+      expect(result.structuredContent).toEqual({ schema: "morrow.problem.v1", code: "private_chat_unavailable" });
     } finally { await client.close(); await server.close(); }
   });
 

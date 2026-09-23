@@ -4,9 +4,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { BridgeCommand } from "@morrow/bridge-protocol";
 import type { JsonObject } from "@morrow/contracts";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { describe, expect, it, vi } from "vitest";
 import { parseGatewayConfig } from "../src/config.js";
-import { GatewayRuntime, PrivateChatWaitEndedError } from "../src/runtime.js";
+import { GatewayRuntime, PrivateChatBridgeProblemError, PrivateChatWaitEndedError } from "../src/runtime.js";
+import { createMorrowServer } from "../src/server.js";
 import { buildLocalCanvasConfig } from "../../client-config/src/index.js";
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
 import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
@@ -197,6 +200,62 @@ describe("Private Chat at its message limit", () => {
         schema: "morrow.private-chat.exchange.v1", action: "reply_at_limit", sessionId: "session-12345678", assistantName: "Desktop assistant",
         assistantReply: "Student A1 has until Friday.", sourceBindingId: SOURCE_BINDING_ID, courseId: "2",
       }]);
+    } finally { await bridge?.close(); await runtime.close(); rmSync(directory, { recursive: true, force: true }); }
+  }, 30_000);
+});
+
+// The Bridge's own reason reaches the tool, so the educator is told what to fix instead of a
+// validation failure that never happened.
+describe("Private Chat when Morrow Bridge cannot relay it", () => {
+  it("names Morrow Bridge as not connected when Chrome has no Bridge connected", async () => {
+    const root = resolve("../..");
+    const directory = mkdtempSync(join(tmpdir(), "morrow-private-chat-no-bridge-"));
+    const port = await availablePort();
+    const runtime = await GatewayRuntime.connect(connectorConfig(root, directory, port));
+    const client = new Client({ name: "VS Code", version: "1" }, { capabilities: { sampling: {} }, versionNegotiation: { mode: "legacy" } });
+    let sampled = 0;
+    client.setRequestHandler("sampling/createMessage", async () => {
+      sampled += 1;
+      return { model: "local-test", role: "assistant", content: { type: "text", text: "ok" } };
+    });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const server = serveStdio(() => createMorrowServer(runtime), { transport: b });
+    try {
+      const refused = runtime.privateChatExchange({
+        schema: "morrow.private-chat.exchange.v1", action: "listen", sessionId: "session-12345678", assistantName: "Desktop assistant",
+      });
+      await expect(refused).rejects.toBeInstanceOf(PrivateChatBridgeProblemError);
+      await expect(refused).rejects.toMatchObject({ code: "bridge_unavailable" });
+
+      await client.connect(a);
+      const result = await client.callTool({ name: "morrow_private_chat", arguments: {} });
+      expect(result.isError).toBe(true);
+      expect((result.content as { text: string }[])[0]!.text).toBe(
+        "Private Chat unavailable. Morrow Bridge is not connected to Morrow. Open Chrome and open the Morrow Bridge popup, which shows the step that connects it. Then ask the assistant to start Private Chat again.",
+      );
+      expect(result.structuredContent).toEqual({ schema: "morrow.problem.v1", code: "private_chat_unavailable", sourceCode: "bridge_unavailable" });
+      expect(sampled).toBe(0);
+    } finally { await client.close(); await server.close(); await runtime.close(); rmSync(directory, { recursive: true, force: true }); }
+  }, 30_000);
+
+  it("carries the Bridge's reason when another Private Chat is already open", async () => {
+    const root = resolve("../..");
+    const directory = mkdtempSync(join(tmpdir(), "morrow-private-chat-busy-"));
+    const port = await availablePort();
+    const catalogDigest = bridgeCatalogDigestForTests(root);
+    const runtime = await GatewayRuntime.connect(connectorConfig(root, directory, port));
+    let bridge: BridgeTestClient | undefined;
+    try {
+      bridge = await connectBridgeTestClient({ port, token: TOKEN, extensionId: EXTENSION_ID, catalogDigest, bindings: [{ ...BINDING, catalogDigest }] });
+      bridge.onCommand((command: BridgeCommand) => {
+        if (command.kind !== "private_chat_exchange") return;
+        bridge?.respondProblem(command, { schema: "morrow.bridge.problem.v1", code: "private_chat_busy", message: "Another Private Chat is already open.", recoverable: true });
+      });
+      const refused = runtime.privateChatExchange({
+        schema: "morrow.private-chat.exchange.v1", action: "listen", sessionId: "session-12345678", assistantName: "Desktop assistant",
+      });
+      await expect(refused).rejects.toBeInstanceOf(PrivateChatBridgeProblemError);
+      await expect(refused).rejects.toMatchObject({ code: "private_chat_busy" });
     } finally { await bridge?.close(); await runtime.close(); rmSync(directory, { recursive: true, force: true }); }
   }, 30_000);
 });

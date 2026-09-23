@@ -448,6 +448,16 @@ export class PrivateChatWaitEndedError extends Error {
   }
 }
 
+/**
+ * The connector answered a Private Chat exchange with Morrow Bridge's reason instead of a message,
+ * for example no Bridge connected. `code` is that reason's code, or "" when it named none.
+ */
+export class PrivateChatBridgeProblemError extends Error {
+  constructor(readonly code: string) {
+    super("private_chat_bridge_problem");
+  }
+}
+
 /** A selected Edit category names an action this gateway cannot invoke. */
 export class EditCategoryUnavailableError extends Error {
   constructor(readonly categoryId: string, readonly reason: string) {
@@ -4045,6 +4055,9 @@ export class GatewayRuntime {
       if (!result || result.schema !== "morrow.private-chat.exchange.v1") throw new Error("The Private Chat relay returned an invalid result.");
       if (result.status === "error" && isJsonObject(result.problem) && result.problem.code === "private_chat_wait_expired") {
         throw new PrivateChatWaitEndedError();
+      }
+      if (result.status === "error") {
+        throw new PrivateChatBridgeProblemError(isJsonObject(result.problem) && typeof result.problem.code === "string" ? result.problem.code : "");
       }
       if (result.status === "closed" && Object.keys(result).every((key) => ["schema", "status"].includes(key))) return result;
       if (input.action === "reply_at_limit") throw new Error("The Private Chat relay did not end the chat at its limit.");

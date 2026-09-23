@@ -13,7 +13,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
-import { PrivateChatWaitEndedError, type GatewayRuntime } from "./runtime.js";
+import { PrivateChatBridgeProblemError, PrivateChatWaitEndedError, type GatewayRuntime } from "./runtime.js";
 
 const inputSchema = z.strictObject({});
 const sampleSchema = z.object({
@@ -72,6 +72,16 @@ export class PrivateChatContinuationLedger {
 }
 
 class PrivateChatError extends Error {}
+
+/** The step for each Morrow Bridge reason an educator can act on. */
+const BRIDGE_PROBLEM_TEXT: Readonly<Record<string, string>> = Object.freeze({
+  bridge_unavailable: "Morrow Bridge is not connected to Morrow. Open Chrome and open the Morrow Bridge popup, which shows the step that connects it. Then ask the assistant to start Private Chat again.",
+  bridge_port_in_use: "Another Morrow is already connected to Morrow Bridge, so this Morrow cannot open Private Chat. Close the other Morrow, or use one Morrow for all your assistants.",
+  bridge_outcome_unknown: "Morrow Bridge stopped answering, so Morrow ended Private Chat. Close the Private Chat drawer if it is still open, then ask the assistant to start Private Chat again.",
+  bridge_request_capacity: "Morrow Bridge is busy with its current requests. Ask the assistant to start Private Chat again after they finish.",
+  private_chat_busy: "Another Private Chat is already open in Morrow Bridge. Close that Private Chat drawer, then ask the assistant to start Private Chat again.",
+});
+const BRIDGE_PROBLEM_OTHER_TEXT = "Morrow Bridge could not continue this Private Chat. Close the Private Chat drawer if it is still open, then ask the assistant to start Private Chat again.";
 class PrivateChatReplyTimeoutError extends Error {}
 function requireChat(value: unknown, message: string): asserts value {
   if (!value) throw new PrivateChatError(message);
@@ -277,13 +287,15 @@ export function registerPrivateChatTool(
         state = { ...state, messages: [...state.messages, { role: "user", text: next.protectedText }] };
       }
     } catch (error) {
+      const bridgeCode = error instanceof PrivateChatBridgeProblemError && Object.hasOwn(BRIDGE_PROBLEM_TEXT, error.code) ? error.code : undefined;
       return {
         isError: true,
         content: [{ type: "text", text: `Private Chat unavailable. ${error instanceof PrivateChatError ? error.message
           : error instanceof PrivateChatWaitEndedError ? "No message was sent in time, so Morrow stopped waiting and cleared the drawer. Ask the assistant to start Private Chat again."
             : error instanceof PrivateChatReplyTimeoutError ? `The assistant did not reply within ${LEGACY_REPLY_TIMEOUT_MS / 60_000} minutes, so Morrow stopped Private Chat. Close the Private Chat drawer, then ask the assistant to start Private Chat again.`
-              : "Morrow could not validate the local relay or assistant response."}` }],
-        structuredContent: { schema: "morrow.problem.v1", code: "private_chat_unavailable" },
+              : error instanceof PrivateChatBridgeProblemError ? (bridgeCode ? BRIDGE_PROBLEM_TEXT[bridgeCode] : BRIDGE_PROBLEM_OTHER_TEXT)
+                : "Morrow could not validate the local relay or assistant response."}` }],
+        structuredContent: { schema: "morrow.problem.v1", code: "private_chat_unavailable", ...(bridgeCode ? { sourceCode: bridgeCode } : {}) },
       };
     }
   });
