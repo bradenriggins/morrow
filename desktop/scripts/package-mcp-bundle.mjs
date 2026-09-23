@@ -190,7 +190,10 @@ function assertObjectKeys(value, keys, description) {
 }
 
 export function captureBridgeRelease(extensionRoot = resolve(ROOT, "connector", "extension")) {
-  const sourcePaths = regularFiles(extensionRoot).map((file) => relative(extensionRoot, file).replaceAll("\\", "/")).sort();
+  // `pnpm run setup` writes this marker into a source checkout so a source Bridge can pair. It is
+  // that computer's secret, never part of a release.
+  const sourcePaths = regularFiles(extensionRoot).map((file) => relative(extensionRoot, file).replaceAll("\\", "/"))
+    .filter((path) => path !== "morrow-bridge-active-folder.json").sort();
   exactList(sourcePaths, BRIDGE_SOURCE_FILES, "Morrow Bridge release file set");
   const source = BRIDGE_SOURCE_FILES.map((path) => {
     const file = resolve(extensionRoot, path);

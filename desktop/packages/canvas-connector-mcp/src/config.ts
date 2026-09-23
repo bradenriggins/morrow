@@ -3,6 +3,7 @@ import { closeSync, constants, fsyncSync, linkSync, lstatSync, openSync, unlinkS
 import { chmod, lstat, mkdir, open, realpath, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import type { BridgePairingSecret } from "@morrow/bridge-loopback";
 import { isJsonObject } from "@morrow/contracts";
 import {
   canonicalPrivateStateFilePath,
@@ -23,6 +24,11 @@ export interface CanvasConnectorConfig {
   readonly runtimeRevision: string;
   readonly allowedExtensionIds: readonly string[];
   readonly approveExtensionId: (extensionId: string) => Promise<void>;
+  /**
+   * The active-folder secret of the Bridge folder Morrow set up, read fresh from the Bridge
+   * folder record beside the connector state, or null when there is none to trust.
+   */
+  readonly pairingSecret: () => Promise<BridgePairingSecret | null>;
 }
 
 interface ConnectorState {
@@ -48,6 +54,10 @@ interface ExactPrivateBytes {
 
 const stateQueues = new Map<string, Promise<void>>();
 const MAX_STATE_BYTES = 64 * 1024;
+// Morrow Desktop records the Bridge folder it set up, with that folder's active-folder
+// challenge, in this file of the State folder the connector state lives in.
+const BRIDGE_FOLDER_RECORD = "bridge-installation.json";
+const MAX_BRIDGE_FOLDER_RECORD_BYTES = 1024 * 1024;
 const MAX_LOCK_BYTES = 4 * 1024;
 
 async function withStateQueue<T>(path: string, work: () => Promise<T>): Promise<T> {
@@ -291,6 +301,22 @@ async function readState(path: string): Promise<ConnectorState> {
   return parseState(JSON.parse(decodeExactUtf8(admitted.bytes, "connector state file")) as unknown);
 }
 
+async function readPairingSecret(path: string): Promise<BridgePairingSecret | null> {
+  try {
+    const admitted = await readPrivateBytes(path, MAX_BRIDGE_FOLDER_RECORD_BYTES, "Bridge folder record");
+    const record = JSON.parse(decodeExactUtf8(admitted.bytes, "Bridge folder record")) as unknown;
+    if (!isJsonObject(record) || !isJsonObject(record.activeFolderChallenge)) return null;
+    const challenge = record.activeFolderChallenge;
+    const extensionId = record.extensionId;
+    if (typeof extensionId !== "string" || !/^[a-p]{32}$/.test(extensionId) || challenge.extensionId !== extensionId
+      || typeof challenge.challengeId !== "string" || !/^[A-Za-z0-9._-]{16,128}$/.test(challenge.challengeId)
+      || typeof challenge.nonce !== "string" || !/^[A-Za-z0-9._-]{32,512}$/.test(challenge.nonce)) return null;
+    return { challengeId: challenge.challengeId, nonce: challenge.nonce, extensionId };
+  } catch {
+    return null;
+  }
+}
+
 async function persist(path: string, state: ConnectorState): Promise<void> {
   const temporary = `${path}.tmp-${process.pid}-${randomBytes(12).toString("hex")}`;
   let prepared: Stats | null = null;
@@ -344,6 +370,7 @@ export async function loadCanvasConnectorConfig(
     port: exactPort(environment.MORROW_CANVAS_CONNECTOR_PORT || state.port),
     runtimeRevision: String(environment.MORROW_CANVAS_CONNECTOR_REVISION || "1.0.0-rc.2").trim(),
     allowedExtensionIds,
+    pairingSecret: async () => await readPairingSecret(join(dirname(statePath), BRIDGE_FOLDER_RECORD)),
     approveExtensionId: async (extensionId: string) => {
       await withStateTransaction(statePath, async () => {
         const latest = await loadOrCreate(statePath);

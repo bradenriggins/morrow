@@ -422,6 +422,7 @@ export class CanvasConnectorRuntime {
       allowedExtensionIds: config.allowedExtensionIds,
       port: config.port,
       pairingEnabled: true,
+      pairingSecret: config.pairingSecret,
       onPairApproved: config.approveExtensionId,
       onActivated: () => runtime?.resendUiState(),
     });

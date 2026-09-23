@@ -8,6 +8,7 @@ import {
   MAX_BRIDGE_MESSAGE_BYTES,
   MIN_BRIDGE_TOKEN_LENGTH,
   bridgeAuthenticationProofPayload,
+  bridgePairingProofPayload,
   createBridgeProblem,
   matchesBridgeEditPermission,
   normalizeBridgeEditPolicySet,
@@ -44,7 +45,6 @@ import {
 } from "@morrow/bridge-protocol";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
-import { brandHead, brandHeader, serveBrandAsset } from "./brand.js";
 export { brandHead, brandHeader, serveBrandAsset } from "./brand.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
@@ -53,6 +53,8 @@ const DEFAULT_CALL_TIMEOUT_MS = 45_000;
 const DEFAULT_HEARTBEAT_MS = 20_000;
 const DEFAULT_SHUTDOWN_GRACE_MS = 250;
 const MAX_PAIRING_REQUESTS = 32;
+// The Bridge confirms a pairing right after it asks for one, in the same Connect Morrow step.
+const PAIRING_TTL_MS = 2 * 60_000;
 const MAX_PENDING_REQUESTS = 64;
 const MAX_PENDING_COMMAND_BYTES = 8 * 1024 * 1024;
 /**
@@ -110,6 +112,12 @@ export interface LoopbackBridgeOptions {
   /** How many sent effect receipts this bridge remembers. Default 20000. */
   readonly writeReceiptCapacity?: number;
   readonly pairingEnabled?: boolean;
+  /**
+   * The secret in the active-folder marker of the Bridge folder Morrow set up, read fresh for
+   * each pairing. A pairing is confirmed only by a Bridge that signs with it. With no secret,
+   * nothing pairs.
+   */
+  readonly pairingSecret?: () => BridgePairingSecret | null | Promise<BridgePairingSecret | null>;
   readonly onPairApproved?: (extensionId: string) => void | Promise<void>;
   /**
    * Runs each time a Bridge connection becomes the active one, after its ready
@@ -117,6 +125,12 @@ export interface LoopbackBridgeOptions {
    * the owner resends that state here.
    */
   readonly onActivated?: () => void;
+}
+
+export interface BridgePairingSecret {
+  readonly challengeId: string;
+  readonly nonce: string;
+  readonly extensionId: string;
 }
 
 export interface BridgeInvocation {
@@ -189,9 +203,8 @@ interface ActiveClient {
 interface PairingRequest {
   readonly pairingId: string;
   readonly extensionId: string;
-  readonly createdAt: number;
+  readonly challenge: string;
   readonly expiresAt: number;
-  status: "pending" | "approved" | "denied";
 }
 
 export class BridgeUnavailableError extends Error {
@@ -381,12 +394,12 @@ export class LoopbackBridgeServer {
   private readonly shutdownGraceMs: number;
   private readonly allowMissingOriginForTests: boolean;
   private readonly pairingEnabled: boolean;
+  private readonly pairingSecret: (() => BridgePairingSecret | null | Promise<BridgePairingSecret | null>) | undefined;
   private readonly onPairApproved: ((extensionId: string) => void | Promise<void>) | undefined;
   private readonly onActivated: (() => void) | undefined;
   private readonly pending = new Map<string, PendingRequest>();
   private pendingCommandBytes = 0;
   private readonly pairingRequests = new Map<string, PairingRequest>();
-  private readonly pairingDecisions = new Set<string>();
   /**
    * Every effect receipt this process has sent, held to `writeReceiptCapacity`
    * entries. Nothing is ever removed: a forgotten receipt would be accepted a
@@ -428,6 +441,7 @@ export class LoopbackBridgeServer {
     this.writeReceiptCapacity = exactCapacity(options.writeReceiptCapacity);
     this.allowMissingOriginForTests = options.allowMissingOriginForTests === true;
     this.pairingEnabled = options.pairingEnabled === true;
+    this.pairingSecret = options.pairingSecret;
     this.onPairApproved = options.onPairApproved;
     this.onActivated = options.onActivated;
 
@@ -535,19 +549,15 @@ export class LoopbackBridgeServer {
     return `http://${LOOPBACK_HOST}:${this.listeningPort}${path}`;
   }
 
-  private pairingPage(request: PairingRequest): string {
-    const extension = request.extensionId.replace(/[<>&"']/g, "");
-    const pending = request.status === "pending";
-    const title = pending ? "Connect Morrow to Chrome" : request.status === "approved" ? "Chrome connection approved" : "Connection cancelled";
-    const content = pending
-      ? `<p>Allow Morrow in your assistant to work with Canvas and Moodle through this Chrome extension.</p><p>Your learning-platform password and sign-in details stay in Chrome. You choose which Canvas or Moodle address to connect next.</p><div class="notice">Only continue if you started this from Morrow Bridge. Connecting does not approve changes to your courses.</div><details><summary>About this connection</summary><p class="details-help">This connection stays on your computer. You can disconnect in Morrow Bridge at any time.</p><p class="details-help">Extension ID: ${extension}</p></details><form class="actions" method="post" action="${BRIDGE_PATH}/pair/${request.pairingId}/decision"><button name="decision" value="approve">Allow connection</button><button class="secondary" name="decision" value="deny">Cancel connection</button></form>`
-      : `<p>${request.status === "approved" ? "Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge identifies the platform and shows Connect this course." : "Morrow did not connect through this request. You can start again from Morrow Bridge when you are ready."}</p>`;
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Morrow</title>${brandHead}</head><body><main class="wrap pairing">${brandHeader}<article class="card"><section class="outcome"><h1>${title}</h1>${content}</section></article><p class="foot">This page opens only on your computer.</p></main></body></html>`;
-  }
-
-  private pairingUnavailable(response: ServerResponse, status: number): void {
-    response.writeHead(status, this.responseHeaders("text/html; charset=utf-8"));
-    response.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Start a new connection · Morrow</title>${brandHead}</head><body><main class="wrap pairing">${brandHeader}<article class="card"><section class="outcome"><h1>Start a new connection</h1><p>This connection request has expired or is no longer available. Open Morrow Bridge and select Connect Morrow to try again.</p></section></article><p class="foot">This page opens only on your computer.</p></main></body></html>`);
+  /** The current folder secret, or null when Morrow has none or cannot read it. */
+  private async currentPairingSecret(): Promise<BridgePairingSecret | null> {
+    try {
+      const secret = await this.pairingSecret?.();
+      return secret && typeof secret.challengeId === "string" && typeof secret.nonce === "string"
+        && typeof secret.extensionId === "string" && secret.nonce.length >= 32 ? secret : null;
+    } catch {
+      return null;
+    }
   }
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -557,14 +567,13 @@ export class LoopbackBridgeServer {
       return;
     }
     const url = new URL(request.url || "/", `http://${host}`);
-    if (request.method === "GET" && serveBrandAsset(url.pathname, response)) return;
     this.prunePairings();
     if (request.method === "OPTIONS" && url.pathname.startsWith(`${BRIDGE_PATH}/pair`)) {
       const identity = this.pairingOrigin(request);
       if (!identity) return this.json(response, 403, { error: "extension_origin_required" });
       response.writeHead(204, {
         ...this.responseHeaders("application/json", identity.origin),
-        "access-control-allow-methods": "GET, POST, OPTIONS",
+        "access-control-allow-methods": "POST, OPTIONS",
         "access-control-allow-headers": "content-type",
         "access-control-max-age": "600",
       });
@@ -574,129 +583,84 @@ export class LoopbackBridgeServer {
     if (request.method === "POST" && url.pathname === `${BRIDGE_PATH}/pair`) {
       const identity = this.pairingOrigin(request);
       if (!identity) return this.json(response, 403, { error: "extension_origin_required" });
+      let body: unknown;
       try {
-        const body = await this.requestBody(request);
-        if (!isJsonObject(body) || body.extensionId !== identity.extensionId
-          || body.catalogDigest !== this.expectedCatalogDigest
-          || body.runtimeRevision !== this.expectedRuntimeRevision) {
-          return this.json(response, 403, { error: "connector_identity_refused" }, identity.origin);
-        }
-        for (const [pairingId, pairing] of this.pairingRequests) {
-          if (pairing.extensionId === identity.extensionId && pairing.status !== "pending") {
-            this.pairingRequests.delete(pairingId);
-          }
-        }
-        const existing = [...this.pairingRequests.values()]
-          .find((pairing) => pairing.extensionId === identity.extensionId && pairing.status === "pending");
-        if (existing) {
-          return this.json(response, 200, {
-            schema: "morrow.bridge.pairing.v1",
-            pairingId: existing.pairingId,
-            status: existing.status,
-            approvalUrl: this.pairingUrl(`${BRIDGE_PATH}/pair/${existing.pairingId}`),
-            statusUrl: this.pairingUrl(`${BRIDGE_PATH}/pair/${existing.pairingId}/status`),
-            expiresAt: existing.expiresAt,
-          }, identity.origin);
-        }
-        if (this.pairingRequests.size >= MAX_PAIRING_REQUESTS) {
-          return this.json(response, 429, { error: "pairing_limit_reached" }, identity.origin);
-        }
-        const pairingId = randomUUID();
-        const createdAt = Date.now();
-        const pairing: PairingRequest = { pairingId, extensionId: identity.extensionId, createdAt, expiresAt: createdAt + 10 * 60_000, status: "pending" };
-        this.pairingRequests.set(pairingId, pairing);
-        return this.json(response, 201, {
-          schema: "morrow.bridge.pairing.v1",
-          pairingId,
-          status: pairing.status,
-          approvalUrl: this.pairingUrl(`${BRIDGE_PATH}/pair/${pairingId}`),
-          statusUrl: this.pairingUrl(`${BRIDGE_PATH}/pair/${pairingId}/status`),
-          expiresAt: pairing.expiresAt,
-        }, identity.origin);
+        body = await this.requestBody(request);
       } catch {
         return this.json(response, 400, { error: "invalid_request" }, identity.origin);
       }
-    }
-    const match = new RegExp(`^${BRIDGE_PATH}/pair/([0-9a-f-]{36})(?:/(status|decision))?$`).exec(url.pathname);
-    if (!match) return this.json(response, 404, { error: "not_found" });
-    const pairing = this.pairingRequests.get(match[1]!);
-    if (!pairing) {
-      if (match[2] !== "status" && String(request.headers.accept || "").includes("text/html")) return this.pairingUnavailable(response, 404);
-      return this.json(response, 404, { error: "pairing_not_found" });
-    }
-    if (match[2] === "status" && (request.method === "GET" || request.method === "POST")) {
-      const identity = this.pairingOrigin(request);
-      if (!identity || identity.extensionId !== pairing.extensionId) return this.json(response, 403, { error: "extension_identity_refused" });
-      if (request.method === "POST") {
-        try {
-          const body = await this.requestBody(request);
-          if (!isJsonObject(body) || body.extensionId !== identity.extensionId) {
-            return this.json(response, 403, { error: "extension_identity_refused" }, identity.origin);
-          }
-        } catch {
-          return this.json(response, 400, { error: "invalid_request" }, identity.origin);
-        }
+      if (!isJsonObject(body) || body.extensionId !== identity.extensionId
+        || body.catalogDigest !== this.expectedCatalogDigest
+        || body.runtimeRevision !== this.expectedRuntimeRevision) {
+        return this.json(response, 403, { error: "connector_identity_refused" }, identity.origin);
       }
-      return this.json(response, 200, {
-        schema: "morrow.bridge.pairing-status.v1",
-        status: pairing.status,
+      const secret = await this.currentPairingSecret();
+      if (!secret) return this.json(response, 409, { error: "pairing_folder_unconfirmed" }, identity.origin);
+      if (secret.extensionId !== identity.extensionId) {
+        return this.json(response, 403, { error: "extension_identity_refused" }, identity.origin);
+      }
+      if (this.pairingRequests.size >= MAX_PAIRING_REQUESTS) {
+        return this.json(response, 429, { error: "pairing_limit_reached" }, identity.origin);
+      }
+      // Each request is its own pairing. One requester can never join another's.
+      const pairing: PairingRequest = {
+        pairingId: randomUUID(),
+        extensionId: identity.extensionId,
+        challenge: randomBytes(32).toString("base64url"),
+        expiresAt: Date.now() + PAIRING_TTL_MS,
+      };
+      this.pairingRequests.set(pairing.pairingId, pairing);
+      return this.json(response, 201, {
+        schema: "morrow.bridge.pairing.v2",
+        pairingId: pairing.pairingId,
+        challenge: pairing.challenge,
+        confirmUrl: this.pairingUrl(`${BRIDGE_PATH}/pair/${pairing.pairingId}/confirm`),
         expiresAt: pairing.expiresAt,
-        ...(pairing.status === "approved" ? { token: this.expectedToken.toString("utf8") } : {}),
       }, identity.origin);
     }
-    if (!match[2] && request.method === "GET") {
-      response.writeHead(200, this.responseHeaders("text/html; charset=utf-8"));
-      response.end(this.pairingPage(pairing));
-      return;
+    const match = new RegExp(`^${BRIDGE_PATH}/pair/([0-9a-f-]{36})/confirm$`).exec(url.pathname);
+    if (!match || request.method !== "POST") return this.json(response, 404, { error: "not_found" });
+    const identity = this.pairingOrigin(request);
+    if (!identity) return this.json(response, 403, { error: "extension_origin_required" });
+    const pairing = this.pairingRequests.get(match[1]!);
+    if (!pairing || pairing.extensionId !== identity.extensionId) {
+      return this.json(response, 404, { error: "pairing_not_found" }, identity.origin);
     }
-    if (match[2] === "decision" && request.method === "POST") {
-      const origin = String(request.headers.origin || "");
-      if (origin !== `http://${host}`) {
-        if (String(request.headers.accept || "").includes("text/html")) return this.pairingUnavailable(response, 403);
-        return this.json(response, 403, { error: "local_origin_required" });
-      }
-      if (pairing.status !== "pending") {
-        response.writeHead(303, { location: `${BRIDGE_PATH}/pair/${pairing.pairingId}`, "cache-control": "no-store" });
-        response.end();
-        return;
-      }
-      if (this.pairingDecisions.has(pairing.pairingId)) {
-        return this.json(response, 409, { error: "pairing_decision_pending" });
-      }
-      const bytes: Buffer[] = [];
-      let total = 0;
-      for await (const chunk of request) {
-        const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        total += value.byteLength;
-        if (total > 16_384) return this.json(response, 413, { error: "request_too_large" });
-        bytes.push(value);
-      }
-      let decision: string | null;
-      try {
-        decision = new URLSearchParams(strictUtf8(Buffer.concat(bytes))).get("decision");
-      } catch {
-        return this.json(response, 400, { error: "invalid_decision" });
-      }
-      if (!["approve", "deny"].includes(decision || "")) return this.json(response, 400, { error: "invalid_decision" });
-      if (decision === "approve") {
-        this.pairingDecisions.add(pairing.pairingId);
-        try {
-          await this.onPairApproved?.(pairing.extensionId);
-        } catch {
-          return this.json(response, 500, { error: "pairing_approval_failed" });
-        } finally {
-          this.pairingDecisions.delete(pairing.pairingId);
-        }
-        this.allowedExtensionIds.add(pairing.extensionId);
-        pairing.status = "approved";
-      } else {
-        pairing.status = "denied";
-      }
-      response.writeHead(303, { location: `${BRIDGE_PATH}/pair/${pairing.pairingId}`, "cache-control": "no-store" });
-      response.end();
-      return;
+    // One confirmation per pairing, right or wrong, so a proof cannot be guessed at.
+    this.pairingRequests.delete(pairing.pairingId);
+    let body: unknown;
+    try {
+      body = await this.requestBody(request);
+    } catch {
+      return this.json(response, 400, { error: "invalid_request" }, identity.origin);
     }
-    this.json(response, 405, { error: "method_not_allowed" });
+    const secret = await this.currentPairingSecret();
+    if (!secret) return this.json(response, 409, { error: "pairing_folder_unconfirmed" }, identity.origin);
+    const expected = createHmac("sha256", Buffer.from(secret.nonce, "utf8")).update(bridgePairingProofPayload({
+      pairingId: pairing.pairingId,
+      challenge: pairing.challenge,
+      extensionId: pairing.extensionId,
+      activeFolderChallengeId: secret.challengeId,
+    })).digest();
+    const proof = isJsonObject(body) && typeof body.proof === "string" && /^[A-Za-z0-9_-]{43}$/.test(body.proof)
+      ? Buffer.from(body.proof, "base64url")
+      : null;
+    if (!isJsonObject(body) || body.extensionId !== pairing.extensionId || secret.extensionId !== pairing.extensionId
+      || body.activeFolderChallengeId !== secret.challengeId
+      || !proof || proof.length !== expected.length || !timingSafeEqual(proof, expected)) {
+      return this.json(response, 403, { error: "pairing_proof_refused" }, identity.origin);
+    }
+    try {
+      await this.onPairApproved?.(pairing.extensionId);
+    } catch {
+      return this.json(response, 500, { error: "pairing_approval_failed" }, identity.origin);
+    }
+    this.allowedExtensionIds.add(pairing.extensionId);
+    return this.json(response, 200, {
+      schema: "morrow.bridge.pairing-result.v2",
+      status: "approved",
+      token: this.expectedToken.toString("utf8"),
+    }, identity.origin);
   }
 
   async start(): Promise<{ host: typeof LOOPBACK_HOST; port: number; path: typeof BRIDGE_PATH }> {
@@ -768,8 +732,8 @@ export class LoopbackBridgeServer {
             socket.close(4403, "bridge_identity_refused");
             return;
           }
-          // A different build is fixed by an update and a reload, not by a new connection approval,
-          // so the Bridge is told which one it is. POST /pair already refuses the same mismatch.
+          // A different build is fixed by an update and a reload, not by pairing again, so the
+          // Bridge is told which one it is. POST /pair already refuses the same mismatch.
           if (request.runtimeRevision !== this.expectedRuntimeRevision || request.catalogDigest !== this.expectedCatalogDigest) {
             socket.close(4403, "bridge_version_mismatch");
             return;

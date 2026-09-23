@@ -40,7 +40,7 @@ const statuses = [
 // The primary button's words and what a click on it does come from one decision, so a label can
 // never promise one step while the click takes another.
 test("every primary label names the one action a click on it takes", () => {
-  const actionFor = { "Try again": "retry", "Open setup guide": "open_setup", "Open the approval page": "pair", "Reconnect Morrow": "pair",
+  const actionFor = { "Try again": "retry", "Open setup guide": "open_setup", "Reconnect Morrow": "pair",
     "Connect Morrow": "pair", "Choose courses": "choose_courses", "Waiting for your assistant": "wait", "Connect this course": "connect_course", "": "none" };
   const cases = [
     ...statuses.map((status) => [status, null]),
@@ -54,7 +54,9 @@ test("every primary label names the one action a click on it takes", () => {
     assert.equal(action.label, primaryLabel(status, detected), JSON.stringify(status));
     assert.equal(action.id, actionFor[action.label], `${action.label}: ${JSON.stringify(status)}`);
   }
-  assert.equal(primaryAction({ paired: true, pairing: true, connected: false, bindings: [], siteAnchors: [] }, "canvas").id, "pair");
+  // Connect Morrow pairs in one step, so no status ever waits on an approval page. A status that
+  // still carries an older pairing flag is read by its other fields alone.
+  assert.equal(primaryAction({ paired: true, pairing: true, connected: false, bindings: [], siteAnchors: [] }, "canvas").id, "wait");
 });
 
 test("a connected socket with an unhealthy runtime asks for a Bridge reload", () => {
@@ -227,10 +229,11 @@ test("no popup text calls this product a preview", () => {
 test("known connection states keep their own value, label, and detail", () => {
   assert.equal(statusValue(statuses[1]), "Not connected");
   assert.equal(primaryLabel(statuses[1]), "Connect Morrow");
-  assert.equal(statusValue(statuses[2]), "Waiting for approval");
-  // A closed approval tab can always be opened again.
-  assert.equal(primaryLabel(statuses[2]), "Open the approval page");
+  // Pairing has no waiting state: a status that still carries an older pairing flag reads as unpaired.
+  assert.equal(statusValue(statuses[2]), "Not connected");
+  assert.equal(primaryLabel(statuses[2]), "Connect Morrow");
   assert.equal(controlState(statuses[2]).primaryDisabled, false);
+  assert.match(detailText(statuses[1]), /Connecting does not approve changes to your courses\.$/);
   assert.equal(statusValue(statuses[3]), "Connecting…");
   assert.equal(controlState(statuses[3]).primaryBusy, true);
   assert.equal(statusValue(statuses[4]), "Not available");

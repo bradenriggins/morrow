@@ -173,14 +173,13 @@ test("every Morrow app setup state cites the line its own title is written on", 
 
 const anchor = (fields = {}) => ({ provider: "canvas", runtimeVerified: true, lastSeenAt: 1, siteAnchorId: "site-1", ...fields });
 const binding = (fields = {}) => ({ courseName: "Biology 101", runtimeVerified: true, lastSeenAt: 1, ...fields });
-const connection = { paired: false, pairing: false, connecting: false, connected: false, bindings: [], siteAnchors: [] };
+const connection = { paired: false, connecting: false, connected: false, bindings: [], siteAnchors: [] };
 const healthyPopup = { paired: true, connected: true, runtimeHealthy: true };
 
 // One state per branch of the popup's detail text.
 const POPUP_STATES = new Map([
   ["read-failed", { status: null }],
   ["not-paired", { status: { ...connection } }],
-  ["pairing", { status: { ...connection, pairing: true } }],
   ["connecting", { status: { ...connection, paired: true, connecting: true } }],
   ["paired-not-connected", { status: { ...connection, paired: true } }],
   ["runtime-mismatch", { status: { ...connection, paired: true, versionMismatch: true } }],
@@ -241,7 +240,7 @@ const healthy = { paired: true, connected: true, runtimeHealthy: true };
 const GUIDE_STATES = new Map([
   ["read-failed", null],
   ["not-paired", { ...connection }],
-  ["pairing", { ...connection, pairing: true }],
+  ["authentication-failed", { ...connection, paired: true, authenticationFailed: true }],
   ["connecting", { ...connection, paired: true, connecting: true }],
   ["paired-not-connected", { ...connection, paired: true }],
   ["runtime-mismatch", { ...connection, paired: true, versionMismatch: true }],

@@ -4,8 +4,8 @@ export const SETUP_MODE_KEY = "morrowSetupGuideMode";
  * The five checks the setup guide reports, in the order a person completes them.
  * connector/extension/onboarding/onboarding.html renders one list item per id.
  *
- * Morrow Bridge reports only what it can see from Chrome. `assistant` is the connection an
- * assistant approved through Morrow, not the assistant window itself, and `runtime` needs that
+ * Morrow Bridge reports only what it can see from Chrome. `assistant` is the connection the
+ * person made with Connect Morrow, not the assistant window itself, and `runtime` needs that
  * connection before it can compare versions at all.
  */
 export const SETUP_CHECK_IDS = Object.freeze(["assistant", "connection", "runtime", "course", "read"]);
@@ -39,7 +39,6 @@ function platformName(status) {
 function unreadState() {
   return {
     ready: false,
-    pairing: false,
     connecting: false,
     connected: false,
     runtimeHealthy: false,
@@ -48,7 +47,7 @@ function unreadState() {
     readCourse: "",
     open: "",
     checks: [
-      { id: "assistant", done: false, text: "Assistant approval is not checked" },
+      { id: "assistant", done: false, text: "Connection to Morrow is not checked" },
       { id: "connection", done: false, text: "Morrow Bridge connection is not checked" },
       { id: "runtime", done: false, text: "Morrow version is not checked" },
       { id: "course", done: false, text: "Course connection is not checked" },
@@ -73,15 +72,10 @@ function readiness(state) {
     heading: "Ready to use",
     summary: `${state.readyCourses} selected ${state.readyCourses === 1 ? "course is" : "courses are"} ready in this Chrome session. Morrow completed a first read in ${state.readCourse}.`,
   };
-  if (state.pairing) return {
-    tone: "waiting",
-    heading: "Waiting for approval",
-    summary: "Morrow is waiting for you to allow this connection on the Morrow page that opened.",
-  };
   if (state.authenticationFailed) return {
     tone: "attention",
     heading: "Reconnect needed",
-    summary: "Morrow no longer accepts the connection Morrow Bridge saved, so it needs a new approval.",
+    summary: "Morrow no longer accepts the connection Morrow Bridge saved, so it needs to connect again.",
   };
   if (state.connecting) return {
     tone: "waiting",
@@ -107,7 +101,7 @@ function readiness(state) {
 
 export function setupGuideState(status) {
   const known = Boolean(status) && typeof status === "object";
-  const state = { canOpenApproval: false, canReconnect: false, ...(known ? readState(status) : unreadState()), known };
+  const state = { canReconnect: false, ...(known ? readState(status) : unreadState()), known };
   return { ...state, ...readiness(state) };
 }
 
@@ -116,10 +110,9 @@ function readState(status) {
   const anchors = Array.isArray(status?.siteAnchors) ? status.siteAnchors : [];
   const readyCourses = bindings.filter((binding) => binding?.runtimeVerified === true).length;
   const readySites = anchors.filter((anchor) => anchor?.runtimeVerified === true).length;
-  const pairing = status?.pairing === true;
   // Morrow refused the saved connection (it was reinstalled, or its data was removed), so the
-  // earlier approval no longer counts, and opening Morrow again cannot fix it.
-  const authenticationFailed = !pairing && status?.authenticationFailed === true;
+  // earlier connection no longer counts, and opening Morrow again cannot fix it.
+  const authenticationFailed = status?.authenticationFailed === true;
   const paired = status?.paired === true && !authenticationFailed;
   const connecting = status?.connecting === true;
   const connected = status?.connected === true;
@@ -137,12 +130,10 @@ function readState(status) {
       id: "assistant",
       done: paired,
       text: paired
-        ? "An assistant approved this connection in Morrow. Morrow Bridge sees the connection, not the assistant itself."
+        ? "Morrow Bridge is set up to work with Morrow on this computer. Morrow Bridge sees the connection, not your assistant itself."
         : authenticationFailed
-          ? "Morrow no longer accepts this saved connection, so it needs a new approval"
-        : pairing
-          ? "An assistant approval is waiting on the Morrow page that opened"
-          : "No assistant has approved this connection yet",
+          ? "Morrow no longer accepts this saved connection, so it needs to connect again"
+          : "Morrow Bridge is not set up to work with Morrow yet",
     },
     {
       id: "connection",
@@ -151,11 +142,9 @@ function readState(status) {
         ? "Morrow Bridge is connected to Morrow"
         : versionMismatch
           ? "Morrow Bridge reached Morrow, and Morrow expects a different version"
-          : pairing
-            ? "Morrow Bridge connects after you allow this connection"
-            : connecting
-              ? "Morrow Bridge is connecting to Morrow"
-              : "Morrow Bridge is not connected to Morrow",
+          : connecting
+            ? "Morrow Bridge is connecting to Morrow"
+            : "Morrow Bridge is not connected to Morrow",
     },
     {
       id: "runtime",
@@ -185,10 +174,10 @@ function readState(status) {
   ];
   // "Ready to use" is every check, so a connection that has never read a course is not ready.
   const ready = checks.every((check) => check.done);
-  // The first check that is not complete is the step this guide asks for, unless an approval or a
-  // connection attempt is already open, which is the step in front of the person right now.
+  // The first check that is not complete is the step this guide asks for, unless a connection
+  // attempt is already open, which is the step in front of the person right now.
   const open = checks.find((check) => !check.done)?.id || "";
-  const state = { ready, pairing, authenticationFailed, connecting, connected, runtimeHealthy, readyCourses, readySites, readCourse, open, checks };
+  const state = { ready, authenticationFailed, connecting, connected, runtimeHealthy, readyCourses, readySites, readCourse, open, checks };
 
   if (ready) return {
     ...state,
@@ -196,18 +185,11 @@ function readState(status) {
     detail: "Ask your assistant for a change in your selected course. Each change waits for your review unless you turned on Edit for that kind of change in that course.",
     canOpenSettings: false,
   };
-  if (pairing) return {
-    ...state,
-    title: "Allow connection",
-    detail: "Select Allow connection on the Morrow page that opened. If you closed that page, select Open the approval page.",
-    canOpenSettings: false,
-    canOpenApproval: true,
-  };
   // The same step and words as the Morrow Bridge popup (popup/popup-view.js).
   if (authenticationFailed) return {
     ...state,
     title: "Reconnect Morrow",
-    detail: "Morrow Bridge refused the saved local connection. Select Reconnect Morrow, then approve the new connection in Morrow. Your selected courses stay saved.",
+    detail: "Morrow refused the connection Morrow Bridge saved. Select Reconnect Morrow to connect again. Your selected courses stay saved.",
     canOpenSettings: false,
     canReconnect: true,
   };
@@ -220,7 +202,7 @@ function readState(status) {
   if (open === "assistant") return {
     ...state,
     title: "Open Morrow",
-    detail: "Open Morrow and choose your assistant. Then return to Morrow Bridge, select Connect Morrow, and allow the connection you started.",
+    detail: "Open Morrow and choose your assistant. Then return to Morrow Bridge and select Connect Morrow.",
     canOpenSettings: false,
   };
   if (open === "connection") return {

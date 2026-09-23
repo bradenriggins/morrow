@@ -16,7 +16,6 @@ const statusDot = document.querySelector("#status-dot");
 const nextTitle = document.querySelector("#next-title");
 const nextDetail = document.querySelector("#next-detail");
 const openSettings = document.querySelector("#open-settings");
-const openApproval = document.querySelector("#open-approval");
 const reconnectMorrow = document.querySelector("#reconnect-morrow");
 const quickOpenSettings = document.querySelector("#quick-open-settings");
 const error = document.querySelector("#error");
@@ -58,7 +57,6 @@ function render(status) {
   nextTitle.textContent = state.title;
   nextDetail.textContent = state.detail;
   openSettings.hidden = !state.canOpenSettings;
-  openApproval.hidden = !state.canOpenApproval;
   reconnectMorrow.hidden = !state.canReconnect;
 }
 
@@ -131,19 +129,7 @@ consentAction.addEventListener("click", async () => {
   }
 });
 openSettings.addEventListener("click", () => { void chrome.runtime.openOptionsPage(); });
-// Morrow answers a second connection request with the one already waiting, so this reopens its page.
-openApproval.addEventListener("click", async () => {
-  openApproval.disabled = true;
-  try {
-    await message("morrow_pair");
-    clearError();
-  } catch (cause) {
-    showError(cause);
-  } finally {
-    openApproval.disabled = false;
-  }
-});
-// Morrow refused the saved connection, so this starts a new one for the person to approve in Morrow.
+// Morrow refused the saved connection, so this connects again, in the one step the person selects.
 reconnectMorrow.addEventListener("click", async () => {
   reconnectMorrow.disabled = true;
   try {

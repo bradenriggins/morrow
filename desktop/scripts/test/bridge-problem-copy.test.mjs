@@ -25,7 +25,8 @@ const TECHNICAL_TERMS = /\b(?:MCP|nonce|digest|dispatch|binding|frozen)\b/i;
  * runtime text, which problemCode() names before the copy is read.
  */
 const WORKER_CODES = [
-  "bridge_not_connected", "bridge_pairing_refused", "bridge_version_mismatch", "bridge_request_failed", "connector_catalog_invalid",
+  "bridge_not_connected", "bridge_pairing_refused", "bridge_pairing_folder_unconfirmed", "bridge_pairing_sender_refused",
+  "bridge_version_mismatch", "bridge_request_failed", "connector_catalog_invalid",
   "course_tab_missing", "course_site_access_required", "course_sign_in_required", "blackboard_browser_unsupported",
   "edit_policy_failed", "edit_policy_binding_missing", "edit_policy_binding_stale", "edit_policy_revision_stale",
   "edit_policy_categories_invalid", "edit_policy_sender_refused",

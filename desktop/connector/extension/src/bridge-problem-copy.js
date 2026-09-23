@@ -23,8 +23,18 @@ const COPY = {
   },
   bridge_pairing_refused: {
     title: "Morrow answered but did not start a connection",
-    detail: "The Morrow app on this computer answered Morrow Bridge, and it did not open a new connection approval.",
+    detail: "The Morrow app on this computer answered Morrow Bridge, and it did not start a new connection.",
     action: "Quit and reopen the Morrow app, then select Connect Morrow again.",
+  },
+  bridge_pairing_folder_unconfirmed: {
+    title: "Morrow could not confirm this copy of Morrow Bridge",
+    detail: "Morrow connects only the Morrow Bridge that Chrome loaded from the folder Morrow set up on this computer, and this copy did not prove it came from that folder.",
+    action: "In the Morrow app, select Show Bridge folder. Load that folder with Load unpacked on the Chrome extensions page, then select Connect Morrow again.",
+  },
+  bridge_pairing_sender_refused: {
+    title: "Connect Morrow was not started from Morrow Bridge",
+    detail: "Morrow Bridge starts a connection only when you select Connect Morrow in its popup or its setup guide.",
+    action: "Open the Morrow Bridge popup and select Connect Morrow.",
   },
   bridge_version_mismatch: {
     title: "Morrow and Morrow Bridge versions do not match",

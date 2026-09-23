@@ -66,7 +66,7 @@ It validates:
 - the extension ID;
 - the catalog digest;
 - the connector revision;
-- the pairing secret;
+- the pairing proof, made from the secret in the active-folder marker of the Bridge folder Morrow set up;
 - the protocol version;
 - request ID and operation ID;
 - exact operation key;
@@ -215,7 +215,7 @@ Batch state is durable in SQLite. Arguments and manifests use authenticated encr
 
 ## Trust boundaries
 
-- **AI client:** may choose and call tools. MCP exposes no approval tool. A separate local page records approval only with Morrow Bridge's signature over the form, which the Bridge adds for a trusted click in the review tab. Local HTTP requests cannot approve. It does not prove human presence against browser automation that drives Chrome input.
+- **AI client:** may choose and call tools. MCP exposes no approval tool. A separate local page records approval only with Morrow Bridge's signature over the form, which the Bridge adds for a trusted click in the review tab. Local HTTP requests cannot approve, and they cannot pair a Bridge: Morrow pairs only a Bridge that proves it holds the secret in the Bridge folder Morrow set up, in the Connect Morrow step the person selects. It does not prove human presence against browser automation that drives Chrome input, and it does not stop a program that runs as the educator and reads Morrow's files.
 - **Morrow MCP:** may plan and reserve effects; has no platform credential.
 - **Approval page:** may approve only one exact, unexpired durable plan on loopback.
 - **Extension:** may use only paired commands, admitted operations, current bindings, and unused receipts.

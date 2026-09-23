@@ -11,6 +11,7 @@ This release fixes every Critical and High defect found in the adversarial audit
 ### Approvals and Edit access
 
 - A change is approved only with a Morrow Bridge signature from the educator's own Chrome tab. A local program can no longer approve a change with a bare HTTP request.
+- Morrow Bridge pairs with Morrow only when you select Connect Morrow, and only with a proof from the Bridge folder Morrow set up. A local program can no longer pair itself over HTTP, read the connection token, and then approve changes. The Chrome page that asked you to allow the connection is gone.
 - Edit access has no time limit. Old timed grants fall back to Plan and are never extended.
 - A review that is waiting ends when its Morrow connection ends.
 

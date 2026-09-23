@@ -1115,6 +1115,20 @@ await new Promise((resolveRequest, rejectRequest) => {
   }).once("error", rejectRequest);
 });
 
+// The desktop app writes an active-folder marker into the Bridge folder it sets up and records the
+// same challenge for the connector. Morrow pairs only a Bridge that signs with that secret.
+const pairingSecret = {
+  challengeId: "morrow-browserharness0123456789abcdef01",
+  nonce: "browser-harness-folder-secret-".repeat(2),
+  extensionId: EXTENSION_ID,
+};
+writeFileSync(join(extensionCopy, "morrow-bridge-active-folder.json"), `${JSON.stringify({
+  schema: "morrow.bridge.active-folder-challenge.v1",
+  challengeId: pairingSecret.challengeId,
+  extensionId: EXTENSION_ID,
+  manifestVersion: manifest.version,
+  nonce: pairingSecret.nonce,
+})}\n`);
 const connectorConfig = {
   statePath: join(temporary, "connector.json"),
   catalogPath: resolve(ROOT, "artifacts/canvas-api/canvas-api-catalog.json"),
@@ -1123,6 +1137,7 @@ const connectorConfig = {
   runtimeRevision: "1.0.0-rc.2",
   allowedExtensionIds: [],
   approveExtensionId: async () => undefined,
+  pairingSecret: async () => pairingSecret,
 };
 let runtime = await CanvasConnectorRuntime.start(connectorConfig);
 connectorConfig.port = runtime.bridge.health().port;
@@ -1330,19 +1345,11 @@ try {
   await popup.goto(`chrome-extension://${EXTENSION_ID}/popup/popup.html`);
   await popup.getByRole("button", { name: "Connect Morrow", exact: true }).waitFor();
   await captureThemes(popup, "popup-unpaired", 360);
-  const approvalPromise = context.waitForEvent("page");
-  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).click();
-  const approval = await approvalPromise;
-  await approval.waitForURL((url) => url.origin === `http://127.0.0.1:${connectorConfig.port}` && /^\/morrow-bridge\/v1\/pair\/[0-9a-f-]+$/.test(url.pathname));
-  await approval.getByText("Your learning-platform password and sign-in details stay in Chrome", { exact: false }).waitFor();
-  await captureThemes(approval, "pairing");
-  process.stderr.write("[browser-test] pairing review ready\n");
+  const pagesBeforePairing = context.pages().length;
   const pairingApprovedAt = performance.now();
-  await approval.getByRole("button", { name: "Allow connection", exact: true }).click();
-  await approval.getByText(/approved/i).waitFor();
-  await captureThemes(approval, "pairing-approved");
-  await popup.bringToFront();
+  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).click();
   await popup.locator("#status-value").filter({ hasText: /^Connected$/ }).waitFor({ timeout: 5_000 });
+  assert.equal(context.pages().length, pagesBeforePairing, "Connect Morrow pairs in the popup and opens no page");
   assert.equal(await popup.locator("#canvas-value").innerText(), "Not connected");
   assert.equal(runtime.bridge.health().connected, true);
   const pairingReadyMs = Math.round(performance.now() - pairingApprovedAt);
@@ -1965,7 +1972,7 @@ try {
   const reopenedSetupGuide = await reopenedSetupPromise;
   await reopenedSetupGuide.waitForURL(`chrome-extension://${EXTENSION_ID}/onboarding/onboarding.html`);
   await reopenedSetupGuide.getByRole("heading", { name: "One step left", exact: true }).waitFor();
-  await reopenedSetupGuide.getByText("An assistant approved this connection in Morrow. Morrow Bridge sees the connection, not the assistant itself.", { exact: true }).waitFor();
+  await reopenedSetupGuide.getByText("Morrow Bridge is set up to work with Morrow on this computer. Morrow Bridge sees the connection, not your assistant itself.", { exact: true }).waitFor();
   await reopenedSetupGuide.getByText("Morrow Bridge is connected to Morrow", { exact: true }).waitFor();
   await reopenedSetupGuide.getByText("Morrow matches this Morrow Bridge version and its list of course actions", { exact: true }).waitFor();
   await reopenedSetupGuide.getByText("3 selected courses are ready", { exact: true }).waitFor();
@@ -3811,14 +3818,10 @@ try {
     return { tokenPresent: typeof stored.token === "string", bindingCount: Array.isArray(stored.bindings) ? stored.bindings.length : 0 };
   });
   assert.deepEqual(retained, { tokenPresent: true, bindingCount: 3 });
-  assert.equal(await popup.locator("#detail").innerText(), "Morrow Bridge refused the saved local connection. Select Reconnect Morrow, then approve the new connection in Morrow. Your selected courses stay saved.");
+  assert.equal(await popup.locator("#detail").innerText(), "Morrow refused the connection Morrow Bridge saved. Select Reconnect Morrow to connect again. Your selected courses stay saved.");
   await popup.getByRole("button", { name: "Reconnect Morrow", exact: true }).waitFor();
   await captureThemes(popup, "popup-reconnect", 360);
-  const replacementApprovalPromise = context.waitForEvent("page");
   await popup.getByRole("button", { name: "Reconnect Morrow", exact: true }).click();
-  const replacementApproval = await replacementApprovalPromise;
-  await replacementApproval.getByRole("button", { name: "Allow connection", exact: true }).click();
-  await popup.bringToFront();
   await popup.locator("#status-value").filter({ hasText: /^Connected$/ }).waitFor({ timeout: 5_000 });
   await popup.getByRole("button", { name: "Disconnect Morrow", exact: true }).click();
   await popup.locator("#status-value").filter({ hasText: /^Not connected$/ }).waitFor();

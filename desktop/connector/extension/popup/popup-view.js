@@ -90,7 +90,7 @@ export function currentPlatform(status, detectedProvider = null) {
 }
 
 // Morrow refused this Bridge build (versionMismatch), or a connection is open but Morrow's answer
-// does not match this extension. An update and a reload fix both, not a new connection approval.
+// does not match this extension. An update and a reload fix both, not connecting again.
 export function runtimeNeedsReload(status) {
   return status?.versionMismatch === true || (status?.connected === true && status.runtimeHealthy !== true);
 }
@@ -105,7 +105,7 @@ export function statusValue(status) {
   if (!status) return NOT_CHECKED;
   if (runtimeNeedsReload(status)) return "Reload needed";
   if (status.authenticationFailed === true) return "Reconnect needed";
-  return status.connected ? "Connected" : status.pairing ? "Waiting for approval" : status.connecting ? "Connecting…" : status.paired ? "Not available" : "Not connected";
+  return status.connected ? "Connected" : status.connecting ? "Connecting…" : status.paired ? "Not available" : "Not connected";
 }
 
 export function courseValue(status) {
@@ -171,8 +171,6 @@ export function statusAnnouncement(status) {
 export function primaryAction(status, detectedProvider = null) {
   if (!status) return { id: "retry", label: "Try again" };
   if (runtimeNeedsReload(status)) return { id: "open_setup", label: "Open setup guide" };
-  // A closed approval tab is opened again: Morrow answers a second request with the one pending.
-  if (status.pairing) return { id: "pair", label: "Open the approval page" };
   if (status.authenticationFailed === true) return { id: "pair", label: "Reconnect Morrow" };
   if (!status.paired) return { id: "pair", label: "Connect Morrow" };
   if (canChooseCourses(status)) return { id: "choose_courses", label: "Choose courses" };
@@ -206,12 +204,10 @@ export function detailText(status, detectedProvider = null) {
   const anchor = currentSiteAnchor(status);
   const platform = currentPlatform(status, detectedProvider);
   const savedPlatform = currentPlatform(status);
-  return status.pairing
-    ? "Select Allow connection on the Morrow page that opened. If you closed that page, select Open the approval page."
-    : status.authenticationFailed === true
-      ? "Morrow Bridge refused the saved local connection. Select Reconnect Morrow, then approve the new connection in Morrow. Your selected courses stay saved."
+  return status.authenticationFailed === true
+    ? "Morrow refused the connection Morrow Bridge saved. Select Reconnect Morrow to connect again. Your selected courses stay saved."
     : !status.paired
-      ? "Add Morrow to your assistant, then open it. Select Connect Morrow to continue."
+      ? "Add Morrow to your assistant, then open it. Select Connect Morrow to connect this extension to Morrow. Connecting does not approve changes to your courses."
       : status.connecting
         ? "Connecting to Morrow. Keep this popup open or return in a moment."
         : !status.connected
@@ -231,7 +227,7 @@ export function detailText(status, detectedProvider = null) {
 
 export function controlState(status, { actionInFlight = false, detectedProvider = null } = {}) {
   if (!status) return { primaryDisabled: actionInFlight, primaryBusy: actionInFlight, secondaryDisabled: true };
-  const waiting = Boolean(status.pairing !== true && status.authenticationFailed !== true && !runtimeNeedsReload(status) && !canChooseCourses(status) && status.paired && !status.connected);
+  const waiting = Boolean(status.authenticationFailed !== true && !runtimeNeedsReload(status) && !canChooseCourses(status) && status.paired && !status.connected);
   const needsDetectedCourse = status.paired === true && status.connected === true
     && !canChooseCourses(status) && currentBinding(status)?.runtimeVerified !== true;
   return {

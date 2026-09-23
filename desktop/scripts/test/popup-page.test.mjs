@@ -19,7 +19,7 @@ const LAST_SEEN = Date.UTC(2026, 8, 1, 15, 4, 5);
 const COURSE_ORIGIN = "https://canvas.example.edu";
 
 const connection = (fields = {}) => ({
-  paired: false, pairing: false, connecting: false, connected: false, bindings: [], siteAnchors: [],
+  paired: false, connecting: false, connected: false, bindings: [], siteAnchors: [],
   ...(fields.connected === true && fields.runtimeHealthy === undefined ? { runtimeHealthy: true } : {}),
   ...fields,
 });
@@ -99,13 +99,7 @@ test("before a course site is connected the popup names the state it is in", asy
       connection: "Not connected", courseLabel: "Course", course: "Not connected",
       primary: "Connect Morrow", primaryDisabled: false, primaryBusy: "false",
       secondary: null, openPlatform: null, disconnect: null, planAndEdit: false, online: false, account: null,
-      detail: "Add Morrow to your assistant, then open it. Select Connect Morrow to continue.",
-    }],
-    ["the person has not approved this connection yet", () => connection({ pairing: true }), {
-      connection: "Waiting for approval", courseLabel: "Course", course: "Not connected",
-      primary: "Open the approval page", primaryDisabled: false, primaryBusy: "false",
-      secondary: null, openPlatform: null, disconnect: null, planAndEdit: false, online: false, account: null,
-      detail: "Select Allow connection on the Morrow page that opened. If you closed that page, select Open the approval page.",
+      detail: "Add Morrow to your assistant, then open it. Select Connect Morrow to connect this extension to Morrow. Connecting does not approve changes to your courses.",
     }],
     ["Morrow Bridge is connecting", () => connection({ paired: true, connecting: true }), {
       connection: "Connecting…", courseLabel: "Course", course: "Not connected",
@@ -257,36 +251,40 @@ test("a version-mismatched Bridge exposes only setup recovery", async () => {
   assert.deepEqual(page.messages("morrow_connect_course_prepare"), []);
 });
 
-test("while approval waits, the popup reopens the approval page", async () => {
+// Connect Morrow pairs in one step. The popup asks for it with nothing else, never asks Chrome for
+// access to whatever site the active tab shows, and moves on once the worker answers.
+test("Connect Morrow pairs in one step and asks Chrome for no site access", async () => {
+  let status = connection();
   const page = await openPopup({
-    status: () => connection({ pairing: true }),
-    handlers: { morrow_pair: () => ({ status: "pending" }) },
-  });
-  await page.click("#primary");
-  assert.deepEqual(page.messages("morrow_pair"), [{ type: "morrow_pair" }]);
-  assert.equal(page.hidden("#error"), true);
-});
-
-// A re-pair waits with the refused token still saved, and the worker restarted, so the status names
-// no authentication problem. The button still reads Open the approval page, and it must do exactly
-// that: never ask Chrome for access to whatever site the active tab shows.
-test("Open the approval page reopens the approval page even while a saved connection is kept", async () => {
-  const page = await openPopup({
-    status: () => connection({ paired: true, pairing: true, authenticationFailed: false, connected: false }),
+    status: () => status,
     tabs: [{ id: 5, url: "https://mail.example.com/inbox", active: true }],
     handlers: {
-      morrow_pair: () => ({ status: "pending" }),
+      morrow_pair: () => {
+        status = connection({ paired: true, connecting: true });
+        return { paired: true };
+      },
       morrow_connect_course_prepare: ({ tabId }) => ({ id: "intent-1", tabId, origins: ["https://mail.example.com/*"] }),
-      morrow_connect_course_cancel: () => ({ cancelled: true }),
     },
   });
-  assert.equal(view(page).primary, "Open the approval page");
-  assert.equal(view(page).primaryDisabled, false);
+  assert.equal(view(page).primary, "Connect Morrow");
   await page.click("#primary");
   assert.deepEqual(page.messages("morrow_pair"), [{ type: "morrow_pair" }]);
   assert.deepEqual(page.messages("morrow_connect_course_prepare"), []);
   assert.deepEqual(page.permissionCalls, []);
   assert.equal(page.hidden("#error"), true);
+  await page.waitFor(() => view(page).connection === "Connecting…", "the popup never showed the new connection");
+});
+
+// A Bridge loaded from a folder Morrow did not set up cannot pair, and the popup says which folder to load.
+test("a Bridge Morrow cannot confirm names the Bridge folder to load", async () => {
+  const page = await openPopup({
+    status: () => connection(),
+    handlers: { morrow_pair: () => ({ ok: false, code: "bridge_pairing_folder_unconfirmed", error: "bridge_pairing_folder_unconfirmed" }) },
+  });
+  await page.click("#primary");
+  assert.equal(page.hidden("#error"), false);
+  assert.match(page.text("#error"), /Show Bridge folder/);
+  assert.match(page.text("#error"), /Connect Morrow again/);
 });
 
 test("a Bridge whose version Morrow refused offers the setup guide, not a new connection", async () => {

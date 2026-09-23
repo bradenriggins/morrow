@@ -452,8 +452,8 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
     return {
       summary: "Connect Morrow Bridge",
       title: "Connect Morrow Bridge.",
-      copy: `${title} is configured. Open Morrow Bridge in Chrome to complete the connection you start.`,
-      body: '<ol class="instructions"><li>Open <strong>Morrow Bridge</strong> in Chrome.</li><li>Select <strong>Connect Morrow</strong>.</li><li>On the Morrow page that opens, select <strong>Allow connection</strong> only if you started it.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
+      copy: `${title} is configured. Open Morrow Bridge in Chrome and select Connect Morrow.`,
+      body: '<ol class="instructions"><li>Open <strong>Morrow Bridge</strong> in Chrome.</li><li>Select <strong>Connect Morrow</strong>. Morrow connects only the Morrow Bridge loaded from the folder Morrow shows.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
     };
   }
   if (!verifiedCourse(current)) {

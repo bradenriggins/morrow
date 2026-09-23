@@ -13,6 +13,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import { parseGatewayConfig } from "../../packages/mcp-server/dist/config.js";
 import { GatewayRuntime } from "../../packages/mcp-server/dist/runtime.js";
+import { prepareSourceBridgeFolder } from "../source-bridge-folder.mjs";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const EXTENSION = join(ROOT, "connector/extension");
@@ -367,6 +368,9 @@ async function main() {
     releaseEvidence = { manifestSha256, criticalSourceSha256 };
     const bridgePort = await availablePort();
     patchFixtureBridgePort(extensionCopy, bridgePort);
+    // The folder secret the desktop app writes into the Bridge folder it sets up, and records beside
+    // the connector state. Morrow pairs only a Bridge that signs with it.
+    prepareSourceBridgeFolder({ extensionRoot: extensionCopy, stateDirectory: directory });
     setStage("prepare_https_fixtures");
     const tls = createCertificate(directory);
     fixtures = startFixtures(tls);
@@ -416,23 +420,15 @@ async function main() {
     await canvasPage.goto(`https://127.0.0.1:${canvasPort}/courses/42`, { waitUntil: "domcontentloaded" });
     await canvasPage.getByRole("heading", { name: "Synthetic Canvas Course" }).waitFor();
 
-    setStage("open_local_pairing_page");
+    setStage("open_bridge_popup");
     const popup = await context.newPage();
     await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
     await popup.getByRole("button", { name: "Agree and continue", exact: true }).click();
-    setStage("approve_local_pairing");
+    setStage("connect_morrow");
     await popup.getByRole("button", { name: "Connect Morrow", exact: true }).click();
-    const pairingPage = await waitFor(() => context.pages().find((page) => {
-      try {
-        const url = new URL(page.url());
-        return url.origin === `http://127.0.0.1:${bridgePort}` && /^\/morrow-bridge\/v1\/pair\/[0-9a-f-]+$/.test(url.pathname);
-      } catch { return false; }
-    }), "local_pairing_page_unavailable");
-    await pairingPage.getByRole("button", { name: "Allow connection", exact: true }).click();
     setStage("wait_for_local_pairing");
     await waitFor(async () => (await popup.evaluate(async () => await chrome.runtime.sendMessage({ type: "morrow_status" })))?.result?.connected === true,
       "connector_pairing_not_ready");
-    await pairingPage.close();
     await canvasPage.bringToFront();
     checkpoint("fresh_cft_profile_and_release_manifest");
 

@@ -338,4 +338,47 @@ describe("Canvas connector config", () => {
     expect(JSON.parse(await readFile(join(first, "state.json"), "utf8")).allowedExtensionIds).toEqual([extensionId]);
     expect(await readdir(second)).toEqual([]);
   });
+  it("reads the Bridge pairing secret fresh from the folder record Morrow keeps beside its state", async () => {
+    const path = await statePath();
+    const record = join(path, "..", "bridge-installation.json");
+    const extensionId = "abcdefghijklmnopabcdefghijklmnop";
+    const challenge = {
+      challengeId: "morrow-0123456789abcdef0123456789abcdef",
+      nonce: "n".repeat(43),
+      extensionId,
+      manifestVersion: "1.0.120",
+      sha256: "c".repeat(64),
+    };
+    const config = await loadCanvasConnectorConfig({ MORROW_CANVAS_CONNECTOR_STATE: path }, process.cwd());
+    // With no Bridge folder record, nothing can pair.
+    expect(await config.pairingSecret()).toBeNull();
+
+    await writeFile(record, JSON.stringify({ schema: "morrow.bridge-installation.v1", extensionId, activeFolderChallenge: challenge }), { mode: 0o600 });
+    expect(await config.pairingSecret()).toEqual({ challengeId: challenge.challengeId, nonce: challenge.nonce, extensionId });
+
+    // Repair and each update issue a new challenge; the next pairing reads it.
+    await writeFile(record, JSON.stringify({ extensionId, activeFolderChallenge: { ...challenge, challengeId: "morrow-ffffffffffffffffffffffffffffffff" } }), { mode: 0o600 });
+    expect((await config.pairingSecret())?.challengeId).toBe("morrow-ffffffffffffffffffffffffffffffff");
+
+    for (const invalid of [
+      { extensionId, activeFolderChallenge: null },
+      { extensionId, activeFolderChallenge: { ...challenge, nonce: "short" } },
+      { extensionId, activeFolderChallenge: { ...challenge, extensionId: "b".repeat(32) } },
+      { extensionId: "not-an-id", activeFolderChallenge: { ...challenge, extensionId: "not-an-id" } },
+    ]) {
+      await writeFile(record, JSON.stringify(invalid), { mode: 0o600 });
+      expect(await config.pairingSecret()).toBeNull();
+    }
+    await writeFile(record, "{not json", { mode: 0o600 });
+    expect(await config.pairingSecret()).toBeNull();
+
+    // A record any other account could read is not a secret.
+    await writeFile(record, JSON.stringify({ extensionId, activeFolderChallenge: challenge }), { mode: 0o600 });
+    await chmod(record, 0o644);
+    expect(await config.pairingSecret()).toBeNull();
+    await rm(record);
+    await writeFile(`${record}.target`, JSON.stringify({ extensionId, activeFolderChallenge: challenge }), { mode: 0o600 });
+    await symlink(`${record}.target`, record);
+    expect(await config.pairingSecret()).toBeNull();
+  });
 });

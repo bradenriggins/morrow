@@ -817,7 +817,7 @@ function httpUrl(path = "") {
 }
 
 async function storage() {
-  return await chrome.storage.local.get(["token", "bindings", "pairing", PAIRING_AUTHORITY_KEY, "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead", "openPlatformWhenNeeded", "courseMeta"]);
+  return await chrome.storage.local.get(["token", "bindings", PAIRING_AUTHORITY_KEY, "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead", "openPlatformWhenNeeded", "courseMeta"]);
 }
 
 async function courseDataConsentAccepted() {
@@ -921,11 +921,6 @@ function pairingAuthority(generation, status) {
   return { schema: PAIRING_AUTHORITY_SCHEMA, generation, status, changedAt: Date.now() };
 }
 
-function pairingIdentityMatches(stored, expected) {
-  return stored?.statusUrl === expected?.statusUrl
-    && stored?.pairingGeneration === expected?.pairingGeneration;
-}
-
 function pairingAuthorityMatches(authority, generation, status) {
   return authority?.schema === PAIRING_AUTHORITY_SCHEMA
     && authority.generation === generation
@@ -938,28 +933,68 @@ function hasExactKeys(value, keys) {
     && keys.every((key) => Object.hasOwn(value, key));
 }
 
-function pairingOffer(value, pairingGeneration = null) {
-  const keys = ["schema", "pairingId", "status", "approvalUrl", "statusUrl", "expiresAt", ...(pairingGeneration ? ["pairingGeneration"] : [])];
-  if (!hasExactKeys(value, keys)
-    || value.schema !== "morrow.bridge.pairing.v1"
+function pairingOffer(value) {
+  if (!hasExactKeys(value, ["schema", "pairingId", "challenge", "confirmUrl", "expiresAt"])
+    || value.schema !== "morrow.bridge.pairing.v2"
     || typeof value.pairingId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.pairingId)
-    || value.status !== "pending"
-    || value.approvalUrl !== httpUrl(`/pair/${value.pairingId}`)
-    || value.statusUrl !== httpUrl(`/pair/${value.pairingId}/status`)
-    || !Number.isSafeInteger(value.expiresAt)
-    || (pairingGeneration && value.pairingGeneration !== pairingGeneration)) return null;
+    || typeof value.challenge !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(value.challenge)
+    || value.confirmUrl !== httpUrl(`/pair/${value.pairingId}/confirm`)
+    || !Number.isSafeInteger(value.expiresAt)) return null;
   return value;
 }
 
-function pairingStatus(value, pairing) {
-  const approved = value?.status === "approved";
-  const keys = ["schema", "status", "expiresAt", ...(approved ? ["token"] : [])];
-  if (!hasExactKeys(value, keys)
-    || value.schema !== "morrow.bridge.pairing-status.v1"
-    || !["pending", "approved", "denied"].includes(value.status)
-    || value.expiresAt !== pairing.expiresAt
-    || (approved && (typeof value.token !== "string" || value.token.length < 32 || value.token.length > 512))) return null;
+function pairingResult(value) {
+  if (!hasExactKeys(value, ["schema", "status", "token"])
+    || value.schema !== "morrow.bridge.pairing-result.v2"
+    || value.status !== "approved"
+    || typeof value.token !== "string" || value.token.length < 32 || value.token.length > 512) return null;
   return value;
+}
+
+/** Matches `bridgePairingProofPayload` in packages/bridge-protocol/src/index.ts. */
+function bridgePairingProofPayload(pairing) {
+  return JSON.stringify([
+    "morrow.bridge.pairing-proof.v1",
+    PROTOCOL_VERSION,
+    BRIDGE_PATH,
+    pairing.pairingId,
+    pairing.challenge,
+    pairing.extensionId,
+    pairing.activeFolderChallengeId,
+  ]);
+}
+
+// The key is the secret in the active-folder marker of the Bridge folder Morrow set up. A program
+// that reaches Morrow only over HTTP cannot read it, so it cannot sign a pairing of its own.
+async function bridgePairingProof(offer) {
+  const folder = await bridgeMaintenance.activeFolderSecret();
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", encoder.encode(folder.nonce), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(bridgePairingProofPayload({
+    pairingId: offer.pairingId,
+    challenge: offer.challenge,
+    extensionId: folder.extensionId,
+    activeFolderChallengeId: folder.challengeId,
+  }))));
+  let binary = "";
+  for (const byte of signature) binary += String.fromCharCode(byte);
+  return {
+    extensionId: folder.extensionId,
+    activeFolderChallengeId: folder.challengeId,
+    proof: btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, ""),
+  };
+}
+
+// Morrow names why it would not pair. A folder that is not the one Morrow set up, or a Bridge
+// folder Morrow cannot confirm, needs the Bridge loaded again from Morrow's folder.
+function pairingRefusal(response, body) {
+  const error = hasExactKeys(body, ["error"]) ? body.error : null;
+  if (response.status === 403 && error === "connector_identity_refused") return "bridge_version_mismatch";
+  if ((response.status === 409 && error === "pairing_folder_unconfirmed")
+    || (response.status === 403 && (error === "extension_identity_refused" || error === "pairing_proof_refused"))) {
+    return "bridge_pairing_folder_unconfirmed";
+  }
+  return "bridge_pairing_refused";
 }
 
 async function boundedPairingJson(response, signal) {
@@ -1038,19 +1073,17 @@ function abortPairingFetches() {
   state.pairingFetchControllers.clear();
 }
 
-async function settlePairing(expected, status, values, authorityGeneration = null) {
+async function settlePairing(pairingGeneration, status, values, authorityGeneration) {
   return await queueStorageMutation(async () => {
-    if (authorityGeneration !== null && !await courseDataAuthorityCurrent(authorityGeneration)) return false;
-    const keys = [...new Set(["pairing", PAIRING_AUTHORITY_KEY, ...Object.keys(values)])];
+    if (!await courseDataAuthorityCurrent(authorityGeneration)) return false;
+    const keys = [...new Set([PAIRING_AUTHORITY_KEY, ...Object.keys(values)])];
     const latest = await chrome.storage.local.get(keys);
-    if (!pairingIdentityMatches(latest.pairing, expected)
-      || !pairingAuthorityMatches(latest[PAIRING_AUTHORITY_KEY], expected?.pairingGeneration, "pending")) return false;
-    await chrome.storage.local.set({ ...values, [PAIRING_AUTHORITY_KEY]: pairingAuthority(expected.pairingGeneration, status) });
-    if (authorityGeneration !== null && !await courseDataAuthorityCurrent(authorityGeneration)) {
+    if (!pairingAuthorityMatches(latest[PAIRING_AUTHORITY_KEY], pairingGeneration, "requesting")) return false;
+    await chrome.storage.local.set({ ...values, [PAIRING_AUTHORITY_KEY]: pairingAuthority(pairingGeneration, status) });
+    if (!await courseDataAuthorityCurrent(authorityGeneration)) {
       await restoreStorageFields(chrome.storage.local, latest, keys);
       return false;
     }
-    await chrome.alarms.clear("morrow-pairing");
     return true;
   });
 }
@@ -1694,6 +1727,12 @@ function settingsSender(sender) {
 // access, so it is safe from the popup; every grant, save and course read stays with settings.
 function popupSender(sender) {
   return sender?.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("popup/popup.html");
+}
+
+// Pairing starts only from Connect Morrow in the popup or the setup guide, the Bridge's own pages
+// where the person selects it. A content script in a course or review tab cannot start one.
+function pairingSender(sender) {
+  return popupSender(sender) || (sender?.id === chrome.runtime.id && sender.url === chrome.runtime.getURL(SETUP_GUIDE_PATH));
 }
 
 const POPUP_EDIT_POLICY_MESSAGES = new Set(["morrow_edit_policy_status", "morrow_edit_policy_revoke"]);
@@ -2929,8 +2968,8 @@ async function connectBridge() {
   };
   socket.onclose = (event) => {
     if (state.socket !== socket) return;
-    // Morrow expects a different Morrow Bridge build. An update and a reload fix that, not a new
-    // connection approval, so it is not an authentication problem. The reconnect alarm tries again.
+    // Morrow expects a different Morrow Bridge build. An update and a reload fix that, not
+    // connecting again, so it is not an authentication problem. The reconnect alarm tries again.
     if (event.code === 4403 && event.reason === "bridge_version_mismatch") {
       state.versionMismatch = true;
       state.authenticationProblem = null;
@@ -5966,6 +6005,11 @@ async function handleBridgeMessage(message, owner) {
   }
 }
 
+/**
+ * Pairs this Bridge with the Morrow on this computer, in the one step the person started with
+ * Connect Morrow. Morrow hands out its token only to a Bridge that signs the pairing with the
+ * secret in the Bridge folder Morrow set up, so a request made over HTTP alone pairs nothing.
+ */
 async function requestPairing() {
   const authorityGeneration = state.courseDataAuthorityGeneration;
   await requireCourseDataAuthority(authorityGeneration);
@@ -5976,97 +6020,45 @@ async function requestPairing() {
       [PAIRING_AUTHORITY_KEY]: pairingAuthority(pairingGeneration, "requesting"),
     }, prior, authorityGeneration);
   });
-  const api = await catalog();
-  await requireCourseDataAuthority(authorityGeneration);
-  const { response, body } = await fetchPairing(httpUrl("/pair"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ extensionId: chrome.runtime.id, catalogDigest: api.catalogDigest, runtimeRevision: RUNTIME_REVISION }),
-  }, async (received, signal) => received.ok || received.status === 403 ? await boundedPairingJson(received, signal) : null);
-  if (!response.ok) {
-    if (response.status === 403 && hasExactKeys(body, ["error"]) && body.error === "connector_identity_refused") {
-      throw new Error("bridge_version_mismatch");
-    }
-    throw new Error("bridge_pairing_refused");
-  }
-  const offer = pairingOffer(body);
-  if (!offer) throw new Error("bridge_pairing_response_invalid");
-  const pairing = { ...offer, pairingGeneration };
-  const committed = await queueStorageMutation(async () => {
-    await requireCourseDataAuthority(authorityGeneration);
-    const latest = await chrome.storage.local.get(["pairing", PAIRING_AUTHORITY_KEY]);
-    if (!pairingAuthorityMatches(latest[PAIRING_AUTHORITY_KEY], pairingGeneration, "requesting")) return false;
-    await setCourseDataBoundFields(chrome.storage.local, {
-      pairing,
-      [PAIRING_AUTHORITY_KEY]: pairingAuthority(pairingGeneration, "pending"),
-    }, latest, authorityGeneration);
-    return true;
-  });
-  if (!committed) throw new Error("bridge_pairing_superseded");
-  let approvalTab = null;
+  const answer = async (received, signal) => received.ok || received.status === 403 || received.status === 409
+    ? await boundedPairingJson(received, signal)
+    : null;
   try {
+    const api = await catalog();
     await requireCourseDataAuthority(authorityGeneration);
-    await chrome.alarms.create("morrow-pairing", { periodInMinutes: 1 });
+    const requested = await fetchPairing(httpUrl("/pair"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ extensionId: chrome.runtime.id, catalogDigest: api.catalogDigest, runtimeRevision: RUNTIME_REVISION }),
+    }, answer);
+    if (!requested.response.ok) throw new Error(pairingRefusal(requested.response, requested.body));
+    const offer = pairingOffer(requested.body);
+    if (!offer) throw new Error("bridge_pairing_response_invalid");
+    let signed;
+    try {
+      signed = await bridgePairingProof(offer);
+    } catch {
+      throw new Error("bridge_pairing_folder_unconfirmed");
+    }
     await requireCourseDataAuthority(authorityGeneration);
-    approvalTab = await chrome.tabs.create({ url: pairing.approvalUrl });
-    await requireCourseDataAuthority(authorityGeneration);
+    const confirmed = await fetchPairing(offer.confirmUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(signed),
+    }, answer);
+    if (!confirmed.response.ok) throw new Error(pairingRefusal(confirmed.response, confirmed.body));
+    const result = pairingResult(confirmed.body);
+    if (!result) throw new Error("bridge_pairing_response_invalid");
+    if (!await settlePairing(pairingGeneration, "approved", { token: result.token }, authorityGeneration)) {
+      throw new Error("bridge_pairing_superseded");
+    }
   } catch (error) {
-    await settlePairing(pairing, "interrupted", { pairing: null });
-    await chrome.alarms.clear("morrow-pairing");
-    if (Number.isInteger(approvalTab?.id)) await chrome.tabs.remove(approvalTab.id).catch(() => undefined);
+    await settlePairing(pairingGeneration, "refused", {}, authorityGeneration).catch(() => false);
     throw error;
   }
-  return pairing;
-}
-
-async function pollPairing() {
-  const authorityGeneration = state.courseDataAuthorityGeneration;
-  if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
-  const saved = await storage();
-  if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
-  const { pairing } = saved;
-  if (!pairing) return;
-  if (!pairingOffer(pairing, pairing.pairingGeneration)
-    || !pairingAuthorityMatches(saved[PAIRING_AUTHORITY_KEY], pairing.pairingGeneration, "pending")) {
-    await queueStorageMutation(async () => {
-      if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
-      const latest = await chrome.storage.local.get(["pairing", PAIRING_AUTHORITY_KEY]);
-      if (!pairingIdentityMatches(latest.pairing, pairing)) return;
-      await setCourseDataBoundFields(chrome.storage.local, {
-        pairing: null,
-        [PAIRING_AUTHORITY_KEY]: pairingAuthority(crypto.randomUUID(), "invalid"),
-      }, latest, authorityGeneration);
-      await chrome.alarms.clear("morrow-pairing");
-    });
-    return;
-  }
-  if (!pairing?.statusUrl || !Number.isFinite(pairing.expiresAt) || Date.now() >= pairing.expiresAt) {
-    await settlePairing(pairing, "expired", { pairing: null }, authorityGeneration);
-    return;
-  }
-  const received = await fetchPairing(pairing.statusUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ extensionId: chrome.runtime.id }),
-  }, async (response, signal) => response.ok ? await boundedPairingJson(response, signal) : null).catch(() => null);
-  if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
-  const response = received?.response;
-  if (response?.status === 404 || response?.status === 410) {
-    await settlePairing(pairing, "expired", { pairing: null }, authorityGeneration);
-    return;
-  }
-  if (!response?.ok) return;
-  const status = pairingStatus(received.body, pairing);
-  if (!status) return;
-  if (status.status === "approved" && status.token) {
-    const committed = await settlePairing(pairing, "approved", { token: status.token, pairing: null }, authorityGeneration);
-    if (committed) {
-      state.authenticationProblem = null;
-      await connectBridge();
-    }
-  } else if (status.status === "denied" || Date.now() >= status.expiresAt) {
-    await settlePairing(pairing, "denied", { pairing: null }, authorityGeneration);
-  }
+  state.authenticationProblem = null;
+  await connectBridge();
+  return { paired: true };
 }
 
 function permissionPattern(value) {
@@ -6308,8 +6300,6 @@ function runtimeHealthy(connected) {
 async function status() {
   const authorityGeneration = state.courseDataAuthorityGeneration;
   if (!await courseDataAuthorityCurrent(authorityGeneration)) return { consentRequired: true };
-  const before = await storage();
-  if (before.pairing?.status === "pending") await pollPairing();
   const stored = await storage();
   const bindings = await publicBindings();
   const siteAnchors = await publicSiteAnchors(stored);
@@ -6325,7 +6315,6 @@ async function status() {
   return {
     consentRequired: false,
     paired: Boolean(stored.token),
-    pairing: stored.pairing?.status === "pending",
     connecting: state.socket?.readyState === WebSocket.CONNECTING || (state.socket?.readyState === WebSocket.OPEN && state.generation === 0),
     authenticationFailed: Boolean(state.authenticationProblem),
     versionMismatch: !connected && state.versionMismatch === true,
@@ -6436,7 +6425,6 @@ async function disconnectConnector() {
   state.versionMismatch = false;
   clearBridgeReviews();
   socket?.close(1000, "user_disconnected");
-  await chrome.alarms.clear("morrow-pairing");
   await queueStorageMutation(async () => {
     const pendingState = await chrome.storage.local.get(COURSE_CONNECTION_INTENT_KEY);
     const pendingIntent = pendingState[COURSE_CONNECTION_INTENT_KEY];
@@ -6449,7 +6437,6 @@ async function disconnectConnector() {
     await chrome.storage.local.set({
       token: null,
       bindings: [],
-      pairing: null,
       siteAnchors: [],
       editPolicies: {},
       editPolicyRevisions: {},
@@ -6461,7 +6448,7 @@ async function disconnectConnector() {
     // usedEffectReceiptFloorAt stays: it only rises, and clearing it would accept a change prepared
     // before this disconnect a second time.
     await discoveryArea().remove(["courseDiscoveries", "usedEffectReceipts", CANVAS_LIST_CONTINUATIONS_KEY]);
-    await chrome.storage.local.remove(["token", "bindings", "pairing", "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead", COURSE_FILE_STORAGE_ACCESS_KEY, COURSE_CONNECTION_INTENT_KEY]);
+    await chrome.storage.local.remove(["token", "bindings", "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead", COURSE_FILE_STORAGE_ACCESS_KEY, COURSE_CONNECTION_INTENT_KEY]);
   });
   const permissions = await chrome.permissions.getAll();
   const optionalOrigins = (permissions.origins || []).filter((origin) => origin.startsWith("https://"));
@@ -6499,13 +6486,11 @@ async function handleCoursePermissionRemoved() {
 
 async function cancelPairingAfterConsentWithdrawal() {
   await queueStorageMutation(async () => {
-    const stored = await chrome.storage.local.get(["pairing", PAIRING_AUTHORITY_KEY]);
-    if (!stored.pairing && !["requesting", "pending"].includes(stored[PAIRING_AUTHORITY_KEY]?.status)) return;
+    const stored = await chrome.storage.local.get(PAIRING_AUTHORITY_KEY);
+    if (stored[PAIRING_AUTHORITY_KEY]?.status !== "requesting") return;
     await chrome.storage.local.set({
-      pairing: null,
       [PAIRING_AUTHORITY_KEY]: pairingAuthority(crypto.randomUUID(), "consent_withdrawn"),
     });
-    await chrome.alarms.clear("morrow-pairing");
   });
 }
 
@@ -6539,7 +6524,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   const run = message?.type === "morrow_course_data_consent_accept" ? acceptCourseDataConsent
-    : message?.type === "morrow_pair" ? requestPairing
+    : message?.type === "morrow_pair" ? (pairingSender(sender) ? requestPairing : () => { throw new Error("bridge_pairing_sender_refused"); })
     : message?.type === "morrow_open_setup" ? openSetupGuide
       : message?.type === "morrow_open_platform" ? () => openPlatform(message.siteAnchorId, message.sourceBindingId)
       : message?.type === "morrow_detect_course_platform" ? () => detectActiveCoursePlatform(message.tabId)
@@ -6564,7 +6549,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.permissions.onAdded.addListener((permissions) => { void handleCoursePermissionAdded(permissions.origins).catch(() => {}); });
 chrome.permissions.onRemoved?.addListener(() => { void handleCoursePermissionRemoved().catch(() => {}); });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "morrow-pairing") void pollPairing();
   if (alarm.name === BRIDGE_RECONNECT_ALARM) void connectBridge();
   if (alarm.name === BADGE_ALARM_NAME) void refreshBadge();
 });
@@ -6572,7 +6556,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   clearItemBankCredentialsForTab(tabId);
   void canvasTabChanged(tabId);
 });
-chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
+chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (change.url) {
     const pending = pendingItemBankLaunches.get(tabId);
     const expected = pending?.launchUrl || [...itemBankCredentials.values()].find((credential) => credential.tabId === tabId)?.launchUrl;
@@ -6582,10 +6566,6 @@ chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
   // Republish after the completed load so the runtime sees the freshly probed
   // binding even when Chrome reports no URL change.
   if (change.url || change.status === "complete") void canvasTabChanged(tabId);
-  if (change.status !== "complete" || !tab.url?.startsWith(httpUrl("/pair/"))) return;
-  void chrome.storage.local.get("pairing").then(({ pairing }) => {
-    if (pairing?.approvalUrl === tab.url) return pollPairing();
-  });
 });
 chrome.webNavigation?.onCommitted?.addListener((details) => {
   if (!Number.isInteger(details?.tabId) || details.tabId < 0 || !Number.isInteger(details?.frameId) || details.frameId <= 0) return;
@@ -6610,10 +6590,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   void cancelPairingAfterConsentWithdrawal().catch(() => {});
   void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
 });
-chrome.runtime.onStartup.addListener(() => { void pollPairing(); void connectBridge(); });
+chrome.runtime.onStartup.addListener(() => { void connectBridge(); });
 chrome.runtime.onInstalled.addListener((details) => {
   void connectBridge();
   if (shouldOpenSetupOnInstall(details)) void openSetupGuide().catch(() => {});
 });
-void pollPairing();
 void connectBridge();

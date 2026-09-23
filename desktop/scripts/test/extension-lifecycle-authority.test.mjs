@@ -18,7 +18,17 @@ const coursePermission = `${courseOrigin}/*`;
 const bindingId = "canvas:account:g1:c42";
 const anchorId = "canvas:account:g1";
 const pairingId = "11111111-1111-4111-8111-111111111111";
-const pairingStatusUrl = `http://127.0.0.1:32147/morrow-bridge/v1/pair/${pairingId}/status`;
+const pairingUrl = "http://127.0.0.1:32147/morrow-bridge/v1/pair";
+const pairingConfirmUrl = `${pairingUrl}/${pairingId}/confirm`;
+const pairingChallenge = "c".repeat(43);
+// The marker Morrow writes into the Bridge folder it set up. Its nonce is the pairing key.
+const activeFolderMarker = {
+  schema: "morrow.bridge.active-folder-challenge.v1",
+  challengeId: "morrow-0123456789abcdef0123456789abcdef",
+  extensionId,
+  manifestVersion: "1.0.4",
+  nonce: "n".repeat(43),
+};
 
 function event() {
   const listeners = [];
@@ -89,7 +99,7 @@ function connectedState() {
   };
 }
 
-function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbackFetch, tabMessage, failScriptInjection = false, tabs: tabOverrides = {} } = {}) {
+function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbackFetch, tabMessage, failScriptInjection = false, tabs: tabOverrides = {}, folderMarker = null } = {}) {
   const local = storageArea(initialLocal);
   const session = storageArea({});
   const runtimeMessages = event();
@@ -152,6 +162,11 @@ function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbac
       throw new Error(`unexpected network request: ${url}`);
     }
     const relative = url.slice(extensionPrefix.length);
+    if (relative === "morrow-bridge-active-folder.json") {
+      return folderMarker
+        ? new Response(JSON.stringify(folderMarker), { headers: { "content-type": "application/json" } })
+        : new Response("", { status: 404 });
+    }
     if (holdCatalog && relative === "generated/canvas-api-catalog.json" && !catalogHeld) {
       catalogHeld = true;
       await new Promise((resolve) => { releaseCatalog = resolve; });
@@ -1506,11 +1521,10 @@ async function settingsPolicyConsentScenario() {
 
 function pairingOffer(extra = {}) {
   return {
-    schema: "morrow.bridge.pairing.v1",
+    schema: "morrow.bridge.pairing.v2",
     pairingId,
-    status: "pending",
-    approvalUrl: `http://127.0.0.1:32147/morrow-bridge/v1/pair/${pairingId}`,
-    statusUrl: pairingStatusUrl,
+    challenge: pairingChallenge,
+    confirmUrl: pairingConfirmUrl,
     expiresAt: Date.now() + 60_000,
     ...extra,
   };
@@ -1523,96 +1537,147 @@ function jsonResponse(value, init = {}) {
   });
 }
 
+async function expectedPairingProof() {
+  const { bridgePairingProofPayload } = await import(new URL("packages/bridge-protocol/dist/index.js", root));
+  return createHmac("sha256", Buffer.from(activeFolderMarker.nonce, "utf8"))
+    .update(bridgePairingProofPayload({ pairingId, challenge: pairingChallenge, extensionId, activeFolderChallengeId: activeFolderMarker.challengeId }))
+    .digest("base64url");
+}
+
+/** A Morrow that pairs a Bridge only for the proof made with the folder secret, as the loopback server does. */
+function pairingMorrow(requests, { confirm } = {}) {
+  return async (url, init) => {
+    requests.push({ url, body: JSON.parse(init.body) });
+    if (url === pairingUrl) return jsonResponse(pairingOffer(), { status: 201 });
+    if (url === pairingConfirmUrl) {
+      if (confirm) return await confirm(JSON.parse(init.body));
+      return JSON.parse(init.body).proof === await expectedPairingProof()
+        ? jsonResponse({ schema: "morrow.bridge.pairing-result.v2", status: "approved", token })
+        : jsonResponse({ error: "pairing_proof_refused" }, { status: 403 });
+    }
+    throw new Error(`unexpected pairing request: ${url}`);
+  };
+}
+
+// Connect Morrow pairs in one step: Morrow sends a challenge, the Bridge signs it with the secret in
+// the Bridge folder Morrow set up, and Morrow answers that one proof with the token. No page opens.
+async function pairingProofScenario() {
+  const requests = [];
+  const value = fixture({ initialLocal: { [consentKey]: consentValue }, folderMarker: activeFolderMarker, loopbackFetch: pairingMorrow(requests) });
+  await importWorker("pairing-proof");
+  const result = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
+  assert.deepEqual(result, { ok: true, result: { paired: true } });
+  assert.deepEqual(requests.map((request) => request.url), [pairingUrl, pairingConfirmUrl]);
+  assert.deepEqual(requests[1].body, {
+    extensionId,
+    activeFolderChallengeId: activeFolderMarker.challengeId,
+    proof: await expectedPairingProof(),
+  });
+  assert.equal(JSON.stringify(requests[0].body).includes(activeFolderMarker.nonce), false, "the folder secret never leaves the Bridge");
+  assert.equal(JSON.stringify(requests[1].body).includes(activeFolderMarker.nonce), false, "the folder secret never leaves the Bridge");
+  assert.equal(value.local.values.token, token);
+  assert.equal(value.local.values.pairingAuthority.status, "approved");
+  assert.deepEqual(value.createdTabs, [], "pairing opens no page for another program to answer");
+  assert.deepEqual(value.alarmCreations.filter((alarm) => alarm.name !== "morrow-bridge-reconnect"), []);
+  await eventually(() => value.FakeWebSocket.instances.length === 1);
+  const status = await sendRuntime(value, { type: "morrow_status" }, popupSender());
+  assert.equal(status.result.paired, true);
+  assert.equal(Object.hasOwn(status.result, "pairing"), false);
+}
+
+// A Bridge loaded from a folder Morrow did not set up has no marker, so it can prove nothing and
+// sends nothing to confirm.
+async function pairingFolderUnconfirmedScenario() {
+  const requests = [];
+  const value = fixture({ initialLocal: { [consentKey]: consentValue }, loopbackFetch: pairingMorrow(requests) });
+  await importWorker("pairing-folder-unconfirmed");
+  const result = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
+  assert.deepEqual(result, { ok: false, code: "bridge_pairing_folder_unconfirmed", error: "bridge_pairing_folder_unconfirmed" });
+  assert.deepEqual(requests.map((request) => request.url), [pairingUrl]);
+  assert.equal(value.local.values.token, undefined);
+  assert.equal(value.local.values.pairingAuthority.status, "refused");
+}
+
+// Morrow refuses a proof that does not match the folder it set up, for example a marker a repair
+// replaced since Chrome loaded this copy.
+async function pairingProofRefusedScenario() {
+  const requests = [];
+  const value = fixture({
+    initialLocal: { [consentKey]: consentValue },
+    folderMarker: activeFolderMarker,
+    loopbackFetch: pairingMorrow(requests, { confirm: async () => jsonResponse({ error: "pairing_proof_refused" }, { status: 403 }) }),
+  });
+  await importWorker("pairing-proof-refused");
+  const result = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
+  assert.deepEqual(result, { ok: false, code: "bridge_pairing_folder_unconfirmed", error: "bridge_pairing_folder_unconfirmed" });
+  assert.equal(value.local.values.token, undefined);
+  assert.equal(value.FakeWebSocket.instances.length, 0);
+}
+
+// Only the Bridge's own popup and setup guide start a pairing. A content script cannot.
+async function pairingSenderScenario() {
+  const requests = [];
+  const value = fixture({ initialLocal: { [consentKey]: consentValue }, folderMarker: activeFolderMarker, loopbackFetch: pairingMorrow(requests) });
+  await importWorker("pairing-sender");
+  for (const sender of [{}, { id: extensionId, url: `${courseOrigin}/courses/42`, tab: { id: 9 } }, { id: "b".repeat(32), url: `chrome-extension://${"b".repeat(32)}/popup/popup.html` }]) {
+    const result = await sendRuntime(value, { type: "morrow_pair" }, sender);
+    assert.deepEqual(result, { ok: false, code: "bridge_pairing_sender_refused", error: "bridge_pairing_sender_refused" });
+  }
+  assert.deepEqual(requests, []);
+  const guide = await sendRuntime(value, { type: "morrow_pair" }, { id: extensionId, url: `${extensionPrefix}onboarding/onboarding.html`, tab: { id: 12 } });
+  assert.deepEqual(guide, { ok: true, result: { paired: true } });
+}
+
 async function pairingOfferConsentScenario() {
   let fetchStarted = false;
   let releaseFetch;
   const value = fixture({
     initialLocal: { [consentKey]: consentValue },
+    folderMarker: activeFolderMarker,
     loopbackFetch: async () => {
       fetchStarted = true;
       await new Promise((resolve) => { releaseFetch = resolve; });
-      return jsonResponse(pairingOffer());
+      return jsonResponse(pairingOffer(), { status: 201 });
     },
   });
   await importWorker("pairing-offer-consent");
-  const pending = sendRuntime(value, { type: "morrow_pair" });
+  const pending = sendRuntime(value, { type: "morrow_pair" }, popupSender());
   await eventually(() => fetchStarted);
   withdrawConsent(value);
   releaseFetch();
   const result = await pending;
   assert.equal(result.ok, false);
-  await eventually(() => value.local.values.pairing === null);
+  await eventually(() => value.local.values.pairingAuthority?.status === "consent_withdrawn");
   assert.equal(value.local.values.token, undefined);
   assert.deepEqual(value.createdTabs, []);
   assert.deepEqual(value.alarmCreations, []);
 }
 
-async function pairingStatusConsentScenario() {
-  const generation = "22222222-2222-4222-8222-222222222222";
-  const expiresAt = Date.now() + 60_000;
-  let fetchStarted = false;
-  let releaseFetch;
-  const value = fixture({
-    initialLocal: {
-      [consentKey]: consentValue,
-      pairing: { ...pairingOffer({ expiresAt }), pairingGeneration: generation },
-      pairingAuthority: { schema: "morrow.bridge-pairing-authority.v1", generation, status: "pending", changedAt: Date.now() },
-    },
-    loopbackFetch: async () => {
-      fetchStarted = true;
-      await new Promise((resolve) => { releaseFetch = resolve; });
-      return jsonResponse({ schema: "morrow.bridge.pairing-status.v1", status: "approved", expiresAt, token });
-    },
-  });
-  await importWorker("pairing-status-consent");
-  await eventually(() => fetchStarted);
-  withdrawConsent(value);
-  releaseFetch();
-  await eventually(() => value.local.values.pairing === null);
-  assert.equal(value.local.values.token, undefined);
-  assert.equal(value.FakeWebSocket.instances.length, 0);
-}
-
-async function pairingAlarmPeriodScenario() {
+async function pairingConfirmConsentScenario() {
+  let confirmStarted = false;
+  let releaseConfirm;
+  const requests = [];
   const value = fixture({
     initialLocal: { [consentKey]: consentValue },
-    loopbackFetch: async () => jsonResponse(pairingOffer()),
+    folderMarker: activeFolderMarker,
+    loopbackFetch: pairingMorrow(requests, {
+      confirm: async () => {
+        confirmStarted = true;
+        await new Promise((resolve) => { releaseConfirm = resolve; });
+        return jsonResponse({ schema: "morrow.bridge.pairing-result.v2", status: "approved", token });
+      },
+    }),
   });
-  await importWorker("pairing-alarm-period");
-  const result = await sendRuntime(value, { type: "morrow_pair" });
-  assert.equal(result.ok, true);
-  assert.deepEqual(value.alarmCreations, [{ name: "morrow-pairing", options: { periodInMinutes: 1 } }]);
-  assert.equal(value.createdTabs.length, 1);
-}
-
-// A closed approval tab is not a dead end: asking to pair again while a request waits reopens the
-// same approval, because Morrow answers a second request with the one already pending.
-async function pairingReopenScenario() {
-  const generation = "33333333-3333-4333-8333-333333333333";
-  const offer = pairingOffer();
-  const posts = [];
-  const value = fixture({
-    initialLocal: {
-      [consentKey]: consentValue,
-      pairing: { ...offer, pairingGeneration: generation },
-      pairingAuthority: { schema: "morrow.bridge-pairing-authority.v1", generation, status: "pending", changedAt: Date.now() },
-    },
-    loopbackFetch: async (url, init) => {
-      if (url === pairingStatusUrl) return jsonResponse({ schema: "morrow.bridge.pairing-status.v1", status: "pending", expiresAt: offer.expiresAt });
-      posts.push(url);
-      return jsonResponse(offer);
-    },
-  });
-  await importWorker("pairing-reopen");
-  const before = await sendRuntime(value, { type: "morrow_status" }, popupSender());
-  assert.equal(before.result.pairing, true);
-  const reopened = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
-  assert.equal(reopened.ok, true, JSON.stringify(reopened));
-  assert.deepEqual(posts, ["http://127.0.0.1:32147/morrow-bridge/v1/pair"]);
-  assert.deepEqual(value.createdTabs, [{ url: offer.approvalUrl }]);
-  assert.equal(value.local.values.pairing.pairingId, offer.pairingId);
-  const after = await sendRuntime(value, { type: "morrow_status" }, popupSender());
-  assert.equal(after.result.pairing, true);
+  await importWorker("pairing-confirm-consent");
+  const pending = sendRuntime(value, { type: "morrow_pair" }, popupSender());
+  await eventually(() => confirmStarted);
+  withdrawConsent(value);
+  releaseConfirm();
+  const result = await pending;
+  assert.equal(result.ok, false);
+  await eventually(() => value.local.values.pairingAuthority?.status === "consent_withdrawn");
+  assert.equal(value.local.values.token, undefined);
+  assert.equal(value.FakeWebSocket.instances.length, 0);
 }
 
 // Connect Morrow before the Morrow app is open: nothing answers at the local address, so the popup
@@ -1626,7 +1691,7 @@ async function pairingNotRunningScenario() {
   await importWorker("pairing-not-running");
   const result = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
   assert.deepEqual(result, { ok: false, code: "bridge_not_connected", error: "bridge_not_connected" });
-  assert.equal(value.local.values.pairing, undefined);
+  assert.equal(value.local.values.token, undefined);
   assert.deepEqual(value.createdTabs, []);
 }
 
@@ -1638,7 +1703,7 @@ async function pairingRefusedScenario() {
   await importWorker("pairing-refused");
   const result = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
   assert.deepEqual(result, { ok: false, code: "bridge_pairing_refused", error: "bridge_pairing_refused" });
-  assert.equal(value.local.values.pairing, undefined);
+  assert.equal(value.local.values.token, undefined);
   assert.deepEqual(value.createdTabs, []);
 }
 
@@ -1648,9 +1713,9 @@ async function pairingDeclaredOverflowScenario() {
     loopbackFetch: async () => jsonResponse(pairingOffer(), { headers: { "content-length": "4097" } }),
   });
   await importWorker("pairing-declared-overflow");
-  const result = await sendRuntime(value, { type: "morrow_pair" });
+  const result = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
   assert.deepEqual(result, { ok: false, code: "bridge_pairing_response_too_large", error: "bridge_pairing_response_too_large" });
-  assert.equal(value.local.values.pairing, undefined);
+  assert.equal(value.local.values.token, undefined);
   assert.deepEqual(value.createdTabs, []);
 }
 
@@ -1668,10 +1733,10 @@ async function pairingStreamOverflowScenario() {
     loopbackFetch: async () => new Response(body, { headers: { "content-type": "application/json" } }),
   });
   await importWorker("pairing-stream-overflow");
-  const result = await sendRuntime(value, { type: "morrow_pair" });
+  const result = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
   assert.deepEqual(result, { ok: false, code: "bridge_pairing_response_too_large", error: "bridge_pairing_response_too_large" });
   assert.equal(bodyCancelled, true);
-  assert.equal(value.local.values.pairing, undefined);
+  assert.equal(value.local.values.token, undefined);
 }
 
 // The catalog read has its own ten-second deadline. Loading the catalog before the pairing deadline
@@ -1691,10 +1756,10 @@ async function pairingStalledBodyScenario() {
   });
   await importWorker("pairing-stalled-body");
   await shortenPairingDeadline(value, 20);
-  const result = await sendRuntime(value, { type: "morrow_pair" });
+  const result = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
   assert.deepEqual(result, { ok: false, code: "bridge_pairing_response_timeout", error: "bridge_pairing_response_timeout" });
   assert.equal(bodyCancelled, true);
-  assert.equal(value.local.values.pairing, undefined);
+  assert.equal(value.local.values.token, undefined);
 }
 
 async function pairingStalledCancellationScenario() {
@@ -1712,54 +1777,41 @@ async function pairingStalledCancellationScenario() {
   await importWorker("pairing-stalled-cancellation");
   await shortenPairingDeadline(value, 100);
   const startedAt = Date.now();
-  const result = await sendRuntime(value, { type: "morrow_pair" });
+  const result = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
   assert.deepEqual(result, { ok: false, code: "bridge_pairing_response_timeout", error: "bridge_pairing_response_timeout" });
   assert.equal(bodyCancelled, true);
   // The bound guards against hanging on the never-settling cancel(), not
   // against scheduling jitter: the settle itself never awaits the cancel.
   assert.ok(Date.now() - startedAt < 2000);
-  assert.equal(value.local.values.pairing, undefined);
+  assert.equal(value.local.values.token, undefined);
 }
 
 async function pairingOfferExactSchemaScenario() {
   const value = fixture({
     initialLocal: { [consentKey]: consentValue },
+    folderMarker: activeFolderMarker,
     loopbackFetch: async () => jsonResponse(pairingOffer({ unexpected: true })),
   });
   await importWorker("pairing-offer-exact-schema");
-  const result = await sendRuntime(value, { type: "morrow_pair" });
+  const result = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
   assert.deepEqual(result, { ok: false, code: "bridge_pairing_response_invalid", error: "bridge_pairing_response_invalid" });
-  assert.equal(value.local.values.pairing, undefined);
+  assert.equal(value.local.values.token, undefined);
   assert.deepEqual(value.createdTabs, []);
 }
 
 async function pairingExactSchemaScenario() {
-  const generation = "22222222-2222-4222-8222-222222222222";
-  const expiresAt = Date.now() + 60_000;
-  let statusReads = 0;
+  const requests = [];
   const value = fixture({
-    initialLocal: {
-      [consentKey]: consentValue,
-      pairing: { ...pairingOffer({ expiresAt }), pairingGeneration: generation },
-      pairingAuthority: { schema: "morrow.bridge-pairing-authority.v1", generation, status: "pending", changedAt: Date.now() },
-    },
-    loopbackFetch: async (url) => {
-      assert.equal(url, pairingStatusUrl);
-      statusReads += 1;
-      return jsonResponse({
-        schema: "morrow.bridge.pairing-status.v1",
-        status: "approved",
-        expiresAt,
-        token,
-        unexpected: true,
-      });
-    },
+    initialLocal: { [consentKey]: consentValue },
+    folderMarker: activeFolderMarker,
+    loopbackFetch: pairingMorrow(requests, {
+      confirm: async () => jsonResponse({ schema: "morrow.bridge.pairing-result.v2", status: "approved", token, unexpected: true }),
+    }),
   });
   await importWorker("pairing-exact-schema");
-  await eventually(() => statusReads === 1);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  const result = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
+  assert.deepEqual(result, { ok: false, code: "bridge_pairing_response_invalid", error: "bridge_pairing_response_invalid" });
   assert.equal(value.local.values.token, undefined);
-  assert.equal(value.local.values.pairing.status, "pending");
   assert.equal(value.FakeWebSocket.instances.length, 0);
 }
 
@@ -1880,9 +1932,12 @@ const scenarios = {
   "connection-writes-course-meta": connectionWritesCourseMetaScenario,
   "settings-selection-consent": settingsSelectionConsentScenario,
   "settings-policy-consent": settingsPolicyConsentScenario,
+  "pairing-proof": pairingProofScenario,
+  "pairing-folder-unconfirmed": pairingFolderUnconfirmedScenario,
+  "pairing-proof-refused": pairingProofRefusedScenario,
+  "pairing-sender": pairingSenderScenario,
   "pairing-offer-consent": pairingOfferConsentScenario,
-  "pairing-status-consent": pairingStatusConsentScenario,
-  "pairing-alarm-period": pairingAlarmPeriodScenario,
+  "pairing-confirm-consent": pairingConfirmConsentScenario,
   "suspended-reconnect-alarm": suspendedReconnectAlarmScenario,
   "pairing-declared-overflow": pairingDeclaredOverflowScenario,
   "pairing-stream-overflow": pairingStreamOverflowScenario,
@@ -1891,7 +1946,6 @@ const scenarios = {
   "pairing-offer-exact-schema": pairingOfferExactSchemaScenario,
   "pairing-exact-schema": pairingExactSchemaScenario,
   "version-mismatch": versionMismatchScenario,
-  "pairing-reopen": pairingReopenScenario,
   "pairing-not-running": pairingNotRunningScenario,
   "pairing-refused": pairingRefusedScenario,
 };
@@ -2112,12 +2166,24 @@ test("consent withdrawal fences a late pairing offer", async () => {
   await isolatedScenario("pairing-offer-consent");
 });
 
-test("consent withdrawal fences a late pairing approval", async () => {
-  await isolatedScenario("pairing-status-consent");
+test("consent withdrawal fences a late pairing confirmation", async () => {
+  await isolatedScenario("pairing-confirm-consent");
 });
 
-test("pairing uses the one-minute alarm floor supported by Chrome 116", async () => {
-  await isolatedScenario("pairing-alarm-period");
+test("Connect Morrow pairs by signing Morrow's challenge with the Bridge folder secret, and opens no page", async () => {
+  await isolatedScenario("pairing-proof");
+});
+
+test("a Bridge with no folder secret from Morrow cannot pair, and names the folder to load", async () => {
+  await isolatedScenario("pairing-folder-unconfirmed");
+});
+
+test("a proof Morrow refuses pairs nothing", async () => {
+  await isolatedScenario("pairing-proof-refused");
+});
+
+test("only the popup and the setup guide start a pairing", async () => {
+  await isolatedScenario("pairing-sender");
 });
 
 test("pairing refuses a declared response larger than four KiB", async () => {
@@ -2140,7 +2206,7 @@ test("pairing refuses an offer with fields outside the exact schema", async () =
   await isolatedScenario("pairing-offer-exact-schema");
 });
 
-test("pairing ignores an approved status with fields outside the exact schema", async () => {
+test("pairing ignores an approved answer with fields outside the exact schema", async () => {
   await isolatedScenario("pairing-exact-schema");
 });
 
@@ -2150,10 +2216,6 @@ test("Connect Morrow with the Morrow app closed says Morrow is not running", asy
 
 test("a Morrow that answers Connect Morrow without starting a connection is named as that", async () => {
   await isolatedScenario("pairing-refused");
-});
-
-test("asking to pair again while approval waits reopens the same approval page", async () => {
-  await isolatedScenario("pairing-reopen");
 });
 
 test("a version mismatch names a reload, not a refused connection", async () => {

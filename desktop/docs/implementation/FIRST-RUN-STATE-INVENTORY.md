@@ -93,7 +93,7 @@ Two facts apply to every row, so they are stated once:
 | `folder-not-ready` | "Morrow Bridge is not ready to open." / "Morrow could not verify its Bridge folder." | **Repair Morrow**, or **Check again**. | `installer/shared/setup-view.mjs:429` |
 | `dev-temporary` | "Add Morrow Bridge." and the temporary Chrome method in five exact substeps | **Show Bridge folder**, use **Manage Extensions**, **Developer mode**, and **Load unpacked**, then select **Connect Morrow** and **Check Bridge**. Also shown when the app has newer Bridge files and no Bridge is connected: **Check Bridge** then replaces the folder with the newer files first. | `installer/shared/setup-view.mjs:437` |
 | `store-available` | "Install Morrow Bridge." / "Morrow Bridge uses the learning platform where you are already signed in. It asks Chrome for access only to the exact learning platform you choose." | Add it from the Chrome Web Store, select **Connect Morrow**, then **Check Bridge**. | `installer/shared/setup-view.mjs:445` |
-| `not-paired` | "Connect Morrow Bridge." / "<assistant> is configured. Open Morrow Bridge in Chrome to complete the connection you start." | Select **Connect Morrow**, approve **Allow connection** only if you started it, then **Check Bridge**. | `installer/shared/setup-view.mjs:454` |
+| `not-paired` | "Connect Morrow Bridge." / "<assistant> is configured. Open Morrow Bridge in Chrome and select Connect Morrow." | Select **Connect Morrow**, then **Check Bridge**. | `installer/shared/setup-view.mjs:454` |
 | `no-course` | "Open your course in Chrome." / "Morrow Bridge identifies Canvas or Moodle after you open a signed-in course." | Open and sign in to a course. In Morrow Bridge select **Connect Canvas** or **Connect Moodle**, allow the exact address, then in **Plan and Edit settings** select **Connect selected courses in Plan**. | `installer/shared/setup-view.mjs:462` |
 | `preview-ready` | "Check your course connection." / "Morrow will read <course> to confirm the connection. This check does not change the course." | **Check connection**. | `installer/shared/setup-view.mjs:480` |
 | `preview-preparing` | "Morrow cannot read your course yet." / "Open your Canvas or Moodle course in Chrome and make sure you are signed in, then select Check status." Also shown after a **Check connection** read fails, with the problem "Morrow could not read your course." | Open the course in Chrome, sign in, then use the header **Check status**. | `installer/shared/setup-view.mjs:490` |
@@ -125,7 +125,7 @@ The exact title and explanatory sentence emitted for each branch are:
 - "Install Morrow Bridge."
 - "Morrow Bridge uses the learning platform where you are already signed in. It asks Chrome for access only to the exact learning platform you choose."
 - "Connect Morrow Bridge."
-- "<assistant> is configured. Open Morrow Bridge in Chrome to complete the connection you start."
+- "<assistant> is configured. Open Morrow Bridge in Chrome and select Connect Morrow."
 - "Open your course in Chrome."
 - "Morrow Bridge identifies Canvas or Moodle after you open a signed-in course."
 - "Check your course connection."
@@ -191,16 +191,12 @@ Home. The Blackboard and retention panels are disclosures reachable through thei
 
 ## 3. Chrome connection page
 
-Served on loopback by the Morrow app. It has no JavaScript: both controls are `<button>` elements in
-a plain `<form method="post">` (`packages/bridge-loopback/src/index.ts:371`), so they work by keyboard
-and with scripts turned off.
-
-| State | What the person sees | Next action | Renders at |
-| --- | --- | --- | --- |
-| `pair-pending` | "Connect Morrow to Chrome", what the connection does, "Only continue if you started this from Morrow Bridge. Connecting does not approve changes to your courses.", and the extension ID inside a disclosure | **Allow connection**, or **Cancel connection** | `packages/bridge-loopback/src/index.ts:428`, `packages/bridge-loopback/src/index.ts:430` |
-| `pair-approved` | "Chrome connection approved" and "Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge identifies the platform and shows Connect Canvas or Connect Moodle." | Open a signed-in course in Chrome, then use the platform button in the popup. The page has no control | `packages/bridge-loopback/src/index.ts:369`, `packages/bridge-loopback/src/index.ts:372` |
-| `pair-denied` | "Connection cancelled" and "Morrow did not connect through this request. You can start again from the Morrow extension when you are ready." | Open the popup and select **Connect Morrow**. The page has no control | `packages/bridge-loopback/src/index.ts:369`, `packages/bridge-loopback/src/index.ts:372` |
-| `pair-unavailable` | "Start a new connection" and "This connection request has expired or is no longer available. Open the Morrow extension and select Connect Morrow to try again." | Open the popup and select **Connect Morrow**. The page has no control | `packages/bridge-loopback/src/index.ts:376-378` |
+There is none. **Connect Morrow** in the popup, or **Reconnect Morrow** in the popup or setup guide,
+pairs in one step. Morrow sends a challenge, and Morrow Bridge signs it with the secret in the
+active-folder marker of the Bridge folder Morrow set up, which no HTTP request can read. Morrow
+answers only that proof with its token (`packages/bridge-loopback/src/index.ts`,
+`connector/extension/src/service-worker.js`). The Morrow app serves no page that approves a
+connection.
 
 ---
 
@@ -235,19 +231,18 @@ it. After acceptance the popup keeps one link with that same name instead of rep
 
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
-| `read-failed` | Morrow and Course are "Not checked". The detail names the failed read and retry. | **Try again**. | `connector/extension/popup/popup-view.js:199` |
-| `not-paired` | Morrow "Not connected", Course "Not connected", and the detail says to add Morrow to the assistant. | **Connect Morrow**. | `connector/extension/popup/popup-view.js:210` |
-| `pairing` | Morrow "Waiting for approval" and the detail names the Morrow page that opened. | **Allow connection** on that page, or **Open the approval page** if it was closed. | `connector/extension/popup/popup-view.js:206` |
+| `read-failed` | Morrow and Course are "Not checked". The detail names the failed read and retry. | **Try again**. | `connector/extension/popup/popup-view.js:201` |
+| `not-paired` | Morrow "Not connected", Course "Not connected", and the detail says to add Morrow to the assistant and that connecting approves no change. | **Connect Morrow**. | `connector/extension/popup/popup-view.js:210` |
 | `connecting` | Morrow "Connecting…" and a settled waiting detail. | No action. Return in a moment. | `connector/extension/popup/popup-view.js:212` |
 | `paired-not-connected` | Morrow "Not available" and the popup says the assistant must be open. | Open the assistant. | `connector/extension/popup/popup-view.js:214` |
-| `runtime-mismatch` | Morrow "Reload needed", Course "Not available", and a version-mismatch detail. | **Open setup guide**, update or repair, then reload Bridge. | `connector/extension/popup/popup-view.js:200` |
-| `authentication-failed` | Morrow "Reconnect needed", Course "Not connected", and the detail says the saved local connection was refused. | **Reconnect Morrow**, then approve the new local connection. | `connector/extension/popup/popup-view.js:208` |
+| `runtime-mismatch` | Morrow "Reload needed", Course "Not available", and a version-mismatch detail. | **Open setup guide**, update or repair, then reload Bridge. | `connector/extension/popup/popup-view.js:202` |
+| `authentication-failed` | Morrow "Reconnect needed", Course "Not connected", and the detail says Morrow refused the saved connection. | **Reconnect Morrow**, which connects again in one step. | `connector/extension/popup/popup-view.js:208` |
 | `connected-no-site` | Morrow "Connected", Course "Not connected", no primary action, and instructions to open a signed-in course. | Open a signed-in Canvas or Moodle course in this tab. | `connector/extension/popup/popup-view.js:225` |
-| `detected-platform` | The active course is detected. The primary action and detail both say **Connect this course**, on Canvas or Moodle alike. | Select **Connect this course** and allow the exact address Chrome shows. | `connector/extension/popup/popup-view.js:189` |
+| `detected-platform` | The active course is detected. The primary action and detail both say **Connect this course**, on Canvas or Moodle alike. | Select **Connect this course** and allow the exact address Chrome shows. | `connector/extension/popup/popup-view.js:191` |
 | `site-ready-no-course` | Course "Ready", **Choose courses**, and a Plan explanation. | **Choose courses**, which opens Plan and Edit settings. | `connector/extension/popup/popup-view.js:220` |
-| `site-stale` | Course "Canvas is closed" and the detail names the saved Canvas connection. | Select **Open Canvas** to reopen it (WI-1.1). | `connector/extension/popup/popup-view.js:195` |
+| `site-stale` | Course "Canvas is closed" and the detail names the saved Canvas connection. | Select **Open Canvas** to reopen it (WI-1.1). | `connector/extension/popup/popup-view.js:197` |
 | `course-ready` | Course "Connected", the selected course and last-check time, and a detail that names the Canvas course tab. | Ask the assistant, or use **Check or switch course**. | `connector/extension/popup/popup-view.js:216` |
-| `course-tab-closed` | Course "Canvas is closed" and a detail that names the closed Canvas tab. | Select **Open Canvas** to reopen it (WI-1.1). | `connector/extension/popup/popup-view.js:191` |
+| `course-tab-closed` | Course "Canvas is closed" and a detail that names the closed Canvas tab. | Select **Open Canvas** to reopen it (WI-1.1). | `connector/extension/popup/popup-view.js:193` |
 
 The exact status, course, action, and detail strings emitted for these branches are:
 
@@ -256,10 +251,7 @@ The exact status, course, action, and detail strings emitted for these branches 
 - "Morrow could not read this connection state. Select Try again. If the state does not change, close this popup and open it again."
 - "Not connected"
 - "Connect Morrow"
-- "Add Morrow to your assistant, then open it. Select Connect Morrow to continue."
-- "Waiting for approval"
-- "Open the approval page"
-- "Select Allow connection on the Morrow page that opened. If you closed that page, select Open the approval page."
+- "Add Morrow to your assistant, then open it. Select Connect Morrow to connect this extension to Morrow. Connecting does not approve changes to your courses."
 - "Connecting…"
 - "Waiting for your assistant"
 - "Connecting to Morrow. Keep this popup open or return in a moment."
@@ -270,7 +262,7 @@ The exact status, course, action, and detail strings emitted for these branches 
 - "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome."
 - "Reconnect needed"
 - "Reconnect Morrow"
-- "Morrow Bridge refused the saved local connection. Select Reconnect Morrow, then approve the new connection in Morrow. Your selected courses stay saved."
+- "Morrow refused the connection Morrow Bridge saved. Select Reconnect Morrow to connect again. Your selected courses stay saved."
 - "Connected"
 - "" (no primary action)
 - "Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge will detect the platform and show Connect this course."
@@ -316,9 +308,9 @@ action. **Setup overview** shows the same three stages as the app, popup, and we
 
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
-| `read-failed` | "Setup state not checked", five explicit not-checked lines, and a detail that names **Setup overview**. | **Setup overview**, or return to this tab to read again. | `connector/extension/onboarding/onboarding-state.js:58` |
-| `not-paired` | "Setup in progress" and "Open Morrow" with the exact assistant and Bridge connection action. | Open Morrow, choose the assistant, then **Connect Morrow** and **Allow connection**. | `connector/extension/onboarding/onboarding-state.js:205` |
-| `pairing` | "Waiting for approval" / "Allow connection". | **Allow connection** on the Morrow page, or **Open the approval page** if it was closed. | `connector/extension/onboarding/onboarding-state.js:192` |
+| `read-failed` | "Setup state not checked", five explicit not-checked lines, and a detail that names **Setup overview**. | **Setup overview**, or return to this tab to read again. | `connector/extension/onboarding/onboarding-state.js:57` |
+| `not-paired` | "Setup in progress" and "Open Morrow" with the exact assistant and Bridge connection action. | Open Morrow, choose the assistant, then **Connect Morrow**. | `connector/extension/onboarding/onboarding-state.js:205` |
+| `authentication-failed` | "Reconnect needed" / "Reconnect Morrow", with the same detail the popup shows. | **Reconnect Morrow**, which connects again in one step. | `connector/extension/onboarding/onboarding-state.js:192` |
 | `connecting` | "Connecting Morrow" and a waiting detail. | No action. Return in a moment. | `connector/extension/onboarding/onboarding-state.js:199` |
 | `paired-not-connected` | "Open Morrow again" and the assistant recovery. | Open Morrow and choose the assistant again. | `connector/extension/onboarding/onboarding-state.js:211` |
 | `runtime-mismatch` | "Morrow needs a reload" / "Reload Morrow Bridge" with version detail. | Update Morrow, reload Bridge, then open the Morrow Bridge popup. | `connector/extension/onboarding/onboarding-state.js:217` |
@@ -326,7 +318,7 @@ action. **Setup overview** shows the same three stages as the app, popup, and we
 | `site-saved-not-verified` | "Reconnect Canvas" and a detail that names the saved Canvas course. | Select **Open Canvas** in the popup, or open the course, and sign in if asked. | `connector/extension/onboarding/onboarding-state.js:224` |
 | `site-ready-no-course` | "Select a course in Plan" and the exact final course-selection control. | **Open Plan and Edit settings**, then **Connect** on a course under Not connected. | `connector/extension/onboarding/onboarding-state.js:231` |
 | `course-ready` | "One step left" / "Try a first read" and the exact request to ask. | Ask the assistant for the read. | `connector/extension/onboarding/onboarding-state.js:237` |
-| `ready` | "Ready to use" / "Plan your first change" after a named first read. | Ask the assistant for a change. Plan holds it for review. | `connector/extension/onboarding/onboarding-state.js:186` |
+| `ready` | "Ready to use" / "Plan your first change" after a named first read. | Ask the assistant for a change. Plan holds it for review. | `connector/extension/onboarding/onboarding-state.js:185` |
 
 The exact heading, summary, next action, detail, and checklist strings emitted for these branches are:
 
@@ -334,7 +326,7 @@ The exact heading, summary, next action, detail, and checklist strings emitted f
 - "Morrow could not read this setup state, so no line below states a current result."
 - "Follow the setup steps"
 - "Morrow could not read this setup state, so it cannot name one next step. Select Setup overview to see the three stages. This guide reads the state again when you return to this tab."
-- "Assistant approval is not checked"
+- "Connection to Morrow is not checked"
 - "Morrow Bridge connection is not checked"
 - "Morrow version is not checked"
 - "Course connection is not checked"
@@ -342,22 +334,21 @@ The exact heading, summary, next action, detail, and checklist strings emitted f
 - "Setup in progress"
 - "Morrow checks the assistant, this connection, your selected course and the first read each time this guide opens."
 - "Open Morrow"
-- "Open Morrow and choose your assistant. Then return to Morrow Bridge, select Connect Morrow, and allow the connection you started."
-- "No assistant has approved this connection yet"
+- "Open Morrow and choose your assistant. Then return to Morrow Bridge and select Connect Morrow."
+- "Morrow Bridge is not set up to work with Morrow yet"
 - "Morrow Bridge is not connected to Morrow"
 - "Morrow version is checked when Morrow Bridge connects"
 - "No Canvas or Moodle course is connected"
 - "No first read is completed yet"
-- "Waiting for approval"
-- "Morrow is waiting for you to allow this connection on the Morrow page that opened."
-- "Allow connection"
-- "Select Allow connection on the Morrow page that opened. If you closed that page, select Open the approval page."
-- "An assistant approval is waiting on the Morrow page that opened"
-- "Morrow Bridge connects after you allow this connection"
+- "Reconnect needed"
+- "Morrow no longer accepts the connection Morrow Bridge saved, so it needs to connect again."
+- "Reconnect Morrow"
+- "Morrow refused the connection Morrow Bridge saved. Select Reconnect Morrow to connect again. Your selected courses stay saved."
+- "Morrow no longer accepts this saved connection, so it needs to connect again"
 - "Connecting Morrow"
 - "Morrow is connecting. This guide reads the state again when you return to this tab."
 - "Keep your assistant open while Morrow connects. Return here in a moment."
-- "An assistant approved this connection in Morrow. Morrow Bridge sees the connection, not the assistant itself."
+- "Morrow Bridge is set up to work with Morrow on this computer. Morrow Bridge sees the connection, not your assistant itself."
 - "Morrow Bridge is connecting to Morrow"
 - "Open Morrow again"
 - "Open Morrow and choose your assistant again. Then return to Morrow Bridge."
@@ -400,7 +391,7 @@ that has never read a course is not ready
 
 | Element | What it reports | Renders at |
 | --- | --- | --- |
-| `assistant-check` | The connection an assistant approved through Morrow. Morrow Bridge cannot see the assistant window itself, and the line says so | `connector/extension/onboarding/onboarding.html:37` |
+| `assistant-check` | The connection the person made with **Connect Morrow**. Morrow Bridge cannot see the assistant window itself, and the line says so | `connector/extension/onboarding/onboarding.html:37` |
 | `connection-check` | Whether Morrow Bridge holds an open connection to Morrow | `connector/extension/onboarding/onboarding.html:38` |
 | `runtime-check` | Whether the Morrow this connection reached is the same build as this extension. Morrow names the connector identity it accepted, and the status read compares it with this extension, this connector revision and this exact list of course actions (`connector/extension/src/service-worker.js:2472-2481`) | `connector/extension/onboarding/onboarding.html:39` |
 | `course-check` | How many selected courses are ready in this Chrome session | `connector/extension/onboarding/onboarding.html:40` |
@@ -408,8 +399,8 @@ that has never read a course is not ready
 
 Every line the five checks can render:
 
-- `assistant-check`: "Assistant approval is not checked", "No assistant has approved this connection yet", "An assistant approval is waiting on the Morrow page that opened", "An assistant approved this connection in Morrow. Morrow Bridge sees the connection, not the assistant itself."
-- `connection-check`: "Morrow Bridge connection is not checked", "Morrow Bridge is not connected to Morrow", "Morrow Bridge connects after you allow this connection", "Morrow Bridge is connecting to Morrow", "Morrow Bridge is connected to Morrow"
+- `assistant-check`: "Connection to Morrow is not checked", "Morrow Bridge is not set up to work with Morrow yet", "Morrow no longer accepts this saved connection, so it needs to connect again", "Morrow Bridge is set up to work with Morrow on this computer. Morrow Bridge sees the connection, not your assistant itself."
+- `connection-check`: "Morrow Bridge connection is not checked", "Morrow Bridge is not connected to Morrow", "Morrow Bridge is connecting to Morrow", "Morrow Bridge is connected to Morrow"
 - `runtime-check`: "Morrow version is not checked", "Morrow version is checked when Morrow Bridge connects", "Morrow reports a different version from this Morrow Bridge", "Morrow matches this Morrow Bridge version and its list of course actions"
 - `course-check`: "Course connection is not checked", "No Canvas or Moodle course is connected", "Saved Canvas needs sign-in or reconnection" (or Moodle), "Canvas is ready; select courses in Plan" (or Moodle), "1 selected course is ready" (or "2 selected courses are ready", and so on)
 - `read-check`: "First read is not checked", "No first read is completed yet", "First read completed in Biology 101" (the recorded course, by name, or by "course" and its id when the record carries no name)
@@ -571,16 +562,11 @@ stale name here.
 | `https://meetmorrow.app/support` | Morrow app | `installer/shared/setup-view.mjs:655` |
 | `Save Blackboard connection` | Morrow app | `installer/renderer/index.html:92` |
 | `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:625` |
-| `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:543` |
-| `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:543` |
-| `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:543` |
-| `Connect Morrow` | Popup | `connector/extension/popup/popup.html:41`, `connector/extension/popup/popup-view.js:176` |
-| `Try again` | Popup | `connector/extension/popup/popup-view.js:171` |
-| `Waiting for approval` | Popup | `connector/extension/popup/popup-view.js:108` |
-| `Open the approval page` | Popup | `connector/extension/popup/popup-view.js:174` |
-| `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:178` |
-| `Choose courses` | Popup | `connector/extension/popup/popup-view.js:177` |
-| `Connect this course` | Popup | `connector/extension/popup/popup-view.js:180` |
+| `Connect Morrow` | Popup | `connector/extension/popup/popup.html:41`, `connector/extension/popup/popup-view.js:175` |
+| `Try again` | Popup | `connector/extension/popup/popup-view.js:172` |
+| `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:177` |
+| `Choose courses` | Popup | `connector/extension/popup/popup-view.js:176` |
+| `Connect this course` | Popup | `connector/extension/popup/popup-view.js:178` |
 | `Open Canvas` | Popup | `connector/extension/popup/popup-view.js:137` |
 | `Open Moodle` | Popup | `connector/extension/popup/popup-view.js:138` |
 | `All courses` | Popup | `connector/extension/popup/popup.html:38` |
@@ -594,7 +580,6 @@ stale name here.
 | `How to connect` | Popup | `connector/extension/popup/popup.html:50` |
 | `Guide me` | Setup guide | `connector/extension/onboarding/onboarding.html:29` |
 | `Setup overview` | Setup guide | `connector/extension/onboarding/onboarding.html:30` |
-| `Open the approval page` | Setup guide | `connector/extension/onboarding/onboarding.html:48` |
 | `Open Plan and Edit settings` | Setup guide | `connector/extension/onboarding/onboarding.html:49`, `connector/extension/onboarding/onboarding.html:49` |
 | `Ask first in all courses` | Plan and Edit settings | `connector/extension/settings/settings.html:23` |
 | `Refresh connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:35` |
@@ -605,16 +590,16 @@ stale name here.
 | `Load more available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:60` |
 | `Plan. Ask first.` | Plan and Edit settings | `connector/extension/settings/settings.html:65` |
 | `Edit. Routine edits.` | Plan and Edit settings | `connector/extension/settings/settings.html:66` |
-| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:161`, `connector/extension/settings/settings.js:1492` |
-| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:1492` |
+| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:161`, `connector/extension/settings/settings.js:1536` |
+| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:1536` |
 | `Remove HTTPS file access` | Plan and Edit settings | `connector/extension/settings/settings.html:162` |
 | `Return selected courses to Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:121` |
-| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:122`, `connector/extension/settings/settings.js:811` |
-| `Review and save` | Plan and Edit settings (WI-5.5 Customize view summary bar) | `connector/extension/settings/settings.js:1466` |
+| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:122`, `connector/extension/settings/settings.js:840` |
+| `Review and save` | Plan and Edit settings (WI-5.5 Customize view summary bar) | `connector/extension/settings/settings.js:1510` |
 | `Keep reviewing` | Plan and Edit settings | `connector/extension/settings/settings.html:131` |
 | `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:132` |
-| `Open Canvas` | Plan and Edit settings | `connector/extension/settings/settings.js:435` |
-| `Open Moodle` | Plan and Edit settings | `connector/extension/settings/settings.js:436` |
+| `Open Canvas` | Plan and Edit settings | `connector/extension/settings/settings.js:436` |
+| `Open Moodle` | Plan and Edit settings | `connector/extension/settings/settings.js:437` |
 | `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1192` |
 | `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1192` |
 | `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1192` |
