@@ -55,6 +55,8 @@ const BRIDGE_PATH = "/morrow-bridge/v1";
 const BRIDGE_PROTOCOL_VERSION = 1;
 const EXTENSION_ID = "a".repeat(32);
 const BRIDGE_TOKEN = "morrow-live-proof-bridge-token-".repeat(2);
+/** How long one harness resource may take to close before the harness stops waiting for it. */
+const CLOSE_DEADLINE_MS = 15_000;
 const read = (relativePath) => readFileSync(join(root, relativePath), "utf8");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const proofPayload = (direction, authentication, serverNonce) => JSON.stringify([
@@ -313,7 +315,7 @@ async function startFixtureSite(directory, fault) {
 async function connectHarnessConnector({ port, binding, page, expiresAt, commands, operations }) {
   const { WebSocket } = require(require.resolve("ws", { paths: [join(root, "packages/mcp-server")] }));
   const socket = new WebSocket(`ws://127.0.0.1:${port}${BRIDGE_PATH}`, { origin: `chrome-extension://${EXTENSION_ID}` });
-  const closed = { code: 0, reason: "" };
+  const closed = { code: null, reason: null };
   socket.on("close", (code, reason) => {
     closed.code = code;
     closed.reason = reason.toString();
@@ -403,6 +405,13 @@ async function connectHarnessConnector({ port, binding, page, expiresAt, command
   };
   socket.on("message", async (raw) => {
     const command = JSON.parse(raw.toString());
+    // Morrow drops a Bridge that stays silent for two heartbeat periods, so the harness answers
+    // each heartbeat the way connector/extension/src/service-worker.js does. Opening and closing
+    // the review page in Chrome sends nothing else, and can take that long on a loaded machine.
+    if (command?.schema === "morrow.bridge.ping.v1" && command.generation === ready.generation) {
+      send({ schema: "morrow.bridge.pong.v1", protocolVersion: BRIDGE_PROTOCOL_VERSION, generation: ready.generation, sentAt: Date.now() });
+      return;
+    }
     if (command?.schema !== "morrow.bridge.command.v1") return;
     const record = { kind: command.kind, toolName: command.toolName, operationKey: command.operationKey, dispatchAttempt: command.outerGrant?.dispatchAttempt ?? null };
     answered.set(command.requestId, record);
@@ -498,12 +507,33 @@ async function connectHarnessConnector({ port, binding, page, expiresAt, command
   return {
     generation: ready.generation,
     approvalPresence: () => approvalPresence,
+    connection: () => ({ open: socket.readyState === 1, closeCode: closed.code, closeReason: closed.reason }),
     close: () => new Promise((done) => {
       if (socket.readyState !== 1) return done();
       socket.once("close", () => done());
       socket.close();
     }),
   };
+}
+
+/**
+ * Closes each harness resource in order and returns the names of those that did not finish
+ * closing within `deadlineMs`. A close that fails or never finishes must not keep a failed proof
+ * from reporting, or leave the resources after it open.
+ */
+async function closeHarnessResources(resources, { deadlineMs = CLOSE_DEADLINE_MS } = {}) {
+  const abandoned = [];
+  for (const [name, resource] of resources) {
+    if (!resource) continue;
+    let deadline;
+    const outcome = await Promise.race([
+      Promise.resolve().then(() => resource.close()).then(() => "closed", () => "failed"),
+      new Promise((done) => { deadline = setTimeout(() => done("abandoned"), deadlineMs); }),
+    ]);
+    clearTimeout(deadline);
+    if (outcome === "abandoned") abandoned.push(name);
+  }
+  return abandoned;
 }
 
 function unwrap(reply, runtime) {
@@ -659,6 +689,7 @@ async function runProof(options) {
   let server;
   let client;
   let connector;
+  let abandoned = [];
   try {
     for (const path of ["packages/mcp-server/dist/morrow-runtime.js", "packages/canvas-connector-mcp/dist/index.js"]) {
       assert.ok(existsSync(join(root, path)), `${path} is missing. Build the workspace first: pnpm -r --if-present build`);
@@ -850,20 +881,30 @@ async function runProof(options) {
   } catch (error) {
     receipt.status = "failed";
     receipt.error = safeError(error);
+    // A course read that fails for a missing binding names no cause of its own. Whether Morrow
+    // still held the harness Bridge connection, and how it ended, is that cause.
+    if (connector) receipt.bridgeConnection = connector.connection();
     save("failed");
     process.exitCode = 1;
     process.stderr.write(`${receipt.error}\n${receiptPath}\n`);
   } finally {
-    await connector?.close();
-    await client?.close();
-    await server?.close();
-    await runtime?.close();
-    await context?.close();
-    await browser?.close();
-    await fixture?.close();
+    abandoned = await closeHarnessResources([
+      ["bridge connection", connector],
+      ["assistant client", client],
+      ["assistant server", server],
+      ["gateway", runtime],
+      ["browser context", context],
+      ["browser", browser],
+      ["fixture site", fixture],
+    ]);
     rmSync(directory, { recursive: true, force: true });
+    if (abandoned.length > 0) {
+      receipt.cleanupAbandoned = abandoned;
+      save(receipt.stage);
+      process.stderr.write(`the harness stopped waiting for these to close: ${abandoned.join(", ")}\n`);
+    }
   }
-  return receiptPath;
+  return { receiptPath, abandoned };
 }
 
 /**
@@ -985,14 +1026,20 @@ async function main() {
     process.stdout.write(`${CHECKLIST_PATH}\n`);
     return;
   }
-  await runProof(options);
+  return runProof(options);
 }
 
-export { buildChecklist, capabilitiesIn, writeClass };
+const HARNESS_BRIDGE = Object.freeze({ token: BRIDGE_TOKEN, runtimeRevision: RUNTIME_REVISION, extensionId: EXTENSION_ID });
+
+export { HARNESS_BRIDGE, buildChecklist, capabilitiesIn, closeHarnessResources, connectHarnessConnector, writeClass };
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) {
-  await main().catch((error) => {
+  const outcome = await main().catch((error) => {
     process.stderr.write(`${safeError(error)}\n`);
     process.exitCode = 1;
+    return null;
   });
+  // A resource the harness stopped waiting for can hold the event loop open. Leaving now also
+  // stops the Chrome it launched.
+  if (outcome?.abandoned?.length > 0) process.exit();
 }
