@@ -100,7 +100,7 @@ const COPY = {
   },
   edit_policy_status_unreadable: {
     title: "Morrow Bridge answered with a course state this page cannot read",
-    detail: "The list of connected courses and Edit lengths did not arrive in the shape this page expects.",
+    detail: "The list of connected courses and their Edit access did not arrive in the shape this page expects.",
     action: "Refresh this page. If it continues, reload Morrow Bridge on the Chrome extensions page.",
   },
   edit_policy_options_unreadable: {

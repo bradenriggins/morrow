@@ -104,6 +104,13 @@ test("no code names a control or a cause the Morrow Bridge pages do not have", (
   for (const code of PROBLEM_CODES) assert.doesNotMatch(problemText(code), retired, code);
 });
 
+// Edit is not timed: it stays on until the educator turns it off, so no copy gives it a length.
+test("no code describes Edit access as having a length or an end time", () => {
+  const timedEdit = /\bEdit (?:access )?(?:lengths?|durations?|time limits?|expir\w*|timers?)\b/i;
+  for (const code of PROBLEM_CODES) assert.doesNotMatch(problemText(code), timedEdit, code);
+  assert.match(problemCopy("edit_policy_status_unreadable").detail, /connected courses and their Edit access/);
+});
+
 // Morrow Bridge reconnects by itself with a saved connection once it is reloaded, and the popup
 // shows no Connect Morrow button while one is saved.
 test("a version mismatch sends the educator to the popup after the reload, not to Connect Morrow", () => {
