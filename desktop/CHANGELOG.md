@@ -37,6 +37,7 @@ This release fixes every Critical and High defect found in the adversarial audit
 - Remove Morrow's data, and any other step an open assistant blocks, says to quit the assistant. It no longer says to wait for work that never ends.
 - When the materials folder is moved, renamed, deleted, or on a drive that is not connected, Home names the folder and offers Choose folder, and Make the folder again for Morrow's own folder. It no longer says Morrow is getting ready.
 - What stays on this computer, the uninstall steps, and the removal confirmation name the copy of the Morrow extension Claude Desktop keeps, and say to remove Morrow in Claude Desktop under Settings, Extensions. They no longer say that Remove Morrow's data stops every assistant from starting Morrow.
+- Morrow finds Gemini CLI by reading its installed package instead of running it, so detection no longer writes to your Gemini folder and no longer misses a slow first start.
 - The app says where unsigned builds get updates. The Mac note now says that moving Morrow to Applications can ask for an administrator password.
 
 ### Privacy

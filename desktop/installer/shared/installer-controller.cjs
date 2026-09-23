@@ -81,7 +81,7 @@ const {
   windowsPowerShellPath,
 } = require("./process-lifetime.cjs");
 const { blackboardPaths, blackboardTenantIdFromBaseUrl, configureBlackboard, readBlackboardHealth, removeBlackboardData, removeBlackboardTenant, selectBlackboardCourses } = require("./blackboard.cjs");
-const { detectAssistantApplication, detectAssistantCommand } = require("./assistant-app-detection.cjs");
+const { detectAssistantApplication, detectAssistantCommand, detectGeminiCli } = require("./assistant-app-detection.cjs");
 const { detectWindowsCodexPackage } = require("./windows-appx-detection.cjs");
 const { parseStrictJson } = require("./strict-utf8.cjs");
 const {
@@ -381,7 +381,7 @@ async function detectAssistant(assistant) {
     readBundleIdentifier: readMacApplicationBundleIdentifier
   })) return true;
   if (assistant.id === "claude-code") return commandFound("claude");
-  if (assistant.id === "gemini-cli") return commandFound("gemini");
+  if (assistant.id === "gemini-cli") return detectGeminiCli();
   if (assistant.id === "codex") return commandFound("codex");
   return false;
 }

@@ -3,11 +3,14 @@ const { EventEmitter } = require("node:events");
 const path = require("node:path");
 const { PassThrough } = require("node:stream");
 const test = require("node:test");
+const fs = require("node:fs/promises");
+const os = require("node:os");
 const {
   CODEX_BUNDLE_IDENTIFIER,
   commandDirectories,
   detectAssistantApplication,
   detectAssistantCommand,
+  detectGeminiCli,
   probeWindowsCommandShim,
   WINDOWS_COMMAND_SHIM_ENV,
   windowsCommandShimInvocation,
@@ -223,4 +226,56 @@ test("requires a real executable with a successful bounded version probe", async
     ["access", "/custom/bin/claude"],
     ["probe", "/custom/bin/claude"],
   ]);
+});
+
+/**
+ * A Gemini CLI install laid out the way its documented installs lay it out:
+ * npm or Homebrew link `gemini` into the package on macOS, and npm writes a
+ * command file beside its node_modules folder on Windows. Running the command
+ * writes a marker, so a test can prove detection never ran it.
+ */
+async function geminiInstall(t, { name = "@google/gemini-cli", version = "0.33.1" } = {}) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-gemini-detection-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const marker = path.join(root, "gemini-ran");
+  const run = process.platform === "win32" ? `@echo off\r\necho ran> "${marker}"\r\n` : `#!/bin/sh\ntouch "${marker}"\n`;
+  const bin = path.join(root, "bin");
+  await fs.mkdir(bin, { recursive: true });
+  if (process.platform === "win32") {
+    const packageRoot = path.join(bin, "node_modules", ...name.split("/"));
+    await fs.mkdir(path.join(packageRoot, "dist"), { recursive: true });
+    await fs.writeFile(path.join(packageRoot, "package.json"), JSON.stringify({ name, version }));
+    await fs.writeFile(path.join(bin, "gemini.cmd"), run);
+  } else {
+    const packageRoot = path.join(root, "lib", "node_modules", ...name.split("/"));
+    await fs.mkdir(path.join(packageRoot, "dist"), { recursive: true });
+    await fs.writeFile(path.join(packageRoot, "package.json"), JSON.stringify({ name, version }));
+    await fs.writeFile(path.join(packageRoot, "dist", "index.js"), run, { mode: 0o755 });
+    await fs.symlink(path.join("..", "lib", "node_modules", ...name.split("/"), "dist", "index.js"), path.join(bin, "gemini"));
+  }
+  // This computer's own command folders may hold a real Gemini CLI, so the
+  // fixture resolves only its own paths.
+  const realpath = (candidate) => (candidate.startsWith(root) ? fs.realpath(candidate) : Promise.reject(new Error("outside the fixture")));
+  return { home: path.join(root, "home"), pathValue: bin, marker, realpath };
+}
+
+// Running `gemini --version` registers the working folder as a Gemini project
+// in the person's own ~/.gemini folder, and a cold start can pass the probe
+// limit. Detection reads the package the command belongs to and never runs it.
+test("Gemini CLI is found from the package its command belongs to, without running it", async (t) => {
+  const install = await geminiInstall(t);
+  assert.equal(await detectGeminiCli({ home: install.home, pathValue: install.pathValue, realpath: install.realpath }), true);
+  assert.equal(await fs.stat(install.marker).then(() => true, () => false), false, "detection never ran gemini");
+});
+
+test("a gemini command that does not belong to the Gemini CLI package is not Gemini CLI", async (t) => {
+  for (const other of [{ name: "gemini-cli-lookalike" }, { version: "not a version" }]) {
+    const install = await geminiInstall(t, other);
+    assert.equal(await detectGeminiCli({ home: install.home, pathValue: install.pathValue, realpath: install.realpath }), false, JSON.stringify(other));
+    assert.equal(await fs.stat(install.marker).then(() => true, () => false), false);
+  }
+  const empty = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-gemini-absent-"));
+  t.after(() => fs.rm(empty, { recursive: true, force: true }));
+  const onlyEmpty = (candidate) => (candidate.startsWith(empty) ? fs.realpath(candidate) : Promise.reject(new Error("outside the fixture")));
+  assert.equal(await detectGeminiCli({ home: path.join(empty, "home"), pathValue: empty, realpath: onlyEmpty }), false);
 });
