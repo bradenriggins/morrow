@@ -7,6 +7,7 @@
 - A Muse account and the Muse app open.
 - Your normal Canvas login: the username and password you already use, and your phone nearby if your school uses Duo or push MFA.
 - One honest heads-up before anything else: Meta uses eligible Muse interaction data for model training by default. There is an opt-out in Muse's settings; check there for the data-sharing opt-out. We name it here because you are about to trust this agent with your courses, and buried defaults are how trust dies.
+- A second heads-up: on some Muse computers, the network that carries traffic out of the computer can read that traffic, including your Canvas sign-in session and the course pages Morrow loads. Morrow cannot prevent that. If your school has rules about where course content may go, check them before you connect.
 
 ## Step 1: Ask Muse to connect your Canvas account
 
@@ -18,7 +19,7 @@ That is the whole setup command. Everything below happens as a conversation; you
 
 ## Step 2: Read the consent moment
 
-Before anything connects, Muse shows you the consent page: what Morrow can and cannot do, where your sign-in lives, how to revoke it, your school's policy, and the training-data default. Read it. It is one page and it is the whole deal. Nothing connects until you say so.
+Before anything connects, Muse shows you the consent page: what Morrow can and cannot do, where your sign-in lives, who else can see your course traffic, how to revoke it, your school's policy, and the training-data default. Read it. It is one page and it is the whole deal. Nothing connects until you say so.
 
 ## Step 3: Tell Muse your school's Canvas address
 

@@ -18,6 +18,12 @@ Failure modes this suite pins down (written before the fix; final sweep
      Canvas on the helper page". No command or SKILL.md step lets the
      assistant sign out. The educator signs out with Canvas's own menu
      on the helper page, and SKILL.md tells the agent to guide that.
+  4. consent.md says it is "the whole deal" with no fine print, and
+     SKILL.md says installing means consenting to the Muse computer's
+     network reading its traffic, but neither consent.md nor
+     setup-guide.md told the educator that this network can read the
+     Canvas session and the course pages loaded (INSTALL.md and the
+     website say so).
 """
 
 import os
@@ -89,3 +95,13 @@ def test_sign_out_is_done_on_the_helper_page_with_canvas_menu():
     skill = _flat("SKILL.md")
     assert "Account, then Logout" in skill
     assert "no command that signs" in skill
+
+
+@pytest.mark.parametrize("rel", ("content/consent.md",
+                                 "content/setup-guide.md"))
+def test_the_educator_hears_who_else_can_read_course_traffic(rel):
+    text = _flat(rel)
+    assert "can read that traffic" in text, rel
+    assert "Canvas sign-in session and the course pages" in text, rel
+    assert "Morrow cannot prevent that" in text, rel
+    assert "check them before you connect" in text, rel

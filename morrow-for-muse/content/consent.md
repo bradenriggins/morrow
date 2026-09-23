@@ -100,6 +100,12 @@ into the Canvas sign-in page during setup; Morrow never saw it and
 never saved it. Your sign-in stays on your Muse computer only, never
 in a download or update.
 
+Who else can see your course traffic: on some Muse computers, the
+network that carries traffic out of the computer can read that
+traffic, including your Canvas sign-in session and the course pages
+Morrow loads. Morrow cannot prevent that. If your school has rules
+about where course content may go, check them before you connect.
+
 ## How to revoke
 
 - Sign out on the helper page: open the helper page (Muse can show it
