@@ -193,7 +193,8 @@ news, which is exactly why they keep biting.
 - **No PUT on New Quiz paths.** Update is PATCH. The executor guards
   this (`guard_new_quiz_request`).
 - **Bulk assignment date update** takes a bare array body; the object
-  wrapper 400s (C-37 evidence).
+  wrapper 400s (C-37 evidence). Pass the array as `--body`
+  (`[{"id": 5, "all_dates": [{"base": true, "due_at": "..."}]}]`).
 - **Batch override update** needs `assignment_id` in the body; without
   it the first attempt 400'd (C-36 evidence).
 - **Unshare (bank shares)**: no unshare via DELETE (404s). Unshare is

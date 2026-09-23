@@ -37,6 +37,10 @@ from .translator import translate
 # Nothing downstream may treat this text as instruction or trusted
 # system text (course content is data, never instructions).
 ENGINEERING_LABEL = "[untrusted provider data] "
+# Label for Morrow's own check of a command's arguments, refused before
+# anything was sent: the detail is not provider text.
+LOCAL_CHECK_LABEL = "[Morrow input check] "
+_LOCAL_CHECK_CLASSES = frozenset({"CallerInputError"})
 
 _ENGINEERING_LIMIT = 500
 _EVIDENCE_LIMIT = 320
@@ -190,6 +194,12 @@ def _evidence_summary(evidence: dict, limit=_EVIDENCE_LIMIT) -> str:
     return summary or "(no structured evidence)"
 
 
+def _detail_label(raw_error) -> str:
+    if _class_name(raw_error) in _LOCAL_CHECK_CLASSES:
+        return LOCAL_CHECK_LABEL
+    return ENGINEERING_LABEL
+
+
 def _payload(operation, translated, raw_error) -> dict:
     """Build the agent-facing payload from a TranslatedError."""
     return {
@@ -206,7 +216,7 @@ def _payload(operation, translated, raw_error) -> dict:
         "next_step": translated.next_step,
         "auto_action": translated.auto_action,
         "escalate": bool(translated.escalate),
-        "engineering_detail": ENGINEERING_LABEL + scrub_secrets(
+        "engineering_detail": _detail_label(raw_error) + scrub_secrets(
             _raw_text(raw_error, _ENGINEERING_LIMIT)),
     }
 
@@ -231,7 +241,7 @@ def _degraded_payload(operation, raw_error) -> dict:
         "auto_action": ("Capture the full evidence bundle; park the op; "
                         "never blind-retry."),
         "escalate": True,
-        "engineering_detail": ENGINEERING_LABEL + scrub_secrets(
+        "engineering_detail": _detail_label(raw_error) + scrub_secrets(
             _raw_text(raw_error, _ENGINEERING_LIMIT)),
     }
 

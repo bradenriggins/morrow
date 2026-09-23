@@ -249,9 +249,10 @@ unrecognized files on the next install/upgrade.)
 `proof-battery/OPERATION_CATALOG.md`.)
 
 `catalog` takes `--name`, `--method`, `--path` (path template),
-`--class read|write|plan`, `--params` (JSON), `--body` (a JSON object:
-the write's request body, which the post-write readback compares
-against; values may reference params as `"params.<name>"`),
+`--class read|write|plan`, `--params` (JSON), `--body` (a JSON object,
+or a JSON array of objects for the bulk date update: the write's
+request body, which the post-write readback compares against; values
+may reference params as `"params.<name>"`),
 `--backend chromium`, and `--canvas-base` (or the `CANVAS_BASE` env
 var). The CLI always runs the shipped `pack/pack.json`; there is no
 pack override. A write result's `outcome` is `verified` (a readback

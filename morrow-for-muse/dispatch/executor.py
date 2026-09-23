@@ -286,6 +286,12 @@ class LocalProcedureRefused(ExecutorError):
     pass
 
 
+class CallerInputError(ExecutorError):
+    """A command's own JSON argument (--params, --body,
+    --course-resolution) was refused before anything was sent. The text
+    is Morrow's own check, never provider data."""
+
+
 class VerificationFailed(ExecutorError):
     pass
 
@@ -9596,10 +9602,30 @@ def _load_params(text: str) -> dict:
     except ValueError as exc:
         # W6-P2-E2: the raw ValueError text echoes the offending input
         # (params can carry learner tokens); keep it off stderr.
-        raise ExecutorError("params are not valid JSON: %s" % "REDACTED") from exc
+        raise CallerInputError(
+            "--params is not valid JSON: %s" % "REDACTED") from exc
     if not isinstance(obj, dict):
-        raise ExecutorError("params must be a JSON object")
+        raise CallerInputError("--params must be a JSON object")
     return obj
+
+
+def _load_body(text: str):
+    """The request body from --body: a JSON object, or a JSON array of
+    objects (the bulk date update, C-37, takes a bare array)."""
+    try:
+        body = json.loads(text)
+    except ValueError as exc:
+        # The offending input can carry learner tokens; keep it off
+        # stderr (W6-P2-E2).
+        raise CallerInputError("--body is not valid JSON") from exc
+    if isinstance(body, dict):
+        return body
+    if isinstance(body, list) and body and all(
+            isinstance(item, dict) for item in body):
+        return body
+    raise CallerInputError(
+        "--body must be a JSON object, or a JSON array of objects (the "
+        "bulk date update takes an array)")
 
 
 def _load_approval(path: str | None) -> dict | None:
@@ -9644,11 +9670,11 @@ def _mode_ctx_from_args(args) -> dict | None:
         try:
             resolution = json.loads(resolution_text)
         except ValueError:
-            raise ExecutorError(
-                "course-resolution is not valid JSON: REDACTED")
+            raise CallerInputError(
+                "--course-resolution is not valid JSON: REDACTED")
         if not isinstance(resolution, dict):
-            raise ExecutorError(
-                "course-resolution must be a JSON object")
+            raise CallerInputError(
+                "--course-resolution must be a JSON object")
         ctx["course_resolution"] = resolution
     destructive_confirmed = getattr(args, "destructive_confirmed", None)
     if destructive_confirmed:
@@ -10220,9 +10246,11 @@ def main(argv=None):
                             "does not know.")
     p_cat.add_argument("--params", default="{}", help="params as a JSON object string")
     p_cat.add_argument("--body", default=None,
-                       help="request body as a JSON object string (the write's "
-                            "intent; the readback compares against it). Values "
-                            "may reference params as \"params.<name>\"")
+                       help="request body as a JSON object string, or a "
+                            "JSON array of objects for the bulk date update "
+                            "(the write's intent; the readback compares "
+                            "against it). Values may reference params as "
+                            "\"params.<name>\"")
     p_cat.add_argument("--provider", default="canvas")
     p_cat.add_argument("--slot", default=None, help="credential slot override (https backend only)")
     p_cat.add_argument("--plan", default=None, help="frozen plan file (required for writes)")
@@ -10258,7 +10286,8 @@ def main(argv=None):
                       help="params as a JSON object string (include "
                            "course_id for a course write)")
     p_pw.add_argument("--body", default=None,
-                      help="request body as a JSON object string")
+                      help="request body as a JSON object string, or a "
+                           "JSON array of objects for the bulk date update")
     p_pw.add_argument("--provider", default="canvas")
     add_backend(p_pw)
     add_mode_ctx(p_pw)
@@ -10446,13 +10475,7 @@ def main(argv=None):
         params = _load_params(args.params)
         extra = None
         if args.body is not None:
-            try:
-                body = json.loads(args.body)
-            except ValueError:
-                raise ExecutorError("--body is not valid JSON")
-            if not isinstance(body, dict):
-                raise ExecutorError("--body must be a JSON object")
-            extra = {"body": body}
+            extra = {"body": _load_body(args.body)}
         plan = load_frozen_plan(args.plan, args.name) if args.plan else None
         approval = _load_approval(args.approval)
         mode_ctx = _mode_ctx_from_args(args)
@@ -10489,12 +10512,7 @@ def main(argv=None):
             if args.command == "plan-write":
                 body = None
                 if args.body is not None:
-                    try:
-                        body = json.loads(args.body)
-                    except ValueError:
-                        raise ExecutorError("--body is not valid JSON")
-                    if not isinstance(body, dict):
-                        raise ExecutorError("--body must be a JSON object")
+                    body = _load_body(args.body)
                 out = prepare_plan_write(
                     args.name, args.method, args.path,
                     _load_params(args.params), body, session, pack,
