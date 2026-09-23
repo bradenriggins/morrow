@@ -1,0 +1,4 @@
+# Every checkout writes the committed bytes, on Windows too. The desktop release checks each Morrow
+# Bridge file against the sealed release ledger and reads pnpm-lock.yaml, so core.autocrlf (the Git
+# for Windows default) must never rewrite line endings.
+* -text
