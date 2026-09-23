@@ -35,6 +35,12 @@ Failure modes this suite pins down (written before the code):
      halt, quarantine, notice) exactly as a death on the first call
      did before, and a write refused by an active write halt must still
      reach Canvas not at all.
+  9. --dry-run rendered the write after its labels were put back into
+     the students' real text, so the dry-run report handed the agent
+     every name, email, and login on the page. The report shows the
+     request as the agent wrote it, with labels, and says the real text
+     goes back only when the change is sent. (Added in the final sweep,
+     2026-09-23, written before the fix.)
 
 The run writes a repeatable artifact of the flow to
 .selftest-work/course-content-e2e-artifact.json (labels only).
@@ -57,8 +63,8 @@ pytest.importorskip("cryptography")
 from dispatch import executor as ex  # noqa: E402
 from dispatch import admission as admission_mod  # noqa: E402
 from dispatch.test_by_name_e2e import (  # noqa: E402,F401
-    BASE, CONV, COURSE, USER, _ctx, _edit_mode, _find, _journal_text,
-    found_in, hermetic, world)
+    BASE, CONV, COURSE, OTHER_CONV, USER, _ctx, _edit_mode, _find,
+    _journal_text, found_in, hermetic, world)
 from dispatch.test_direct_lane_hardening import _pack  # noqa: E402
 from learners.test_students_find import ROSTER  # noqa: E402
 
@@ -363,6 +369,47 @@ def test_a_halted_write_reaches_canvas_not_at_all(monkeypatch):
     with pytest.raises(ex.WriteHaltActive):
         _update(session, {"title": "Week 2"})
     assert session.calls == []
+
+
+# -- 9 ------------------------------------------------------------------------
+
+def test_a_dry_run_of_an_edited_page_shows_labels_never_the_names():
+    _edit_mode()
+    session = Canvas()
+    shown = _show(session)["receipt"]["body"]
+    edited = shown.replace("Friday", "Monday")
+    before = _journal_text()
+    name, method, path = UPDATE
+    out = ex.dispatch_catalog_op(
+        name, method, path, "write", dict(PAGE_PARAMS), pack=_pack(),
+        session=session, mode_ctx=_ctx(), dry_run=True,
+        extra={"body": {"wiki_page": {"body": edited}}})
+    assert out["dry_run"] is True
+    assert _leaks(out) == [], json.dumps(out)[:2000]
+    assert out["requests"][0]["body"] == {"wiki_page": {"body": edited}}
+    assert "real text" in out["note"]
+    assert not [c for c in session.calls if c[0] == "PUT"]
+    assert _journal_text() == before
+    # The same edit, sent, still reaches Canvas with the real text.
+    _update(session, {"body": edited})
+    puts = [b for m, _u, b in session.calls if m == "PUT"]
+    assert puts[0]["wiki_page"]["body"] == BODY.replace("Friday", "Monday")
+
+
+def test_a_dry_run_of_a_label_the_model_wrote_shows_the_label():
+    # Another conversation: no typed name is echoed next to the label.
+    _edit_mode()
+    session = Canvas()
+    label = _find("Jane Doe")["student"]
+    name, method, path = UPDATE
+    out = ex.dispatch_catalog_op(
+        name, method, path, "write", dict(PAGE_PARAMS), pack=_pack(),
+        session=session, mode_ctx=_ctx(OTHER_CONV), dry_run=True,
+        extra={"body": {"wiki_page": {
+            "body": "<p>Congratulations, %s!</p>" % label}}})
+    text = json.dumps(out)
+    assert _leaks(text) == [], text[:2000]
+    assert label in text
 
 
 def _artifact(record):

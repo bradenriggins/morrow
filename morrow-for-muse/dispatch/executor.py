@@ -8306,13 +8306,20 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                                             plan_not_required=mode_edit_write,
                                             learner_tokens=label_tokens)
     journal_params = params
-    entry, params = wire_entry, wire_params
     if id_labels and isinstance(_labels, dict):
         _labels["map"] = id_labels
     if dry_run:
-        return _render_dry_run(entry, params, session, pack, plan, op_id,
-                                approval_audit, tenant_base, _derived,
-                                declared)
+        # The report goes to the agent: the request as the agent wrote
+        # it, with labels, never the students' real text or ids.
+        report = _render_dry_run(entry, params, session, pack, plan, op_id,
+                                 approval_audit, tenant_base, _derived,
+                                 declared)
+        if wire_entry is not entry or wire_params is not params:
+            report["note"] += (
+                ". Student labels are shown as written; Morrow puts back "
+                "each student's real text only when it sends the change")
+        return report
+    entry, params = wire_entry, wire_params
     # Post-claim, pre-provider: every step from here to the provider
     # call runs before any provider call, so any failure proves
     # nothing applied. The claim is released (op_id reusable) instead

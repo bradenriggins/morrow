@@ -27,6 +27,10 @@ Student privacy:
   cannot, it reads and changes nothing in the course. When the
   assistant saves the content back, Morrow puts the real text back in:
   a first name stays a first name, and an email stays an email.
+- Privacy fix: when the assistant previewed a change to text that
+  names students, the preview showed those students' real names,
+  emails, and logins. Now the preview keeps each student's label, and
+  Morrow puts the real text back only when it sends the change.
 - Some names are still not hidden, and the consent page lists them: a
   name Canvas does not list for the student, such as a nickname; a
   course named for its student, such as an independent study; and a
@@ -198,6 +202,10 @@ Technical notes:
 - `test_release_version.py` requires every current-version statement
   (`pack/version.txt`, `pack/pack.json`, SKILL.md, INSTALL.md, the
   install selftest stub, and this changelog) to name `VERSION`.
+- `dispatch/executor.py` renders `--dry-run` from the label form of the
+  request (the entry and params before label resolution, which the
+  gates and the journal already use), and the report's note says labels
+  are restored only when the change is sent.
 - `transport/local_chromium.py` `api()` runs a change's page-context
   program again only when CDP says its world was gone before it ran
   ("Cannot find context with specified id"). Any other context loss
