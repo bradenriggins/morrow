@@ -125,7 +125,7 @@ def test_carved_tree_passes_secrets_gate_without_exclusions(carved):
     proc = subprocess.run(
         ["bash", os.path.join(carved, "scripts", "verify-no-secrets.sh"),
          carved], capture_output=True, text=True,
-        env=dict(os.environ, VERIFY_EXCLUDE=""))
+        env=dict(os.environ, VERIFY_EXCLUDE="", VERIFY_TENANT_EXEMPT=""))
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 

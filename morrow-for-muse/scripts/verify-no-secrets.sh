@@ -126,7 +126,7 @@ is_verify_excluded() { # $1 = rel path
 # their school's Canvas address there, so a real tenant host is its
 # purpose. Every other rule still applies to these files, so session
 # material or a credential written there still fails the gate. The
-# carve-time gate sets neither variable, and helper/env never ships.
+# carve-time gate clears both variables, and helper/env never ships.
 is_tenant_exempt() { # $1 = rel path
   local rel="$1" e
   [ -n "${VERIFY_TENANT_EXEMPT:-}" ] || return 1

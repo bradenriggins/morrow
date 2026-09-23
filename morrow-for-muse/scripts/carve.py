@@ -273,7 +273,8 @@ def carve(out_dir, make_zip=False, run_gate=True):
         gate = subprocess.run(
             ["bash", os.path.join(stage, "scripts", "verify-no-secrets.sh"),
              stage], capture_output=True, text=True,
-            env=dict(os.environ, VERIFY_EXCLUDE="")) if run_gate else None
+            env=dict(os.environ, VERIFY_EXCLUDE="",
+                     VERIFY_TENANT_EXEMPT="")) if run_gate else None
         if gate is not None and gate.returncode != 0:
             raise SystemExit("CARVE FAIL: secrets gate\n%s%s"
                              % (gate.stdout, gate.stderr))
