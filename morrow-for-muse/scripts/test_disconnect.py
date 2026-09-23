@@ -26,6 +26,13 @@ Failure modes this suite pins down (written before the fix):
      disconnect that correctly waited for a yes. Every stop names the
      mode, and a missing yes reads as not confirmed. A completed
      uninstall printed "Uninstall complete" twice; it prints it once.
+  9. (final sweep 2026-09-23) the paths to delete were one
+     space-joined string, split again on every space. With the tree at
+     ~/workspace/skills/morrow canvas, disconnect deleted an unrelated
+     ~/workspace/skills/morrow folder, kept the real sign-in, checked
+     the same wrong paths, and reported the sign-in deleted. A
+     MORROW_HOME with a space split the same way, in disconnect and in
+     uninstall.
 
 The real crontab is never touched: a fake `crontab` on PATH stores the
 table in a scratch file, and a fake `ss` reports no listeners. The
@@ -67,12 +74,10 @@ esac
 """
 
 
-@pytest.fixture
-def rig():
-    root = os.path.join(HERE, ".selftest-work", "disconnect-%d" % os.getpid())
+def _make_rig(root, tree_rel, home_rel):
     shutil.rmtree(root, ignore_errors=True)
-    tree = _copy_tree(os.path.join(root, "tree"))
-    home = os.path.join(root, "home")
+    tree = _copy_tree(os.path.join(root, tree_rel))
+    home = os.path.join(root, home_rel)
     morrow_home = os.path.join(home, ".morrow")
     profile = os.path.join(tree, "helper", "profile")
     decoy = os.path.join(root, "not-the-profile")
@@ -114,11 +119,42 @@ def rig():
                 "FAKE_CRONTAB_FILE": cron,
                 "PATH": fakebin + os.pathsep + env.get("PATH", "")})
     env.pop("MORROW_SOURCE_VAULT_PATH", None)
+    # Commands run from an empty folder, so a path split into a
+    # relative piece can only name something inside the scratch root.
+    cwd = os.path.join(root, "cwd")
+    os.makedirs(cwd)
+    return {"root": root, "env": env, "profile": profile, "cron": cron,
+            "files": files, "keepalive": keepalive, "decoy": decoy,
+            "morrow": os.path.join(tree, "bin", "morrow"),
+            "tree": tree, "cwd": cwd}
+
+
+@pytest.fixture
+def rig():
+    root = os.path.join(HERE, ".selftest-work", "disconnect-%d" % os.getpid())
     try:
-        yield {"root": root, "env": env, "profile": profile, "cron": cron,
-               "files": files, "keepalive": keepalive, "decoy": decoy,
-               "morrow": os.path.join(tree, "bin", "morrow"),
-               "tree": tree}
+        yield _make_rig(root, "tree", "home")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.fixture
+def spaced_rig():
+    """The tree and MORROW_HOME under paths with a space, next to
+    folders named like the first word of each path."""
+    root = os.path.join(HERE, ".selftest-work",
+                        "disconnect-spaces-%d" % os.getpid())
+    try:
+        rig = _make_rig(root, os.path.join("skills", "morrow canvas"),
+                        "home dir")
+        rig["siblings"] = []
+        for rel in (os.path.join("skills", "morrow"), "home"):
+            path = os.path.join(root, rel, "educator-notes.txt")
+            os.makedirs(os.path.dirname(path))
+            with open(path, "w") as fh:
+                fh.write("not Morrow's\n")
+            rig["siblings"].append(path)
+        yield rig
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -127,7 +163,8 @@ def _run(rig, *args):
     return subprocess.run([sys.executable, rig["morrow"], "disconnect"]
                           + list(args),
                           env=rig["env"], capture_output=True, text=True,
-                          timeout=120, stdin=subprocess.DEVNULL)
+                          timeout=120, stdin=subprocess.DEVNULL,
+                          cwd=rig["cwd"])
 
 
 def test_disconnect_removes_session_and_keepalive(rig):
@@ -186,7 +223,8 @@ def _run_uninstall(rig, *args):
                                                 "uninstall.sh")]
                           + list(args),
                           env=rig["env"], capture_output=True, text=True,
-                          timeout=120, stdin=subprocess.DEVNULL)
+                          timeout=120, stdin=subprocess.DEVNULL,
+                          cwd=rig["cwd"])
 
 
 def test_non_interactive_uninstall_without_yes_says_not_confirmed(rig):
@@ -248,3 +286,31 @@ def test_disconnect_without_crontab_still_disconnects(rig):
     assert proc.returncode == 0, out
     assert not os.path.exists(rig["profile"]), out
     assert "no crontab" in out
+
+
+def test_disconnect_with_spaces_in_the_paths(spaced_rig):
+    rig = spaced_rig
+    proc = _run(rig, "--yes")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert not os.path.exists(rig["profile"]), out
+    for key in ("lane", "session", "pin_audit"):
+        assert not os.path.exists(rig["files"][key]), (key, out)
+    for key in ("settings", "journal"):
+        assert os.path.exists(rig["files"][key]), (key, out)
+    for path in rig["siblings"]:
+        assert os.path.exists(path), (path, out)
+    assert os.listdir(rig["cwd"]) == [], out
+    assert "deleted: %s" % rig["profile"] in out, out
+
+
+def test_uninstall_with_spaces_in_the_paths(spaced_rig):
+    rig = spaced_rig
+    proc = _run_uninstall(rig, "--yes")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert not os.path.exists(rig["tree"]), out
+    assert not os.path.exists(rig["env"]["MORROW_HOME"]), out
+    for path in rig["siblings"]:
+        assert os.path.exists(path), (path, out)
+    assert os.listdir(rig["cwd"]) == [], out

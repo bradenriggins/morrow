@@ -75,7 +75,12 @@ for _a in "$@"; do
 done
 unset _a
 # Session material a disconnect removes (the educator's records stay).
-DISCONNECT_PATHS="${PROFILE_DIR} ${MORROW_HOME}/browser_lane.json ${MORROW_HOME}/browser_lane.json.lock ${MORROW_HOME}/session.json ${MORROW_HOME}/session.json.prev ${MORROW_HOME}/principal_pin.json ${MORROW_HOME}/browser-pending ${MORROW_HOME}/browser-briefs"
+# Arrays, always expanded quoted: a tree or MORROW_HOME path may hold
+# spaces.
+DISCONNECT_PATHS=("${PROFILE_DIR}" "${MORROW_HOME}/browser_lane.json"
+  "${MORROW_HOME}/browser_lane.json.lock" "${MORROW_HOME}/session.json"
+  "${MORROW_HOME}/session.json.prev" "${MORROW_HOME}/principal_pin.json"
+  "${MORROW_HOME}/browser-pending" "${MORROW_HOME}/browser-briefs")
 
 if [ "${MODE}" = "disconnect" ]; then STOP_PREFIX="DISCONNECT STOPPED"; else STOP_PREFIX="UNINSTALL STOPPED"; fi
 die() { printf '%s: %s\n' "${STOP_PREFIX}" "$1" >&2; exit 1; }
@@ -236,7 +241,7 @@ note "Morrow for Muse disconnect. This will:"
 note "  1. stop the helper (port ${HELPER_PORT}) and its Chromium, if running"
 note "  2. stop the keepalive background loop and remove the keepalive cron entries (otherwise keepalive relaunches the signed-in helper within 5 minutes)"
 note "  3. delete the Canvas session material:"
-for _p in ${DISCONNECT_PATHS}; do note "          ${_p}"; done
+for _p in "${DISCONNECT_PATHS[@]}"; do note "          ${_p}"; done
 note "  It keeps this install, your settings, the audit journal, and the learner vault."
 note ""
 else
@@ -439,13 +444,13 @@ unset _l _cmd _tok _t _v _mine _cron_new _after _leftover
 
 if [ "${MODE}" = "disconnect" ]; then
   note "--- 3. deleting the Canvas session material"
-  for _p in ${DISCONNECT_PATHS}; do
+  for _p in "${DISCONNECT_PATHS[@]}"; do
     case "${_p}" in
       ""|"/"|"${HOME}"|"${HOME}/."|"${MORROW_HOME}"|"${TREE}") die "refusing to delete unsafe path: ${_p}" ;;
     esac
   done
   _DISC_FAILED=0
-  for _p in ${DISCONNECT_PATHS}; do
+  for _p in "${DISCONNECT_PATHS[@]}"; do
     if [ -e "${_p}" ] || [ -L "${_p}" ]; then
       if rm -rf "${_p}" 2>/dev/null; then
         note "deleted: ${_p}"
@@ -457,7 +462,7 @@ if [ "${MODE}" = "disconnect" ]; then
   done
   [ "${_DISC_FAILED}" = "0" ] || die "one or more session paths could not be deleted; see above"
   note "--- 4. verifying"
-  for _p in ${DISCONNECT_PATHS}; do
+  for _p in "${DISCONNECT_PATHS[@]}"; do
     if [ -e "${_p}" ] || [ -L "${_p}" ]; then
       printf 'STILL PRESENT: %s\n' "${_p}" >&2
       _DISC_FAILED=1
@@ -493,7 +498,7 @@ note "--- ${step_n}. deleting install paths"
 # this uninstall deletes the journal tree immediately after (nothing
 # can dangle); the privacy CLIs use the safe default that skips
 # in-flight envelopes.
-_TRANSIENT_DIRS="${MORROW_HOME}/browser-pending ${MORROW_HOME}/browser-briefs"
+_TRANSIENT_DIRS=("${MORROW_HOME}/browser-pending" "${MORROW_HOME}/browser-briefs")
 if [ -d "${MORROW_HOME}/browser-pending" ] || [ -d "${MORROW_HOME}/browser-briefs" ]; then
   if _purge_out="$(PYTHONDONTWRITEBYTECODE=1 python3 -c \
       'import sys; sys.path.insert(0, sys.argv[1]); from transport.browser_backend import purge_transient_state; print(purge_transient_state(force=True))' \
@@ -504,7 +509,7 @@ if [ -d "${MORROW_HOME}/browser-pending" ] || [ -d "${MORROW_HOME}/browser-brief
     note "${_purge_out}"
   fi
 fi
-for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${VAULT_PATH}" "${VAULT_PATH}.key" ${_TRANSIENT_DIRS}; do
+for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${VAULT_PATH}" "${VAULT_PATH}.key" "${_TRANSIENT_DIRS[@]}"; do
   case "${_p}" in
     ""|"/"|"${HOME}"|"${HOME}/.") die "refusing to delete unsafe path: ${_p}" ;;
   esac
@@ -529,7 +534,7 @@ _delete_path() {
   fi
 }
 _REMOVED=""; _DELETE_FAILED=0
-for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${VAULT_PATH}" "${VAULT_PATH}.key" ${_TRANSIENT_DIRS}; do
+for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${VAULT_PATH}" "${VAULT_PATH}.key" "${_TRANSIENT_DIRS[@]}"; do
   _delete_path "${_p}"
 done
 # W4-P1-6: the installer leaves upgrade backups behind
@@ -549,7 +554,7 @@ unset _b _p
 step_n=4
 note "--- ${step_n}. verifying removal"
 _FAILED=0
-for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${VAULT_PATH}" "${VAULT_PATH}.key" ${_TRANSIENT_DIRS}; do
+for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${VAULT_PATH}" "${VAULT_PATH}.key" "${_TRANSIENT_DIRS[@]}"; do
   if [ -e "${_p}" ] || [ -L "${_p}" ]; then
     printf 'STILL PRESENT: %s\n' "${_p}" >&2
     _FAILED=1
