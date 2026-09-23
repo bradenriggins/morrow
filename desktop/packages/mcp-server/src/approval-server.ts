@@ -1307,9 +1307,16 @@ const EDIT_ACCESS_ENDED: Readonly<Record<string, readonly [string, string]>> = {
   expired: ["Review expired", "Morrow did not turn on Edit. Return to your assistant and ask again if you still want Edit."],
 };
 
+/** Whether a selected course keeps a grant saved while Edit was timed, which ends by itself. */
+function editAccessEndsSooner(view: JsonObject): boolean {
+  return (Array.isArray(view.selections) ? view.selections.map(object) : []).some((selection) => typeof selection.grantEndsAt === "number");
+}
+
 function editAccessStatusContent(view: JsonObject): string {
-  const [title, detail] = EDIT_ACCESS_ENDED[String(view.state)]
-    ?? ["Check this request", "This Edit access review can no longer be answered here. Return to your assistant and ask again."];
+  const [title, detail] = view.state === "enabled" && editAccessEndsSooner(view)
+    ? ["Edit is on", "Edit is on for these courses. It stays on until you return a course to Plan in Morrow Bridge, except for a course this page says ends sooner. Return to your assistant."]
+    : EDIT_ACCESS_ENDED[String(view.state)]
+      ?? ["Check this request", "This Edit access review can no longer be answered here. Return to your assistant and ask again."];
   return `<section class="outcome"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(detail)}</p></section>`;
 }
 
@@ -1321,7 +1328,13 @@ function editAccessCourses(view: JsonObject): string {
   const selections = Array.isArray(view.selections) ? view.selections.map(object) : [];
   return selections.map((selection) => {
     const actions = (Array.isArray(selection.actions) ? selection.actions : []).map(object);
-    return `<section class="section"><dl class="destination"><div><dt>Course</dt><dd>${escapeHtml(String(selection.courseName ?? ""))}</dd></div><div><dt>Site</dt><dd>${escapeHtml(String(selection.site ?? ""))}</dd></div></dl><p class="preview-label">${label}</p><div class="formatted-preview"><ul>${actions.map((action) => `<li>${escapeHtml(String(action.label ?? ""))}</li>`).join("")}</ul></div></section>`;
+    const endsAt = typeof selection.grantEndsAt === "number"
+      ? new Date(selection.grantEndsAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+      : null;
+    const ending = endsAt
+      ? `<p class="warning">This course has Edit access from an earlier version of Morrow that ends ${escapeHtml(endsAt)}. These changes end with it, and the course returns to Plan.</p>`
+      : "";
+    return `<section class="section"><dl class="destination"><div><dt>Course</dt><dd>${escapeHtml(String(selection.courseName ?? ""))}</dd></div><div><dt>Site</dt><dd>${escapeHtml(String(selection.site ?? ""))}</dd></div></dl><p class="preview-label">${label}</p><div class="formatted-preview"><ul>${actions.map((action) => `<li>${escapeHtml(String(action.label ?? ""))}</li>`).join("")}</ul></div>${ending}</section>`;
   }).join("");
 }
 
@@ -1341,9 +1354,12 @@ function editAccessPage(target: ApprovalTarget, view: JsonObject, grant: () => s
   const expiresAt = Number.isFinite(expiry)
     ? new Date(expiry).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
     : "15 minutes after it opened";
+  const stays = editAccessEndsSooner(view)
+    ? "Edit stays on until you return a course to Plan in Morrow Bridge, except for a course this page says ends sooner."
+    : "Edit stays on for these courses until you return them to Plan in Morrow Bridge.";
   const path = `/${target.kind}/${escapeHtml(encodeURIComponent(target.id))}`;
   const nonce = escapeHtml(grant());
-  return pageShell("Turn on Edit?", `<header class="hero"><h1>Turn on Edit?</h1><p>Your assistant asked Morrow to make these kinds of change without asking you each time.</p>${uncheckedNote}</header>${courses}<footer class="decision"><div class="next-step"><p>Edit stays on for these courses until you return them to Plan in Morrow Bridge.</p><p class="presence-note">Turn on Edit here in Chrome with Morrow Bridge connected. A request from another program cannot turn it on.</p></div><div class="actions"><form method="post" action="${path}/approve"><input type="hidden" name="nonce" value="${nonce}"><button class="approve" type="submit">Turn on Edit</button></form><form method="post" action="${path}/cancel"><input type="hidden" name="nonce" value="${nonce}"><button class="cancel" type="submit">Keep Plan</button></form></div><details><summary>Technical details</summary><p class="details-help">This review can be answered until ${escapeHtml(expiresAt)}. After that, ask your assistant again.</p></details></footer>`);
+  return pageShell("Turn on Edit?", `<header class="hero"><h1>Turn on Edit?</h1><p>Your assistant asked Morrow to make these kinds of change without asking you each time.</p>${uncheckedNote}</header>${courses}<footer class="decision"><div class="next-step"><p>Changes Morrow already makes without asking in these courses stay on.</p><p>${stays}</p><p class="presence-note">Turn on Edit here in Chrome with Morrow Bridge connected. A request from another program cannot turn it on.</p></div><div class="actions"><form method="post" action="${path}/approve"><input type="hidden" name="nonce" value="${nonce}"><button class="approve" type="submit">Turn on Edit</button></form><form method="post" action="${path}/cancel"><input type="hidden" name="nonce" value="${nonce}"><button class="cancel" type="submit">Keep Plan</button></form></div><details><summary>Technical details</summary><p class="details-help">This review can be answered until ${escapeHtml(expiresAt)}. After that, ask your assistant again.</p></details></footer>`);
 }
 
 /** Why a close-out was refused, in the words the runtime gave the person. */

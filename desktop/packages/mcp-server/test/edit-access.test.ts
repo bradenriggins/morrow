@@ -74,7 +74,7 @@ function operationStub(): JsonObject {
 async function owner(expiresAt: number | undefined = undefined) {
   const prepare = vi.fn().mockResolvedValue(prepared);
   const apply = vi.fn().mockImplementation(async (scope: BrowserEditAccessPrepared) => grantedResult(scope, expiresAt));
-  const reviews = new EditAccessReviews((scope) => apply(scope));
+  const reviews = new EditAccessReviews((scope, options) => apply(scope, options));
   let baseUrl: string | null = null;
   const presence: ReviewApprovalPresence[] = [];
   const approval = new LoopbackApprovalServer({
@@ -222,7 +222,8 @@ describe("Edit asked for in a conversation", () => {
       const requested = await requestEdit(test);
       const confirmed = await turnOnEdit(test, requested);
       expect(test.apply).toHaveBeenCalledTimes(1);
-      expect(test.apply).toHaveBeenCalledWith(prepared);
+      // The reviewed kinds join what each course already has; nothing the person turned on ends.
+      expect(test.apply).toHaveBeenCalledWith(prepared, { merge: true });
       expect(confirmed).toMatchObject({ schema: "morrow.edit-access.v1", ok: true, mode: "edit", state: "enabled", outcome: "received" });
       expect(confirmed.selections).toEqual([
         expect.objectContaining({ sourceBindingId: "canvas-bio", actualMode: "edit", confirmed: true }),
@@ -233,6 +234,94 @@ describe("Edit asked for in a conversation", () => {
       const after = await reviewForm(test, path);
       expect(after.nonce).toBe("");
       expect(after.body).toContain("Edit is on for these courses.");
+    } finally {
+      await test.close();
+    }
+  });
+
+  it("keeps the Edit choices a course already has, and lists the whole saved grant after Turn on Edit", async () => {
+    const test = await owner();
+    try {
+      const requested = await requestEdit(test);
+      const { body } = await reviewForm(test, new URL(String(requested.approvalUrl)).pathname);
+      expect(body).toContain("Changes Morrow already makes without asking in these courses stay on.");
+      // Biology already had a removal and a routine kind, turned on in Plan and Edit settings.
+      test.apply.mockImplementationOnce(async (scope: BrowserEditAccessPrepared) => {
+        const granted = grantedResult(scope);
+        return {
+          ...granted,
+          bindings: granted.bindings.map((binding) => binding.sourceBindingId !== "canvas-bio" ? binding : {
+            ...binding,
+            editCategories: [
+              { id: "action:canvas:canvas_remove_report", label: "Remove a generated report", availability: "edit", destructive: true },
+              { id: "assignment_due_at", label: "Assignment due dates", availability: "edit" },
+              { id: "canvas_create_ai_conversation", label: "Start an AI conversation", availability: "edit", verification: "unchecked" },
+            ],
+            editPermission: {
+              ...(binding.editPermission as JsonObject),
+              enabledCategories: ["action:canvas:canvas_remove_report", "assignment_due_at", "canvas_create_ai_conversation"],
+            },
+          }),
+        } satisfies BrowserEditAccessResult;
+      });
+      const confirmed = await turnOnEdit(test, requested);
+      expect(confirmed).toMatchObject({ ok: true, state: "enabled", outcome: "received" });
+      expect(confirmed.selections).toEqual([
+        expect.objectContaining({ sourceBindingId: "canvas-bio", actualMode: "edit", confirmed: true }),
+        expect.objectContaining({ sourceBindingId: "moodle-chem", actualMode: "edit", confirmed: true }),
+      ]);
+      const after = await reviewForm(test, new URL(String(requested.approvalUrl)).pathname);
+      const biology = after.body.slice(after.body.indexOf("Biology"), after.body.indexOf("Chemistry"));
+      expect(biology).toContain("Changes Morrow now makes without asking");
+      expect(biology).toContain("<li>Remove a generated report</li>");
+      expect(biology).toContain("<li>Assignment due dates</li>");
+      expect(biology).toContain("<li>Start an AI conversation</li>");
+      expect(after.body.slice(after.body.indexOf("Chemistry"))).toContain("<li>Page content</li>");
+    } finally {
+      await test.close();
+    }
+  });
+
+  it("does not confirm Edit when the saved grant is missing a reviewed kind", async () => {
+    const test = await owner();
+    try {
+      const requested = await requestEdit(test);
+      test.apply.mockImplementationOnce(async (scope: BrowserEditAccessPrepared) => {
+        const granted = grantedResult(scope);
+        return {
+          ...granted,
+          bindings: granted.bindings.map((binding) => binding.sourceBindingId !== "canvas-bio" ? binding : {
+            ...binding,
+            editPermission: { ...(binding.editPermission as JsonObject), enabledCategories: ["canvas_create_ai_conversation"] },
+          }),
+        } satisfies BrowserEditAccessResult;
+      });
+      expect(await turnOnEdit(test, requested)).toMatchObject({ ok: false, state: "unconfirmed" });
+    } finally {
+      await test.close();
+    }
+  });
+
+  it("says when a course's Edit access from an earlier Morrow ends, and that the new kinds end with it", async () => {
+    const endsAt = Date.now() + 3 * 60 * 60_000;
+    const test = await owner(endsAt);
+    try {
+      test.prepare.mockResolvedValueOnce({
+        mode: "edit",
+        selections: [{ ...prepared.selections[0]!, grantEndsAt: endsAt }, prepared.selections[1]!],
+      } satisfies BrowserEditAccessPrepared);
+      const requested = await requestEdit(test);
+      const when = new Date(endsAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      const { body } = await reviewForm(test, new URL(String(requested.approvalUrl)).pathname);
+      const biology = body.slice(body.indexOf("Biology"), body.indexOf("Chemistry"));
+      expect(biology).toContain(`This course has Edit access from an earlier version of Morrow that ends ${when}. These changes end with it, and the course returns to Plan.`);
+      expect(body.slice(body.indexOf("Chemistry"))).not.toContain("earlier version of Morrow");
+      expect(body).not.toContain("Edit stays on for these courses until you return them to Plan in Morrow Bridge.");
+      expect(body).toContain("Edit stays on until you return a course to Plan in Morrow Bridge, except for a course this page says ends sooner.");
+      expect(await turnOnEdit(test, requested)).toMatchObject({ ok: true, state: "enabled" });
+      const after = await reviewForm(test, new URL(String(requested.approvalUrl)).pathname);
+      expect(after.body).toContain(`This course has Edit access from an earlier version of Morrow that ends ${when}. These changes end with it, and the course returns to Plan.`);
+      expect(after.body).not.toContain("It stays on until you return them to Plan in Morrow Bridge.");
     } finally {
       await test.close();
     }

@@ -343,6 +343,24 @@ describe("Runtime: the offer and the grant (WI-4.3)", () => {
     }
   }, CASE_TIMEOUT_MS);
 
+  it("an Edit access review asks the Bridge to add the reviewed kinds to the course's current grant", async () => {
+    activeEditOptions = [canvasPagesTextOption];
+    editPolicySets.length = 0;
+    try {
+      const prepared = await runtime.prepareBrowserEditAccess("edit", [{ sourceBindingId, enabledCategories: ["canvas_pages_text"] }]);
+      const editAccessId = String(runtime.editAccessReviews.create(prepared, "http://127.0.0.1:9").editAccessId);
+      expect(runtime.editAccessReviews.approve(editAccessId)).toMatchObject({ approved: true });
+      await runtime.editAccessReviews.run(editAccessId);
+      expect(editPolicySets).toEqual([{
+        mode: "edit",
+        merge: true,
+        selections: [{ sourceBindingId, expectedPolicyRevision: 0, enabledCategories: ["canvas_pages_text"] }],
+      }]);
+    } finally {
+      activeEditOptions = [];
+    }
+  }, CASE_TIMEOUT_MS);
+
   it("does not fail the change when the grant fails", async () => {
     // rememberKind never touches the operation it was given: a grant it cannot make (here,
     // because rememberOffer found no bundle to grant) reports "failed" and leaves that operation
