@@ -86,6 +86,7 @@ This release fixes the problems a full review of Morrow found before release. Te
 - Student IDs inside grade, submission, and profile links are replaced with labels.
 - Each student has one label everywhere. Real names appear only in Morrow Bridge in your own Chrome tab (Private Chat and the review tab). Any other program on your computer that asks Morrow for course information gets labels only.
 - Private Chat reads a sentence start correctly through quotes and line breaks.
+- Morrow Bridge forgets the student names a review page showed 15 minutes after the page last showed them, even when nothing else changes, and a Bridge that reconnects no longer gets old names back.
 - A first name used alone, such as Will or Grace, is replaced only where it is written with a capital letter, as a family name already was. In small letters it is usually an ordinary word, and replacing it put the student's full name into text the assistant saved. A name part in a script with no capital letters, such as Korean, is now replaced wherever it appears.
 - A student's family name written alone, such as "Adams replied.", is replaced with the student's label in Private Chat and in course text the assistant reads, where it is written with a capital letter. A suffix such as Jr. is not taken for the family name.
 - Private Chat replaces a student's ID number or a login made only of numbers, and refuses a message that still holds one.

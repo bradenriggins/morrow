@@ -2076,6 +2076,7 @@ export class GatewayRuntime {
    * page last showed it, the same lifetime as the page's approval cookie.
    */
   private readonly bridgeReviewLearnerNames = new Map<string, { readonly entry: BridgeUiLearnerNames; readonly expiresAt: number }>();
+  private learnerNamesExpiryTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * The requesting assistant for the tool call running on this async stack. One
    * runtime serves every connected assistant, so the identity travels with the
@@ -2671,6 +2672,24 @@ export class GatewayRuntime {
       this.bridgeReviewLearnerNames.delete(path);
     }
     this.pushBrowserUiState();
+    this.scheduleLearnerNamesExpiry();
+  }
+
+  /**
+   * Tells the Bridge when a review's names end, even when nothing else would push a new state
+   * then. Each push leaves out the names that have ended.
+   */
+  private scheduleLearnerNamesExpiry(): void {
+    if (this.learnerNamesExpiryTimer) clearTimeout(this.learnerNamesExpiryTimer);
+    this.learnerNamesExpiryTimer = null;
+    const next = Math.min(...[...this.bridgeReviewLearnerNames.values()].map(({ expiresAt }) => expiresAt));
+    if (!Number.isFinite(next)) return;
+    this.learnerNamesExpiryTimer = setTimeout(() => {
+      this.learnerNamesExpiryTimer = null;
+      this.pushBrowserUiState();
+      this.scheduleLearnerNamesExpiry();
+    }, Math.max(0, next - Date.now()));
+    this.learnerNamesExpiryTimer.unref?.();
   }
 
   private currentReviewLearnerNames(): readonly BridgeUiLearnerNames[] {
@@ -10860,6 +10879,8 @@ export class GatewayRuntime {
   }
 
   async close(): Promise<void> {
+    if (this.learnerNamesExpiryTimer) clearTimeout(this.learnerNamesExpiryTimer);
+    this.learnerNamesExpiryTimer = null;
     this.fileStages.clear();
     this.operationFileStages.clear();
     await Promise.allSettled([...this.upstreams.values()].map((upstream) => upstream.close()));
