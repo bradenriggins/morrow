@@ -493,6 +493,8 @@ export interface LearnerTextRedactionContext {
 
 interface LearnerAlias {
   readonly token: string | null;
+  /** Matches only where the text writes it with a capital letter. */
+  readonly capitalized?: boolean;
 }
 
 interface PreparedLearnerTextRedactionContext extends LearnerTextRedactionContext {
@@ -509,7 +511,7 @@ function mergeLearnerIdentity(left: LearnerIdentity, right: LearnerIdentity): Le
   if (left.id !== right.id) throw new TypeError("learner identity does not match");
   for (const field of ["name", "email", "loginId", "sisUserId"] as const) {
     if (left[field] && right[field] && left[field] !== right[field]) {
-      const knownAliases = [...(left.aliases ?? []), ...(field === "name" ? learnerNameAliases(left) : [])].map(normalizeAlias);
+      const knownAliases = [...(left.aliases ?? []), ...(field === "name" ? learnerNameAliases(left).aliases : [])].map(normalizeAlias);
       if (!knownAliases.includes(normalizeAlias(right[field]!))) throw new Error("learner_roster_identity_conflict");
     }
   }
@@ -527,19 +529,46 @@ function normalizeAlias(value: string): string {
   return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");
 }
 
-function learnerNameAliases(identity: LearnerIdentity): readonly string[] {
-  if (!identity.name) return [];
+// A generational suffix ends a name but is never the family name.
+const NAME_SUFFIX = /^(?:jr|sr|ii|iii|iv|v)\.?$/u;
+
+function nameWords(value: string): string[] {
+  const words = value.replace(/,/gu, " ").split(" ").filter(Boolean);
+  while (words.length > 1 && NAME_SUFFIX.test(words.at(-1)!)) words.pop();
+  return words;
+}
+
+interface LearnerNameAliases {
+  readonly aliases: readonly string[];
+  /**
+   * A one-word family name used alone. Written in small letters it is usually
+   * an ordinary word, such as long or page, and a label there would come back
+   * as the student's full name in text the assistant saves.
+   */
+  readonly capitalized: ReadonlySet<string>;
+}
+
+function learnerNameAliases(identity: LearnerIdentity): LearnerNameAliases {
+  const none = { aliases: [], capitalized: new Set<string>() };
+  if (!identity.name) return none;
   const name = normalizeAlias(identity.name);
-  if (!name || name.length > 500) return [];
-  const given = (name.includes(",") ? name.split(",")[1]!.trim() : name).split(/\s+/u)[0]!;
-  const aliases = new Set([name, ...((given.match(/\p{L}/gu)?.length ?? 0) >= 2 ? [given] : [])]);
+  if (!name || name.length > 500) return none;
   const comma = /^([^,]+),\s*(.+)$/u.exec(name);
-  if (comma) aliases.add(`${comma[2]} ${comma[1]}`);
-  else {
-    const parts = name.split(" ");
-    if (parts.length === 2) aliases.add(`${parts[1]} ${parts[0]}`);
+  const familyFirst = comma && !NAME_SUFFIX.test(comma[2]!) ? comma : null;
+  const words = nameWords(familyFirst ? familyFirst[2]! : name);
+  const familyWords = familyFirst ? nameWords(familyFirst[1]!) : words.length > 1 ? words.slice(-1) : [];
+  const given = words[0] ?? "";
+  const family = familyWords.join(" ");
+  const aliases = new Set([name]);
+  for (const part of [given, family, familyWords.at(-1) ?? ""]) {
+    if ((part.match(/\p{L}/gu)?.length ?? 0) >= 2) aliases.add(part);
   }
-  return [...aliases];
+  if (familyFirst) aliases.add(`${familyFirst[2]} ${familyFirst[1]}`);
+  else if (words.length === 2) aliases.add(`${words[1]} ${words[0]}`);
+  if (given && family) aliases.add(`${given} ${family}`);
+  const capitalized = new Set([family, familyWords.at(-1) ?? ""]
+    .filter((part) => aliases.has(part) && !part.includes(" ") && part !== given));
+  return { aliases: [...aliases], capitalized };
 }
 
 function escapeRegExp(value: string): string {
@@ -720,11 +749,14 @@ function applySourceReplacements(value: string, replacements: readonly SourceRep
   return output + value.slice(cursor);
 }
 
-function addAlias(aliases: Map<string, LearnerAlias>, alias: string, token: string): void {
+function addAlias(aliases: Map<string, LearnerAlias>, alias: string, token: string, capitalized = false): void {
   const key = normalizeAlias(alias);
   if (!key) return;
   const existing = aliases.get(key);
-  aliases.set(key, existing && existing.token !== token ? { token: null } : { token });
+  aliases.set(key, {
+    token: existing && existing.token !== token ? null : token,
+    ...(capitalized && (!existing || existing.capitalized === true) ? { capitalized: true } : {}),
+  });
 }
 
 function buildAliasMatcher(aliases: ReadonlyMap<string, LearnerAlias>): RegExp | null {
@@ -745,11 +777,13 @@ function replaceKnownAliases(
   const references = [...view.text.matchAll(/\bStudent A[1-9][0-9]*\b/gu)];
   for (const match of view.text.matchAll(matcher)) {
     if (references.some((reference) => match.index! >= reference.index! && match.index! < reference.index! + reference[0].length)) continue;
+    const alias = aliases.get(normalizeAlias(match[0]));
+    if (alias?.capitalized === true && !/^\p{Lu}/u.test(match[0])) continue;
     const source = sourceRangeForView(view, match.index!, match.index! + match[0].length);
     if (!source) continue;
     replacements.push({
       ...source,
-      replacement: aliases.get(normalizeAlias(match[0]))?.token ?? "[learner]",
+      replacement: alias?.token ?? "[learner]",
     });
   }
   return applySourceReplacements(value, replacements);
@@ -883,7 +917,8 @@ function preparedLearnerTextContext(
     // A bare numeric alias has no person meaning in prose. Typed identity fields
     // and contextual references still resolve it through identityById.
     if (!/^[0-9]+$/u.test(identity.id)) addAlias(aliases, identity.id, token);
-    for (const alias of learnerNameAliases(identity)) addAlias(aliases, alias, token);
+    const names = learnerNameAliases(identity);
+    for (const alias of names.aliases) addAlias(aliases, alias, token, names.capitalized.has(alias));
     if (identity.email) addAlias(aliases, identity.email, token);
     if (identity.loginId) addAlias(aliases, identity.loginId, token);
     if (identity.sisUserId) addAlias(aliases, identity.sisUserId, token);

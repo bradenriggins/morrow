@@ -1113,12 +1113,12 @@ describe("complete roster structured identity regression", () => {
 });
 
 describe("bidirectional roster dictionary", () => {
-  it("replaces unique given names everywhere and never resolves an ambiguous given name", () => {
+  it("replaces unique given and family names everywhere and never resolves an ambiguous one", () => {
     const roster = new LearnerRoster();
     roster.register(scope, [{ id: "501", name: "Michaela Adams" }, { id: "502", name: "Alex Smith" }, { id: "503", name: "Alex Jones" }]);
     const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
     const token = redactKnownLearnerText("Michaela Adams", ctx);
-    expect(redactKnownLearnerText("Michaela wrote a message. Adams replied.", ctx)).toBe(`${token} wrote a message. Adams replied.`);
+    expect(redactKnownLearnerText("Michaela wrote a message. Adams replied.", ctx)).toBe(`${token} wrote a message. ${token} replied.`);
     expect(redactKnownLearnerText("Alex replied.", ctx)).toBe("[learner] replied.");
     expect(redactLearnerEgress({ outer: [{ body: "Michaela Adams replied to Michaela.", nested: { Michaela: "Alex replied." } }] }, ctx))
       .toEqual({ outer: [{ body: `${token} replied to ${token}.`, nested: { [token]: "[learner] replied." } }] });
@@ -1126,6 +1126,50 @@ describe("bidirectional roster dictionary", () => {
     expect(request).toEqual({ user_id: "501", body: "Hello Michaela Adams.", nested: { "501": "selected" } });
     roster.register(scope, []);
     expect(() => resolveLearnerTokens({ body: `Hello ${token}.` }, ctx.learnerVault, scope, roster)).toThrow("learner_roster_identity_unavailable");
+  });
+  it("replaces a family name used alone when the roster gives only the full name", () => {
+    const roster = new LearnerRoster();
+    // A Moodle roster read carries the id, the full name, and the email, never a separate family name.
+    roster.register(scope, [
+      { id: "601", name: "Michaela Adams", email: "madams@example.edu" },
+      { id: "602", name: "Jordan Whitfield" },
+      { id: "603", name: "Martin Luther King Jr." },
+      { id: "604", name: "Henry Ford II" },
+      { id: "605", name: "Okafor, Chidi" },
+      { id: "606", name: "Jane Alexandra Doe" },
+      { id: "607", name: "Sam Taylor" },
+      { id: "608", name: "Taylor Reed" },
+      { id: "609", name: "Mary X" },
+    ]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const label = (name: string) => redactKnownLearnerText(name, ctx);
+    const [adams, whitfield, king, ford, okafor, doe] = ["Michaela Adams", "Jordan Whitfield", "Martin Luther King Jr.", "Henry Ford II", "Okafor, Chidi", "Jane Alexandra Doe"].map(label);
+    expect(new Set([adams, whitfield, king, ford, okafor, doe]).size).toBe(6);
+    expect(redactKnownLearnerText("Adams posted. Whitfield replied to Adams.", ctx)).toBe(`${adams} posted. ${whitfield} replied to ${adams}.`);
+    expect(redactKnownLearnerText("Ms. Whitfield's essay", ctx)).toBe(`Ms. ${whitfield}'s essay`);
+    expect(redactKnownLearnerText("King and Ford presented. Jr. and II stay as written.", ctx)).toBe(`${king} and ${ford} presented. Jr. and II stay as written.`);
+    expect(redactKnownLearnerText("Okafor asked Chidi.", ctx)).toBe(`${okafor} asked ${okafor}.`);
+    expect(redactKnownLearnerText("Jane Doe and Doe", ctx)).toBe(`${doe} and ${doe}`);
+    expect(redactKnownLearnerText("Taylor spoke to Reed. Sam listened.", ctx)).toBe(`[learner] spoke to ${label("Taylor Reed")}. ${label("Sam Taylor")} listened.`);
+    expect(redactKnownLearnerText("Mary chose option X.", ctx)).toBe(`${label("Mary X")} chose option X.`);
+  });
+  it("replaces a lone family name only where it is written with a capital letter", () => {
+    const roster = new LearnerRoster();
+    roster.register(scope, [
+      { id: "701", name: "Jordan Long" },
+      { id: "702", name: "Ana Page" },
+      { id: "703", name: "Lee Lee" },
+      { id: "704", name: "Robin Hall", aliases: ["Hall"] },
+    ]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [long, page, lee, hall] = ["Jordan Long", "Ana Page", "Lee Lee", "Robin Hall"].map((name) => redactKnownLearnerText(name, ctx));
+    // Written in small letters, a family name is usually an ordinary word, and a label
+    // there would come back as the student's full name in text the assistant saves.
+    expect(redactKnownLearnerText("Write a long answer on this page.", ctx)).toBe("Write a long answer on this page.");
+    expect(redactKnownLearnerText("Long and PAGE replied.", ctx)).toBe(`${long} and ${page} replied.`);
+    expect(redactKnownLearnerText("jordan long replied.", ctx)).toBe(`${long} replied.`);
+    // A given name keeps matching in any case, and so does a family name the roster gives in its own field.
+    expect(redactKnownLearnerText("lee met the hall monitor.", ctx)).toBe(`${lee} met the ${hall} monitor.`);
   });
   it("neutralizes a pasted label outside the roster and refuses it only in the strict projection", () => {
     const roster = new LearnerRoster(); roster.register(scope, [{ id: "17", name: "Ada Lovelace" }]);
