@@ -7,6 +7,7 @@ import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { isDesktopRendererSmokeReceipt } from "./lib/desktop-renderer-smoke.mjs";
+import { pnpmCommand } from "./lib/pnpm-command.mjs";
 import { createWindowsSmokeBindingFromPackage, windowsSmokeObservation } from "./lib/windows-smoke-evidence.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -274,7 +275,8 @@ export function validateTestOutput({
 }
 
 function run(id, args, { commit, windowsEvidenceDirectory }) {
-  const result = spawnSync("pnpm", args, {
+  const pnpm = pnpmCommand();
+  const result = spawnSync(pnpm.command, [...pnpm.args, ...args], {
     cwd: root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],

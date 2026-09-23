@@ -21,6 +21,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { pnpmCommand } from "./lib/pnpm-command.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLER = resolve(ROOT, "installer");
@@ -268,8 +269,16 @@ function copyBridgeRelease(appRoot, extensionRoot) {
   return { manifestSha256: digest(resolve(releaseRoot, "manifest.json")), version: manifest.version, extensionId: manifest.extensionId };
 }
 
+/** The program and arguments that start `command` with no shell on this platform. */
+function startable(command, args, options) {
+  if (command !== "pnpm") return { program: command, programArgs: args };
+  const pnpm = pnpmCommand({ env: options.env || process.env });
+  return { program: pnpm.command, programArgs: [...pnpm.args, ...args] };
+}
+
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { cwd: ROOT, stdio: "inherit", ...options });
+  const { program, programArgs } = startable(command, args, options);
+  const result = spawnSync(program, programArgs, { cwd: ROOT, stdio: "inherit", ...options });
   if (result.error) throw new Error(`${command} could not start: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`${command} failed with exit status ${result.status ?? 1}`);
 }
@@ -343,7 +352,8 @@ function runtimeDependencies(packagesByName) {
 }
 
 function capture(command, args, options = {}) {
-  const result = spawnSync(command, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, ...options });
+  const { program, programArgs } = startable(command, args, options);
+  const result = spawnSync(program, programArgs, { cwd: ROOT, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, ...options });
   if (result.error) throw new Error(`${command} could not start: ${result.error.message}`);
   if (result.status !== 0) {
     const detail = String(result.stderr || result.stdout || "").trim();

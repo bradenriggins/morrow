@@ -84,6 +84,8 @@ jobs:
       - name: Install desktop installer dependencies
         run: pnpm --dir installer --ignore-workspace install --frozen-lockfile
       - run: pnpm build
+      - name: Start pnpm with no shell, as the release packager does
+        run: node --test scripts/test/pnpm-command.test.mjs
       - name: Test each installer contract file with a process limit
         timeout-minutes: 23
         run: pnpm --dir installer --ignore-workspace test:bounded:files
