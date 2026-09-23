@@ -5,15 +5,6 @@ from zero to their first real task. The educator does everything by
 talking to Muse; shell commands below are operator diagnostics, never
 educator homework.
 
-## 0. Pre-flight (agent only)
-
-- Fresh, isolated state: a clean `MORROW_HOME`, no live profile, no
-  real credentials anywhere in the test path.
-- Nonproduction helper and CDP ports; no port may collide with the
-  live helper (8901/19223) or any other tree.
-- The carved dist under test is exactly the carved file set
-  (`pack/carve-manifest.json` verifies this at install step 2).
-
 ## 1. Install
 
 Run `install.sh` from the dist root. Expected:

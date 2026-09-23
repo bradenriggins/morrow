@@ -13,6 +13,13 @@
 # 4. Writes the full transcript to <repo>/dist/install-e2e.log and exits
 #    non-zero on the first failed step.
 #
+# A test run needs isolated state and ports, and the container gives
+# both: a scratch HOME (a clean MORROW_HOME, no live helper profile, no
+# real credentials) and its own network, so the helper and Chromium
+# ports never meet a live helper on the host's 8901/19223. These are
+# test-run rules only; FIRST_RUN.md is the checklist for an educator's
+# Muse computer, where the helper uses 8901 and 19223.
+#
 # Needs Docker. Never touches the host crontab, ~/.morrow, or /tmp.
 set -euo pipefail
 

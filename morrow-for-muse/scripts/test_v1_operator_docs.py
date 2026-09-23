@@ -25,6 +25,12 @@ sweep 2026-09-22):
      policy admitted it on proof on 2026-09-22, and SCOPE.md ships it.
      An evidence hold on any other task was also described to the
      educator as "I tried to create a New Quiz".
+  7. FIRST_RUN.md, the agent's first-hour checklist for a real
+     educator, began with test-run steps: a clean MORROW_HOME, no live
+     profile, and helper and browser ports that must not be the live
+     8901/19223. An agent that followed them on an educator's Muse
+     computer would split the helper from the state and ports SKILL.md
+     uses. Those steps belong to the dev-only install test.
 """
 
 import contextlib
@@ -142,3 +148,15 @@ def test_an_evidence_hold_is_told_as_the_task_that_was_asked():
     assert [e["id"] for e in holds] == ["evidence-hold"]
     text = json.dumps(holds[0])
     assert "New Quiz" not in text and "{operation}" in text
+
+
+def test_first_run_is_for_the_educator_not_a_test_run():
+    text = _flat("FIRST_RUN.md")
+    for stale in ("Pre-flight", "MORROW_HOME", "no live profile",
+                  "Nonproduction", "must not collide", "may collide"):
+        assert stale not in text, stale
+    with open(os.path.join(TREE, "scripts", "install-e2e.sh"),
+              encoding="utf-8") as fh:
+        e2e = fh.read()
+    assert "8901" in e2e and "19223" in e2e
+    assert "scripts/install-e2e.sh" in carve.DEV_ONLY
