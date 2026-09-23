@@ -170,7 +170,12 @@ and confirm the fields anyway.
   as success ONLY with that follow-up GET). Caveats: changing
   `points_possible` rescales every score already entered, disclose
   it in the approval; changing `due_at` does NOT move existing
-  overrides (separate read).
+  overrides (separate read). Batch readback: C-36 re-reads exactly
+  the overrides it changed (GET `.../assignments/overrides` with
+  `assignment_overrides[][id]` and `[][assignment_id]` for each);
+  C-37 re-reads each assignment with its overrides and compares the
+  dates. Canvas applies a C-37 date update in the background, so a
+  date that has not moved yet reads as unconfirmed, never as failed.
 - **Modules** (C-268 create, C-282 update, C-270 delete; items C-269
   create, C-283 update; C-276/C-277/C-278/C-284 progress/overrides).
   Shape: POST `/api/v1/courses/{course_id}/modules` (body

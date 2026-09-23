@@ -6219,7 +6219,11 @@ def recompute_before_state(entry, params, plan, session, pack, config,
 #     assignments, modules, quizzes, pages. POST to a collection derives
 #     the member URL from the create response's id (or page url);
 #     PUT/PATCH to a member route re-reads that route. A course update
-#     (PUT /api/v1/courses/{id}) re-reads the course.
+#     (PUT /api/v1/courses/{id}) re-reads the course. Batch writes are
+#     read back where each change lives: C-36 (PUT
+#     /assignments/overrides) with the batch retrieve of the overrides
+#     it changed, C-37 (PUT /assignments/bulk_update) with one GET per
+#     assignment.
 #   - New Quiz (/api/quiz/v1): quizzes collection + quiz member,
 #     quizzes/{id}/items collection + item member. Create responses carry
 #     the member in the "id" field; PUT/PATCH already name the member.
@@ -6231,7 +6235,8 @@ def recompute_before_state(entry, params, plan, session, pack, config,
 #   - New Quiz accommodations, reports, and media upload routes: bulk or
 #     binary surfaces with no stable member GET to compare against intent.
 #   - DELETE: deletion is verified by the terminal 404 of the follow-up
-#     read, not by a GET of the removed object.
+#     read, not by a GET of the removed object. A classic quiz delete is
+#     verified by the course quiz index (D-002).
 #   - Every other route: unknown surface; skipped rather than failed so a
 #     new endpoint can never be "proven" by accident.
 _WRITE_READBACK_COLLECTIONS = (
@@ -6244,9 +6249,13 @@ _WRITE_READBACK_COLLECTIONS = (
     (r"/api/quiz/v1/courses/\d+/quizzes$", "id"),
     (r"/api/quiz/v1/courses/\d+/quizzes/\d+/items$", "id"),
 )
+# Members have numeric ids (pages keep their url slug), so a batch
+# route such as /assignments/overrides or /assignments/bulk_update is
+# never mistaken for a member.
 _WRITE_READBACK_MEMBER_RE = re.compile(
     r"(?:/api/v1/courses/\d+/(?:assignment_groups|discussion_topics|"
-    r"assignments|modules|quizzes|pages)/[^/]+"
+    r"assignments|modules|quizzes)/\d+"
+    r"|/api/v1/courses/\d+/pages/[^/]+"
     r"|/api/quiz/v1/courses/\d+/quizzes/\d+(?:/items/\d+)?)$")
 # A course update (C-128) is read back with the course GET. Updates
 # only: a course DELETE may conclude the course, which the course GET
@@ -6807,8 +6816,109 @@ def _readback_get(entry, session, pack, config, params, transients, target,
     return apply_result_block(entry, raw, resp_headers)["payload"]
 
 
+_CLASSIC_QUIZ_MEMBER_RE = re.compile(r"/api/v1/courses/\d+/quizzes/(\d+)$")
+
+
+def _url_path(url) -> str:
+    try:
+        return (urllib.parse.urlparse(str(url)).path or "").rstrip("/")
+    except Exception:  # noqa: BLE001 - an unparsable URL has no path
+        return ""
+
+
+def _read_collection_ids(entry, session, pack, config, params, transients,
+                         url, method, max_bytes):
+    """The ids a paginated collection lists, and whether every page was
+    read: ({id, ...}, complete). Follows Link rel="next" (and the
+    Chromium lane's next page) up to PAGINATION_MAX_PAGES. A failed read
+    raises UncertainWrite: the write returned 2xx."""
+    ids, pages = set(), 0
+    while True:
+        pages += 1
+        block = {"method": "GET", "url": url, "headers": {}}
+        try:
+            rmethod, rurl, rheaders, rbody = build_request(
+                entry, block, params, session, pack, config,
+                transients or {})
+            _status, resp_headers, raw, _attempts = session.raw_request(
+                rmethod, rurl, rheaders, rbody, is_write=False,
+                max_bytes=max_bytes)
+            payload = apply_result_block(entry, raw, resp_headers)["payload"]
+        except ProviderHttpError as exc:
+            raise UncertainWrite(
+                "delete readback GET %s failed HTTP %s; the %s effect is "
+                "unconfirmed, not a proven failure" % (url, exc.status, method))
+        except ExecutorError as exc:
+            raise UncertainWrite(
+                "delete readback GET %s failed (%s); the %s effect is "
+                "unconfirmed, not a proven failure"
+                % (url, type(exc).__name__, method))
+        if not isinstance(payload, list):
+            raise UncertainWrite(
+                "delete readback GET %s did not return a list; the %s effect "
+                "is unconfirmed, not a proven failure" % (url, method))
+        for item in payload:
+            if isinstance(item, dict) and item.get("id") is not None:
+                ids.add(str(item["id"]))
+        pagination = _pagination_state(resp_headers)
+        if pagination is None or not pagination.get("partial"):
+            return ids, True
+        next_page = pagination.get("next_page")
+        if not next_page or pages >= PAGINATION_MAX_PAGES:
+            return ids, False
+        url = urllib.parse.urljoin(url, next_page)
+
+
+def _verify_classic_quiz_delete(entry, session, pack, config, params,
+                                transients, method, url, quiz_id, max_bytes):
+    """D-002: after a classic quiz delete Canvas may still serve the quiz
+    on a direct member GET; the quiz leaving the course quiz index is
+    the delete receipt."""
+    member = str(url).split("?")[0].split("#")[0].rstrip("/")
+    index = member[:-len("/" + quiz_id)]
+    listed, complete = _read_collection_ids(
+        entry, session, pack, config, params, transients,
+        index + "?per_page=100", method, max_bytes)
+    if quiz_id in listed:
+        raise WriteFieldMismatch(
+            "delete readback mismatch on %s %s: the quiz is still listed in "
+            "the course quiz index (readback %s)" % (method, url, index))
+    if complete:
+        return {"status": "pass",
+                "detail": "readback %s no longer lists quiz %s: removal from "
+                          "the course quiz index is the delete receipt "
+                          "(D-002: a direct GET may still serve a deleted "
+                          "classic quiz)" % (index, quiz_id)}
+    try:
+        parsed = _readback_get(entry, session, pack, config, params,
+                               transients, member, method, max_bytes)
+    except ProviderHttpError as exc:
+        if exc.status in (404, 410):
+            return {"status": "pass",
+                    "detail": "readback %s returned HTTP %s: the quiz is "
+                              "gone" % (member, exc.status)}
+        parsed = None
+    except ExecutorError:
+        parsed = None
+    if isinstance(parsed, dict) and (
+            str(parsed.get("workflow_state") or "").lower() == "deleted"
+            or parsed.get("deleted") is True or parsed.get("deleted_at")):
+        return {"status": "pass",
+                "detail": "readback %s shows the quiz marked deleted"
+                          % member}
+    return {"status": "unverified",
+            "detail": "the course quiz index %s could not be read in full, "
+                      "and the pages read do not list quiz %s; the delete "
+                      "is not confirmed" % (index, quiz_id)}
+
+
 def _verify_delete(entry, session, pack, config, params, transients, method,
                    url, max_bytes):
+    classic_quiz = _CLASSIC_QUIZ_MEMBER_RE.search(_url_path(url))
+    if classic_quiz:
+        return _verify_classic_quiz_delete(
+            entry, session, pack, config, params, transients, method, url,
+            classic_quiz.group(1), max_bytes)
     target = _delete_readback_target(url)
     if target is None:
         return {"status": "unverified",
@@ -6886,6 +6996,16 @@ def run_write_readback(entry, session, pack, config, params, transients,
     if str(method).upper() == "DELETE":
         return _verify_delete(entry, session, pack, config, params,
                               transients, method, url, max_bytes)
+    if str(method).upper() == "PUT":
+        path = _url_path(url)
+        if _OVERRIDE_BATCH_RE.search(path):
+            return _readback_override_batch(
+                entry, session, pack, config, params, transients, method,
+                url, resolved_body, max_bytes)
+        if _BULK_DATES_RE.search(path):
+            return _readback_bulk_dates(
+                entry, session, pack, config, params, transients, method,
+                url, resolved_body, max_bytes)
     target = _readback_target(method, url, result_payload)
     if target is None:
         return {"status": "unverified",
@@ -6927,6 +7047,15 @@ def run_write_readback(entry, session, pack, config, params, transients,
                                   % "; ".join(settings_mismatches))
         else:
             unechoed.append("quiz_settings")
+    return _readback_verdict(method, url, target, parsed, compared,
+                             unechoed, mismatches, unconfirmed)
+
+
+def _readback_verdict(method, url, target, parsed, compared, unechoed,
+                      mismatches, unconfirmed):
+    """The readback outcome from a finished comparison: WriteFieldMismatch
+    for a proven difference, "unverified" when a requested field was not
+    confirmed or nothing was comparable, else "pass"."""
     if mismatches:
         # W3-P2-5: the mismatch detail formats raw readback values with
         # %r, which can be learner names or identifiers. Carry the raw
@@ -6958,6 +7087,133 @@ def run_write_readback(entry, session, pack, config, params, transients,
     return {"status": "pass",
             "detail": "readback %s matched %d requested field(s): %s"
                       % (target, len(compared), ", ".join(sorted(compared)))}
+
+
+# Batch writes change many objects in one request. Each change is read
+# back where it lives, never by re-reading the batch route.
+_OVERRIDE_BATCH_RE = re.compile(r"/api/v1/courses/\d+/assignments/overrides$")
+_BULK_DATES_RE = re.compile(r"/api/v1/courses/\d+/assignments/bulk_update$")
+_BULK_DATE_FIELDS = ("due_at", "unlock_at", "lock_at")
+
+
+def _batch_readback_get(entry, session, pack, config, params, transients,
+                        target, method, max_bytes):
+    """GET one batch readback target; a failed read is UncertainWrite."""
+    try:
+        return _readback_get(entry, session, pack, config, params,
+                             transients, target, method, max_bytes)
+    except ProviderHttpError as exc:
+        raise UncertainWrite(
+            "write readback GET %s failed HTTP %s; the %s effect is "
+            "unconfirmed, not a proven mismatch" % (target, exc.status, method))
+    except ExecutorError as exc:
+        raise UncertainWrite(
+            "write readback GET %s failed (%s); the %s effect is "
+            "unconfirmed, not a proven mismatch"
+            % (target, type(exc).__name__, method))
+
+
+def _readback_override_batch(entry, session, pack, config, params,
+                             transients, method, url, resolved_body,
+                             max_bytes):
+    """C-36: read back exactly the overrides the batch update changed,
+    with the batch retrieve (assignment_overrides[][id] and
+    [][assignment_id] for each)."""
+    sent = resolved_body.get("assignment_overrides") \
+        if isinstance(resolved_body, dict) else None
+    if not isinstance(sent, list) or not sent or not all(
+            isinstance(o, dict) and o.get("id") is not None
+            and o.get("assignment_id") is not None for o in sent):
+        return {"status": "unverified",
+                "detail": "readback not run: the batch override update "
+                          "does not name each override's id and "
+                          "assignment_id, so there is nothing to re-read"}
+    pairs = []
+    for override in sent:
+        pairs.append(("assignment_overrides[][id]", str(override["id"])))
+        pairs.append(("assignment_overrides[][assignment_id]",
+                      str(override["assignment_id"])))
+    target = "%s?%s" % (str(url).split("?")[0].split("#")[0].rstrip("/"),
+                        urllib.parse.urlencode(pairs))
+    parsed = _batch_readback_get(entry, session, pack, config, params,
+                                 transients, target, method, max_bytes)
+    if not isinstance(parsed, list):
+        raise UncertainWrite(
+            "write readback GET %s did not return a list; the %s effect is "
+            "unconfirmed, not a proven mismatch" % (target, method))
+    read = {str(o["id"]): o for o in parsed
+            if isinstance(o, dict) and o.get("id") is not None}
+    compared, unechoed, mismatches, unconfirmed = [], [], [], []
+    for index, override in enumerate(sent):
+        where = "assignment_overrides[%d] (override %s)" % (index,
+                                                             override["id"])
+        got = read.get(str(override["id"]))
+        if got is None:
+            unechoed.append(where)
+            continue
+        _compare_intent(override, got, where, compared, unechoed,
+                        mismatches, unconfirmed)
+    return _readback_verdict(method, url, target, parsed, compared,
+                             unechoed, mismatches, unconfirmed)
+
+
+def _readback_bulk_dates(entry, session, pack, config, params, transients,
+                         method, url, resolved_body, max_bytes):
+    """C-37: one GET per assignment (with its overrides), comparing the
+    dates the update set. Canvas applies the update in the background
+    (the PUT answers with a progress record), so a date that does not
+    match yet is unconfirmed, never a proven failure."""
+    sent = resolved_body
+    if not isinstance(sent, list) or not sent or not all(
+            isinstance(a, dict) and a.get("id") is not None
+            and isinstance(a.get("all_dates"), list) for a in sent):
+        return {"status": "unverified",
+                "detail": "readback not run: the bulk date update does not "
+                          "name each assignment id and its all_dates, so "
+                          "there is nothing to re-read"}
+    collection = str(url).split("?")[0].split("#")[0].rstrip("/")
+    collection = collection[:-len("/bulk_update")]
+    query = urllib.parse.urlencode([("include[]", "overrides")])
+    compared, unechoed, mismatches, unconfirmed = [], [], [], []
+    for assignment in sent:
+        target = "%s/%s?%s" % (collection, urllib.parse.quote(
+            str(assignment["id"]), safe=""), query)
+        read = _batch_readback_get(entry, session, pack, config, params,
+                                   transients, target, method, max_bytes)
+        if not isinstance(read, dict):
+            raise UncertainWrite(
+                "write readback GET %s did not return a JSON object; the %s "
+                "effect is unconfirmed, not a proven mismatch"
+                % (target, method))
+        overrides = {str(o.get("id")): o for o in read.get("overrides") or []
+                     if isinstance(o, dict)}
+        for index, date in enumerate(assignment["all_dates"]):
+            where = "assignment %s all_dates[%d]" % (assignment["id"], index)
+            if not isinstance(date, dict):
+                unechoed.append(where)
+                continue
+            want = {k: date[k] for k in _BULK_DATE_FIELDS if k in date}
+            if date.get("base"):
+                got = read
+            elif date.get("id") is not None:
+                got = overrides.get(str(date["id"]))
+            else:
+                got = None
+            if got is None:
+                unechoed.append(where)
+                continue
+            _compare_intent(want, got, where, compared, unechoed,
+                            mismatches, unconfirmed)
+    where = "of %d assignment(s)" % len(sent)
+    if mismatches:
+        return {"status": "unverified",
+                "detail": "readback %s found date(s) that do not match yet: "
+                          "%s. Canvas applies a bulk date update in the "
+                          "background, so this is not proof the change "
+                          "failed; it is not confirmed"
+                          % (where, "; ".join(mismatches))}
+    return _readback_verdict(method, url, where, sent, compared, unechoed,
+                             mismatches, unconfirmed)
 
 
 # --------------------------------------------------------------------------
