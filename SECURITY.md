@@ -2,7 +2,7 @@
 
 ## Report a security problem
 
-Email [hello@meetmorrow.app](mailto:hello@meetmorrow.app) with a short description and the steps to reproduce it. Do not open a public GitHub issue for a security problem: anyone can read an issue, before a fix ships.
+Email [hello@meetmorrow.app](mailto:hello@meetmorrow.app) with a short description and the steps to reproduce it. Do not open a public GitHub issue for a security problem, because anyone can read it before a fix ships.
 
 Do not include student information, private course content, passwords, sign-in details, or screenshots that show any of these. We will tell you how to share sensitive detail safely.
 
