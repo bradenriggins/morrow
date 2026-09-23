@@ -115,3 +115,56 @@ def test_status_breakdowns_in_the_knowledge_docs():
     assert [int(x) for x in m.groups()] == [
         counts["live_reads"], counts["live_writes"],
         counts["live_canvas_reads"], counts["live_ib_reads"]], m.group(0)
+
+
+# Failure mode (final sweep 2026-09-23, written before the fix): three
+# knowledge docs SKILL.md tells the agent to read said Item Bank item
+# create and update (IB-6, IB-18) were pending ("do not dispatch against
+# real items, do not claim them") after the catalog marked them
+# live-proven, so the agent refused a task the Muse page offers.
+IB_DOCS = ("SKILL.md", "SCOPE.md", "knowledge/operations-runbook.md",
+           "knowledge/api-catalog-guide.md",
+           "knowledge/new-quizzes-contract.md", "knowledge/item-banks-sdk.md",
+           "knowledge/api-patterns-and-errors.md",
+           "knowledge/audit-checklist.md")
+_NOT_PROVEN = re.compile(
+    r"pending|unproven|not proven|never proven|evidence-hold|"
+    r"not (?:a )?v1 claims?|do not claim|not implemented", re.I)
+_PROVEN = re.compile(r"live-proven", re.I)
+
+
+def _ib_status():
+    out = {}
+    with open(CATALOG, encoding="utf-8") as fh:
+        for line in fh:
+            f = [x.strip() for x in line.rstrip("\n").split("|")]
+            if len(f) >= 9 and re.fullmatch(r"IB-\d+", f[1]):
+                out[f[1]] = (f[7].split() or [""])[0]
+    return out
+
+
+def _ib_ids(clause):
+    ids = []
+    for m in re.finditer(r"IB-(\d+)((?:/(?:IB-)?\d+)*)", clause):
+        ids.append("IB-" + m.group(1))
+        ids += ["IB-" + n for n in re.findall(r"/(?:IB-)?(\d+)", m.group(2))]
+    return ids
+
+
+def test_every_item_bank_status_claim_matches_the_catalog():
+    status = _ib_status()
+    assert status["IB-6"] == status["IB-18"] == "live-proven"
+    wrong = []
+    for rel in IB_DOCS:
+        text = _read(rel)
+        for clause in re.split(r"(?<=[.;])\s+|\s+-\s+(?=\S)|\*\*|\|", text):
+            ids = _ib_ids(clause)
+            negative = bool(_NOT_PROVEN.search(clause))
+            positive = bool(_PROVEN.search(clause))
+            if negative and not positive:
+                wrong += [(rel, i, "said not proven") for i in ids
+                          if status.get(i) == "live-proven"]
+            elif positive and not negative:
+                wrong += [(rel, i, "said live-proven") for i in ids
+                          if status.get(i) != "live-proven"]
+    assert wrong == []

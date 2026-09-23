@@ -256,8 +256,9 @@ SDK lane or not at all):
 - Item delete (IB-19): the lane implements the route but no
   delete_item flow was ever proven (Meridian has no delete_item
   flow). **PENDING: never dispatch against a real item.**
-- Item create (IB-6) and update (IB-18): implemented, pending live
-  proof. Entry GET (IB-10) is the proven read path meanwhile.
+- Item create (IB-6) and update (IB-18): live-proven through the
+  Chromium SDK lane (2026-09-21, item 11244176). Entry GET (IB-10) is
+  the proven item read path; the direct item GET (IB-11) is pending.
 - Unshare (bank shares): no unshare via DELETE (404s). Unshare is
   PATCH /api/banks/{bank}/shared_banks/{id} with
   {shared_bank:{permission:"removed_access"}} (proven 2026-09-21,

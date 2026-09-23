@@ -103,13 +103,14 @@ in `knowledge/new-quizzes-contract.md`; they are
 edit through this package has no merge safety. Say so to the
 educator before offering one.
 
-Item Banks: bank-level only (create, rename, share, unshare,
-archive, list, list entries, get entry, list shares). Item
-create/read/update/delete
-(IB-6/IB-11/IB-18/IB-19) are implemented in the SDK lane but pending
-live proof: do not dispatch against real items, do not claim them.
-quiz_entries routes (IB-2/IB-3/IB-8/IB-14) are evidence-hold (401,
-wrong scope). Full mechanism: `knowledge/item-banks-sdk.md`.
+Item Banks: bank operations (create, rename, share, unshare, archive,
+list, list entries, get entry, list shares) and item operations (IB-6
+item create, IB-18 item update, IB-4 attach an item to a bank, IB-7
+remove a bank entry) are live-proven. Read an item through its bank
+entry (IB-10). The direct item read (IB-11) and item delete (IB-19)
+are pending: do not dispatch them, do not claim them. quiz_entries
+routes (IB-2/IB-3/IB-8/IB-14) are evidence-hold (401, wrong scope).
+Full mechanism: `knowledge/item-banks-sdk.md`.
 
 Outcomes: 7 live-proven reads (outcome groups/links in context).
 Outcome alignment writes for New Quiz items are unsupported by the

@@ -90,13 +90,14 @@ readback and cleanup:
   (C-287 create, C-293 read, C-295 list, C-298 update, C-290 delete)
   are proven through the same pipeline (items 11057310, 11057311).
   Excluded: publish (never tested).
-- **Item Banks**: bank-level operations only (IB-1 archive, IB-5
-  create, IB-9 get, IB-12 list, IB-13 list entries, IB-10 get entry,
-  IB-15 list shares, IB-16 rename, IB-17 share, IB-20 unshare). Item create/read/update
-  (IB-6/IB-11/IB-18) are implemented in the Item Banks SDK lane but
-  live proof is pending, so they are cataloged as pending. Item delete
-  (IB-19) is implemented and unproven; the live battery attempts it
-  against a disposable item before any claim. quiz_entries routes
+- **Item Banks**: bank operations (IB-1 archive, IB-5 create, IB-9
+  get, IB-12 list, IB-13 list entries, IB-10 get entry, IB-15 list
+  shares, IB-16 rename, IB-17 share, IB-20 unshare) and item
+  operations (IB-6 item create, IB-18 item update, IB-4 attach an item
+  to a bank, IB-7 remove a bank entry) are live-proven through the
+  Item Banks SDK lane. Read an item through its bank entry (IB-10).
+  The direct item read (IB-11) and item delete (IB-19) are pending: the
+  gate refuses them. quiz_entries routes
   (IB-2/3/8/14) are evidence-hold (401 under the banks.build scope).
   Full mechanism: `knowledge/item-banks-sdk.md`.
 - **Reads**: 113 verified GETs (108 Canvas plus 5 Item Bank) across
