@@ -52,7 +52,7 @@ def test_educator_pages_use_plain_words(rel):
                              text, re.IGNORECASE), (rel, word)
     code = re.findall(r"`([^`]*)`", text)
     assert all(c in ALLOWED_CODE for c in code), (rel, code)
-    assert "—" not in text, rel
+    assert "\u2014" not in text, rel
 
 
 def test_consent_states_a_fair_count_and_only_tested_examples():
