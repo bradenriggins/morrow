@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "@typescript/typescript6";
 import { hardenPrivateDirectory } from "../../packages/gateway-core/dist/private-file-access.js";
 import { createChildProcessReclaimer, createRuntimeMonitor } from "../shared/runtime-monitor.mjs";
@@ -77,7 +77,7 @@ function processIsAlive(pid) {
   }
 }
 
-async function writeGatewayConfig(directory) {
+async function writeGatewayConfig(directory, { startDelayMs = 0 } = {}) {
   const config = {
     schema: "morrow.upstreams.v1",
     profile: "private-full",
@@ -88,7 +88,9 @@ async function writeGatewayConfig(directory) {
       label: "Fixture",
       kind: "mcp-stdio",
       command: process.execPath,
-      args: [fakeUpstream],
+      args: startDelayMs > 0
+        ? ["--input-type=module", "-e", `await new Promise((resolve) => setTimeout(resolve, ${startDelayMs})); await import(${JSON.stringify(pathToFileURL(fakeUpstream).href)});`]
+        : [fakeUpstream],
       env: { FAKE_SOURCE: "morrow-legacy" },
       priority: 1,
       required: true,
@@ -135,6 +137,7 @@ if (pidLog) fs.appendFileSync(pidLog, "pid:" + process.pid + "\n", "utf8");
 const stall = () => new Promise(() => {});
 const freeze = () => { process.on("SIGTERM", () => {}); setTimeout(() => { for (;;) { /* spin */ } }, 0); return stall(); };
 if (mode === "stall-initialize") { process.stdin.resume(); setInterval(() => {}, 1000); }
+if (mode === "exit-initialize") process.exit(3);
 // Mirrors the packaged gateway: read the sealed manifest that sits beside the
 // payload this entrypoint was loaded from and hash its bytes. Nothing about the
 // runtime identity comes from the parent process.
@@ -439,6 +442,54 @@ test("uses one durable gateway owner instead of starting a connector", async (t)
 
   await Promise.all([first.close(), second.close()]);
   await waitFor(() => !existsSync(ownerPath), "gateway owner cleanup");
+});
+
+// The local owner proxy answers the first connect only after the owner has started its required
+// sources, and it gives that start 30 seconds of its own. A start that is slow but still on time is
+// reported ready, not as a runtime that never started.
+test("reports the runtime ready when its owner takes longer than fifteen seconds to start", async (t) => {
+  assert.equal(existsSync(gatewayEntry), true, "build packages/mcp-server before this test");
+  const directory = await privateTemporaryDirectory("morrow-runtime-monitor-slow-owner-");
+  const workspaceRoot = await realpath(directory);
+  const configPath = await writeGatewayConfig(workspaceRoot, { startDelayMs: 16_000 });
+  const journalPath = path.join(workspaceRoot, "gateway.sqlite3");
+  const ownerPath = `${journalPath}.local-owner.json`;
+  const monitor = createRuntimeMonitor({ nodePath: process.execPath, serverEntryPath: gatewayEntry, upstreamsPath: configPath, workspaceRoot, journalPath });
+  t.after(async () => {
+    await monitor.close();
+    await removeTemporaryDirectory(directory);
+  });
+
+  const snapshot = await monitor.start();
+  assert.deepEqual(snapshot.health, { attempted: true, gatewayReady: true, bridgeConnected: false, canRestart: "unknown" });
+  await monitor.close();
+  await waitFor(() => !existsSync(ownerPath), "gateway owner cleanup");
+});
+
+// A runtime process that exits before it answers ends the wait when it exits, so waiting as long as
+// the owner's own start limit never holds up a start that already failed.
+test("ends the first connect when the runtime process exits before it answers", async (t) => {
+  const directory = await privateTemporaryDirectory("morrow-runtime-monitor-exit-");
+  const workspaceRoot = await realpath(directory);
+  const entry = await writeMockGateway(directory);
+  const originalMode = process.env.MORROW_RUNTIME_MONITOR_FIXTURE;
+  process.env.MORROW_RUNTIME_MONITOR_FIXTURE = "exit-initialize";
+  const monitor = createRuntimeMonitor({ nodePath: process.execPath, serverEntryPath: entry, upstreamsPath: path.join(workspaceRoot, "upstreams.json"), workspaceRoot, journalPath: path.join(workspaceRoot, "gateway.sqlite3") });
+  t.after(async () => {
+    if (originalMode === undefined) delete process.env.MORROW_RUNTIME_MONITOR_FIXTURE;
+    else process.env.MORROW_RUNTIME_MONITOR_FIXTURE = originalMode;
+    await monitor.close();
+    await rm(entry, { force: true });
+    await removeTemporaryDirectory(directory);
+  });
+
+  const marker = Symbol("still waiting");
+  let timer = null;
+  // Far under the connect limit: only the exit can end the wait this soon.
+  const stillWaiting = new Promise((resolve) => { timer = setTimeout(() => resolve(marker), 10_000); });
+  const outcome = await Promise.race([monitor.start(), stillWaiting]).finally(() => clearTimeout(timer));
+  assert.notEqual(outcome, marker, "the monitor kept waiting after the runtime process exited");
+  assert.equal(outcome.health.gatewayReady, "unknown");
 });
 
 test("uses only the held private owner lease for Bridge maintenance", async (t) => {

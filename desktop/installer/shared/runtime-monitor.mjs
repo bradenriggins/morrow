@@ -27,7 +27,13 @@ const INITIAL_GATEWAY_READY_RETRY_MS = 250;
 // still cannot hold a public method open. A stalled operation closes the
 // exact client and transport generation it ran against and reclaims that
 // generation's child process within a fixed bound.
-const MCP_CONNECT_TIMEOUT_MS = 15_000;
+//
+// The first connect is answered only after the local owner has started its
+// required sources. The proxy bounds that start itself: it gives the owner 30
+// seconds, ends it within 3 more, and exits, and an exit ends this wait at
+// once. This limit sits above that bound, so it ends only a runtime process
+// that neither answers nor exits, never a start that is still on time.
+const MCP_CONNECT_TIMEOUT_MS = 45_000;
 const MCP_OPERATION_TIMEOUT_MS = 10_000;
 const MCP_CLOSE_TIMEOUT_MS = 5_000;
 const CHILD_RECLAIM_TIMEOUT_MS = 2_000;
