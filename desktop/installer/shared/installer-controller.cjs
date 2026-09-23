@@ -651,8 +651,10 @@ class InstallerController {
     }
   }
 
+  // A folder flush is a POSIX file-system call: Windows refuses it, whatever
+  // platform this controller serves. Every folder flush here asks the host.
   async syncInstallerStateDirectory() {
-    if (this.platform === "win32") return;
+    if (process.platform === "win32") return;
     const directory = await fs.open(this.paths.state, fsConstants.O_RDONLY);
     try { await directory.sync(); } finally { await directory.close(); }
   }
@@ -791,7 +793,7 @@ class InstallerController {
     if (!backupDirectory.isDirectory() || backupDirectory.isSymbolicLink()) {
       throw new Error("record_backup_directory_invalid");
     }
-    if (this.platform !== "win32") {
+    if (process.platform !== "win32") {
       const flags = fsConstants.O_RDONLY
         | (typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0)
         | (typeof fsConstants.O_DIRECTORY === "number" ? fsConstants.O_DIRECTORY : 0);
@@ -832,7 +834,7 @@ class InstallerController {
       handle = null;
       await fs.rename(temporary, this.recordPath);
       renamed = true;
-      if (this.platform !== "win32") {
+      if (process.platform !== "win32") {
         const directory = await fs.open(this.paths.state, fsConstants.O_RDONLY);
         try { await directory.sync(); } finally { await directory.close(); }
       }
@@ -865,7 +867,7 @@ class InstallerController {
     } else {
       await fs.rm(this.recordPath, { force: true });
     }
-    if (this.platform !== "win32") {
+    if (process.platform !== "win32") {
       for (const directoryPath of [backups, this.paths.state]) {
         const directory = await fs.open(directoryPath, fsConstants.O_RDONLY);
         try { await directory.sync(); } finally { await directory.close(); }
@@ -1892,7 +1894,7 @@ class InstallerController {
   }
 
   async syncClaudeSetupDirectory() {
-    if (this.platform === "win32") return;
+    if (process.platform === "win32") return;
     const setupRoot = path.join(await fs.realpath(this.paths.state), "ClaudeDesktop");
     const directory = await fs.open(setupRoot, fsConstants.O_RDONLY);
     try { await directory.sync(); } finally { await directory.close(); }
