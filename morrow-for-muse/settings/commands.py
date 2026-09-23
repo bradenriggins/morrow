@@ -90,12 +90,9 @@ _SETTING_LABELS = {
     "default_mode": "Default mode",
     "verbosity": "Verbosity",
     "confirm_destructive_writes": "Deletion confirmations",
-    "write_approval_style": "Write approval style",
     "failure_verbosity": "Failure report detail",
     "proactivity": "Proactivity",
     "read_confirmations": "Read confirmations",
-    "auto_cleanup_test_objects": "Auto-clean test objects",
-    "confirm_bulk_actions": "Bulk action confirmations",
     "default_course_id": "Default course",
     "timezone": "Timezone",
     "work_summary": "Work summary detail",
@@ -106,9 +103,6 @@ _NOT_TIMED = ("Edit mode has no time limit: it stays on until you turn it "
 
 
 def _friendly_value(key, value):
-    if key == "write_approval_style":
-        return {"per_write": "one per write",
-                "batched": "batched"}.get(value, value)
     if isinstance(value, bool):
         return "on" if value else "off"
     if isinstance(value, str) and value == "" and key in (

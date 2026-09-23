@@ -208,7 +208,8 @@ SETTINGS_SCHEMA = {
         "consequential": False,
         "description": (
             "How much the agent says while working: concise, balanced, "
-            "or detailed."),
+            "or detailed. A preference the assistant follows as it works "
+            "with you."),
     },
     "confirm_destructive_writes": {
         "default": False,
@@ -221,16 +222,6 @@ SETTINGS_SCHEMA = {
             "difference from plan mode. Turn it on only if you want "
             "the extra guardrail."),
     },
-    "write_approval_style": {
-        "default": "per_write",
-        "validate": _enum_validator({"per_write", "batched"}),
-        "consequential": True,
-        "description": (
-            "'per_write': one approval ceremony per write. 'batched': a "
-            "single approval ceremony may cover a listed set of writes "
-            "in one validated plan; the educator still approves the "
-            "whole set before anything runs."),
-    },
     "failure_verbosity": {
         "default": "detailed",
         "validate": _enum_validator({"concise", "detailed"}),
@@ -238,7 +229,8 @@ SETTINGS_SCHEMA = {
         "description": (
             "'detailed' failure reports include what was attempted, the "
             "evidence, and recovery options. 'concise' keeps to what "
-            "failed and the next step."),
+            "failed and the next step. A preference the assistant follows "
+            "as it works with you."),
     },
     "proactivity": {
         "default": "reactive",
@@ -246,16 +238,18 @@ SETTINGS_SCHEMA = {
         "consequential": False,
         "description": (
             "'reactive': the agent only does what is asked. 'suggestive': "
-            "it may suggest follow-up actions unprompted."),
+            "it may suggest follow-up actions unprompted. A preference the "
+            "assistant follows as it works with you."),
     },
     "read_confirmations": {
         "default": False,
         "validate": _bool_validator,
         "consequential": False,
         "description": (
-            "Verbosity preference only. Reads never need approval; when "
-            "true the agent narrates what it is about to read before "
-            "reading it, when false it just reads."),
+            "Reads never need approval; when true the agent narrates what "
+            "it is about to read before reading it, when false it just "
+            "reads. A preference the assistant follows as it works with "
+            "you."),
     },
     "work_summary": {
         "default": "full",
@@ -264,16 +258,8 @@ SETTINGS_SCHEMA = {
         "description": (
             "How the agent reports completed work. 'brief': one short "
             "line per task. 'full': every change listed. In edit mode "
-            "this summary is your oversight, so 'full' is the default."),
-    },
-    "auto_cleanup_test_objects": {
-        "default": True,
-        "validate": _bool_validator,
-        "consequential": False,
-        "description": (
-            "When true, temporary objects the agent creates to verify "
-            "something works (proof pages, test items) are deleted when "
-            "the check is done instead of left behind."),
+            "this summary is your oversight, so 'full' is the default. A "
+            "preference the assistant follows as it works with you."),
     },
     "default_course_id": {
         "default": "",
@@ -285,7 +271,8 @@ SETTINGS_SCHEMA = {
             "unambiguous; it asks only when the target is genuinely "
             "ambiguous or conflicts. Plan/Edit mode still governs write "
             "approval as usual. Empty means no default: the agent asks. "
-            "Consequential because it steers where writes land."),
+            "Consequential because it steers where writes land. A "
+            "preference the assistant follows as it works with you."),
     },
     "timezone": {
         "default": "",
@@ -297,16 +284,6 @@ SETTINGS_SCHEMA = {
             "unset: Morrow then uses the course's time zone in Canvas, "
             "then your Canvas profile's, and asks you when neither is "
             "set."),
-    },
-    "confirm_bulk_actions": {
-        "default": True,
-        "validate": _bool_validator,
-        "consequential": True,
-        "description": (
-            "When true, actions that touch many students or items at "
-            "once (mass messages, bulk edits) ask for confirmation "
-            "first, even in edit mode. The educator can turn it off, "
-            "but only explicitly."),
     },
 }
 

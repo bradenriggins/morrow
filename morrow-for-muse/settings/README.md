@@ -88,18 +88,21 @@ And three rules about the agent itself:
 | default_mode | Your saved mode: plan or edit. Edit is the standing edit grant, with no time limit. | plan |
 | verbosity | How much the agent says: concise, balanced, or detailed. | balanced |
 | confirm_destructive_writes | Ask before deletes and destructive writes, even in edit mode. | off |
-| write_approval_style | One approval per write, or one ceremony covering a listed set of writes in a single validated plan. | per_write |
 | failure_verbosity | Failure reports: concise (what failed, next step) or detailed (what was tried, evidence, recovery options). | detailed |
 | proactivity | reactive (only does what you ask) or suggestive (may suggest follow-ups unprompted). | reactive |
 | read_confirmations | Narrate reads before doing them. Reads never need approval either way. | off |
 | work_summary | How the agent reports completed work: brief (one short line per task) or full (every change listed). In edit mode this summary is your oversight. | full |
-| auto_cleanup_test_objects | Temporary objects the agent creates to verify something works (proof pages, test items) are deleted when the check is done instead of left behind. | on |
 | default_course_id | Your go-to course id. When you do not name a course, the agent starts here without an extra "is this the right course?" check, as long as it is unambiguous. If the target is genuinely ambiguous or conflicts with what you named, it asks. Plan/Edit mode still governs write approval as usual. Empty means no default: the agent asks. | empty |
 | timezone | Your timezone for date math ("last week's quiz", due-date windows). An IANA name like America/Denver; empty means unset: Morrow then uses the course's time zone in Canvas, then your Canvas profile's, and asks you when neither is set. | empty |
-| confirm_bulk_actions | Actions that touch many students or items at once (mass messages, bulk edits) ask for confirmation first, even in edit mode. | on |
 
-Try: "be more concise", "use batched approvals", "suggest follow-ups",
-"keep failure reports short", "show me my settings".
+Morrow itself enforces three of these: default_mode, deletion
+confirmations (confirm_destructive_writes), and timezone. The others
+(verbosity, failure report detail, proactivity, read confirmations,
+work summary, default course) are preferences the assistant follows as
+it works with you.
+
+Try: "be more concise", "suggest follow-ups", "keep failure reports
+short", "show me my settings".
 
 ## Where it lives
 

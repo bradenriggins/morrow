@@ -208,8 +208,8 @@ lives inside the deploy tree. `user_id` is restricted to
 - Keys: `"default_mode"` (`"plan"` | `"edit"`; standing default),
   `"verbosity"`, `"confirm_destructive_writes"` (bool; destructive
   writes in edit mode need explicit confirmation),
-  `"write_approval_style"`, `"failure_verbosity"`, `"proactivity"`,
-  `"read_confirmations"`.
+  `"failure_verbosity"`, `"proactivity"`, `"read_confirmations"`,
+  `"work_summary"`, `"default_course_id"`, `"timezone"`.
 - `settings.effective_mode(user_id, conversation_id)` delegates to
   `modes.state.current_mode`: one resolver, no second authority.
 - `end_conversation(...)` clears the persisted override and revokes

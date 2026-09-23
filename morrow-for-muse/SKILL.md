@@ -511,15 +511,14 @@ both modes.
   a conversation id, per-conversation edit overrides cannot apply and
   any plan override makes the write plan.
 - Other knobs, all user-settable: `verbosity` (concise | balanced |
-  detailed, default balanced), `write_approval_style` (per_write |
-  batched, default per_write), `failure_verbosity` (concise | detailed,
+  detailed, default balanced), `failure_verbosity` (concise | detailed,
   default detailed), `proactivity` (reactive | suggestive, default
-  reactive), `read_confirmations` (bool, default off),
-  `work_summary` (brief | full, default full),
-  `auto_cleanup_test_objects` (bool, default on),
-  `default_course_id` (course id or empty, default empty),
-  `timezone` (IANA name or empty, default empty),
-  `confirm_bulk_actions` (bool, default on). Educator docs:
+  reactive), `read_confirmations` (bool, default off), `work_summary`
+  (brief | full, default full), `default_course_id` (course id or
+  empty, default empty), and `timezone` (IANA name or empty, default
+  empty; the failed-students query uses it). Every one of these except
+  `timezone` is an instruction to you: read it with `morrow settings
+  show` and follow it as you work; no code enforces it. Educator docs:
   `settings/README.md`.
 
 ## v1 capability scope

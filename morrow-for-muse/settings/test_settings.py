@@ -111,8 +111,6 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(store.get_setting(self.user, "verbosity"), "balanced")
         self.assertEqual(
             store.get_setting(self.user, "confirm_destructive_writes"), False)
-        self.assertEqual(store.get_setting(self.user, "write_approval_style"),
-                         "per_write")
         self.assertEqual(store.get_setting(self.user, "failure_verbosity"),
                          "detailed")
         self.assertEqual(store.get_setting(self.user, "proactivity"),
@@ -148,7 +146,7 @@ class SettingsTest(unittest.TestCase):
             ("verbosity", "BALANCED"),
             ("confirm_destructive_writes", "yes"),
             ("confirm_destructive_writes", 1),
-            ("write_approval_style", "sometimes"),
+            ("work_summary", "sometimes"),
             ("failure_verbosity", "verbose"),
             ("proactivity", "hyper"),
             ("read_confirmations", "yes"),
@@ -193,7 +191,7 @@ class SettingsTest(unittest.TestCase):
     def test_consequential_requires_educator_confirmation(self):
         for key, value in [("default_mode", "edit"),
                            ("confirm_destructive_writes", False),
-                           ("write_approval_style", "batched")]:
+                           ("default_course_id", "12345")]:
             with self.assertRaises(store.SettingsTamperRefused,
                                    msg="key=%r" % key):
                 store.set_setting(self.user, key, value,
@@ -690,11 +688,10 @@ class CommandTest(unittest.TestCase):
     def test_every_setting_applies_in_one_call_and_is_journaled(self):
         values = {
             "verbosity": "concise", "confirm_destructive_writes": True,
-            "write_approval_style": "batched", "failure_verbosity": "concise",
+            "failure_verbosity": "concise",
             "proactivity": "suggestive", "read_confirmations": True,
-            "work_summary": "brief", "auto_cleanup_test_objects": False,
+            "work_summary": "brief",
             "default_course_id": "12345", "timezone": "America/Denver",
-            "confirm_bulk_actions": False,
         }
         self.assertEqual(set(values) | {"default_mode"},
                          set(store.SETTINGS_SCHEMA))
@@ -711,7 +708,7 @@ class CommandTest(unittest.TestCase):
         for key, value in (("timezone", "Mars/Olympus"),
                            ("default_course_id", "12 345"),
                            ("verbosity", "loud"),
-                           ("confirm_bulk_actions", "yes")):
+                           ("read_confirmations", "yes")):
             out = commands.setting_set(self.user, key, value)
             self.assertEqual(out["status"], "error", msg=key)
         out = commands.setting_set(self.user, "no_such_key", 1)
@@ -766,7 +763,7 @@ class CommandTest(unittest.TestCase):
                                   this_conversation=True),
                 commands.mode_set(self.user, "plan", self.conv),
                 commands.settings_show(self.user, self.conv),
-                commands.setting_set(self.user, "confirm_bulk_actions",
+                commands.setting_set(self.user, "read_confirmations",
                                      False),
                 commands.setting_get(self.user, "timezone")]
         for out in outs:
@@ -914,21 +911,15 @@ class Lane4HardeningTest(unittest.TestCase):
     def test_new_settings_defaults(self):
         self.assertEqual(store.get_setting(self.user, "work_summary"),
                          "full")
-        self.assertEqual(
-            store.get_setting(self.user, "auto_cleanup_test_objects"), True)
         self.assertEqual(store.get_setting(self.user, "default_course_id"),
                          "")
         self.assertEqual(store.get_setting(self.user, "timezone"), "")
-        self.assertEqual(store.get_setting(self.user, "confirm_bulk_actions"),
-                         True)
 
     def test_new_settings_bad_values_refused(self):
         bad = [
             ("work_summary", "verbose"),
             ("work_summary", "FULL"),
             ("work_summary", 1),
-            ("auto_cleanup_test_objects", "yes"),
-            ("auto_cleanup_test_objects", 1),
             ("default_course_id", "../evil"),
             ("default_course_id", "a" * 65),
             ("default_course_id", 12345),
@@ -936,8 +927,6 @@ class Lane4HardeningTest(unittest.TestCase):
             ("timezone", "Mars/Olympus"),
             ("timezone", "Eastern"),
             ("timezone", 123),
-            ("confirm_bulk_actions", "yes"),
-            ("confirm_bulk_actions", 0),
         ]
         for key, value in bad:
             with self.assertRaises(store.SettingsValidationError,
@@ -960,20 +949,16 @@ class Lane4HardeningTest(unittest.TestCase):
                          "America/Denver")
         store.set_setting(self.user, "work_summary", "brief",
                           educator_confirmed=False)
-        store.set_setting(self.user, "auto_cleanup_test_objects", False,
-                          educator_confirmed=False)
-        self.assertFalse(
-            store.get_setting(self.user, "auto_cleanup_test_objects"))
+        self.assertEqual(store.get_setting(self.user, "work_summary"),
+                         "brief")
 
     def test_consequential_new_settings_need_confirmation(self):
-        for key, value in [("default_course_id", "12345"),
-                           ("confirm_bulk_actions", False)]:
+        for key, value in [("default_course_id", "12345")]:
             with self.assertRaises(store.SettingsTamperRefused,
                                    msg="key=%r" % key):
                 store.set_setting(self.user, key, value,
                                   educator_confirmed=False)
         for key, value in [("work_summary", "brief"),
-                           ("auto_cleanup_test_objects", False),
                            ("timezone", "America/Chicago")]:
             store.set_setting(self.user, key, value,
                               educator_confirmed=False)  # no raise
