@@ -123,6 +123,17 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # The receipts the harnesses wrote before a failure are the only record
+      # of it once the runner is gone. The installer never leaves a failed run.
+      - name: Upload the receipts of a failed or cancelled run
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: morrow-windows-desktop-failure-receipts-${{ github.run_id }}
+          path: desktop/artifacts/desktop-windows-private-qa/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
   macos-installer:
     name: macOS Apple silicon unsigned disk image and installed-app smoke
     runs-on: macos-14
@@ -217,4 +228,16 @@ jobs:
           name: morrow-macos-desktop-${{ github.run_id }}
           path: desktop/artifacts/desktop-macos-private-qa
           if-no-files-found: error
+          retention-days: 14
+
+      # The receipts the harnesses wrote before a failure are the only record
+      # of it once the runner is gone. The disk image and archive never leave
+      # a failed run.
+      - name: Upload the receipts of a failed or cancelled run
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: morrow-macos-desktop-failure-receipts-${{ github.run_id }}
+          path: desktop/artifacts/desktop-macos-private-qa/*.json
+          if-no-files-found: warn
           retention-days: 14
