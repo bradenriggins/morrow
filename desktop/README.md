@@ -360,7 +360,7 @@ The app keeps the same window for the rest of the installation's life. It carrie
 
 - **Repair Morrow**, which checks the files inside Morrow, replaces the Morrow Bridge folder from the copy Morrow ships when the folder does not match it, and writes Morrow's entry again into every assistant it set up, so each one points at this copy of Morrow. Morrow finds its own entry by what it is, so an assistant that rewrote the rest of its settings file since is not a problem. It leaves a server of the same name that Morrow did not write alone and changes nothing in your course.
 - **What stays on this computer**, which names the exact path of every place this installation keeps data, marks which of them Morrow can remove, and states the step this computer uses to remove the application itself. **Remove Morrow's data** first shows a confirmation listing every path it will remove and every path it will keep. It then takes Morrow's own entry out of each assistant settings file, so no assistant keeps starting a Morrow that is gone, and stops without removing anything if it cannot. It keeps the **Assistant settings backups** folder. It then reads each path again and reports which are gone and which are still there.
-- To remove the application, select **Remove Morrow's data** first, then quit Morrow and move it to the Trash (Mac) or uninstall it from Settings, Apps (Windows).
+- To remove the application, select **Remove Morrow's data** first, then quit Morrow and move it to the Trash (Mac) or uninstall it from Settings, Apps, Installed apps (Windows).
 - Changing the materials folder and removing an assistant after setup.
 - Manual installation of a newer unsigned build. Automatic updates remain disabled in unsigned releases.
 

@@ -469,7 +469,7 @@ function repointPanel() {
 
 const UNINSTALL_STEPS = Object.freeze({
   move_to_trash: "To remove the Morrow application, first select Remove Morrow's data so your assistants stop starting Morrow. Then quit Morrow and move it to the Trash.",
-  windows_settings_apps: "To remove the Morrow application, first select Remove Morrow's data so your assistants stop starting Morrow. Then quit Morrow, open Settings, select Apps, select Morrow, and select Uninstall.",
+  windows_settings_apps: "To remove the Morrow application, first select Remove Morrow's data so your assistants stop starting Morrow. Then quit Morrow, open Settings, select Apps, then Installed apps, find Morrow, select More, and select Uninstall.",
   unknown: "To remove the Morrow application, first select Remove Morrow's data so your assistants stop starting Morrow. Then quit Morrow and remove it the way this computer removes an application."
 });
 

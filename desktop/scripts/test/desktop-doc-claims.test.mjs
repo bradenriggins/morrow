@@ -406,7 +406,7 @@ test("the data-removal action the Windows guide describes is the one the policy 
     assert.deepEqual(claiming, [], "the retention policy marks nothing removable, so no document may name a data-removal action");
   }
   assert.match(guide, /It never removes an assistant's own configuration file\./);
-  assert.match(guide, /Settings, Apps, Morrow, Uninstall/,
+  assert.match(guide, /Settings, Apps, Installed apps, Morrow, More, Uninstall/,
     "the guide must state the removal step this platform uses, which the policy names as windows_settings_apps");
 });
 

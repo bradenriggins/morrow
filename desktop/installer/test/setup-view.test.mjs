@@ -330,7 +330,8 @@ test("the data-retention section names every place, what it removes, and the ste
   assert.match(view.body, /data-action="remove-data"/);
 
   const windows = retentionView(state({ retention: { uninstall: "windows_settings_apps", locations: RETENTION_LOCATIONS } }));
-  assert.match(windows.body, /select Apps, select Morrow, and select Uninstall/);
+  // Microsoft's steps: Start > Settings > Apps > Installed apps, then the app's More > Uninstall.
+  assert.match(windows.body, /open Settings, select Apps, then Installed apps, find Morrow, select More, and select Uninstall\./);
   assert.equal(/Trash/.test(windows.body), false);
 
   assert.match(retention().body, /Chrome loaded Morrow Bridge from the Bridge folder above/, "the temporary route loads the Bridge folder");
