@@ -48,11 +48,6 @@ _LADDER = (rs.RUNG_USER_ID, rs.RUNG_SIS_USER_ID, rs.RUNG_LOGIN,
            rs.RUNG_NAME_FUZZY)
 _STATE_RANK = {"active": 0, "inactive": 1, "completed": 2}
 _LABEL_RE = re.compile(r"^Student A[1-9][0-9]*$")
-# Labels are numbered per course scope, so a course given another way
-# (sis_course_id:BIO101, 1/../2, 0101) gets labels that name different
-# students than the same numbers in the course by number. Only a plain
-# Canvas course number is accepted: the rule query/chain.py applies.
-_COURSE_NUMBER_RE = re.compile(r"[1-9][0-9]{0,15}")
 
 
 class InvalidCourseId(ValueError):
@@ -61,7 +56,7 @@ class InvalidCourseId(ValueError):
 
 def _operation(course_id):
     """What was attempted, in the educator's words, for the funnel."""
-    if _COURSE_NUMBER_RE.fullmatch(course_id):
+    if rs.is_course_number(course_id):
         return "looking up the student you named in course %s" % course_id
     return "looking up the student you named"
 
@@ -82,7 +77,7 @@ def _failure(status, course_id, raw_error):
 def _course_refusal(course_id):
     """The refusal for a course not given by its number, else None.
     Checked before any read."""
-    if _COURSE_NUMBER_RE.fullmatch(course_id):
+    if rs.is_course_number(course_id):
         return None
     return _failure("refused", course_id, InvalidCourseId(
         "the course is given as %r, not as its Canvas course number; find "
