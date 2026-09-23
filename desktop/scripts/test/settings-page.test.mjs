@@ -1115,6 +1115,41 @@ test("a course whose available actions changed is paused until it is saved again
   assert.equal(page.query('[data-binding-id="canvas:course-1"] .course-row-state').textContent, "Plan. Asks first.");
 });
 
+// A saved grant that lapsed, or that no longer matches the list of actions, says nothing about
+// whether the course's tab is open. A closed course is listed as closed, with its Open action.
+test("a closed course keeps its Open Canvas action even while its saved grant is out of date", async () => {
+  const staleClosed = canvasCourse(1, "Anatomy", {
+    runtimeVerified: false,
+    staleEditPermission: { ...editPermissionSummary("canvas:course-1", { catalogDigest: "a".repeat(64) }), enabledCategories: [CHECKED_ACTION.id] },
+  });
+  const lapsedClosed = canvasCourse(2, "Physiology", {
+    runtimeVerified: false,
+    editPermission: { ...editPermissionSummary("canvas:course-2", { expiresAt: Date.now() - 1_000 }), enabledCategories: [CHECKED_ACTION.id] },
+  });
+  const page = await openSettings({ status: () => statusFixture([staleClosed, lapsedClosed]) });
+  assert.equal(page.queryAll('[data-row-kind="connected"]').length, 0);
+  for (const binding of [staleClosed, lapsedClosed]) {
+    assert.equal(page.text(`[data-open-platform="${binding.sourceBindingId}"]`), "Open Canvas", binding.courseName);
+  }
+  assert.deepEqual(page.queryAll('[data-row-kind="attention"] .course-row-note').map((note) => note.textContent),
+    ["Canvas is closed. Morrow Bridge can open it for you.", "Canvas is closed. Morrow Bridge can open it for you."]);
+});
+
+// The course's tab closed after the page last read it. Turning on routine edits then reads the
+// course's actions, finds the course closed, and says to open it, not that an action is missing.
+test("routine edits for a course whose tab has closed says to open the course", async () => {
+  const page = await openSettings({
+    status: () => statusFixture([ANATOMY]),
+    options: (sourceBindingId) => optionsFixture(sourceBindingId, [FIELD_SELECTION_BUNDLE, ROUTINE_BUNDLE_B], { runtimeVerified: false }),
+  });
+  const detail = await openCourseDetail(page, ANATOMY.sourceBindingId);
+  await page.click(`#${detail.getAttribute("id")} [data-set-level="routine"]`);
+  await page.waitFor(() => !page.hidden("#error"), "the closed course was not reported");
+  assert.equal(page.text("#error"), problemText("edit_policy_binding_stale"));
+  assert.equal(page.messages("morrow_edit_policy_save").length, 0);
+  assert.equal(page.text(`[data-open-platform="${ANATOMY.sourceBindingId}"]`), "Open Canvas");
+});
+
 // WI-5.4: the course detail opens in place under a connected row when its name button is clicked.
 async function openCourseDetail(page, sourceBindingId) {
   const button = page.query(`[data-toggle-course="${sourceBindingId}"]`);

@@ -1131,9 +1131,10 @@ function renderCustomize() {
   syncCustomizeTriStates();
 }
 
-/** WI-1.1: the course is otherwise usable, but its saved Canvas or Moodle tab is not open. */
+/** WI-1.1: the course is otherwise usable, but its saved Canvas or Moodle tab is not open. A saved
+ * grant that lapsed or no longer matches the action list says nothing about the tab. */
 function siteClosed(binding) {
-  return isEligible(binding) && !permissionHasExpired(binding) && !isStale(binding) && binding.runtimeVerified !== true;
+  return isEligible(binding) && binding.runtimeVerified !== true;
 }
 
 /** WI-5.1, WI-3.3: every curated category id that is routine, grouped by provider (a static list,
@@ -1898,13 +1899,23 @@ function toggleCourseDetail(sourceBindingId) {
  */
 async function ensureBindingOptions(binding) {
   if (optionsFor(binding)) return true;
-  if (!binding || binding.runtimeVerified !== true) {
-    showError("edit_policy_options_unreadable");
+  if (!binding) {
+    showError("edit_policy_binding_missing");
+    return false;
+  }
+  if (binding.runtimeVerified !== true) {
+    showError("edit_policy_binding_stale");
     return false;
   }
   try {
     const detail = normalizeEditOptions(await request("morrow_edit_policy_options", { sourceBindingId: binding.sourceBindingId }), binding);
     state.optionsByBinding.set(binding.sourceBindingId, detail);
+    // The course's tab closed after this page last read it, so the course now needs opening.
+    if (detail.runtimeVerified !== true) {
+      state.status = { ...state.status, bindings: state.status.bindings.map((entry) => entry.sourceBindingId === binding.sourceBindingId ? { ...entry, runtimeVerified: false } : entry) };
+      showError("edit_policy_binding_stale");
+      return false;
+    }
     return true;
   } catch (cause) {
     showError(cause);
