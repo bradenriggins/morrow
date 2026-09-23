@@ -161,6 +161,11 @@ Installing and the docs:
   installer's own checks still ship, and they keep to a scratch folder.
 - The troubleshooting guide names the Python version the installer
   needs: 3.11 or newer.
+- Morrow's commands run on a computer that has another Python package
+  named `dispatch` (Homebrew's Python can have one). Approving a
+  change stopped with "cannot import name 'executor' from 'dispatch'",
+  because the command loaded that package before its own files. Every
+  command now loads its own files first.
 - The example commands in the assistant's instructions and the install
   guide run as written. They put the Canvas address option after the
   command, where Morrow refused it, so every example read and change
