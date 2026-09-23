@@ -1511,12 +1511,18 @@ export class MorrowRuntime {
     const states: Record<string, string> = {};
     const tools = new Set<string>();
     let confirmedChildren = 0;
+    // A planned batch of staged writes is either still in review or approved and waiting for its batch
+    // window. Only the children's own operations say which, so they are read only in that state.
+    const reviewed = batch.state === "planned" && batch.mode === "stage_writes";
+    let reviewOpen = false;
     let offset = 0;
     for (;;) {
       const page = this.batches.listChildren(batchId, offset, 500);
       for (const child of page.children) {
         tools.add(child.publicToolName);
         if (child.gatewayOperationState === "verified") confirmedChildren += 1;
+        if (reviewed && !reviewOpen && child.state === "pending" && child.gatewayOperationId
+          && this.gateway.operationGet(child.gatewayOperationId).state === "awaiting_approval") reviewOpen = true;
         states[String(child.ordinal - 1)] = operationStatus(
           child.state === "pending" ? "awaiting_approval"
             : child.state === "running" ? "dispatching"
@@ -1533,6 +1539,7 @@ export class MorrowRuntime {
       schema: "morrow.batch-approval-status.v1",
       platform: reviewPlatform([...tools]),
       batch,
+      ...(reviewed ? { approval: reviewOpen ? "awaiting_approval" : "approved" } : {}),
       totalChildren: batch.totalChildren,
       confirmedChildren,
       states,

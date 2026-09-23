@@ -37,10 +37,14 @@ interface RecentChangesCapableRuntime {
   recentChangesUrl?(): string;
 }
 
-/** The states `morrow_operation_wait` keeps polling through. Any other reported state, known or not,
- * ends the wait: the point of this tool is to sleep through the part of a change that a person must
- * still act on, not to model every state an operation or a batch can reach. */
-const WAIT_CONTINUE_STATES: ReadonlySet<string> = new Set(["awaiting_approval", "approved", "dispatching", "running"]);
+/** The operation states `morrow_operation_wait` keeps polling through. Any other reported state,
+ * known or not, ends the wait: the point of this tool is to sleep through a review a person has not
+ * answered yet and the work they approved, not to model every state an operation can reach. */
+const OPERATION_REVIEW_OPEN_STATES: ReadonlySet<string> = new Set(["awaiting_approval"]);
+const OPERATION_APPLYING_STATES: ReadonlySet<string> = new Set(["approved", "dispatching"]);
+
+const REVIEW_OPEN_ATTENTION = "The person has not approved yet. Say that the review is still open. Call morrow_operation_wait again when they are ready. Do not call it more than 6 times in a row.";
+const APPLYING_ATTENTION = "The person approved. Morrow is still applying what they approved. Call morrow_operation_wait again to wait for the result.";
 
 const WAIT_POLL_INTERVAL_MS = 500;
 const WAIT_PROGRESS_INTERVAL_MS = 5000;
@@ -68,6 +72,8 @@ function waitDelay(ms: number, signal: AbortSignal): Promise<void> {
 interface WaitSnapshot {
   readonly record: JsonObject;
   readonly state: string;
+  /** Whether the person still has to answer the review, or already approved work Morrow is applying. */
+  readonly phase: "review_open" | "applying" | "ended";
 }
 
 /** Reads the current state of the one id the caller named, from whichever store holds it. An
@@ -77,7 +83,9 @@ interface WaitSnapshot {
 function readWaitSnapshot(runtime: GatewayRuntime, composition: OperationToolComposition, operationId: string | undefined, batchId: string | undefined): WaitSnapshot {
   if (operationId !== undefined) {
     const record = runtime.operationGet(operationId);
-    return { record, state: typeof record.state === "string" ? record.state : "unknown" };
+    const state = typeof record.state === "string" ? record.state : "unknown";
+    const phase = OPERATION_REVIEW_OPEN_STATES.has(state) ? "review_open" : OPERATION_APPLYING_STATES.has(state) ? "applying" : "ended";
+    return { record, state, phase };
   }
   if (typeof composition.batchApprovalStatus !== "function") {
     throw new Error("this server cannot report a batch's approval status");
@@ -85,7 +93,12 @@ function readWaitSnapshot(runtime: GatewayRuntime, composition: OperationToolCom
   const record = composition.batchApprovalStatus(batchId as string);
   const batch = record.batch;
   const state = isJsonObject(batch) && typeof batch.state === "string" ? batch.state : "unknown";
-  return { record, state };
+  // A planned batch of staged writes is either still in review or approved and waiting for its batch
+  // window; its status says which. A planned batch with no review has nothing to wait for.
+  const phase = state === "running" || (state === "planned" && record.approval === "approved") ? "applying"
+    : state === "planned" && record.approval === "awaiting_approval" ? "review_open"
+      : "ended";
+  return { record, state, phase };
 }
 
 /** What the wider server composition adds to a GatewayRuntime for these tools. */
@@ -135,7 +148,7 @@ export function registerOperationTools(
         const progressToken = context.mcpReq._meta?.progressToken;
         let lastProgressAt = startedAt;
         let snapshot = readWaitSnapshot(runtime, composition, operation_id, batch_id);
-        while (WAIT_CONTINUE_STATES.has(snapshot.state) && Date.now() < deadlineAt && !context.mcpReq.signal.aborted) {
+        while (snapshot.phase !== "ended" && Date.now() < deadlineAt && !context.mcpReq.signal.aborted) {
           const now = Date.now();
           if (progressToken !== undefined && now - lastProgressAt >= WAIT_PROGRESS_INTERVAL_MS) {
             lastProgressAt = now;
@@ -154,15 +167,11 @@ export function registerOperationTools(
           snapshot = readWaitSnapshot(runtime, composition, operation_id, batch_id);
         }
         const seconds = Math.round((Date.now() - startedAt) / 1000);
-        const timedOut = !context.mcpReq.signal.aborted && WAIT_CONTINUE_STATES.has(snapshot.state);
+        const timedOut = !context.mcpReq.signal.aborted && snapshot.phase !== "ended";
         const attention = Array.isArray(snapshot.record.attention)
           ? snapshot.record.attention.filter((entry): entry is string => typeof entry === "string")
           : [];
-        if (timedOut) {
-          attention.push(
-            "The person has not approved yet. Say that the review is still open. Call morrow_operation_wait again when they are ready. Do not call it more than 6 times in a row.",
-          );
-        }
+        if (timedOut) attention.push(snapshot.phase === "review_open" ? REVIEW_OPEN_ATTENTION : APPLYING_ATTENTION);
         return {
           content: [{ type: "text", text: `Here is saved request ${id}.` }],
           structuredContent: {
