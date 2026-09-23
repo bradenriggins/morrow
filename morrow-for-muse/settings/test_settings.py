@@ -681,7 +681,7 @@ class CommandTest(unittest.TestCase):
         out = commands.setting_set(self.user, "confirm_destructive_writes",
                                    False)
         self.assertFalse(store.destructive_confirmation_required(self.user))
-        self.assertIn("Deletion confirmations is now off", out["message"])
+        self.assertIn("Deletion confirmations are off", out["message"])
         # Turning deletion confirmations off never touches the mode.
         self.assertEqual(store.get_setting(self.user, "default_mode"), "plan")
 
