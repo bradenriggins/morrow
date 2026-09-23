@@ -11,6 +11,7 @@ const actionCheckedOnly = document.querySelector("#action-checked-only");
 const routineSwitchContainer = document.querySelector("#routine-switch");
 const routineSwitch = document.querySelector("#routine-edits");
 const routineBundleList = document.querySelector("#routine-bundle-list");
+const routineSwitchSummary = document.querySelector("#routine-switch .routine-toggle small");
 const actionFilterField = document.querySelector("#action-filter-field");
 const actionCheckedOnlyField = document.querySelector("#action-checked-only-field");
 const selectionSummary = document.querySelector("#selection-summary");
@@ -721,16 +722,41 @@ function categoryFamily(category) {
   return null;
 }
 
-const CATEGORY_FAMILIES = Object.freeze({
-  routine: Object.freeze({
-    label: "Routine edits",
-    description: "Edit text and titles, change module item links and how they open, reorder, indent and move modules, items and files, create folders, and add alternative text in the selected courses. It never creates anything other than a folder, publishes, removes, posts, or changes a date, points or a course setting.",
-  }),
-  dates: Object.freeze({
-    label: "Change assignment and quiz dates",
-    description: "Change existing due dates and open or close dates in every selected course. Each change is visible to learners as soon as the course platform saves it.",
-  }),
+// What each platform's routine set changes with no review. Canvas's and Moodle's routine sets
+// differ, so a selection is told only about the platforms it holds.
+// scripts/test/settings-page.test.mjs checks each sentence names every field its routine set changes.
+const ROUTINE_CHANGES = Object.freeze({
+  canvas: "edits text and titles, changes module item links and how they open, reorders, indents and moves modules, items and files, creates folders, and adds alternative text",
+  moodle: "edits text and titles in Moodle Pages, Text and media areas, Assignments, and Quizzes",
 });
+
+/** The Routine edits promise for the platforms a selection holds. */
+function routineSummary(providers) {
+  const platforms = ["canvas", "moodle"].filter((provider) => providers.includes(provider));
+  const changes = platforms.length === 1
+    ? `Morrow ${ROUTINE_CHANGES[platforms[0]]} without another approval.`
+    : `In Canvas courses, Morrow ${ROUTINE_CHANGES.canvas}. In Moodle courses, Morrow ${ROUTINE_CHANGES.moodle}. Morrow makes these changes without another approval.`;
+  return `${changes} ${routineAsks(platforms)}`;
+}
+
+/** What the routine set never does with no review. Only Canvas's creates anything: a folder. */
+function routineAsks(providers) {
+  return providers.includes("canvas")
+    ? "It always asks before it creates anything other than a folder, publishes, removes, posts, or changes a date, points or a course setting."
+    : "It always asks before it creates anything, publishes, removes, posts, or changes a date, points or a course setting.";
+}
+
+const CATEGORY_FAMILY_LABELS = Object.freeze({
+  routine: "Routine edits",
+  dates: "Change due dates and availability dates",
+});
+
+/** A family row states what it grants on each selected platform: the routine promise for those
+ * platforms, or the words of each platform's own date bundle, which name its own objects. */
+function familyDescription(family, members) {
+  if (family === "routine") return routineSummary(members.map((option) => option.provider));
+  return [...new Set(members.map((option) => option.description))].join(" ");
+}
 
 /** WI-5.6: a Canvas id and a Moodle id never match, so the same-id intersection rebuildCategories
  * otherwise uses would show nothing for a mixed selection. One row stands in for each family below,
@@ -738,11 +764,14 @@ const CATEGORY_FAMILIES = Object.freeze({
  * (so the choice can never grant one connection nothing); resolveEnabledCategoriesFor expands a
  * family row back to each connection's own ids at save. */
 function mixedPlatformCategories(details) {
-  return Object.entries(CATEGORY_FAMILIES)
-    .filter(([family]) => details.every((detail) => detail.options.some((option) =>
-      option.availability === "edit" && !option.requiresFieldSelection && categoryFamily(option) === family)))
-    .map(([family, { label, description }]) => ({
-      id: `family:${family}`, group: "Actions for every selected course", label, description,
+  const members = (detail, family) => detail.options.filter((option) =>
+    option.availability === "edit" && !option.requiresFieldSelection && categoryFamily(option) === family);
+  const byPlatform = [...details].sort((left, right) => String(left.provider).localeCompare(String(right.provider)));
+  return Object.entries(CATEGORY_FAMILY_LABELS)
+    .filter(([family]) => details.every((detail) => members(detail, family).length > 0))
+    .map(([family, label]) => ({
+      id: `family:${family}`, group: "Actions for every selected course", label,
+      description: familyDescription(family, byPlatform.flatMap((detail) => members(detail, family).map((option) => ({ ...option, provider: detail.provider })))),
       availability: "edit", destructive: false, routine: family === "routine", rememberable: true, requiresFieldSelection: false, family,
     }))
     .sort((left, right) => left.label.localeCompare(right.label));
@@ -1225,7 +1254,7 @@ function renderCourseDetail(binding, isOpen) {
   const level = courseLevel(binding);
   const ids = level === "plan" ? [] : (Array.isArray(binding?.editPermission?.enabledCategories) ? binding.editPermission.enabledCategories.filter((value) => typeof value === "string") : []);
   const lead = level === "routine"
-    ? "Morrow makes the routine edits below without another approval until you choose Plan. It always asks before it creates anything other than a folder, publishes, removes, posts, or changes a date, points or a course setting."
+    ? `Morrow makes the routine edits below without another approval until you choose Plan. ${routineAsks([binding.provider])}`
     : level === "custom"
       ? "Morrow makes the changes you selected in Customize until you choose Plan. It asks before every other change."
       : "Morrow asks before each change. To skip the review for one kind of edit, choose Edit above, or use “do not ask again” on a review.";
@@ -1387,6 +1416,7 @@ function renderRoutineSwitch(showEditStage) {
   routineSwitchContainer.hidden = !canOffer;
   routineSwitch.disabled = state.busy || !canOffer;
   routineSwitch.checked = state.routineMode;
+  if (canOffer) routineSwitchSummary.textContent = routineSummary(selectedBindings().map((binding) => binding.provider));
   const bundles = state.routineMode
     ? [...state.selectedCategories].map(categoryById).filter((category) => category && category.routine === true)
       .sort((left, right) => left.label.localeCompare(right.label))

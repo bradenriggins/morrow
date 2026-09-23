@@ -179,7 +179,7 @@ export const CURATED_CATEGORY_SPECS = Object.freeze([
     id: "dates",
     group: "Common Moodle actions",
     label: "Change Moodle assignment and quiz dates",
-    description: "Change Moodle Assignment due dates and Quiz open or close dates in this course.",
+    description: "Change Moodle Assignment due dates and Quiz open or close dates. Each change is visible to learners as soon as Moodle saves it.",
     provider: "moodle",
     rememberable: true,
     rules: Object.freeze([
@@ -453,7 +453,7 @@ export const CURATED_CATEGORY_SPECS = Object.freeze([
     id: "canvas_dates",
     group: "Canvas task bundles",
     label: "Change due dates and availability dates",
-    description: "Change due dates and availability dates for Canvas Assignments, Discussions, Files, Pages, and Quizzes, one at a time or in bulk. Each change is visible to learners as soon as Canvas saves it.",
+    description: "Change due dates and availability dates for Canvas Assignments, Discussions, Files, Pages, and Quizzes, one at a time or in bulk, including the dates an assignment gives one student or one section. Each change is visible to learners as soon as Canvas saves it.",
     provider: "canvas",
     area: "assignments",
     rememberable: true,

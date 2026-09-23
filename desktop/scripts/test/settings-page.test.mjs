@@ -514,6 +514,77 @@ test("the Routine edits promise names every change the routine set makes with no
   }
 });
 
+// Canvas's and Moodle's routine sets differ, so the switch names only the routine set of the
+// platforms selected, and names each field a selected platform's routine set may change.
+test("the Routine edits switch names only the routine set of the selected platforms", async () => {
+  const routineWords = (provider) => [...new Set(CURATED_CATEGORY_SPECS.filter((spec) => spec.provider === provider && spec.routine === true)
+    .flatMap((spec) => spec.rules || []).flatMap((rule) => rule.allowedChangedFields || []).map((field) => ROUTINE_FIELD_WORDS.get(field)))];
+  const switchText = async (bindings) => {
+    const page = await openSettings({
+      status: () => statusFixture(bindings),
+      options: (sourceBindingId) => optionsFixture(
+        sourceBindingId,
+        sourceBindingId.startsWith("moodle:") ? MOODLE_ROUTINE_OPTIONS : CANVAS_ROUTINE_OPTIONS,
+        { provider: sourceBindingId.startsWith("moodle:") ? "moodle" : "canvas" },
+      ),
+    });
+    await page.click("#course-select-mode");
+    for (const binding of bindings) await page.click(`[data-binding-id="${binding.sourceBindingId}"] .course-select`);
+    await page.waitFor(() => page.query("#course-bulk-routine").disabled === false, "the selection's options never finished loading");
+    await page.click("#mode-edit");
+    return page.text("#routine-switch .routine-toggle small");
+  };
+  const chemistry = moodleCourse(2, "Chemistry");
+
+  const moodle = await switchText([chemistry]);
+  for (const words of routineWords("moodle")) assert.match(moodle, new RegExp(words, "iu"), moodle);
+  assert.match(moodle, /Moodle Pages, Text and media areas, Assignments, and Quizzes/u);
+  assert.doesNotMatch(moodle, /module item links|folders?|alternative text|Canvas/u, moodle);
+  assert.match(moodle, /always asks before it creates anything, publishes/u);
+
+  const canvas = await switchText([ANATOMY]);
+  for (const words of routineWords("canvas")) assert.match(canvas, new RegExp(words, "iu"), canvas);
+  assert.doesNotMatch(canvas, /Moodle/u, canvas);
+
+  const mixed = await switchText([ANATOMY, chemistry]);
+  assert.match(mixed, /In Canvas courses, Morrow edits text and titles, changes module item links/u);
+  assert.match(mixed, /In Moodle courses, Morrow edits text and titles in Moodle Pages/u);
+});
+
+// A mixed selection's date choice grants each platform its own date bundle, so its words are those
+// bundles' own words: Canvas's covers Discussions, Files, Pages and the dates set for one student
+// or section, not only assignments and quizzes.
+test("a mixed Canvas and Moodle date choice names every date it lets Morrow change on each platform", async () => {
+  const spec = (provider, id) => CURATED_CATEGORY_SPECS.find((candidate) => candidate.provider === provider && candidate.id === id);
+  const option = (entry) => ({ id: entry.id, group: entry.group, label: entry.label, description: entry.description, availability: "edit", destructive: false, verification: "checked", rememberable: true });
+  const canvasDates = spec("canvas", "canvas_dates");
+  const moodleDates = spec("moodle", "dates");
+  assert.match(canvasDates.description, /Discussions, Files, Pages, and Quizzes/u);
+  assert.match(canvasDates.description, /one student or one section/u);
+  const chemistry = moodleCourse(2, "Chemistry");
+  const page = await openSettings({
+    status: () => statusFixture([ANATOMY, chemistry]),
+    options: (sourceBindingId) => optionsFixture(
+      sourceBindingId,
+      [option(sourceBindingId.startsWith("moodle:") ? moodleDates : canvasDates)],
+      { provider: sourceBindingId.startsWith("moodle:") ? "moodle" : "canvas" },
+    ),
+  });
+  await page.click("#course-select-mode");
+  await page.click(`[data-binding-id="${ANATOMY.sourceBindingId}"] .course-select`);
+  await page.click(`[data-binding-id="${chemistry.sourceBindingId}"] .course-select`);
+  await page.waitFor(() => page.messages("morrow_edit_policy_options").length === 2 && !page.text("#category-list").includes("Reading"), "the mixed selection's options never finished loading");
+  await page.click("#mode-edit");
+  await openCustomizeGroup(page, "other", "edit");
+  assert.deepEqual(listedActions(page), ["Change due dates and availability dates"]);
+  assert.equal(page.query("#category-list .category-option small").textContent, `${canvasDates.description} ${moodleDates.description}`);
+  await page.click('#category-list input[value="family:dates"]');
+  await page.click("#save-edit");
+  await page.waitFor(() => page.text("#notice") !== "", "the date choice was never saved");
+  assert.deepEqual(page.messages("morrow_edit_policy_save").map((message) => message.enabledCategories), [["canvas_dates"], ["dates"]]);
+  assert.match(page.text("#notice"), /Allowed actions: Change due dates and availability dates\./u);
+});
+
 // WI-5.3: the bulk bar's Plan shortcut reuses returnToPlan, the same handler "Return selected
 // courses to Plan" uses.
 test("the bulk bar's Plan shortcut returns every selected course to Plan", async () => {
