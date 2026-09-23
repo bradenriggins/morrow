@@ -98,6 +98,15 @@ _TENANT = re.compile(r"(?<![%}A-Za-z0-9.-])([A-Za-z0-9-]+)"
                      re.IGNORECASE)
 
 
+def install_suites(tree=SRC):
+    """The install selftest suites, in order, as scripts/install-suites.sh
+    lists them (install.sh step 9 and CI run that script)."""
+    with open(os.path.join(tree, "scripts", "install-suites.sh"),
+              encoding="utf-8") as fh:
+        text = fh.read()
+    return text.split('SUITES="', 1)[1].split('"', 1)[0].split()
+
+
 def _allowed_hosts():
     allowed, section = set(), None
     with open(os.path.join(SRC, "pack", "deny-list.txt"),

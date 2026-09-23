@@ -125,11 +125,10 @@ def test_dev_only_surface_does_not_ship(carved):
 
 
 def test_every_install_suite_ships(carved):
-    with open(os.path.join(TREE, "install.sh")) as fh:
-        text = fh.read()
-    block = text.split('SUITES="', 1)[1].split('"', 1)[0]
-    for suite in block.split():
+    for suite in carve.install_suites():
         assert os.path.isfile(os.path.join(carved, suite)), suite
+    assert os.path.isfile(os.path.join(carved, "scripts",
+                                       "install-suites.sh"))
 
 
 def test_carve_refuses_output_inside_source():

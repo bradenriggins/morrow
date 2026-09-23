@@ -77,8 +77,9 @@
 #      Any deny-list violation fails the install. No runtime file is
 #      ever written into the tree (logs and loop state live in the
 #      state dir), so a rerun after the helper ran passes it too.
-#   9. All 23 selftest suites from this tree. Any failure fails the
-#      install and names the suite. Test scratch (.selftest-work) is
+#   9. All 23 selftest suites from this tree, through
+#      scripts/install-suites.sh. Any failure fails the install and
+#      names each failed suite. Test scratch (.selftest-work) is
 #      removed afterwards so it never lingers in the install.
 #   10. Helper launch via helper/keepalive.sh (only when CANVAS_BASE is
 #      set): the tenant is probed first (placeholders, unreachable hosts,
@@ -1005,61 +1006,21 @@ VERIFY_EXCLUDE="helper/profile" "${TREE}/scripts/verify-no-secrets.sh" "${TREE}"
 
 # -- 9. selftests ------------------------------------------------------------
 step "9/10 selftest suites"
-SUITES="transport/chromium_session_selftest.py
-transport/egress_selftest.py
-dispatch/executor_selftest.py
-dispatch/admission_selftest.py
-dispatch/executor_write_hardening_selftest.py
-dispatch/journal_integrity_selftest.py
-dispatch/wave4_dispatch_integrity_selftest.py
-dispatch/integration_selftest.py
-privacy/source_privacy_selftest.py
-privacy/deidentif_selftest.py
-privacy/learner_vault_selftest.py
-helper/helper_selftest.py
-helper/cdp_http_auth_selftest.py
-reauth/session_lifecycle_selftest.py
-helper/cookie_expiry_selftest.py
-modes/test_modes_integration.py
-settings/test_settings.py
-failures/selftest_smoke.py
-failures/selftest_wiring.py
-failures/test_error_translation.py
-learners/test_resolve_student.py
-query/selftest_query.py
-catalog/a11y/runner_selftest.py"
-# Round-4 H2: the suites run in a scratch home with every live state
-# path removed. The educator's MORROW_HOME (even ~/.morrow), tree
-# state dir, vault, signing key, identity, and helper profile never
-# reach a selftest, and never make one refuse to run.
-SELFTEST_UNSET="MORROW_HOME MORROW_TREE_STATE_DIR MORROW_SOURCE_VAULT_PATH MORROW_APPROVAL_SIGNING_KEY MORROW_USER_ID MORROW_CONVERSATION_ID MORROW_HELPER_ENV_FILE MORROW_PRIVACY_MAP MORROW_PRIVACY_SALT MORROW_SELFTEST_HOME LOGIN_HELPER_PROFILE_DIR LOGIN_HELPER_PORT LOGIN_HELPER_CDP_PORT"
-mkdir -p "${TREE}/.selftest-work"
-selftest_env() {
-  # Runs "$@" with the live state variables removed and HOME pointed at
-  # a fresh scratch dir under the tree's .selftest-work/.
-  _st_home="$(mktemp -d "${TREE}/.selftest-work/install-home.XXXXXX")" \
-    || return 1
-  _st_args=""
-  for _v in ${SELFTEST_UNSET}; do
-    _st_args="${_st_args} -u ${_v}"
-  done
-  # shellcheck disable=SC2086
-  env ${_st_args} HOME="${_st_home}" PYTHONDONTWRITEBYTECODE=1 "$@"
-  # The scratch home lives under .selftest-work/, which is removed as a
-  # whole after the suites (and by rollback on failure).
-  return $?
-}
-PASS=0
-TOTAL=0
-for suite in ${SUITES}; do
-  TOTAL=$((TOTAL + 1))
-  if (cd "${TREE}" && selftest_env python3 "${suite}" >/dev/null 2>&1); then
-    PASS=$((PASS + 1))
-  else
-    fail "selftest" "${suite} failed; run 'python3 ${suite}' from ${TREE} for details"
-  fi
-done
-note "ok: ${PASS}/${TOTAL} selftest suites pass"
+# scripts/install-suites.sh holds the suite list and runs each suite in
+# a scratch home with every live state path removed (round-4 H2). CI
+# runs the same script on the carved release tree. Its scratch lives
+# under .selftest-work/, which is removed below (and by rollback on
+# failure).
+_SUITES_OUT="$(bash "${TREE}/scripts/install-suites.sh")"
+_SUITES_RC=$?
+if [ "${_SUITES_RC}" -ne 0 ]; then
+  _FAILED="$(printf '%s\n' "${_SUITES_OUT}" | sed -n 's/^FAIL //p' \
+    | tr '\n' ' ')"
+  [ -n "${_FAILED}" ] || _FAILED="scripts/install-suites.sh (exit ${_SUITES_RC}) "
+  fail "selftest" "${_FAILED}failed; run 'bash scripts/install-suites.sh --show-failures' from ${TREE} for details"
+fi
+note "ok: ${_SUITES_OUT##*$'\n'}"
+unset _SUITES_OUT _SUITES_RC _FAILED
 # Test scratch is regenerable residue: remove it so it never lingers in
 # the install. (The secrets gate ran above, before the suites; this just
 # keeps the tree clean.)

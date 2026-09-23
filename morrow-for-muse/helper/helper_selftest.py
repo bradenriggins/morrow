@@ -683,6 +683,11 @@ def main():
           not any(("cp " in line or "rsync" in line or "unzip" in line)
                   and "profile" in line
                   for line in inst.splitlines()))
+    # install.sh runs the suites through scripts/install-suites.sh, the
+    # runner CI also uses, which holds the suite list.
+    with open(os.path.join(tree, "scripts", "install-suites.sh"),
+              encoding="utf-8") as fh:
+        suites_sh = fh.read()
     for suite in ("transport/chromium_session_selftest.py",
                   "transport/egress_selftest.py",
                   "dispatch/executor_selftest.py",
@@ -692,7 +697,7 @@ def main():
                   "privacy/source_privacy_selftest.py",
                   "helper/helper_selftest.py"):
         check("install.sh runs " + os.path.basename(suite),
-              suite in inst)
+              "scripts/install-suites.sh" in inst and suite in suites_sh)
     check("install.sh launches the helper via keepalive.sh",
           "helper/keepalive.sh" in inst)
     check("install.sh prints the sign-in notice",

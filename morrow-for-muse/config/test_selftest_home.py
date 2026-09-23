@@ -115,7 +115,8 @@ def test_a_scratch_home_made_by_a_parent_selftest_is_reused(tmp_path):
 
 
 def test_install_runs_suites_with_live_state_removed():
-    with open(os.path.join(TREE, "install.sh"), encoding="utf-8") as fh:
+    with open(os.path.join(TREE, "scripts", "install-suites.sh"),
+              encoding="utf-8") as fh:
         text = fh.read()
     decl = text[text.index("SELFTEST_UNSET=\""):]
     decl = decl[:decl.index("\"\n", len("SELFTEST_UNSET=\""))]
