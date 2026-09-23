@@ -246,6 +246,11 @@ function installerState(input) {
     materialsFolder: typeof input.materialsFolder === "string" && input.materialsFolder.length > 0 && input.materialsFolder.length <= 4096
       ? input.materialsFolder
       : null,
+    // The folder Morrow was using when it is gone, so setup can name it and
+    // offer the step that fixes it. `isDefault` marks Morrow's own folder, the
+    // only one Morrow makes again. `null` while the folder is there, and before
+    // any assistant is set up, because setup itself makes the default folder.
+    materialsFolderMissing: materialsFolderMissing(input.materialsFolderMissing),
     runtime: { status: input.runtimeStatus },
     bridge: {
       delivery: input.bridgeDelivery,
@@ -280,6 +285,12 @@ function installerState(input) {
       completed: input.firstPreview?.completed === true
     }
   };
+}
+
+function materialsFolderMissing(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || typeof value.path !== "string" || value.path.length === 0 || value.path.length > 4096) return null;
+  return { path: value.path, isDefault: value.isDefault === true };
 }
 
 function blackboardSnapshot(value) {

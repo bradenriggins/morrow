@@ -1092,6 +1092,34 @@ class InstallerController {
   }
 
   /**
+   * The folder Morrow was using when it is gone, or null. Before any assistant
+   * is set up the default folder is not missing: assistant setup makes it.
+   */
+  materialsFolderMissing(record, materials) {
+    if (materials) return null;
+    const candidate = this.workspace || record.materialsFolder || this.paths.defaultMaterials;
+    const isDefault = candidate === this.paths.defaultMaterials;
+    const configured = record.configured && typeof record.configured === "object" ? Object.keys(record.configured).length > 0 : false;
+    return isDefault && !configured ? null : { path: candidate, isDefault };
+  }
+
+  /**
+   * Makes Morrow's own default materials folder again, empty, after it was
+   * deleted while an assistant is set up to use it. The assistants already
+   * name that exact folder, so none of them is written. A folder the person
+   * chose is never made again: it may be on a drive that is not connected, and
+   * an empty folder in its place would hide the real one.
+   */
+  async restoreMaterialsFolder() {
+    const refused = this.locationAdmission() || this.maintenanceAdmission();
+    if (refused) throw errorDetails(refused);
+    const record = await this.record();
+    if (await this.effectiveWorkspace(record)) return;
+    if (this.materialsFolderMissing(record, null)?.isDefault !== true) throw errorDetails("setup_failed");
+    await mkdirPrivate(this.paths.defaultMaterials);
+  }
+
+  /**
    * Creates the default materials folder only as part of the explicit assistant
    * setup transaction. State reads stay observational, including after a new
    * process starts with all app-owned data removed.
@@ -3170,6 +3198,7 @@ class InstallerController {
       selectedAssistantId: requestedAssistant?.id || null,
       workspaceSelected: record.materialsFolder !== undefined,
       materialsFolder: materials,
+      materialsFolderMissing: this.materialsFolderMissing(record, materials),
       runtimeStatus: currentRuntimeStatus,
       bridgeDelivery: this.bridgeDelivery,
       bridgeFolderReady: bridgeInstallation?.installed === true,

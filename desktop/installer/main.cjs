@@ -839,6 +839,18 @@ async function startMorrow(lifecycle) {
     try { await installer.revealMaterialsFolder(); return respond(); }
     catch { return failed(errorDetails("materials_folder_unavailable")); }
   });
+  // Makes Morrow's own default materials folder again after it was deleted.
+  // The controller refuses any other folder, so a chosen one is never replaced.
+  ipcMain.handle("installer:restore-materials-folder", async (event, ...input) => {
+    trusted(event);
+    try {
+      noInput(input);
+      await installer.restoreMaterialsFolder();
+      return respond();
+    } catch (error) {
+      return failed(error);
+    }
+  });
   // Copies one example request to the system clipboard. Morrow writes nothing
   // else there, and this step changes no setup state, so it answers with the
   // state that already exists.

@@ -467,6 +467,45 @@ test("the folder row before setup asks for a folder and never claims a change it
   assert.match(unknown.body, /Otherwise, Morrow creates and uses its own Materials folder\./);
 });
 
+// A configured assistant cannot use Morrow while its materials folder is gone,
+// and waiting never brings the folder back. Home names the folder and the step
+// that fixes it, and no row claims Morrow will make a folder it will not make.
+test("a materials folder that is gone asks for the step that brings one back", () => {
+  const defaultFolder = "/Users/teacher/Library/Application Support/Morrow/Materials";
+  const gone = state({ ...READY_ASSISTANT, runtimeStatus: "uncertain", materialsFolderMissing: { path: defaultFolder, isDefault: true } });
+  assert.deepEqual(gone.materialsFolderMissing, { path: defaultFolder, isDefault: true });
+  const view = actionView(gone, { chosenAssistantId: "codex" });
+  assert.equal(view.title, "Morrow cannot find its Materials folder.");
+  assert.ok(view.body.includes(escapeHtml(defaultFolder)), "Home names the folder");
+  assert.deepEqual(actions(view.body), ["restore-materials-folder", "choose-workspace"]);
+  assert.match(view.body, /data-action="restore-materials-folder">Make the folder again<\/button>/);
+  assert.match(view.body, /Files that were in the old folder do not come back\./);
+  assert.match(view.body, /Choosing a folder writes it into ChatGPT\./);
+  assert.doesNotMatch(`${view.copy} ${view.body}`, /getting ready|Keep Morrow open/);
+  assert.equal(statusSummary(gone), "Materials folder not found");
+  assert.equal(step(gone, "Assistant").status, "current");
+  assert.equal(step(gone, "Assistant").detail, "Materials folder not found");
+  assert.equal(step(gone, "Morrow Bridge").status, "pending");
+
+  const chosen = state({ ...READY_ASSISTANT, runtimeStatus: "uncertain", materialsFolderMissing: { path: MATERIALS, isDefault: false } });
+  const chosenView = actionView(chosen, { chosenAssistantId: "codex" });
+  assert.equal(chosenView.title, "Morrow cannot find your materials folder.");
+  assert.ok(chosenView.body.includes(escapeHtml(MATERIALS)));
+  assert.match(chosenView.copy, /moved, renamed, or deleted, or it may be on a drive that is not connected/);
+  assert.deepEqual(actions(chosenView.body), ["choose-workspace", "check-setup-state"], "a chosen folder is never made again");
+  assert.equal(statusSummary(chosen), "Materials folder not found");
+
+  // Settings names the folder that is gone, offers the same steps, and makes no claim about creating one.
+  for (const [current, expected] of [[gone, ["restore-materials-folder", "choose-workspace"]], [chosen, ["choose-workspace"]]]) {
+    const settings = setupManagementView(current);
+    const row = settings.body.slice(0, settings.body.indexOf("</div></div>") + 12);
+    assert.ok(row.includes(escapeHtml(current.materialsFolderMissing.path)));
+    assert.match(row, /Morrow cannot find this folder\./);
+    assert.doesNotMatch(row, /Morrow creates|reveal-materials-folder/);
+    assert.deepEqual(actions(row), expected);
+  }
+});
+
 test("the repair state offers the repair alone, with no setup to change", () => {
   const current = state({
     lifecycle: "repair_required",

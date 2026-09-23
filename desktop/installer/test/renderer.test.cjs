@@ -1012,6 +1012,25 @@ test("copying an example request sends its exact text through the clipboard chan
   assert.equal(dom.element("#copy-status").textContent, "Copied to the clipboard.");
 });
 
+test("a missing default materials folder is made again from Home, and the answer is drawn", async () => {
+  const calls = [];
+  const folder = "/Users/teacher/Library/Application Support/Morrow/Materials";
+  let current = state({ runtimeStatus: "uncertain", materialsFolderMissing: { path: folder, isDefault: true } });
+  const dom = await load("materials-restore", async (method, payload) => {
+    calls.push({ method, payload });
+    if (method === "installer:restore-materials-folder") current = state({ materialsFolder: folder });
+    return ok(current);
+  });
+  assert.equal(dom.element("#action-title").textContent, "Morrow cannot find its Materials folder.");
+  const body = dom.element("#action-body");
+  const restore = body.querySelectorAll("[data-action]").find((element) => element.dataset.action === "restore-materials-folder");
+  assert.ok(restore, "Home offers Make the folder again");
+  await body.dispatch("click", { target: restore });
+  await settle();
+  assert.deepEqual(calls.at(-1), { method: "installer:restore-materials-folder", payload: undefined });
+  assert.notEqual(dom.element("#action-title").textContent, "Morrow cannot find its Materials folder.");
+});
+
 test("the materials folder row on Settings opens the folder and copies its path", async () => {
   const calls = [];
   const folder = "/Users/teacher/Library/Application Support/Morrow/Materials";

@@ -14,6 +14,7 @@ const METHODS = new Set([
   "installer:remove-assistant",
   "installer:reveal-bridge-folder",
   "installer:reveal-materials-folder",
+  "installer:restore-materials-folder",
   "installer:copy-to-clipboard",
   "installer:open-support",
   "installer:reconcile-bridge",

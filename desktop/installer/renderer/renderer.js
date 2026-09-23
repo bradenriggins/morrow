@@ -742,6 +742,12 @@ async function handleAction(event) {
     else render(state);
     return;
   }
+  if (action === "restore-materials-folder") {
+    const next = await invoke("installer:restore-materials-folder");
+    if (next) render(next);
+    else render(state);
+    return;
+  }
   if (action === "reveal-bridge-folder" || action === "reveal-materials-folder") {
     const next = await invoke(action === "reveal-materials-folder" ? "installer:reveal-materials-folder" : "installer:reveal-bridge-folder");
     if (next) render(next);

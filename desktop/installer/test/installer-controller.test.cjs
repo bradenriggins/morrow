@@ -2657,6 +2657,56 @@ test("an assistant whose Morrow entry points at a Morrow that moved asks for the
   assert.equal((await installer.state()).assistantsNeedRepoint, false, "a different materials folder alone is not a move");
 });
 
+// With its materials folder gone the runtime cannot start, so a configured
+// assistant stays unusable. The state names the folder Morrow was using, and
+// only Morrow's own default folder is ever made again: a chosen folder may be
+// on a drive that is not connected, and an empty one in its place would hide it.
+test("a materials folder that is gone is named by its path, and only the default one is made again", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root, { detectAssistant: async () => true });
+  installer.ensureRuntime = async () => installer.paths;
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, "[mcp_servers.morrow]\n");
+  const configured = { ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: sha256(await fs.readFile(target)) } } };
+  await installer.writeRecord(configured);
+  const defaultFolder = installer.paths.defaultMaterials;
+  assert.equal(await fs.stat(defaultFolder).then(() => true, () => false), false);
+
+  let current = await installer.state({ recheckAssistants: true });
+  assert.equal(current.lifecycle, "assistant_ready");
+  assert.equal(current.materialsFolder, null);
+  assert.deepEqual(current.materialsFolderMissing, { path: defaultFolder, isDefault: true });
+
+  await installer.restoreMaterialsFolder();
+  const made = await fs.stat(defaultFolder);
+  assert.equal(made.isDirectory(), true);
+  if (process.platform !== "win32") assert.equal(made.mode & 0o777, 0o700, "only this account can open the folder Morrow made");
+  assert.deepEqual(await fs.readdir(defaultFolder), [], "the folder Morrow makes again is empty");
+  current = await installer.state({ recheckAssistants: true });
+  assert.equal(current.materialsFolderMissing, null);
+  assert.equal(current.materialsFolder, await fs.realpath(defaultFolder));
+  // Making it again once it is there changes nothing.
+  await fs.writeFile(path.join(defaultFolder, "syllabus.md"), "week one\n");
+  await installer.restoreMaterialsFolder();
+  assert.deepEqual(await fs.readdir(defaultFolder), ["syllabus.md"]);
+
+  const chosen = path.join(root, "Home", "Course materials");
+  await installer.writeRecord({ ...configured, materialsFolder: chosen });
+  current = await installer.state({ recheckAssistants: true });
+  assert.deepEqual(current.materialsFolderMissing, { path: chosen, isDefault: false });
+  await assert.rejects(() => installer.restoreMaterialsFolder(), (error) => error.code === "setup_failed");
+  assert.equal(await fs.stat(chosen).then(() => true, () => false), false, "a chosen folder is never made again");
+
+  // Before any assistant is set up, setup itself makes the default folder, so it is not missing.
+  await fs.rm(defaultFolder, { recursive: true, force: true });
+  await installer.writeRecord(freshRecord());
+  current = await installer.state({ recheckAssistants: true });
+  assert.equal(current.materialsFolderMissing, null);
+  await assert.rejects(() => installer.restoreMaterialsFolder(), (error) => error.code === "setup_failed");
+  assert.equal(await fs.stat(defaultFolder).then(() => true, () => false), false);
+});
+
 test("Morrow records that an assistant connected only when its own session holds the runtime", async () => {
   const root = await temporaryRoot();
   await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });

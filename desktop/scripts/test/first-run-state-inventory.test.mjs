@@ -96,6 +96,8 @@ const INSTALLER_STATES = new Map([
   ["claude-pending", installer({ assistants: [{ ...CLAUDE_DESKTOP, detected: true, pending: true, selected: true }], selectedAssistantId: "claude-desktop" })],
   ["claude-checking", installer({ assistants: [{ ...CLAUDE_DESKTOP, detected: true, pending: true, checking: true, selected: true }], selectedAssistantId: "claude-desktop" })],
   ["no-assistant", installer({ assistants: [{ ...CHATGPT, detected: true }] })],
+  ["materials-default-missing", installer({ ...ASSISTANT_READY, runtimeStatus: "uncertain", materialsFolderMissing: { path: "/Users/teacher/Library/Application Support/Morrow/Materials", isDefault: true } })],
+  ["materials-chosen-missing", installer({ ...ASSISTANT_READY, runtimeStatus: "uncertain", materialsFolderMissing: { path: "/Users/teacher/Documents/Course materials", isDefault: false } })],
   ["runtime-not-ready", installer({ ...ASSISTANT_READY, runtimeStatus: "starting" })],
   ["delivery-blocked", installer({ ...ASSISTANT_READY, bridgeDelivery: "unavailable" })],
   ["reload-required", installer({ ...ASSISTANT_READY, bridgeManualChromeReloadRequired: true })],

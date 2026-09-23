@@ -114,7 +114,9 @@ export function progress(current) {
   // After the first read, the panel asks for a quit and reopen until the assistant connects, so the
   // rail points back at the Assistant step for that time.
   const restart = firstPreviewCompleted && !repairRequired ? restartAssistant(current) : null;
-  const active = repairRequired ? -1 : !assistant ? 0 : reloadRequired || updateAvailable || !paired ? 1 : restart ? 0 : firstPreviewCompleted ? -1 : 2;
+  // A configured assistant cannot use Morrow while its materials folder is gone.
+  const materialsMissing = !repairRequired && assistant !== null && !current.materialsFolder && Boolean(current.materialsFolderMissing);
+  const active = repairRequired ? -1 : !assistant || materialsMissing ? 0 : reloadRequired || updateAvailable || !paired ? 1 : restart ? 0 : firstPreviewCompleted ? -1 : 2;
   const bridgeDetail = blocked
     ? "Not available yet"
     : reloadRequired
@@ -138,7 +140,7 @@ export function progress(current) {
         ? "Open your course in Chrome"
         : "Open Canvas or Moodle in Chrome";
   return [
-    { label: "Assistant", detail: repairRequired ? "Waiting for repair" : restart && active === 0 ? `Quit and reopen ${restart.title}` : assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? pending.checking === true ? "Checking the Claude Desktop connection" : "Finish approval in Claude Desktop" : "Choose an installed assistant", status: repairRequired ? "pending" : restart && active === 0 ? "current" : assistant ? "done" : "current" },
+    { label: "Assistant", detail: repairRequired ? "Waiting for repair" : materialsMissing ? "Materials folder not found" : restart && active === 0 ? `Quit and reopen ${restart.title}` : assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? pending.checking === true ? "Checking the Claude Desktop connection" : "Finish approval in Claude Desktop" : "Choose an installed assistant", status: repairRequired ? "pending" : materialsMissing || (restart && active === 0) ? "current" : assistant ? "done" : "current" },
     { label: "Morrow Bridge", detail: bridgeDetail, status: blocked ? "blocked" : active === 1 ? "current" : paired ? "done" : "pending" },
     { label: "Course", detail: courseDetail, status: firstPreviewCompleted ? "done" : active === 2 ? "current" : "pending" },
   ].map((step, index) => ({ ...step, current: index === active && step.status !== "done" }));
@@ -177,6 +179,16 @@ function assistantTitles(assistants) {
 }
 
 /**
+ * What choosing another materials folder writes, said before the change:
+ * Morrow writes the folder into every assistant it configured.
+ */
+function rebindSentence(configured, lead) {
+  if (configured.length === 0) return "";
+  const claude = configured.some((assistant) => assistant.id === "claude-desktop") ? " Claude Desktop then asks you to approve Morrow again." : "";
+  return ` ${lead} ${assistantTitles(configured)}.${claude}`;
+}
+
+/**
  * The materials folder row. It names the exact folder Morrow uses and offers
  * the change in every state, so the folder is never a choice a person makes
  * once and cannot revisit. What changing it does to each assistant is written
@@ -187,12 +199,19 @@ function materialsRow(current, { optionalDisclosure = false } = {}) {
   const folder = typeof current?.materialsFolder === "string" && current.materialsFolder.length > 0 ? current.materialsFolder : null;
   const configured = configuredAssistants(current);
   const settled = configuredAssistant(current) !== null;
+  const missing = folder ? null : current?.materialsFolderMissing || null;
+  if (missing) {
+    const detail = missing.isDefault
+      ? "Morrow cannot find this folder. Make the folder again gives Morrow a new, empty one in the same place."
+      : "Morrow cannot find this folder. If it is on a drive that is not connected, connect the drive, then select Check status.";
+    const restore = missing.isDefault ? '<button class="secondary-button" type="button" data-action="restore-materials-folder">Make the folder again</button>' : "";
+    return `<div class="materials-row materials-row-stacked"><div><h3>Materials folder</h3><p class="path-text">${escapeHtml(missing.path)}</p><p>${detail}${rebindSentence(configured, "Choosing a folder writes it into")}</p></div><div class="inline-actions">${restore}<button class="secondary-button" type="button" data-action="choose-workspace">Choose folder</button></div></div>`;
+  }
   if (!folder) {
     const row = `<div class="materials-row"><div><h3>Materials folder</h3><p>Choose a different folder only if you want Morrow materials somewhere else. Otherwise, Morrow creates and uses its own Materials folder.</p></div><button class="secondary-button" type="button" data-action="choose-workspace">Choose folder</button></div>`;
     return optionalDisclosure ? `<details class="optional-setup"><summary>Optional: Choose another materials folder</summary>${row}</details>` : row;
   }
-  const rebind = configured.length === 0 ? ""
-    : ` Changing it writes the new folder into ${assistantTitles(configured)}.${configured.some((assistant) => assistant.id === "claude-desktop") ? " Claude Desktop then asks you to approve Morrow again." : ""}`;
+  const rebind = rebindSentence(configured, "Changing it writes the new folder into");
   const detail = current?.workspaceSelected === true
     ? `Morrow works with the course materials in this folder.${rebind}`
     : `Morrow made this folder for course materials. Choose a different folder to work somewhere else.${rebind}`;
@@ -351,6 +370,25 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
       title: "Choose your assistant.",
       copy: "Morrow configures only the assistant you choose. Your course sign-in remains separate in Chrome.",
       body: `${assistantCards(current, chosenAssistantId)}${materialsRow(current, { optionalDisclosure: true })}<div class="inline-actions"><button class="primary-button" type="button" data-action="install-assistant"${active ? "" : " disabled"}>${active ? `Set up ${escapeHtml(active.title)}` : "Choose an assistant"}</button></div>`,
+    };
+  }
+  // The runtime cannot start without its materials folder, so this comes before
+  // the wait for the runtime: waiting never brings the folder back.
+  const missing = current.materialsFolder ? null : current.materialsFolderMissing;
+  if (missing?.isDefault === true) {
+    return {
+      summary: "Materials folder not found",
+      title: "Morrow cannot find its Materials folder.",
+      copy: "Morrow keeps course materials in its own Materials folder, and that folder is gone. Your assistant cannot use Morrow until Morrow has a materials folder again.",
+      body: `<div class="materials-row materials-row-stacked"><div><h3>Materials folder</h3><p class="path-text">${escapeHtml(missing.path)}</p><p>Make the folder again gives Morrow a new, empty Materials folder in the same place. Files that were in the old folder do not come back. If you moved the folder, select Choose folder and choose it where it is now.${rebindSentence(configuredAssistants(current), "Choosing a folder writes it into")}</p></div></div><div class="inline-actions"><button class="primary-button" type="button" data-action="restore-materials-folder">Make the folder again</button><button class="secondary-button" type="button" data-action="choose-workspace">Choose folder</button></div>`,
+    };
+  }
+  if (missing) {
+    return {
+      summary: "Materials folder not found",
+      title: "Morrow cannot find your materials folder.",
+      copy: "The folder may have been moved, renamed, or deleted, or it may be on a drive that is not connected. Your assistant cannot use Morrow until Morrow has a materials folder again.",
+      body: `<div class="materials-row materials-row-stacked"><div><h3>Materials folder</h3><p class="path-text">${escapeHtml(missing.path)}</p><p>${rebindSentence(configuredAssistants(current), "Choosing a folder writes it into").trimStart()}</p></div></div><ol class="instructions"><li>If the folder is on a drive that is not connected, connect the drive, then select <strong>Check again</strong>.</li><li>Otherwise select <strong>Choose folder</strong> and choose the folder where it is now, or another folder.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="choose-workspace">Choose folder</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>`,
     };
   }
   if (current.runtime?.status !== "ready") {
