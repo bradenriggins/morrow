@@ -862,11 +862,13 @@ def check_uuid(value: str) -> str:
 # representative per visual equivalence class, so a homoglyph name is
 # detectable: skeleton("B<cy>ilogy 101") == "biology 101" while the raw
 # name is not ASCII. assert_no_spoof_identifier() fails closed when a
-# human-reviewed name mixes scripts around such characters: a write gate
-# must never bless a target whose human-readable name is a visual spoof.
-# Pure single-script names (a Russian course name, a Japanese course
-# name) are NOT flagged: the spoof signal requires mixed scripts, which
-# is the shape of the homoglyph attack, not of multilingual text.
+# word of a human-reviewed name mixes scripts around such characters:
+# a write gate must never bless a target whose human-readable name is a
+# visual spoof.
+# Multilingual names are NOT flagged: the spoof signal is a word that
+# mixes Latin, Cyrillic, or Greek letters, which is the shape of the
+# homoglyph attack. A Russian or Greek word next to English words (a
+# bilingual course name) is not.
 # --------------------------------------------------------------------------
 
 def norm_identifier(text) -> str:
@@ -935,23 +937,39 @@ def confusable_skeleton(text) -> str:
     ).casefold().strip()
 
 
-def spoof_characters(text):
-    """Characters in text that have a cross-script visual twin AND sit in
-    a mixed-script string (the homoglyph-attack shape).
+_TWIN_SCRIPTS = frozenset({"Latin", "Cyrillic", "Greek"})
 
-    Returns [(char, latin_twin), ...]. Pure single-script text (a
-    Russian or Japanese course name) returns []: multilingual names are
-    not spoofs."""
-    normed = unicodedata.normalize(
-        "NFKC", str(text if text is not None else ""))
-    hits = [(ch, _CONFUSABLE_SKELETON[ch])
-            for ch in normed if ch in _CONFUSABLE_SKELETON]
-    if not hits:
-        return []
-    scripts = {_char_script(ch) for ch in normed
-               if unicodedata.category(ch).startswith("L")}
+
+def _mixed_word_hits(word):
+    """The confusable characters of one word when that word mixes Latin,
+    Cyrillic, or Greek letters; [] for a single-script word."""
+    scripts = {_char_script(ch) for ch in word} & _TWIN_SCRIPTS
     if len(scripts) < 2:
         return []
+    return [(ch, _CONFUSABLE_SKELETON[ch])
+            for ch in word if ch in _CONFUSABLE_SKELETON]
+
+
+def spoof_characters(text):
+    """Characters with a cross-script visual twin inside a word that mixes
+    scripts (the homoglyph-attack shape, UTS #39 mixed-script words).
+
+    Returns [(char, latin_twin), ...]. Words are runs of letters and
+    marks. A word that mixes Latin, Cyrillic, or Greek letters
+    ("Вiology" with a Cyrillic В) is a spoof; single-script words are
+    not, whatever sits next to them, so a bilingual name ("Русский язык
+    (Russian Language I)") or a Greek letter as its own word
+    ("Statistics: μ and σ") returns []."""
+    normed = unicodedata.normalize(
+        "NFKC", str(text if text is not None else ""))
+    hits, word = [], []
+    for ch in normed + " ":
+        if unicodedata.category(ch)[0] in ("L", "M"):
+            word.append(ch)
+            continue
+        if word:
+            hits.extend(_mixed_word_hits(word))
+            word = []
     return hits
 
 
