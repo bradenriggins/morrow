@@ -614,7 +614,14 @@ class ChromiumSession:
                   file=sys.stderr)
 
     def close(self):
-        """Stop the Chromium this session launched, if it launched one.
+        """Close this session's Item Banks tabs, then stop the Chromium
+        this session launched, if it launched one.
+
+        Every cached SDK session is closed first, whatever the launcher:
+        on the helper browser (which is never stopped) its tab would
+        otherwise stay open running the Item Banks app, which the
+        idle-tab reaper does not close, and its credential would stay in
+        memory.
 
         P2-12: stops ONLY launchers this process started itself. An attached
         launcher (this tree's helper browser, launcher.attached is
@@ -622,6 +629,12 @@ class ChromiumSession:
         proc, which is None when start() attached to the running helper.
         Defensive getattr: test doubles may define only start().
         """
+        sdk_sessions, self._sdk_sessions = self._sdk_sessions, {}
+        for sdk in sdk_sessions.values():
+            try:
+                sdk.close()
+            except Exception:
+                pass
         launcher = self._launcher
         if launcher is None:
             return
