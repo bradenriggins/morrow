@@ -1160,13 +1160,14 @@ describe("bidirectional roster dictionary", () => {
       { id: "702", name: "Ana Page" },
       { id: "703", name: "Lee Lee" },
       { id: "704", name: "Robin Hall", aliases: ["Hall"] },
+      { id: "705", name: "Luca d'Angelo" },
     ]);
     const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
-    const [long, page, lee, hall] = ["Jordan Long", "Ana Page", "Lee Lee", "Robin Hall"].map((name) => redactKnownLearnerText(name, ctx));
+    const [long, page, lee, hall, angelo] = ["Jordan Long", "Ana Page", "Lee Lee", "Robin Hall", "Luca d'Angelo"].map((name) => redactKnownLearnerText(name, ctx));
     // Written in small letters, a family name is usually an ordinary word, and a label
     // there would come back as the student's full name in text the assistant saves.
     expect(redactKnownLearnerText("Write a long answer on this page.", ctx)).toBe("Write a long answer on this page.");
-    expect(redactKnownLearnerText("Long and PAGE replied.", ctx)).toBe(`${long} and ${page} replied.`);
+    expect(redactKnownLearnerText("Long and PAGE replied to d'Angelo.", ctx)).toBe(`${long} and ${page} replied to ${angelo}.`);
     expect(redactKnownLearnerText("jordan long replied.", ctx)).toBe(`${long} replied.`);
     // A given name keeps matching in any case, and so does a family name the roster gives in its own field.
     expect(redactKnownLearnerText("lee met the hall monitor.", ctx)).toBe(`${lee} met the ${hall} monitor.`);

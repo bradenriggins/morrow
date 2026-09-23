@@ -778,7 +778,7 @@ function replaceKnownAliases(
   for (const match of view.text.matchAll(matcher)) {
     if (references.some((reference) => match.index! >= reference.index! && match.index! < reference.index! + reference[0].length)) continue;
     const alias = aliases.get(normalizeAlias(match[0]));
-    if (alias?.capitalized === true && !/^\p{Lu}/u.test(match[0])) continue;
+    if (alias?.capitalized === true && !/\p{Lu}/u.test(match[0])) continue;
     const source = sourceRangeForView(view, match.index!, match.index! + match[0].length);
     if (!source) continue;
     replacements.push({
