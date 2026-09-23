@@ -4,19 +4,20 @@ Morrow uses the NSIS target in `electron-builder.config.cjs`. It is a
 one-click, per-user installer. It does not offer a machine-wide mode, ask for
 elevation, or package the NSIS elevation helper.
 
-Build the x64 artifact in two steps. `electron-builder.config.cjs` refuses to
-load without an absolute prepared payload, so the payload is prepared first and
-named in the environment:
+Build the x64 installer on Windows x64. Step 4 of the release procedure in
+[docs/versioning.md](../../docs/versioning.md) names the install and build
+commands to run first. Then, in `desktop/`, run one command:
 
-```sh
-node scripts/package-mcp-bundle.mjs --target win32-x64 --prepare-desktop-payload <absolute-payload-path>
-MORROW_INSTALLER_PAYLOAD=<absolute-payload-path> MORROW_SIGNED_RELEASE=0 \
-  pnpm --dir installer --ignore-workspace package:win
+```text
+node scripts/package-mcp-bundle.mjs --target win32-x64 --unsigned-release --output <new absolute folder>
 ```
 
-The output is `Morrow-<version>-win-x64.exe`. Every Morrow Desktop release so
-far, including 1.0.5, is unsigned. Automatic updates remain disabled. Use the complete NSIS installer;
-do not deploy an unpacked app or a separately copied `MorrowPayload` directory.
+It writes `Morrow-<version>-win-x64.exe` and `receipt.json` into that folder.
+The receipt ties the installer to the commit it was built from. The same step 4
+installs, starts, repairs, and removes that exact installer in a test run.
+Every Morrow Desktop release so far, including 1.0.5, is unsigned. Automatic
+updates remain disabled. Use the complete NSIS installer; do not deploy an
+unpacked app or a separately copied `MorrowPayload` directory.
 
 ## The Morrow Bridge delivery route
 
