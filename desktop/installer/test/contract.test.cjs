@@ -852,4 +852,9 @@ test("Blackboard recoveries name only what the Blackboard form and course list o
   const selection = errorDetails("blackboard_course_selection_invalid");
   assert.equal(selection.recovery, "Select Check status, then select Allow Morrow or Remove on that course again. Your Blackboard connection was left as it was.");
   for (const text of [configuration.recovery, selection.recovery]) assert.doesNotMatch(text, /account ID|course ID|_45_1/);
+  // After a save the form keeps only the web address, and a save needs the
+  // application key, so changing the secret takes the key as well.
+  const savedNote = html.match(/<p id="blackboard-saved-note"[^>]*>([^<]+)<\/p>/)[1];
+  assert.match(savedNote, /To change the secret, paste the application key and the new secret, then save\.$/);
+  assert.doesNotMatch(savedNote, /paste it again/);
 });
