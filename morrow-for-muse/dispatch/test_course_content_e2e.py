@@ -251,6 +251,23 @@ def test_an_edited_page_goes_back_with_the_real_text():
                "result": out.get("receipt")})
 
 
+def test_a_page_shown_with_a_typed_name_goes_back_exact():
+    # The educator named Jane in this conversation, so the page shows
+    # her as "Jane Doe (Student An)"; saving it back must not double her
+    # name or lose a form.
+    _edit_mode()
+    label = _find("Jane Doe")["student"]
+    session = Canvas()
+    name, method, path = SHOW
+    shown = ex.dispatch_catalog_op(
+        name, method, path, "read", dict(PAGE_PARAMS), pack=_pack(),
+        session=session, mode_ctx=_ctx())["receipt"]["body"]
+    assert "Jane Doe (%s)" % label in shown
+    _update(session, {"body": shown.replace("Friday", "Monday")})
+    puts = [b for m, _u, b in session.calls if m == "PUT"]
+    assert puts[0]["wiki_page"]["body"] == BODY.replace("Friday", "Monday")
+
+
 def test_a_label_the_model_writes_reaches_canvas_as_the_name():
     _edit_mode()
     session = Canvas()
