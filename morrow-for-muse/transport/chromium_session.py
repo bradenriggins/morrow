@@ -284,8 +284,9 @@ def _decode_body(body_bytes, headers):
     Returns (data, as_json). The executor JSON-encodes dict bodies by
     default, so JSON objects round-trip as JSON, and so does the bulk
     date update's array of objects; explicit form-encoded bodies decode
-    back to a flat field dict. A body the lane cannot encode raises
-    WriteNotAttempted: it is refused before anything is sent.
+    back to their [key, value] pairs, in order and with every repeated
+    key. A body the lane cannot encode raises WriteNotAttempted: it is
+    refused before anything is sent.
     """
     if body_bytes is None:
         return None, False
@@ -297,7 +298,7 @@ def _decode_body(body_bytes, headers):
     if ctype == "application/x-www-form-urlencoded":
         pairs = urllib.parse.parse_qsl(
             body_bytes.decode("utf-8"), keep_blank_values=True)
-        return dict(pairs), False
+        return [[k, v] for k, v in pairs], False
     try:
         obj = json.loads(body_bytes.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
@@ -312,6 +313,38 @@ def _decode_body(body_bytes, headers):
     raise RequestNotSendable(
         "chromium backend sends a JSON object or a JSON array of objects "
         "as the request body; nothing was sent")
+
+
+_QUERY_SCALARS = (str, int, float, bool)
+
+
+def _query_pairs(data, as_json):
+    """The [key, value] query pairs of a GET or DELETE, whose parameters
+    ride in the query string. A list value is one pair per item
+    (include[]=a&include[]=b), as Canvas reads it; a None value is left
+    out. A value with no query form (an object, or a list holding an
+    object, a list, or None) raises RequestNotSendable."""
+    if not as_json:
+        return data
+    if not isinstance(data, dict):
+        raise RequestNotSendable(
+            "chromium backend sends a GET or DELETE's parameters in the "
+            "query string, and a JSON array has no query form; nothing was "
+            "sent")
+    pairs = []
+    for key, value in data.items():
+        values = value if isinstance(value, list) else [value]
+        if value is None:
+            continue
+        for item in values:
+            if not isinstance(item, _QUERY_SCALARS):
+                raise RequestNotSendable(
+                    "chromium backend sends a GET or DELETE's parameters "
+                    "in the query string, and %r holds a value with no "
+                    "query form (%s); nothing was sent"
+                    % (key, type(item).__name__))
+            pairs.append([key, ex._form_scalar(item)])
+    return pairs
 
 
 class ChromiumSession:
@@ -1082,6 +1115,12 @@ class ChromiumSession:
                                           headers, is_write,
                                           max_bytes=max_bytes)
         data, as_json = _decode_body(body_bytes, headers)
+        if data is not None and method.upper() in ("GET", "DELETE"):
+            query = urllib.parse.urlencode(
+                [tuple(pair) for pair in _query_pairs(data, as_json)])
+            if query:
+                path += ("&" if "?" in path else "?") + query
+            data, as_json = None, False
         if max_bytes is None:
             max_bytes = ex.DEFAULT_MAX_BYTES
 

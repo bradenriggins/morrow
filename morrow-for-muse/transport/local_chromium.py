@@ -2206,16 +2206,27 @@ _API_JS = r"""(async () => {
   };
   const headers = {'Accept': 'application/json',
                    'X-Requested-With': 'XMLHttpRequest'};
+  // One pair per list item (include[]=a&include[]=b): URLSearchParams
+  // would join an array into one comma-separated value.
+  const encode = (d) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of (Array.isArray(d) ? d : Object.entries(d))) {
+      for (const x of (Array.isArray(v) ? v : [v])) {
+        if (x !== null && x !== undefined) qs.append(k, x);
+      }
+    }
+    return qs.toString();
+  };
   let url = path, body = null;
   if (data && (method === 'GET' || method === 'DELETE')) {
-    const qs = new URLSearchParams(data).toString();
+    const qs = encode(data);
     if (qs) url += (url.includes('?') ? '&' : '?') + qs;
   } else if (data) {
     if (asJson) {
       body = JSON.stringify(data);
       headers['Content-Type'] = 'application/json';
     } else {
-      body = new URLSearchParams(data).toString();
+      body = encode(data);
       headers['Content-Type'] = 'application/x-www-form-urlencoded';
     }
   }
@@ -2438,10 +2449,12 @@ class LocalChromiumTransport:
         the page truncates before the body crosses into Python memory,
         so Python never holds more than max_bytes of any one response).
 
-        `data` is a flat dict of form fields. GET/DELETE encode it into the
-        query string; POST/PUT form-encode the body with the CSRF header,
-        unless as_json is true, in which case the body goes as
-        application/json (for executor-built JSON bodies, which may nest).
+        `data` is a dict of form fields (a list value is one pair per
+        item, include[]=a&include[]=b) or a list of [key, value] pairs, in
+        order. GET/DELETE encode it into the query string; POST/PUT
+        form-encode the body with the CSRF header, unless as_json is true,
+        in which case the body goes as application/json (for
+        executor-built JSON bodies, which may nest).
         The CSRF token is harvested inside page-context JS and never enters
         Python memory; only (status, url, body) come back.
 

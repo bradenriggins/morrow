@@ -413,8 +413,8 @@ s = cs.ChromiumSession(BASE, transport=t)
 s.raw_request("POST", BASE + "/api/v1/x",
               {"Content-Type": "application/x-www-form-urlencoded"},
               b"a=1&b=two", is_write=False)
-check("form body decodes to flat dict, as_json=False",
-      t.calls[0]["data"] == {"a": "1", "b": "two"}
+check("form body decodes to ordered pairs, as_json=False",
+      t.calls[0]["data"] == [["a", "1"], ["b", "two"]]
       and t.calls[0]["as_json"] is False, repr(t.calls[0]))
 
 t = FakeTransport([("ok", 200, "{}")])
