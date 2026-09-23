@@ -174,33 +174,6 @@ _TREE_ENV_VARS_IGNORED_FROM_GLOBAL = (
 )
 
 
-def _parse_env_file(path):
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            lines = fh.read().splitlines()
-    except OSError:
-        return {}
-    out = {}
-    for raw in lines:
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line[len("export "):].lstrip()
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip()
-        if (len(value) >= 2 and value[0] == value[-1]
-                and value[0] in ("'", '"')):
-            value = value[1:-1]
-        # Shell-identifier keys only (letters/digits/underscore, not
-        # digit-first): anything else cannot be a real env assignment.
-        if (key and (key[0].isalpha() or key[0] == "_")
-                and all(c.isalnum() or c == "_" for c in key)):
-            out[key] = value
-    return out
-
-
 def _tighten_env_perms(path):
     """W4-P1-2: helper env files may hold deployment config and, in the
     legacy global file, CANVAS_BASE. They must not be readable by other
@@ -236,6 +209,8 @@ def _source_morrow_env():
     if _root not in sys.path:
         sys.path.insert(0, _root)
     from config.paths import morrow_home  # noqa: E402
+    # The same parser every agent-side reader uses (config/tree_config).
+    from config.tree_config import parse_env_file as _parse_env_file  # noqa: E402
     # W4-P1-18: test seam. MORROW_HELPER_ENV_FILE overrides the tree env
     # file location (default <tree>/helper/env). The selftests point it
     # at an empty scratch file so they never mutate, move, or depend on

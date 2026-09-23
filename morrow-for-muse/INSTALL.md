@@ -418,14 +418,16 @@ than shipped on trust; the manifest (`pack/carve-manifest.json`) is the
 integrity source of truth.
 
 Tree-scoping: configuration lives in the tree's own `helper/env`
-(`CANVAS_BASE` and optional profile/port/production pins); runtime
-state (keepalive lock, op journal, version marker, and the logs:
-`keepalive.log`, `server.log`, and the keepalive background loop's
-`keepalive-supervisor.log`) lives under the effective `MORROW_HOME`,
-in `trees/<tree id>/` for this tree's own files. The legacy global `~/.morrow/env` is honored
-for `CANVAS_BASE` only. After upgrading from a pre-tree-scoping
-release, move any `LOGIN_HELPER_*` vars from `~/.morrow/env` into
-`helper/env`.
+(`CANVAS_BASE` and optional profile/port/production pins). The helper,
+keepalive, and every agent command (`bin/morrow`, the executor, and
+`reauth/state_machine.py`) read it there; a value exported in the
+shell wins. Runtime state (keepalive lock, op journal, version marker,
+and the logs: `keepalive.log`, `server.log`, and the keepalive
+background loop's `keepalive-supervisor.log`) lives under the
+effective `MORROW_HOME`, in `trees/<tree id>/` for this tree's own
+files. The legacy global `~/.morrow/env` is honored for `CANVAS_BASE`
+only. After upgrading from a pre-tree-scoping release, move any
+`LOGIN_HELPER_*` vars from `~/.morrow/env` into `helper/env`.
 
 ## Backup, restore, and migration
 

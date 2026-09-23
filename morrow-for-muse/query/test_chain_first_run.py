@@ -47,7 +47,7 @@ class _FailingReader:
 
 def _run_no_tenant(monkeypatch, **kw):
     monkeypatch.setattr(C._live_read, "LiveReader", _BoomReader)
-    monkeypatch.setattr(C._live_read, "TENANT_BASE", "")
+    monkeypatch.setattr(C._live_read, "tenant_base", lambda: "")
     with pytest.raises(ChainFailure) as ei:
         C.run_query("89585", "last_week", tenant_base=None, **kw)
     return ei.value
@@ -66,8 +66,8 @@ def test_missing_tenant_message_names_next_step(monkeypatch):
 def _run_failing_health(monkeypatch, message):
     monkeypatch.setattr(C._live_read, "LiveReader",
                         lambda *a, **k: _FailingReader(message))
-    monkeypatch.setattr(C._live_read, "TENANT_BASE",
-                        "https://school.example.edu")
+    monkeypatch.setattr(C._live_read, "tenant_base",
+                        lambda: "https://school.example.edu")
     with pytest.raises(ChainFailure) as ei:
         C.run_query("89585", "last_week",
                     tenant_base="https://school.example.edu")
@@ -103,7 +103,7 @@ def test_main_exits_two_with_mode_line(monkeypatch, capsys):
 
     monkeypatch.setattr(C, "run_query", boom)
     rc = C.main(["--quiz", "last-week",
-                 "--course", "89585", "--tenant",
+                 "--course", "89585", "--canvas-base",
                  "https://school.example.edu"])
     assert rc == 2
     out = capsys.readouterr().out

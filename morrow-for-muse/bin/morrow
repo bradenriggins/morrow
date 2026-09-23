@@ -56,8 +56,12 @@ _COMMANDS = {
 # audit/plan need their runner subcommand prepended.
 _PREPEND = {"audit": ["audit"], "plan": ["plan"]}
 
-HELPER_STATUS_URL = os.environ.get(
-    "MORROW_HELPER_STATUS_URL", "http://127.0.0.1:8901/status")
+def _helper_status_url():
+    """This tree's helper /status: LOGIN_HELPER_PORT from the
+    environment, then helper/env (MORROW_HELPER_STATUS_URL overrides)."""
+    from config import tree_config
+    return os.environ.get("MORROW_HELPER_STATUS_URL") \
+        or "http://127.0.0.1:%d/status" % tree_config.helper_port()
 
 
 def _print_help():
@@ -208,12 +212,13 @@ def _doctor(json_mode=False):
     facts = {"helper": {}, "tree": {}, "entries": {}}
 
     # 1. Helper reachability and session state (read-only).
+    status_url = _helper_status_url()
     try:
-        with urllib.request.urlopen(HELPER_STATUS_URL, timeout=10) as resp:
+        with urllib.request.urlopen(status_url, timeout=10) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
         logged_in = bool(payload.get("logged_in"))
         alive = bool(payload.get("chromium_alive"))
-        lines.append("helper: reachable (%s)" % HELPER_STATUS_URL)
+        lines.append("helper: reachable (%s)" % status_url)
         lines.append("helper: logged_in=%s chromium_alive=%s"
                      % (logged_in, alive))
         facts["helper"] = {"reachable": True, "logged_in": logged_in,

@@ -206,21 +206,29 @@ def tree_helper_profile_dir():
     return os.path.join(tree_root(), "helper", "profile")
 
 
-def _int_env(name, default):
-    try:
-        return int(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
+def _tree_setting(name, default=None):
+    """One of this tree's settings: the environment, then helper/env
+    (config/tree_config.py, the order keepalive.sh and the helper use)."""
+    _tree_root_on_path()
+    from config import tree_config  # noqa: E402
+    return tree_config.setting(name, default)
+
+
+def _tree_int(name, default):
+    _tree_root_on_path()
+    from config import tree_config  # noqa: E402
+    return tree_config.int_setting(name, default)
 
 
 def tree_cdp_port(default=HELPER_CDP_PORT):
-    """This tree's Chromium identity label. LOGIN_HELPER_CDP_PORT wins;
-    defaults to the historical HELPER_CDP_PORT only when unset.
+    """This tree's Chromium identity label. LOGIN_HELPER_CDP_PORT (the
+    environment, then helper/env) wins; defaults to the historical
+    HELPER_CDP_PORT only when unset.
 
     W4-P0-3: with --remote-debugging-pipe there is no CDP TCP port; the
     number survives only as the tree's identity label (forwarder-port
     derivation, CDP client labeling). It opens nothing."""
-    return _int_env("LOGIN_HELPER_CDP_PORT", default)
+    return _tree_int("LOGIN_HELPER_CDP_PORT", default)
 
 
 def _tree_version():
@@ -238,8 +246,9 @@ def _tree_version():
 
 
 def tree_helper_port(default=8901):
-    """This tree's helper HTTP port. LOGIN_HELPER_PORT wins."""
-    return _int_env("LOGIN_HELPER_PORT", default)
+    """This tree's helper HTTP port: LOGIN_HELPER_PORT from the
+    environment, then helper/env."""
+    return _tree_int("LOGIN_HELPER_PORT", default)
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +292,8 @@ def _helper_tls_context():
     Returns (scheme, ssl_context_or_None). HTTPS is used exactly when
     the server's TLS mode is on: LOGIN_HELPER_TLS_CERT and
     LOGIN_HELPER_TLS_KEY both set and both files exist (the same
-    condition helper/server.py uses to wrap its listener). The loopback
+    condition helper/server.py uses to wrap its listener; read from the
+    environment, then helper/env, as the server reads them). The loopback
     cert is typically self-signed, so verification pins to the
     configured cert file itself as the trust anchor: only that exact
     certificate validates. LOGIN_HELPER_TLS_INSECURE=1 skips
@@ -291,12 +301,12 @@ def _helper_tls_context():
     set, cert file missing) stays on plain HTTP: never silently mix
     schemes.
     """
-    cert = os.environ.get("LOGIN_HELPER_TLS_CERT", "")
-    key = os.environ.get("LOGIN_HELPER_TLS_KEY", "")
+    cert = _tree_setting("LOGIN_HELPER_TLS_CERT", "")
+    key = _tree_setting("LOGIN_HELPER_TLS_KEY", "")
     if not (cert and key and os.path.isfile(cert)
             and os.path.isfile(key)):
         return "http", None
-    if os.environ.get("LOGIN_HELPER_TLS_INSECURE", "") == "1":
+    if _tree_setting("LOGIN_HELPER_TLS_INSECURE", "") == "1":
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE

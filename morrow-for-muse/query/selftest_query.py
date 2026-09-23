@@ -38,7 +38,7 @@ from failures import translator as TR
 # explicitly to run_query. No live reads: every provider call goes
 # through FakeReader or StubReader.
 _TEST_TENANT = "https://school.example.edu"
-L.TENANT_BASE = _TEST_TENANT
+L.tenant_base = lambda: _TEST_TENANT
 
 PASS = []
 FAIL = []
@@ -369,6 +369,7 @@ def t_pagination():
         def __init__(self, pages):
             self._pages = pages  # {url: (status, payload, headers)}
             self._tab_id = "stub"
+            self._tenant = _TEST_TENANT
 
         def _fetch(self, url):
             return self._pages[url]
@@ -497,7 +498,7 @@ def t_translator():
     _proc = _sp.run(
         [sys.executable, os.path.join(_TREE_ROOT, "query", "chain.py"),
          "--course", "89585", "--quiz", "last-week",
-         "--tenant", _TEST_TENANT],
+         "--canvas-base", _TEST_TENANT],
         cwd=_TREE_ROOT, capture_output=True, text=True, timeout=120)
     check("tr/cli-exit-2", _proc.returncode == 2,
           "exit %s: %s" % (_proc.returncode, _proc.stderr[-200:]))

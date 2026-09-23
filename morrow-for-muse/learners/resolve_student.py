@@ -723,11 +723,11 @@ def helper_fetch_factory(canvas_base, timeout=60):
     JSON response via CDP network interception, and closes the tab.
     Read-only: only GET navigations, no form writes.
 
-    Callers must set MORROW_TREE_STATE_DIR to the live helper tree's
-    state dir (the failures/live_verify.py pattern) and
-    LOGIN_HELPER_PROFILE_DIR to the live profile before calling, so the
-    launcher passes the holder proof and _helper_request picks up the
-    live helper's auth token.
+    In an installed tree the helper's port, token, and profile resolve
+    from the tree itself (helper/env and the tree state dir, as
+    keepalive writes them). A dev harness that drives a live helper
+    elsewhere sets MORROW_TREE_STATE_DIR and LOGIN_HELPER_PROFILE_DIR
+    first (the failures/live_verify.py pattern).
     """
     here = os.path.dirname(os.path.abspath(__file__))
     repo = os.path.dirname(here)
@@ -736,13 +736,11 @@ def helper_fetch_factory(canvas_base, timeout=60):
         if entry not in sys.path:
             sys.path.insert(0, entry)
     from local_chromium import (ChromiumLauncher, default_binary,
-                                tree_cdp_port, tree_helper_profile_dir)
-    import urllib.request as _urllib_request
+                                helper_status, tree_cdp_port,
+                                tree_helper_profile_dir)
 
     try:
-        with _urllib_request.urlopen(
-                "http://127.0.0.1:8901/status", timeout=10) as resp:
-            status_doc = json.load(resp)
+        status_doc = helper_status(timeout=10)
     except Exception as exc:
         raise RuntimeError("helper status unreachable: %s" % exc)
     if not status_doc.get("logged_in"):

@@ -2,11 +2,15 @@
 """Live read path for the failed-students query chain.
 
 Every real API call in the chain runs through the Canvas login
-helper's authenticated browser context (127.0.0.1:8901): the helper's
-Chromium session fetches /api/v1 URLs in-page, so Canvas auth never
-leaves the browser. This module never performs shell-side HTTP with
-credentials and never reads or echoes any credential material except
-the helper's own launch token file, which is never logged.
+helper's authenticated browser context (this tree's helper port,
+LOGIN_HELPER_PORT, default 8901): the helper's Chromium session fetches
+/api/v1 URLs in-page, so Canvas auth never leaves the browser. Helper
+calls go through transport/local_chromium's helper client, the same
+one the executor uses: it reads the tree's helper token where
+keepalive writes it (<MORROW_HOME>/trees/<tree id>/helper_token) and
+the port and TLS settings from the environment, then helper/env. This
+module never performs shell-side HTTP with credentials and never logs
+the token.
 
 Pagination: Canvas collection endpoints paginate via Link
 rel="next" headers. fetch_paginated follows them (same origin only),
@@ -21,20 +25,24 @@ from __future__ import annotations
 import json
 import os
 import re
-import urllib.error
+import sys
 import urllib.parse
-import urllib.request
 
-HELPER_BASE = "http://127.0.0.1:8901"
-TOKEN_FILE = os.path.join(
-    os.environ.get("HOME", os.path.expanduser("~")),
-    ".morrow", "canvas-login-helper", "helper_token")
+_TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _TREE_ROOT not in sys.path:
+    sys.path.insert(0, _TREE_ROOT)
 
-TENANT_BASE = os.environ.get("CANVAS_BASE") or ""
-# The tenant is never hardcoded: it comes from CANVAS_BASE (set during
-# onboarding) and the chain fails closed when it is absent. (2026-09-22
-# first-run audit: this was a hardcoded production tenant URL; the literal
-# host is not repeated here so the distribution secrets gate stays quiet.)
+from config import tree_config as _tree_config  # noqa: E402
+from transport import local_chromium as _lc  # noqa: E402
+
+
+def tenant_base():
+    """The educator's Canvas origin: CANVAS_BASE from the environment,
+    then helper/env, then the legacy global env; "" when none is set
+    (the chain then fails closed with the setup message). Never
+    hardcoded."""
+    return _tree_config.canvas_base()
+
 
 MAX_PAGES = 20          # bound on pagination, fail-loud past it
 MAX_BODY_BYTES = 500000  # bound on a single page body read in-page
@@ -64,59 +72,50 @@ def _pinned_principal_id():
     return pid if isinstance(pid, int) else None
 
 
-def _load_token():
-    """Read the helper launch token (0600, never logged)."""
-    try:
-        with open(TOKEN_FILE, "r", encoding="utf-8") as fh:
-            token = fh.read().strip()
-    except OSError as exc:
-        raise LiveReadError(
-            "helper token file %r is unreadable: %s" % (TOKEN_FILE, exc))
-    if not (len(token) == 64
-            and all(c in "0123456789abcdef" for c in token)):
-        raise LiveReadError(
-            "helper token file %r is malformed; refusing unauthenticated "
-            "helper calls" % TOKEN_FILE)
-    return token
-
-
 class LiveReadError(Exception):
     """A read through the helper failed or the helper is unhealthy."""
 
 
+def _check_token():
+    """The tree's helper token must exist and be well formed (0600,
+    never logged); the helper client sends it on every call."""
+    path = _lc.helper_token_path()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            token = fh.read().strip()
+    except OSError as exc:
+        raise LiveReadError(
+            "helper token file %r is unreadable: %s" % (path, exc))
+    if not (len(token) == 64
+            and all(c in "0123456789abcdef" for c in token)):
+        raise LiveReadError(
+            "helper token file %r is malformed; refusing unauthenticated "
+            "helper calls" % path)
+
+
 class _HelperClient:
-    """Minimal token-authenticated client for the helper's CDP routes."""
+    """Token-authenticated client for the helper's CDP routes."""
 
     def __init__(self, timeout=45):
-        self._token = _load_token()
+        _check_token()
         self._timeout = timeout
 
     def _post(self, path, payload):
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            HELPER_BASE + path, data=data, method="POST",
-            headers={"Content-Type": "application/json",
-                     "X-Helper-Token": self._token})
         try:
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                return resp.status, json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            try:
-                body = exc.read().decode("utf-8", "replace")[:500]
-            except Exception:
-                body = "<unreadable>"
+            status, raw = _lc._helper_request("POST", path, payload,
+                                              timeout=self._timeout)
+        except RuntimeError as exc:
+            raise LiveReadError("helper %s failed: %s" % (path, exc))
+        try:
+            return status, json.loads(raw.decode("utf-8"))
+        except ValueError:
             raise LiveReadError(
-                "helper %s returned HTTP %s: %s" % (path, exc.code, body))
-        except Exception as exc:
-            raise LiveReadError(
-                "helper %s request failed: %s" % (path, type(exc).__name__))
+                "helper %s returned a body that is not JSON" % path)
 
     def status(self):
-        req = urllib.request.Request(HELPER_BASE + "/status", method="GET")
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except Exception as exc:
+            return _lc.helper_status(timeout=15)
+        except (RuntimeError, ValueError) as exc:
             raise LiveReadError("helper /status failed: %s" % exc)
 
     def tabs(self):
@@ -164,15 +163,15 @@ def _next_link(link_header):
     return None
 
 
-def _same_origin(url):
+def _same_origin(url, tenant):
     try:
         return urllib.parse.urlsplit(url).netloc.lower() == \
-            urllib.parse.urlsplit(TENANT_BASE).netloc.lower()
+            urllib.parse.urlsplit(tenant).netloc.lower()
     except ValueError:
         return False
 
 
-def _scratch_tab(client):
+def _scratch_tab(client, tenant):
     """Create a dedicated scratch tab on the tenant for API reads.
 
     The educator's existing tabs are never navigated or evaluated in;
@@ -180,7 +179,7 @@ def _scratch_tab(client):
     polled until its location settles on the tenant (a fresh tab's
     execution context cannot fetch until the navigation completes).
     """
-    _, data = client._post("/cdp/new-tab", {"url": TENANT_BASE + "/"})
+    _, data = client._post("/cdp/new-tab", {"url": tenant + "/"})
     tab_id = data.get("id") or data.get("targetId")
     if not tab_id:
         raise LiveReadError("helper did not return a tab id for the "
@@ -191,7 +190,7 @@ def _scratch_tab(client):
             href = client.evaluate(tab_id, "location.href", timeout=10)
         except LiveReadError:
             href = ""
-        if isinstance(href, str) and href.startswith(TENANT_BASE):
+        if isinstance(href, str) and href.startswith(tenant):
             return tab_id
         _time.sleep(1)
     raise LiveReadError("scratch tab never settled on the tenant; "
@@ -202,12 +201,15 @@ class LiveReader:
     """Authenticated read client bound to one helper session.
 
     Usage:
-        reader = LiveReader()
+        reader = LiveReader(tenant_base())
         reader.health_check()          # session alive + Canvas logged in
         status, rows, note = reader.get_paginated("/api/v1/courses/89585/quizzes?per_page=100")
     """
 
-    def __init__(self):
+    def __init__(self, tenant):
+        self._tenant = str(tenant or "").rstrip("/")
+        if not self._tenant:
+            raise LiveReadError("no Canvas base URL to read from")
         self._client = _HelperClient()
         self._tab_id = None
         self.principal = None
@@ -223,7 +225,7 @@ class LiveReader:
         # in the lane state. The pinned principal comes from onboarding;
         # it is never hardcoded. (2026-09-22 first-run audit: this was a
         # hardcoded dev user id.)
-        tab = _scratch_tab(self._client)
+        tab = _scratch_tab(self._client, self._tenant)
         self._tab_id = tab
         me = self.get_json("/api/v1/users/self")
         pinned_id = _pinned_principal_id()
@@ -260,7 +262,7 @@ class LiveReader:
                 "reader used before health_check(); the scratch tab does "
                 "not exist yet")
         if url.startswith("/"):
-            url = TENANT_BASE + url
+            url = self._tenant + url
         value = self._client.evaluate(self._tab_id, _js_get(url))
         status = value.get("status")
         headers = value.get("headers") or {}
@@ -306,7 +308,7 @@ class LiveReader:
             nxt = _next_link(headers.get("link"))
             if nxt is None:
                 break
-            if not _same_origin(nxt):
+            if not _same_origin(nxt, self._tenant):
                 note = ("stopped: pagination left the tenant origin; %d "
                         "pages merged before the stop" % pages)
                 break

@@ -11,6 +11,10 @@ audit 2026-09-22, probe audit-muse4/live_journal.py):
        failed for an educator who exported the default path.
   H2c. install.sh ran the suites with the educator's env; it must run
        them with every live state path removed.
+  Final sweep 2026-09-22: agent-side code now reads the tree's
+       helper/env when the environment has no value, so a selftest in
+       an installed tree must read an empty scratch env file, never
+       the educator's helper/env (their tenant, ports, TLS files).
 
 Each check runs in a fresh interpreter, exactly like an install suite.
 """
@@ -26,6 +30,7 @@ PROBE = r"""
 import json, os, sys
 sys.path.insert(0, %r)
 import config.selftest_home
+from config import tree_config
 from dispatch import executor as ex
 ex.journal_append({"wal": "audit", "event": "selftest.probe",
                    "op_id": "00000000-0000-4000-8000-000000000001"})
@@ -34,7 +39,8 @@ print(json.dumps({k: os.environ.get(k) for k in (
     "MORROW_SOURCE_VAULT_PATH", "MORROW_APPROVAL_SIGNING_KEY",
     "MORROW_USER_ID", "MORROW_CONVERSATION_ID",
     "MORROW_HELPER_ENV_FILE", "LOGIN_HELPER_PROFILE_DIR")}
-    | {"TREE_STATE_DIR": ex.TREE_STATE_DIR}))
+    | {"TREE_STATE_DIR": ex.TREE_STATE_DIR,
+       "ENV_FILE": tree_config.env_file_path()}))
 """ % TREE
 
 
@@ -78,10 +84,17 @@ def test_live_morrow_home_and_tree_state_dir_are_never_used(tmp_path):
     assert not seen["TREE_STATE_DIR"].startswith(str(tmp_path / "live"))
     for key in ("MORROW_TREE_STATE_DIR", "MORROW_SOURCE_VAULT_PATH",
                 "MORROW_APPROVAL_SIGNING_KEY", "MORROW_USER_ID",
-                "MORROW_CONVERSATION_ID", "MORROW_HELPER_ENV_FILE",
-                "LOGIN_HELPER_PROFILE_DIR"):
+                "MORROW_CONVERSATION_ID", "LOGIN_HELPER_PROFILE_DIR"):
         assert seen[key] is None, key
+    assert seen["MORROW_HELPER_ENV_FILE"] == seen["ENV_FILE"]
+    assert seen["ENV_FILE"].startswith(seen["MORROW_HOME"] + os.sep)
     assert _files_under(str(tmp_path / "live")) == before
+
+
+def test_the_tree_helper_env_never_reaches_a_selftest(tmp_path):
+    seen = _run({}, tmp_path)
+    assert seen["ENV_FILE"] != os.path.join(TREE, "helper", "env")
+    assert seen["ENV_FILE"].startswith(seen["MORROW_HOME"] + os.sep)
 
 
 def test_real_default_morrow_home_does_not_refuse(tmp_path):

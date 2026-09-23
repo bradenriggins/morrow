@@ -223,11 +223,13 @@ def _need_chromium_session(canvas_base=None):
     if tdir not in sys.path:
         sys.path.insert(0, tdir)
     import chromium_session
-    base = canvas_base or os.environ.get("CANVAS_BASE")
+    from config import tree_config
+    base = canvas_base or tree_config.canvas_base()
     if not base:
         raise A11yRunnerError(
-            "CANVAS_BASE is not set: the audit runner needs the educator's "
-            "Canvas host to attach the helper Chromium session.")
+            "CANVAS_BASE is not set in helper/env: the audit runner needs "
+            "the educator's Canvas host to attach the helper Chromium "
+            "session.")
     return chromium_session.ChromiumSession.load(base_url=base)
 
 
@@ -607,12 +609,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Morrow for Muse a11y mode runner: audit mode and "
                     "planner mode (plan-class, never dispatches writes).")
-    parser.add_argument("--canvas-base", default=os.environ.get("CANVAS_BASE"),
-                        help="Canvas host (or CANVAS_BASE env).")
+    parser.add_argument("--canvas-base", default=None,
+                        help="Canvas host (default: CANVAS_BASE from the "
+                             "environment, then this tree's helper/env).")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_audit = sub.add_parser("audit", help="Run audit mode on one target.")
-    p_audit.add_argument("--canvas-base", default=os.environ.get("CANVAS_BASE"))
+    p_audit.add_argument("--canvas-base", default=None)
     p_audit.add_argument("--target-kind", required=True)
     p_audit.add_argument("--course-id", required=True)
     p_audit.add_argument("--target-ids", default="{}",
@@ -624,7 +627,7 @@ def main(argv=None):
                               "readable summary of the same report.")
 
     p_plan = sub.add_parser("plan", help="Run planner mode (validates, never writes).")
-    p_plan.add_argument("--canvas-base", default=os.environ.get("CANVAS_BASE"))
+    p_plan.add_argument("--canvas-base", default=None)
     p_plan.add_argument("--planner", required=True,
                         help="Planner name, e.g. morrow_plan_page_image_alt_repair.")
     p_plan.add_argument("--params", default="{}",

@@ -29,6 +29,10 @@ for _name in ("MORROW_TREE_STATE_DIR", "MORROW_SOURCE_VAULT_PATH",
               "MORROW_PRIVACY_MAP", "MORROW_PRIVACY_SALT",
               "LOGIN_HELPER_PROFILE_DIR"):
     os.environ.pop(_name, None)
+# Agent-side code reads the tree's helper/env when the environment has
+# no value; the suite reads an empty scratch file instead.
+os.environ["MORROW_HELPER_ENV_FILE"] = os.path.join(
+    os.environ["MORROW_HOME"], "helper-env")
 
 
 def pytest_unconfigure(config):

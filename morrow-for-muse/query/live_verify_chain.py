@@ -13,11 +13,11 @@ _TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _TREE_ROOT not in sys.path:
     sys.path.insert(0, _TREE_ROOT)
 
-from query.live_read import LiveReader
+from query.live_read import LiveReader, tenant_base
 
 
 def main():
-    r = LiveReader()
+    r = LiveReader(tenant_base())
     r.health_check()
     print("health_check: principal id 28206 verified in-page")
     course = "89585"

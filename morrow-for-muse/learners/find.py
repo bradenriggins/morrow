@@ -290,9 +290,9 @@ def main(argv=None, fetcher=None):
         description="Resolve the name the educator typed to the student's "
                     "course label. Prints one JSON object. Read-only.")
     parser.add_argument("--course", required=True, help="Canvas course id")
-    parser.add_argument("--canvas-base",
-                        default=os.environ.get("CANVAS_BASE"),
-                        help="Canvas origin (default: CANVAS_BASE)")
+    parser.add_argument("--canvas-base", default=None,
+                        help="Canvas origin (default: CANVAS_BASE from the "
+                             "environment, then this tree's helper/env)")
     parser.add_argument("--conversation-id",
                         default=os.environ.get("MORROW_CONVERSATION_ID"),
                         help="the Muse conversation id (default: "
@@ -308,8 +308,12 @@ def main(argv=None, fetcher=None):
                         help="the name as the educator typed it")
     args = parser.parse_args(argv)
     if not args.canvas_base:
+        from config import tree_config
+        args.canvas_base = tree_config.canvas_base()
+    if not args.canvas_base:
         print(json.dumps({"ok": False, "status": "error",
-                          "message": "Set --canvas-base or CANVAS_BASE."}))
+                          "message": "No Canvas base URL: set CANVAS_BASE "
+                                     "in helper/env."}))
         return 2
     section_id = args.section_id
     if section_id is not None and section_id.isdigit():

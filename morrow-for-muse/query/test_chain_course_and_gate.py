@@ -79,7 +79,7 @@ def test_cli_refuses_bad_course_before_any_read(monkeypatch, capsys):
         raise AssertionError("no reader may start for a bad course id")
     monkeypatch.setattr(C._live_read, "LiveReader", boom)
     assert C.main(["--quiz", "last-week", "--course", "1/../2",
-                   "--tenant", TENANT]) == 2
+                   "--canvas-base", TENANT]) == 2
     assert "course" in capsys.readouterr().out.lower()
 
 

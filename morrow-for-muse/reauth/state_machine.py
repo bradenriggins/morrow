@@ -1047,10 +1047,13 @@ def read_live_principal(base=None):
         raise PrincipalPinError(
             "the login helper reports no signed-in Canvas session; sign "
             "in through the helper page first")
-    base = (base or os.environ.get("CANVAS_BASE") or "").rstrip("/")
+    from config import tree_config
+    base = (base or tree_config.canvas_base()).rstrip("/")
     if not base:
         raise PrincipalPinError(
-            "CANVAS_BASE is not set; pass --base or set it in helper/env")
+            "no Canvas base URL: CANVAS_BASE is not set in this tree's "
+            "helper/env (%s) or the environment; set it there, or pass "
+            "--base" % tree_config.env_file_path())
     from dispatch import executor as ex
     from transport import chromium_session as cs
     sess = cs.ChromiumSession(base)

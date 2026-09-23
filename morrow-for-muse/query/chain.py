@@ -231,7 +231,8 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
     below_percent / below_points / letter_f: at most one explicit fail
         threshold; none means the assignment's own default.
     reader: a LiveReader (default: create and health-check one).
-    tenant_base: tenant origin for the privacy binding.
+    tenant_base: tenant origin for the privacy binding (default:
+        CANVAS_BASE from the environment, then the tree's helper/env).
     synthetic_rows: when set, a list of synthetic (fixture) submission
         dicts used INSTEAD of live submissions; the result is loudly
         labeled synthetic and never touches the learner vault.
@@ -269,7 +270,7 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
         _prog("arguments_checked", str(quiz_ref))
 
         if reader is None:
-            tenant_base = tenant_base or _live_read.TENANT_BASE
+            tenant_base = tenant_base or _live_read.tenant_base()
             if not tenant_base:
                 # Fail closed BEFORE the browser lane initializes: the
                 # privacy binding needs a real tenant origin, and a fresh
@@ -279,15 +280,15 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                 raise _translate(
                     operation,
                     SessionMissing("query chain needs a Canvas base URL: set "
-                                   "CANVAS_BASE or pass tenant_base"))
-            reader = _live_read.LiveReader()
+                                   "CANVAS_BASE in helper/env"))
+            reader = _live_read.LiveReader(tenant_base)
             own_reader = True
             try:
                 reader.health_check()
             except _live_read.LiveReadError as exc:
                 raise _translate_helper_failure(exc)
         else:
-            tenant_base = tenant_base or _live_read.TENANT_BASE
+            tenant_base = tenant_base or _live_read.tenant_base()
         _prog("reader_ready")
         reader = _GatedReader(reader)
         if not tenant_base:
@@ -295,7 +296,7 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
             raise _translate(
                 operation,
                 SessionMissing("query chain needs a Canvas base URL: set "
-                               "CANVAS_BASE or pass tenant_base"))
+                               "CANVAS_BASE in helper/env"))
 
         try:
             quiz, assignment, ctx = _qr.resolve(
@@ -474,7 +475,9 @@ def main(argv):
                        help="failed means below this many points")
     group.add_argument("--letter-f", action="store_true",
                        help="failed means a letter grade of F")
-    ap.add_argument("--tenant", default=_live_read.TENANT_BASE)
+    ap.add_argument("--canvas-base", default=None,
+                    help="Canvas origin (default: CANVAS_BASE from the "
+                         "environment, then this tree's helper/env)")
     ap.add_argument("--progress", action="store_true",
                     help="QOL-3: print chain progress lines to stderr as "
                          "each stage completes (stdout stays clean for "
@@ -492,7 +495,8 @@ def main(argv):
                            below_percent=args.below_percent,
                            below_points=args.below_points,
                            letter_f=args.letter_f,
-                           tenant_base=args.tenant, progress=progress)
+                           tenant_base=args.canvas_base,
+                           progress=progress)
     except ChainFailure as exc:
         # TranslatedError is a dataclass, not an exception: the
         # raisable carrier is ChainFailure, which wraps the
