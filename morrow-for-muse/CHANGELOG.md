@@ -161,6 +161,8 @@ Installing and the docs:
   installer's own checks still ship, and they keep to a scratch folder.
 - The troubleshooting guide names the Python version the installer
   needs: 3.11 or newer.
+- The release zip includes the license (MIT) at the top of the
+  folder, so anyone reviewing the zip has the license with it.
 - A restored backup works. The backup left out the key that checks
   your approvals, settings, and Edit mode, so after a restore Morrow
   refused every change. It also left out your student labels, the
@@ -241,6 +243,10 @@ Technical notes:
   lane, not only on the https lane. A body the lane cannot encode
   raises `WriteNotAttempted`, so its claim is released instead of being
   journaled as a write that may have applied.
+- `scripts/carve.py` ships the repository's `LICENSE` at the tree
+  root (`REPO_FILES`), listed in `pack/carve-manifest.json` and in the
+  zip; the carve fails when it is missing or untracked, or when
+  `morrow-for-muse/LICENSE` would shadow it.
 - `dispatch/state_backup.py` backs up and restores the approval signing
   keyring (`secrets/`), the source vault Morrow writes
   (`morrow_source_vault.json` with its `.key` and `.echo`, restored to
