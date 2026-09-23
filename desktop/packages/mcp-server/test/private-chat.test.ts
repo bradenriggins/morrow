@@ -1,7 +1,7 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import type { JsonObject } from "@morrow/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMorrowServer } from "../src/server.js";
 import { PrivateChatWaitEndedError, type GatewayRuntime } from "../src/runtime.js";
 
@@ -148,6 +148,64 @@ describe("Morrow Private Chat", () => {
       });
       expect(JSON.stringify(calls)).not.toMatch(/Michaela|example\.edu|school_id/iu);
     } finally { await client.close(); await server.close(); }
+  });
+
+  // A legacy-era client may show a consent prompt, or its model may take minutes to write a reply.
+  // The assistant's reply decides the wait, not the MCP SDK's 60-second request default.
+  it("relays a legacy-era assistant reply that takes more than a minute", async () => {
+    const { runtime, calls } = fixture();
+    const client = new Client({ name: "VS Code", version: "1" }, { capabilities: { sampling: {} }, versionNegotiation: { mode: "legacy" } });
+    let reply: (() => void) | undefined;
+    const asked = new Promise<void>((resolveAsked) => {
+      client.setRequestHandler("sampling/createMessage", async () => {
+        resolveAsked();
+        await new Promise<void>((resolveReply) => { reply = resolveReply; });
+        return { model: "local-test", role: "assistant", content: { type: "text", text: "Student A1 needs feedback." }, stopReason: "endTurn" };
+      });
+    });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const server = serveStdio(() => createMorrowServer(runtime), { transport: b });
+    await client.connect(a);
+    try {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const pending = client.callTool({ name: "morrow_private_chat", arguments: {} }, { timeout: 60 * 60_000 });
+      await asked;
+      await vi.advanceTimersByTimeAsync(9 * 60_000);
+      reply!();
+      const result = await pending;
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toMatchObject({ schema: "morrow.private-chat.v1", status: "closed", turns: 1 });
+      expect(calls.map((call) => call.action)).toEqual(["listen", "reply_and_listen"]);
+    } finally { vi.useRealTimers(); reply?.(); await client.close(); await server.close(); }
+  });
+
+  it("says the assistant did not reply in time when a legacy-era reply takes more than 10 minutes", async () => {
+    const { runtime, calls } = fixture();
+    const client = new Client({ name: "VS Code", version: "1" }, { capabilities: { sampling: {} }, versionNegotiation: { mode: "legacy" } });
+    let reply: (() => void) | undefined;
+    const asked = new Promise<void>((resolveAsked) => {
+      client.setRequestHandler("sampling/createMessage", async () => {
+        resolveAsked();
+        await new Promise<void>((resolveReply) => { reply = resolveReply; });
+        return { model: "local-test", role: "assistant", content: { type: "text", text: "Too late." }, stopReason: "endTurn" };
+      });
+    });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const server = serveStdio(() => createMorrowServer(runtime), { transport: b });
+    await client.connect(a);
+    try {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const pending = client.callTool({ name: "morrow_private_chat", arguments: {} }, { timeout: 60 * 60_000 });
+      await asked;
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      const result = await pending;
+      expect(result.isError).toBe(true);
+      expect((result.content as { text: string }[])[0]!.text).toBe(
+        "Private Chat unavailable. The assistant did not reply within 10 minutes, so Morrow stopped Private Chat. Close the Private Chat drawer, then ask the assistant to start Private Chat again.",
+      );
+      expect(result.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "private_chat_unavailable" });
+      expect(calls.map((call) => call.action)).toEqual(["listen"]);
+    } finally { vi.useRealTimers(); reply?.(); await client.close(); await server.close(); }
   });
 
   it("uses signed input_required continuation on 2026-07-28, repeats, and refuses a changed state token", async () => {

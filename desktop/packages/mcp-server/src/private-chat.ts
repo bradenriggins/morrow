@@ -3,6 +3,8 @@ import {
   CLIENT_CAPABILITIES_META_KEY,
   inputRequired,
   inputResponse,
+  SdkError,
+  SdkErrorCode,
   type CallToolResult,
   type CreateMessageRequestParams,
   type InputRequiredResult,
@@ -35,6 +37,13 @@ export type PrivateChatRequestState = {
 };
 
 const CONTINUATION_TTL_MS = 10 * 60 * 1_000;
+/**
+ * How long a legacy-era client has to answer one sampling request. A client may first ask the
+ * person to allow sampling, and the reply can be long, so the SDK's 60-second request default
+ * would end the chat after the educator's message was already taken. This matches the SDK's own
+ * per-leg wait for input required results.
+ */
+const LEGACY_REPLY_TIMEOUT_MS = 10 * 60_000;
 /** The assistant replies one Private Chat session allows. The last one ends the chat. */
 const REPLY_LIMIT = 100;
 const MAX_CONTINUATION_CLAIMS = 2_048;
@@ -63,6 +72,7 @@ export class PrivateChatContinuationLedger {
 }
 
 class PrivateChatError extends Error {}
+class PrivateChatReplyTimeoutError extends Error {}
 function requireChat(value: unknown, message: string): asserts value {
   if (!value) throw new PrivateChatError(message);
 }
@@ -239,7 +249,23 @@ export function registerPrivateChatTool(
       }
 
       for (;;) {
-        const response = sampleSchema.parse(await context.mcpReq.requestSampling(samplingRequest(state)));
+        let sampled: unknown;
+        try {
+          sampled = await context.mcpReq.requestSampling(samplingRequest(state), {
+            relatedRequestId: context.mcpReq.id,
+            timeout: LEGACY_REPLY_TIMEOUT_MS,
+            resetTimeoutOnProgress: true,
+            onprogress: () => {},
+            signal: context.mcpReq.signal,
+          });
+        } catch (error) {
+          // The SDK reports a cancelled request with the timeout code too, so a cancel is not a late reply.
+          if (error instanceof SdkError && error.code === SdkErrorCode.RequestTimeout && !context.mcpReq.signal.aborted) {
+            throw new PrivateChatReplyTimeoutError();
+          }
+          throw error;
+        }
+        const response = sampleSchema.parse(sampled);
         const reply = response.content.text;
         const next = await nextExchange(runtime, state, reply, context.mcpReq.signal);
         state = { ...state, messages: [...state.messages, { role: "assistant", text: reply }], turns: state.turns + 1 };
@@ -255,7 +281,8 @@ export function registerPrivateChatTool(
         isError: true,
         content: [{ type: "text", text: `Private Chat unavailable. ${error instanceof PrivateChatError ? error.message
           : error instanceof PrivateChatWaitEndedError ? "No message was sent in time, so Morrow stopped waiting and cleared the drawer. Ask the assistant to start Private Chat again."
-            : "Morrow could not validate the local relay or assistant response."}` }],
+            : error instanceof PrivateChatReplyTimeoutError ? `The assistant did not reply within ${LEGACY_REPLY_TIMEOUT_MS / 60_000} minutes, so Morrow stopped Private Chat. Close the Private Chat drawer, then ask the assistant to start Private Chat again.`
+              : "Morrow could not validate the local relay or assistant response."}` }],
         structuredContent: { schema: "morrow.problem.v1", code: "private_chat_unavailable" },
       };
     }
