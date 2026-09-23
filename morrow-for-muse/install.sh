@@ -48,8 +48,8 @@
 #      older release wrote into helper/ are moved there, loudly. On a
 #      version change: back up the tree, remove files the new version
 #      no longer ships (manifest diff, logged).
-#   3. Chromium locate (transport/chromium/chrome, vendor/chromium/chrome,
-#      then /opt/meta-chromium/chrome)
+#   3. Chromium locate: CHROMIUM_BIN (the environment, then helper/env)
+#      when set, otherwise /opt/meta-chromium/chrome (the Muse VM image)
 #   4. Egress probe (transport/egress.py: authenticated proxy, bare proxy,
 #      or direct; credentials are redacted in the output)
 #   5. ~/.morrow state creation (0700 dirs; the tree env template
@@ -696,7 +696,7 @@ except RuntimeError as exc:
 ")"
 case "${CHROME_BIN}" in
   MISSING*)
-    fail "chromium" "no Chromium binary found. Checked, in order: transport/chromium/chrome, vendor/chromium/chrome, /opt/meta-chromium/chrome." ;;
+    fail "chromium" "no usable Chromium: ${CHROME_BIN#MISSING: }. The Muse VM image has it at /opt/meta-chromium/chrome. To use another Chromium (152.0.7977.82 or newer), add CHROMIUM_BIN=<its path> to helper/env and rerun." ;;
 esac
 note "ok: ${CHROME_BIN}"
 

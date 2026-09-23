@@ -2629,11 +2629,13 @@ def default_binary():
     /opt/meta-chromium/chrome ships in the Muse VM image (Meta-provided,
     boot-reconciled), so the connector does not bundle its own copy. A
     connector-local build under transport/chromium/ or vendor/chromium/
-    is honored first if present (dev override). CHROMIUM_BIN, when set,
-    wins over every probe: it must point at an executable file whose
-    --version reports a sane Chromium/Google Chrome version at or above
-    the floor (W4-P2-17); a bad value fails fast instead of silently
-    falling through to a different browser.
+    is honored first if present (dev override; an installed tree
+    refuses both). CHROMIUM_BIN, when set in the environment or in this
+    tree's helper/env (the order every tree setting uses), wins over
+    every probe: it must point at an executable file whose --version
+    reports a sane Chromium/Google Chrome version at or above the floor
+    (W4-P2-17); a bad value fails fast instead of silently falling
+    through to a different browser.
 
     W4-P2-22: the override is never silent (logged loudly), and the
     resolved path + version are always printed so the operator knows
@@ -2642,7 +2644,7 @@ def default_binary():
     explicit path plus the --version probe.
     """
     here = os.path.dirname(os.path.abspath(__file__))
-    override = (os.environ.get("CHROMIUM_BIN") or "").strip()
+    override = (_tree_setting("CHROMIUM_BIN") or "").strip()
     if override:
         # W4-P2-22: an explicit CHROMIUM_BIN is fail-fast, never silent
         # fall-through. When the operator names a binary, a bad value
@@ -2685,8 +2687,9 @@ def default_binary():
     raise RuntimeError(
         "no Chromium binary found: every candidate was missing, not "
         "executable, or failed the version gate (minimum %s). Tried: %s; "
-        "install Chromium or set CHROMIUM_BIN to an explicit path ... see "
-        "INSTALL.md" % (_MIN_CHROMIUM_VERSION_STR, "; ".join(tried)))
+        "set CHROMIUM_BIN=<path> in the environment or in this tree's "
+        "helper/env (INSTALL.md, Prerequisites)"
+        % (_MIN_CHROMIUM_VERSION_STR, "; ".join(tried)))
 
 
 def default_profile_dir():

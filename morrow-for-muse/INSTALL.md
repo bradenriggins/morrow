@@ -16,8 +16,12 @@ prior knowledge of the project.
 - A Muse VM (the connector runs on the VM Meta provisions for you).
 - The platform Chromium present. The installer looks for it at
   `/opt/meta-chromium/chrome`, which ships in the Muse VM image. If your
-  VM does not provide it, place a Chromium binary at
-  `transport/chromium/chrome` inside this tree before installing.
+  VM does not provide it, name another Chromium (version 152.0.7977.82 or newer) in the
+  tree's `helper/env` before you run `install.sh` (step 2): create the
+  file with the line `CHROMIUM_BIN=/path/to/chrome`. The installer
+  keeps an existing `helper/env`, and the helper and Morrow read the
+  same line. Do not put a Chromium inside the tree: install step 2
+  refuses any file the release does not ship.
 - Python 3.11 or newer (`python3 --version`). (Python 3.10 is refused:
   it reaches security end-of-life in October 2026 per PEP 619.)
 - The Python package `cryptography` for anything that touches student
@@ -139,9 +143,11 @@ it does, in order:
    entries from other trees so exactly one entry (this tree's) remains.
    Records the installed version and manifest under the effective
    `MORROW_HOME`.
-3. **Chromium locate.** Checks `/opt/meta-chromium/chrome` (ships in
-   the Muse VM image), then `transport/chromium/chrome`. Fails with a
-   diagnostic if none is executable.
+3. **Chromium locate.** Uses `CHROMIUM_BIN` when it is set (in the
+   environment, or in `helper/env`), otherwise
+   `/opt/meta-chromium/chrome` (ships in the Muse VM image). The
+   binary must report Chromium 152.0.7977.82 or newer. Fails with a diagnostic
+   naming what it tried.
 4. **Egress probe.** Runs the egress probe: an authenticated proxy from
    the environment, else a bare proxy, else one quick direct TLS
    handshake to your tenant host (or `example.com` when `CANVAS_BASE`
@@ -249,7 +255,7 @@ Everything that does not touch student data works normally.
 nano helper/env
 ```
 
-Uncomment and set the line:
+Uncomment (or add) and set the line:
 
 ```
 CANVAS_BASE=https://myschool.instructure.com
