@@ -130,6 +130,42 @@ describe("privacy output boundary", () => {
     expect(text({ schema: "morrow.canvas-browser-failure.v1", provider: "moodle", sent: false })).toEqual([{ type: "text", text: "Morrow did not send this request to Moodle." }]);
   });
 
+  // The Bridge's own message is dropped here, so its reason is named from Morrow's code alone. A
+  // course tab that closed, or a Bridge that is not connected, is a step for the person to take,
+  // not unsafe output.
+  it("names Morrow Bridge's reason for a request it did not send, and keeps whether trying again can work", () => {
+    const refused = (code: string, recoverable?: boolean) => normalize({
+      isError: true,
+      content: [{ type: "text", text: "Morrow sent nothing: the Canvas site tab for Biology 101 is not open and signed in." }],
+      structuredContent: {
+        schema: "morrow.canvas-connector.result.v1",
+        ok: false,
+        provider: "canvas",
+        resultState: "not_sent",
+        problem: {
+          schema: "morrow.bridge.problem.v1", code,
+          message: "Morrow sent nothing: the Canvas site tab for Biology 101 is not open and signed in.",
+          ...(recoverable === undefined ? {} : { recoverable }),
+        },
+      },
+    }, { descriptor: learnerDescriptor });
+    const closedTab = refused("canvas_binding_required", true);
+    expect(closedTab.content).toEqual([{ type: "text", text: "Morrow sent nothing, because the signed-in Canvas or Moodle tab for this course is closed, signed out, or showing another page. Open the course in Canvas or Moodle and sign in, then ask again. If the course is closed, select Open Canvas or Open Moodle in the Morrow Bridge popup." }]);
+    expect(closedTab.structuredContent).toEqual({
+      schema: "morrow.problem.v1", code: "upstream_error_sanitized", recoverable: true, resultState: "not_sent", sourceCode: "canvas_binding_required",
+    });
+    expect(JSON.stringify(closedTab)).not.toContain("Biology");
+    expect(refused("bridge_unavailable", true).content).toEqual([{ type: "text", text: "Morrow Bridge is not connected to Morrow, so Morrow could not reach the course. Open Chrome and open the Morrow Bridge popup, which shows the step that connects it. Then ask again." }]);
+    expect(refused("bridge_port_in_use", true).content).toEqual([{ type: "text", text: "Another Morrow is already connected to Morrow Bridge, so this Morrow could not reach the course. Close the other Morrow, or use one Morrow for all your assistants." }]);
+    expect(refused("course_binding_mismatch", true).content).toEqual([{ type: "text", text: "This request names a course that is not the one this Morrow connection carries, so Morrow sent nothing to the course. Connect that course in Morrow Bridge, or ask for this in the connected course." }]);
+    const unnamed = refused("operation_catalog_mismatch", false);
+    expect(unnamed.content).toEqual([{ type: "text", text: "Morrow Bridge could not complete this request." }]);
+    expect(unnamed.structuredContent).toMatchObject({ recoverable: false, sourceCode: "operation_catalog_mismatch" });
+    // A source that does not say whether trying again can work is not told it can.
+    expect(refused("canvas_binding_required").structuredContent).toMatchObject({ recoverable: false });
+    for (const result of [closedTab, unnamed]) expect(JSON.stringify(result)).not.toContain("unsafe");
+  });
+
   it("does not retain malformed or extended provider failure records", () => {
     const result = normalize({
       isError: true,

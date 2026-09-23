@@ -49,6 +49,7 @@ import {
 import {
   applyPublicationPolicy,
   ArtifactGenerationRegistry,
+  BRIDGE_NOT_CONNECTED_TEXT,
   LearnerRoster,
   LearnerVault,
   canonicalMorrowResult,
@@ -459,7 +460,15 @@ const LEARNER_PRIVACY_REFUSAL_TEXT = "Morrow did not return this result because 
 /** The fixed person-facing sentence for a privacy-boundary refusal. */
 export function privacyProblemText(code: string): string {
   if (code === "privacy_browser_binding_unverified") {
-    return "Open this course in Chrome and sign in, then select Connect this course in Morrow Bridge. Its signed-in Canvas tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection.";
+    return "Open this course in Chrome and sign in, then select Connect this course in Morrow Bridge. Its signed-in Canvas or Moodle tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection.";
+  }
+  // Closing Chrome or disconnecting a course is a step the person can take, not a privacy fault.
+  if (code === "privacy_browser_bridge_not_connected") return BRIDGE_NOT_CONNECTED_TEXT;
+  if (code === "privacy_browser_bridge_port_in_use") {
+    return "Another Morrow is already connected to Morrow Bridge, so this Morrow could not reach the course. Close the other Morrow, or use one Morrow for all your assistants.";
+  }
+  if (code === "privacy_browser_binding_missing") {
+    return "This course is not connected in Morrow Bridge, so Morrow could not reach it. Open the course in Chrome and sign in, then select Connect this course in the Morrow Bridge popup. Then ask again.";
   }
   // The connection is working and carries another course, so this names what is
   // true instead of pointing at the privacy boundary.
@@ -6797,7 +6806,8 @@ export class GatewayRuntime {
     if (!bindingTool) throw new Error("learner_roster_source_unavailable");
     const bindings = await this.callSourceOwned(bindingTool.publicName, {}, options);
     if (bindings.isError === true) throw new Error("privacy_edit_options_bindings_source_failed");
-    const matches = browserBindingContent(bindings).filter((binding) => {
+    const listed = browserBindingContent(bindings);
+    const matches = listed.filter((binding) => {
       const provider = this.exactString(binding.provider, 30);
       return binding.runtimeVerified === true
         && binding.sourceBindingId === sourceBindingId
@@ -6814,8 +6824,45 @@ export class GatewayRuntime {
         && Number.isSafeInteger(binding.editPolicyRevision)
         && Number(binding.editPolicyRevision) >= 0;
     });
-    if (matches.length !== 1) throw new Error("privacy_edit_options_binding_mismatch");
+    if (matches.length !== 1) {
+      const named = listed.filter((binding) => binding.sourceBindingId === sourceBindingId);
+      throw await this.missingBrowserBindingReason(mapping, listed, new Error(named.length === 0
+        ? "privacy_browser_binding_missing"
+        : named.length === 1 && named[0]!.runtimeVerified !== true
+          ? "privacy_browser_binding_unverified"
+          : "privacy_edit_options_binding_mismatch"), options);
+    }
     return matches[0]!;
+  }
+
+  /**
+   * Morrow Bridge lists no connection while it is not connected to this Morrow, so a connection
+   * that is missing for that reason is named as the Bridge: connecting the course cannot help yet.
+   * The connector's health is read only on this failure path.
+   */
+  private async missingBrowserBindingReason(
+    mapping: CatalogTool,
+    listed: readonly JsonObject[],
+    error: unknown,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<unknown> {
+    if (!(error instanceof Error) || error.message !== "privacy_browser_binding_missing" || listed.length > 0) return error;
+    const healthTools = this.catalog.tools.filter((candidate) => (
+      candidate.upstreamId === mapping.upstreamId && this.isBrowserConnectorHealth(candidate)
+    ));
+    if (healthTools.length !== 1) return error;
+    try {
+      const raw = await this.callSourceOwned(healthTools[0]!.publicName, {}, options);
+      const health = raw.isError !== true && isJsonObject(raw.structuredContent)
+        && raw.structuredContent.schema === "morrow.canvas-connector.health.v1" ? raw.structuredContent : null;
+      const bridge = health && isJsonObject(health.bridge) && health.bridge.schema === "morrow.bridge.health.v1" ? health.bridge : null;
+      if (bridge?.connected !== false) return error;
+      return new Error(isJsonObject(bridge.problem) && bridge.problem.code === "bridge_port_in_use"
+        ? "privacy_browser_bridge_port_in_use"
+        : "privacy_browser_bridge_not_connected");
+    } catch {
+      return error;
+    }
   }
 
   private canonicalBrowserEditOptions(
@@ -6887,7 +6934,12 @@ export class GatewayRuntime {
     if (!bindingTool) throw new Error("learner_roster_source_unavailable");
     const bindings = await this.callSourceOwned(bindingTool.publicName, {}, options);
     if (bindings.isError === true) throw new Error("learner_roster_binding_unavailable");
-    return this.matchVerifiedBrowserBinding(browserBindingContent(bindings), request, expectedProvider);
+    const listed = browserBindingContent(bindings);
+    try {
+      return this.matchVerifiedBrowserBinding(listed, request, expectedProvider);
+    } catch (error) {
+      throw await this.missingBrowserBindingReason(mapping, listed, error, options);
+    }
   }
 
   private matchVerifiedBrowserBinding(
@@ -6925,6 +6977,9 @@ export class GatewayRuntime {
       if (named.length === 0 && connection.length === 1 && connection[0]!.runtimeVerified === true) {
         throw new Error("canvas_course_not_connected");
       }
+      // Morrow Bridge holds no connection by this name: the course was never connected here, was
+      // disconnected, or Morrow Bridge itself is not connected and so lists none.
+      if (connection.length === 0) throw new Error("privacy_browser_binding_missing");
       throw new Error(named.length === 1 && named[0]!.runtimeVerified !== true
         ? "privacy_browser_binding_unverified"
         : "learner_roster_binding_unavailable");
@@ -7310,11 +7365,14 @@ export class GatewayRuntime {
       || mapping.annotations?.readOnlyHint !== true
       || mapping.capability?.provider !== "canvas"
       || !isCanvasConnector(mapping)) return raw;
+    // A read the source could not make carries no Course. It crosses as the source's own sanitized
+    // reason, the same as every other read, so the person is told what to do next.
+    if (raw.isError === true) return raw;
     const courseId = this.exactString(request.id, 19);
     const structured = isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
     const result = structured && isJsonObject(structured.result) ? structured.result : null;
     const course = result && isJsonObject(result.data) ? result.data : null;
-    if (raw.isError === true || !courseId || !/^[1-9][0-9]{0,18}$/u.test(courseId)
+    if (!courseId || !/^[1-9][0-9]{0,18}$/u.test(courseId)
       || !structured || structured.schema !== "morrow.canvas-connector.result.v1"
       || structured.ok !== true || structured.provider !== "canvas" || structured.commandKind !== "invoke_read"
       || !result || result.ok !== true || result.sent !== true || result.truncated !== false
@@ -8240,7 +8298,12 @@ export class GatewayRuntime {
       const sourceBindingId = this.requestSourceBindingId(selection);
       const courseId = this.requestCourseId(selection);
       if (!sourceBindingId || !courseId) throw new Error("learner_roster_binding_unavailable");
-      const binding = this.matchVerifiedBrowserBinding(bindings, selection, provider);
+      let binding: JsonObject;
+      try {
+        binding = this.matchVerifiedBrowserBinding(bindings, selection, provider);
+      } catch (error) {
+        throw await this.missingBrowserBindingReason(mapping, bindings, error, options);
+      }
       const contextKey = this.inventoryContextKey(mapping, provider, binding, sourceBindingId, courseId);
       const pending = pendingContexts.get(contextKey);
       if (pending) pending.selectionKeys.push(selectionKey);

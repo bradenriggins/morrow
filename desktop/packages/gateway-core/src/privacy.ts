@@ -1236,6 +1236,7 @@ function sanitizedUpstreamError(value: JsonObject): JsonObject {
   if (providerFailure === undefined && sourceCode === undefined && sourceRefusal === undefined) return output;
   output.structuredContent = {
     ...(output.structuredContent as JsonObject),
+    ...(typeof sourceProblem?.recoverable === "boolean" ? { recoverable: sourceProblem.recoverable } : {}),
     ...(providerFailure === undefined ? {} : { providerFailure: structuredClone(providerFailure) }),
     ...(resultState === undefined ? {} : { resultState }),
     ...(sourceCode === undefined ? {} : { sourceCode }),
@@ -1245,7 +1246,32 @@ function sanitizedUpstreamError(value: JsonObject): JsonObject {
   // output. A missing item after a delete is the expected readback, so the
   // text names what the provider answered instead of reporting a refusal.
   if (providerFailure !== undefined) output.content = [{ type: "text", text: providerFailureText(providerFailure) }];
+  else if (sourceCode !== undefined) output.content = [{ type: "text", text: bridgeProblemText(sourceCode) }];
   return output;
+}
+
+/** Morrow Bridge is not connected to the Morrow app, so no course request can reach the course. */
+export const BRIDGE_NOT_CONNECTED_TEXT = "Morrow Bridge is not connected to Morrow, so Morrow could not reach the course. Open Chrome and open the Morrow Bridge popup, which shows the step that connects it. Then ask again.";
+
+/**
+ * The fixed sentence for a request Morrow Bridge answered with one of Morrow's
+ * own reasons. The Bridge's message can name the course, so it is dropped at
+ * this boundary and the reason is named from its code alone.
+ */
+function bridgeProblemText(code: string): string {
+  switch (code) {
+    case "bridge_unavailable":
+      return BRIDGE_NOT_CONNECTED_TEXT;
+    case "bridge_port_in_use":
+      return "Another Morrow is already connected to Morrow Bridge, so this Morrow could not reach the course. Close the other Morrow, or use one Morrow for all your assistants.";
+    // The same words Morrow Bridge shows for this code (connector/extension/src/bridge-problem-copy.js).
+    case "canvas_binding_required":
+      return "Morrow sent nothing, because the signed-in Canvas or Moodle tab for this course is closed, signed out, or showing another page. Open the course in Canvas or Moodle and sign in, then ask again. If the course is closed, select Open Canvas or Open Moodle in the Morrow Bridge popup.";
+    case "course_binding_mismatch":
+      return "This request names a course that is not the one this Morrow connection carries, so Morrow sent nothing to the course. Connect that course in Morrow Bridge, or ask for this in the connected course.";
+    default:
+      return "Morrow Bridge could not complete this request.";
+  }
 }
 
 function providerFailureText(providerFailure: JsonObject): string {
