@@ -218,3 +218,103 @@ test("no claim document widens what the course audit detects", () => {
   }
   assert.deepEqual(problems, [], `${COURSE_AUDIT} is the authority for what the audit detects`);
 });
+
+const CANVAS_CATALOG = "connector/extension/generated/canvas-api-catalog.json";
+const EDIT_POLICY = "connector/extension/src/edit-policy.js";
+const ITEM_BANK_COVERAGE = "docs/implementation/NEW-QUIZZES-ITEM-BANKS-COVERAGE.md";
+const PROOF_HARNESS_LEDGER = "proof-harness/ledger.json";
+const ITEM_BANK_FAN_OUT = "packages/mcp-server/src/item-bank-fan-out.ts";
+
+const NUMBER_WORDS = [
+  "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+  "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+];
+const numberValue = (word) => (/^\d+$/.test(word) ? Number(word) : NUMBER_WORDS.indexOf(word.toLowerCase()));
+
+const itemBankOperations = () => JSON.parse(read(CANVAS_CATALOG)).operations
+  .filter((operation) => operation.family === "new-quizzes-item-banks");
+
+/** The lines of a text that talk about Item Banks: a Markdown paragraph or list item, or one line of source. */
+const itemBankUnits = (text) => text.split("\n").filter((line) => /Item Banks?\b/.test(line));
+
+test("the claim documents count the Item Bank reads and changes the catalog carries", () => {
+  const operations = itemBankOperations();
+  const reads = operations.filter((operation) => operation.readOnly === true).length;
+  const changes = operations.length - reads;
+  const problems = [];
+  for (const doc of CLAIM_DOCS) {
+    for (const match of read(doc).matchAll(/\b([A-Za-z]+|\d+) (?:Item Bank )?reads and ([A-Za-z]+|\d+) (?:course-bound|owner-write)\b/g)) {
+      if (numberValue(match[1]) !== reads || numberValue(match[2]) !== changes) {
+        problems.push(`${doc}: "${match[0]}", but the catalog carries ${reads} reads and ${changes} changes`);
+      }
+    }
+  }
+  assert.deepEqual(problems, [], `${CANVAS_CATALOG} is the authority for the Item Bank operation counts`);
+});
+
+test("the README counts the Item Bank changes the Edit policy offers and the ones it keeps change by change", async () => {
+  const { categoriesForBinding } = await import(new URL(EDIT_POLICY, root).href);
+  const operations = JSON.parse(read(CANVAS_CATALOG)).operations.map((operation) => ({ ...operation, provider: "canvas" }));
+  const bank = categoriesForBinding({ provider: "canvas", courseId: "42" }, operations)
+    .filter((category) => category.id.startsWith("action:canvas:canvas_item_bank_"));
+  const edit = bank.filter((category) => category.availability === "edit").length;
+  const review = bank.filter((category) => category.availability === "review").length;
+  const paragraph = itemBankUnits(read("README.md")).find((line) => /standing Edit grant/.test(line)) || "";
+  const standing = paragraph.match(/\b([A-Za-z]+|\d+) of (?:them|the [A-Za-z]+ changes) can hold a standing Edit grant/);
+  const oneByOne = paragraph.match(/\b([A-Za-z]+|\d+) (?:of them )?are approved change by change/);
+  assert.ok(standing && oneByOne, "README.md must state how many Item Bank changes can hold a standing Edit grant and how many are approved change by change");
+  assert.deepEqual([numberValue(standing[1]), numberValue(oneByOne[1])], [edit, review],
+    `${EDIT_POLICY} offers ${edit} Item Bank changes for Edit and keeps ${review} change by change`);
+});
+
+test("the Item Bank live status follows the attended record, never the proof harness", () => {
+  const coverage = read(ITEM_BANK_COVERAGE);
+  const start = coverage.indexOf("\n## Item Banks");
+  const table = coverage.slice(start, coverage.indexOf("\n## ", start + 1));
+  assert.ok([...table.matchAll(/\| proven \|\s*$/gm)].length > 0, `${ITEM_BANK_COVERAGE} records no Item Bank task proven live`);
+  const harness = Object.values(JSON.parse(read(PROOF_HARNESS_LEDGER)).rows);
+  const harnessProvedAChange = harness.some((row) => String(row.id).startsWith("canvas_item_bank_") && row.kind === "write" && row.verdict === "PASS");
+
+  const unproven = /live-unverified|live-untested|no (?:connected|Morrow-connected) Canvas tenant has (?:proved|answered)|no retained live Canvas receipt/i;
+  const aboutTheRoutes = /Item Banks?\b|private (?:route|operation)s?|frame contract/i;
+  const problems = [];
+  for (const file of [...CLAIM_DOCS, COURSE_AUDIT, ITEM_BANK_FAN_OUT]) {
+    for (const unit of itemBankUnits(read(file))) {
+      for (const sentence of sentences(unit)) {
+        if (unproven.test(sentence.text) && aboutTheRoutes.test(sentence.text)) {
+          problems.push(`${file} calls the Item Bank routes unproven: ${sentence.text}`);
+        }
+        if (!harnessProvedAChange && sentence.text.includes(PROOF_HARNESS_LEDGER)) {
+          problems.push(`${file} cites ${PROOF_HARNESS_LEDGER} for Item Banks, where no Item Bank change ran: ${sentence.text}`);
+        }
+      }
+    }
+  }
+  for (const doc of ["README.md", "LIMITATIONS.md"]) {
+    if (!itemBankUnits(read(doc)).some((line) => line.includes("NEW-QUIZZES-ITEM-BANKS-COVERAGE.md"))) {
+      problems.push(`${doc} states the Item Bank live status without citing ${ITEM_BANK_COVERAGE}`);
+    }
+  }
+  assert.deepEqual(problems, [], `${ITEM_BANK_COVERAGE} is the attended record of what Item Banks proved live`);
+});
+
+test("the New Quiz question and settings limits follow the attended record", () => {
+  const coverage = read(ITEM_BANK_COVERAGE);
+  const provenRow = (task) => coverage.split("\n").some((line) => line.startsWith(`| ${task}`) && /\| proven \|\s*$/.test(line));
+  const neverRun = /none of these three has run against a live Canvas course/i;
+  const claims = [
+    { task: "Create each of the 12 question types", stale: neverRun },
+    { task: "Change a question's type", stale: neverRun },
+    { task: "Delete a question", stale: neverRun },
+    {
+      task: "Edit points, answer choices (add and remove)",
+      stale: /would add, remove, rename, or duplicate any provider interaction UUID|has not verified the provider's handling of newly generated interaction UUIDs/i,
+    },
+    { task: "Settings: shuffle questions, time limit", stale: /every documented setting combination is live-unverified/i },
+  ];
+  const limitations = collapse(read("LIMITATIONS.md"));
+  const problems = claims
+    .filter(({ task, stale }) => provenRow(task) && stale.test(limitations))
+    .map(({ task, stale }) => `LIMITATIONS.md says ${stale} although ${ITEM_BANK_COVERAGE} marks "${task}" proven`);
+  assert.deepEqual(problems, []);
+});
