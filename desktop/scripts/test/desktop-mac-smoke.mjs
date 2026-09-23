@@ -316,7 +316,10 @@ function assertAppReceipt(receipt, precondition) {
   const actual = normalizedAppReceipt(receipt);
   const differing = Object.keys(expected).filter((key) => !isDeepStrictEqual(actual[key], expected[key]));
   if (differing.length === 0) return;
-  throw new Error(`Morrow smoke receipt did not prove the required contained runtime, state, and Codex configuration. These records differ from what a contained run must report: ${differing.join(", ")}.`);
+  // The normalized records hold only flags, stage names, and sanitized codes,
+  // so the log can name the cause of a failed run.
+  const details = differing.map((key) => `${key} observed ${JSON.stringify(actual[key])}; expected ${JSON.stringify(expected[key])}`);
+  throw new Error(`Morrow smoke receipt did not prove the required contained runtime, state, and Codex configuration. These records differ from what a contained run must report: ${differing.join(", ")}. ${details.join(". ")}.`);
 }
 
 function receiptSidecarPath(receipt) {

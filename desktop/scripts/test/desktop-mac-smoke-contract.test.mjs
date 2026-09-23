@@ -142,6 +142,21 @@ test("rejects a gateway that never answered its health request", () => {
   rejects(receipt);
 });
 
+test("a rejected receipt names what each differing record observed and what a contained run reports", () => {
+  const receipt = boundReceipt();
+  receipt.health.gatewayReady = false;
+  receipt.runtimeTrace.portBinding = "not_observed";
+  receipt.runtimeTrace.upstream.listTools = { ready: false, durationMs: 10 };
+  let message = "";
+  try { assertAppReceipt(receipt, PORT_FREE); } catch (error) { message = error.message; }
+  assert.match(message, /These records differ from what a contained run must report: health, runtimeTrace\./);
+  assert.ok(message.includes('health observed {"attempted":true,"gatewayReady":false,"bridgeConnected":false}; '
+    + 'expected {"attempted":true,"gatewayReady":true,"bridgeConnected":false}'), message);
+  assert.ok(message.includes('"portBinding":"not_observed"'), message);
+  assert.ok(message.includes('"listTools":{"ready":false,"durationMs":0}'), message);
+  assert.doesNotMatch(message, /stateSecurity observed/);
+});
+
 test("rejects state or Codex configuration written outside the test root", () => {
   const outsideState = boundReceipt();
   outsideState.state.withinTestRoot = false;
