@@ -754,3 +754,17 @@ test("an assistant settings error names only that absolute file, and only for er
   assert.equal(unrelated.error.file, undefined);
   assert.equal(JSON.stringify(unrelated).includes(file), false);
 });
+
+test("Blackboard recoveries name only what the Blackboard form and course list offer", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "renderer", "index.html"), "utf8");
+  const renderer = fs.readFileSync(path.join(__dirname, "..", "renderer", "renderer.js"), "utf8");
+  const labels = [...html.matchAll(/<label for="blackboard-[^"]+">([^<]+)<\/label>/g)].map((match) => match[1]);
+  assert.deepEqual(labels, ["Your Blackboard web address", "Application key from your Blackboard administrator", "Application secret"]);
+  // Courses are chosen from the list Blackboard verified, with a button on each course.
+  assert.match(renderer, /\? "Remove" : "Allow Morrow"/);
+  const configuration = errorDetails("blackboard_configuration_invalid");
+  assert.equal(configuration.recovery, "Check the Blackboard web address and the application key and secret from your administrator, then save again.");
+  const selection = errorDetails("blackboard_course_selection_invalid");
+  assert.equal(selection.recovery, "Select Check status, then select Allow Morrow or Remove on that course again. Your Blackboard connection was left as it was.");
+  for (const text of [configuration.recovery, selection.recovery]) assert.doesNotMatch(text, /account ID|course ID|_45_1/);
+});

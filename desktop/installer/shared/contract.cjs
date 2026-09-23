@@ -140,11 +140,11 @@ const PUBLIC_ERRORS = Object.freeze({
   },
   blackboard_configuration_invalid: {
     message: "Morrow could not save the Blackboard connection.",
-    recovery: "Check the Blackboard web address, the application key and secret from your administrator, and the account ID, then save again."
+    recovery: "Check the Blackboard web address and the application key and secret from your administrator, then save again."
   },
   blackboard_course_selection_invalid: {
     message: "Morrow could not save that Blackboard course.",
-    recovery: "Check the course ID in the course web address. It looks like _45_1. Your Blackboard connection was left as it was."
+    recovery: "Select Check status, then select Allow Morrow or Remove on that course again. Your Blackboard connection was left as it was."
   },
   blackboard_removal_failed: {
     message: "Morrow could not remove that Blackboard connection.",

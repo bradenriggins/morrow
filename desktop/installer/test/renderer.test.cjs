@@ -637,7 +637,7 @@ test("the problem alert is written once for each distinct problem", async () => 
 
 test("a rejected Blackboard save keeps the three safe values and clears only the secret", async () => {
   let request = null;
-  let answer = () => failed(state(), { code: "blackboard_configuration_invalid", message: "Morrow could not save that connection.", recovery: "Check the account ID, then save again." });
+  let answer = () => failed(state(), { code: "blackboard_configuration_invalid", message: "Morrow could not save that connection.", recovery: "Check the Blackboard web address and the application key and secret from your administrator, then save again." });
   const dom = await load("blackboard", async (method, payload) => {
     if (method === "installer:configure-blackboard") request = payload;
     return answer();
