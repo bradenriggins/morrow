@@ -2,7 +2,7 @@
 """Full test suite for the Morrow error translation layer.
 
 Covers failures/translator.py + failures/catalog.py + failures/catalog.json:
-  1. per-mode tests: every one of the 86 catalog modes gets a synthetic
+  1. per-mode tests: every one of the 87 catalog modes gets a synthetic
      raw error; asserts the right mode_id, the four message anchors, all
      placeholders filled, no em dashes, no shrug language, and the
      escalate flag matching the catalog.
@@ -331,7 +331,7 @@ def _quiz_no_match_case():
         214, 9, 157,
         [("Mid-Term Exam", 4045392, "2026-02-23T05:59:00+00:00",
           "assignment.due_at")],
-        query="last week's quiz")
+        "America/Chicago", query="last week's quiz")
 
 
 def _quiz_ambiguous_case():
@@ -344,7 +344,7 @@ def _quiz_ambiguous_case():
           "assignment.due_at", 50.0),
          ("Pop Quiz #2", 2, "2026-09-18T05:00:00+00:00",
           "assignment.due_at", 50.0)],
-        query="last week's quiz")
+        "America/Chicago", query="last week's quiz")
 
 
 MODE_CASES = {
@@ -353,6 +353,9 @@ MODE_CASES = {
             "quiz must be one of last_week, this_week, got 'yesterday'"),
     "query-threshold-undefined":
         lambda: _qthresholds.ThresholdUndefined("points_possible is None"),
+    "query-timezone-unknown":
+        lambda: _qchain.TimezoneUnknown(
+            "no time zone is set for the educator"),
     "quiz-reference-unsupported":
         lambda: _qresolve.UnsupportedQuizRef("yesterday"),
     "query-live-read-failed":
@@ -612,8 +615,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_86_modes(self):
-        self.assertEqual(86, len(CATALOG.entries))
+    def test_catalog_has_87_modes(self):
+        self.assertEqual(87, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):

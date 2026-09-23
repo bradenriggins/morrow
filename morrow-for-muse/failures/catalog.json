@@ -1860,6 +1860,26 @@
       ]
     },
     {
+      "id": "query-timezone-unknown",
+      "title": "The educator's time zone is not known",
+      "surface": "query/chain.py",
+      "severity_hint": "low",
+      "severity_hint_inventory": "engineering",
+      "root_cause": "\"Last week\" and \"this week\" are the educator's weeks (query/chain.py educator_zone): the time zone comes from the educator's timezone setting, then the course's time zone in Canvas, then the educator's Canvas profile. When none of them names a zone, the chain raises TimezoneUnknown before it resolves any quiz; it never guesses a zone.",
+      "is_not": "This is not a Canvas or session problem: Canvas answered, but nothing names the educator's time zone.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: I do not know your time zone. It is not in your settings, the course, or your Canvas profile (reference {correlation_id}). What this means: I cannot tell which days count as last week, so I read no grades. What happens next: tell me your time zone (for example, America/Denver). I will save it as your timezone setting and ask the question again.",
+      "auto_action": "Ask the educator for their time zone, save it with `morrow settings set timezone <IANA name>`, and run the query again.",
+      "escalate_when": "never; this is a usage message, not an incident",
+      "signature": {
+        "error_class": "TimezoneUnknown"
+      },
+      "signature_notes": "classification: \"TimezoneUnknown\"; fixed_behavior: \"no quiz is resolved and no grades are read without a time zone\"; triggers: [\"no timezone setting, no course time zone, and no Canvas profile time zone\"]",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
       "id": "query-threshold-undefined",
       "title": "\"Failed\" is undefined for this assignment (not_graded or no points)",
       "surface": "query/thresholds.py",

@@ -62,6 +62,7 @@ class _Reader:
 
 
 def _run(reader=None, **kw):
+    kw.setdefault("timezone", "America/Chicago")
     return C.run_query("89585", reader=reader or _Reader(), now_utc=NOW,
                        synthetic_rows=SYNTH, tenant_base=TENANT, **kw)
 

@@ -53,7 +53,8 @@ def test_live_submissions_read_refused_until_live_proven():
     reader = _Reader()
     with pytest.raises(C.ChainFailure):
         C.run_query("89585", "last_week", reader=reader, now_utc=NOW,
-                    tenant_base="https://school.example.edu")
+                    tenant_base="https://school.example.edu",
+                    timezone="America/Chicago")
     assert not any("/submissions" in p for p in reader.paths)
 
 

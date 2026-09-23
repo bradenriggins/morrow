@@ -39,6 +39,9 @@ from failures import translator as TR
 # through FakeReader or StubReader.
 _TEST_TENANT = "https://school.example.edu"
 L.tenant_base = lambda: _TEST_TENANT
+# The fixtures' calendar is written in Chicago time; the chain itself
+# takes the educator's zone (query/test_chain_timezone.py).
+CHI = "America/Chicago"
 
 PASS = []
 FAIL = []
@@ -75,11 +78,11 @@ def t_dates():
     # Tue 2026-09-22 12:00 UTC = 07:00 CDT. Last week (Chicago):
     # Mon 2026-09-14 .. Sun 2026-09-20.
     now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
-    start, end = Q.last_week_window(now)
+    start, end = Q.last_week_window(CHI, now)
     check("dates/last-week-window",
-          (Q.chicago_ymd(start), Q.chicago_ymd(end)) ==
+          (Q.local_ymd(start, CHI), Q.local_ymd(end, CHI)) ==
           ("2026-09-14", "2026-09-20"),
-          "got %s..%s" % (Q.chicago_ymd(start), Q.chicago_ymd(end)))
+          "got %s..%s" % (Q.local_ymd(start, CHI), Q.local_ymd(end, CHI)))
 
     q = {"id": 1, "created_at": "2026-09-01T00:00:00Z"}
     a = {"id": 9, "due_at": "2026-09-16T05:00:00Z",
@@ -107,20 +110,20 @@ def t_dates():
     # DST transitions (spring forward 2026-03-08, fall back 2026-11-01):
     # last week must stay exact in Chicago terms.
     spring = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)  # Tue
-    s, e = Q.last_week_window(spring)
+    s, e = Q.last_week_window(CHI, spring)
     check("dates/dst-spring-window",
-          (Q.chicago_ymd(s), Q.chicago_ymd(e)) == ("2026-03-02", "2026-03-08"),
-          "got %s..%s" % (Q.chicago_ymd(s), Q.chicago_ymd(e)))
+          (Q.local_ymd(s, CHI), Q.local_ymd(e, CHI)) == ("2026-03-02", "2026-03-08"),
+          "got %s..%s" % (Q.local_ymd(s, CHI), Q.local_ymd(e, CHI)))
     check("dates/dst-spring-utc-start", s.isoformat() ==
           "2026-03-02T06:00:00+00:00", s.isoformat())  # CST (-6) before flip
     check("dates/dst-spring-utc-end",
           e.isoformat() == "2026-03-09T04:59:59.999999+00:00",
           e.isoformat())  # CDT (-5) after flip
     fall = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)  # Tue
-    s, e = Q.last_week_window(fall)
+    s, e = Q.last_week_window(CHI, fall)
     check("dates/dst-fall-window",
-          (Q.chicago_ymd(s), Q.chicago_ymd(e)) == ("2026-10-26", "2026-11-01"),
-          "got %s..%s" % (Q.chicago_ymd(s), Q.chicago_ymd(e)))
+          (Q.local_ymd(s, CHI), Q.local_ymd(e, CHI)) == ("2026-10-26", "2026-11-01"),
+          "got %s..%s" % (Q.local_ymd(s, CHI), Q.local_ymd(e, CHI)))
     check("dates/dst-fall-utc-start", s.isoformat() ==
           "2026-10-26T05:00:00+00:00", s.isoformat())  # CDT (-5) before flip
     check("dates/dst-fall-utc-end",
@@ -172,7 +175,7 @@ def t_resolve():
         [_quiz(1, "Pop Quiz #1", aid=11), _quiz(2, "Draft", False, 12)],
         [_assign(11, "2026-09-16T05:00:00Z"), _assign(12, "2026-09-16T05:00:00Z")])
     quiz, assignment, ctx = Q.resolve(r, "89585", {"kind": "last_week"},
-                                     now_utc=NOW)
+                                     CHI, now_utc=NOW)
     check("resolve/one-match", quiz["id"] == 1 and assignment["id"] == 11)
 
     # Zero matches: nothing dated in the window.
@@ -180,7 +183,8 @@ def t_resolve():
         [_quiz(1, "Undated", aid=11), _quiz(2, "Draft", False, 12)],
         [_assign(11, None), _assign(12, None)])
     try:
-        Q.resolve(r, "89585", {"kind": "last_week"}, now_utc=NOW)
+        Q.resolve(r, "89585", {"kind": "last_week"}, CHI,
+                  now_utc=NOW)
         check("resolve/zero-raises", False, "no raise")
     except Q.QuizNotFound as e:
         check("resolve/zero-raises", True)
@@ -201,7 +205,8 @@ def t_resolve():
          _assign(13, "2026-09-21T05:00:00Z"),
          _assign(14, "2026-12-01T05:00:00Z")])
     try:
-        Q.resolve(r, "89585", {"kind": "last_week"}, now_utc=NOW)
+        Q.resolve(r, "89585", {"kind": "last_week"}, CHI,
+                  now_utc=NOW)
         check("resolve/nearest-raises", False, "no raise")
     except Q.QuizNotFound as e:
         titles = [t for t, _i, _e, _f in e.nearest]
@@ -216,7 +221,8 @@ def t_resolve():
         [_assign(11, "2026-09-15T05:00:00Z"),
          _assign(12, "2026-09-18T05:00:00Z")])
     try:
-        Q.resolve(r, "89585", {"kind": "last_week"}, now_utc=NOW)
+        Q.resolve(r, "89585", {"kind": "last_week"}, CHI,
+                  now_utc=NOW)
         check("resolve/multi-raises", False, "no raise")
     except Q.QuizAmbiguous as e:
         check("resolve/multi-raises", True)
@@ -231,7 +237,8 @@ def t_resolve():
     r = FakeReader([_quiz(1, "Undated", aid=11)],
                    [_assign(11, None)])
     try:
-        Q.resolve(r, "89585", {"kind": "last_week"}, now_utc=NOW)
+        Q.resolve(r, "89585", {"kind": "last_week"}, CHI,
+                  now_utc=NOW)
         check("resolve/undated-excluded", False, "matched an undated quiz")
     except Q.QuizNotFound:
         check("resolve/undated-excluded", True)
@@ -245,7 +252,7 @@ def t_resolve():
              "due_at": "2026-09-17T05:00:00Z", "published": True,
              "grading_type": "pass_fail", "points_possible": 100.0}])
     quiz, assignment, ctx = Q.resolve(r, "89585", {"kind": "last_week"},
-                                     now_utc=NOW)
+                                     CHI, now_utc=NOW)
     check("resolve/nq-included", str(quiz["id"]) == "55"
           and str(assignment["id"]) == "55")
 
@@ -256,14 +263,15 @@ def t_resolve():
                    [_assign(11, "2026-09-16T05:00:00Z")],
                    nq_error=Boom("HTTP 401"))
     quiz, assignment, ctx = Q.resolve(r, "89585", {"kind": "last_week"},
-                                     now_utc=NOW)
+                                     CHI, now_utc=NOW)
     check("resolve/nq-401-degrades",
           quiz["id"] == 1 and ctx["new_quizzes_skipped"] is not None
           and "401" in ctx["new_quizzes_skipped"])
 
     # Unsupported reference kinds raise instead of guessing.
     try:
-        Q.resolve(FakeReader([], []), "89585", {"kind": "unspecified"})
+        Q.resolve(FakeReader([], []), "89585", {"kind": "unspecified"},
+                  CHI)
         check("resolve/unsupported-raises", False, "no raise")
     except Q.UnsupportedQuizRef:
         check("resolve/unsupported-raises", True)
@@ -421,7 +429,7 @@ def t_translator():
     te = TR.translate("op", Q.QuizNotFound(
         datetime(2026, 9, 14, 5, 0, tzinfo=timezone.utc),   # 00:00 CDT
         datetime(2026, 9, 21, 4, 59, 59, tzinfo=timezone.utc),  # 23:59 CDT
-        5, 3, 1, []))
+        5, 3, 1, [], CHI))
     check("tr/no-match", te.mode_id == "quiz-resolution-no-match"
           and "no published quiz" in te.agent_message, te.mode_id)
     check("tr/no-match-placeholders",
@@ -430,7 +438,7 @@ def t_translator():
     te = TR.translate("op", Q.QuizAmbiguous(
         datetime(2026, 9, 14), datetime(2026, 9, 20),
         [("Quiz A", 1, "2026-09-15T05:00:00+00:00", "assignment.due_at",
-          50.0)]))
+          50.0)], CHI))
     check("tr/ambiguous", te.mode_id == "quiz-resolution-ambiguous"
           and "Quiz A" in te.agent_message, te.mode_id)
     te = TR.translate("op", C.QueryArgumentsInvalid("blah"))
@@ -466,7 +474,7 @@ def t_translator():
               "arguments were not valid" in e.translated.agent_message)
     try:
         C.run_query("89585", "last_week", reader=FakeReader([], []), now_utc=NOW,
-                    tenant_base=_TEST_TENANT)
+                    tenant_base=_TEST_TENANT, timezone=CHI)
         check("tr/chainfailure-no-match", False, "no raise")
     except C.ChainFailure as e:
         check("tr/chainfailure-no-match",
@@ -480,7 +488,7 @@ def t_translator():
 
     try:
         C.run_query("89585", "last_week", reader=_BoomReader([], []), now_utc=NOW,
-                    tenant_base=_TEST_TENANT)
+                    tenant_base=_TEST_TENANT, timezone=CHI)
         check("tr/chainfailure-read-error", False, "no raise")
     except C.ChainFailure as e:
         check("tr/chainfailure-read-error",
@@ -532,7 +540,7 @@ def t_end_to_end():
         [_assign(11, "2026-09-16T05:00:00Z")])
     res = C.run_query(
         "89585", "last_week", reader=r, now_utc=NOW, synthetic_rows=_SYNTH,
-        tenant_base=_TEST_TENANT)
+        tenant_base=_TEST_TENANT, timezone=CHI)
     txt = res.text
     check("e2e/synthetic-banner", txt.startswith("*** SYNTHETIC"),
           txt[:60])

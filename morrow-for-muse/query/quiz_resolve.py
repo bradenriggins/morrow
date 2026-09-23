@@ -3,8 +3,11 @@
 
 "Last week's quiz" semantics (exact, documented, tested):
 
-- The educator's timezone is America/Chicago. "Last week" is the ISO
-  calendar week (Monday 00:00 through Sunday 23:59:59) immediately
+- Weeks are the educator's weeks: the chain passes the educator's
+  time zone (query/chain.py: the --timezone argument, the `timezone`
+  setting, the course's time zone in Canvas, or the educator's Canvas
+  profile; never a hardcoded zone). "Last week" is the ISO calendar
+  week (Monday 00:00 through Sunday 23:59:59 in that zone) immediately
   before the week containing "now".
 - A quiz is a candidate for that week when its EFFECTIVE DATE falls
   inside the window. Effective date, with provenance, is the first
@@ -49,20 +52,20 @@ from zoneinfo import ZoneInfo
 # live_read imports nothing from this module, so there is no cycle.
 from query.live_read import LiveReadError
 
-_CHICAGO_TZ = ZoneInfo("America/Chicago")
-CHICAGO = "America/Chicago"
+def zone(tz):
+    """A ZoneInfo for an IANA name (or a ZoneInfo, returned as is)."""
+    return tz if isinstance(tz, ZoneInfo) else ZoneInfo(str(tz))
 
-# America/Chicago: CST is UTC-6, CDT is UTC-5. DST 2026: Mar 8 - Nov 1.
-# Computed rather than hardcoded so the semantics stay exact year-round.
-def chicago_ymd(dt_utc):
-    """Render an aware-UTC datetime as an America/Chicago calendar date.
+
+def local_ymd(dt_utc, tz):
+    """Render an aware-UTC datetime as a calendar date in tz.
 
     Used for educator-facing window strings: the window is defined in
-    Chicago time, so "2026-09-20 23:59 Chicago" must not render as
+    the educator's zone, so "2026-09-20 23:59" there must not render as
     2026-09-21 (its UTC date).
     """
     dt = dt_utc if dt_utc.tzinfo else dt_utc.replace(tzinfo=timezone.utc)
-    return dt.astimezone(_CHICAGO_TZ).date().isoformat()
+    return dt.astimezone(zone(tz)).date().isoformat()
 
 
 class QuizResolutionError(Exception):
@@ -84,11 +87,11 @@ class QuizNotFound(QuizResolutionError):
     """No quiz matched the reference window; carries context, not a pick."""
 
     def __init__(self, window_start, window_end, scanned, undated,
-                 unpublished, nearest, query="last week's quiz"):
+                 unpublished, nearest, tz, query="last week's quiz"):
         super().__init__(
             "no quiz has an effective date inside %s..%s (%d quizzes "
             "scanned, %d undated, %d unpublished)" % (
-                chicago_ymd(window_start), chicago_ymd(window_end),
+                local_ymd(window_start, tz), local_ymd(window_end, tz),
                 scanned, undated, unpublished),
             query=query,
             evidence={
@@ -97,8 +100,8 @@ class QuizNotFound(QuizResolutionError):
                 "candidates_examined": scanned,
                 "undated": undated,
                 "unpublished": unpublished,
-                "window_start": chicago_ymd(window_start),
-                "window_end": chicago_ymd(window_end),
+                "window_start": local_ymd(window_start, tz),
+                "window_end": local_ymd(window_end, tz),
                 "nearest_public": "; ".join(
                     "%s (id %s, %s via %s)" % (t, i, eff, f)
                     for t, i, eff, f in nearest) or "(no dated quizzes)",
@@ -114,19 +117,19 @@ class QuizNotFound(QuizResolutionError):
 class QuizAmbiguous(QuizResolutionError):
     """Multiple quizzes matched; the educator must pick, never the chain."""
 
-    def __init__(self, window_start, window_end, candidates,
+    def __init__(self, window_start, window_end, candidates, tz,
                  query="last week's quiz"):
         super().__init__(
             "%d quizzes have an effective date inside %s..%s; refusing "
             "to pick one silently" % (
-                len(candidates), chicago_ymd(window_start),
-                chicago_ymd(window_end)),
+                len(candidates), local_ymd(window_start, tz),
+                local_ymd(window_end, tz)),
             query=query,
             evidence={
                 "query": query,
                 "match_count": len(candidates),
-                "window_start": chicago_ymd(window_start),
-                "window_end": chicago_ymd(window_end),
+                "window_start": local_ymd(window_start, tz),
+                "window_end": local_ymd(window_end, tz),
                 "candidates_public": "; ".join(
                     "%s (id %s, effective %s via %s, %s points)" % (
                         t, i, eff, f,
@@ -163,25 +166,36 @@ def parse_canvas_dt(value):
         return None
 
 
-def last_week_window(now_utc=None):
-    """Return (window_start, window_end) datetimes in UTC for last week.
-
-    Last week = the ISO Monday-Sunday week before the week containing
-    now, in America/Chicago.
-    """
+def _monday_midnight(tz, now_utc):
+    """Midnight on Monday of the week containing now_utc, in tz, as a
+    UTC datetime (stdlib zoneinfo: exact across DST changes)."""
     now_utc = now_utc or datetime.now(timezone.utc)
     if now_utc.tzinfo is None:
         now_utc = now_utc.replace(tzinfo=timezone.utc)
-    # stdlib zoneinfo: exact across DST transitions (no hand-rolled
-    # DST arithmetic). Midnight Chicago always exists (transitions
-    # happen at 02:00), so these local midnights are unambiguous.
-    local = now_utc.astimezone(_CHICAGO_TZ)
-    monday_this = (local - timedelta(days=local.weekday())).replace(
-        hour=0, minute=0, second=0, microsecond=0)
-    start_local = monday_this - timedelta(days=7)
-    end_local = monday_this - timedelta(microseconds=1)
-    return (start_local.astimezone(timezone.utc),
-            end_local.astimezone(timezone.utc))
+    tzinfo = zone(tz)
+    local = now_utc.astimezone(tzinfo)
+    monday = local.date() - timedelta(days=local.weekday())
+    return datetime(monday.year, monday.month, monday.day,
+                    tzinfo=tzinfo).astimezone(timezone.utc)
+
+
+def _week_start(tz, monday_utc, weeks):
+    """Midnight on the Monday `weeks` weeks from monday_utc, in tz."""
+    tzinfo = zone(tz)
+    day = monday_utc.astimezone(tzinfo).date() + timedelta(weeks=weeks)
+    return datetime(day.year, day.month, day.day,
+                    tzinfo=tzinfo).astimezone(timezone.utc)
+
+
+def last_week_window(tz, now_utc=None):
+    """Return (window_start, window_end) datetimes in UTC for last week.
+
+    Last week = the ISO Monday-Sunday week before the week containing
+    now, in the educator's zone tz (an IANA name or a ZoneInfo).
+    """
+    this_monday = _monday_midnight(tz, now_utc)
+    return (_week_start(tz, this_monday, -1),
+            this_monday - timedelta(microseconds=1))
 
 
 def effective_date(quiz, assignment):
@@ -207,38 +221,34 @@ def effective_date(quiz, assignment):
     return None, None
 
 
-def resolve(reader, course_id, quiz_ref, now_utc=None):
+def resolve(reader, course_id, quiz_ref, tz, now_utc=None):
     """Resolve a parsed quiz reference to one (quiz, assignment, ctx).
 
     reader: object with get_paginated(path) -> (status, rows, note)
             and get_json(path) -> dict.
+    tz: the educator's time zone (an IANA name or a ZoneInfo).
     Returns (quiz_record, assignment_record_or_None, context_dict).
     Raises QuizNotFound, QuizAmbiguous, UnsupportedQuizRef,
     or the reader's own errors (session death, HTTP failures).
     """
     kind = quiz_ref.get("kind")
     if kind == "last_week":
-        return _resolve_week(reader, course_id, "last_week", now_utc)
+        return _resolve_week(reader, course_id, "last_week", tz, now_utc)
     if kind == "this_week":
-        return _resolve_week(reader, course_id, "this_week", now_utc)
+        return _resolve_week(reader, course_id, "this_week", tz, now_utc)
     raise UnsupportedQuizRef(kind)
 
 
-def _this_week_window(now_utc):
-    now_utc = now_utc or datetime.now(timezone.utc)
-    if now_utc.tzinfo is None:
-        now_utc = now_utc.replace(tzinfo=timezone.utc)
-    local = now_utc.astimezone(_CHICAGO_TZ)
-    monday = (local - timedelta(days=local.weekday())).replace(
-        hour=0, minute=0, second=0, microsecond=0)
-    end_local = monday + timedelta(days=7) - timedelta(microseconds=1)
-    return (monday.astimezone(timezone.utc),
-            end_local.astimezone(timezone.utc))
+def this_week_window(tz, now_utc=None):
+    """(window_start, window_end) in UTC for the week containing now,
+    Monday through Sunday in the educator's zone tz."""
+    monday = _monday_midnight(tz, now_utc)
+    return monday, _week_start(tz, monday, 1) - timedelta(microseconds=1)
 
 
-def _resolve_week(reader, course_id, which, now_utc):
-    window = last_week_window(now_utc) if which == "last_week" \
-        else _this_week_window(now_utc)
+def _resolve_week(reader, course_id, which, tz, now_utc):
+    window = last_week_window(tz, now_utc) if which == "last_week" \
+        else this_week_window(tz, now_utc)
     start, end = window
     status, quizzes, note = reader.get_paginated(
         "/api/v1/courses/%s/quizzes?per_page=100" % course_id)
@@ -348,7 +358,7 @@ def _resolve_week(reader, course_id, which, now_utc):
         nearest = [(t, i, eff.isoformat(), f)
                    for eff, t, i, f in dated_all[:5]]
         err = QuizNotFound(start, end, scanned, undated, unpublished,
-                           nearest, query="%s's quiz" % which.replace(
+                           nearest, tz, query="%s's quiz" % which.replace(
                                "_", " "))
         err.new_quizzes_skipped = nq_skipped
         raise err
@@ -356,7 +366,7 @@ def _resolve_week(reader, course_id, which, now_utc):
               (a or {}).get("points_possible"))
              for eff, t, i, f, _q, a in
              sorted(candidates, key=lambda r: r[0])]
-    err = QuizAmbiguous(start, end, shown,
+    err = QuizAmbiguous(start, end, shown, tz,
                         query="%s's quiz" % which.replace("_", " "))
     err.new_quizzes_skipped = nq_skipped
     raise err

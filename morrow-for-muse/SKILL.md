@@ -492,9 +492,14 @@ both modes.
   `--below-points N`, or `--letter-f` when the educator named a
   threshold. You choose the arguments from what the educator said; if
   they mean a quiz that is not last week's or this week's, ask which
-  quiz first. Names in the result are de-identified (a student the
-  educator named in this conversation shows by that name next to the
-  label).
+  quiz first. Weeks are the educator's weeks: the query uses their
+  `timezone` setting (pass `--user-id`), else the course's time zone in
+  Canvas, else their Canvas profile's. When the educator names a time
+  zone, pass `--timezone <IANA name>`. If none is known the query asks
+  for it (mode `query-timezone-unknown`): save their answer with
+  `morrow settings set timezone <name>` and run it again. Names in the
+  result are de-identified (a student the educator named in this
+  conversation shows by that name next to the label).
 - Every dispatch must carry the educator's identity for the mode gate:
   pass `--user-id` and `--conversation-id` to `dispatch/executor.py`
   (or set `MORROW_USER_ID` and `MORROW_CONVERSATION_ID`). Without a

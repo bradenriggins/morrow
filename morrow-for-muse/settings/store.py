@@ -177,7 +177,7 @@ def _timezone_validator(value):
     if not isinstance(value, str):
         raise SettingsValidationError("must be a string, got %r" % (value,))
     if value == "":
-        return  # unset: the agent asks or falls back to the course default
+        return  # unset: the course or Canvas profile zone applies
     try:
         from zoneinfo import available_timezones
         zones = available_timezones()
@@ -294,8 +294,9 @@ SETTINGS_SCHEMA = {
         "description": (
             "Your timezone for date math ('last week's quiz', due-date "
             "windows). An IANA name like 'America/Denver'; empty means "
-            "unset, and the agent asks or falls back to the course "
-            "default."),
+            "unset: Morrow then uses the course's time zone in Canvas, "
+            "then your Canvas profile's, and asks you when neither is "
+            "set."),
     },
     "confirm_bulk_actions": {
         "default": True,

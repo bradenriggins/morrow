@@ -10,8 +10,9 @@ Links:
      window is "last_week" or "this_week", and the threshold is one of
      below_percent (0-100), below_points (>= 0), or letter_f.
   2. quiz_resolve.resolve: the quiz window -> exactly one quiz, with
-     exact week/effective-date semantics; zero or multiple matches
-     raise instead of silently picking.
+     exact week/effective-date semantics in the educator's time zone
+     (educator_zone); zero or multiple matches raise instead of
+     silently picking.
   3. submissions fetch: paginated GET
      /api/v1/courses/{id}/assignments/{aid}/submissions with
      include[]=user, following Link rel="next" (never a silent
@@ -63,6 +64,58 @@ class ChainFailure(Exception):
     def __init__(self, translated):
         super().__init__(translated.mode_id)
         self.translated = translated
+
+
+class TimezoneUnknown(Exception):
+    """No time zone is known for the educator, so "last week" has no
+    edges. Never guessed: the query asks for the educator's zone."""
+
+
+def _named_zone(name, source):
+    try:
+        return _qr.zone(name), name, source
+    except Exception:
+        return None
+
+
+def _catalog_not_proven():
+    from dispatch import executor as _ex
+    return _ex.CatalogNotProven
+
+
+def educator_zone(user_id, reader, course_id):
+    """(ZoneInfo, name, source) for "last week" and "this week" when
+    the educator named no zone: the educator's `timezone` setting, the
+    course's time zone in Canvas, then the educator's Canvas profile.
+    Raises TimezoneUnknown when none is set; never falls back to a
+    fixed zone."""
+    uid = user_id or os.environ.get("MORROW_USER_ID")
+    if uid:
+        try:
+            from settings import store as _settings
+            name = _settings.get_setting(uid, "timezone")
+        except Exception:
+            name = ""
+        found = _named_zone(name, "your timezone setting") if name else None
+        if found:
+            return found
+    for path, source in (("/api/v1/courses/%s" % course_id,
+                          "the course's time zone in Canvas"),
+                         ("/api/v1/users/self",
+                          "your Canvas profile's time zone")):
+        try:
+            doc = reader.get_json(path)
+        except (_live_read.LiveReadError, _catalog_not_proven()):
+            continue
+        name = (doc or {}).get("time_zone") if isinstance(doc, dict) \
+            else None
+        found = _named_zone(name, source) \
+            if isinstance(name, str) and name.strip() else None
+        if found:
+            return found
+    raise TimezoneUnknown(
+        "no time zone is set for the educator: not in the timezone "
+        "setting, the course, or the Canvas profile")
 
 
 class SessionMissing(Exception):
@@ -223,11 +276,15 @@ def _translate(operation, exc):
 
 def run_query(course_id, quiz, below_percent=None, below_points=None,
               letter_f=False, reader=None, tenant_base=None,
-              now_utc=None, synthetic_rows=None, progress=None):
+              now_utc=None, synthetic_rows=None, progress=None,
+              timezone=None, user_id=None):
     """Run the full chain.
 
     course_id: Canvas course id.
     quiz: the quiz window, "last_week" or "this_week".
+    timezone: the educator's IANA time zone when they named one; else
+        user_id's `timezone` setting (user_id defaults to
+        MORROW_USER_ID), the course's zone, or the Canvas profile's.
     below_percent / below_points / letter_f: at most one explicit fail
         threshold; none means the assignment's own default.
     reader: a LiveReader (default: create and health-check one).
@@ -266,6 +323,13 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                 quiz, below_percent, below_points, letter_f)
         except QueryArgumentsInvalid as exc:
             raise _translate(operation, exc)
+        named_zone = None
+        if timezone is not None:
+            named_zone = _named_zone(timezone, "the time zone you named")
+            if named_zone is None:
+                raise _translate(operation, QueryArgumentsInvalid(
+                    "timezone must be an IANA name like America/Denver, "
+                    "got %r" % (timezone,)))
         parsed = {"quiz_ref": quiz_ref, "threshold": threshold}
         _prog("arguments_checked", str(quiz_ref))
 
@@ -299,8 +363,13 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                                "CANVAS_BASE in helper/env"))
 
         try:
+            tz, tz_name, _tz_source = named_zone or educator_zone(
+                user_id, reader, course_id)
+        except TimezoneUnknown as exc:
+            raise _translate(operation, exc)
+        try:
             quiz, assignment, ctx = _qr.resolve(
-                reader, course_id, parsed["quiz_ref"], now_utc=now_utc)
+                reader, course_id, parsed["quiz_ref"], tz, now_utc=now_utc)
         except (_qr.QuizNotFound, _qr.QuizAmbiguous,
                 _qr.UnsupportedQuizRef) as exc:
             raise _translate(operation, exc)
@@ -419,8 +488,9 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
         report = {
             "quiz_title": quiz.get("title"),
             "quiz_id": quiz.get("id"),
-            "window": "%s..%s (America/Chicago)" % (
-                _qr.chicago_ymd(win_start), _qr.chicago_ymd(win_end)),
+            "window": "%s..%s (%s)" % (
+                _qr.local_ymd(win_start, tz), _qr.local_ymd(win_end, tz),
+                tz_name),
             "effective_date": eff.isoformat() if eff else "unknown",
             "effective_field": eff_field or "none",
             "threshold_source": threshold_source,
@@ -476,6 +546,14 @@ def main(argv):
     ap.add_argument("--canvas-base", default=None,
                     help="Canvas origin (default: CANVAS_BASE from the "
                          "environment, then this tree's helper/env)")
+    ap.add_argument("--timezone", default=None,
+                    help="the educator's IANA time zone when they named "
+                         "one (default: their timezone setting, then the "
+                         "course's zone in Canvas, then their Canvas "
+                         "profile)")
+    ap.add_argument("--user-id", default=os.environ.get("MORROW_USER_ID"),
+                    help="the educator, for their timezone setting "
+                         "(default: MORROW_USER_ID)")
     ap.add_argument("--progress", action="store_true",
                     help="QOL-3: print chain progress lines to stderr as "
                          "each stage completes (stdout stays clean for "
@@ -494,7 +572,8 @@ def main(argv):
                            below_points=args.below_points,
                            letter_f=args.letter_f,
                            tenant_base=args.canvas_base,
-                           progress=progress)
+                           progress=progress, timezone=args.timezone,
+                           user_id=args.user_id)
     except ChainFailure as exc:
         # TranslatedError is a dataclass, not an exception: the
         # raisable carrier is ChainFailure, which wraps the
