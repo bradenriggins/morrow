@@ -295,6 +295,8 @@ Installing and the docs:
 - The shipped `transport/local_chromium_selftest.py` runs in the
   release: its allowlist check no longer opens a file the release
   leaves out.
+- Installing no longer leaves an empty test folder
+  (`helper/.selftest-warn-profile`) in the installed folder.
 
 Technical notes:
 
