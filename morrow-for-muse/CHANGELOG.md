@@ -109,6 +109,9 @@ Changes to your courses:
 - A course page whose title starts with "Login" (for example "Login
   Help") can be read and changed. Morrow took it for Canvas's sign-in
   page, paused every change, and said your Canvas connection expired.
+  The same happened to a page, quiz question, or post that shows the
+  field names of Canvas's sign-in form. It can be read and changed
+  now too.
 - The approval names what a change touches by its title, for example
   Delete the assignment "Week 3 Quiz", never only by its number.
   Morrow reads the page, assignment, module, quiz, discussion, or item

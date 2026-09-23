@@ -900,8 +900,8 @@ def _t_api_js_origin_scoped():
 def _t_api_js_no_token_echo():
     # The session rides first-party cookies (no Authorization header is
     # ever set), and the returned envelope is a fixed key allowlist:
-    # {status, url, body, link, retryAfter, truncated, redirected,
-    #  csrf_missing}. The csrf_missing boolean is the only signal that
+    # {status, url, body, link, retryAfter, contentType, truncated,
+    #  redirected, csrf_missing}. The csrf_missing boolean is the only signal that
     # may cross back about the token (W4-CSRF fail-closed); the token
     # value itself never does. Request headers and document.cookie
     # must never cross back.
@@ -915,7 +915,8 @@ def _t_api_js_no_token_echo():
         envelope = js[finals[-1]:finals[-1] + 300]
         keys = set(re.findall(r"(\w+)\s*:", envelope))
         assert keys <= {"status", "url", "body", "link", "retryAfter",
-                        "truncated", "redirected", "csrf_missing"}, keys
+                        "contentType", "truncated", "redirected",
+                        "csrf_missing"}, keys
         assert "headers" not in keys and "cookie" not in keys
     check("api-js-no-token-echo", _run)
 
@@ -1681,6 +1682,10 @@ def _t_looks_like_login_page():
             "</body></html>")
         assert not lc._looks_like_login_page('{"courses": []}')
         assert not lc._looks_like_login_page('{"message": "login ok"}')
+        # API data that shows the sign-in form's field names is data.
+        assert not lc._looks_like_login_page(
+            '{"body": "<code>pseudonym_session[unique_id]</code>"}',
+            "text/html")
     check("looks-like-login-page", _run)
 
 

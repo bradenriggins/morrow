@@ -642,26 +642,38 @@ def _is_unauthenticated(body):
         str(doc.get("status") or "").lower() == "unauthenticated"
 
 
-def _looks_like_login_page(body):
+def _parses_as_json(text):
+    try:
+        json.loads(text)
+    except ValueError:
+        return False
+    return True
+
+
+def _looks_like_login_page(body, content_type=None):
     """True when body is an HTML login page, even with HTTP 200.
 
     W2-P0-10: the old check only caught redirects and /login in the
     final URL; an IdP that serves the login form with status 200 passed
-    silently as valid API data. Markers are deliberately HTML-shaped so
-    a JSON API body that merely mentions "login" is never flagged:
+    silently as valid API data. Markers count only in an HTML document
+    (a doctype or <html> open tag, or a text/html answer that is not
+    JSON). API data is JSON, and a course page, quiz question, or post
+    in it can show the sign-in form's markup, so a JSON body is never a
+    sign-in page. In the document:
     - Canvas's login-form field namespace (pseudonym_session), or
-    - an HTML document (doctype / <html> open tag) containing a
-      password field, or a login/sign-in <title>.
+    - a password field, or a login/sign-in <title>.
     """
     if not isinstance(body, str) or not body:
         return False
     lowered = body[:8192].lower()
-    if "pseudonym_session" in lowered:
-        return True
-    stripped = lowered.lstrip()
+    stripped = lowered.lstrip("\ufeff \t\r\n")
     if not (stripped.startswith("<!doctype html")
             or stripped.startswith("<html")):
-        return False
+        if "text/html" not in str(content_type or "").lower() \
+                or _parses_as_json(body):
+            return False
+    if "pseudonym_session" in lowered:
+        return True
     if 'type="password"' in lowered or "type='password'" in lowered:
         return True
     title = re.search(r"<title[^>]*>(.*?)</title>", lowered, re.DOTALL)
@@ -2249,8 +2261,10 @@ _API_JS = r"""(async () => {
     let truncated = false;
     let link = null;
     let retryAfter = null;
+    let contentType = null;
     try { link = r.headers.get('link'); } catch (e) { link = null; }
     try { retryAfter = r.headers.get('retry-after'); } catch (e) { retryAfter = null; }
+    try { contentType = r.headers.get('content-type'); } catch (e) { contentType = null; }
     const reader = r.body ? r.body.getReader() : null;
     if (reader) {
       try {
@@ -2283,8 +2297,8 @@ _API_JS = r"""(async () => {
       text = new TextDecoder("utf-8", {fatal: false}).decode(bodyBytes);
     }
     return {status: r.status, url: r.url, body: text, link: link,
-            retryAfter: retryAfter, truncated: truncated,
-            redirected: false};
+            retryAfter: retryAfter, contentType: contentType,
+            truncated: truncated, redirected: false};
   };
   let res = await attempt();
   return JSON.stringify(res);
@@ -2499,7 +2513,8 @@ class LocalChromiumTransport:
         # /login in the final URL) is a dead session too. Detect
         # login-page markers in the body and raise loudly instead of
         # returning the HTML as if it were valid API data.
-        if _looks_like_login_page(resp.get("body")):
+        if _looks_like_login_page(resp.get("body"),
+                                  resp.get("contentType")):
             raise SessionDead(
                 "Canvas served a login page (HTTP %s) for the API call; "
                 "the browser session is dead (sign in again through the "
