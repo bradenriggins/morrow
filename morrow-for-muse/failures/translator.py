@@ -556,29 +556,28 @@ def _yes_no(value):
 
 
 def _known_facts(evidence: dict) -> str:
-    """The facts the evidence carries, for the structured fallback. A
-    fact the evidence does not carry is left out, never printed as
-    unknown."""
+    """The facts the evidence carries, for the structured fallback, in
+    the educator's words. A fact the evidence does not carry is left
+    out, never printed as unknown; the exception class stays in the
+    labeled engineering detail."""
     facts = []
     if evidence.get("http_status") is not None:
-        facts.append("the provider answered with status %s"
+        facts.append("the service answered with code %s"
                      % evidence["http_status"])
     request_id = evidence.get("request_id") \
         or evidence.get("x_request_context_id")
     if request_id:
-        facts.append("request id %s" % request_id)
+        facts.append("request number %s" % request_id)
     for key, label in (("session_logged_in", "signed in"),
-                       ("chromium_alive", "browser running"),
+                       ("chromium_alive", "helper browser running"),
                        ("write_halt_active", "changes paused")):
         if evidence.get(key) is not None:
             facts.append("%s: %s" % (label, _yes_no(evidence[key])))
     if evidence.get("attempt_count") is not None:
         facts.append("%s attempts" % evidence["attempt_count"])
     if evidence.get("op_id"):
-        facts.append("journal operation %s" % evidence["op_id"])
-    facts.append("error type %s" % (evidence.get("error_class")
-                                    or "not captured"))
-    return "; ".join(facts)
+        facts.append("change record %s" % evidence["op_id"])
+    return "; ".join(facts) or "nothing Morrow could name"
 
 
 def _sentence(text):

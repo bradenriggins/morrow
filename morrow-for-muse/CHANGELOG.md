@@ -135,6 +135,12 @@ Messages:
   was sent.
 - A change refused before it was sent no longer stays listed as
   unfinished.
+- Messages about a problem use plain words and promise only what
+  Morrow does. When Canvas refuses a change, you are told that nothing
+  changed and that the assistant can prepare it again when you say so;
+  Morrow never sends it again on its own. When a request needs student
+  records and the package that hides student names is missing, the
+  message names the command that installs it.
 
 Installing and the docs:
 

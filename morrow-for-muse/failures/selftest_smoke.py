@@ -15,8 +15,9 @@ newer workstream modes + 2 query-chain read/ref-resolution modes + 6 dispatch-ou
 + 2 signed-in-account modes + 1 validation-refusal mode + 1
 session-expiry halt mode + 1 saved-task-not-pinned mode + 1
 local-input-refusal mode + 1 never-dispatch mode + 1
-course-roster mode),
-at failures/catalog.json.
+course-roster mode), less the 14 modes retired on 2026-09-23 for lanes
+that do not ship (Moodle, the raw HTTPS lane's access token, the form
+and browser-task lanes): 79 entries at failures/catalog.json.
 """
 import os as _home_os, sys as _home_sys  # noqa: E401
 _home_sys.path.insert(0, _home_os.path.join(
@@ -44,8 +45,8 @@ def _check(cond, reason):
 
 def main():
     catalog = load_catalog()
-    _check(len(catalog.entries) == 93,
-           "expected 93 merged entries, got %d" % len(catalog.entries))
+    _check(len(catalog.entries) == 79,
+           "expected 79 merged entries, got %d" % len(catalog.entries))
     _check(catalog.by_id["unknown"].get("fallback") is True,
            "unknown entry must be the fallback")
 
@@ -91,10 +92,6 @@ def main():
          {"provider": "item-banks", "provider_served": False,
           "capability": "ib.random_cap"}),
         ("write-halt-active", {"write_halt_active": True}),
-        ("moodle-route-changed",
-         {"provider": "moodle", "moodle_route_shape": "dead",
-          "route_path": "core_grades_delete_grades"}),
-        ("browser-task-dead", {"task_state": "died"}),
         # Workstream C: mode-system admission refusals (exception class
         # route and dict route both reach the new modes).
         ("edit_self_grant_refused",

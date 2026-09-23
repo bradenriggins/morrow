@@ -205,16 +205,19 @@ def test_helper_down_recovery_works_without_cron():
     """Final muse audit L2: the helper-down failure mode told the agent
     supervision is cron-based and to run keepalive.sh only. On a
     machine without cron, `bin/morrow start` is what brings the
-    supervision back, so the recovery must name it."""
+    supervision back, so the recovery must name it. The educator's
+    message names no supervision detail at all (final sweep
+    2026-09-23: plain words only)."""
     with open(os.path.join(TREE, "failures", "catalog.json"),
               encoding="utf-8") as fh:
         catalog = json.load(fh)
     mode = [e for e in catalog["entries"] if e["id"] == "helper-down"][0]
     assert "bin/morrow start" in mode["auto_action"]
     assert "helper/keepalive.sh" in mode["auto_action"]
-    for field in ("root_cause", "agent_message"):
-        assert "cron-based" not in mode[field], field
-        assert "background loop" in mode[field], field
+    assert "cron-based" not in mode["root_cause"]
+    assert "background loop" in mode["root_cause"]
+    assert "cron" not in mode["agent_message"]
+    assert "start the helper again" in mode["agent_message"]
 
 
 def _tree_state_dir(tree):
