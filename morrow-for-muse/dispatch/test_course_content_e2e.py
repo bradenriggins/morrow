@@ -444,6 +444,9 @@ class SisCanvas(Canvas):
     (SHOW, {"course_id": SIS, "url_or_id": "week-1"}),
     (("canvas_get_single_course_courses", "GET", "/api/v1/courses/{id}"),
      {"id": SIS}),
+    # A leading zero reaches course 1 in Canvas but scopes labels apart
+    # from "1", as students find does not accept it.
+    (SHOW, {"course_id": "01", "url_or_id": "week-1"}),
 ])
 def test_a_course_given_by_its_sis_code_is_refused_before_any_call(op,
                                                                    params):

@@ -46,7 +46,9 @@ Student privacy:
   your Canvas sign-in and the course pages Morrow loads.
 - Privacy fix: a course given by its SIS code (for example
   `sis_course_id:BIO101`) skipped the step that hides student names, so
-  a page's names, emails, and logins reached the assistant. Morrow now
+  a page's names, emails, and logins reached the assistant. Looking up
+  a student by name in such a course gave a label that could name a
+  different student in the same course given by its number. Morrow now
   refuses such a course before it reads anything, and the assistant
   asks for the course by name or by the number in its Canvas address.
 
@@ -162,6 +164,9 @@ Messages:
   applied and promised an engineering follow-up.
 - A failure Morrow cannot classify no longer promises a follow-up that
   never comes. It gives the support address instead.
+- When the helper is not running, looking up a student by name says so
+  and that your Canvas sign-in is not affected. It told the assistant
+  to have you sign in again.
 - When changes are paused because your Canvas sign-in expired, you
   are told to sign in again on the helper page. This also happens when
   the sign-in expires just as Morrow starts work in a course. While

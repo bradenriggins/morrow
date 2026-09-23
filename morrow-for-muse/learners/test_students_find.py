@@ -26,6 +26,16 @@ audit round 4, H3a/H3b, 2026-09-22):
      for "Jane", including the vault ciphertext, a random run of
      base64url that holds "Jane" by chance with no leak. A stored name
      stands as its own word; the check matches it that way.
+ 11. A course given as anything but its Canvas number (the SIS form
+     "sis_course_id:BIO101", a path like "1/../2") got labels in a
+     scope of its own. The same label, used in the course by number,
+     named a different student. Such a course is refused before any
+     read, as the executor and the query refuse it.
+ 12. Errors skipped the failure funnel: they carried Python class names
+     and no reference, and a stopped helper told the agent to sign the
+     educator in again. Every error now carries a mode and a reference
+     and names the real remedy: helper-down, the roster read failed,
+     or the learner vault is missing.
 
 Needs the optional 'cryptography' package (labels come from the
 encrypted vault); skips without it except the routing test.
@@ -320,3 +330,156 @@ def test_bin_morrow_routes_students_find(monkeypatch):
                             "argv", argv) and 0)
     cli.main(["students", "find", "--course", "1", "Jane Doe"])
     assert seen["argv"] == ["--course", "1", "Jane Doe"]
+
+
+# ------------------------------------------- course numbers and errors --
+
+def _journal_lookups_or_none():
+    from dispatch import executor as ex
+    if not os.path.exists(ex.JOURNAL_PATH):
+        return []
+    return _lookups()
+
+
+@pytest.mark.parametrize("course", ["sis_course_id:BIO101", "1/../2",
+                                    "101?per_page=1", "0101", "", "abc"])
+def test_course_must_be_given_by_its_canvas_number(home, course):
+    from learners import find
+    fetch = fake_canvas()
+    out = find.find_student(fetch, BASE, course, "Jane Doe",
+                            conversation_id=CONV)
+    assert out["ok"] is False and out["status"] == "refused", out
+    assert out["mode_id"] == "query-course-id-invalid", out
+    assert out["correlation_id"]
+    assert "canvas_list_courses" in out["next_step"], out
+    assert "student" not in out
+    # Nothing was read, so no label was issued in any scope.
+    assert fetch.calls == []
+    assert _journal_lookups_or_none() == []
+
+
+def test_cli_refuses_a_sis_course_before_the_helper(home, capsys,
+                                                    monkeypatch):
+    from learners import find
+    from learners import resolve_student as rs
+
+    def _no_helper(*_a, **_k):
+        raise AssertionError("the helper was reached for a bad course")
+    monkeypatch.setattr(rs, "helper_fetch_factory", _no_helper)
+    rc = find.main(["--course", "sis_course_id:BIO101", "--canvas-base",
+                    BASE, "Jane Doe"])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 1 and out["status"] == "refused", out
+
+
+_CLASS_NAME_RE = re.compile(r"\b[A-Za-z]*(?:Error|Exception|Unavailable)\b")
+
+
+def _funneled(out, mode_id):
+    assert out["ok"] is False and out["status"] == "error", out
+    assert out["mode_id"] == mode_id, out
+    assert re.fullmatch(r"[0-9a-f]{12}", out["correlation_id"]), out
+    assert out["correlation_id"] in out["message"], out
+    assert _CLASS_NAME_RE.findall(out["message"]) == [], out["message"]
+    assert "error" not in out
+    return out
+
+
+@pytest.fixture
+def helper_env(tmp_path, monkeypatch):
+    """helper/env and the tree state dir for the real helper client."""
+    def write(port):
+        env_file = tmp_path / "helper-env"
+        env_file.write_text("CANVAS_BASE=%s\nLOGIN_HELPER_PORT=%d\n"
+                            % (BASE, port))
+        env_file.chmod(0o600)
+        state = tmp_path / "tree-state"
+        state.mkdir(exist_ok=True)
+        (state / "helper_token").write_text("ab" * 32 + "\n")
+        for name in ("CANVAS_BASE", "LOGIN_HELPER_PORT",
+                     "LOGIN_HELPER_TLS_CERT", "LOGIN_HELPER_TLS_KEY"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("MORROW_HELPER_ENV_FILE", str(env_file))
+        monkeypatch.setenv("MORROW_TREE_STATE_DIR", str(state))
+    return write
+
+
+def test_helper_down_says_helper_down_not_sign_in(home, helper_env,
+                                                  capsys):
+    """The scenario: the helper process is down while the Canvas sign-in
+    is fine. A bound socket that never listens refuses the connection,
+    as a stopped helper does."""
+    import socket
+    from learners import find
+    closed = socket.socket()
+    closed.bind(("127.0.0.1", 0))
+    try:
+        helper_env(closed.getsockname()[1])
+        rc = find.main(["--course", "89585", "--conversation-id", "c1",
+                        "Jane Doe"])
+    finally:
+        closed.close()
+    out = _funneled(json.loads(capsys.readouterr().out), "helper-down")
+    assert rc == 1
+    assert "Sign the educator in" not in out["message"]
+    assert "not affected" in out["message"]
+    assert "keepalive" in out["next_step"]
+
+
+def test_signed_out_helper_asks_for_a_sign_in(home, helper_env, capsys):
+    import http.server
+    import threading
+    from learners import find
+
+    class _Helper(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            raw = json.dumps({"logged_in": False,
+                              "chromium_alive": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Helper)
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        helper_env(srv.server_address[1])
+        rc = find.main(["--course", "89585", "Jane Doe"])
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        thread.join()
+    _funneled(json.loads(capsys.readouterr().out), "canvas-session-dead")
+    assert rc == 1
+
+
+def test_roster_read_failure_is_a_live_read_failure(home):
+    def fetch(url):
+        return 500, {}, "<html>Internal error</html>"
+    out = _funneled(_find("Jane Doe", fetcher=fetch),
+                    "query-live-read-failed")
+    assert "not an empty class" in out["message"]
+
+
+def test_missing_vault_is_learner_data_gated(home, monkeypatch):
+    from privacy import core
+    monkeypatch.setattr(core, "AESGCM", None)
+    out = _funneled(_find("Jane Doe"), "learner-data-gated")
+    assert "requirements-optional.txt" in out["message"]
+    assert _no_secrets(out) == [], out
+
+
+def test_unrecorded_lookup_is_funneled(home, monkeypatch):
+    from learners import find
+
+    def _fail(*_a, **_k):
+        raise OSError("journal disk full")
+    monkeypatch.setattr(find, "_journal_lookup", _fail)
+    out = _find("Jane Doe")
+    assert out["ok"] is False and out["status"] == "error", out
+    assert out["correlation_id"] and "student" not in out
+    assert _CLASS_NAME_RE.findall(out["message"]) == [], out["message"]

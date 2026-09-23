@@ -2020,18 +2020,18 @@
     },
     {
       "id": "query-course-id-invalid",
-      "title": "Query course is not a Canvas course number (InvalidCourseId)",
+      "title": "Course is not a Canvas course number (InvalidCourseId)",
       "surface": "query",
       "severity_hint": "low",
-      "root_cause": "Verified mechanism: the failed-students chain puts the course id into Canvas request paths, so it accepts only a plain Canvas course number. Anything else (a path fragment, a query string, text, an empty value) is refused before any request is built.",
+      "root_cause": "Verified mechanism: the failed-students chain, the executor, and students find put the course id into Canvas request paths and number student labels per course, so they accept only a plain Canvas course number. Anything else (a SIS form such as sis_course_id:BIO101, a path fragment, a query string, text, an empty value) is refused before any request is built.",
       "is_not": "This is not a Canvas error and not a permissions problem: no request was sent.",
-      "agent_message": "What was attempted: I tried {operation}. What the evidence showed: the course I was given is not a Canvas course number, so I did not send any request. What this means: nothing was read and nothing in your course changed. What happens next: tell me the course by name, or by the number in its Canvas address (for example 12345 in /courses/12345), and I will run the query again.",
-      "auto_action": "Refuse before any read; ask the educator which course they mean.",
-      "escalate_when": "Never: the educator names the course and the query runs again.",
+      "agent_message": "What was attempted: I tried {operation}. What the evidence showed: the course I was given is not a Canvas course number, so I did not send any request. What this means: nothing was read and nothing in your course changed. What happens next: tell me the course by name, or by the number in its Canvas address (for example 12345 in /courses/12345), and I will try again.",
+      "auto_action": "Refuse before any read. Find the course by name (canvas_list_courses) and use the number in its Canvas address, or ask the educator which course they mean.",
+      "escalate_when": "Never: the course is named by its number and the step runs again.",
       "signature": {
         "error_class": "InvalidCourseId"
       },
-      "signature_notes": "exception: \"InvalidCourseId\" raised by query/chain.py before any read.",
+      "signature_notes": "exception: \"InvalidCourseId\" raised before any read by query/chain.py, dispatch/executor.py _require_numbered_course, and learners/find.py.",
       "placeholders": [
         "operation"
       ]

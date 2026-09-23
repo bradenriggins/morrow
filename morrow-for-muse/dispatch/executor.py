@@ -8121,7 +8121,7 @@ def _read_all_pages(session, url):
     return items
 
 
-_COURSE_NUMBER_RE = re.compile(r"[0-9]+")
+_COURSE_NUMBER_RE = re.compile(r"[1-9][0-9]*")
 
 
 def _require_numbered_course(entry, params):
@@ -8130,7 +8130,8 @@ def _require_numbered_course(entry, params):
     scope, and the course checks all know a course by its number. A SIS
     form (sis_course_id:BIO101) reaches the same course in Canvas but
     none of them, so the students named in its content would reach the
-    agent and the journal unlabeled."""
+    agent and the journal unlabeled. A leading zero ("0101") reaches
+    course 101 but scopes its labels apart from "101"."""
     course_id = _write_target_course_id(entry, params)
     if course_id is not None and not _COURSE_NUMBER_RE.fullmatch(
             str(course_id)):

@@ -728,6 +728,14 @@ def _cdp_capture_with_headers(cdp, tab, url, timeout=60):
             pass
 
 
+class HelperUnavailable(RuntimeError):
+    """The login helper did not answer /status: it is not running."""
+
+
+class HelperSignedOut(RuntimeError):
+    """The helper answered, but its Canvas session is signed out."""
+
+
 def helper_fetch_factory(canvas_base, timeout=60):
     """Build a fetcher(url) -> (status, headers, body) via the login helper.
 
@@ -757,9 +765,10 @@ def helper_fetch_factory(canvas_base, timeout=60):
     try:
         status_doc = helper_status(timeout=10)
     except Exception as exc:
-        raise RuntimeError("helper status unreachable: %s" % exc)
+        raise HelperUnavailable("helper status unreachable: %s" % exc)
     if not status_doc.get("logged_in"):
-        raise RuntimeError("helper reports logged_in:false; refusing fetch")
+        raise HelperSignedOut(
+            "helper reports logged_in:false; refusing fetch")
 
     launcher = ChromiumLauncher(
         default_binary(), tree_helper_profile_dir(),

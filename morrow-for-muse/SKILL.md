@@ -793,6 +793,10 @@ The educator names students; you never guess which one they mean.
 4. `status: not_found`: no student matched. Tell the educator, and ask
    them to check the spelling or say whether to include inactive or
    concluded enrollments (`--include-inactive`, `--include-concluded`).
+   `status: refused` or `error`: nothing was looked up. Relay
+   `message` and follow `next_step`; `correlation_id` is the reference.
+   `--course` takes only the course's Canvas number, never its SIS
+   form: find the course by name (canvas_list_courses) first.
 5. Write by label: put the label (or the `shown_as` form) where the
    operation takes a student, as a path parameter (`--params
    '{"user_id": "Student A3", ...}'`) or in the body (`--body

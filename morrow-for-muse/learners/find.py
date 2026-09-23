@@ -19,7 +19,9 @@ the educator did not type:
 
 Output is one JSON object: ok, status (resolved | confirm | not_found |
 refused | error), message, and student / shown_as / candidates as they
-apply. Read-only against Canvas: GET the course roster and sections.
+apply. A refusal or error comes from the failure funnel
+(failures/funnel.py) and carries its mode_id, correlation_id, and
+next_step. Read-only against Canvas: GET the course roster and sections.
 
 The roster is read through the login helper (helper_fetch_factory);
 tests inject a fetcher(url) -> (status, headers, body_text).
@@ -46,6 +48,64 @@ _LADDER = (rs.RUNG_USER_ID, rs.RUNG_SIS_USER_ID, rs.RUNG_LOGIN,
            rs.RUNG_NAME_FUZZY)
 _STATE_RANK = {"active": 0, "inactive": 1, "completed": 2}
 _LABEL_RE = re.compile(r"^Student A[1-9][0-9]*$")
+# Labels are numbered per course scope, so a course given another way
+# (sis_course_id:BIO101, 1/../2, 0101) gets labels that name different
+# students than the same numbers in the course by number. Only a plain
+# Canvas course number is accepted: the rule query/chain.py applies.
+_COURSE_NUMBER_RE = re.compile(r"[1-9][0-9]{0,15}")
+
+
+class InvalidCourseId(ValueError):
+    """The course is not given by its Canvas course number."""
+
+
+def _operation(course_id):
+    """What was attempted, in the educator's words, for the funnel."""
+    if _COURSE_NUMBER_RE.fullmatch(course_id):
+        return "looking up the student you named in course %s" % course_id
+    return "looking up the student you named"
+
+
+def _failure(status, course_id, raw_error):
+    """A refusal or error through the failure funnel: the translated
+    message, its mode and reference, and the next step. The exception
+    class stays out; raw text only in the labeled engineering detail."""
+    from failures.funnel import agent_error_payload
+    payload = agent_error_payload(_operation(course_id), raw_error)
+    out = {"ok": False, "status": status}
+    for key in ("message", "mode_id", "correlation_id", "next_step",
+                "escalate", "engineering_detail"):
+        out[key] = payload[key]
+    return out
+
+
+def _course_refusal(course_id):
+    """The refusal for a course not given by its number, else None.
+    Checked before any read."""
+    if _COURSE_NUMBER_RE.fullmatch(course_id):
+        return None
+    return _failure("refused", course_id, InvalidCourseId(
+        "the course is given as %r, not as its Canvas course number; find "
+        "the course by name (canvas_list_courses) and use the number in "
+        "its Canvas address. Nothing was looked up." % course_id[:80]))
+
+
+def _helper_failure(course_id, exc):
+    """The funnel's evidence for a login helper that could not be used:
+    a helper that is not running is helper-down (the sign-in is fine), a
+    signed-out session asks for a sign-in, anything else is a helper
+    browser Morrow could not reach."""
+    detail = str(exc)
+    if isinstance(exc, rs.HelperUnavailable):
+        evidence = {"error": "ExecutorError", "provider": "helper",
+                    "detail": "login helper endpoint is down: " + detail}
+    elif isinstance(exc, rs.HelperSignedOut):
+        evidence = {"error": "SessionDead", "provider": "helper",
+                    "session_dead_signal": True, "detail": detail}
+    else:
+        evidence = {"error": "HelperNotReached", "provider": "helper",
+                    "detail": detail}
+    return _failure("error", course_id, evidence)
 
 
 def _tokens(text):
@@ -188,23 +248,27 @@ def find_student(fetcher, tenant_base, course_id, query, *,
     """Resolve the name the educator typed to a course label (JSON dict).
 
     Every lookup that reads the roster is journaled (_journal_lookup);
-    when that record cannot be written, nothing is shown."""
-    out = _find_student(fetcher, tenant_base, course_id, query,
-                        conversation_id=conversation_id, choose=choose,
-                        section_id=section_id,
-                        include_inactive=include_inactive,
-                        include_concluded=include_concluded,
-                        include_test_student=include_test_student)
-    if out.get("status") in ("resolved", "confirm", "not_found", "refused"):
-        typed = rs._collapse_ws(query) if isinstance(query, str) else ""
-        try:
+    when that record cannot be written, nothing is shown. A course not
+    given by its Canvas number is refused before any read."""
+    course_id = str(course_id)
+    refusal = _course_refusal(course_id)
+    if refusal is not None:
+        return refusal
+    try:
+        out = _find_student(fetcher, tenant_base, course_id, query,
+                            conversation_id=conversation_id, choose=choose,
+                            section_id=section_id,
+                            include_inactive=include_inactive,
+                            include_concluded=include_concluded,
+                            include_test_student=include_test_student)
+        if out.get("status") in ("resolved", "confirm", "not_found",
+                                 "refused"):
+            typed = rs._collapse_ws(query) if isinstance(query, str) \
+                else ""
             _journal_lookup(tenant_base, course_id, conversation_id, typed,
                             out)
-        except Exception as exc:
-            return {"ok": False, "status": "error",
-                    "message": "The lookup could not be recorded in the "
-                               "journal (%s), so no student is shown."
-                               % type(exc).__name__}
+    except Exception as exc:
+        return _failure("error", course_id, exc)
     return out
 
 
@@ -212,29 +276,28 @@ def _find_student(fetcher, tenant_base, course_id, query, *,
                   conversation_id=None, choose=None, section_id=None,
                   include_inactive=False, include_concluded=False,
                   include_test_student=False):
-    course_id = str(course_id)
     try:
         rs.check_tenant_base(tenant_base)
-    except ValueError:
-        return {"ok": False, "status": "error",
-                "message": "The Canvas base is not an exact http(s) origin, "
-                           "so no student can be looked up."}
+    except ValueError as exc:
+        return _failure("error", course_id, {
+            "error": "CallerInputError", "detail": str(exc)})
+    from privacy import core as _privacy_core
+    if _privacy_core.AESGCM is None:
+        # Labels come from the encrypted learner vault: without it no
+        # label can be issued, so the roster is not read at all.
+        return _failure("error", course_id, {
+            "error": "LearnerDataGated",
+            "detail": "course labels need the encrypted learner vault, "
+                      "which needs the 'cryptography' package"})
     try:
         candidates, _ev = rs.fetch_course_candidates(fetcher, tenant_base,
                                                      course_id)
     except Exception as exc:
-        return {"ok": False, "status": "error",
-                "message": "The course roster could not be read (%s). "
-                           "Nothing was looked up." % type(exc).__name__}
-    try:
-        label_for = rs.vault_label_for(tenant_base, course_id, candidates) \
-            if candidates else (lambda uid: None)
-    except Exception as exc:
-        return {"ok": False, "status": "error",
-                "message": "No course label could be issued (%s), so no "
-                           "student is shown. Student data needs the "
-                           "encrypted learner vault (the optional "
-                           "'cryptography' package)." % type(exc).__name__}
+        return _failure("error", course_id, {
+            "error": "LiveReadError", "provider": "canvas",
+            "detail": "the course roster read failed: %s" % exc})
+    label_for = rs.vault_label_for(tenant_base, course_id, candidates) \
+        if candidates else (lambda uid: None)
     states = set(rs.ACTIVE_STATES)
     if include_inactive:
         states |= rs.INACTIVE_STATES
@@ -310,10 +373,17 @@ def main(argv=None, fetcher=None):
     if not args.canvas_base:
         from config import tree_config
         args.canvas_base = tree_config.canvas_base()
+    course_id = str(args.course)
+    refusal = _course_refusal(course_id)
+    if refusal is not None:
+        print(json.dumps(refusal, indent=1, sort_keys=True))
+        return 1
     if not args.canvas_base:
-        print(json.dumps({"ok": False, "status": "error",
-                          "message": "No Canvas base URL: set CANVAS_BASE "
-                                     "in helper/env."}))
+        print(json.dumps(_failure("error", course_id, {
+            "error": "SessionMissing",
+            "detail": "students find needs a Canvas base URL: set "
+                      "CANVAS_BASE in helper/env"}), indent=1,
+            sort_keys=True))
         return 2
     section_id = args.section_id
     if section_id is not None and section_id.isdigit():
@@ -323,13 +393,11 @@ def main(argv=None, fetcher=None):
         try:
             fetcher = rs.helper_fetch_factory(args.canvas_base)
         except Exception as exc:
-            print(json.dumps({
-                "ok": False, "status": "error",
-                "message": "The login helper is not ready (%s). Sign the "
-                           "educator in first." % type(exc).__name__}))
+            print(json.dumps(_helper_failure(course_id, exc), indent=1,
+                             sort_keys=True))
             return 1
     try:
-        out = find_student(fetcher, args.canvas_base, args.course,
+        out = find_student(fetcher, args.canvas_base, course_id,
                            " ".join(args.name),
                            conversation_id=args.conversation_id,
                            choose=args.choose, section_id=section_id,
