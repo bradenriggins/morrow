@@ -135,11 +135,13 @@ learner-data gated). Writes (C-139 create, C-141 delete, C-167
 update) carry live-proven marks from the retired canvas-batch form
 lane on 2026-09-20; C-238 (discussion date_details PUT 204) was
 proven through the 2026-09-21 Chromium write battery, not the form
-lane. SCOPE.md withholds all discussion writes from v1.
-Treat them as proven-mechanism-mixed: disclose the lane before
-touching, and announcement variants stay excluded (posting an
-announcement notifies enrolled users; a standing product exclusion). No
-discussion reads or writes touch learner identity.
+lane. SCOPE.md withholds all discussion writes from v1, and the
+admission policy holds all four (`evidence_holds`): dispatch refuses
+them on every lane. Announcements are never posted: any request that
+sets `is_announcement`, on any route, and creating an announcement
+external feed (C-25) are never-dispatch (posting an announcement
+notifies every student in the course; a standing product
+exclusion).
 
 Grades/submissions/gradebook: no live-proven grades or submissions
 rows (all pending or excluded). Learner-data gated. The admission

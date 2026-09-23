@@ -106,6 +106,11 @@ class BrowserFake:
                      "user_name": "Jane Doe",
                      "author": {"id": 98765, "display_name": "Jane Doe"}}
             return self._ok(topic)
+        if path == "/api/v1/courses/1/pages/week-1":
+            page = {"url": "week-1", "page_id": 7,
+                    "title": "Week 1 by Jane Doe (jane.doe@school.edu)",
+                    "body": "<p>Jane Doe will lead Friday.</p>"}
+            return self._ok(page)
         if method == "GET" and path == "/api/v1/users/98765/courses/1/" \
                                        "assignments":
             return self._ok([{"id": 3, "name": "Essay",
@@ -324,7 +329,21 @@ def test_plan_mode_refuses_before_any_label_is_resolved(monkeypatch):
     assert called == []
 
 
-def test_mismatch_detail_reaches_the_agent_projected():
+def _lift_hold(monkeypatch, name):
+    """Admit one held operation for this test only (the policy file is
+    unchanged)."""
+    import copy
+    policy = copy.deepcopy(admission_mod.load_policy())
+    policy["evidence_holds"]["tool_names"].remove(name)
+    monkeypatch.setattr(admission_mod, "_policy_cache", policy)
+
+
+def test_mismatch_detail_reaches_the_agent_projected(monkeypatch):
+    # Discussion writes are held until a Chromium-lane battery proves
+    # them, and the discussion update is the one learner-data write
+    # with a readback. The projection pinned here runs the same way on
+    # any such write, so the hold is lifted for this test only.
+    _lift_hold(monkeypatch, "canvas_update_topic_courses")
     _edit_mode()
     _find("Jane Doe")
     session = BrowserFake()

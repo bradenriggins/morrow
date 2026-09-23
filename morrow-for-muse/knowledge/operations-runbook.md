@@ -60,7 +60,9 @@ feature flags, the quiz submission-users message), `unsupported`,
 
 **Important caveat:** a catalog row marked live-proven can still be
 held by the admission policy: `evidence_holds` in
-`dispatch/admission_policy.json` names each held row and why. The
+`dispatch/admission_policy.json` names each held row and why. Example:
+the discussion writes C-139, C-141, and C-167 are catalog live-proven,
+but only through the retired form lane, so the policy holds them. The
 catalog is the provenance record; the policy is the dispatch
 authority. When they disagree, the policy wins.
 
@@ -117,10 +119,13 @@ readback and cleanup:
   retired canvas-batch form lane on 2026-09-20, not the Chromium lane,
   while C-238 (discussion date_details, PUT 204) was proven through
   the 2026-09-21 Chromium write battery. SCOPE.md withholds all
-  discussion writes from v1. Treat them as proven-mechanism-mixed:
-  disclose the lane before touching them.
-  Announcement variants stay excluded (posting an announcement
-  notifies enrolled users; a standing product exclusion).
+  discussion writes from v1, and the admission policy holds all four:
+  dispatch refuses them on every lane.
+  Announcements are never posted: any request that sets
+  `is_announcement`, on any route, and creating an announcement
+  external feed (C-25) are never-dispatch (posting an announcement
+  notifies every student in the course; a standing product
+  exclusion).
 
 Not v1 claims at all: Moodle (proven in a sandbox, not packaged),
 Blackboard (no implementation exists), learner-data operations
@@ -200,13 +205,14 @@ and confirm the fields anyway.
   PATCH); ghost-stub choice hazards are in
   `knowledge/new-quizzes-contract.md`.
 - **Discussions** (C-139/C-141/C-167 form-lane retired; C-238
-  date_details PUT 204). Withheld from v1. Shape: flat params
+  date_details PUT 204). Withheld from v1 and held by the admission
+  policy, so dispatch refuses them. Shape: flat params
   (`{"title": ..., "message": ...}`, NOT a `discussion_topic`
   wrapper; only the `assignment` subobject nests for graded
   discussions). The executor unwraps one nesting level for readback
   comparison and prevalidation but sends the body unchanged, so a
-  wrapped body still hits the D-009 failure class. Disclose the
-  lane before touching any discussion write.
+  wrapped body still hits the D-009 failure class. Correct this the
+  day a Chromium-lane battery proves discussion writes.
 - **Files** (C-130 upload, C-191 folder create, C-200/C-203 usage
   rights). Shape: POST `/api/v1/courses/{course_id}/files`. The
   provider upload is a multi-step flow; the recipe is the live

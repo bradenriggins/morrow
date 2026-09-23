@@ -28,7 +28,8 @@ Write bodies use Canvas's nested contract per surface:
   selftests still encode the `{"discussion_topic": {...}}` wrapper,
   and only one discussion write is live-proven through the Chromium
   lane (C-238, discussion date_details PUT 204, 2026-09-21 write
-  battery; SCOPE.md withholds discussion writes from v1). The flat
+  battery; SCOPE.md withholds discussion writes from v1, and the
+  admission policy holds them). The flat
   shape is the production-verified contract; the executor unwraps
   one nesting level for readback comparison and prevalidation but
   sends the body unchanged, so a wrapped body still hits D-009.

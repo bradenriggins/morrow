@@ -357,18 +357,18 @@ def test_a_label_in_free_text_is_sent_as_text_not_as_an_id():
         # The fake answers the readback with a different title, so the
         # write fails verification; only the request sent matters here.
         ex.dispatch_catalog_op(
-            "canvas_update_topic_courses", "PUT",
-            "/api/v1/courses/{course_id}/discussion_topics/{topic_id}",
-            "write", {"course_id": COURSE, "topic_id": "7"}, pack=_pack(),
-            session=session,
+            "canvas_update_create_page_courses", "PUT",
+            "/api/v1/courses/{course_id}/pages/{url_or_id}",
+            "write", {"course_id": COURSE, "url_or_id": "week-1"},
+            pack=_pack(), session=session,
             mode_ctx=dict(_ctx(), course_resolution={
                 "course_id": COURSE, "confidence": 1.0,
                 "user_confirmed": True}),
-            extra={"body": {"title": label, "message": label}})
+            extra={"body": {"wiki_page": {"title": label, "body": label}}})
     puts = [b for m, _u, b in session.calls if m == "PUT"]
     assert puts, "the write was not sent"
-    assert puts[0]["title"] == label
-    assert puts[0]["message"] == label
+    assert puts[0]["wiki_page"]["title"] == label
+    assert puts[0]["wiki_page"]["body"] == label
 
 
 def test_a_label_in_a_learner_id_position_still_resolves():

@@ -594,6 +594,32 @@
       ]
     },
     {
+      "id": "never-dispatch",
+      "title": "Task Morrow never does in this version (standing exclusion)",
+      "surface": "canvas",
+      "severity_hint": "high",
+      "root_cause": "Policy, verified in code: dispatch/admission.py check_never_dispatch refuses the admission policy's never_dispatch set (tool names, URL patterns, and request flags such as is_announcement) on every tenant and lane, before any approval, with no override.",
+      "is_not": "This is not a session problem, a provider refusal, or a task waiting for a live test. No approval or setting can allow it.",
+      "agent_message": "What was attempted: I tried {operation}, and Morrow stopped before anything reached Canvas. What the evidence showed: this is something Morrow never does in this version, even when you ask: posting announcements, sending messages to people, opening support tickets, or changing settings that reach beyond your courses. What this means: nothing was sent to Canvas and nothing changed, and no approval can allow it. What happens next: I will not try it another way. You can do it yourself in Canvas, and I can help you write it first.",
+      "auto_action": "Refuse; never reach the same effect through another operation. Offer to draft the text for the educator to post themselves.",
+      "escalate_when": "Surface to the educator whenever they ask for an excluded task, with the exclusion stated plainly.",
+      "signature": {
+        "__any_of": [
+          {
+            "gate": "NeverDispatch"
+          },
+          {
+            "error_class": "NeverDispatch"
+          }
+        ]
+      },
+      "signature_notes": "evidence: \"dispatch/admission.py check_never_dispatch; dispatch/admission_policy.json never_dispatch (tool_names, url_substrings, request_flags)\"; gate: \"NeverDispatch\"",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation"
+      ]
+    },
+    {
       "id": "catalog-not-proven",
       "title": "Operation not in the proven catalog (CatalogNotProven)",
       "surface": "canvas",

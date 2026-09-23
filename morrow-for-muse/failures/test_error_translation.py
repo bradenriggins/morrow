@@ -192,6 +192,10 @@ class EvidenceHold(Exception):
     pass
 
 
+class NeverDispatch(Exception):
+    pass
+
+
 class ManifestPinMismatch(Exception):
     """dispatch/executor.py: a saved task (execute --entry) or its undo
     whose entry the pack does not pin."""
@@ -454,6 +458,9 @@ MODE_CASES = {
         "enrollment_count": 0,
     },
     "evidence-hold": lambda: EvidenceHold("held by gate"),
+    "never-dispatch": lambda: NeverDispatch(
+        "operation 'canvas_create_new_discussion_topic_courses' sets "
+        "is_announcement, which posts an announcement. Nothing was sent."),
     # New Quiz safety-guard refusals (Lane 7): every NewQuizRefused text
     # below is the exact message raised by dispatch/executor.py.
     "new-quiz-put-refused": lambda: NewQuizRefused(
@@ -643,8 +650,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_91_modes(self):
-        self.assertEqual(91, len(CATALOG.entries))
+    def test_catalog_has_92_modes(self):
+        self.assertEqual(92, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):

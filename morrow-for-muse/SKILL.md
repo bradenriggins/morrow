@@ -536,9 +536,12 @@ sequence steps of 11 run on those rows). The catalog row is the unit of truth: a
 marked live-proven does not dispatch. Absolutely refused on every
 tenant, with no override flag: never-dispatch routes (the standing
 exclusions: announcements, messages to people, support tickets,
-subaccount-affecting operations), catalog-unsupported rows, failed
-rows, evidence-hold rows (course delete or conclude, C-108, and the
-four Item Bank quiz-entry routes), and
+subaccount-affecting operations; any request that sets
+`is_announcement` on any route, and creating an announcement external
+feed, are refused as announcements), catalog-unsupported rows, failed
+rows, evidence-hold rows (course delete or conclude, C-108; the four
+Item Bank quiz-entry routes; and the discussion writes C-139 create,
+C-167 update, C-141 delete, and C-238 date change), and
 learner-data rows on any lane that cannot de-identify them (the raw
 HTTPS lane, or no `cryptography`); on the Chromium lane with the
 encrypted vault, live-proven learner-data rows dispatch de-identified

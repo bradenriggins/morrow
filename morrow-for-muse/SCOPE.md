@@ -118,7 +118,10 @@ live battery marks them live-proven in
 - Discussion writes (C-139 create, C-141 delete, C-167 update,
   C-238 date_details): catalog live-proven only (C-139/C-141/C-167
   through the retired form lane 2026-09-20; C-238 through the
-  2026-09-21 Chromium battery), withheld from v1 claims.
+  2026-09-21 Chromium battery), withheld from v1 claims. The admission
+  policy holds all four (`evidence_holds`), so they are refused on
+  every lane until a Chromium-lane battery proves create, update, and
+  delete.
 - Item Bank item read and delete (IB-11/IB-19): implemented in the SDK
   lane, not proven (see Item Banks above).
 
@@ -153,13 +156,18 @@ live battery marks them live-proven in
   course with real students, so treat them as fixture-proven, not
   live-proven, until that battery runs.
 - Discussions: C-139 (create), C-141 (delete), and C-167 (update) are
-  catalog live-proven on 2026-09-20 (discussion 1241942 lifecycle) and
-  carry the learner-data flag, so they dispatch only on the Chromium
-  lane with the encrypted vault (receipts de-identified), and are
-  refused elsewhere. C-238 (discussion date_details PUT) is live-proven
-  through the 2026-09-21 Chromium write battery (PUT 204). No
+  catalog live-proven on 2026-09-20 (discussion 1241942 lifecycle)
+  through the retired form lane, never the Chromium lane. C-238
+  (discussion date_details PUT) is live-proven through the 2026-09-21
+  Chromium write battery (PUT 204). The admission policy holds all
+  four on every lane (see "In scope but pending live proof"). No
   discussion reads are among the 113 verified GETs (all discussion
   reads are pending).
+- Announcements: never posted, even when the educator asks. Any
+  request that sets `is_announcement` (on any route, in the body or
+  the query) and creating an announcement external feed (C-25) are
+  never-dispatch in the admission policy. Posting an announcement
+  notifies every student in the course.
 - Classic question banks: never tested. Not a v1 claim.
 - The remainder of the 457-row for-muse catalog (437 Canvas rows
   plus 20 Item Bank rows): only rows marked `live-proven` are v1

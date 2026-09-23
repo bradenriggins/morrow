@@ -22,7 +22,9 @@ and undo. It turns the launch blockers into enforced refusals:
 Admission policy lives in dispatch/admission_policy.json (machine-readable,
 generated from proof-battery/OPERATION_CATALOG.md plus the standing
 proof-directive exclusions). The gate matches entry names against the tool-name lists and scans
-every request URL the entry would hit against the URL-substring lists.
+every request URL the entry would hit against the URL-substring lists,
+and every request's query and body for the never-dispatch request flags
+(is_announcement: Morrow for Muse never posts an announcement).
 
 Approval records (v2): JSON, either supplied as a dict or read from
 ~/.morrow/approvals/<op_id>.json. Fields:
@@ -72,6 +74,7 @@ import secrets
 import stat
 import sys
 import unicodedata
+import urllib.parse
 
 # W4-P1-17: the morrow state root has ONE source of truth
 # (config/paths.morrow_home, honoring MORROW_HOME). Every hardcoded
@@ -412,6 +415,80 @@ def _learner_signal_hit(entry: dict, policy: dict) -> str | None:
     return None
 
 
+_FALSE_FLAG_TEXT = frozenset({"", "0", "false", "f", "no", "n", "off"})
+_FORM_KEY_PART_RE = re.compile(r"[A-Za-z0-9_]+")
+
+
+def _flag_is_false(value) -> bool:
+    """True only for a value Canvas reads as false. Anything else, a
+    params reference included, may turn the flag on."""
+    if value is None or isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return value == 0
+    if isinstance(value, str):
+        return value.strip().lower() in _FALSE_FLAG_TEXT
+    return False
+
+
+def _flag_set_in(value, flags) -> str | None:
+    """The first flag in flags that a query or body sets to anything but
+    false, or None.
+
+    Flags are matched as keys, including form keys such as
+    "discussion_topic[is_announcement]", never inside text values, so a
+    page body that mentions a flag is not a request to set it. A string
+    query or body is read as JSON or as form-encoded pairs.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if text[:1] in ("{", "["):
+            try:
+                return _flag_set_in(json.loads(text), flags)
+            except ValueError:
+                pass
+        pairs = urllib.parse.parse_qsl(text.lstrip("?"),
+                                       keep_blank_values=True)
+        return _flag_set_in([{k: v} for k, v in pairs], flags)
+    if isinstance(value, list):
+        for item in value:
+            hit = _flag_set_in(item, flags)
+            if hit:
+                return hit
+        return None
+    if isinstance(value, dict):
+        for key, child in value.items():
+            parts = _FORM_KEY_PART_RE.findall(str(key))
+            flag = next((p for p in parts if p in flags), None)
+            if flag and not _flag_is_false(child):
+                return flag
+            if isinstance(child, (dict, list)):
+                hit = _flag_set_in(child, flags)
+                if hit:
+                    return hit
+    return None
+
+
+def _request_flag_hit(entry: dict, flags) -> str | None:
+    """The first never-dispatch request flag any request block of the
+    entry sets: in its query, its body, or its URL's own query string."""
+    if not flags:
+        return None
+    for value in (entry or {}).values():
+        blocks = [value] if isinstance(value, dict) else \
+            [v for v in value if isinstance(v, dict)] \
+            if isinstance(value, list) else []
+        for block in blocks:
+            if not block.get("url"):
+                continue
+            url_query = urllib.parse.urlsplit(str(block["url"])).query
+            for part in (block.get("query"), block.get("body"), url_query):
+                hit = _flag_set_in(part, flags) if part else None
+                if hit:
+                    return hit
+    return None
+
+
 def check_never_dispatch(entry: dict, policy: dict) -> None:
     """Refuse standing-excluded and catalog-excluded operations. No override."""
     name = entry.get("name") or ""
@@ -419,14 +496,22 @@ def check_never_dispatch(entry: dict, policy: dict) -> None:
     if name in nd.get("tool_names", []):
         raise NeverDispatch(
             "operation %r is on the never-dispatch list (catalog excluded / "
-            "standing exclusion); it cannot be dispatched by any caller" % name)
+            "standing exclusion); it cannot be dispatched by any caller. "
+            "Nothing was sent." % name)
     for url in extract_urls(entry):
         hit = _url_hits_any(url, nd.get("url_substrings", []))
         if hit:
             raise NeverDispatch(
                 "operation %r targets a never-dispatch URL pattern %r "
                 "(standing exclusion: messages to people, support tickets, "
-                "subaccount-affecting operations)" % (name, hit))
+                "subaccount-affecting operations). Nothing was sent."
+                % (name, hit))
+    flags = nd.get("request_flags") or {}
+    flag = _request_flag_hit(entry, flags)
+    if flag:
+        raise NeverDispatch(
+            "operation %r sets %s, which %s. Nothing was sent."
+            % (name, flag, flags[flag]))
 
 
 def check_unsupported(entry: dict, policy: dict) -> None:
