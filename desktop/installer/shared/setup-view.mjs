@@ -519,11 +519,23 @@ function restartPanel(assistant, current) {
   const which = configured.length > 1
     ? `<div class="info-box"><strong>Reopen each assistant</strong><p>Morrow can tell that an assistant opened Morrow, but it cannot tell which one. Quit and reopen each assistant you set up: ${assistantTitles(configured)}.</p></div>`
     : "";
+  // Claude Code and Gemini CLI read Morrow's entry only in the project folder chosen at setup, and
+  // Claude Code uses a project's server only after the person approves it there.
+  const folder = typeof assistant.projectFolder === "string" && assistant.projectFolder.length > 0
+    ? `<span class="path-text">${escapeHtml(assistant.projectFolder)}</span>`
+    : null;
+  const reopen = folder && assistant.id === "claude-code"
+    ? `<li>Quit <strong>${title}</strong> completely.</li><li>Open <strong>${title}</strong> in the project folder ${folder}. When ${title} asks whether to use the morrow server from this project, approve it.</li>`
+    : folder
+      ? `<li>Quit <strong>${title}</strong> completely.</li><li>Start <strong>${title}</strong> in the project folder ${folder}.</li>`
+      : `<li>Quit <strong>${title}</strong> completely. Closing its window is not enough.</li><li>Open <strong>${title}</strong> again and start a new chat.</li>`;
   return {
     summary: `Quit and reopen ${assistant.title}`,
     title: "Quit and reopen your assistant.",
-    copy: `${assistant.title} reads its settings only when it starts. It cannot use Morrow until you open it again.`,
-    body: `${which}<ol class="instructions"><li>Quit <strong>${title}</strong> completely. Closing its window is not enough.</li><li>Open <strong>${title}</strong> again and start a new chat.</li><li>Return here and select <strong>Check ${title}</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
+    copy: folder
+      ? `${assistant.title} reads Morrow's entry only from the project folder you chose, and only when it starts there.`
+      : `${assistant.title} reads its settings only when it starts. It cannot use Morrow until you open it again.`,
+    body: `${which}<ol class="instructions">${reopen}<li>Return here and select <strong>Check ${title}</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
   };
 }
 

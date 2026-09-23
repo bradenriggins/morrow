@@ -881,6 +881,28 @@ test("setup asks the teacher to quit and reopen the assistant before it says to 
   assert.match(connected.copy, /Continue in ChatGPT/);
 });
 
+test("the reopen step for a project assistant names its project folder, and Claude Code's approval", () => {
+  const project = (id, title, projectFolder) => actionView(state({
+    ...connectedCourseFields(),
+    selectedAssistantId: id,
+    assistants: [{ id, title, tier: "advanced", supported: true, needsWorkspace: true, detected: true, configured: true, connected: false, selected: true, projectFolder }],
+  }));
+  const claudeCode = project("claude-code", "Claude Code", "/Home/Courses/Fall biology");
+  assert.equal(claudeCode.title, "Quit and reopen your assistant.");
+  assert.equal(claudeCode.copy, "Claude Code reads Morrow's entry only from the project folder you chose, and only when it starts there.");
+  assert.match(claudeCode.body, /<li>Quit <strong>Claude Code<\/strong> completely\.<\/li><li>Open <strong>Claude Code<\/strong> in the project folder <span class="path-text">\/Home\/Courses\/Fall biology<\/span>\. When Claude Code asks whether to use the morrow server from this project, approve it\.<\/li><li>Return here and select <strong>Check Claude Code<\/strong>\.<\/li>/);
+  assert.doesNotMatch(claudeCode.body, /start a new chat/);
+
+  const gemini = project("gemini-cli", "Gemini CLI", "/Home/Courses/Spring chemistry");
+  assert.equal(gemini.copy, "Gemini CLI reads Morrow's entry only from the project folder you chose, and only when it starts there.");
+  assert.match(gemini.body, /<li>Quit <strong>Gemini CLI<\/strong> completely\.<\/li><li>Start <strong>Gemini CLI<\/strong> in the project folder <span class="path-text">\/Home\/Courses\/Spring chemistry<\/span>\.<\/li><li>Return here and select <strong>Check Gemini CLI<\/strong>\.<\/li>/);
+
+  // A desktop app keeps the desktop wording.
+  assert.match(actionView(connectedCourse()).body, /<li>Open <strong>ChatGPT<\/strong> again and start a new chat\.<\/li>/);
+  // A check that finds no session points back at those steps instead of repeating the desktop wording.
+  assert.equal(errorDetails("assistant_not_connected").recovery, "Quit the assistant completely, then open it again as the steps on this screen say. Then select the Check button that names your assistant.");
+});
+
 test("a failed assistant check names the button the panel shows, not a Check again button it does not have", () => {
   const panel = actionView(connectedCourse());
   const button = panel.body.match(/data-action="check-assistant-connection">([^<]+)</)[1];
