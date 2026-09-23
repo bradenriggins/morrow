@@ -44,3 +44,10 @@ not be able to connect. You will see the plain-language "your sign-in
 expired" notice and a guided path to reconnect. To reconnect, say
 "Connect my Canvas account" and sign in again on the helper page; you
 can pick up where you left off.
+
+## Getting help
+
+If a disconnect or uninstall does not finish, email
+hello@meetmorrow.app or see meetmorrow.app/support, and include the
+step where Muse stopped. Do not send student information: no student
+names, records, or screenshots that show students, and no passwords.

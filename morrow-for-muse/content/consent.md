@@ -152,3 +152,9 @@ data-sharing opt-out. We are naming the default now because
 discovering it later would make everything above read as dishonest,
 and we will update this page the moment our own walkthrough
 is done.
+
+## Getting help
+
+For help or questions, email hello@meetmorrow.app or see
+meetmorrow.app/support. Do not send student information: no student
+names, records, or screenshots that show students, and no passwords.

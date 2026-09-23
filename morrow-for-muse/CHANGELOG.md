@@ -161,6 +161,10 @@ Installing and the docs:
   installer's own checks still ship, and they keep to a scratch folder.
 - The troubleshooting guide names the Python version the installer
   needs: 3.11 or newer.
+- The setup, consent, and disconnect pages, and the assistant's
+  instructions, say how to get help: email hello@meetmorrow.app or see
+  meetmorrow.app/support, with the Morrow for Muse version and the step
+  that failed, and never with student information.
 - The list of what this version does names "Show me my courses" and
   reading your own Canvas profile. Both were tested live, but the list
   called them untested, so the assistant could hesitate on the first
