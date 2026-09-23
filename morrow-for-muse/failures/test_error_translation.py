@@ -196,6 +196,10 @@ class NeverDispatch(Exception):
     pass
 
 
+class CourseRosterUnavailable(Exception):
+    pass
+
+
 class ManifestPinMismatch(Exception):
     """dispatch/executor.py: a saved task (execute --entry) or its undo
     whose entry the pack does not pin."""
@@ -458,6 +462,9 @@ MODE_CASES = {
         "enrollment_count": 0,
     },
     "evidence-hold": lambda: EvidenceHold("held by gate"),
+    "course-roster-unavailable": lambda: CourseRosterUnavailable(
+        "The student list of course 101 could not be read (403), so "
+        "nothing in the course was read or changed."),
     "never-dispatch": lambda: NeverDispatch(
         "operation 'canvas_create_new_discussion_topic_courses' sets "
         "is_announcement, which posts an announcement. Nothing was sent."),
@@ -650,8 +657,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_92_modes(self):
-        self.assertEqual(92, len(CATALOG.entries))
+    def test_catalog_has_93_modes(self):
+        self.assertEqual(93, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):

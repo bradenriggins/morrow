@@ -57,6 +57,43 @@ For each learner-data read the connector:
 Anything the boundary cannot verify fails closed: the op is refused
 rather than surfacing raw learner PII.
 
+## Course content
+
+Course content (a page body, an assignment or quiz description, a quiz
+question, a module, group, or file name) can name a student too. Before
+a Chromium-lane dispatch reads or changes anything in a course, the
+executor reads the course's whole student roster through the same
+signed-in session: every enrollment state, plus the students whose
+enrollment was deleted, whose names can still be in older content
+(`dispatch/executor.py` `_read_course_roster_first`). The roster is
+held in memory for that dispatch only; it is never journaled or shown.
+If the read fails, nothing in the course is read or changed
+(`CourseRosterUnavailable`).
+
+Every course-scoped result then passes through that roster
+(`privacy/course_content.py`, called from `project_learner_result`):
+each form of a student's name becomes the student's label plus a marker
+naming the form it replaced (`Student A3` for the full name; `(first
+name)`, `(last name)`, `(name, last name first)`, `(email)`, `(login)`,
+`(SIS id)`, `(user id)`, `(other name)` for the rest), and text that
+already reads like a label is marked `(as written)`. A student gets a
+label in the vault only when their name appears in what the agent sees.
+Learner-data receipts get the same roster pass after the boundary, so a
+classmate named only in a post's text is labeled too. Item Bank results
+use the roster of the course the Item Banks launch is bound to.
+
+The projection is exact in reverse, because course content is what an
+educator edits and saves back. When a write's free text carries labels,
+the executor puts back the text each marker names (a label with no
+marker becomes the full name): "Jane" stays "Jane", an email stays the
+email, and a word that only looked like a name ("Brown v. Board" in a
+course with a student named Brown) is restored as written. A label the
+course never issued is refused before anything is sent, and in plan
+mode each label is bound to its vault token as a learner-id label is.
+Without the encrypted vault there are no labels: the roster's forms are
+hidden one way (`[hidden: student name]`), and a write whose text still
+carries one is refused.
+
 ## Working by name
 
 The educator can work with a student by name, and the data stays
@@ -267,17 +304,15 @@ the wired vault file above.
   `url_substrings` net, plus the catalog `[LEARNER-DATA]` flag.
   `dispatch/test_learner_classification.py` fails when a live-proven
   row whose path names a people resource is not classified. Course
-  content (pages, quizzes, assignments, modules) is deliberately not
-  classified, because projecting it would rewrite names inside content
-  an educator may save back. The consequence: a page body can carry a
-  person's name unprojected. Person fields on content (a page's
-  `last_edited_by`, any `created_by`/`updated_by`/`editor`) are replaced
-  field by field: a learner the vault already labeled in that course
-  gets their label, anyone else becomes "a Canvas user Morrow has not
-  labeled". Course search (`smartsearch`) is learner data: result text
-  naming a learner the receipt or the vault knows for that course is
-  labeled, but a learner Morrow has never seen in that course stays raw
-  in result text. Additions go through admission-policy review.
+  content (pages, quizzes, assignments, modules) is not learner data;
+  it passes through the course roster instead (see "Course content"),
+  and is restored exactly when saved back. Person fields on content (a
+  page's `last_edited_by`, any `created_by`/`updated_by`/`editor`) are
+  replaced field by field: a learner the vault already labeled in that
+  course gets their label, anyone else becomes "a Canvas user Morrow
+  has not labeled". Course search (`smartsearch`) is learner data, and
+  its result text also passes through the course roster. Additions go
+  through admission-policy review.
 - Small cohorts: labels are stable across ops and restarts, so in a
   cohort of 1-3 anyone who knows the roster can re-identify students
   by elimination (matching scores or distinctive work to known
@@ -286,20 +321,22 @@ the wired vault file above.
 - Nicknames: aliases derive from roster fields only. A nickname the
   roster never mentions (for example "Bobby" for rostered "Robert J.
   Smith") survives redaction in free text.
-- The roster is receipt-derived: the boundary redacts the
-  identities the receipt carries (any key naming a person or a people
-  collection, and every id under a person-id key such as
-  `student_ids` or `participating_user_ids`), plus every learner the
-  encrypted vault already labeled for the same course. A learner the
-  receipt never mentions and the vault has never seen (no record, no
-  id, no name) cannot be redacted from free text. Concretely: a
-  collaboration title or description naming its own owner is
-  redacted, and a group name is redacted for any learner a roster
-  read of that course labeled before; a group name that names a
-  learner Morrow has not yet seen in that course stays raw until a
-  roster read labels them. An ad hoc override title (an override
-  that lists student ids) is always replaced by its student count
-  ("1 student"), because its students may appear nowhere else.
+- The course roster bounds what can be labeled: on the Chromium
+  lane every current student and every student whose enrollment was
+  deleted is known, so any of them named in free text is labeled.
+  Someone who was never a student in the course (a teacher, a guest)
+  is not. Off that lane (the rig lane), projection knows only the
+  receipt's people and the students the vault labeled before. An ad
+  hoc override title (an override that lists student ids) is always
+  replaced by its student count ("1 student"), because its students
+  may appear nowhere else.
+- A word that matches a student's first or last name is labeled even
+  when it means something else ("Brown v. Board" in a course with a
+  student named Brown reads `Student A4 (last name) v. Board`). It is
+  restored exactly when saved back.
+- The failed-students answer (`query/`) shows the quiz's title as
+  Canvas has it: it reads the course outside the executor, without
+  the roster pass.
 - Bare numeric ids in arbitrary prose or CSV text are not always
   recognized. Contextual forms are redacted: `user_id=912345`, any
   URL path segment or query value equal to a rostered learner id
@@ -312,10 +349,12 @@ the wired vault file above.
 - Opaque blobs (base64 segments that decode to non-printable
   bytes) are refused rather than passed through.
 - The executor's write-direction resolver
-  (`executor_wire.resolve_learner_labels`) resolves only whole values
-  (a string that is exactly a label or the echoed "<name> (label)"
-  form). A label inside free text (an override title) is written as
-  the label, never as the name.
+  (`executor_wire.resolve_learner_labels`) turns a label into a real
+  id only where a learner id belongs (a whole value under a person-id
+  key or a person route's path parameter, a label or the echoed
+  "<name> (label)" form). A label in free text (a page body, a title)
+  becomes the text its marker names (see "Course content"), never the
+  id.
 - Initial-last names ("M. Jackson") are not redacted: the alias
   set covers full-name, given-name, and reversed ("Jackson,
   Mary") forms only. A production ingress layer would block on

@@ -51,13 +51,18 @@ def _flat(rel):
 def test_docs_state_the_by_name_limits_honestly():
     """Final muse audit M5: "the agent only ever learns the names you
     type" was not true. A lookup with a guessed name confirms that a
-    student with that name is enrolled, and course content (a page
-    body) is not de-identified. FERPA_POLICY.md said a reveal needs 20
-    characters; since the final sweep of 2026-09-22 there is no reveal
-    at all, and the policy says so."""
+    student with that name is enrolled. FERPA_POLICY.md said a reveal
+    needs 20 characters; since the final sweep of 2026-09-22 there is
+    no reveal at all, and the policy says so.
+
+    Final sweep 2026-09-23: course content (a page body) is labeled
+    through the course roster and put back with the real names, so the
+    docs no longer say it reaches the model as written, and they name
+    what is still not hidden."""
     skill = _flat("SKILL.md")
     consent = _flat("content/consent.md")
     policy = _flat("privacy/FERPA_POLICY.md")
+    kb = _flat("knowledge/privacy-ferpa.md")
     # consent.md is the educator's page: "recorded", not "journaled".
     for text, recorded in ((skill, "every lookup is journaled"),
                            (consent, "every lookup is recorded")):
@@ -65,10 +70,18 @@ def test_docs_state_the_by_name_limits_honestly():
         assert "confirms that a student with that name is enrolled" in text
         assert recorded in text
         assert "page body" in text
+    for text in (skill, consent, policy, kb):
+        assert "Course content is not hidden" not in text
+        assert "Course content is not de-identified" not in text
+        assert "reaches the model as written" not in text
+        assert "a page body can carry a person's name" not in text
+    assert "puts the real names back in" in consent
+    assert "nickname" in consent
     limits = skill[skill.index("Honest limitations"):]
     limits = limits[:limits.index("## Never")]
-    assert "page body" in limits
+    assert "course roster" in limits
     assert "confirms that a student with that name is enrolled" in limits
+    assert "keep every label and its marker exactly as you read it" in skill
     assert "at least 20 characters" not in policy
     assert "nothing turns it off" in policy
 

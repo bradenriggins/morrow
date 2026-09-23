@@ -23,8 +23,10 @@ prior knowledge of the project.
   data: finding a student by name, the failed-students question,
   rosters, grades, and submissions. Morrow keeps student names and ids
   in an encrypted learner vault, and the vault needs this package.
-  Without it the install works, everything else works, and Morrow
-  refuses all student data. Install it hash-pinned from this tree:
+  Without it the install works and Morrow refuses all student data.
+  Course content still works, but student names in it are hidden
+  without labels, so a change that would save a hidden name back is
+  refused. Install it hash-pinned from this tree:
   `python3 -m pip install --require-hashes -r requirements-optional.txt`.
   Install step 1 checks for it and prints a warning (repeated at the
   end) when it is missing or older than the pinned version. Everything
@@ -206,9 +208,10 @@ a tampered mirror fails the install loudly instead of silently.
 Without the package (or with a version older than the pin), every
 student-data request is refused with a clear message: finding a
 student by name, the failed-students question, rosters, grades, and
-submissions. Nothing about students is ever sent to the assistant
-unprotected. Everything that does not touch student data works
-normally.
+submissions. Student names in course content are hidden without
+labels, and a change that would save a hidden name back is refused.
+Nothing about students is ever sent to the assistant unprotected.
+Everything that does not touch student data works normally.
 
 ## Step 3: set your tenant
 

@@ -19,9 +19,10 @@ audit 2026-09-22, proofs final-muse/tests/test_planwrite_by_label.py):
       student id (an override's own id, an html_url segment) into the
       label; and a free-text field whose whole value is a label (a page
       titled "Student A1") was sent to Canvas as the student's real id.
-      Labels resolve only in learner-id positions, and relabeling
-      touches only learner-id fields and URL segments after a person
-      route word.
+      Labels resolve to ids only in learner-id positions (in free text a
+      label goes to Canvas as the student's name, since the final sweep
+      of 2026-09-23), and relabeling touches only learner-id fields and
+      URL segments after a person route word.
   F1. The leak checks searched for "Jane", "Doe", and 5-digit ids
       anywhere in the stored files. The vault ciphertext, the journal's
       HMACs and digests, the signing key, and op ids are random runs of
@@ -349,7 +350,10 @@ def test_relabel_rules_by_position():
                               "assignment 98765 exists")
 
 
-def test_a_label_in_free_text_is_sent_as_text_not_as_an_id():
+def test_a_label_in_free_text_is_sent_as_the_name_not_as_an_id():
+    # Free text is never a learner-id position: a label there goes to
+    # Canvas as the student's name (privacy/course_content.py), never
+    # as the Canvas id.
     _edit_mode()
     label = _find("Jane Doe")["student"]
     session = BrowserFake()
@@ -367,8 +371,9 @@ def test_a_label_in_free_text_is_sent_as_text_not_as_an_id():
             extra={"body": {"wiki_page": {"title": label, "body": label}}})
     puts = [b for m, _u, b in session.calls if m == "PUT"]
     assert puts, "the write was not sent"
-    assert puts[0]["wiki_page"]["title"] == label
-    assert puts[0]["wiki_page"]["body"] == label
+    assert puts[0]["wiki_page"]["title"] == "Jane Doe"
+    assert puts[0]["wiki_page"]["body"] == "Jane Doe"
+    assert _ids_in(json.dumps(puts)) == []
 
 
 def test_a_label_in_a_learner_id_position_still_resolves():

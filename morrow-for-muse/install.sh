@@ -347,8 +347,9 @@ PY_OK="$(python3 -c 'import sys; print("yes" if sys.version_info >= (3, 11) else
   || fail "python3" "python3 >= 3.11 required (found: ${PY_VER}). Python 3.10 reaches security end-of-life in October 2026 (PEP 619) and will stop receiving security fixes; install Python 3.11 or newer and rerun."
 note "ok: ${PY_VER}"
 # All student-data work needs the encrypted learner vault, which needs
-# the 'cryptography' package. Without it the install still works and
-# Morrow refuses student data (fail closed), so this warns instead of
+# the 'cryptography' package. Without it the install still works,
+# Morrow refuses student data (fail closed), and student names in
+# course content are hidden without labels, so this warns instead of
 # failing, here and again in the closing summary.
 VAULT_PROBLEM="$(cd / && python3 -c "
 import sys
@@ -365,7 +366,9 @@ vault_warning() {
     "and the vault needs the Python package 'cryptography'. Without it," \
     "Morrow refuses everything that touches student data: finding a" \
     "student by name, the failed-students question, rosters, grades," \
-    "and submissions. Everything else works." \
+    "and submissions. Student names in course pages are hidden without" \
+    "labels, so a change that would save one back is refused." \
+    "Everything else works." \
     "" \
     "Reason: ${VAULT_PROBLEM}" \
     "" \

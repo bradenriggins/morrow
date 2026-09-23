@@ -65,10 +65,9 @@ SKILL.md "Working by name"; policy: `privacy/FERPA_POLICY.md`.
   re-identifiable by the data holder.
 - Nicknames: aliases derive from roster fields only. A nickname the
   roster never mentions survives redaction in free text.
-- Unseen learners: free text (a group name, a collaboration title) is
-  redacted for learners the receipt carries or the vault already
-  labeled for that course. A name Morrow has never seen in that course
-  stays raw until a roster read labels it.
+- Course content is labeled through the course roster, so a name the
+  roster does not know (a nickname, someone never enrolled) is not.
+- The failed-students answer shows the quiz's title as Canvas has it.
 
 ## When de-id applies
 
@@ -78,6 +77,19 @@ catalog rows plus the structural rule in
 `/enrollments`, `/submissions`, `/gradebook`, `/grades`, `/analytics`,
 overrides, date details, revisions, and more; `/users/self`
 excepted).
+
+Course content too: before the executor reads or changes anything in a
+course on the Chromium lane, it reads the course's whole student roster
+(every enrollment state, and deleted enrollments) and fails closed when
+it cannot. Every course-scoped result (and every Item Bank result, with
+the roster of the course the Item Banks launch is bound to) comes back
+with each student's label and a marker naming the form it replaced:
+`Student A3`, `Student A3 (first name)`, `(last name)`, `(name, last
+name first)`, `(email)`, `(login)`, `(SIS id)`, `(user id)`, `(other
+name)`; text that only reads like a label is marked `(as written)`.
+Saved back, each marker returns the exact text it stood for
+(`privacy/course_content.py`). Without `cryptography` the forms read as
+`[hidden: student name]` and a write carrying one is refused.
 
 ## Current enforcement (do not work around it)
 

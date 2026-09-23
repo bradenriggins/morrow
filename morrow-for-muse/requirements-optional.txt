@@ -8,7 +8,9 @@
 #   it, Morrow refuses everything that touches student data (finding a
 #   student by name, the failed-students question, rosters, grades,
 #   submissions) with a message telling the educator to install this
-#   file. Everything else works.
+#   file. Student names in course content are hidden without labels,
+#   and a change that would save one back is refused. Everything else
+#   works.
 #
 # Hash-pinned (W4-P2-19): --require-hashes means pip verifies every
 # downloaded artifact against one of the hashes below before

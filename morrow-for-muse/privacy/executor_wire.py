@@ -16,6 +16,7 @@ session_generation, and lane_state (a mapping with per-provider
 session_generation).
 """
 
+import contextvars
 import hashlib
 import os
 import re
@@ -33,6 +34,7 @@ from dispatch import admission as _admission
 
 from privacy import boundary as _boundary
 from privacy import core as _privacy_core
+from privacy import course_content as _content
 
 # De-identification has no off switch: no record, flag, file, or
 # environment variable shows real names to the agent (final sweep
@@ -220,6 +222,182 @@ def _vault_labels_for(entry, tenant_base, lane_context):
             for identity, label in zip(known, labels)}
 
 
+# The course rosters the running dispatch read before it touched the
+# course, {(origin, course_id): [identity, ...]}. The executor sets a
+# fresh map per dispatch; the fields read now win over what the vault
+# kept from an earlier read.
+_COURSE_ROSTERS = contextvars.ContextVar("morrow_course_rosters",
+                                         default=None)
+
+
+def begin_course_rosters():
+    """Start an empty roster map for one dispatch; returns the reset
+    token for end_course_rosters."""
+    return _COURSE_ROSTERS.set({})
+
+
+def end_course_rosters(token):
+    _COURSE_ROSTERS.reset(token)
+
+
+def _user_identity(user, sis_user_id=None):
+    """A vault identity from one Canvas user record, or None without an
+    id or a real name."""
+    if not isinstance(user, dict):
+        return None
+    uid = user.get("id")
+    name = user.get("name")
+    if isinstance(uid, bool) or not isinstance(uid, (int, str)) \
+            or not str(uid).strip() \
+            or not isinstance(name, str) or not name.strip():
+        return None
+    identity = {"id": str(uid).strip(), "name": name}
+    for src, dst in (("email", "email"), ("login_id", "loginId")):
+        if isinstance(user.get(src), str) and user[src].strip():
+            identity[dst] = user[src]
+    sis = user.get("sis_user_id") or sis_user_id
+    if isinstance(sis, str) and sis.strip():
+        identity["sisUserId"] = sis
+    aliases = []
+    for key in ("sortable_name", "short_name", "sis_login_id"):
+        value = user.get(key)
+        if isinstance(value, str) and value.strip() and value != name \
+                and value not in aliases:
+            aliases.append(value)
+    if aliases:
+        identity["aliases"] = aliases
+    return identity
+
+
+def roster_identities(users, deleted_enrollments=()):
+    """Vault identities for a course roster: the users list (every
+    enrollment state) plus the students whose enrollment was deleted,
+    whose names can still be in older course content. Raises ValueError
+    on a record that is not a user, so a malformed roster never passes
+    for a whole one."""
+    if not isinstance(users, list) or not isinstance(deleted_enrollments,
+                                                     (list, tuple)):
+        raise ValueError("the course roster is not a list")
+    by_id = {}
+    for user in users:
+        identity = _user_identity(user)
+        if identity is None:
+            raise ValueError("a course roster record has no id or name")
+        by_id.setdefault(identity["id"], identity)
+    for enrollment in deleted_enrollments:
+        if not isinstance(enrollment, dict):
+            raise ValueError("a deleted enrollment is not a record")
+        identity = _user_identity(enrollment.get("user"),
+                                  enrollment.get("sis_user_id"))
+        if identity is None:
+            raise ValueError("a deleted enrollment has no user id or name")
+        by_id.setdefault(identity["id"], identity)
+    return list(by_id.values())
+
+
+def remember_course_roster(tenant_base, course_id, identities):
+    """Keep one course's roster, read just now, for this dispatch's
+    projection and restoration. Nothing is sealed here: a student gets
+    a label in the vault only when their name appears in what the agent
+    sees, so a course's labels name only students Morrow has shown."""
+    rosters = _COURSE_ROSTERS.get()
+    if rosters is not None:
+        origin = _exact_origin(tenant_base, ValueError)
+        rosters[(origin, str(course_id))] = list(identities)
+
+
+def _fresh_roster(origin, course_id):
+    return ((_COURSE_ROSTERS.get() or {}).get((origin, str(course_id)))
+            or [])
+
+
+# Placeholder labels for the first matching pass: far above any label a
+# course issues, so they never collide with a real one.
+_PLACEHOLDER_BASE = 10 ** 9
+
+
+def _project_with_course_roster(value, origin, course_id, provider,
+                                principal, protect_literals):
+    """value with every roster form labeled. Students the vault already
+    labeled in this course keep their label; a roster student named in
+    value for the first time is labeled now (only those)."""
+    fresh = {str(i["id"]): i for i in _fresh_roster(origin, course_id)}
+    path = _source_vault_path()
+    if not fresh and not os.path.exists(path):
+        return _content.project_value(value, _content.prepare([]),
+                                      protect_literals)
+    scope = learner_scope(origin, course_id, provider, principal)
+    vault = _privacy_core.LearnerVault(path)
+    try:
+        known = vault.identities_for_scope(scope)
+        known_ids = {i["id"] for i in known}
+        known_identities = [fresh.get(i["id"], i) for i in known]
+        known_pairs = list(zip(known_identities,
+                               vault.tokenize_many(scope, known_identities)
+                               if known_identities else []))
+        new = [i for key, i in sorted(fresh.items()) if key not in known_ids]
+        placeholders = {"Student A%d" % (_PLACEHOLDER_BASE + n): identity
+                        for n, identity in enumerate(new, 1)}
+        projected = _content.project_value(
+            value, _content.prepare(known_pairs + [
+                (identity, label)
+                for label, identity in placeholders.items()]),
+            protect_literals)
+        named = [placeholders[label] for label in
+                 sorted(_content.labels_in_value(projected))
+                 if label in placeholders]
+        if not named:
+            return projected
+        labels = vault.tokenize_many(scope, named)
+    finally:
+        vault.close()
+    return _content.project_value(
+        value, _content.prepare(known_pairs + list(zip(named, labels))),
+        protect_literals)
+
+
+def _project_course_content(entry, result, tenant_base, lane_context,
+                            error_cls, protect_literals=True):
+    """Label every roster form in a course-scoped result's receipt
+    (privacy/course_content.py). Without the encrypted vault there are
+    no labels: the forms of the roster read for this dispatch are hidden
+    one way, and a later write that carries one is refused. A result no
+    roster covers (the rig lane without a vault) passes through.
+    protect_literals=False for a receipt the learner boundary already
+    projected, whose labels are real."""
+    receipt = result.get("receipt") if isinstance(result, dict) else None
+    if receipt is None:
+        return result
+    course_id = _entry_course_id(entry)
+    if course_id is None:
+        synced = list(_COURSE_ROSTERS.get() or {})
+        if len(synced) != 1:
+            return result
+        course_id = synced[0][1]
+    origin = _exact_origin(tenant_base, error_cls)
+    try:
+        if _privacy_core.AESGCM is None:
+            fresh = _fresh_roster(origin, course_id)
+            if not fresh:
+                return result
+            projected = _content.project_value(
+                receipt, _content.prepare_hidden(fresh))
+        else:
+            projected = _project_with_course_roster(
+                receipt, origin, course_id, entry.get("provider"),
+                (lane_context or {}).get("principal"), protect_literals)
+    except Exception as exc:
+        raise error_cls(
+            "course content for entry %r could not be de-identified (%s); "
+            "refusing rather than showing student names"
+            % (entry.get("name"), type(exc).__name__))
+    if projected == receipt:
+        return result
+    out = dict(result)
+    out["receipt"] = projected
+    return out
+
+
 def learner_scope(tenant_base, course_id, provider=None, principal=None):
     """The exact vault scope the boundary labels one course's learners
     under. Every labeler and resolver must use this one shape, or a
@@ -401,8 +579,10 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
     lane_context = lane_context or {}
     course_id = _entry_course_id(entry)
     if not _admission.touches_learner_data(entry):
-        return _label_editor_records(entry, result, tenant_base,
-                                     lane_context, error_cls)
+        result = _label_editor_records(entry, result, tenant_base,
+                                       lane_context, error_cls)
+        return _project_course_content(entry, result, tenant_base,
+                                       lane_context, error_cls)
     provider = entry.get("provider") or "canvas"
     if not course_id:
         raise error_cls(
@@ -500,7 +680,11 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
             "learner privacy boundary returned an unexpected shape for "
             "entry %r; refusing rather than surfacing raw learner PII"
             % entry.get("name"))
-    return out
+    # The boundary knows the receipt's own people and the vault's; a
+    # classmate named only in free text (a post that mentions another
+    # student) is labeled through the course roster.
+    return _project_course_content(entry, out, tenant_base, lane_context,
+                                   error_cls, protect_literals=False)
 
 
 # ---------------------------------------------------------------------------
@@ -513,7 +697,10 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
 # everything the agent or the journal sees (relabel_learner_ids).
 # ---------------------------------------------------------------------------
 
-_LABEL_TEXT_RE = re.compile(r"(?<![A-Za-z0-9(])(Student A[1-9][0-9]*)(?![0-9])")
+# A label to show with its typed name, except course text that only
+# reads like a label ("(as written)", privacy/course_content.py).
+_ECHO_LABEL_RE = re.compile(r"(?<![A-Za-z0-9(])(Student A[1-9][0-9]*)"
+                            r"(?![0-9])(?! \(%s\))" % _content.AS_WRITTEN)
 _LABEL_VALUE_RE = re.compile(r"^Student A[1-9][0-9]*$")
 _ECHO_VALUE_RE = re.compile(r"^(.+?) \((Student A[1-9][0-9]*)\)$")
 
@@ -564,7 +751,7 @@ def apply_name_echo(value, tenant_base, course_id, conversation_id):
         return value
 
     def echo(text, _key):
-        return _LABEL_TEXT_RE.sub(
+        return _ECHO_LABEL_RE.sub(
             lambda m: "%s (%s)" % (known[m.group(1)], m.group(1))
             if m.group(1) in known else m.group(1), text)
     return _walk_strings(value, echo)
@@ -636,6 +823,119 @@ def _map_learner_positions(value, fn, extra_keys=frozenset(), key="",
             is_learner_id_key(k, key) or k in extra_keys)
             for k, v in value.items()}
     return value
+
+
+def _map_free_text(value, fn, extra_keys=frozenset(), key="",
+                   parent=None, in_position=False):
+    """Apply fn(text) to every string NOT in a learner-id position: the
+    free text of a write (a page body, a title)."""
+    if isinstance(value, str):
+        return value if in_position else fn(value)
+    if isinstance(value, list):
+        return [_map_free_text(v, fn, extra_keys, key, parent, in_position)
+                for v in value]
+    if isinstance(value, dict):
+        return {k: _map_free_text(
+            v, fn, extra_keys, k, key,
+            is_learner_id_key(k, key) or k in extra_keys)
+            for k, v in value.items()}
+    return value
+
+
+def _unecho(text, introduced):
+    """text with each "<typed name> (label)" of this conversation
+    reduced to the label."""
+    for label, typed in introduced.items():
+        words = [re.escape(w) for w in str(typed).split()]
+        if not words:
+            continue
+        text = re.sub(r"(?<![A-Za-z0-9])%s \(%s\)(?![0-9])"
+                      % (r"\s+".join(words), re.escape(label)),
+                      label, text, flags=re.IGNORECASE)
+    return text
+
+
+def _free_text_refs(value, tenant_base, course_id, conversation_id,
+                    error_cls, provider, extra_keys):
+    """(value with typed-name echoes in free text reduced to labels,
+    {label: identity}, {label: vault token}) for the student labels the
+    free text of a write names. Raises error_cls for a label the course
+    never issued."""
+    texts = []
+    _map_free_text(value, lambda t: texts.append(t) or t, extra_keys)
+    if _content.has_hidden(texts):
+        raise error_cls(
+            "the text of this change still holds a student detail Morrow "
+            "hid when it read the course (\"[hidden: student ...]\"). "
+            "Without the encrypted learner vault (the optional "
+            "'cryptography' package) Morrow cannot put it back, so this "
+            "text cannot be saved. Leave that part out, or have the "
+            "educator write it. Nothing was sent.")
+    if not any("Student" in t for t in texts):
+        return value, {}, {}
+    introduced = {}
+    if conversation_id and course_id is not None:
+        from privacy import name_echo as _echo
+        introduced = _echo.introductions(tenant_base, course_id,
+                                         conversation_id)
+    value = _map_free_text(value, lambda t: _unecho(t, introduced),
+                           extra_keys)
+    labels = set()
+    _map_free_text(value, lambda t: labels.update(
+        _content.labels_in_text(t)) or t, extra_keys)
+    if not labels:
+        return value, {}, {}
+    if course_id is None:
+        raise error_cls(
+            "the text of this change names %s, but the change targets no "
+            "course; student labels belong to one course. Nothing was "
+            "sent." % ", ".join(sorted(labels)))
+    if _privacy_core.AESGCM is None:
+        raise error_cls(
+            "the text of this change names a student by label, and putting "
+            "the student's name back needs the encrypted learner vault "
+            "(the optional 'cryptography' package). Nothing was sent.")
+    try:
+        origin = _exact_origin(tenant_base, ValueError)
+        scope = learner_scope(origin, course_id, provider)
+    except ValueError:
+        raise error_cls("the text of this change names a student by label, "
+                        "but the tenant base is not an exact origin. "
+                        "Nothing was sent.")
+    path = _source_vault_path()
+    if not os.path.exists(path):
+        raise error_cls(
+            "the text of this change names %s, but no student labels have "
+            "been issued in course %s on this machine. Nothing was sent."
+            % (", ".join(sorted(labels)), course_id))
+    fresh = {str(i["id"]): i for i in _fresh_roster(origin, course_id)}
+    identities, tokens = {}, {}
+    vault = _privacy_core.LearnerVault(path)
+    try:
+        for label in sorted(labels):
+            try:
+                identity, token = vault.resolve_with_token(scope, label)
+            except _privacy_core.PrivacyError:
+                raise error_cls(
+                    "%s is not a student label in course %s, so Morrow "
+                    "cannot put the student's name back into the text. "
+                    "Use a label Morrow showed for this course, or write "
+                    "the name as the educator gave it. Nothing was sent."
+                    % (label, course_id))
+            identities[label] = fresh.get(str(identity["id"]), identity)
+            tokens[label] = token
+    finally:
+        vault.close()
+    return value, identities, tokens
+
+
+def _restore_free_text(value, identities, error_cls, extra_keys):
+    try:
+        return _map_free_text(
+            value, lambda t: _content.restore_text(t, identities.get),
+            extra_keys)
+    except _content.RestoreError as exc:
+        raise error_cls(str(exc))
 
 
 def _lookup_learner_refs(value, tenant_base, course_id, conversation_id,
@@ -715,7 +1015,14 @@ def resolve_learner_labels(value, tenant_base, course_id, conversation_id,
     when numeric). The label must have been issued in THIS course's
     vault scope, so a label from another course is refused; an echoed
     name must match what the educator typed in this conversation, so a
-    stale or cross-course echo is refused. Free text is never rewritten.
+    stale or cross-course echo is refused.
+
+    Free text (a page body, a title) is never turned into an id. A label
+    there, with its course-content marker ("Student A3 (first name)",
+    privacy/course_content.py), is put back into the student's real
+    text: the model read course content with labels and saves it back
+    with them. A label the course never issued is refused.
+
     Returns (resolved_value, {str(real_id): label}) so the caller can
     relabel everything the agent or the journal sees afterwards. When
     tokens_out is a dict it receives {label: vault token}.
@@ -723,18 +1030,25 @@ def resolve_learner_labels(value, tenant_base, course_id, conversation_id,
     found = _lookup_learner_refs(value, tenant_base, course_id,
                                  conversation_id, error_cls, provider,
                                  extra_keys)
-    if not found:
-        return value, {}
     mapping = {}
-    by_text = {}
-    for text, (label, identity, token) in found.items():
-        raw = identity["id"]
-        by_text[text] = int(raw) if raw.isdigit() else raw
-        mapping[str(raw)] = label
+    if found:
+        by_text = {}
+        for text, (label, identity, token) in found.items():
+            raw = identity["id"]
+            by_text[text] = int(raw) if raw.isdigit() else raw
+            mapping[str(raw)] = label
+            if tokens_out is not None:
+                tokens_out[label] = token
+        value = _map_learner_positions(
+            value, lambda text: by_text.get(text, text), extra_keys)
+    value, identities, tokens = _free_text_refs(
+        value, tenant_base, course_id, conversation_id, error_cls, provider,
+        extra_keys)
+    if identities:
+        value = _restore_free_text(value, identities, error_cls, extra_keys)
         if tokens_out is not None:
-            tokens_out[label] = token
-    return _map_learner_positions(
-        value, lambda text: by_text.get(text, text), extra_keys), mapping
+            tokens_out.update(tokens)
+    return value, mapping
 
 
 def bind_learner_labels(value, tenant_base, course_id, conversation_id,
@@ -747,16 +1061,26 @@ def bind_learner_labels(value, tenant_base, course_id, conversation_id,
     (the typed name of an echoed label stays in the encrypted name-echo
     store only). Returns (value_with_bare_labels, {label: vault token});
     the tokens bind the approval to the students, not to the label
-    text, and never reveal a real id."""
+    text, and never reveal a real id. Labels in free text are checked
+    the same way (each must be issued in this course and its marker
+    fillable from the roster), their typed-name echoes are reduced to
+    the label, and they are bound by token too."""
     found = _lookup_learner_refs(value, tenant_base, course_id,
                                  conversation_id, error_cls, provider,
                                  extra_keys)
-    if not found:
-        return value, {}
-    bare = {text: label for text, (label, _i, _t) in found.items()}
-    tokens = {label: token for label, _i, token in found.values()}
-    return _map_learner_positions(
-        value, lambda text: bare.get(text, text), extra_keys), tokens
+    tokens = {}
+    if found:
+        bare = {text: label for text, (label, _i, _t) in found.items()}
+        tokens = {label: token for label, _i, token in found.values()}
+        value = _map_learner_positions(
+            value, lambda text: bare.get(text, text), extra_keys)
+    value, identities, free_tokens = _free_text_refs(
+        value, tenant_base, course_id, conversation_id, error_cls, provider,
+        extra_keys)
+    if identities:
+        _restore_free_text(value, identities, error_cls, extra_keys)
+        tokens.update(free_tokens)
+    return value, tokens
 
 
 # Bookkeeping fields that are never learner references (op ids, claim

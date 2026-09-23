@@ -51,12 +51,17 @@ it asks you to confirm the course instead of guessing, in either mode.
 
 ## Your students' privacy
 
-Student details are hidden from the assistant. When Morrow reads
-rosters, submissions, or grades, the assistant sees labels like
-"Student A1" instead of names, emails, logins, or Canvas ID numbers
-(including the ones inside links). Morrow's own records on your Muse
-computer use the same labels, never the names. A student keeps the
-same label every time on this computer.
+Student details are hidden from the assistant. When Morrow reads your
+course, the assistant sees labels like "Student A1" instead of names,
+emails, logins, or Canvas ID numbers (including the ones inside
+links). That covers rosters, submissions, and grades, and it covers
+course content too: a page body or an assignment description that
+names a student shows the label. To do that, Morrow first reads the
+course's student list; if it cannot, it reads and changes nothing in
+the course. When the assistant saves a change to that content, Morrow
+puts the real names back in. Morrow's own
+records on your Muse computer use the same labels, never the names. A
+student keeps the same label every time on this computer.
 
 You can still work with a student by name. When you name a student
 ("extend Jane Doe's due date by two days"), Morrow looks that name up
@@ -77,12 +82,12 @@ with two limits you should know:
   lookup is recorded on your Muse computer (which course, which
   conversation, and whether it matched; never the name itself), so a
   guess leaves a trail.
-- Course content is not hidden. If a page body, announcement,
-  discussion post, or file names a student, the assistant reads that
-  name as written.
+- Two things are not hidden: a name Canvas does not list for the
+  student (a nickname such as "Bobby" for Robert), and, when you ask
+  who failed a quiz, the quiz's name, which shows as Canvas has it.
 
-The assistant never sees the names of students you did not name, and
-this cannot be turned off. To check who a label is, tell the assistant
+Apart from those limits, the assistant never sees the names of
+students you did not name, and this cannot be turned off. To check who a label is, tell the assistant
 the name of the student you have in mind: it looks that name up and
 tells you whether it is the same label.
 

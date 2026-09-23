@@ -48,6 +48,8 @@ class RosterCanvas(BrowserFake):
     def raw_request(self, method, url, headers, body, is_write=False,
                     max_bytes=None):
         self.calls.append((method, url, None))
+        if url.split("?", 1)[0].endswith("/enrollments"):
+            return self._ok([])
         return self._ok(ROSTER)
 
 

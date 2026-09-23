@@ -117,7 +117,8 @@ def test_install_warns_when_cryptography_is_missing(carved):
     assert WARNING in head, head
     assert "cryptography" in head
     assert INSTALL_CMD in head
-    for feature in ("by name", "failed", "grades"):
+    for feature in ("by name", "failed", "grades",
+                    "names in course pages are hidden"):
         assert feature in head, (feature, head)
 
 

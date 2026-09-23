@@ -37,6 +37,7 @@ _home_sys.path.insert(0, _home_os.path.join(
     _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
 import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import json
+import urllib.parse
 import os
 import shutil
 import sys
@@ -111,18 +112,35 @@ _AUTH = ("selftest authorization basis: offline mocked-CDP write hardening "
 # fakes
 # ----------------------------------------------------------------------
 
+
+def _is_roster_read(method, path):
+    """The student roster read Morrow makes before it touches a course
+    (dispatch/test_course_content_e2e.py checks it and its order)."""
+    parts = urllib.parse.urlsplit(path)
+    query = urllib.parse.parse_qs(parts.query)
+    return method == "GET" and (
+        (parts.path.endswith("/users")
+         and "inactive" in query.get("enrollment_state[]", []))
+        or (parts.path.endswith("/enrollments")
+            and query.get("state[]") == ["deleted"]))
+
+
 class FakeTransport:
     """Scripted stand-in for LocalChromiumTransport (the CDP layer)."""
 
     def __init__(self, script):
         self.script = list(script)
         self.calls = []
+        self.roster_calls = []
 
     def ensure_session(self):
         return (1, "Test User")
 
     def api(self, method, path, data=None, _ws=None, timeout=60,
             as_json=False, max_bytes=None):
+        if _is_roster_read(method, path):
+            self.roster_calls.append(path)
+            return 200, {}, "[]"
         self.calls.append({"method": method, "path": path, "data": data,
                            "as_json": as_json, "max_bytes": max_bytes})
         if not self.script:

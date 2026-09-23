@@ -91,6 +91,14 @@ class BrowserFake:
         path = url.split("?", 1)[0][len(BASE):]
         if method == "GET" and path == "/api/v1/courses/1":
             return self._ok({"id": 1, "name": "Biology 101"})
+        # The course roster the executor reads before it touches a
+        # course (every course here has the same students).
+        if method == "GET" and path.startswith("/api/v1/courses/") \
+                and path.endswith("/users"):
+            return self._ok(ROSTER)
+        if method == "GET" and path.startswith("/api/v1/courses/") \
+                and path.endswith("/enrollments"):
+            return self._ok([])
         if method == "POST" and path.endswith("/assignments/3/overrides"):
             body = data["assignment_override"]
             rec = {"id": 5, "assignment_id": 3,

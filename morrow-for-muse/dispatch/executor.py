@@ -302,6 +302,13 @@ class LearnerLabelUnresolved(ExecutorError):
     was sent (round-4 privacy audit H3c)."""
 
 
+class CourseRosterUnavailable(ExecutorError):
+    """The course's student list could not be read before a dispatch
+    that reads or changes something in the course, so nothing in the
+    course was read or changed: without it, student names in course
+    content could not be hidden."""
+
+
 class RedirectDowngradeRefused(ExecutorError):
     """An https:// -> http:// redirect, or a redirect off the LMS host,
     was refused (W4-P2-7).
@@ -7999,8 +8006,10 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
     the educator introduced by name in this conversation are echoed as
     "<typed name> (label)" (privacy/name_echo).
     """
+    from privacy import executor_wire as _wire
     holder = {}
     token = _ACTIVE_ID_LABELS.set(holder)
+    rosters = _wire.begin_course_rosters()
     try:
         out = _dispatch_entry_inner(
             entry, params, session, pack, plan=plan, op_id=op_id, kind=kind,
@@ -8012,8 +8021,8 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
         _relabel_exception(exc, holder.get("map"))
         raise
     finally:
+        _wire.end_course_rosters(rosters)
         _ACTIVE_ID_LABELS.reset(token)
-    from privacy import executor_wire as _wire
     if holder.get("map"):
         out = _wire.relabel_learner_ids(out, holder["map"])
     conversation_id = mode_ctx.get("conversation_id") \
@@ -8056,10 +8065,104 @@ def _relabel_exception(exc, mapping):
         pass
 
 
+# Every enrollment state the course roster read asks for; students
+# whose enrollment was deleted come from the enrollments read.
+_ROSTER_ENROLLMENT_STATES = ("active", "invited", "rejected", "completed",
+                             "inactive")
+_ROSTER_MAX_READS = 30
+_ROSTER_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _read_all_pages(session, url):
+    """Every item of a Canvas list read through the session, following
+    the lane's pagination reports. Raises CourseRosterUnavailable on a
+    partial or malformed list: a partial roster must never stand in for
+    the whole one."""
+    items = []
+    seen = set()
+    base = session.base_for("canvas")
+    while url:
+        if url in seen or len(seen) >= _ROSTER_MAX_READS:
+            raise CourseRosterUnavailable(
+                "the course's student list did not end after %d reads"
+                % len(seen))
+        seen.add(url)
+        _status, headers, raw, _attempts = session.raw_request(
+            "GET", url, {"Accept": "application/json"}, None,
+            is_write=False, max_bytes=_ROSTER_MAX_BYTES)
+        text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        try:
+            page = json.loads(text or "[]")
+        except ValueError:
+            page = None
+        if not isinstance(page, list):
+            raise CourseRosterUnavailable(
+                "the course's student list was not a list")
+        items.extend(page)
+        state = _pagination_state(headers)
+        if state is None or not state.get("partial"):
+            break
+        url = state.get("next_page")
+        if not url:
+            raise CourseRosterUnavailable(
+                "the course's student list was cut short (%s)"
+                % state.get("note"))
+        if url.startswith("/"):
+            url = base.rstrip("/") + url
+    return items
+
+
+def _read_course_roster_first(entry, params, session, tenant_base,
+                              dry_run):
+    """Read the course's whole student roster before a Chromium-lane
+    dispatch reads or changes anything in that course. Course content
+    (a page body, an assignment description) can name any student, and
+    a name can be labeled only when Morrow knows it
+    (privacy/course_content.py); a student gets a label in the vault
+    when their name appears in what the agent sees, and without the
+    vault the names are hidden one way. The roster is held for this
+    dispatch only: never journaled, never shown. Fails closed: when the
+    roster cannot be read, nothing in the course is read or changed."""
+    if dry_run or not getattr(session, "browser_owned_auth", False):
+        return
+    # The course the request path names, or for an Item Bank route the
+    # course its launch is bound to (params.course_id).
+    course_id = _write_target_course_id(entry, params)
+    if course_id is None or not str(course_id).isdigit():
+        return
+    from privacy import executor_wire as _wire
+    base = session.base_for("canvas").rstrip("/")
+    users_url = "%s/api/v1/courses/%s/users?%s" % (
+        base, course_id, urllib.parse.urlencode(
+            [("enrollment_type[]", "student")]
+            + [("enrollment_state[]", s) for s in _ROSTER_ENROLLMENT_STATES]
+            + [("include[]", "email"), ("per_page", "100")]))
+    deleted_url = "%s/api/v1/courses/%s/enrollments?%s" % (
+        base, course_id, urllib.parse.urlencode(
+            [("type[]", "StudentEnrollment"), ("state[]", "deleted"),
+             ("per_page", "100")]))
+    try:
+        identities = _wire.roster_identities(
+            _read_all_pages(session, users_url),
+            _read_all_pages(session, deleted_url))
+        _wire.remember_course_roster(tenant_base, course_id, identities)
+    except (ProviderHttpError, CourseRosterUnavailable, ValueError,
+            TypeError) as exc:
+        detail = exc.status if isinstance(exc, ProviderHttpError) \
+            else type(exc).__name__
+        raise CourseRosterUnavailable(
+            "The student list of course %s could not be read (%s), so "
+            "nothing in the course was read or changed: without it, "
+            "Morrow cannot hide student names in course content. Nothing "
+            "was sent." % (course_id, detail)) from None
+
+
 def _resolve_dispatch_labels(entry, params, tenant_base, mode_ctx):
     """(entry, params, {real id: label}, {label: vault token}) with
-    learner labels resolved for the course this dispatch targets. No
-    labels: inputs unchanged."""
+    learner labels resolved for the course this dispatch targets: to
+    real ids in learner-id positions, and to the student's real text in
+    free text (privacy/course_content.py). No labels: inputs
+    unchanged."""
     from privacy import executor_wire as _wire
     course_id = _write_target_course_id(entry, params)
     conversation_id = mode_ctx.get("conversation_id") \
@@ -8070,7 +8173,7 @@ def _resolve_dispatch_labels(entry, params, tenant_base, mode_ctx):
         conversation_id, error_cls=LearnerLabelUnresolved,
         provider=entry.get("provider"),
         extra_keys=_wire.learner_route_param_keys(entry), tokens_out=tokens)
-    if not mapping:
+    if not mapping and not tokens:
         return entry, params, {}, {}
     if not course_id:
         raise LearnerLabelUnresolved(
@@ -8154,6 +8257,10 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # point, and no lane can project without the encrypted vault
         # ('cryptography'), so those keep refusing learner-bearing entries.
         vault_ready=_learner_vault_ready(session))
+    # Course content can name any student: read the course roster (and
+    # refuse the course when it cannot be read) before anything in the
+    # course is read, changed, or restored from labels.
+    _read_course_roster_first(entry, params, session, tenant_base, dry_run)
     # Working by name: resolve learner labels to real ids AFTER the mode
     # gate and BEFORE the write gates claim the op (a refusal here leaves
     # nothing claimed). The gates and every journal record keep the

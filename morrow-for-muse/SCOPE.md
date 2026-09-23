@@ -155,6 +155,16 @@ live battery marks them live-proven in
   end to end against a live Canvas
   course with real students, so treat them as fixture-proven, not
   live-proven, until that battery runs.
+- Course content de-identification: before a Chromium-lane dispatch
+  reads or changes anything in a course, the executor reads the
+  course's student roster (every enrollment state, and deleted
+  enrollments) and labels every student named in course content (a
+  page body, an assignment description), restoring the real text when
+  content is saved back (`privacy/course_content.py`). It is a privacy
+  control, not a capability, and it is fixture-proven like the by-name
+  flow: the roster read (the same Canvas requests the desktop Morrow
+  makes) has not yet been run through this lane against a live
+  course.
 - Discussions: C-139 (create), C-141 (delete), and C-167 (update) are
   catalog live-proven on 2026-09-20 (discussion 1241942 lifecycle)
   through the retired form lane, never the Chromium lane. C-238

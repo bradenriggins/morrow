@@ -28,8 +28,10 @@ bash install.sh
 It checks python3 (>= 3.11; 3.10 refused, security EOL Oct 2026) and
 warns when the `cryptography` package is missing (without it, every
 student-data request is refused: working by name, the failed-students
-question, rosters, grades; if the educator asks for one of those, tell
-them the operator must run `python3 -m pip install --require-hashes -r
+question, rosters, grades; student names in course content are hidden
+without labels, and a change whose text still carries a hidden name is
+refused; if the educator asks for one of those, tell them the operator
+must run `python3 -m pip install --require-hashes -r
 requirements-optional.txt` in this tree), locates Chromium, probes egress
 (`transport/egress.py`: authenticated proxy, bare proxy, or direct),
 creates the effective `MORROW_HOME` state layout, creates
@@ -658,10 +660,10 @@ the educator asks): Morrow cannot intercept what the educator types to
 Muse, so names the educator types reach the Muse model, because the
 educator typed them. Morrow keeps every other student identifier in
 LMS records (every name the educator did not type, every email, login,
-SIS id, and Canvas id) out of what the model and the journal see. Two
-exceptions, below under Honest limitations: a name lookup confirms
-enrollment, and course content (a page body, an announcement, a
-discussion post) reaches the model as written.
+SIS id, and Canvas id) out of what the model and the journal see,
+in course content too (a page body, an assignment description, a quiz
+question). One exception, below under Honest limitations: a name
+lookup confirms enrollment.
 
 For the agent: people-bearing catalog rows (the `[LEARNER-DATA]` rows
 and every route whose response carries people) dispatch only on the
@@ -691,6 +693,36 @@ agent-visible or journaled. Anywhere else (the raw HTTPS lane, or no
   in that course, else with "a Canvas user Morrow has not labeled". A
   named author the roster cannot resolve (a teacher on a submission
   comment) projects to `Staff`.
+
+### Course content (pages, assignments, quizzes)
+
+Course content can name a student too, so before the executor reads or
+changes anything in a course on the Chromium lane it reads the course's
+whole student roster (every enrollment state, and students whose
+enrollment was deleted). If that read fails, nothing in the course is
+read or changed (`CourseRosterUnavailable`); tell the educator plainly
+and retry once. Every result from that course then comes back with each
+student's label plus a marker that names the form it replaced:
+
+- `Student A3`: the full name. `Student A3 (first name)`,
+  `(last name)`, `(name, last name first)`, `(email)`, `(login)`,
+  `(SIS id)`, `(user id)`, `(other name)`: the other forms.
+- `Student A3 or Student A4 (first name)`: a form two students share.
+- `Student A7 (as written)`: text that already read like a label.
+  It is not a student.
+
+When you save content back (a page body, a title, a description), keep
+every label and its marker exactly as you read it: Morrow puts back the
+exact text each one stood for, so "Jane" stays "Jane" and an email
+stays an email. A label you write yourself with no marker goes to Canvas
+as the student's full name. A label the course never issued is refused
+before anything is sent (`LearnerLabelUnresolved`). A word that only
+looks like a student's name is labeled too ("Brown v. Board" in a course
+with a student named Brown reads `Student A4 (last name) v. Board`); it
+is restored exactly when saved back, so never "correct" it. Without the
+`cryptography` package there are no labels: names read as `[hidden:
+student name]`, and a change whose text still carries one is refused;
+leave that part out, or ask the educator to write it.
 
 ### Working by name (the flow you run)
 
@@ -773,11 +805,12 @@ Honest limitations (not defects, but know them):
 - Nicknames: aliases derive from roster fields only, so a nickname
   the roster never mentions (for example "Bobby" for rostered
   "Robert J. Smith") survives redaction in free text.
-- Course content is not de-identified: a page body, announcement,
-  discussion post, or file that names a student ("Congrats to Jane
-  Doe") reaches the model as written, even when Morrow has labeled that
-  student elsewhere. Only people records in LMS responses (rosters,
-  submissions, authors, editors) are projected.
+- Course content is labeled through the course roster, so a name the
+  roster does not know is not labeled: a nickname (above), or someone
+  who was never a student in the course.
+- The failed-students answer (`morrow failed-students`) shows the
+  quiz's title as Canvas has it: it reads the course outside the
+  executor, without the roster pass.
 - A name lookup confirms enrollment: when `students find` returns a
   label for a name, it confirms that a student with that name is
   enrolled in the course, even if the educator never typed that name

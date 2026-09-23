@@ -69,9 +69,19 @@ def edit_mode(hermetic, monkeypatch):
 
 class ChromiumFake(FakeSession):
     """Chromium-lane stand-in: overrides can name students, so C-36 runs
-    only where receipts are de-identified."""
+    only where receipts are de-identified. It serves the empty course
+    roster the executor reads before it touches the course."""
 
     browser_owned_auth = True
+
+    def __init__(self, handler):
+        def with_roster(method, url, body):
+            path = _path(url)
+            if method == "GET" and path.startswith("/api/v1/courses/") \
+                    and path.endswith(("/users", "/enrollments")):
+                return 200, {}, b"[]"
+            return handler(method, url, body)
+        super().__init__(with_roster)
 
 
 def _path(url):

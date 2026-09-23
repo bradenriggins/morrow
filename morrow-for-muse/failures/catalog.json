@@ -620,6 +620,32 @@
       ]
     },
     {
+      "id": "course-roster-unavailable",
+      "title": "Course student list could not be read (course content not shown)",
+      "surface": "canvas",
+      "severity_hint": "high",
+      "root_cause": "Verified in code: dispatch/executor.py _read_course_roster_first reads the course's whole student list (every enrollment state, and deleted enrollments) before a Chromium-lane dispatch reads or changes anything in the course, so student names in course content can be replaced by labels. When that read fails (a Canvas error, a partial list, or a malformed record), the dispatch refuses before the course is touched.",
+      "is_not": "This is not an expired sign-in (that is its own message) and not a refusal of the task itself. Nothing in the course was read or changed.",
+      "agent_message": "What was attempted: I tried {operation}. What the evidence showed: before Morrow reads or changes anything in a course, it reads the course's student list so it can hide student names in what Canvas returns, and that list could not be read this time. What this means: nothing in the course was read or changed, so no student name reached me. What happens next: I will try once more. If it fails again, check that your Canvas account can open the People page of this course; Morrow needs that to keep student names hidden.",
+      "auto_action": "Retry the same request once; never read the course another way while the student list is unreadable.",
+      "escalate_when": "Surface to the educator when a retry fails, with the People page check.",
+      "signature": {
+        "__any_of": [
+          {
+            "gate": "CourseRosterUnavailable"
+          },
+          {
+            "error_class": "CourseRosterUnavailable"
+          }
+        ]
+      },
+      "signature_notes": "evidence: \"dispatch/executor.py CourseRosterUnavailable from _read_course_roster_first\"; gate: \"CourseRosterUnavailable\"",
+      "severity_hint_inventory": "provider",
+      "placeholders": [
+        "operation"
+      ]
+    },
+    {
       "id": "catalog-not-proven",
       "title": "Operation not in the proven catalog (CatalogNotProven)",
       "surface": "canvas",
