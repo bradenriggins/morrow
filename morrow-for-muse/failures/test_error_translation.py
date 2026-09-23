@@ -2,7 +2,7 @@
 """Full test suite for the Morrow error translation layer.
 
 Covers failures/translator.py + failures/catalog.py + failures/catalog.json:
-  1. per-mode tests: every one of the 89 catalog modes gets a synthetic
+  1. per-mode tests: every one of the 90 catalog modes gets a synthetic
      raw error; asserts the right mode_id, the four message anchors, all
      placeholders filled, no em dashes, no shrug language, and the
      escalate flag matching the catalog.
@@ -190,6 +190,11 @@ class VerificationFailed(Exception):
 
 class EvidenceHold(Exception):
     pass
+
+
+class ManifestPinMismatch(Exception):
+    """dispatch/executor.py: a saved task (execute --entry) or its undo
+    whose entry the pack does not pin."""
 
 
 class NewQuizRefused(Exception):
@@ -469,6 +474,9 @@ MODE_CASES = {
     "new-quiz-guard-refused": lambda: NewQuizRefused(
         "draw update requires a positive whole question count; got 0"),
     "catalog-not-proven": lambda: {"gate": "CatalogNotProven"},
+    "manifest-entry-not-pinned": lambda: ManifestPinMismatch(
+        "entry name 'morrow_plan_page_image_alt_repair' is not pinned in "
+        "the pack; refusing to run"),
     "helper-down": lambda: {
         "error_class": "ExecutorError",
         "error_text": "chromium backend: browser unavailable (boom); "
@@ -627,8 +635,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_89_modes(self):
-        self.assertEqual(89, len(CATALOG.entries))
+    def test_catalog_has_90_modes(self):
+        self.assertEqual(90, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):

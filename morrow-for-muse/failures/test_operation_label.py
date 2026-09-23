@@ -29,6 +29,9 @@ import pytest
 
 from dispatch import executor as ex
 from failures.catalog import load_catalog
+# Imported here, under the session's scratch home: a first import inside
+# a test would bind the module's paths to that test's tmp_path.
+from reauth import state_machine
 from dispatch.test_round4_write_ceremony import (  # noqa: F401
     CONV, METHOD, NAME, PARAMS, PATH, USER, FakeSession, _canvas, _cli,
     _fake_store, _plan_write_argv, hermetic, hermetic_keys)
@@ -68,13 +71,13 @@ def _prepared(monkeypatch, handler=None):
 
 @pytest.fixture
 def rsm(monkeypatch, hermetic):
-    from reauth import state_machine
     for name, file_name in (("HALT_PATH", "write_halt"),
                             ("QUAR_PATH", "quarantine.jsonl"),
                             ("NOTIFY_PATH", "notify.txt"),
                             ("STATE_PATH", "reauth_state.json")):
         monkeypatch.setattr(state_machine, name, str(hermetic / file_name))
-    return state_machine
+    yield state_machine
+    (hermetic / "write_halt").unlink(missing_ok=True)
 
 
 def test_a_paused_approved_write_names_the_change_and_the_course(

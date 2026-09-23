@@ -621,6 +621,26 @@
       ]
     },
     {
+      "id": "manifest-entry-not-pinned",
+      "title": "Saved task or undo not in this release (ManifestPinMismatch)",
+      "surface": "canvas",
+      "severity_hint": "low",
+      "root_cause": "Verified mechanism: the executor runs a saved multi-step task (execute --entry) or its undo only when pack/pack.json pins that entry with a matching sha256. This release pins no entry, so every such run is refused before anything is sent (a changed entry file is refused the same way).",
+      "is_not": "This is not a Canvas failure and nothing was sent. It is not a broken install.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: this version of Morrow does not include that saved task, so it stopped before sending anything to Canvas (reference {correlation_id}). What this means: nothing was changed. This version has no automatic undo. What happens next: to reverse a change, I can prepare the opposite change as a new change, and in plan mode I will show it to you for approval first.",
+      "auto_action": "Do not retry the saved task or undo. To reverse a change, prepare the opposite change with plan-write (or run it directly in edit mode) and tell the educator it is a new change, not an undo.",
+      "escalate_when": "Never on its own: the refusal is by design. Escalate only if an entry the release is meant to pin is refused.",
+      "signature": {
+        "error_class": "ManifestPinMismatch"
+      },
+      "signature_notes": "evidence: 2026-09-22 final sweep: executor 'undo --entry catalog/a11y/morrow_plan_page_image_alt_repair.json' raised ManifestPinMismatch (\"entry name ... is not pinned in the pack; refusing to run\"); before this entry it fell through to the unknown fallback, which says something might have applied.",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
       "id": "helper-down",
       "title": "Helper server not running",
       "surface": "helper",
