@@ -374,6 +374,14 @@ Technical notes:
   root (`REPO_FILES`), listed in `pack/carve-manifest.json` and in the
   zip; the carve fails when it is missing or untracked, or when
   `morrow-for-muse/LICENSE` would shadow it.
+- `scripts/carve.py --zip`, the release build, refuses to start while
+  a tracked file under `morrow-for-muse/` or `LICENSE` differs from the
+  commit checked out (an edit, a staged, deleted, added, or mode
+  change, or an edit hidden by `assume-unchanged`), so a published zip
+  always holds its tag's bytes. Every carve records `source_commit`
+  and `source_dirty` in `pack/carve-manifest.json`. Before, the zip
+  copied the working tree and recorded no commit, so an uncommitted
+  edit shipped silently.
 - `dispatch/state_backup.py` backs up and restores the approval signing
   keyring (`secrets/`), the source vault Morrow writes
   (`morrow_source_vault.json` with its `.key` and `.echo`, restored to

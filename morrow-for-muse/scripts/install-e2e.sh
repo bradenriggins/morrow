@@ -1,8 +1,9 @@
 #!/bin/bash
 # scripts/install-e2e.sh: prove install from this repo, end to end (DEV-ONLY).
 #
-# 1. Carves the distribution from the working tree (scripts/carve.py
-#    --zip) into <repo>/dist/.
+# 1. Carves the distribution (scripts/carve.py --zip) into <repo>/dist/.
+#    Like a release build, it refuses uncommitted changes under
+#    morrow-for-muse/, so commit the work under test first.
 # 2. Builds a Linux container that looks like the Muse VM: user `hatch`,
 #    Chromium at /opt/meta-chromium/chrome, curl/ss/pgrep/flock/crontab,
 #    and an authenticated https_proxy in the environment.
