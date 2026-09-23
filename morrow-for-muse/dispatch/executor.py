@@ -390,7 +390,7 @@ def _on_session_death(op_id, entry_name, evidence):
     # via `state_machine.py notify` and the helper /status, so a
     # missing file is detectable, not silent.
     try:
-        n_paused = len(_rsm.quarantined_ops())
+        n_paused = len(_rsm.paused_ops())
     except Exception:
         n_paused = -1  # count unknown; the warning below still names it
     try:
@@ -427,7 +427,7 @@ def _on_stale_verify(op_id, entry_name, evidence):
     # W6-P1-S2: see _on_session_dead: never swallow a failed educator
     # notification silently.
     try:
-        _rsm.write_notify_stale(len(_rsm.quarantined_ops()))
+        _rsm.write_notify_stale(len(_rsm.paused_ops()))
     except Exception as exc:
         print("MORROW WARNING: the educator notification for the stale "
               "verify of op %s FAILED to write (%s); read the quarantine "

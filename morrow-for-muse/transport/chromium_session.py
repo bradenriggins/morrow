@@ -369,7 +369,7 @@ class ChromiumSession:
                 % (self._dead_cause_key or "unknown"),
                 cause="session_expired")
             rsm.quarantine_session(self._dead_cause_key, detection)
-            rsm.write_notify_expired(len(rsm.quarantined_ops()))
+            rsm.write_notify_expired(len(rsm.paused_ops()))
         except Exception:
             pass
 

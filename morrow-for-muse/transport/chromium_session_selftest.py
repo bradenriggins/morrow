@@ -168,6 +168,9 @@ class _FakeRsm:
     def quarantined_ops(self):
         return []
 
+    def paused_ops(self):
+        return []
+
     # Executor gate reads (hermetic answers; the real machine is the
     # session_lifecycle_selftest's subject, not this file's).
     def check_write_allowed(self):
@@ -192,6 +195,7 @@ _fake_rsm_mod = types.SimpleNamespace(
     quarantine_session=_fake_rsm.quarantine_session,
     write_notify_expired=_fake_rsm.write_notify_expired,
     quarantined_ops=_fake_rsm.quarantined_ops,
+    paused_ops=_fake_rsm.paused_ops,
     check_write_allowed=_fake_rsm.check_write_allowed,
     op_quarantine_status=_fake_rsm.op_quarantine_status,
     on_expiry_detected=_fake_rsm.on_expiry_detected,

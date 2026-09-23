@@ -760,6 +760,19 @@ def quarantined_ops():
     return ops
 
 
+def paused_ops():
+    """The changes still waiting on the educator: one entry per op id,
+    its newest, when that status is quarantined or awaiting_approval.
+    The session_death records of past incidents are history, not
+    paused changes."""
+    newest = {}
+    for entry in quarantined_ops():
+        if (entry.get("kind") or "op") == "op":
+            newest[str(entry.get("op_id"))] = entry
+    return [entry for entry in newest.values()
+            if entry.get("status") in ("quarantined", "awaiting_approval")]
+
+
 def mark_ops_awaiting_approval():
     """After verified resume, quarantined ops move to awaiting_approval.
 
@@ -1186,7 +1199,7 @@ def verified_resume_after_manual_signin(principal_id, principal_name="",
     # incomplete rig/drill cycle may have left one behind; a completed
     # recovery is the right moment to sweep it.
     age_out_stale_prev()
-    write_notify_resumed(len(quarantined_ops()))
+    write_notify_resumed(len(paused_ops()))
     print("verified resume (manual sign-in): principal id=%s matches the "
           "pinned account, halt lifted, %d op(s) awaiting fresh per-op "
           "approval" % (principal_id, moved))
@@ -1249,13 +1262,20 @@ def _session_summary():
 
 def write_notify_expired(n_quarantined):
     base, name, pid = _session_summary()
+    if n_quarantined:
+        paused = (
+            f"{n_quarantined} in-progress operation(s) were paused and "
+            "saved. Nothing was lost and nothing was retried.\n\n"
+            "Next step: sign in to Canvas again on the helper page, then "
+            "confirm each paused operation before it resumes.\n")
+    else:
+        paused = (
+            "No change was in progress, so nothing was paused.\n\n"
+            "Next step: sign in to Canvas again on the helper page.\n")
     text = (
         "Morrow: your Canvas connection expired.\n\n"
         f"The session for {name} (id {pid}) on {base} is no longer valid.\n"
-        f"{n_quarantined} in-progress operation(s) were paused and saved. "
-        "Nothing was lost and nothing was retried.\n\n"
-        "Next step: sign in to Canvas again in the browser when prompted, "
-        "then confirm each paused operation before it resumes.\n"
+        + paused
     )
     os.makedirs(STORE_DIR, mode=0o700, exist_ok=True)
     with open(NOTIFY_PATH, "w") as f:
@@ -1264,6 +1284,14 @@ def write_notify_expired(n_quarantined):
 
 
 def write_notify_resumed(n_ops):
+    if not n_ops:
+        # Nothing waits on the educator, so the helper page has nothing
+        # left to tell them.
+        try:
+            os.remove(NOTIFY_PATH)
+        except FileNotFoundError:
+            pass
+        return
     base, name, pid = _session_summary()
     text = (
         "Morrow: your Canvas connection is back.\n\n"
@@ -1320,10 +1348,10 @@ def write_notify_escalation(detail):
 def on_expiry_detected(detection, simulated=False):
     """Full expiry handling: halt, quarantine placeholder, notify."""
     impose_halt(detection)
-    write_notify_expired(len(quarantined_ops()))
+    write_notify_expired(len(paused_ops()))
     tag = " (SIMULATED)" if simulated else ""
     print(f"expiry detected{tag}: state={EXPIRED}, write halt imposed, "
-          f"notify.txt written, {len(quarantined_ops())} op(s) quarantined")
+          f"notify.txt written, {len(paused_ops())} op(s) quarantined")
 
 
 def reauth():
@@ -1439,7 +1467,7 @@ def _complete_reauth(old_principal, new_principal):
     except OSError:
         pass
     lift_halt()
-    write_notify_resumed(len(quarantined_ops()))
+    write_notify_resumed(len(paused_ops()))
     print(f"verified resume: principal id={new_principal.get('id')} pinned, "
           f"halt lifted, {moved} op(s) awaiting fresh per-action approval")
     return True

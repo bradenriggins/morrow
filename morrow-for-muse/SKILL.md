@@ -213,6 +213,11 @@ run stops loudly instead of writing through a half-dead session:
    then `state_machine.py pin --confirm-account "<their words>"`, then
    `resume` again. A pin record that is unreadable or loosely
    permissioned also refuses; it is never read as "no pin".
+   Then run `python3 reauth/state_machine.py notify`: it prints the
+   notice the helper page shows (what was paused, and what waits for
+   the educator's approval) and clears it. Tell the educator what it
+   says in plain words. With nothing waiting, resume clears the notice
+   itself and `notify` prints that none is pending.
 5. **Per-op re-approval.** Each quarantined op needs the educator's
    explicit approval (`reauth/state_machine.py approve --op-id <id>
    --authorization "<educator's verbatim approval words>"`; the
