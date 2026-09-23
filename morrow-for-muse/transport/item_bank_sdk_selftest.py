@@ -108,26 +108,26 @@ def _t_paths():
 
 def _t_derive():
     assert sdk.derive_api_origin(
-        "https://school.quiz-lti-iad-prod.example.com") == \
-        "https://school.quiz-api-iad-prod.example.com"
+        "https://school.quiz-lti-iad-prod.instructure.com") == \
+        "https://school.quiz-api-iad-prod.instructure.com"
     assert sdk.derive_api_origin(
-        "https://school.quiz-lti.eu-west-1.example.com") == \
-        "https://school.quiz-api.eu-west-1.example.com"
+        "https://school.quiz-lti.eu-west-1.instructure.com") == \
+        "https://school.quiz-api.eu-west-1.instructure.com"
     assert sdk.derive_api_origin(
-        "https://school.quiz-api-iad-prod.example.com"
+        "https://school.quiz-api-iad-prod.instructure.com"
         .replace("quiz-api", "quiz-lti")) == \
-        "https://school.quiz-api-iad-prod.example.com"
+        "https://school.quiz-api-iad-prod.instructure.com"
 
 
 def _t_derive_refuses():
     expect_raises("derive_refuses_plain", lambda: sdk.derive_api_origin(
-        "https://school.example.com"), sdk.ItemBankSdkError)
+        "https://school.instructure.com"), sdk.ItemBankSdkError)
 
 
 def _t_origin_of():
     assert sdk.origin_of(
-        "https://school.quiz-lti-iad-prod.example.com/api/sdk_tokens/x"
-    ) == "https://school.quiz-lti-iad-prod.example.com"
+        "https://school.quiz-lti-iad-prod.instructure.com/api/sdk_tokens/x"
+    ) == "https://school.quiz-lti-iad-prod.instructure.com"
     expect_raises("origin_bad", lambda: sdk.origin_of("not a url"),
                   sdk.ItemBankSdkError)
 
@@ -136,19 +136,20 @@ def _t_origin_of():
 
 def _t_frame_id():
     tree = {"frameTree": {
-        "frame": {"id": "F1", "url": "https://school.example.com/"},
+        "frame": {"id": "F1", "url": "https://school.instructure.com/"},
         "childFrames": [
             {"frame": {"id": "F2",
                        "url": "https://other.example.com/"},
              "childFrames": []},
             {"frame": {"id": "F3",
-                       "url": "https://school.quiz-lti-iad-prod.example.com"
+                       "url": "https://school.quiz-lti-iad-prod"
+                              ".instructure.com"
                               "/lti/launch"},
              "childFrames": []},
         ]}}
     assert sdk.find_quiz_lti_frame_id(tree) == "F3"
     assert sdk.find_quiz_lti_frame_id({"frameTree": {
-        "frame": {"id": "F1", "url": "https://school.example.com/"},
+        "frame": {"id": "F1", "url": "https://school.instructure.com/"},
         "childFrames": []}}) is None
     assert sdk.find_quiz_lti_frame_id({}) is None
     assert sdk.find_quiz_lti_frame_id(None) is None
@@ -157,11 +158,11 @@ def _t_frame_id():
 def _t_frame_rejects_sibling_host():
     tree = {"frameTree": {
         "frame": {"id": "F1",
-                  "url": "https://school.quiz-lti-iad-prod.example.com"
+                  "url": "https://school.quiz-lti-iad-prod.instructure.com"
                          ".evil.example/lti/launch"},
         "childFrames": []}}
     assert sdk.find_quiz_lti_frame_id(
-        tree, "school.example.com") is None
+        tree, "school.instructure.com") is None
 
 
 def _t_frame_rejects_fragment_in_query():
@@ -170,32 +171,35 @@ def _t_frame_rejects_fragment_in_query():
         "childFrames": []}}
     assert sdk.find_quiz_lti_frame_id(tree) is None
     assert sdk.find_quiz_lti_frame_id(
-        tree, "school.example.com") is None
+        tree, "school.instructure.com") is None
 
 
 def _t_frame_rejects_non_https():
     tree = {"frameTree": {
         "frame": {"id": "F1",
-                  "url": "http://school.quiz-lti-iad-prod.example.com/lti"},
+                  "url": "http://school.quiz-lti-iad-prod.instructure.com"
+                         "/lti"},
         "childFrames": []}}
     assert sdk.find_quiz_lti_frame_id(
-        tree, "school.example.com") is None
+        tree, "school.instructure.com") is None
 
 
 def _t_frame_tenant_bound_variants():
-    for url in ("https://school.quiz-lti-iad-prod.example.com/lti/launch",
-                "https://school.quiz-lti.eu-west-1.example.com/lti/launch"):
+    for url in ("https://school.quiz-lti-iad-prod.instructure.com/lti/launch",
+                "https://school.quiz-lti.eu-west-1.instructure.com"
+                "/lti/launch"):
         tree = {"frameTree": {
             "frame": {"id": "F1", "url": url}, "childFrames": []}}
         assert sdk.find_quiz_lti_frame_id(
-            tree, "school.example.com") == "F1", url
+            tree, "school.instructure.com") == "F1", url
     # wrong tenant first label: refused
     tree = {"frameTree": {
         "frame": {"id": "F1",
-                  "url": "https://other.quiz-lti-iad-prod.example.com/lti"},
+                  "url": "https://other.quiz-lti-iad-prod.instructure.com"
+                         "/lti"},
         "childFrames": []}}
     assert sdk.find_quiz_lti_frame_id(
-        tree, "school.example.com") is None
+        tree, "school.instructure.com") is None
 
 
 # -- token payload parsing ---------------------------------------------------
@@ -247,18 +251,18 @@ def _t_tool_foreign_domain_refused():
               "url": "https://evil.example/lti/launch"}]
     expect_raises("foreign_tool",
                   lambda: sdk.find_item_banks_tool_id(
-                      tools, "school.example.com"),
+                      tools, "school.instructure.com"),
                   sdk.ItemBankSdkError)
 
 
 def _t_tool_tenant_domain_ok():
     tools = [{"id": 9, "name": "Item Banks",
-              "domain": "school.quiz-lti-iad-prod.example.com"}]
+              "domain": "school.quiz-lti-iad-prod.instructure.com"}]
     assert sdk.find_item_banks_tool_id(
-        tools, "school.example.com") == 9
+        tools, "school.instructure.com") == 9
     # no url/domain carried: nothing to validate, still resolves
     assert sdk.find_item_banks_tool_id(
-        [{"id": 9, "name": "Item Banks"}], "school.example.com") == 9
+        [{"id": 9, "name": "Item Banks"}], "school.instructure.com") == 9
 
 
 # -- course scoping ----------------------------------------------------------
@@ -287,8 +291,8 @@ def _t_payload():
 
 # -- launch / request flow with a mocked CDP ---------------------------------
 
-_QZ_LTI = "https://school.quiz-lti-iad-prod.example.com"
-_QZ_API = "https://school.quiz-api-iad-prod.example.com"
+_QZ_LTI = "https://school.quiz-lti-iad-prod.instructure.com"
+_QZ_API = "https://school.quiz-api-iad-prod.instructure.com"
 
 
 class _FakeCDP:
@@ -311,7 +315,7 @@ class _FakeCDP:
         self.last_match = None
         self.frame_tree = {"frameTree": {
             "frame": {"id": "F-top",
-                      "url": "https://school.example.com/courses/1"},
+                      "url": "https://school.instructure.com/courses/1"},
             "childFrames": []}}
         self.api_status = 201
         self.api_body = '{"item":{"id":777}}'
@@ -387,7 +391,7 @@ class _FakeCDP:
         if "users/self" in expression:
             return 200 if self.session_alive else 401
         if "location.href" in expression:
-            return "https://school.example.com/"
+            return "https://school.instructure.com/"
         # the item fetch program: runs in the tab root frame's world
         assert context_id == 42, \
             "fetch must evaluate in the quiz-lti frame context"
@@ -403,24 +407,24 @@ class _FakeCDP:
 
 def _t_api_host():
     assert sdk._is_quiz_api_host(
-        "school.quiz-api-iad-prod.example.com", "school.example.com")
+        "school.quiz-api-iad-prod.instructure.com", "school.instructure.com")
     assert sdk._is_quiz_api_host(
-        "school.quiz-api.example.com", "school.example.com")
+        "school.quiz-api.instructure.com", "school.instructure.com")
     assert not sdk._is_quiz_api_host(
-        "other.quiz-api-iad-prod.example.com", "school.example.com")
+        "other.quiz-api-iad-prod.instructure.com", "school.instructure.com")
     assert not sdk._is_quiz_api_host(
-        "school.quiz-lti-iad-prod.example.com", "school.example.com")
+        "school.quiz-lti-iad-prod.instructure.com", "school.instructure.com")
     assert not sdk._is_quiz_api_host(
-        "school.quiz-api-iad-prod.example.com.evil.example",
-        "school.example.com")
+        "school.quiz-api-iad-prod.instructure.com.evil.example",
+        "school.instructure.com")
     assert not sdk._is_quiz_api_host("evil.example.com",
-                                     "school.example.com")
-    assert not sdk._is_quiz_api_host("", "school.example.com")
+                                     "school.instructure.com")
+    assert not sdk._is_quiz_api_host("", "school.instructure.com")
 
 
 def _t_launch_captures_auth_headers():
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
     assert len(cdp.captured) == 1
     url, _match = cdp.captured[0]
@@ -434,7 +438,7 @@ def _t_launch_captures_auth_headers():
 def _t_launch_auth_type_defaults():
     cdp = _FakeCDP()
     cdp.capture_headers = {"Authorization": "tok-x"}
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
     assert s._token == "tok-x"
     assert s._auth_type == "Signature", "auth type must default"
@@ -442,39 +446,40 @@ def _t_launch_auth_type_defaults():
 def _t_launch_auth_type_variant():
     cdp = _FakeCDP()
     cdp.capture_headers = {"Authorization": "t", "AuthType": "CustomScheme"}
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
     assert s._auth_type == "CustomScheme"
     s.close()
 def _t_launch_region_variant():
     cdp = _FakeCDP()
-    cdp.capture_url = ("https://school.quiz-api.eu-west-1.example.com"
+    cdp.capture_url = ("https://school.quiz-api.eu-west-1.instructure.com"
                        "/api/features")
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
     assert s._api_origin == \
-        "https://school.quiz-api.eu-west-1.example.com", s._api_origin
+        "https://school.quiz-api.eu-west-1.instructure.com", s._api_origin
     # the real matcher (kept by the fake) binds to the tenant: a sibling
     # tenant's quiz-api host is refused.
     assert not cdp.last_match(
-        "https://other.quiz-api-eu-west-1.example.com/api/x",
+        "https://other.quiz-api-eu-west-1.instructure.com/api/x",
         {"Authorization": "z"})
     s.close()
 def _t_launch_matcher_rejects_foreign_host():
     # the matcher launch() builds is the trust boundary: drive it
     # directly against hostile inputs.
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
     m = cdp.last_match
     good = {"Authorization": "z"}
-    assert m("https://school.quiz-api-iad-prod.example.com/api/banks",
+    assert m("https://school.quiz-api-iad-prod.instructure.com/api/banks",
              good)
-    assert not m("https://school.quiz-lti-iad-prod.example.com/api/x",
+    assert not m("https://school.quiz-lti-iad-prod.instructure.com/api/x",
                  good), "quiz-lti host is not the item API host"
-    assert not m("https://school.quiz-api-iad-prod.example.com.evil.example/"
+    assert not m("https://school.quiz-api-iad-prod.instructure.com"
+                 ".evil.example/"
                  "api/x", good), "suffix trick"
-    assert not m("https://school.quiz-api-iad-prod.example.com/api/x",
+    assert not m("https://school.quiz-api-iad-prod.instructure.com/api/x",
                  {"Accept": "application/json"}), "no Authorization"
     assert not m("not a url", good)
     s.close()
@@ -486,7 +491,7 @@ def _t_launch_retries_capture_timeout_once():
     # error.
     cdp = _FakeCDP()
     cdp.capture_fail_times = 1
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
     assert len(cdp.captured) == 2, cdp.captured
     assert s._launched is True
@@ -494,7 +499,7 @@ def _t_launch_retries_capture_timeout_once():
 
     cdp = _FakeCDP()
     cdp.capture_fail_times = 2
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     try:
         s.launch()
     except sdk.ItemBankSdkError as exc:
@@ -508,7 +513,7 @@ def _t_launch_retries_capture_timeout_once():
 
 def _t_launch_course_id_json_encoded():
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
     prog = [e for e in cdp.evaluations if "external_tools" in e[0]][0][0]
     assert "'/api/v1/courses/' + \"89585\" + '/external_tools'" in prog, prog
@@ -518,7 +523,7 @@ def _t_launch_course_id_json_encoded():
 
 def _t_ids_rejected_at_boundary():
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     expect_raises("none_bank",
                   lambda: s.create_item(None, {"item": {}}),
                   sdk.ItemBankSdkError)
@@ -554,11 +559,11 @@ def _t_ids_rejected_at_boundary():
     # single-segment validation at construction.
     expect_raises("slash_course",
                   lambda: sdk.ItemBankSdk(
-                      _FakeCDP(), "https://school.example.com", "../x"),
+                      _FakeCDP(), "https://school.instructure.com", "../x"),
                   sdk.ItemBankSdkError)
     expect_raises("backslash_course",
                   lambda: sdk.ItemBankSdk(
-                      _FakeCDP(), "https://school.example.com", "1\\2"),
+                      _FakeCDP(), "https://school.instructure.com", "1\\2"),
                   sdk.ItemBankSdkError)
     # numeric ids still work
     status, body = s.create_item(
@@ -572,15 +577,15 @@ def _t_launch_needs_no_quiz_lti_frame():
     # launch must not require one.
     cdp = _FakeCDP()
     cdp.frame_tree = {"frameTree": {
-        "frame": {"id": "F-top", "url": "https://school.example.com/"},
+        "frame": {"id": "F-top", "url": "https://school.instructure.com/"},
         "childFrames": []}}
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
     s.close()
 def _t_launch_capture_timeout():
     cdp = _FakeCDP()
     cdp.capture_error = TimeoutError("never fired")
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585",
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585",
                         token_wait_s=5)
     expect_raises("capture_timeout", s.launch, sdk.ItemBankSdkError)
     s.close()
@@ -589,7 +594,7 @@ def _t_launch_capture_timeout():
 def _t_launch_falls_back_to_banks_route():
     cdp = _FakeCDP()
     cdp.tools = [{"id": 9, "name": "Zoom"}]
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
     url, _match = cdp.captured[0]
     assert url.endswith("/courses/89585/banks"), url
@@ -597,7 +602,7 @@ def _t_launch_falls_back_to_banks_route():
 def _t_launch_dead_session():
     cdp = _FakeCDP()
     cdp.session_alive = False
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     expect_raises("launch_dead", s.launch, sdk.ItemBankSdkSessionDead)
     assert cdp.captured == [], "no capture without a live session"
     s.close()
@@ -605,7 +610,7 @@ def _t_launch_dead_session():
 
 def _t_request_roundtrip():
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     status, body = s.create_item("123", sdk.build_disposable_choice_item("Q"))
     assert status == 201, status
     assert json.loads(body)["item"]["id"] == 777
@@ -620,7 +625,7 @@ def _t_request_roundtrip():
 def _t_request_no_token_in_results():
     cdp = _FakeCDP()
     cdp.api_body = '{"item":{"id":1},"echo":"none"}'
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     status, body = s.get_item("123", "456")
     assert status == 201
     assert "tok-abc-123" not in body
@@ -629,7 +634,7 @@ def _t_request_no_token_in_results():
 
 def _t_request_context_loss_resets():
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
     cdp.eval_error = RuntimeError(
         "Cannot find context with specified id")
@@ -647,7 +652,7 @@ def _t_request_fetch_error_is_maybe_attempted():
     # the provider, so it surfaces as MaybeAttempted. A non-fetch
     # program failure stays a plain (not-attempted) ItemBankSdkError.
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
     cdp.item_outcome = {"ok": False,
                         "error": "fetch_error: connection reset"}
@@ -672,7 +677,7 @@ def _t_request_fetch_error_is_maybe_attempted():
 
 def _t_close_wipes_token():
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
     assert s._token == "tok-abc-123"
     s.close()
@@ -683,7 +688,7 @@ def _t_close_wipes_token():
 
 def _t_request_refuses_cross_course():
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     expect_raises("xcourse", lambda: s.get_item("1", "2", course_id="999"),
                   sdk.ItemBankSdkError)
     s.close()
@@ -691,7 +696,7 @@ def _t_request_refuses_cross_course():
 
 def _t_request_refuses_non_sdk_path():
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
 
     def _refused(path):
         n_calls = len(cdp.calls)
@@ -725,7 +730,7 @@ def _t_request_refuses_non_sdk_path():
 
 def _t_create_requires_item_nesting():
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     expect_raises("nesting", lambda: s.create_item("1", {"title": "x"}),
                   sdk.ItemBankSdkError)
     s.close()
@@ -733,7 +738,7 @@ def _t_create_requires_item_nesting():
 
 def _t_update_requires_item_nesting():
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     expect_raises("nesting_upd", lambda: s.update_item(
         "1", "2", {"title": "x"}), sdk.ItemBankSdkError)
     s.close()
@@ -741,7 +746,7 @@ def _t_update_requires_item_nesting():
 
 def _t_no_course_refused():
     expect_raises("nocourse", lambda: sdk.ItemBankSdk(
-        _FakeCDP(), "https://school.example.com", None),
+        _FakeCDP(), "https://school.instructure.com", None),
         sdk.ItemBankSdkError)
 
 
@@ -749,7 +754,7 @@ def _t_request_rejects_unsupported_method():
     # LANE6-4: the method boundary admits only GET/POST/PATCH/DELETE.
     # PUT is refused in particular (item updates are PATCH-only).
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     for bad in ("PUT", "put", "OPTIONS", "HEAD", "TRACE"):
         expect_raises("method_%s" % bad,
                       lambda m=bad: s.request(
@@ -764,7 +769,7 @@ def _t_request_rejects_unsupported_method():
     assert n_launches == 1, n_launches
     # All four contract methods are still admitted (each relaunches once).
     for good in ("GET", "post", "Patch", "DELETE"):
-        s2 = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+        s2 = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
         status, _ = s2.request(good, "/api/banks/123")
         assert status == 201, (good, status)
         s2.close()
@@ -775,7 +780,7 @@ def _t_drop_credential_forces_relaunch():
     # LANE6-5: drop_credential wipes the launch state so the next
     # request() recaptures a fresh credential (the 401 recovery path).
     cdp = _FakeCDP()
-    s = sdk.ItemBankSdk(cdp, "https://school.example.com", "89585")
+    s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
     assert s._launched is True
     assert s._token is not None, "expected a captured token after launch"

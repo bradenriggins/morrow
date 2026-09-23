@@ -18,13 +18,20 @@ holds auth material:
 1. **Dynamic LTI tool resolution**: GET
    `/api/v1/courses/{course_id}/external_tools`, first tool whose name
    contains "Item Banks" (case-insensitive). Never hardcoded: the old
-   54065 id was one tenant's id, not a contract.
+   54065 id was one tenant's id, not a contract. The same list with
+   `include_parents=true` names the tenant's New Quizzes account: the
+   `<account>` of `<account>.quiz-lti-<region>.instructure.com`.
+   Instructure hosts New Quizzes for every tenant, including one whose
+   Canvas runs on the school's own domain (`canvas.school.edu`), which
+   has no other way to learn its account. A `*.instructure.com`
+   tenant's own first label is its account too.
 2. **Credential capture**: one persistent CDP session on a dedicated
    tab, navigate to the LTI launch
    (`{canvas_base}/courses/{course_id}/external_tools/{tool_id}`,
    fallback `{canvas_base}/courses/{course_id}/banks`). The app's own
    traffic is watched for the first request to the tenant-bound
-   quiz-api host carrying an Authorization header; that header (plus
+   quiz-api host (`<account>.quiz-api-<region>.instructure.com`, for
+   one of the tenant's own accounts) carrying an Authorization header; that header (plus
    the AuthType header) is the captured `banks.build` credential.
    Request headers, not the `/api/sdk_tokens/banks.build` response
    body: on the `/banks` route the app issues its API calls from a Web

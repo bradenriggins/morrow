@@ -822,8 +822,9 @@ def _confine_fetch_url(url, canvas_base):
     tparts = urllib.parse.urlsplit(canvas_base or "")
     if _same_https_origin(parts, tparts):
         return
-    # The tenant's own quiz-api host (<first-label>.quiz-api[-.]...<parent>):
-    # the Item Banks SDK lane's API origin. Tenant binding is mandatory:
+    # The tenant's own quiz-api host
+    # (<first-label>.quiz-api[-<region>].instructure.com): the Item Banks
+    # SDK lane's API origin. Tenant binding is mandatory:
     # without it any quiz-api-shaped host (including an attacker's) would
     # pass the structural check, so a missing tenant base fails closed.
     thost = (tparts.hostname or "").lower()
