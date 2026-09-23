@@ -2,9 +2,10 @@
 
 This document is for the operator installing the connector on a Muse
 VM. If you are an educator who wants to use Morrow, you do not install
-anything: open Muse and say "Connect my Canvas account", then follow
-the conversation (`content/setup-guide.md` is the educator walkthrough
-and `FIRST_RUN.md` is the agent's first-hour checklist).
+anything: open Muse and say "Set up Morrow for Muse by following
+https://meetmorrow.app/morrow-for-muse", then follow the conversation
+(`content/setup-guide.md` is the educator walkthrough and
+`FIRST_RUN.md` is the agent's first-hour checklist).
 
 This document takes you from a fresh Muse VM to a verified Canvas
 connection. Every step is executable as written; nothing here assumes
@@ -71,12 +72,22 @@ publish unless the secrets gate passes on the result. Do not run
 `install.sh` directly in a repository checkout: it has no carve manifest
 and step 2 refuses it on purpose.
 
-Unzip the release into the skills directory:
+Unzip the release into the skills directory. Run these commands from
+the folder that holds the zip. Running them again is safe: they update
+an existing `morrow-canvas` tree in place and keep `helper/env` and the
+sign-in in `helper/profile/`.
 
 ```
 mkdir -p ~/workspace/skills
-unzip morrow-muse-connector-0.4.1.zip -d ~/workspace/skills/
-mv ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas
+rm -rf ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas/morrow-muse-connector
+unzip -q morrow-muse-connector-0.4.1.zip -d ~/workspace/skills/
+cd ~/workspace/skills
+if [ -d morrow-canvas ]; then
+  cp -R morrow-muse-connector/. morrow-canvas/
+  rm -rf morrow-muse-connector
+else
+  mv morrow-muse-connector morrow-canvas
+fi
 cd ~/workspace/skills/morrow-canvas
 ```
 
@@ -388,8 +399,18 @@ reliably end the helper's separate session.
 
 ## Upgrading
 
-Unzip the new release over the tree (or into a fresh directory) and
-rerun `install.sh`. The installer:
+Get the new release zip as in step 1, run step 1's unzip commands again
+from the folder that holds it, then rerun the installer from the tree:
+
+```
+bash install.sh
+```
+
+Step 1's commands copy the new release over the existing
+`~/workspace/skills/morrow-canvas` tree. Do not unzip into a fresh
+directory: `helper/env` and the sign-in in `helper/profile/` live inside
+the tree, so a fresh tree starts without the Canvas address, and the
+educator must sign in again. The installer:
 
 - Verifies the tree against `pack/carve-manifest.json` (SHA-256 of
   every shipped file) before touching anything.
