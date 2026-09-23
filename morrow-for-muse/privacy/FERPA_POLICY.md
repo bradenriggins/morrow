@@ -340,6 +340,16 @@ the wired vault file above.
   when it means something else ("Brown v. Board" in a course with a
   student named Brown reads `Student A4 (last name) v. Board`). It is
   restored exactly when saved back.
+- A first or last name alone is labeled only when it is capitalized
+  (a lowercase one is often an ordinary word); the full name, email,
+  and login are labeled in any case. So a page's web address (`url`,
+  `html_url`, the slug Canvas makes from the title in lowercase) can
+  carry a student's name. Morrow needs the address to find the page.
+- A course's own name is shown as Canvas has it wherever Morrow names
+  the course (the course list, the approval display, operation labels
+  in messages), so a course named for a student (an independent study)
+  shows that name. The course list spans courses and has no single
+  roster to label it with.
 - Bare numeric ids in arbitrary prose or CSV text are not always
   recognized. Contextual forms are redacted: `user_id=912345`, any
   URL path segment or query value equal to a rostered learner id

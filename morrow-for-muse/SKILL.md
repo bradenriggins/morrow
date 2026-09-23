@@ -808,6 +808,14 @@ Honest limitations (not defects, but know them):
 - Course content is labeled through the course roster, so a name the
   roster does not know is not labeled: a nickname (above), or someone
   who was never a student in the course.
+- A name in lowercase is labeled only when it is the full name, the
+  email, or the login (a lowercase first or last name alone is often an
+  ordinary word). So a page's web address (`url`, `html_url`), which
+  keeps the words of the page's title in lowercase, can carry a
+  student's name; Morrow needs the address to find the page.
+- A course's own name is shown as Canvas has it wherever Morrow names
+  the course (the course list, approvals, messages), so a course named
+  for a student (an independent study) shows that name.
 - A name lookup confirms enrollment: when `students find` returns a
   label for a name, it confirms that a student with that name is
   enrolled in the course, even if the educator never typed that name
