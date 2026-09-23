@@ -259,5 +259,9 @@ def test_a_session_that_ends_during_the_write_pauses_the_change(world):
     assert "status=quarantined" in status, status
     notice = _state_machine(world, "notify")
     assert "No change was in progress" not in notice, notice
+    # The change was on its way to Canvas: the notice must not call it
+    # paused and safe (finding muse-ux-r2-expiry-notice-uncertain-paused).
+    assert "1 change may already be in Canvas" in notice, notice
+    assert "resume" not in notice
     _record("session ended during the write", mode_id=payload["mode_id"],
-            quarantined=True)
+            quarantined=True, notice_says_may_be_in_canvas=True)

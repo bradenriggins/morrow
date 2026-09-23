@@ -381,12 +381,13 @@ def _uncertain_write_from_session_death(exc) -> bool:
     return False
 
 
-def _on_session_death(op_id, entry_name, evidence):
+def _on_session_death(op_id, entry_name, evidence, write_sent=False):
     """W4-P2-1: run the re-auth state machine when session death is
     detected: impose the write halt, quarantine the op, and write the
     educator notification. Runs after detection and before the original
     exception is re-raised, so the run stops loudly instead of writing
-    through a half-dead session.
+    through a half-dead session. write_sent is True when the write was
+    already sent, so Canvas may hold the change.
 
     Lazy-imports reauth.state_machine: the state machine never imports
     the executor, so there is no import cycle. Best effort by design:
@@ -406,7 +407,8 @@ def _on_session_death(op_id, entry_name, evidence):
               "%s (%s); the original session-death error is still raised "
               "below" % (op_id, type(exc).__name__), file=sys.stderr)
     try:
-        _rsm.quarantine_op(op_id, entry_name, str(evidence)[:200])
+        _rsm.quarantine_op(op_id, entry_name, str(evidence)[:200],
+                           write_sent=write_sent)
     except Exception as exc:
         print("MORROW WARNING: op %s could not be quarantined after "
               "session death (%s); the original error is still raised "
@@ -420,14 +422,13 @@ def _on_session_death(op_id, entry_name, evidence):
     # paused. Fail loud on stderr; the notification is also readable
     # via `state_machine.py notify` and the helper /status, so a
     # missing file is detectable, not silent.
+    paused = None
     try:
-        n_paused = len(_rsm.paused_ops())
-    except Exception:
-        n_paused = -1  # count unknown; the warning below still names it
-    try:
-        _rsm.write_notify_expired(max(n_paused, 0))
+        paused = _rsm.paused_ops()
+        _rsm.write_notify_expired(paused)
     except Exception as exc:
-        count_txt = str(n_paused) if n_paused >= 0 else "an unknown number of"
+        count_txt = str(len(paused)) if paused is not None \
+            else "an unknown number of"
         print("MORROW WARNING: the educator notification for %s paused "
               "op(s) FAILED to write (%s); the educator may not know ops "
               "are paused. Read the quarantine directly: "
@@ -8571,7 +8572,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
             _on_session_death(op_id, entry_name,
                               "SessionDead mid-write; the write may have "
                               "executed before the session died; uncertain "
-                              "journal preserved")
+                              "journal preserved", write_sent=True)
         # W5-P2-1: the uncertain outcome is journaled (drained); a
         # pending shutdown now stops the run instead of continuing.
         _raise_if_shutdown_requested()
@@ -8774,7 +8775,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                     or _uncertain_write_from_session_death(exc)):
                 _on_session_death(op_id, entry_name,
                                   "session dead during write readback: %s"
-                                  % type(exc).__name__)
+                                  % type(exc).__name__, write_sent=True)
             _raise_if_shutdown_requested()
             raise UncertainWrite(
                 "write op %s returned success, but the readback could not "
@@ -8813,7 +8814,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                     or _uncertain_write_from_session_death(exc)):
                 _on_session_death(op_id, entry_name,
                                   "session dead during verify readback: %s"
-                                  % type(exc).__name__)
+                                  % type(exc).__name__, write_sent=True)
             elif _is_stale_command(exc):
                 # W4-P2-1: stale verify command, not session death. The
                 # write already returned 2xx (request phase journaled);

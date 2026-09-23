@@ -207,7 +207,8 @@ run stops loudly instead of writing through a half-dead session:
    every write refuses while it stands.
 3. **Quarantine.** The in-flight op is parked in the quarantine ledger
    (`quarantine.jsonl`); nothing is retried against the dead session.
-   The educator is notified with the true paused-op count.
+   The educator is notified with the true count of paused changes, and
+   told which of them may already be in Canvas.
 4. **Verified resume.** The educator signs in again through the login
    helper's own browser tab (never the agent, never credentials to the
    agent). The agent runs `reauth/state_machine.py resume`: it reads
@@ -237,6 +238,13 @@ run stops loudly instead of writing through a half-dead session:
    run plan-write again for the same change, show the educator the new
    `approval_display`, and ask them to approve it. approve-write on the
    old op id is refused, because its approval was already used.
+   A change that was already on its way to Canvas when the session
+   ended (`state_machine.py status` shows `write_sent=True`) may
+   already be in Canvas, and its op id is used up: it is never sent
+   again. Read the item back with a live-proven read, tell the educator
+   what Canvas has, and prepare the change again only when that read
+   shows it is not there and the educator says so. `approve` on such an
+   op only takes it off the paused list; it sends nothing.
 
 `session.json.prev` (the superseded session record used for principal
 pinning) exists only between a re-auth start and its successful
