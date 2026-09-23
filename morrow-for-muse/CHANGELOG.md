@@ -101,6 +101,10 @@ In plain words:
   your Canvas sign-in and the course pages Morrow loads.
 - The first-run checklist starts with your install; the test-only
   steps moved to the install test.
+- The release no longer includes the developer tests. Run from an
+  installed copy, they wrote to Morrow's own records, and Morrow then
+  refused to make changes until the records were restored. The
+  installer's own checks still ship, and they keep to a scratch folder.
 
 Technical notes:
 
@@ -120,7 +124,15 @@ Technical notes:
   the general `evidence-hold`.
 - The privacy tests match a stored name or id as a whole word, so an
   HMAC, digest, key, or op id that happens to contain one no longer
-  fails the suite (1 run in 55 before; 0 in 2000 after).
+  fails the suite (1 run in 55 before; 0 in 2000 after). The students
+  find check does the same for the vault ciphertext.
+- `scripts/install-suites.sh` holds the 23 install suites and runs each
+  in its own scratch home with every live-state variable removed.
+  install.sh step 9 runs it, and CI runs it on the carved release tree
+  after the carve's secrets gate. The carve drops every `test_*.py`
+  that is not an install suite.
+- The troubleshooting playbook names the Python 3.11 floor that
+  install.sh enforces.
 
 ## 0.4.0 (2026-09-22)
 
@@ -261,26 +273,26 @@ The detailed notes below cover the work since 0.3.0.
 - New suite `dispatch/journal_integrity_selftest.py` (26 checks), wired
   into `install.sh` (now 9 suites).
 
-### Form-relay lane removed (2026-09-21) The first-party static relay page
-  on meetmorrow.app/morrow/form-relay/ was taken down and its source
-  deleted (transport/form_relay.py, transport/form-relay/,
-  transport/form_relay_selftest.py). Dead code: the live write path runs
-  in the helper Chromium's page context (dispatch/executor.py chromium
-  backend), so nothing called the relay anymore. transport/batch.py now
-  fails closed on every form write (FormTransportUnavailable,
-  unconditionally); the relay routing, relay_url parameter, and
-  _render_relay_brief are gone from batch.py and
-  transport/browser_backend.py. Proof-battery wave-1 renderer and briefs
-  marked retired; defect-log relay items annotated historical. All 22
-  source selftests pass (20
-  `*_selftest.py` files, `transport/selftest.py`, and
-  `helper/keepalive_selftest.sh`; count re-verified 2026-09-21, all
-  exit 0). Measured suite counts
-  (2026-09-21): keepalive 53 checks on the shipped copy (88 combined
-  across both variants); privacy/source_privacy 69/69;
-  privacy/deidentif 30/30; privacy/learner_vault 15/15;
-  transport/item_bank_sdk 59; transport/local_chromium 31;
-  dispatch/executor_write_hardening 124 checks PASS.
+### Form-relay lane removed (2026-09-21)
+
+The first-party static relay page on meetmorrow.app/morrow/form-relay/
+was taken down and its source deleted (transport/form_relay.py,
+transport/form-relay/, transport/form_relay_selftest.py). Dead code: the
+live write path runs in the helper Chromium's page context
+(dispatch/executor.py chromium backend), so nothing called the relay
+anymore. transport/batch.py now fails closed on every form write
+(FormTransportUnavailable, unconditionally); the relay routing,
+relay_url parameter, and _render_relay_brief are gone from batch.py and
+transport/browser_backend.py. Proof-battery wave-1 renderer and briefs
+marked retired; defect-log relay items annotated historical. All 22
+source selftests pass (20 `*_selftest.py` files,
+`transport/selftest.py`, and `helper/keepalive_selftest.sh`; count
+re-verified 2026-09-21, all exit 0). Measured suite counts (2026-09-21):
+keepalive 53 checks on the shipped copy (88 combined across both
+variants); privacy/source_privacy 69/69; privacy/deidentif 30/30;
+privacy/learner_vault 15/15; transport/item_bank_sdk 59;
+transport/local_chromium 31; dispatch/executor_write_hardening 124
+checks PASS.
 
 ### Item Bank lane hardening (2026-09-21)
   `transport/item_bank_sdk.py`: quiz-lti frame detection now requires a
