@@ -1,4 +1,4 @@
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 
 /**
  * Data-flow analysis of one provider source file for the two response-body

@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { hardenPrivateDirectory } from "../../packages/gateway-core/dist/private-file-access.js";
 import { createChildProcessReclaimer, createRuntimeMonitor } from "../shared/runtime-monitor.mjs";
 
