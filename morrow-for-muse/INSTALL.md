@@ -535,8 +535,11 @@ machine holding an educator's Morrow state.
 
 ## Troubleshooting
 
-- `install.sh` fails at **egress probe**: the VM cannot reach any tenant.
-  Check `https_proxy`/`HTTPS_PROXY`, or ask your admin about egress.
+- `install.sh` fails at **egress probe**: the VM cannot reach your
+  Canvas address (the probe handshakes with the `CANVAS_BASE` host from
+  `helper/env`, or `example.com` when it is not set yet). Check the
+  address for a typo, then `https_proxy`/`HTTPS_PROXY`, or ask your
+  admin about egress.
 - Helper exits with "no Canvas tenant configured": `CANVAS_BASE` is unset
   or still the `example.instructure.com` placeholder. Set it in
   `helper/env` (or the legacy `~/.morrow/env`, or the environment).

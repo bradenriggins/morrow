@@ -302,6 +302,9 @@ Installing and the docs:
   installer again, which checks the address before it starts the
   helper. It no longer suggests waiting for the helper to start on its
   own, which skips that check.
+- The installer's network check tries your school's Canvas address
+  from `helper/env`. It tried example.com, so a computer that needs a
+  proxy to reach your school passed the check.
 - Installing no longer leaves an empty test folder
   (`helper/.selftest-warn-profile`) in the installed folder.
 
