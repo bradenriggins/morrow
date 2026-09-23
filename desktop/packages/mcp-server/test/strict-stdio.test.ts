@@ -159,9 +159,11 @@ describe("StrictStdioServerTransport", () => {
 
     try {
       child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "fill" })}\n`);
+      // Starting the fixture is setup, and a loaded runner can take seconds to do
+      // it. Only the exit after stdin ends is timed.
       await Promise.race([
         backpressured,
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("fixture did not backpressure")), 1_000)),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("fixture did not backpressure")), 15_000)),
       ]);
       const closeStarted = Date.now();
       child.stdin.end();
@@ -177,5 +179,5 @@ describe("StrictStdioServerTransport", () => {
       child.stderr.destroy();
       if (!exited) child.kill("SIGKILL");
     }
-  });
+  }, 30_000);
 });
