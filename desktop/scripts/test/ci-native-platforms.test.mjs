@@ -230,7 +230,7 @@ test("the required check fails whenever a changed product's job on any platform 
  * in their own job on every change, from the repository root, with nothing to install.
  */
 const REPOSITORY_JOB = "check-repository";
-const REPOSITORY_GATES = ["desktop/scripts/test/no-em-dash.test.mjs", "desktop/scripts/test/product-claims.test.mjs"];
+const REPOSITORY_GATES = ["desktop/scripts/test/no-em-dash.test.mjs", "desktop/scripts/test/product-claims.test.mjs", "desktop/scripts/test/repository-policy.test.mjs"];
 
 test("the repository text gates run on every change, and the required check needs them", () => {
   const body = job(ci, REPOSITORY_JOB);

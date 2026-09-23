@@ -1,0 +1,42 @@
+name: Report a bug
+description: Something in Morrow Desktop, Morrow Bridge, or Morrow for Muse does not work as its documentation says.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Anyone can read this issue. Do not include student information: no student names, email addresses, usernames, student or course account IDs, grades, or screenshots that show them. Write a label such as Student A1 instead.
+
+        Do not report a security problem here. Email hello@meetmorrow.app instead, as the [Security page](https://meetmorrow.app/security) says.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before you post
+      options:
+        - label: This issue holds no student information, no private course content, and no passwords or sign-in details.
+          required: true
+  - type: dropdown
+    id: product
+    attributes:
+      label: Product
+      options:
+        - Morrow Desktop or Morrow Bridge
+        - Morrow for Muse
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The version you installed, if you know it.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what Morrow did instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The steps that make it happen again, if you know them.
