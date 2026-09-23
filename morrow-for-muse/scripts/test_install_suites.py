@@ -14,6 +14,9 @@ sweep 2026-09-23):
   3. A failed suite is named, the other suites still run, and the exit
      status is non-zero. --show-failures (CI) also prints the failed
      suite's output; without it (install.sh) the output stays quiet.
+  4. (final sweep 2026-09-23) the egress suite bound fixed loopback
+     ports 18093 to 18099, so any program holding one of them, or a
+     second install running at the same time, failed install step 9.
 """
 
 import json
@@ -126,3 +129,26 @@ def test_show_failures_prints_the_failed_suite_output(tmp_path):
     assert proc.returncode != 0
     assert "suite output: boom" in proc.stdout
     assert "FAIL %s" % suites[-1] in proc.stdout.splitlines()
+
+
+def test_the_egress_suite_passes_while_its_old_ports_are_taken():
+    import socket
+    held = []
+    try:
+        for port in range(18093, 18100):
+            sock = socket.socket()
+            try:
+                sock.bind(("127.0.0.1", port))
+                sock.listen(1)
+            except OSError:
+                # Another program holds it already: the same case.
+                sock.close()
+                continue
+            held.append(sock)
+        proc = subprocess.run(
+            ["bash", RUNNER, "--show-failures", "transport/egress_selftest.py"],
+            capture_output=True, text=True, timeout=600)
+    finally:
+        for sock in held:
+            sock.close()
+    assert proc.returncode == 0, proc.stdout[-4000:] + proc.stderr[-2000:]

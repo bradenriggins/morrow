@@ -139,6 +139,10 @@ REACHABLE = {
         "entry is not pinned in the pack"),
     "caller-input-refused": lambda: ex.CallerInputError(
         "--body is not a JSON object"),
+    "maintenance-confirmation-required": lambda: ex.ConfirmationRequired(
+        "journal-reconcile is destructive: this re-anchors the journal. "
+        "Re-run with --yes to confirm, or run this command interactively "
+        "to be prompted."),
     "helper-down": lambda: {
         "error": "ExecutorError", "provider": "helper",
         "detail": "login helper endpoint is down: connection refused"},

@@ -913,9 +913,11 @@ When integrity checks fail, follow these procedures. Each is
 fail-closed and tells you what to do when it cannot proceed.
 
 **Backup/restore (W6-P1-1):** `python3 -m dispatch.state_backup create
-<dir>` (store encrypted), `verify <dir>`, `restore <dir> --yes`.
-Restore preserves the generation high-water mark and writes a restore
-marker; the journal stays fail-closed until `journal-reconcile`.
+<dir>` (store encrypted) prints the backup folder it made,
+`<dir>/morrow-backup-<time>`; pass that folder to `verify` and to
+`restore <folder> --yes`. Restore preserves the generation high-water
+mark and writes a restore marker; the journal stays fail-closed until
+`python3 -m dispatch.executor journal-reconcile --yes`.
 
 **Journal secret lost (W6-P1-3):** Reconcile in-flight ops against the
 provider FIRST, then `python3 -m dispatch.executor
@@ -924,8 +926,9 @@ re-keys under a new secret, preserving op_id replay protection with
 provenance downgraded to operator attestation.
 
 **Missing archives (W6-P1-4):** The executor fails closed naming the
-missing archives. Restore from backup, then `journal-reconcile`. Do
-not re-claim op_ids meanwhile.
+missing archives. Restore from backup, then `python3 -m
+dispatch.executor journal-reconcile --yes`. Do not re-claim op_ids
+meanwhile.
 
 **Retired seal (W6-P1-5):** `python3 -m dispatch.executor retired-seal
 --yes` adopts a pre-seal legacy retired set explicitly.

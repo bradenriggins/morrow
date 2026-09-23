@@ -820,6 +820,26 @@
       ]
     },
     {
+      "id": "maintenance-confirmation-required",
+      "title": "A maintenance command was run without --yes (ConfirmationRequired)",
+      "surface": "dispatch",
+      "severity_hint": "low",
+      "root_cause": "Verified mechanism: the recovery commands that change Morrow's own records (journal-seal, journal-repair, journal-reconcile, journal-recover-secret, retired-seal, claim-release) ask for confirmation first. With no terminal to ask on (an agent run) and no --yes, the executor refuses before doing anything.",
+      "is_not": "This is not a failure of the step itself and nothing changed. The command needs --yes, added after the steps that come before it.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: this step changes Morrow's own records, so it runs only when the command includes --yes, and it was run without it (reference {correlation_id}). What this means: nothing ran and nothing changed. What happens next: finish the steps that come before it in the recovery instructions, then run the same command again with --yes added.",
+      "auto_action": "Nothing ran. Finish the earlier steps of the runbook (for example reconciling in-flight changes against Canvas), then rerun the same command with --yes. engineering_detail names the command.",
+      "escalate_when": "Never on its own: the refusal is a confirmation check. Escalate only if the command with --yes fails.",
+      "signature": {
+        "error_class": "ConfirmationRequired"
+      },
+      "signature_notes": "exception: \"ConfirmationRequired\" raised by dispatch/executor.py _require_destructive_confirm when --yes is absent and stdin is not a terminal. evidence: 2026-09-23 final sweep: `python3 -m dispatch.executor journal-reconcile` (as INSTALL.md wrote it) fell through to the unknown fallback, which told the educator the task might have made a change.",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
       "id": "helper-down",
       "title": "Helper server not running",
       "surface": "helper",

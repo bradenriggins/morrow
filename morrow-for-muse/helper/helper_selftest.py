@@ -232,9 +232,10 @@ def main():
     # binary (via CHROMIUM_BIN) passes the version gate and then dies on
     # launch, so the pipe never answers; the dangling symlink (target
     # does not exist) proves lexists() sees through to dangling links
-    # where exists() would not. The scratch dir and ports are randomized
-    # per run: several workers run this selftest from this tree
-    # concurrently, so nothing here may use a fixed shared path or port.
+    # where exists() would not. The scratch dir is per run and the HTTP
+    # port is 0 (the kernel picks a free one): several workers run this
+    # selftest from this tree concurrently, so nothing here may use a
+    # fixed shared path or a port another program can hold.
     import random  # noqa: E402
     import tempfile  # noqa: E402
     scratch_1d = tempfile.mkdtemp(prefix=".selftest-1d-", dir=HERE)
@@ -259,12 +260,18 @@ def main():
     lenv.pop("LOGIN_HELPER_PRODUCTION", None)
     lenv.pop("LOGIN_HELPER_ALLOW_TEST_ON_LIVE_PROFILE", None)
     lenv["CHROMIUM_BIN"] = fake_chromium
-    lenv["LOGIN_HELPER_PORT"] = str(random.randint(19100, 19900))
+    lenv["LOGIN_HELPER_PORT"] = "0"
     # CDP port must stay below 22768: the W3-P2-15 forwarder derivation
     # (CDP + 10000) FATALs inside the ephemeral range, which would
     # pre-empt the SingletonLock path this scenario exercises.
     lenv["LOGIN_HELPER_CDP_PORT"] = str(random.randint(20100, 22100))
     lenv["LOGIN_HELPER_PROFILE_DIR"] = lock_profile
+    # An unauthenticated stand-in proxy: Chromium takes it directly, so
+    # no egress forwarder binds CDP + 10000 (a port another program can
+    # hold) and no probe touches the network.
+    for _var in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
+        lenv.pop(_var, None)
+    lenv["https_proxy"] = lenv["HTTPS_PROXY"] = "http://127.0.0.1:9"
     try:
         lproc = subprocess.run(
             [sys.executable, server], env=lenv, capture_output=True,
@@ -770,9 +777,13 @@ def main():
         # The test's own scratch dirs (.selftest-*) are not shipped; the
         # deny-list guards the shipped tree, so skip them here. (Earlier
         # sections run the server against scratch profiles that leave
-        # log files behind; those must not trip this check.)
+        # log files behind; those must not trip this check.) The live
+        # profile is not shipped either: once the helper's Chromium has
+        # run it holds Cookies, Login Data, and *.db, and install.sh
+        # leaves it out of its secrets gate the same way.
         rel_root = os.path.relpath(root, HERE)
-        if rel_root.split(os.sep)[0].startswith(".selftest-"):
+        top = rel_root.split(os.sep)[0]
+        if top.startswith(".selftest-") or top == "profile":
             continue
         for f in files:
             rel = os.path.relpath(os.path.join(root, f), HERE)

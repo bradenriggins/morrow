@@ -15,6 +15,11 @@ audit 2026-09-22, probe audit-muse4/live_journal.py):
        helper/env when the environment has no value, so a selftest in
        an installed tree must read an empty scratch env file, never
        the educator's helper/env (their tenant, ports, TLS files).
+  Final sweep 2026-09-23: with LOGIN_HELPER_PROFILE_DIR removed, the
+       profile a selftest reached was the tree's own helper/profile,
+       the educator's sign-in. The vault wipe checks in two install
+       suites purged its History, Local Storage, and Session Storage
+       on every install. A selftest's profile is a scratch path.
 
 Each check runs in a fresh interpreter, exactly like an install suite.
 """
@@ -34,14 +39,19 @@ from config import tree_config
 from dispatch import executor as ex
 ex.journal_append({"wal": "audit", "event": "selftest.probe",
                    "op_id": "00000000-0000-4000-8000-000000000001"})
+sys.path.insert(0, os.path.join(%r, "transport"))
+import browser_backend as bb
+import local_chromium as lc
 print(json.dumps({k: os.environ.get(k) for k in (
     "HOME", "MORROW_HOME", "MORROW_TREE_STATE_DIR",
     "MORROW_SOURCE_VAULT_PATH", "MORROW_APPROVAL_SIGNING_KEY",
     "MORROW_USER_ID", "MORROW_CONVERSATION_ID",
     "MORROW_HELPER_ENV_FILE", "LOGIN_HELPER_PROFILE_DIR")}
     | {"TREE_STATE_DIR": ex.TREE_STATE_DIR,
-       "ENV_FILE": tree_config.env_file_path()}))
-""" % TREE
+       "ENV_FILE": tree_config.env_file_path(),
+       "PURGE_PROFILE": bb._default_profile_dir(),
+       "LAUNCH_PROFILE": lc.tree_helper_profile_dir()}))
+""" % (TREE, TREE)
 
 
 def _files_under(path):
@@ -84,8 +94,10 @@ def test_live_morrow_home_and_tree_state_dir_are_never_used(tmp_path):
     assert not seen["TREE_STATE_DIR"].startswith(str(tmp_path / "live"))
     for key in ("MORROW_TREE_STATE_DIR", "MORROW_SOURCE_VAULT_PATH",
                 "MORROW_APPROVAL_SIGNING_KEY", "MORROW_USER_ID",
-                "MORROW_CONVERSATION_ID", "LOGIN_HELPER_PROFILE_DIR"):
+                "MORROW_CONVERSATION_ID"):
         assert seen[key] is None, key
+    assert seen["LOGIN_HELPER_PROFILE_DIR"].startswith(
+        seen["MORROW_HOME"] + os.sep)
     assert seen["MORROW_HELPER_ENV_FILE"] == seen["ENV_FILE"]
     assert seen["ENV_FILE"].startswith(seen["MORROW_HOME"] + os.sep)
     assert _files_under(str(tmp_path / "live")) == before
@@ -95,6 +107,17 @@ def test_the_tree_helper_env_never_reaches_a_selftest(tmp_path):
     seen = _run({}, tmp_path)
     assert seen["ENV_FILE"] != os.path.join(TREE, "helper", "env")
     assert seen["ENV_FILE"].startswith(seen["MORROW_HOME"] + os.sep)
+
+
+def test_the_tree_helper_profile_never_reaches_a_selftest(tmp_path):
+    for extra in ({}, {"MORROW_HOME": str(tmp_path / "s" / ".morrow"),
+                       "MORROW_SELFTEST_HOME": str(tmp_path / "s" /
+                                                   ".morrow")}):
+        seen = _run(extra, tmp_path)
+        live = os.path.join(TREE, "helper", "profile")
+        for key in ("PURGE_PROFILE", "LAUNCH_PROFILE"):
+            assert seen[key] != live, key
+            assert seen[key].startswith(seen["MORROW_HOME"] + os.sep), key
 
 
 def test_real_default_morrow_home_does_not_refuse(tmp_path):

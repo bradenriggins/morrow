@@ -1124,9 +1124,9 @@ class HelperBrowser:
         except RuntimeError as exc:
             if "no Chromium binary found" in str(exc):
                 raise RuntimeError(
-                    "Chromium was not found at the probed locations; "
-                    "install Chromium or set CHROMIUM_BIN ... see "
-                    "INSTALL.md") from exc
+                    "no Chromium binary found; add CHROMIUM_BIN=<its "
+                    "path> to this tree's helper/env (INSTALL.md, "
+                    "Prerequisites)") from exc
             raise
         self.cdp = self.launcher.cdp
         self.tab = self.cdp.new_tab("about:blank")
@@ -2159,10 +2159,11 @@ def main():
         # HelperBrowser.start covers the same class from the other side.)
         if (isinstance(exc, RuntimeError)
                 and "no Chromium binary found" in str(exc)):
-            print("FATAL: Chromium was not found at the probed locations; "
-                  "install Chromium (see INSTALL.md: place a binary at "
-                  "transport/chromium/chrome, or ensure "
-                  "/opt/meta-chromium/chrome exists) or set CHROMIUM_BIN.",
+            print("FATAL: Chromium was not found at the probed locations. "
+                  "The Muse VM image has it at /opt/meta-chromium/chrome; "
+                  "to use another Chromium (152.0.7977.82 or newer), add "
+                  "CHROMIUM_BIN=<its path> to this tree's helper/env "
+                  "(INSTALL.md, Prerequisites).",
                   file=sys.stderr)
             _cleanup_startup(srv)
             sys.exit(1)

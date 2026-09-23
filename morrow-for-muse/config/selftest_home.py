@@ -11,7 +11,10 @@ the educator's journal, approvals, or settings. MORROW_HELPER_ENV_FILE
 then names an empty file in the scratch home: the tree's helper/env
 (the educator's tenant, ports, and TLS files) is what agent-side code
 reads when the environment has no value, and it never reaches a
-selftest.
+selftest. LOGIN_HELPER_PROFILE_DIR names a profile path in the scratch
+home for the same reason: without it the profile is the tree's own
+helper/profile, the educator's sign-in, and the vault wipe checks
+purged its stores on every install.
 
 Round-4 audit H2: this module used to adopt any MORROW_HOME the caller
 set (and refuse MORROW_HOME=~/.morrow with exit 2). With MORROW_HOME
@@ -70,6 +73,8 @@ def _adoptable(configured):
 def _scratch_helper_env(morrow_home):
     os.environ["MORROW_HELPER_ENV_FILE"] = os.path.join(morrow_home,
                                                         "helper-env")
+    os.environ["LOGIN_HELPER_PROFILE_DIR"] = os.path.join(morrow_home,
+                                                          "helper-profile")
 
 
 def ensure_scratch_home():

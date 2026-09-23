@@ -15,12 +15,13 @@ newer workstream modes + 2 query-chain read/ref-resolution modes + 6 dispatch-ou
 + 3 signed-in-account modes + 1 validation-refusal mode + 1
 session-expiry halt mode + 1 account-mismatch halt mode + 1
 saved-task-not-pinned mode + 1
-local-input-refusal mode + 1 never-dispatch mode + 1
+local-input-refusal mode + 1 maintenance-confirmation mode + 1
+never-dispatch mode + 1
 course-roster mode + 2 prepared-write-gone modes + 2 not-sent modes
 for the helper browser and Item Banks + 3 Canvas refusal modes: not
 permitted, not found, and any other refused request), less the 14 modes
 retired on 2026-09-23 for lanes that do not ship (Moodle, the raw HTTPS
-lane's access token, the form and browser-task lanes): 88 entries at
+lane's access token, the form and browser-task lanes): 89 entries at
 failures/catalog.json.
 """
 import os as _home_os, sys as _home_sys  # noqa: E401
@@ -49,8 +50,8 @@ def _check(cond, reason):
 
 def main():
     catalog = load_catalog()
-    _check(len(catalog.entries) == 88,
-           "expected 88 merged entries, got %d" % len(catalog.entries))
+    _check(len(catalog.entries) == 89,
+           "expected 89 merged entries, got %d" % len(catalog.entries))
     _check(catalog.by_id["unknown"].get("fallback") is True,
            "unknown entry must be the fallback")
 

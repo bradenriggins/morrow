@@ -259,14 +259,17 @@ The correct lifecycle is quiz-API delete, never assignment-endpoint delete for N
 ## Recovery runbooks (W6-P2-9)
 
 **Backup/restore:** `python3 -m dispatch.state_backup create <dir>`
-(encrypted storage mandatory), `verify <dir>`, `restore <dir> --yes`.
-Post-restore: `python3 -m dispatch.executor journal-reconcile`.
+(encrypted storage mandatory) prints the backup folder it made,
+`<dir>/morrow-backup-<time>`; pass that folder to `verify` and to
+`restore <folder> --yes`. Post-restore: `python3 -m dispatch.executor
+journal-reconcile --yes`.
 
 **Journal secret loss:** Reconcile in-flight ops against the provider
 first, then `python3 -m dispatch.executor journal-recover-secret --yes
 --reason "operator attestation (min 20 chars)"`.
 
-**Missing archives:** Restore from backup, then `journal-reconcile`.
+**Missing archives:** Restore from backup, then `python3 -m
+dispatch.executor journal-reconcile --yes`.
 Never re-claim op_ids while archives are missing.
 
 **Retired seal adoption:** `python3 -m dispatch.executor retired-seal --yes`.

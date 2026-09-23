@@ -16,8 +16,12 @@ prior knowledge of the project.
 - A Muse VM (the connector runs on the VM Meta provisions for you).
 - The platform Chromium present. The installer looks for it at
   `/opt/meta-chromium/chrome`, which ships in the Muse VM image. If your
-  VM does not provide it, place a Chromium binary at
-  `transport/chromium/chrome` inside this tree before installing.
+  VM does not provide it, name another Chromium (version 152.0.7977.82 or newer) in the
+  tree's `helper/env` before you run `install.sh` (step 2): create the
+  file with the line `CHROMIUM_BIN=/path/to/chrome`. The installer
+  keeps an existing `helper/env`, and the helper and Morrow read the
+  same line. Do not put a Chromium inside the tree: install step 2
+  refuses any file the release does not ship.
 - Python 3.11 or newer (`python3 --version`). (Python 3.10 is refused:
   it reaches security end-of-life in October 2026 per PEP 619.)
 - The Python package `cryptography` for anything that touches student
@@ -139,9 +143,11 @@ it does, in order:
    entries from other trees so exactly one entry (this tree's) remains.
    Records the installed version and manifest under the effective
    `MORROW_HOME`.
-3. **Chromium locate.** Checks `/opt/meta-chromium/chrome` (ships in
-   the Muse VM image), then `transport/chromium/chrome`. Fails with a
-   diagnostic if none is executable.
+3. **Chromium locate.** Uses `CHROMIUM_BIN` when it is set (in the
+   environment, or in `helper/env`), otherwise
+   `/opt/meta-chromium/chrome` (ships in the Muse VM image). The
+   binary must report Chromium 152.0.7977.82 or newer. Fails with a diagnostic
+   naming what it tried.
 4. **Egress probe.** Runs the egress probe: an authenticated proxy from
    the environment, else a bare proxy, else one quick direct TLS
    handshake to your tenant host (or `example.com` when `CANVAS_BASE`
@@ -176,8 +182,10 @@ it does, in order:
 8. **Secrets gate.** Runs `scripts/verify-no-secrets.sh` against the
    tree, enforcing `pack/deny-list.txt` (no profiles, logs, session
    material, secret-shaped content, or non-example tenant hostnames).
-   Runs BEFORE the helper launches, so a dirty tree never starts a
-   browser. Any violation fails the install.
+   Your live sign-in in `helper/profile/` is left out, and your own
+   Canvas address may appear in `helper/env`; every other check still
+   reads `helper/env`. Runs BEFORE the helper launches, so a dirty
+   tree never starts a browser. Any violation fails the install.
 9. **Selftest suites.** Runs all 23 selftest suites from this tree
    (transport, dispatch, privacy, helper, reauth). Any failure fails the
    install and names the suite. Test scratch is removed afterwards.
@@ -247,7 +255,7 @@ Everything that does not touch student data works normally.
 nano helper/env
 ```
 
-Uncomment and set the line:
+Uncomment (or add) and set the line:
 
 ```
 CANVAS_BASE=https://myschool.instructure.com
@@ -434,20 +442,24 @@ The Step 1 commands copy the new release over the existing
 Canvas address, your sign-in, and the tree id. Do not unzip into a
 fresh directory: `helper/env` and the sign-in in `helper/profile/` live
 inside the tree, so a fresh tree starts without the Canvas address, and
-the educator must sign in again. Keep the previous release zip: the
-installer's backup covers its own changes, not the files the copy
-replaced. The installer:
+the educator must sign in again. The copy replaces the previous
+release's files before the installer runs, so the installer cannot
+bring the previous release back. The installer:
 
 - Verifies the tree against `pack/carve-manifest.json` (SHA-256 of
   every shipped file) before touching anything.
 - On a version change (see `pack/version.txt`), backs up the existing
   tree to a timestamped directory outside the tree (excluding
   `helper/profile/`), then removes stale files the new version no
-  longer ships (loudly logged). If the install fails midway, it
-  restores from the backup, but ONLY from a verified-complete backup:
+  longer ships (loudly logged). The backup is the tree as the
+  installer found it: the new release plus any files the previous
+  release left behind. If the install fails midway, it restores that
+  backup, which undoes the installer's own changes (the tree still
+  holds the new release), but ONLY from a verified-complete backup:
   the installer records a per-path SHA-256 manifest of the backup at
   backup time and re-verifies it with `sha256sum -c` before any
-  restore. A backup
+  restore. Fix what failed and run `bash install.sh` again to finish
+  the upgrade. A backup
   interrupted mid-write (e.g. disk full) is NEVER restored over the
   tree; the tree is left in place, the partial backup is quarantined
   as `<tree>.bak-<ts>.PARTIAL`, and the failure names the recovery
@@ -563,26 +575,30 @@ Create a backup before any risky operation:
 python3 -m dispatch.state_backup create /path/to/backup-dir
 ```
 
-The backup contains every HMAC/AES secret in plaintext. Store it
-encrypted. Never store backups unencrypted.
+It makes a new folder inside the one you name and prints it, for
+example `/path/to/backup-dir/morrow-backup-20260923T205434Z`. The
+commands below take that printed folder, shown here as
+`morrow-backup-<time>`. The backup contains every HMAC/AES secret in
+plaintext. Store it encrypted. Never store backups unencrypted.
 
 Verify a backup (checks manifest + sha256 of every file):
 
 ```
-python3 -m dispatch.state_backup verify /path/to/backup-dir
+python3 -m dispatch.state_backup verify /path/to/backup-dir/morrow-backup-<time>
 ```
 
 Restore (fail-closed: verifies first, preserves the generation
 high-water mark, writes the restore marker):
 
 ```
-python3 -m dispatch.state_backup restore /path/to/backup-dir --yes
+python3 -m dispatch.state_backup restore /path/to/backup-dir/morrow-backup-<time> --yes
 ```
 
-After a restore, the journal is fail-closed until you reconcile:
+After a restore, the journal is fail-closed until you reconcile.
+Reconcile in-flight ops against the provider first, then run:
 
 ```
-python3 -m dispatch.executor journal-reconcile
+python3 -m dispatch.executor journal-reconcile --yes
 ```
 
 ### Journal secret lost or corrupted (W6-P1-3)
@@ -614,7 +630,7 @@ missing archives. Do NOT re-claim op_ids meanwhile. Restore the
 archives from backup, then run:
 
 ```
-python3 -m dispatch.executor journal-reconcile
+python3 -m dispatch.executor journal-reconcile --yes
 ```
 
 ### Retired set seal (W6-P1-5)

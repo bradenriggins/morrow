@@ -11,31 +11,29 @@
 # re-verifies every step and repairs drift (missing cron entry, missing
 # profile dir), but it never duplicates and never deletes your state.
 #
-# Upgrade: two supported paths.
-#   * New directory (recommended): unzip the new dist somewhere new and
-#     run this installer there. Supervision (the keepalive cron entry) is
-#     migrated from the old tree to this one, loudly; the old tree is
-#     otherwise untouched.
-#   * In place: unzip the new dist over the old tree and run this
-#     installer. The installer backs the tree up to a timestamped
-#     directory first, then removes files the new version no longer ships
-#     (diffed against the previous install's manifest, loudly logged). If
-#     the upgrade fails afterwards, the backup is restored automatically,
-#     but ONLY from a verified-complete backup: the installer records
-#     the backup's file count and byte total at backup time and
-#     re-verifies them before any restore. A backup interrupted mid-write
-#     (e.g. disk full) is NEVER restored over the tree; the tree is left
-#     in place, the partial backup is quarantined as <tree>.bak-<ts>.PARTIAL,
-#     and the failure names the recovery steps. (The backup covers the
-#     installer's own in-place writes. If you unzipped over the old tree,
-#     the pre-unzip tree is already gone; keep the previous release zip
-#     for full rollback.)
-#   A failed FRESH install (no backup) rolls back everything the run
-#   created (state dirs, helper/env, helper/profile, the cron entry),
-#   itemized, instead of leaving a half-install. Upgrade backups keep
-#   a bounded retention: the 2 most recent are kept, older ones pruned.
-#   scripts/uninstall.sh removes the tree, the state dir, backups
-#   (<tree>.bak-* incl. .PARTIAL), and failed trees (<tree>.failed-*).
+# Upgrade: INSTALL.md step 1 copies the new release over the installed
+# tree (keeping helper/env, helper/profile, and .morrow-tree-id), then
+# this installer runs. On a version change it backs the tree up to a
+# timestamped directory, then removes files the new version no longer
+# ships (diffed against the previous install's manifest, loudly
+# logged). The backup is the tree as this installer found it: the new
+# release's files plus the previous release's leftovers. The previous
+# release's own files are already gone, so no step of this installer
+# can bring that release back. If the upgrade fails afterwards, the
+# backup is restored automatically, which undoes this installer's
+# changes, but ONLY from a verified-complete backup: the installer
+# records a per-file SHA-256 manifest at backup time and re-verifies it
+# before any restore. A backup interrupted mid-write (e.g. disk full)
+# is NEVER restored over the tree; the tree is left in place, the
+# partial backup is quarantined as <tree>.bak-<ts>.PARTIAL, and the
+# failure names the recovery steps. After a restore, fixing the cause
+# and running this installer again finishes the upgrade.
+# A failed FRESH install (no backup) rolls back everything the run
+# created (state dirs, helper/env, helper/profile, the cron entry),
+# itemized, instead of leaving a half-install. Upgrade backups keep a
+# bounded retention: the 3 most recent are kept, older ones pruned.
+# scripts/uninstall.sh removes the tree, the state dir, backups
+# (<tree>.bak-* incl. .PARTIAL), and failed trees (<tree>.failed-*).
 #
 # What it does, in order:
 #   1. python3 check (>= 3.11; 3.10 refused: security EOL Oct 2026).
@@ -50,8 +48,8 @@
 #      older release wrote into helper/ are moved there, loudly. On a
 #      version change: back up the tree, remove files the new version
 #      no longer ships (manifest diff, logged).
-#   3. Chromium locate (transport/chromium/chrome, vendor/chromium/chrome,
-#      then /opt/meta-chromium/chrome)
+#   3. Chromium locate: CHROMIUM_BIN (the environment, then helper/env)
+#      when set, otherwise /opt/meta-chromium/chrome (the Muse VM image)
 #   4. Egress probe (transport/egress.py: authenticated proxy, bare proxy,
 #      or direct; credentials are redacted in the output)
 #   5. ~/.morrow state creation (0700 dirs; the tree env template
@@ -73,7 +71,9 @@
 #      tree was probably moved/renamed: rerun install.sh from the new
 #      location); MORROW_CRON=0 skips this if you arrange your own
 #      scheduler)
-#   8. Secrets gate: scripts/verify-no-secrets.sh against this tree.
+#   8. Secrets gate: scripts/verify-no-secrets.sh against this tree,
+#      except the live helper/profile. helper/env may name the
+#      educator's own Canvas host; every other check still reads it.
 #      Any deny-list violation fails the install. No runtime file is
 #      ever written into the tree (logs and loop state live in the
 #      state dir), so a rerun after the helper ran passes it too.
@@ -280,7 +280,7 @@ fail() {
       else
         printf 'WARNING: could not quarantine the partial backup at %s; inspect it by hand (do NOT restore from it).\n' "${UPGRADE_BACKUP}" >&2
       fi
-      printf 'RECOVERY: free disk space, then restore the tree from your previous release zip: the installer never completed a backup to restore from.\n' >&2
+      printf 'RECOVERY: free disk space, then run bash install.sh again.\n' >&2
       exit 1
     fi
     # W4-P2-15: never rename a symlinked tree root aside: the rename
@@ -295,7 +295,7 @@ fail() {
     _ts="$(date +%Y%m%d-%H%M%S)"
     _failed="${TREE}.failed-${_ts}"
     printf 'upgrade failed: preserving the failed tree at %s\n' "${_failed}" >&2
-    printf 'restoring the pre-upgrade tree from the VERIFIED backup %s ...\n' "${UPGRADE_BACKUP}" >&2
+    printf 'restoring the tree as this installer found it, from the VERIFIED backup %s ...\n' "${UPGRADE_BACKUP}" >&2
     if mv "${TREE}" "${_failed}" 2>/dev/null \
        && mv "${UPGRADE_BACKUP}" "${TREE}" 2>/dev/null; then
       # The backup excluded the live profile (runtime state, 10s of MB);
@@ -306,7 +306,12 @@ fail() {
         mv "${_failed}/helper/profile" "${TREE}/helper/profile" \
           2>/dev/null || true
       fi
-      printf 'restore complete: pre-upgrade tree is back at %s\n' "${TREE}" >&2
+      # The backup was taken when this run started, after the new
+      # release was unpacked over the tree (INSTALL.md step 1), so it
+      # holds the new release, not the previous one.
+      printf 'restore complete: %s is back as this installer found it.\n' "${TREE}" >&2
+      printf 'That is the release you unpacked, not the previous release: unpacking it replaced the previous release'"'"'s files before this installer ran.\n' >&2
+      printf 'Fix the failure above, then run bash install.sh again to finish the upgrade.\n' >&2
       printf 'failed attempt preserved at %s for forensics\n' "${_failed}" >&2
     else
       printf 'RESTORE FAILED: manual recovery needed.\n' >&2
@@ -610,7 +615,7 @@ if kept_dirs:
     for rel in kept_dirs:
         print("  kept: " + rel)
 PYEOF
-    [ $? -eq 0 ] || fail "migration" "stale-file removal failed; the pre-upgrade tree was restored from ${UPGRADE_BACKUP}"
+    [ $? -eq 0 ] || fail "migration" "stale-file removal failed"
   else
     note "WARNING: no previous install manifest at ${INSTALLED_MANIFEST_FILE};"
     note "cannot determine which files the new version dropped. If this is an"
@@ -691,7 +696,7 @@ except RuntimeError as exc:
 ")"
 case "${CHROME_BIN}" in
   MISSING*)
-    fail "chromium" "no Chromium binary found. Checked, in order: transport/chromium/chrome, vendor/chromium/chrome, /opt/meta-chromium/chrome." ;;
+    fail "chromium" "no usable Chromium: ${CHROME_BIN#MISSING: }. The Muse VM image has it at /opt/meta-chromium/chrome. To use another Chromium (152.0.7977.82 or newer), add CHROMIUM_BIN=<its path> to helper/env and rerun." ;;
 esac
 note "ok: ${CHROME_BIN}"
 
@@ -999,9 +1004,11 @@ step "8/10 secrets gate"
 # The gate runs against the installed tree, excluding the runtime
 # helper/profile the installer itself just created (it is empty on
 # first install and holds the educator's live session on reinstalls;
-# neither may fail an install). The carve-time gate runs without
-# exclusions, so a dist shipping a profile is rejected before install.
-VERIFY_EXCLUDE="helper/profile" "${TREE}/scripts/verify-no-secrets.sh" "${TREE}" \
+# neither may fail an install). helper/env names the educator's own
+# Canvas address, so the tenant rule skips it; every other rule still
+# checks it. The carve-time gate runs without exclusions, so a dist
+# shipping a profile is rejected before install.
+VERIFY_EXCLUDE="helper/profile" VERIFY_TENANT_EXEMPT="helper/env" "${TREE}/scripts/verify-no-secrets.sh" "${TREE}" \
   || fail "secrets" "scripts/verify-no-secrets.sh reported violations (see above)"
 
 # -- 9. selftests ------------------------------------------------------------

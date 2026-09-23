@@ -247,6 +247,30 @@ Installing and the docs:
   student-data package as a step, names `unzip` as a prerequisite, and
   starts a helper the installer skipped by running the installer again,
   which checks your Canvas address first.
+- Running the installer again after you connect Canvas and sign in
+  works. Its safety check refused your school's Canvas address in
+  `helper/env`, and once the helper's browser had run, its own tests
+  refused the browser's files, so connecting, repairing, and upgrading
+  all stopped. Those tests also cleared part of the helper browser's
+  stored data on every run; they now use a scratch copy.
+- When an upgrade fails, the installer says what it put back: the
+  folder as it found it, with the new release in it, not the previous
+  release. Fix what failed and run the installer again to finish the
+  upgrade.
+- Disconnecting works when the install folder's path has a space in
+  it. Morrow deleted the wrong folder, kept your sign-in, and said the
+  sign-in was deleted. Uninstalling had the same problem.
+- The installer's own tests no longer fail when another program uses
+  a network port they used, or when two installs run at once.
+- The install guide's fallback for a computer without the platform
+  Chromium works: name another Chromium with `CHROMIUM_BIN` in
+  `helper/env`. Placing one inside the install folder, as the guide
+  said before, made the installer refuse the folder.
+- The backup and restore steps run as written: verify and restore take
+  the folder the backup command prints, and the step after a restore
+  includes `--yes`. Run without `--yes`, that step now says nothing
+  ran, instead of an unknown failure that said a change might have
+  been made.
 - The setup, consent, and disconnect pages, and the assistant's
   instructions, say how to get help: email hello@meetmorrow.app or see
   meetmorrow.app/support, with the Morrow for Muse version and the step
