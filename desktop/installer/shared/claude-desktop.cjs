@@ -6,11 +6,13 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const {
+  WINDOWS_POWERSHELL_TIMEOUT_MS,
   parseUnixProcessStartTimes,
   parseWindowsProcessStartTimes,
   processAlive,
   readBoundedCommandOutput,
   readProcessStartTimes,
+  windowsPowerShellPath,
   windowsProcessStartQuery,
 } = require("./process-lifetime.cjs");
 const { inspectRecord, readPrivateRegularFile } = require("./state-policy.cjs");
@@ -761,12 +763,16 @@ async function isCurrentClaudeDesktopSetup(setup, expected = {}) {
   return true;
 }
 
-function boundedCommand(executable, argumentsValue) {
+function boundedCommand(executable, argumentsValue, timeoutMs = 3_000) {
   return readBoundedCommandOutput(executable, argumentsValue, {
-    timeoutMs: 3_000,
+    timeoutMs,
     maxBytes: 64 * 1024,
     includeStderr: true,
   });
+}
+
+function powerShellCommand(script) {
+  return boundedCommand(windowsPowerShellPath(), ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], WINDOWS_POWERSHELL_TIMEOUT_MS);
 }
 
 async function processAncestry(startPid, platform) {
@@ -780,9 +786,8 @@ async function processAncestry(startPid, platform) {
       if (!match) return null;
       record = { processId: Number(match[1]), parentProcessId: Number(match[2]), executablePath: match[3] };
     } else if (platform === "win32") {
-      const powershell = path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
       const script = `$p=Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}';if($null-ne$p){[pscustomobject]@{processId=[int]$p.ProcessId;parentProcessId=[int]$p.ParentProcessId;executablePath=[string]$p.ExecutablePath}|ConvertTo-Json -Compress}`;
-      const answer = await boundedCommand(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script]);
+      const answer = await powerShellCommand(script);
       try { record = JSON.parse(answer || ""); } catch { return null; }
     } else {
       return null;
@@ -802,10 +807,9 @@ async function verifyClaudeExecutableIdentity(proof, platform, executable) {
       || !/(?:^|\n)TeamIdentifier=Q6L2SF6YDW(?:\n|$)/.test(detail)) return false;
   } else if (platform === "win32") {
     if (typeof proof.signerThumbprint !== "string" || !/^[A-Fa-f0-9]{40,64}$/.test(proof.signerThumbprint)) return false;
-    const powershell = path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
     const escaped = executable.replace(/'/g, "''");
     const script = `$s=Get-AuthenticodeSignature -LiteralPath '${escaped}';if($s.Status-eq'Valid'){[pscustomobject]@{subject=[string]$s.SignerCertificate.Subject;thumbprint=[string]$s.SignerCertificate.Thumbprint}|ConvertTo-Json -Compress}`;
-    const answer = await boundedCommand(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script]);
+    const answer = await powerShellCommand(script);
     let signature;
     try { signature = JSON.parse(answer || ""); } catch { return false; }
     if (typeof signature?.subject !== "string" || !/Anthropic/i.test(signature.subject)

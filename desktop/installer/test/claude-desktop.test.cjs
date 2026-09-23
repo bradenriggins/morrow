@@ -614,6 +614,46 @@ test("macOS and Windows process proof require the recorded Claude ancestor", asy
   }
 });
 
+test("Windows process proof waits for a cold PowerShell start", async () => {
+  const lifetime = require("../shared/process-lifetime.cjs");
+  const modulePath = require.resolve("../shared/claude-desktop.cjs");
+  const original = lifetime.readBoundedCommandOutput;
+  const executablePath = "C:\\Users\\Teacher\\AppData\\Local\\AnthropicClaude\\Claude.exe";
+  const thumbprint = "A".repeat(40);
+  const answers = [];
+  delete require.cache[modulePath];
+  // Each PowerShell here answers after 4 s, as a cold start can on Windows.
+  lifetime.readBoundedCommandOutput = async (executable, argumentsValue, options) => {
+    const script = argumentsValue.at(-1);
+    answers.push({ executable, timeoutMs: options.timeoutMs });
+    if (options.timeoutMs <= 4_000) return null;
+    if (script.includes("Get-AuthenticodeSignature")) {
+      return JSON.stringify({ subject: "CN=Anthropic, PBC", thumbprint });
+    }
+    const pid = Number(/ProcessId=([0-9]+)/.exec(script)?.[1]);
+    return JSON.stringify(pid === 99
+      ? { processId: 99, parentProcessId: 52, executablePath: "C:\\Morrow\\launch.cjs" }
+      : { processId: 52, parentProcessId: 1, executablePath });
+  };
+  let isolated;
+  try {
+    isolated = require(modulePath);
+  } finally {
+    lifetime.readBoundedCommandOutput = original;
+    delete require.cache[modulePath];
+  }
+  const receipt = {
+    launcherPid: 99,
+    claudeProcess: { platform: "win32", processId: 52, executablePath, signerThumbprint: thumbprint }
+  };
+  assert.equal(await isolated.verifyClaudeProcessProof(receipt, {
+    platform: "win32",
+    running: true,
+    resolveExecutable: async (value) => value
+  }), true);
+  assert.ok(answers.length >= 2 && answers.every((answer) => /powershell\.exe$/i.test(answer.executable)));
+});
+
 test("clientInfo metadata and an arbitrary copied launcher cannot prove Claude installation", async (t) => {
   const input = await fixture(t);
   const ended = await endedProcessId();

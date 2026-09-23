@@ -425,15 +425,24 @@ async function releaseDatabaseLock(stateDirectory, lockId) {
   }
 }
 
+let ownProcessStartedAt = null;
+
+// Morrow's own start time never changes, so it is read once per process. When
+// the read fails, the lock names this process without it: a lock with no start
+// time is reclaimed only when its process is gone or started after the lock.
+function readOwnProcessStartedAt() {
+  ownProcessStartedAt ??= readProcessStartedAt(process.pid).catch(() => null);
+  return ownProcessStartedAt;
+}
+
 async function acquireDatabaseLock(stateDirectory) {
-  const processStartedAt = await readProcessStartedAt(process.pid);
-  if (processStartedAt === null) fail("bridge_process_identity_unavailable");
+  const processStartedAt = await readOwnProcessStartedAt();
   const database = await openLockDatabase(stateDirectory);
   const ownership = {
     lockId: crypto.randomUUID(),
     pid: process.pid,
     startedAt: new Date().toISOString(),
-    processStartedAt: new Date(processStartedAt).toISOString(),
+    processStartedAt: processStartedAt === null ? null : new Date(processStartedAt).toISOString(),
   };
   let transaction = false;
   try {

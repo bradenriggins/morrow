@@ -631,6 +631,68 @@ test("two contenders cannot both replace one stale Bridge database lock", async 
   }
 });
 
+/** Loads a fresh Bridge update module whose own start-time reader is replaced. */
+function bridgeUpdatesWithStartReader(readStartedAt) {
+  const lifetime = require("../shared/process-lifetime.cjs");
+  const modulePath = require.resolve("../shared/bridge-updates.cjs");
+  const original = lifetime.readProcessStartedAt;
+  delete require.cache[modulePath];
+  lifetime.readProcessStartedAt = readStartedAt;
+  try {
+    return require(modulePath);
+  } finally {
+    lifetime.readProcessStartedAt = original;
+    delete require.cache[modulePath];
+  }
+}
+
+test("Bridge maintenance works when Morrow cannot read its own start time, and asks for it once", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-bridge-lock-identity-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const bridgeDirectory = path.join(root, "Bridge");
+  let ownQueries = 0;
+  const isolated = bridgeUpdatesWithStartReader(async (pid) => {
+    if (pid === process.pid) ownQueries += 1;
+    // A cold PowerShell that passes its time limit answers nothing.
+    return null;
+  });
+
+  const initial = await fixture(root, "1.0.2");
+  const installed = await isolated.initializeBridgeDirectory({ ...initial, stateDirectory, bridgeDirectory, initialChallenge: challenge("identity") });
+  assert.equal(installed.activeFolderChallenge.challengeId, "identity-challenge-id");
+  assert.deepEqual(await isolated.pruneBridgeRollbackCopies({ stateDirectory }), { removed: [], referenced: [], retained: [] });
+
+  let held = null;
+  const newer = await fixture(root, "1.0.3");
+  await assert.rejects(isolated.prepareBridgeUpdate({
+    ...newer,
+    stateDirectory,
+    bridgeDirectory,
+    requestQuiescence: async () => {
+      const database = new DatabaseSync(lockDatabasePath(stateDirectory), { readOnly: true });
+      try {
+        held = database.prepare("SELECT pid, process_started_at FROM bridge_update_lock WHERE singleton = 1").get();
+      } finally {
+        database.close();
+      }
+      return {
+        schema: "morrow.bridge.update-quiesced.v1",
+        extensionId,
+        manifestVersion: "1.0.2",
+        installType: "normal",
+        quiescent: true,
+        quiesceEpoch: "epoch-for-identity-install",
+        activeFolderProof: proof(installed.activeFolderChallenge)
+      };
+    },
+    resumeQuiescence: async () => ({ schema: "morrow.bridge.update-resumed.v1", extensionId, manifestVersion: "1.0.2", quiesceEpoch: "epoch-for-identity-install", resumed: true }),
+    nextChallenge: challenge("identity-next")
+  }), (error) => error instanceof isolated.BridgeUpdateError && error.code === "bridge_quiesce_unconfirmed");
+  assert.deepEqual({ ...held }, { pid: process.pid, process_started_at: null }, "the held lock names this process without a start time");
+  assert.equal(ownQueries, 1, "Morrow asks for its own start time once per process");
+});
+
 test("startup pruning removes a rollback copy the record does not reference and keeps the one it does", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-bridge-prune-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

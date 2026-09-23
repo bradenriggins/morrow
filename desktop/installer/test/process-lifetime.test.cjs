@@ -7,6 +7,7 @@ const test = require("node:test");
 const {
   createBoundedCommandReader,
   readBoundedCommandOutput,
+  readProcessStartTimes,
 } = require("../shared/process-lifetime.cjs");
 
 function stalledChild() {
@@ -57,4 +58,23 @@ test("bounded command output can include the diagnostic stream without losing it
 
   assert.match(output, /standard/);
   assert.match(output, /diagnostic/);
+});
+
+/** A command reader whose program answers only after `answerAfterMs`. */
+function slowCommandReader(answerAfterMs, answer, calls = []) {
+  return async (executable, argumentsValue, options) => {
+    calls.push({ executable, argumentsValue, options });
+    return options.timeoutMs > answerAfterMs ? answer(argumentsValue) : null;
+  };
+}
+
+test("a Windows process start query waits for a cold PowerShell start", async () => {
+  const calls = [];
+  const started = await readProcessStartTimes([4242], {
+    platform: "win32",
+    readCommand: slowCommandReader(4_000, () => '{"processId":4242,"startedAt":"2026-09-22T10:00:00.0000000Z"}', calls),
+  });
+  assert.deepEqual([...started], [[4242, Date.parse("2026-09-22T10:00:00Z")]]);
+  assert.match(calls[0].executable, /powershell\.exe$/i);
+  assert.ok(calls[0].options.timeoutMs < 15_000, "the query stays inside the runtime monitor's 15 s connect limit");
 });

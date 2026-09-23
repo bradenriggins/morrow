@@ -4,6 +4,9 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 const QUERY_TIMEOUT_MS = 3_000;
+// A cold Windows PowerShell start can take several seconds. The bound stays
+// below the runtime monitor's 15 s connect limit, which includes this query.
+const WINDOWS_POWERSHELL_TIMEOUT_MS = 10_000;
 const QUERY_KILL_GRACE_MS = 500;
 const QUERY_FINAL_GRACE_MS = 750;
 const QUERY_MAX_BYTES = 8 * 1024;
@@ -160,24 +163,20 @@ function createBoundedCommandReader(dependencies = {}) {
 
 const readBoundedCommandOutput = createBoundedCommandReader();
 
-function readCommandOutput(executable, argumentsValue) {
-  return readBoundedCommandOutput(executable, argumentsValue, {
-    timeoutMs: QUERY_TIMEOUT_MS,
-    maxBytes: QUERY_MAX_BYTES,
-    killGraceMs: QUERY_KILL_GRACE_MS,
-    finalGraceMs: QUERY_FINAL_GRACE_MS,
-  });
+function windowsPowerShellPath() {
+  return path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
 
-async function readProcessStartTimes(pids) {
+async function readProcessStartTimes(pids, { platform = process.platform, readCommand = readBoundedCommandOutput } = {}) {
   const identifiers = [...new Set(pids)].filter(exactPid);
   if (identifiers.length === 0) return new Map();
-  if (process.platform === "win32") {
-    const executable = path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-    const output = await readCommandOutput(executable, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", windowsProcessStartQuery(identifiers)]);
+  const limits = { maxBytes: QUERY_MAX_BYTES, killGraceMs: QUERY_KILL_GRACE_MS, finalGraceMs: QUERY_FINAL_GRACE_MS };
+  if (platform === "win32") {
+    const output = await readCommand(windowsPowerShellPath(), ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", windowsProcessStartQuery(identifiers)],
+      { ...limits, timeoutMs: WINDOWS_POWERSHELL_TIMEOUT_MS });
     return output === null ? null : parseWindowsProcessStartTimes(output);
   }
-  const output = await readCommandOutput("/bin/ps", ["-o", "pid=,lstart=", "-p", identifiers.join(",")]);
+  const output = await readCommand("/bin/ps", ["-o", "pid=,lstart=", "-p", identifiers.join(",")], { ...limits, timeoutMs: QUERY_TIMEOUT_MS });
   return output === null ? null : parseUnixProcessStartTimes(output);
 }
 
@@ -202,6 +201,7 @@ async function processMatchesExactStart(pid, recordedStartedAt) {
 }
 
 module.exports = {
+  WINDOWS_POWERSHELL_TIMEOUT_MS,
   createBoundedCommandReader,
   parseUnixProcessStartTimes,
   parseWindowsProcessStartTimes,
@@ -211,5 +211,6 @@ module.exports = {
   readBoundedCommandOutput,
   readProcessStartedAt,
   readProcessStartTimes,
+  windowsPowerShellPath,
   windowsProcessStartQuery,
 };

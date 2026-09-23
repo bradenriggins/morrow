@@ -48,7 +48,11 @@ const {
   prepareClaudeDesktopBundle,
   processAlive,
 } = require("./claude-desktop.cjs");
-const { processMatchesRecordedLifetime } = require("./process-lifetime.cjs");
+const {
+  WINDOWS_POWERSHELL_TIMEOUT_MS,
+  processMatchesRecordedLifetime,
+  windowsPowerShellPath,
+} = require("./process-lifetime.cjs");
 const { blackboardPaths, blackboardTenantIdFromBaseUrl, configureBlackboard, readBlackboardHealth, removeBlackboardData, removeBlackboardTenant, selectBlackboardCourses } = require("./blackboard.cjs");
 const { detectAssistantApplication, detectAssistantCommand } = require("./assistant-app-detection.cjs");
 const { detectWindowsCodexPackage } = require("./windows-appx-detection.cjs");
@@ -302,9 +306,8 @@ async function readMacApplicationBundleIdentifier(applicationPath) {
 
 async function runWindowsPowerShell(script) {
   if (process.platform !== "win32") return null;
-  const executable = path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  return readCommandOutput(executable, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
-    timeoutMs: 3_000,
+  return readCommandOutput(windowsPowerShellPath(), ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+    timeoutMs: WINDOWS_POWERSHELL_TIMEOUT_MS,
     maxBytes: 8 * 1024
   });
 }
