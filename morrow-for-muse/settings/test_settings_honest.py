@@ -74,3 +74,20 @@ def test_the_docs_offer_only_real_settings(rel):
     for key in RETIRED:
         assert key not in text, (rel, key)
     assert "batched approvals" not in text
+
+
+def test_the_deletion_setting_claims_only_deletions():
+    """Only a delete asks first under confirm_destructive_writes
+    (admission._is_destructive: HTTP DELETE, and no catalog row is
+    marked destructive), so no text may promise that "other destructive
+    writes" such as a page revert or a bulk overwrite ask too (final
+    sweep 2026-09-22)."""
+    description = store.SETTINGS_SCHEMA["confirm_destructive_writes"][
+        "description"]
+    assert "other destructive" not in description
+    assert "deletes" in description
+    with open(os.path.join(TREE, "settings", "README.md"),
+              encoding="utf-8") as fh:
+        text = " ".join(fh.read().split())
+    assert "other destructive writes" not in text
+    assert "deletes and destructive writes" not in text

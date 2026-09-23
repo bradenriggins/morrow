@@ -64,11 +64,10 @@ matter the mode:
    type reach the Muse model.
 2. **Safe operations in Canvas.** Every write runs only through the
    governed dispatcher (live-proven operations only, never-dispatch
-   routes refused). If you also want deletes and other destructive
-   writes to ask first while in edit mode, say "always confirm
-   deletions" (off by default: edit mode does not ask per write). Say
-   "stop asking me to confirm deletions" to turn it back off. Either
-   change is journaled.
+   routes refused). If you also want deletions to ask first while in
+   edit mode, say "always confirm deletions" (off by default: edit
+   mode does not ask per write). Say "stop asking me to confirm
+   deletions" to turn it back off. Either change is journaled.
 
 And three rules about the agent itself:
 
@@ -87,7 +86,7 @@ And three rules about the agent itself:
 |---|---|---|
 | default_mode | Your saved mode: plan or edit. Edit is the standing edit grant, with no time limit. | plan |
 | verbosity | How much the agent says: concise, balanced, or detailed. | balanced |
-| confirm_destructive_writes | Ask before deletes and destructive writes, even in edit mode. | off |
+| confirm_destructive_writes | Ask before deletions, even in edit mode. | off |
 | failure_verbosity | Failure reports: concise (what failed, next step) or detailed (what was tried, evidence, recovery options). | detailed |
 | proactivity | reactive (only does what you ask) or suggestive (may suggest follow-ups unprompted). | reactive |
 | read_confirmations | Narrate reads before doing them. Reads never need approval either way. | off |

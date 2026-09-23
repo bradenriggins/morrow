@@ -216,11 +216,10 @@ SETTINGS_SCHEMA = {
         "validate": _bool_validator,
         "consequential": True,
         "description": (
-            "When true, deletes and other destructive writes ask "
-            "for confirmation even in edit mode. Defaults to false: "
-            "edit mode does not ask per write; that is the entire "
-            "difference from plan mode. Turn it on only if you want "
-            "the extra guardrail."),
+            "When true, deletes ask for confirmation even in edit "
+            "mode. Defaults to false: edit mode does not ask per "
+            "write; that is the entire difference from plan mode. Turn "
+            "it on only if you want the extra guardrail."),
     },
     "failure_verbosity": {
         "default": "detailed",
