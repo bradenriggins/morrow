@@ -23,6 +23,11 @@ const { freshRecord } = require("../shared/state-policy.cjs");
 
 const inspectionOptionsBySetup = new WeakMap();
 
+// Claude Desktop runs on macOS and Windows. A fixture uses this host's own
+// platform where Claude Desktop runs, and macOS elsewhere: a setup made for
+// one platform names paths the other platform cannot hold.
+const CLAUDE_DESKTOP_PLATFORM = process.platform === "win32" ? "win32" : "darwin";
+
 function inspectClaudeDesktopConnection(setup, options = inspectionOptionsBySetup.get(setup)) {
   return inspectClaudeDesktopConnectionRaw(setup, options);
 }
@@ -35,7 +40,7 @@ async function fixture(t, options = {}) {
   await fs.mkdir(workspace);
   await fs.mkdir(state, { mode: 0o700 });
   const server = path.join(root, "server.cjs");
-  const node = path.join(root, "node");
+  const node = path.join(root, process.platform === "win32" ? "node.exe" : "node");
   const runtimeManifest = path.join(root, "mcp-runtime-manifest.json");
   const upstreams = path.join(state, "upstreams.json");
   const descendantPath = path.join(root, "server-descendant.pid");
@@ -67,7 +72,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "test/paths") process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id,
     result: { workspace: process.cwd(), upstreams: process.env.MORROW_UPSTREAMS_FILE } }) + "\\n");
 });`);
-  await fs.writeFile(node, "#!/bin/sh\nexec " + JSON.stringify(process.execPath) + " \"$@\"\n", { mode: 0o700 });
+  // The launcher starts this file itself. Windows starts only an executable,
+  // so there the fixture is a copy of this Node; elsewhere a small script runs it.
+  if (process.platform === "win32") await fs.copyFile(process.execPath, node);
+  else await fs.writeFile(node, "#!/bin/sh\nexec " + JSON.stringify(process.execPath) + " \"$@\"\n", { mode: 0o700 });
   const serverBytes = await fs.readFile(server);
   await fs.writeFile(runtimeManifest, JSON.stringify({
     schema: "morrow.mcp-runtime-manifest.v2",
@@ -83,7 +91,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const managedLauncherPath = path.join(extracted, "server", "launch.cjs");
   const setup = await prepareClaudeDesktopBundle({ nodePath: node, serverEntryPath: server,
     runtimeManifestPath: runtimeManifest, upstreamsPath: upstreams, workspaceRoot: workspace,
-    stateDirectory: state, version: "1.0.0-rc.0", platform: "darwin", managedLauncherPath });
+    stateDirectory: state, version: "1.0.0-rc.0", platform: CLAUDE_DESKTOP_PLATFORM, managedLauncherPath });
   const installerRecordPath = path.join(state, "installer.json");
   await fs.writeFile(installerRecordPath, `${JSON.stringify({ ...freshRecord(), configured: { "claude-desktop": setup } })}\n`, { mode: 0o600 });
   const { unpackExtension } = await import("@anthropic-ai/mcpb");
@@ -100,7 +108,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     extracted,
     managedLauncherPath,
     installerRecordPath,
-    inspectionOptions: { platform: "darwin", managedLauncherPath, verifyClaudeProcessProof: async () => true }
+    inspectionOptions: { platform: CLAUDE_DESKTOP_PLATFORM, managedLauncherPath, verifyClaudeProcessProof: async () => true }
   };
   inspectionOptionsBySetup.set(setup, result.inspectionOptions);
   return result;
@@ -489,7 +497,7 @@ test("the installer record alone activates one generation and revokes a stale re
     workspaceRoot: input.workspace,
     stateDirectory: path.dirname(input.installerRecordPath),
     version: "1.0.0-rc.0",
-    platform: "darwin",
+    platform: CLAUDE_DESKTOP_PLATFORM,
     managedLauncherPath: launcherB,
   });
   const { unpackExtension } = await import("@anthropic-ai/mcpb");
