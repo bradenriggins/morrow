@@ -7818,6 +7818,14 @@ def _render_dry_run(entry, params, session, pack, plan, op_id,
                       "detail": "dry-run: no provider calls; the fresh-read "
                                 "comparison would run after the claim, before "
                                 "any write"})
+        publish_target = _new_quiz_publish_target(entry)
+        if publish_target:
+            gates.append({"gate": "new_quiz_publish_check",
+                          "result": "skipped",
+                          "detail": "dry-run: no provider calls; the %s "
+                                    "is read before the change is sent, "
+                                    "and publishing a New Quiz is refused"
+                                    % publish_target})
     config = {"canvas_base": tenant_base or ""}
     secret_headers = _dry_run_secret_headers(entry, pack)
     requests = []
@@ -8296,6 +8304,10 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # globally-wrong tenant cannot sail through.
         _chromium_session_mod().verify_helper_tenant_binding(tenant_base)
     _check_auxiliary_learner_data(entry, _learner_vault_ready(session))
+    if is_write and not dry_run:
+        # Before the mode gate and the approval: publishing a New Quiz is
+        # refused whatever was approved.
+        _refuse_new_quiz_publish(entry, params, session, pack)
     approval_audit, approval_record = admit(
         entry, params, tenant_base=tenant_base, approval=approval, op_id=op_id,
         require_educator_channel=require_educator_channel,
@@ -10030,6 +10042,97 @@ def _read_named_object(entry, params, session, pack, tenant_base,
                 (title or "").encode("utf-8")).hexdigest()}
 
 
+# Routes that can publish a New Quiz without naming one: the assignment
+# a New Quiz is (C-43) and its module item (C-283). Publishing a New Quiz
+# was never tested (SCOPE.md), so Morrow reads the target first (C-44 and
+# C-281 are live-proven reads) and refuses a New Quiz. The New Quiz routes
+# themselves are refused by admission_policy.json request_fields.
+_PUBLISH_TARGETS = {
+    ("PUT", "/api/v1/courses/{}/assignments/{}"): "assignment",
+    ("PUT", "/api/v1/courses/{}/modules/{}/items/{}"): "module item",
+}
+
+
+def _new_quiz_publish_target(entry):
+    """"assignment" or "module item" when the write sets published on a
+    route whose target can be a New Quiz, else None."""
+    from dispatch.admission import _field_values, _flag_is_false, _route_key
+    request = (entry or {}).get("request") or {}
+    kind = _PUBLISH_TARGETS.get(_route_key(request.get("method"),
+                                           request.get("url")))
+    if kind is None:
+        return None
+    url_query = urllib.parse.urlsplit(str(request.get("url") or "")).query
+    for part in (request.get("query"), request.get("body"), url_query):
+        if part and any(not _flag_is_false(value)
+                        for value in _field_values(part, "published")):
+            return kind
+    return None
+
+
+def _is_new_quiz_assignment(doc):
+    """True for an assignment that is a New Quiz: Canvas flags it
+    is_quiz_lti_assignment, and it launches the quiz-lti tool."""
+    if doc.get("is_quiz_lti_assignment") is True:
+        return True
+    tool = doc.get("external_tool_tag_attributes")
+    url = tool.get("url") if isinstance(tool, dict) else None
+    return "external_tool" in (doc.get("submission_types") or []) \
+        and ".quiz-lti" in str(url or "").lower()
+
+
+def _read_publish_target(entry, url_template, params, session, pack, what):
+    read_entry = dict(entry, effects="read",
+                      request={"method": "GET", "url": url_template,
+                               "headers": {}})
+    config = {"canvas_base": session.base_for("canvas")}
+    rmethod, rurl, rheaders, rbody = build_request(
+        read_entry, read_entry["request"], params, session, pack, config,
+        {})
+    try:
+        _status, _hdrs, raw, _attempts = session.raw_request(
+            rmethod, rurl, rheaders, rbody, is_write=False)
+        return _parse_provider_json(raw, "the %s read" % what)
+    except (ProviderHttpError, TargetIdentityMismatch) as exc:
+        raise WriteNotAttempted(
+            "the %s could not be read (%s), so Morrow could not check that "
+            "it is not a New Quiz before publishing it. Nothing was sent."
+            % (what, "HTTP %s" % exc.status
+               if isinstance(exc, ProviderHttpError) else exc))
+
+
+def _refuse_new_quiz_publish(entry, params, session, pack):
+    """Refuse (EvidenceHold) a write that publishes a New Quiz through its
+    assignment or module item. Reads the target first; a target Morrow
+    cannot read is not published (WriteNotAttempted)."""
+    kind = _new_quiz_publish_target(entry)
+    if kind is None:
+        return
+    from reauth import state_machine as _rsm
+    if not _rsm.check_write_allowed()[0]:
+        # Changes are paused: the write gates refuse it, and nothing is
+        # read or sent.
+        return
+    url = entry["request"]["url"].split("?", 1)[0]
+    doc = _read_publish_target(entry, url, params, session, pack, kind)
+    if kind == "module item":
+        new_quiz = doc.get("quiz_lti") is True
+        if "quiz_lti" not in doc and doc.get("type") == "Assignment":
+            course_url = url.split("/modules/", 1)[0]
+            new_quiz = _is_new_quiz_assignment(_read_publish_target(
+                entry, course_url + "/assignments/{content_id}",
+                dict(params, content_id=doc.get("content_id")), session,
+                pack, "assignment"))
+    else:
+        new_quiz = _is_new_quiz_assignment(doc)
+    if new_quiz:
+        from dispatch.admission import EvidenceHold
+        raise EvidenceHold(
+            "operation %r publishes a New Quiz (the %s is one), which was "
+            "never tested; refused on every tenant until a live battery "
+            "proves it. Nothing was sent." % (entry.get("name"), kind))
+
+
 def _educator_time_zone(user_id, course_zone):
     """The zone the approval shows dates in: the educator's timezone
     setting, then the course's time zone in Canvas; None (UTC) when
@@ -10103,6 +10206,7 @@ def prepare_plan_write(name: str, method: str, path_template: str,
                              session=session)
     check_policy_gates(entry, bool(getattr(session, "browser_owned_auth",
                                            False)))
+    _refuse_new_quiz_publish(entry, params, session, pack)
     tenant_base = session.base_for(provider or "canvas")
     course_id = _write_target_course_id(entry, params)
     target = None

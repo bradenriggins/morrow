@@ -519,12 +519,84 @@ def check_unsupported(entry: dict, policy: dict) -> None:
             "exists; refusing to dispatch" % name)
 
 
+def _field_values(value, field):
+    """Every value a query or body sends under a key named field,
+    including form keys such as "course[default_view]". A string query
+    or body is read as JSON or as form-encoded pairs; text values are
+    never searched for keys."""
+    if isinstance(value, str):
+        text = value.strip()
+        if text[:1] in ("{", "["):
+            try:
+                return _field_values(json.loads(text), field)
+            except ValueError:
+                pass
+        pairs = urllib.parse.parse_qsl(text.lstrip("?"),
+                                       keep_blank_values=True)
+        return _field_values([{k: v} for k, v in pairs], field)
+    found = []
+    if isinstance(value, list):
+        for item in value:
+            found.extend(_field_values(item, field))
+    elif isinstance(value, dict):
+        for key, child in value.items():
+            if field in _FORM_KEY_PART_RE.findall(str(key)):
+                found.append(child)
+            elif isinstance(child, (dict, list)):
+                found.extend(_field_values(child, field))
+    return found
+
+
+def _holds_word(value, word) -> bool:
+    if isinstance(value, (list, tuple)):
+        return any(_holds_word(v, word) for v in value)
+    if isinstance(value, str):
+        return word in re.split(r"[\s,]+", value.strip().lower())
+    return False
+
+
+def _request_field_hit(entry: dict, rules) -> dict | None:
+    """The first request_fields rule a request block of the entry meets."""
+    for value in (entry or {}).values():
+        blocks = [value] if isinstance(value, dict) else \
+            [v for v in value if isinstance(v, dict)] \
+            if isinstance(value, list) else []
+        for block in blocks:
+            if not block.get("url"):
+                continue
+            key = _route_key(block.get("method"), block.get("url"))
+            url_query = urllib.parse.urlsplit(str(block["url"])).query
+            for rule in rules:
+                if key is None or key != _route_key(rule.get("method"),
+                                                    rule.get("path")):
+                    continue
+                values = []
+                for part in (block.get("query"), block.get("body"),
+                             url_query):
+                    if part:
+                        values.extend(_field_values(part, rule["field"]))
+                when = rule.get("when")
+                if when == "present" and values:
+                    return rule
+                if when == "true" and any(not _flag_is_false(v)
+                                          for v in values):
+                    return rule
+                if when == "contains" and any(
+                        _holds_word(v, str(rule.get("value")).lower())
+                        for v in values):
+                    return rule
+    return None
+
+
 def check_evidence_holds(entry: dict, policy: dict) -> None:
     """Refuse operations that are not yet live-proven through Morrow for Muse.
 
     Tenant-independent: the refusal applies identically on every tenant.
     When a disposable live battery proves the complete path for a held
     operation, it is removed from the hold list and admitted on all tenants.
+    A live-proven route is refused too when its request sends a field
+    whose effect is not in this version (evidence_holds.request_fields:
+    the course home page, publishing a New Quiz, a graded discussion).
     """
     name = entry.get("name") or ""
     holds = policy.get("evidence_holds", {}) or {}
@@ -534,6 +606,13 @@ def check_evidence_holds(entry: dict, policy: dict) -> None:
         raise EvidenceHold(
             "operation %r is on evidence hold: %s; refused on every tenant "
             "until a live battery proves the complete path" % (name, reason))
+    rule = _request_field_hit(
+        entry, (holds.get("request_fields") or {}).get("rules") or ())
+    if rule:
+        raise EvidenceHold(
+            "operation %r sends %s: that %s; refused on every tenant until "
+            "a live battery proves it. Nothing was sent."
+            % (name, rule["field"], rule["why"]))
 
 
 def check_learner_data(entry: dict, policy: dict, vault_ready: bool) -> None:

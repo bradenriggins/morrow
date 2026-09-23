@@ -65,6 +65,13 @@ Changes to your courses:
   no exception. In 0.4.0, the assistant could offer to run a task we
   had not tested if you approved it, although the consent page said
   Morrow refuses such a task even if you ask. That option is gone.
+- What this version does not do is refused even when it is part of a
+  task we tested: making a page the course home page, choosing the
+  course home page, publishing a New Quiz, and making a graded
+  discussion. Each one ran after your approval, or in Edit mode. To
+  catch a New Quiz published through its assignment or module item,
+  Morrow reads that item first. Make these changes in Canvas yourself
+  for now.
 - The approval you read before a change is in plain words: the
   course, the change, every value that will be sent, and whether
   Morrow can undo it. A course rename and a change to the dates of

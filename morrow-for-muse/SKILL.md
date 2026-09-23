@@ -391,6 +391,17 @@ even when the educator asks and even with a signed approval. Tell the
 educator plainly that Morrow does not do that task yet, and offer a
 live-proven task that gets them close, if there is one.
 
+A live-proven route is refused the same way when the request sends a
+field whose effect is not in this version: making a page the course
+home page (`front_page` true on a page create or update), choosing the
+course home page (`default_view` on a course update), publishing a New
+Quiz (`published` true on a New Quiz create or update, or on the
+assignment or module item of a New Quiz; Morrow reads the assignment or
+module item first to check), and a graded discussion
+(`submission_types` holding `discussion_topic` on an assignment create
+or update). Leave the field out, and tell the educator to make that
+change in Canvas themselves.
+
 Undo: this release has no automatic undo. Every write's
 `approval_display` says "Morrow cannot undo this change automatically",
 and every write result carries `"undo_available": false`. The
