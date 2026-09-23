@@ -1,5 +1,5 @@
 import { problemText } from "../src/bridge-problem-copy.js";
-import { activeEditBindings, canChooseCourses, connectedCourseRows, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, editBannerText, nextError, openPlatformLabel, pendingReviews, platformClosed, primaryLabel, reviewButtonLabel, runtimeNeedsReload, statusAnnouncement, statusValue } from "./popup-view.js";
+import { activeEditBindings, canChooseCourses, connectedCourseRows, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, editBannerText, nextError, openPlatformLabel, pendingReviews, platformClosed, primaryAction, primaryLabel, reviewButtonLabel, runtimeNeedsReload, statusAnnouncement, statusValue } from "./popup-view.js";
 
 const primary = document.querySelector("#primary");
 const consentAction = document.querySelector("#consent-action");
@@ -339,30 +339,29 @@ consentAction.addEventListener("click", async () => {
 });
 
 primary.addEventListener("click", async () => {
-  if (!current) {
+  const action = primaryAction(current, detectedProvider).id;
+  if (action === "retry") {
     await retryStatus();
     return;
   }
-  if (runtimeNeedsReload(current)) {
+  if (action === "open_setup") {
     clearNotice();
     await runAction(() => message("morrow_open_setup"));
     return;
   }
-  if (canChooseCourses(current)) {
+  if (action === "choose_courses") {
     clearNotice();
     openCourseSelection();
     return;
   }
-  await runAction(async () => {
-    if (current?.authenticationFailed === true) return await message("morrow_pair");
-    if (!current?.paired) return await message("morrow_pair");
-    return await connectCanvasCourse();
-  }, (result) => {
-    if (result?.siteAnchorId) {
-      clearNotice();
-      openCourseSelection();
-    }
-    else clearNotice();
+  if (action === "pair") {
+    await runAction(() => message("morrow_pair"), () => clearNotice());
+    return;
+  }
+  if (action !== "connect_course") return;
+  await runAction(connectCanvasCourse, (result) => {
+    clearNotice();
+    if (result?.siteAnchorId) openCourseSelection();
   });
 });
 

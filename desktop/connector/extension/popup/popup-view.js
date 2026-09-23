@@ -166,18 +166,22 @@ export function statusAnnouncement(status) {
 // platform: the person already knows what course the active tab shows (D1a). popup.js hides this
 // control instead, whenever the saved course's own tab needs reopening (platformClosed) or nothing
 // is detected here, so "Connect this course", "Open Canvas"/"Open Moodle", or no primary action at
-// all are the only three outcomes.
-export function primaryLabel(status, detectedProvider = null) {
-  if (!status) return "Try again";
-  if (runtimeNeedsReload(status)) return "Open setup guide";
+// all are the only three outcomes. The label and the step a click takes come from this one
+// decision, so the button can never say one thing and do another.
+export function primaryAction(status, detectedProvider = null) {
+  if (!status) return { id: "retry", label: "Try again" };
+  if (runtimeNeedsReload(status)) return { id: "open_setup", label: "Open setup guide" };
   // A closed approval tab is opened again: Morrow answers a second request with the one pending.
-  if (status.pairing) return "Open the approval page";
-  if (status.authenticationFailed === true) return "Reconnect Morrow";
-  if (!status.paired) return "Connect Morrow";
-  if (canChooseCourses(status)) return "Choose courses";
-  if (!status.connected) return "Waiting for your assistant";
-  const platform = currentPlatform(status, detectedProvider);
-  return platform ? "Connect this course" : "";
+  if (status.pairing) return { id: "pair", label: "Open the approval page" };
+  if (status.authenticationFailed === true) return { id: "pair", label: "Reconnect Morrow" };
+  if (!status.paired) return { id: "pair", label: "Connect Morrow" };
+  if (canChooseCourses(status)) return { id: "choose_courses", label: "Choose courses" };
+  if (!status.connected) return { id: "wait", label: "Waiting for your assistant" };
+  return currentPlatform(status, detectedProvider) ? { id: "connect_course", label: "Connect this course" } : { id: "none", label: "" };
+}
+
+export function primaryLabel(status, detectedProvider = null) {
+  return primaryAction(status, detectedProvider).label;
 }
 
 function courseTabName(platform) {

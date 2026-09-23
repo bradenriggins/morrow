@@ -13,6 +13,7 @@ import {
   detailText,
   nextError,
   pendingReviews,
+  primaryAction,
   primaryLabel,
   reviewButtonLabel,
   runtimeNeedsReload,
@@ -35,6 +36,26 @@ const statuses = [
   { paired: true, pairing: false, connecting: false, connected: true, runtimeHealthy: true, bindings: [binding()], siteAnchors: [anchor()], bindingCount: 1 },
   { paired: true, pairing: false, connecting: false, connected: true, runtimeHealthy: true, bindings: [binding({ runtimeVerified: false })], siteAnchors: [anchor()], bindingCount: 1 },
 ];
+
+// The primary button's words and what a click on it does come from one decision, so a label can
+// never promise one step while the click takes another.
+test("every primary label names the one action a click on it takes", () => {
+  const actionFor = { "Try again": "retry", "Open setup guide": "open_setup", "Open the approval page": "pair", "Reconnect Morrow": "pair",
+    "Connect Morrow": "pair", "Choose courses": "choose_courses", "Waiting for your assistant": "wait", "Connect this course": "connect_course", "": "none" };
+  const cases = [
+    ...statuses.map((status) => [status, null]),
+    ...statuses.map((status) => [status, "canvas"]),
+    [{ paired: true, pairing: true, authenticationFailed: false, connected: false, bindings: [], siteAnchors: [] }, "canvas"],
+    [{ paired: true, pairing: true, authenticationFailed: true, connected: false, bindings: [], siteAnchors: [] }, null],
+    [{ ...statuses[9], runtimeHealthy: false }, "canvas"],
+  ];
+  for (const [status, detected] of cases) {
+    const action = primaryAction(status, detected);
+    assert.equal(action.label, primaryLabel(status, detected), JSON.stringify(status));
+    assert.equal(action.id, actionFor[action.label], `${action.label}: ${JSON.stringify(status)}`);
+  }
+  assert.equal(primaryAction({ paired: true, pairing: true, connected: false, bindings: [], siteAnchors: [] }, "canvas").id, "pair");
+});
 
 test("a connected socket with an unhealthy runtime asks for a Bridge reload", () => {
   const status = { ...statuses[9], runtimeHealthy: false };

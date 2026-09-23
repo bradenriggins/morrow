@@ -267,6 +267,28 @@ test("while approval waits, the popup reopens the approval page", async () => {
   assert.equal(page.hidden("#error"), true);
 });
 
+// A re-pair waits with the refused token still saved, and the worker restarted, so the status names
+// no authentication problem. The button still reads Open the approval page, and it must do exactly
+// that: never ask Chrome for access to whatever site the active tab shows.
+test("Open the approval page reopens the approval page even while a saved connection is kept", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, pairing: true, authenticationFailed: false, connected: false }),
+    tabs: [{ id: 5, url: "https://mail.example.com/inbox", active: true }],
+    handlers: {
+      morrow_pair: () => ({ status: "pending" }),
+      morrow_connect_course_prepare: ({ tabId }) => ({ id: "intent-1", tabId, origins: ["https://mail.example.com/*"] }),
+      morrow_connect_course_cancel: () => ({ cancelled: true }),
+    },
+  });
+  assert.equal(view(page).primary, "Open the approval page");
+  assert.equal(view(page).primaryDisabled, false);
+  await page.click("#primary");
+  assert.deepEqual(page.messages("morrow_pair"), [{ type: "morrow_pair" }]);
+  assert.deepEqual(page.messages("morrow_connect_course_prepare"), []);
+  assert.deepEqual(page.permissionCalls, []);
+  assert.equal(page.hidden("#error"), true);
+});
+
 test("a Bridge whose version Morrow refused offers the setup guide, not a new connection", async () => {
   const page = await openPopup({
     status: () => connection({ paired: true, connected: false, authenticationFailed: false, versionMismatch: true, runtimeHealthy: false, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
