@@ -76,7 +76,9 @@ readback and cleanup:
 
 - **Courses**: get course, update course (rename, readback-verified and
   restored), course settings, course tabs. Course create was never
-  tested. Course conclude/delete (C-108) is on evidence hold.
+  tested. Course conclude/delete (C-108) is on evidence hold, and so
+  is the same change sent as `course[event]` or `offer` on a course
+  update.
 - **Assignments**: create/read/update/delete, plus overrides
   (create/read/update/delete, batch override create/update, bulk date
   update) and assignment groups CRUD. Create proven with HTTP 201 and
@@ -157,7 +159,8 @@ and confirm the fields anyway.
   GET `/api/v1/courses/{id}`, compare the changed fields. Caveat:
   the rename battery restored the original name after the test write;
   course create was never tested; course conclude/delete (C-108) is
-  evidence-hold and refuses on every tenant.
+  evidence-hold and refuses on every tenant, and so does a course
+  update that sends `course[event]` or `offer`.
 - **Assignments** (C-38 create, C-43 update, C-40 delete, C-42
   duplicate; overrides C-39/C-41/C-51, batch C-34/C-36/C-37, groups
   C-29/C-30/C-31). Shape: POST `/api/v1/courses/{course_id}/

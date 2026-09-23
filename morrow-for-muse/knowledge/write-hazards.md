@@ -87,8 +87,10 @@ The highest-blast-radius writes in Canvas:
   surface. They are on evidence-hold and the admission policy refuses
   them on every tenant: no approval, frozen plan, or ceremony admits
   them today, precisely because the blast radius is the whole
-  enrollment. They stay held until a disposable live battery proves
-  the complete path.
+  enrollment. The same change sent as a field of the course update
+  (C-128) is refused the same way: `course[event]` (delete, conclude,
+  claim, offer, undelete) and `offer`. They stay held until a
+  disposable live battery proves the complete path.
 - Module publish with item cascade makes every item in the module
   student-visible in one call. Present it as exactly that to the
   educator: "this makes N items visible to students," with the count

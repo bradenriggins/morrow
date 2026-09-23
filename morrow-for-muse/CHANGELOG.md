@@ -99,6 +99,12 @@ Changes to your courses:
   catch a New Quiz published through its assignment or module item,
   Morrow reads that item first. Make these changes in Canvas yourself
   for now.
+- Morrow can no longer delete, conclude, publish, or unpublish a whole
+  course through the course rename task. That task also took a course
+  "event", so after one approval, or in Edit mode with no question at
+  all, the assistant could delete or conclude the course, although the
+  docs said Morrow refuses that even with your approval. Only a
+  course rename was tested, so those changes are refused now.
 - The approval you read before a change is in plain words: the
   course, the change, every value that will be sent, and whether
   Morrow can undo it. A course rename and a change to the dates of
@@ -413,7 +419,9 @@ Technical notes:
   non-id key in a student position refuses the read.
 - `dispatch/admission_policy.json` 1.4.0: `never_dispatch.request_flags`
   refuses `is_announcement` on any route; `canvas_create_external_feed_courses`
-  is never-dispatch; C-139, C-141, C-167, and C-238 are evidence holds.
+  is never-dispatch; C-139, C-141, C-167, and C-238 are evidence holds;
+  `evidence_holds.request_fields` refuses `event` (any value) and
+  `offer` (true) on the course update (C-128).
 - The failure catalog gains `never-dispatch` and
   `course-roster-unavailable`; `new-quiz-create-evidence-hold` became
   the general `evidence-hold`.

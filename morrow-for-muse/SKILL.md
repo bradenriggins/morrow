@@ -398,7 +398,9 @@ live-proven task that gets them close, if there is one.
 A live-proven route is refused the same way when the request sends a
 field whose effect is not in this version: making a page the course
 home page (`front_page` true on a page create or update), choosing the
-course home page (`default_view` on a course update), publishing a New
+course home page (`default_view` on a course update), deleting,
+concluding, publishing, or unpublishing the whole course (`event` or
+`offer` on a course update), publishing a New
 Quiz (`published` true on a New Quiz create or update, or on the
 assignment or module item of a New Quiz; Morrow reads the assignment or
 module item first to check), a graded discussion
@@ -610,7 +612,8 @@ exclusions: announcements, messages to people, support tickets,
 subaccount-affecting operations; any request that sets
 `is_announcement` on any route, and creating an announcement external
 feed, are refused as announcements), catalog-unsupported rows, failed
-rows, evidence-hold rows (course delete or conclude, C-108; the four
+rows, evidence-hold rows (course delete or conclude, C-108, also when
+sent as `event` on a course update; the four
 Item Bank quiz-entry routes; and the discussion writes C-139 create,
 C-167 update, C-141 delete, and C-238 date change), and
 learner-data rows on any lane that cannot de-identify them (the raw

@@ -27,6 +27,15 @@ after an approval (or in Edit mode) the untested change ran:
   6. A classic question bank: a question group that draws from one
      (assessment_question_bank_id on question group create C-347 or
      update C-352). Classic question banks are not in this version.
+  7. Deleting or concluding the whole course through the course update
+     (C-128): course[event] delete, conclude, offer, claim, or undelete,
+     and the offer flag. The docs say course delete and conclude (C-108)
+     are refused on every tenant even with an approval, and only a
+     rename of C-128 was tested; in Edit mode the course was deleted
+     with no question, even with "always confirm deletions" on, and in
+     Plan mode the educator read only "Change the course" (muse engine
+     audit round 2, 2026-09-23). plan-write, catalog, and approve-write
+     each refuse it and send nothing.
 Each refusal happens before approval, on every lane, and reads to the
 educator as a task that is on hold in this version (evidence-hold).
 
@@ -107,11 +116,23 @@ REFUSED = [
                        "assessment_question_bank_id": 12}]}),
     ("question-bank-group-form", GROUP_UPDATE,
      {"quiz_groups[][assessment_question_bank_id]": "12"}),
+    ("course-delete", COURSE_UPDATE, {"course": {"event": "delete"}}),
+    ("course-conclude", COURSE_UPDATE, {"course": {"event": "conclude"}}),
+    ("course-claim", COURSE_UPDATE, {"course": {"event": "claim"}}),
+    ("course-offer", COURSE_UPDATE, {"course": {"event": "offer"}}),
+    ("course-undelete", COURSE_UPDATE, {"course": {"event": "undelete"}}),
+    ("course-event-form", COURSE_UPDATE,
+     {"course[name]": "Bio 101", "course[event]": "delete"}),
+    ("course-event-top-level", COURSE_UPDATE, {"event": "conclude"}),
+    ("course-offer-flag", COURSE_UPDATE,
+     {"course": {"name": "Bio 101"}, "offer": True}),
 ]
 ADMITTED = [
     ("page-rename", PAGE_UPDATE, {"wiki_page": {"title": "Welcome!",
                                                 "front_page": False}}),
     ("course-rename", COURSE_UPDATE, {"course": {"name": "Bio 101"}}),
+    ("course-rename-offer-false", COURSE_UPDATE,
+     {"course": {"name": "Bio 101"}, "offer": False}),
     ("new-quiz-rename", NQ_UPDATE, {"quiz": {"title": "Week 2 Quiz",
                                              "published": False}}),
     ("text-assignment", ASSIGNMENT_CREATE,
@@ -310,3 +331,60 @@ def test_a_dry_run_says_the_new_quiz_check_waits_for_the_send(hermetic):
     assert session.calls == []
     gates = {g["gate"]: g for g in report["gates"]}
     assert gates["new_quiz_publish_check"]["result"] == "skipped"
+
+
+# -- deleting or concluding the course through the course update ---------------
+
+def _course_canvas():
+    """Course 101, Bio 101, which a sent course[event] would change."""
+    state = {"workflow_state": "available"}
+
+    def handler(method, url, body):
+        path = url.split("?")[0].rstrip("/")
+        if path.endswith("/courses/101"):
+            if method == "PUT":
+                state["workflow_state"] = "deleted"
+            return 200, {}, json.dumps({"id": 101, "name": "Bio 101",
+                                        **state}).encode()
+        return 404, {}, b'{"errors": [{"message": "not found"}]}'
+    return handler, state
+
+
+@pytest.mark.parametrize("event", ["delete", "conclude"])
+def test_a_course_event_is_refused_by_every_command(edit_mode, monkeypatch,
+                                                    event):
+    from settings import store
+    store.set_setting(USER, "confirm_destructive_writes", True,
+                      educator_confirmed=True)
+    handler, state = _course_canvas()
+    session = edit_mode(handler)
+    name, method, path, params = COURSE_UPDATE
+    body = {"course": {"event": event}}
+    code, out = _publish(COURSE_UPDATE, body)
+    assert code != 0 and "EvidenceHold" in out, out
+    code, out = _cli(["plan-write", "--name", name, "--method", method,
+                      "--path", path, "--params", json.dumps(params),
+                      "--body", json.dumps(body)] + _who())
+    assert code != 0 and "EvidenceHold" in out, out
+    pending = os.path.join(ex.MORROW_HOME, ex.PENDING_WRITES_DIRNAME)
+    assert not os.path.isdir(pending) or os.listdir(pending) == []
+    # A write prepared before this version held the field (the hold
+    # lifted while plan-write ran) is refused when approved.
+    import copy
+    held = admission_mod.load_policy()
+    lifted = copy.deepcopy(held)
+    lifted["evidence_holds"]["request_fields"]["rules"] = [
+        r for r in lifted["evidence_holds"]["request_fields"]["rules"]
+        if r["field"] != "event"]
+    monkeypatch.setattr(admission_mod, "_policy_cache", lifted)
+    code, out = _cli(["plan-write", "--name", name, "--method", method,
+                      "--path", path, "--params", json.dumps(params),
+                      "--body", json.dumps(body)] + _who())
+    assert code == 0, out
+    op_id = json.loads(out)["op_id"]
+    monkeypatch.setattr(admission_mod, "_policy_cache", held)
+    code, out = _cli(["approve-write", "--op-id", op_id,
+                      "--authorization", "Yes, do it"] + _who())
+    assert code != 0 and "EvidenceHold" in out, out
+    assert _writes(session) == []
+    assert state["workflow_state"] == "available"

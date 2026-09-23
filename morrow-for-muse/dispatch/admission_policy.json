@@ -79,6 +79,20 @@
      "why": "chooses the course home page, which is not in this version"
     },
     {
+     "method": "PUT",
+     "path": "/api/v1/courses/{id}",
+     "field": "event",
+     "when": "present",
+     "why": "deletes, concludes, publishes, or unpublishes the whole course, which is not in this version (course delete and conclude, C-108, are on hold, and only a course rename was tested)"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/v1/courses/{id}",
+     "field": "offer",
+     "when": "true",
+     "why": "publishes the whole course to its students, which was never tested"
+    },
+    {
      "method": "POST",
      "path": "/api/quiz/v1/courses/{course_id}/quizzes",
      "field": "published",
