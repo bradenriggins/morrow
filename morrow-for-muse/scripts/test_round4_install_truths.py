@@ -169,3 +169,25 @@ def test_every_first_start_of_the_helper_runs_install():
         modes = {e["id"]: e for e in json.load(fh)["entries"]}
     assert "bash install.sh" in \
         modes["setup-tenant-not-configured"]["auto_action"]
+
+
+# Final sweep 2026-09-23 (written before the fix): the troubleshooting
+# playbook told the agent that after a restart "the keepalive cron
+# self-heals the helper" (the Muse VM has no cron: a background loop
+# runs keepalive, and `bin/morrow start` restarts it after a reboot),
+# that the sign-in notice prints "once ever" (it repeats on every
+# install until sign-in), to "create ~/.morrow/write_halt" on a dead
+# session (the executor imposes the halt; a hand-made one reads as a
+# manual pause the educator did not ask for), and gave a placeholder
+# executor command.
+def test_the_playbook_matches_supervision_notice_and_halt():
+    text = " ".join(_read("knowledge/troubleshooting-playbook.md").split())
+    assert "cron (every 5 minutes) self-heals" not in text
+    assert "runs every 5 minutes from cron" not in text
+    assert "background loop" in text and "bin/morrow start" in text
+    assert not re.search(r"(?<!not shown )once ever", text)
+    assert "sign-in notice on every run until" in text
+    assert not re.search(r"create `?~/\.morrow/write_halt", text)
+    assert "imposes the write halt" in text
+    assert "<a live-proven read row>" not in text
+    assert "--name users_self --method GET --path /api/v1/users/self" in text
