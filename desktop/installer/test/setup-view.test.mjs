@@ -334,7 +334,20 @@ test("the data-retention section names every place, what it removes, and the ste
   assert.match(windows.body, /open Settings, select Apps, then Installed apps, find Morrow, select More, and select Uninstall\./);
   assert.equal(/Trash/.test(windows.body), false);
 
-  assert.match(retention().body, /Chrome loaded Morrow Bridge from the Bridge folder above/, "the temporary route loads the Bridge folder");
+  // Chrome loaded the Bridge from the folder listed above only when Chrome loaded
+  // or connected it and that folder is on this computer.
+  const bridgeRow = { id: "bridge", label: "The Morrow Bridge folder Chrome loads", path: "/Morrow/Bridge", removable: true, keptReason: null };
+  const withBridge = { uninstall: "move_to_trash", locations: [...RETENTION_LOCATIONS, bridgeRow] };
+  for (const bridge of [{ bridgeLoadedInChrome: true }, { bridgePaired: true }]) {
+    assert.match(retentionView(state({ ...bridge, retention: withBridge })).body, /Chrome loaded Morrow Bridge from the Bridge folder above\. To remove/, "the temporary route loads the Bridge folder");
+  }
+  const loadedWithoutFolder = retentionView(state({ bridgeLoadedInChrome: true, retention: { uninstall: "move_to_trash", locations: RETENTION_LOCATIONS } }));
+  assert.doesNotMatch(loadedWithoutFolder.body, /Chrome loaded Morrow Bridge/, "no Bridge folder is listed above");
+  assert.match(loadedWithoutFolder.body, /To remove Morrow Bridge from Chrome, open/);
+  for (const unconfirmed of [retention(), retentionView(state({ bridgeLoadedInChrome: false, retention: withBridge }))]) {
+    assert.doesNotMatch(unconfirmed.body, /Chrome loaded Morrow Bridge/, "Chrome is not known to have loaded Morrow Bridge");
+    assert.match(unconfirmed.body, /If you added <strong>Morrow Bridge<\/strong> in Chrome, remove it there too: open the Chrome <strong>three-dot menu<\/strong>/);
+  }
   const store = retentionView(state({ bridgeDelivery: "available", retention: { uninstall: "move_to_trash", locations: RETENTION_LOCATIONS } }));
   assert.doesNotMatch(store.body, /Bridge folder/, "a Chrome Web Store install did not load the Bridge folder");
   assert.match(store.body, /remove <strong>Morrow Bridge<\/strong>/);

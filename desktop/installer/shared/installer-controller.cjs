@@ -2378,14 +2378,15 @@ class InstallerController {
    * Removing the Morrow application removes the application only, so this is
    * what stays on this computer until a person removes it here.
    */
-  retention(record) {
+  /** The places this installation keeps data that are on this computer now. */
+  async retention(record) {
     const configured = record?.configured && typeof record.configured === "object" && !Array.isArray(record.configured) ? record.configured : {};
     const assistantConfigurations = ASSISTANTS.flatMap((assistant) => {
       const target = configured[assistant.id]?.target;
       return typeof target === "string" && path.isAbsolute(target) ? [{ title: assistant.title, path: target }] : [];
     });
     const blackboard = blackboardPaths(this.home, "default");
-    return retentionSnapshot({
+    const snapshot = retentionSnapshot({
       platform: this.platform,
       userData: this.paths.userData,
       state: this.paths.state,
@@ -2398,6 +2399,8 @@ class InstallerController {
       assistantConfigurations,
       removal: this.dataRemoval
     });
+    const present = await Promise.all(snapshot.locations.map((location) => fs.lstat(location.path).then(() => true, () => false)));
+    return { ...snapshot, locations: snapshot.locations.filter((_location, index) => present[index]) };
   }
 
   /**
@@ -2424,7 +2427,8 @@ class InstallerController {
 
   async runDataRemoval(parent) {
     const record = await this.record();
-    const retention = this.retention(record);
+    const retention = await this.retention(record);
+    const bridgeLoaded = await this.bridgeLoadedInChrome(this.bridgeInstallation, this.runtimeMonitor?.snapshot?.() ?? null) === true;
     const removable = retention.locations.filter((location) => location.removable === true);
     const kept = retention.locations.filter((location) => location.removable !== true);
     const keptPaths = kept.map((location) => location.path);
@@ -2434,7 +2438,7 @@ class InstallerController {
     });
     const guard = await this.acquireDataRemovalGuard();
     this.dataRemovalGuard = guard;
-    if (!await this.confirmDataRemoval(parent, removable, kept, entries)) {
+    if (!await this.confirmDataRemoval(parent, removable, kept, entries, bridgeLoaded)) {
       await this.releaseDataRemovalGuard(guard);
       this.dataRemoval = { schema: DATA_REMOVAL_SCHEMA, status: "cancelled", removed: [], remaining: [], kept: keptPaths };
       return this.dataRemoval;
@@ -2664,7 +2668,7 @@ class InstallerController {
    * button and not the button the Escape key answers with, and any other
    * answer, including a dialog Morrow cannot read, is not a confirmation.
    */
-  async confirmDataRemoval(parent, removable, kept, entries = []) {
+  async confirmDataRemoval(parent, removable, kept, entries = [], bridgeLoaded = false) {
     const lines = (locations) => locations.map((location) => `- ${location.label}: ${location.path}`);
     const answer = await this.dialog.showMessageBox(parent, {
       type: "warning",
@@ -2676,7 +2680,9 @@ class InstallerController {
         ...lines(removable),
         ...(kept.length ? ["", "Morrow will not remove:", ...lines(kept)] : []),
         "",
-        "This cannot be undone. Chrome loaded Morrow Bridge from the Bridge folder, so remove Morrow Bridge in Chrome as well."
+        bridgeLoaded && this.bridgeDelivery === "developer_temporary"
+          ? "This cannot be undone. Chrome loaded Morrow Bridge from the Bridge folder, so remove Morrow Bridge in Chrome as well."
+          : "This cannot be undone. If you added Morrow Bridge in Chrome, remove it there as well."
       ].join("\n"),
       buttons: ["Cancel", "Remove data"],
       defaultId: 0,
@@ -3116,7 +3122,7 @@ class InstallerController {
       selectedCourseName: bridge.courseName,
       firstPreviewCourseName: bridge.firstReadCourseName,
       blackboard: await this.blackboardHealth(),
-      retention: this.retention(record),
+      retention: await this.retention(record),
       updates,
       firstPreview: {
         available: runtime.firstPreview.available === "yes",

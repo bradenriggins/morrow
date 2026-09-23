@@ -2068,6 +2068,36 @@ test("the state names every place this installation keeps data, by its exact pat
   }
 });
 
+test("the state and the removal confirmation name only places on this computer, and say Chrome loaded the Bridge only when it did", async () => {
+  const root = await temporaryRoot();
+  const { installer, messageBoxes, paths } = await installationWithData(root, 0);
+  // This person never connected Blackboard, and the default materials folder was never made.
+  await fs.rm(paths.credentials, { recursive: true, force: true });
+  await fs.rm(paths.blackboardConfiguration, { force: true });
+  await fs.rm(paths.materials, { recursive: true, force: true });
+
+  const retention = (await installer.state()).retention;
+  assert.deepEqual(retention.locations.map((location) => location.path), [paths.state, paths.backups, paths.bridge, paths.assistantConfiguration]);
+  for (const location of retention.locations) {
+    assert.equal(await fs.lstat(location.path).then(() => true, () => false), true, `${location.path} exists`);
+  }
+
+  installer.bridgeLoadedInChrome = async () => "unknown";
+  assert.equal((await installer.removeData(null)).status, "cancelled");
+  let detail = messageBoxes.at(-1).detail;
+  for (const absent of [paths.credentials, paths.blackboardConfiguration, paths.materials]) {
+    assert.equal(detail.includes(absent), false, `the confirmation does not name ${absent}`);
+  }
+  assert.doesNotMatch(detail, /Blackboard/);
+  assert.doesNotMatch(detail, /Chrome loaded Morrow Bridge/);
+  assert.match(detail, /This cannot be undone\. If you added Morrow Bridge in Chrome, remove it there as well\.$/);
+
+  installer.bridgeLoadedInChrome = async () => true;
+  assert.equal((await installer.removeData(null)).status, "cancelled");
+  detail = messageBoxes.at(-1).detail;
+  assert.match(detail, /This cannot be undone\. Chrome loaded Morrow Bridge from the Bridge folder, so remove Morrow Bridge in Chrome as well\.$/);
+});
+
 test("a data removal without an explicit confirmation removes nothing", async () => {
   const root = await temporaryRoot();
   const { installer, messageBoxes, paths } = await installationWithData(root, 0);

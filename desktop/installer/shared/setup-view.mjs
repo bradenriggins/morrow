@@ -514,6 +514,16 @@ function retentionRemoval(removal) {
  * installation keeps, which of them the in-app removal can remove, and the step
  * this computer uses to remove the application itself.
  */
+// Chrome is named as having loaded Morrow Bridge only when setup saw it loaded
+// or connected, and the folder it loaded is only named when it is listed above.
+function bridgeRemovalSentence(current, locations) {
+  const steps = "open the Chrome <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>, then remove <strong>Morrow Bridge</strong>.";
+  const bridge = current?.bridge || {};
+  if (bridge.loadedInChrome !== true && bridge.paired !== true) return `If you added <strong>Morrow Bridge</strong> in Chrome, remove it there too: ${steps}`;
+  const folderListed = bridge.delivery === "developer_temporary" && locations.some((location) => location.id === "bridge");
+  return `${folderListed ? "Chrome loaded Morrow Bridge from the Bridge folder above. " : ""}To remove Morrow Bridge from Chrome, ${steps}`;
+}
+
 export function retentionView(current) {
   const retention = current?.retention;
   if (retention?.schema !== "morrow.installer-retention.v1" || !Array.isArray(retention.locations) || retention.locations.length === 0) return null;
@@ -527,7 +537,7 @@ export function retentionView(current) {
       kept.length ? `<div><h3>Morrow does not remove these</h3>${retentionRows(kept)}</div>` : "",
       retentionRemoval(retention.removal),
       `<p>${escapeHtml(UNINSTALL_STEPS[retention.uninstall] || UNINSTALL_STEPS.unknown)}</p>`,
-      `<p>${current?.bridge?.delivery === "developer_temporary" ? "Chrome loaded Morrow Bridge from the Bridge folder above. " : ""}To remove Morrow Bridge from Chrome, open the Chrome <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>, then remove <strong>Morrow Bridge</strong>.</p>`,
+      `<p>${bridgeRemovalSentence(current, retention.locations)}</p>`,
       removable.length ? '<div class="inline-actions"><button class="secondary-button danger-button" type="button" data-action="remove-data">Remove Morrow&#39;s data</button></div>' : ""
     ].join("")
   };
