@@ -92,15 +92,10 @@ marked `live-proven` is not a v1 claim.
   journaled dispatches. This release has no automatic undo: no undo
   entry is pinned, and each approval says the change cannot be undone
   automatically; a reversal is a new change the educator approves. Only
-  live-proven operations run, with one exception: a catalog row marked
-  `pending` (never tried live) dispatches only with `--allow-unproven`
-  plus an educator-signed v2 approval carrying `allow_unproven: true`,
-  bound to that exact operation and its parameters, single use. The
-  educator must sign it; the agent cannot. Rows marked `failed`,
-  `unsupported`, `excluded`, or `evidence-hold` are refused with or
-  without it, and it does not bypass write approval, frozen-plan
-  requirements, never-dispatch, learner-data refusal, or
-  unknown-operation refusal.
+  live-proven operations run, with no exception and no override: rows
+  marked `pending`, `failed`, `unsupported`, `excluded`, or
+  `evidence-hold`, and unknown operations, are refused even when the
+  educator asks and even with a signed approval.
 - The Canvas Login Helper (`helper/`): educator self-sign-in,
   SSO/MFA-capable, with keepalive.
 
@@ -146,9 +141,8 @@ live battery marks them live-proven in
   package), where every receipt is de-identified in `dispatch_entry`
   (course-scoped labels such as `Student A1`) before the agent or the
   journal sees it. Everywhere else (the raw HTTPS lane, or no
-  `cryptography`) they are refused (`LearnerDataGated`;
-  `--allow-unproven` cannot override it). The educator works by name
-  through `morrow students find` and writes by label (SKILL.md
+  `cryptography`) they are refused (`LearnerDataGated`). The educator
+  works by name through `morrow students find` and writes by label (SKILL.md
   "Working by name"). Proof status: the by-name flow and the opened
   people-bearing rows are proven against synthetic Canvas fixtures in
   the source tree's end-to-end tests; they have not yet been exercised

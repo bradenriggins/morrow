@@ -52,9 +52,9 @@ dispatchable through `dispatch/executor.py --backend chromium`:
 437 Canvas rows (C-1 through C-437) and 20 Item Bank rows (IB-1
 through IB-20). Each row names a tool, method, path template,
 read/write class, mechanism, proof status, and evidence notes. Only
-rows marked `live-proven` dispatch; a row marked `pending` also runs
-with an educator-signed `--allow-unproven` override, and rows marked
-`failed`, `unsupported`, or `excluded` never run. The admission policy
+rows marked `live-proven` dispatch. Rows marked `pending`, `failed`,
+`unsupported`, or `excluded` never run, and nothing overrides that,
+not even the educator asking. The admission policy
 (`dispatch/admission_policy.json`) can hold even a live-proven row;
 its `evidence_holds` list names each held row and why. Its
 `admitted_on_proof` list records the rows a live battery released
@@ -145,8 +145,8 @@ exclusion).
 
 Grades/submissions/gradebook: no live-proven grades or submissions
 rows (all pending or excluded). Learner-data gated. The admission
-gate refuses them on every tenant; `--allow-unproven` cannot override
-this. See `knowledge/privacy-ferpa.md`.
+gate refuses them on every tenant, and nothing overrides that. See
+`knowledge/privacy-ferpa.md`.
 
 Moodle: proven in a sandbox, not packaged. **NOT IMPLEMENTED** here.
 Blackboard: no implementation exists. **NOT IMPLEMENTED** here (see

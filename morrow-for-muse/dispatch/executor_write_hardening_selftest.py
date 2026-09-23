@@ -933,7 +933,7 @@ class _Boom(Exception):
 
 ex._journal_write_failure_audit(
     "test.n5", "dispatch", "write", {"a": 1}, None, _n5_op, _Boom("x"),
-    {"write_attempted": True}, None, None, None)
+    {"write_attempted": True}, None, None)
 check("audit record is not reported as the outcome",
       ex.find_journal_op(_n5_op) is None)
 check("claim stays live after audit record",

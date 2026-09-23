@@ -650,11 +650,11 @@
       "title": "Operation not in the proven catalog (CatalogNotProven)",
       "surface": "canvas",
       "severity_hint": "medium",
-      "root_cause": "Verified mechanism: the provenance gate admits only catalog rows marked live-proven (or pending rows with an educator-signed unproven override). Unknown names and unproven rows are refused by design.",
+      "root_cause": "Verified mechanism: the provenance gate admits only catalog rows marked live-proven. Unknown names and rows with any other status are refused by design, and nothing overrides that.",
       "is_not": "This is not a provider failure and not a broken session. The capability may simply not be proven yet.",
-      "agent_message": "What was attempted: I tried {operation} and the safety gate refused because that operation is not in the proven catalog (or is still marked pending). What the evidence showed: this operation has not been proven safe on live courses yet, which is the system keeping unproven operations away from your live courses by design. What this means: I cannot run this exact operation through the governed path right now. What happens next: I can check whether a proven equivalent exists, or you can explicitly approve an unproven run with a signed override, understanding it carries more risk. Absolute refusals (like held destructive operations) cannot be overridden.",
-      "auto_action": "Offer the nearest proven equivalent; if the educator approves, mint the unproven override explicitly. Never invent a route name.",
-      "escalate_when": "Always surface the first time an operation they asked for is refused this way, with the equivalent or override options.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow only does tasks we have tested on a real Canvas course, and this task is not one of them yet. What this means: I did not do it, and nothing changed in Canvas. Morrow cannot do an untested task, even if you ask. What happens next: I can look for a tested task that gets you close, if there is one.",
+      "auto_action": "Offer the nearest live-proven task, if there is one. Never invent a route name, and never offer to run the refused task.",
+      "escalate_when": "Always surface the first time a task they asked for is refused this way, with the nearest tested task if there is one.",
       "signature": {
         "__any_of": [
           {
@@ -665,7 +665,7 @@
           }
         ]
       },
-      "signature_notes": "causes: [\"unknown tool name\", \"row marked pending\", \"IB rows pre-fix naming\"]; gate: \"CatalogNotProven\"; override: \"educator-signed --allow-unproven approval only; absolute refusals cannot be overridden\"",
+      "signature_notes": "causes: [\"unknown tool name\", \"row marked pending\", \"IB rows pre-fix naming\"]; gate: \"CatalogNotProven\"; override: \"none; nothing overrides this refusal\"",
       "severity_hint_inventory": "user-action",
       "placeholders": [
         "operation"

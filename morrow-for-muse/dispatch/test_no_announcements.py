@@ -204,7 +204,6 @@ def test_discussion_writes_are_held_even_where_student_data_works(op):
     with pytest.raises(admission.EvidenceHold):
         ex._catalog_provenance_gate(
             _entry(op, body), name, method, path, {"course_id": "101"},
-            "canvas", None, False,
             SimpleNamespace(browser_owned_auth=True))
 
 
