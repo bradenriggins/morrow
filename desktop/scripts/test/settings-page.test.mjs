@@ -315,6 +315,23 @@ test("a course search narrows the list, with no pagination", async () => {
   assert.equal(page.queryAll(".course-row").length, 8);
 });
 
+// The search label names only what the search matches: a course by its name, code, term or
+// platform, and a site by its address.
+test("the course search finds a course by its site address or platform, as its label says", async () => {
+  const anatomy = canvasCourse(1, "Anatomy", { origin: "https://canvas.state.edu", siteUrl: "https://canvas.state.edu/" });
+  const algebra = moodleCourse(2, "Algebra", { origin: "https://moodle.college.edu", siteUrl: "https://moodle.college.edu/" });
+  const page = await openSettings({ status: () => statusFixture([anatomy, algebra]) });
+  assert.equal(page.text('label[for="course-filter"] span'), "Search courses or sites");
+  const found = async (query) => {
+    await page.type("#course-filter", query);
+    return page.queryAll(".course-row-name").map((element) => element.textContent);
+  };
+  assert.deepEqual(await found("Anatomy"), ["Anatomy"]);
+  assert.deepEqual(await found("canvas.state.edu"), ["Anatomy"]);
+  assert.deepEqual(await found("moodle.college.edu"), ["Algebra"]);
+  assert.deepEqual(await found("Moodle"), ["Algebra"]);
+});
+
 // WI-5.3: past the "8 courses or fewer" threshold, the scope tabs show, each with its own count,
 // and choosing one narrows the list without touching the other filters.
 test("past 8 courses the scope tabs appear, each with a count, and narrow the list", async () => {

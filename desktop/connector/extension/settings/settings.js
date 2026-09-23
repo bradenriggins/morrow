@@ -542,6 +542,7 @@ function courseRows() {
       code: meta?.code || "",
       term: meta?.term || "",
       platform: providerName(binding),
+      site: siteAddress(binding),
       role: meta?.role || "",
       favorite: meta?.favorite === true,
       scope: bindingScope(binding)
@@ -557,6 +558,7 @@ function courseRows() {
       code: course.code,
       term: course.term,
       platform: providerName(course),
+      site: siteAddress(course),
       role: course.role,
       favorite: course.favorite === true,
       scope: "available"
@@ -564,9 +566,14 @@ function courseRows() {
   return [...bindingRows, ...availableRows];
 }
 
+/** The site a course belongs to, as the address a person types, so the search finds it. */
+function siteAddress(entity) {
+  return [entity?.siteUrl, entity?.origin].filter((value) => typeof value === "string" && value).join(" ");
+}
+
 function rowMatchesFilters(row, { skipScope = false } = {}) {
   const query = state.filters.q.trim().toLocaleLowerCase();
-  if (query && !`${row.name} ${row.code}`.toLocaleLowerCase().includes(query)) return false;
+  if (query && ![row.name, row.code, row.term, row.platform, row.site].join(" ").toLocaleLowerCase().includes(query)) return false;
   if (state.filters.platform !== "all" && row.platform !== state.filters.platform) return false;
   if (state.filters.term !== "all" && row.term !== state.filters.term) return false;
   if (!skipScope && state.filters.scope !== "all" && row.scope !== state.filters.scope) return false;
