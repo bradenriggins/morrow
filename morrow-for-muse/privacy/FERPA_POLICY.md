@@ -366,7 +366,13 @@ the wired vault file above.
   URL path segment or query value equal to a rostered learner id
   (except the segment right after `/courses/` or `/accounts/`, which
   is the course or account by Canvas URL grammar), whole-string ids,
-  structured identity fields, and numeric identity values.
+  structured identity fields, and numeric identity values. Course
+  content counts a number as a student's id only after a person word
+  (`student 912345`, `student_id=912345`, `/users/912345`) or as the
+  user segment of a grades, assignment submission, or profile link
+  (`/courses/1/grades/912345`, `/assignments/5/submissions/912345`,
+  `/about/912345`), so an assignment or page id that equals a
+  student's id is left alone.
 - Secret-shaped text (API keys, tokens, launch parameters) fails
   closed instead of being partially projected: the op is refused
   rather than leaking a redacted fragment.
@@ -379,10 +385,9 @@ the wired vault file above.
   "<name> (label)" form). A label in free text (a page body, a title)
   becomes the text its marker names (see "Course content"), never the
   id.
-- Initial-last names ("M. Jackson") are not redacted: the alias
-  set covers full-name, given-name, and reversed ("Jackson,
-  Mary") forms only. A production ingress layer would block on
-  the education-record fact; this egress half currently does not.
+- An initial next to a last name ("M. Jackson") keeps the initial:
+  the last name is labeled like any last name used alone, and the
+  initial is not (`privacy/source_privacy_selftest.py` pins it).
 - "canvas id <id>" is not a contextual id pattern; `/users/<id>`,
   `user_id=<id>`, whole-string ids, structured identity fields,
   and numeric identity values are.

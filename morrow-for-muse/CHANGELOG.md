@@ -36,11 +36,10 @@ Student privacy:
   name, so for "Martin Luther King Jr." the name "King" reached the
   assistant as written, and a "Jr." elsewhere in the course was hidden
   instead.
-- Some names are still not hidden, and the consent page lists them: a
-  name Canvas does not list for the student, such as a nickname; a
-  course named for its student, such as an independent study; and a
-  first or last name alone in small letters, such as "jane" in a page's
-  web address.
+- Privacy fix: a link in course content to a student's grades, to an
+  assignment submission, or to a profile showed the student's Canvas
+  ID number. Now it shows the student's label, and Morrow puts the
+  number back when it saves the content.
 - A student's full name is hidden in a page's web address
   ("jane-doe-iep-accommodations") and in a file name
   ("Jane_Doe_essay.pdf", "JaneDoe.pdf", "doe_jane.docx"). Both reached
@@ -50,6 +49,15 @@ Student privacy:
   "José Álvarez" when Canvas lists "Jose Alvarez", "Zoe Mueller" for
   "Zoë Müller", and "O’Brien" with a curly apostrophe. These reached
   the assistant as written.
+- Some student details are still not hidden, and the consent page
+  lists them: a name Canvas does not list for the student, such as a
+  nickname; a first or last name used alone and written in small
+  letters, such as "jane" in a page's web address, because in small
+  letters it is usually an ordinary word; the name of someone who was
+  never a student in that course; a course named for its student, such
+  as an independent study; an ID number written as plain text, such as
+  "Canvas ID 912345" in a page; and other details written about a
+  student, such as a birth date.
 - The consent page says that on some Muse computers, the network that
   carries traffic out of the computer can read that traffic, including
   your Canvas sign-in and the course pages Morrow loads.
@@ -464,6 +472,14 @@ Technical notes:
   root (`REPO_FILES`), listed in `pack/carve-manifest.json` and in the
   zip; the carve fails when it is missing or untracked, or when
   `morrow-for-muse/LICENSE` would shadow it.
+- `scripts/carve.py --zip`, the release build, refuses to start while
+  a tracked file under `morrow-for-muse/` or `LICENSE` differs from the
+  commit checked out (an edit, a staged, deleted, added, or mode
+  change, or an edit hidden by `assume-unchanged`), so a published zip
+  always holds its tag's bytes. Every carve records `source_commit`
+  and `source_dirty` in `pack/carve-manifest.json`. Before, the zip
+  copied the working tree and recorded no commit, so an uncommitted
+  edit shipped silently.
 - `dispatch/state_backup.py` backs up and restores the approval signing
   keyring (`secrets/`), the source vault Morrow writes
   (`morrow_source_vault.json` with its `.key` and `.echo`, restored to

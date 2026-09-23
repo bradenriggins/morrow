@@ -72,10 +72,13 @@ python3 scripts/carve.py --zip
 release) builds the installable tree from the files git tracks:
 it leaves out the dev-only surface (live-test drivers, proof evidence,
 Moodle research code), writes `pack/carve-manifest.json` (the SHA-256
-of every shipped file, which install step 2 verifies), and refuses to
-publish unless the secrets gate passes on the result. Do not run
-`install.sh` directly in a repository checkout: it has no carve manifest
-and step 2 refuses it on purpose.
+of every shipped file, which install step 2 verifies, and the commit
+the files came from), and refuses to publish unless the secrets gate
+passes on the result. With `--zip` it also refuses to start while a
+file under `morrow-for-muse/` or the repository's `LICENSE` has a
+change that is not committed, so the zip always matches one commit.
+Do not run `install.sh` directly in a repository checkout: it has no
+carve manifest and step 2 refuses it on purpose.
 
 Unzip the release into the skills directory. Run these commands from
 the folder that holds the zip. Running them again is safe: they update

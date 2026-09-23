@@ -24,6 +24,17 @@ Failure modes pinned down (written before the fix):
      so an institution reviewing the zip had no license grant, though
      the website says the license text travels with the source (final
      sweep 2026-09-23).
+  8. The release zip (--zip, docs/versioning.md step 5) copied the
+     working tree without checking it matched a commit, and recorded
+     none, so an uncommitted edit (a debug line in SKILL.md) shipped in
+     a zip that no longer matched its tag, and install.sh's integrity
+     check, which compares the zip with its own manifest, could not
+     tell. The zip must refuse any tracked change under morrow-for-muse/
+     or to LICENSE: an edit, a staged change, a deleted or added file, a
+     mode change, and an edit git was told to ignore (assume-unchanged).
+     Untracked files never ship, so they do not block it. Every carve
+     records the commit it read and whether the tree differed from it
+     (final sweep 2026-09-23).
 
 The full install proof (install.sh run from the carved tree into a
 scratch HOME/MORROW_HOME, then disconnect and uninstall) runs in a
@@ -32,6 +43,7 @@ Linux container: scripts/install-e2e.sh. Scratch lives under
 """
 
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -80,7 +92,8 @@ def carved():
     try:
         # The secrets gate takes minutes over the whole tree; the gate
         # test below runs it once, and scripts/install-e2e.sh always does.
-        carve.carve(out, make_zip=True, run_gate=False)
+        # A zip needs a committed tree; the zip tests below build one.
+        carve.carve(out, run_gate=False)
         yield out
     finally:
         shutil.rmtree(os.path.dirname(out), ignore_errors=True)
@@ -112,10 +125,151 @@ def test_the_license_ships_in_the_tree_and_the_zip(carved):
         assert "LICENSE" in json.load(fh)["files"]
     with open(os.path.join(TREE, "VERSION")) as fh:
         version = fh.read().strip()
-    zpath = os.path.join(os.path.dirname(carved), "%s-%s.zip"
-                         % (carve.DIST_NAME, version))
+    zpath = carve.write_zip(carved)
+    assert zpath == os.path.join(os.path.dirname(carved), "%s-%s.zip"
+                                 % (carve.DIST_NAME, version))
     with zipfile.ZipFile(zpath) as zf:
         assert zf.read(carve.DIST_NAME + "/LICENSE") == license_text
+
+
+def test_manifest_names_the_commit_it_was_carved_from(carved):
+    with open(os.path.join(carved, "pack", "carve-manifest.json")) as fh:
+        man = json.load(fh)
+    assert man["source_commit"] == _git("rev-parse", "HEAD").stdout.strip()
+    assert isinstance(man["source_dirty"], bool)
+
+
+def _mini_git(repo, *args):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return subprocess.run(
+        ["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null",
+         "-c", "commit.gpgsign=false", "-c", "user.name=carve test",
+         "-c", "user.email=carve-test@example.invalid"] + list(args),
+        capture_output=True, text=True, check=True, env=env)
+
+
+@pytest.fixture
+def mini(tmp_path, monkeypatch):
+    """A committed repository with this carve.py and the least tree it
+    needs: (repo, its carve module)."""
+    for name in [k for k in os.environ if k.startswith("GIT_")]:
+        monkeypatch.delenv(name)
+    repo = tmp_path / "repo"
+    files = {
+        "LICENSE": "MIT License\n\nmini\n",
+        "other/README.md": "outside morrow-for-muse\n",
+        "morrow-for-muse/VERSION": "9.9.9\n",
+        "morrow-for-muse/pack/version.txt": "9.9.9\n",
+        "morrow-for-muse/pack/deny-list.txt": "[tenant_allow]\n",
+        "morrow-for-muse/scripts/install-suites.sh": 'SUITES=""\n',
+        "morrow-for-muse/SKILL.md": "# Skill\n",
+        "morrow-for-muse/tool.py": "X = 1\n",
+    }
+    for rel, text in files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    script = repo / "morrow-for-muse" / "scripts" / "carve.py"
+    shutil.copy2(os.path.join(HERE, "carve.py"), str(script))
+    _mini_git(repo, "init", "-q")
+    _mini_git(repo, "add", "-A")
+    _mini_git(repo, "commit", "-q", "-m", "mini")
+    spec = importlib.util.spec_from_file_location("carve_mini", str(script))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return repo, module
+
+
+def _append(path, text="uncommitted local edit\n"):
+    with open(str(path), "a", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def _modify(repo):
+    _append(repo / "morrow-for-muse" / "SKILL.md")
+    return "morrow-for-muse/SKILL.md"
+
+
+def _stage(repo):
+    _modify(repo)
+    _mini_git(repo, "add", "-A")
+    return "morrow-for-muse/SKILL.md"
+
+
+def _delete(repo):
+    os.remove(str(repo / "morrow-for-muse" / "tool.py"))
+    return "morrow-for-muse/tool.py"
+
+
+def _add(repo):
+    (repo / "morrow-for-muse" / "new.py").write_text("Y = 2\n")
+    _mini_git(repo, "add", "morrow-for-muse/new.py")
+    return "morrow-for-muse/new.py"
+
+
+def _license(repo):
+    _append(repo / "LICENSE")
+    return "LICENSE"
+
+
+def _mode(repo):
+    os.chmod(str(repo / "morrow-for-muse" / "SKILL.md"), 0o755)
+    return "morrow-for-muse/SKILL.md"
+
+
+def _hidden(repo):
+    _mini_git(repo, "update-index", "--assume-unchanged",
+              "morrow-for-muse/SKILL.md")
+    return _modify(repo)
+
+
+@pytest.mark.parametrize("change", [_modify, _stage, _delete, _add,
+                                    _license, _mode, _hidden],
+                         ids=lambda f: f.__name__.strip("_"))
+def test_the_release_zip_refuses_uncommitted_changes(mini, change):
+    repo, mini_carve = mini
+    changed = change(repo)
+    out = repo / "dist" / mini_carve.DIST_NAME
+    with pytest.raises(SystemExit) as refused:
+        mini_carve.carve(str(out), make_zip=True, run_gate=False)
+    assert changed in str(refused.value), str(refused.value)
+    assert not (repo / "dist").exists()
+
+
+def test_a_clean_checkout_zips_and_records_its_commit(mini):
+    repo, mini_carve = mini
+    # Neither ships: an untracked file, and a change outside
+    # morrow-for-muse/.
+    (repo / "morrow-for-muse" / "scratch.txt").write_text("untracked\n")
+    _append(repo / "other" / "README.md")
+    head = _mini_git(repo, "rev-parse", "HEAD").stdout.strip()
+    out = repo / "dist" / mini_carve.DIST_NAME
+    mini_carve.carve(str(out), make_zip=True, run_gate=False)
+    with open(str(out / "pack" / "carve-manifest.json")) as fh:
+        man = json.load(fh)
+    assert man["source_commit"] == head
+    assert man["source_dirty"] is False
+    assert "scratch.txt" not in man["files"]
+    zpath = repo / "dist" / ("%s-9.9.9.zip" % mini_carve.DIST_NAME)
+    with zipfile.ZipFile(str(zpath)) as zf:
+        root = mini_carve.DIST_NAME + "/"
+        assert json.loads(zf.read(root + "pack/carve-manifest.json")) == man
+        assert zf.read(root + "SKILL.md") == b"# Skill\n"
+        assert zf.read(root + "LICENSE") == b"MIT License\n\nmini\n"
+
+
+def test_a_tree_carve_of_uncommitted_changes_says_so(mini):
+    # CI and the tests carve the working tree; only the zip is a release.
+    repo, mini_carve = mini
+    _modify(repo)
+    head = _mini_git(repo, "rev-parse", "HEAD").stdout.strip()
+    out = repo / "dist" / mini_carve.DIST_NAME
+    mini_carve.carve(str(out), run_gate=False)
+    with open(str(out / "pack" / "carve-manifest.json")) as fh:
+        man = json.load(fh)
+    assert man["source_commit"] == head
+    assert man["source_dirty"] is True
+    assert os.listdir(str(repo / "dist")) == [mini_carve.DIST_NAME]
 
 
 @pytest.mark.skipif(not os.environ.get("MORROW_CARVE_GATE"),

@@ -115,6 +115,12 @@ _USER_ID_RES = (
                r"[#:=]?\s*)([0-9]{1,20})(?![0-9])", re.IGNORECASE),
     re.compile(r"(/(?:users|learners|students)/)([0-9]{1,20})(?![0-9])",
                re.IGNORECASE),
+    # Canvas routes whose last segment is a user id: a student's grades,
+    # an assignment submission, and a profile. A classic quiz
+    # submission's segment is its own id, so only the assignment form
+    # counts.
+    re.compile(r"(/(?:courses/[0-9]+/grades|assignments/[0-9]+/submissions"
+               r"|about)/)([0-9]{1,20})(?![0-9])", re.IGNORECASE),
 )
 
 
