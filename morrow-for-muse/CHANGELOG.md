@@ -78,6 +78,49 @@ In plain words:
   unfinished.
 - Morrow closes the Item Banks tabs it opens in the helper browser
   when it finishes.
+- Student names in course content are hidden too. When Morrow reads a
+  page, an assignment description, a quiz question, or a quiz title
+  that names a student, the assistant sees the student's label. To do
+  that, Morrow first reads the course's student list, and if it cannot,
+  it reads and changes nothing in the course. When the assistant saves
+  the content back, Morrow puts the real text back in: a first name
+  stays a first name, and an email stays an email.
+- Morrow never posts an announcement, even when asked: posting one
+  notifies every student in the course. A request that would post one,
+  or add a feed that posts them, is refused before anything is sent,
+  and the assistant is told why in plain words.
+- Discussion changes are refused until they are tested through the
+  browser Morrow uses today; they were tested only through an older,
+  retired route.
+- The assistant offers New Quiz creation again: it was tested and
+  turned on for 0.4.0, but the assistant's instructions still said it
+  was on hold. A task that is on hold is now described as the task you
+  asked for, not as a New Quiz.
+- The consent page says that on some Muse computers, the network that
+  carries traffic out of the computer can read that traffic, including
+  your Canvas sign-in and the course pages Morrow loads.
+- The first-run checklist starts with your install; the test-only
+  steps moved to the install test.
+
+Technical notes:
+
+- `privacy/course_content.py` projects every course-scoped result
+  (and learner receipts after the boundary) through the course roster
+  with reversible form markers, and `resolve_learner_labels` restores
+  labels in a write's free text; `dispatch/executor.py`
+  `_read_course_roster_first` reads the roster (users in every
+  enrollment state, deleted enrollments) before a Chromium-lane course
+  dispatch and fails closed (`CourseRosterUnavailable`). The roster read
+  is fixture-proven, not yet live-proven through this lane.
+- `dispatch/admission_policy.json` 1.4.0: `never_dispatch.request_flags`
+  refuses `is_announcement` on any route; `canvas_create_external_feed_courses`
+  is never-dispatch; C-139, C-141, C-167, and C-238 are evidence holds.
+- The failure catalog gains `never-dispatch` and
+  `course-roster-unavailable`; `new-quiz-create-evidence-hold` became
+  the general `evidence-hold`.
+- The privacy tests match a stored name or id as a whole word, so an
+  HMAC, digest, key, or op id that happens to contain one no longer
+  fails the suite (1 run in 55 before; 0 in 2000 after).
 
 ## 0.4.0 (2026-09-22)
 
