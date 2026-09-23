@@ -2702,31 +2702,42 @@
     return actual === expected;
   }
 
+  // A fresh list proves a mismatch only when it lacks the approved result. When it holds the
+  // approved result and also changed in another way, such as a second copy Chrome sent on its own
+  // after a reused connection closed, or a question a colleague added or removed at the same
+  // moment, it proves nothing about this one change, so the change stays unconfirmed.
   async function verifyNewQuizItemLifecycleChange(change, writeData, expiresAt) {
     const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-item-lifecycle" };
     try {
       const after = (await newQuizItemMembership(change.listUrl, expiresAt)).map((item) => item.id);
+      const additions = after.filter((id) => !change.before.includes(id));
+      const removed = change.before.filter((id) => !after.includes(id));
       if (change.kind === "delete") {
+        if (after.includes(change.itemId)) return { ...base, status: "mismatch", reason: "new_quiz_item_delete_readback_mismatch" };
         const expected = change.before.filter((id) => id !== change.itemId);
         return after.length === expected.length && after.every((id, index) => id === expected[index])
           ? { ...base, status: "verified", evidence: "complete_item_list_reread_after_delete" }
-          : { ...base, status: "mismatch", reason: "new_quiz_item_delete_readback_mismatch" };
+          : { ...base, status: "unconfirmed", reason: "new_quiz_item_list_changed_concurrently" };
       }
-      const additions = after.filter((id) => !change.before.includes(id));
-      const removed = change.before.filter((id) => !after.includes(id));
-      if (after.length !== change.before.length + 1 || additions.length !== 1 || removed.length !== 0) {
-        return { ...base, status: "mismatch", reason: "new_quiz_item_create_membership_mismatch" };
-      }
+      if (additions.length === 0) return { ...base, status: "mismatch", reason: "new_quiz_item_create_membership_mismatch" };
       const responseId = pageId(writeData?.id ?? writeData?.item?.id);
-      const itemId = additions[0];
-      if (responseId && responseId !== itemId) return { ...base, status: "mismatch", reason: "new_quiz_item_create_id_mismatch" };
+      if (responseId && !after.includes(responseId)) return { ...base, status: "mismatch", reason: "new_quiz_item_create_id_mismatch" };
+      if (responseId && change.before.includes(responseId)) return { ...base, status: "unconfirmed", reason: "new_quiz_item_create_answer_not_new" };
+      const itemId = responseId || (additions.length === 1 ? additions[0] : "");
+      if (!itemId) return { ...base, status: "unconfirmed", reason: "new_quiz_item_duplicate_effect_suspected" };
+      const concurrent = additions.length > 1 || removed.length > 0;
+      // Another question added or removed ahead of this one moves it, so its position proves nothing then.
+      const requested = { ...change.payload };
+      if (concurrent) delete requested.position;
       const itemUrl = new URL(change.listUrl);
       itemUrl.pathname = `${itemUrl.pathname}/${itemId}`;
       itemUrl.search = "";
       const saved = await pageJson(itemUrl, expiresAt);
-      if (!plainObject(saved) || pageId(saved.id) !== itemId || !requestedNewQuizItemShapeMatches(saved, change.payload)) {
+      if (!plainObject(saved) || pageId(saved.id) !== itemId || !requestedNewQuizItemShapeMatches(saved, requested)) {
         return { ...base, status: "mismatch", reason: "new_quiz_item_create_readback_mismatch" };
       }
+      if (additions.length > 1) return { ...base, status: "unconfirmed", reason: "new_quiz_item_duplicate_effect_suspected" };
+      if (removed.length > 0) return { ...base, status: "unconfirmed", reason: "new_quiz_item_list_changed_concurrently" };
       return { ...base, status: "verified", evidence: "complete_item_list_and_created_item_reread" };
     } catch {
       return { ...base, status: "unconfirmed", reason: "new_quiz_item_lifecycle_readback_unavailable" };
@@ -2853,24 +2864,27 @@
     return { kind, before, listUrl, quizId };
   }
 
+  // The course list proves a mismatch only when it lacks the approved result, the same rule as
+  // verifyNewQuizItemLifecycleChange above.
   async function verifyNewQuizLifecycleChange(change, writeData, expiresAt) {
     const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-lifecycle" };
     try {
       const after = await newQuizMembership(change.listUrl, expiresAt);
+      const additions = after.filter((id) => !change.before.includes(id));
+      const removed = change.before.filter((id) => !after.includes(id));
       if (change.kind === "delete") {
+        if (after.includes(change.quizId)) return { ...base, status: "mismatch", reason: "new_quiz_delete_readback_mismatch" };
         const expected = change.before.filter((id) => id !== change.quizId);
         return after.length === expected.length && after.every((id, index) => id === expected[index])
           ? { ...base, status: "verified", evidence: "complete_course_new_quiz_list_reread_after_delete" }
-          : { ...base, status: "mismatch", reason: "new_quiz_delete_readback_mismatch" };
+          : { ...base, status: "unconfirmed", reason: "new_quiz_list_changed_concurrently" };
       }
-      const additions = after.filter((id) => !change.before.includes(id));
-      const removed = change.before.filter((id) => !after.includes(id));
-      if (after.length !== change.before.length + 1 || additions.length !== 1 || removed.length !== 0) {
-        return { ...base, status: "mismatch", reason: "new_quiz_create_membership_mismatch" };
-      }
+      if (additions.length === 0) return { ...base, status: "mismatch", reason: "new_quiz_create_membership_mismatch" };
       const responseId = pageId(writeData?.id ?? writeData?.quiz?.id);
-      const quizId = additions[0];
-      if (responseId && responseId !== quizId) return { ...base, status: "mismatch", reason: "new_quiz_create_id_mismatch" };
+      if (responseId && !after.includes(responseId)) return { ...base, status: "mismatch", reason: "new_quiz_create_id_mismatch" };
+      if (responseId && change.before.includes(responseId)) return { ...base, status: "unconfirmed", reason: "new_quiz_create_answer_not_new" };
+      const quizId = responseId || (additions.length === 1 ? additions[0] : "");
+      if (!quizId) return { ...base, status: "unconfirmed", reason: "new_quiz_duplicate_effect_suspected" };
       const quizUrl = new URL(change.listUrl);
       quizUrl.pathname = `${quizUrl.pathname}/${quizId}`;
       quizUrl.search = "";
@@ -2878,6 +2892,8 @@
       if (!plainObject(saved) || pageId(saved.id) !== quizId || !requestedNewQuizItemShapeMatches(saved, change.payload)) {
         return { ...base, status: "mismatch", reason: "new_quiz_create_readback_mismatch" };
       }
+      if (additions.length > 1) return { ...base, status: "unconfirmed", reason: "new_quiz_duplicate_effect_suspected" };
+      if (removed.length > 0) return { ...base, status: "unconfirmed", reason: "new_quiz_list_changed_concurrently" };
       return { ...base, status: "verified", evidence: "complete_course_quiz_list_and_created_quiz_reread" };
     } catch {
       return { ...base, status: "unconfirmed", reason: "new_quiz_lifecycle_readback_unavailable" };
