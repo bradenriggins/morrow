@@ -1476,9 +1476,15 @@ async function pairingStreamOverflowScenario() {
   assert.equal(value.local.values.pairing, undefined);
 }
 
-async function pairingStalledBodyScenario() {
+// The catalog read has its own ten-second deadline. Loading the catalog before the pairing deadline
+// is shortened keeps the shorter wait on the pairing response alone.
+async function shortenPairingDeadline(value, delayMs) {
+  await sendRuntime(value, { type: "morrow_status" });
   const originalSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = (callback, delay, ...args) => originalSetTimeout(callback, delay === 10_000 ? 20 : delay, ...args);
+  globalThis.setTimeout = (callback, delay, ...args) => originalSetTimeout(callback, delay === 10_000 ? delayMs : delay, ...args);
+}
+
+async function pairingStalledBodyScenario() {
   let bodyCancelled = false;
   const body = new ReadableStream({ cancel() { bodyCancelled = true; } });
   const value = fixture({
@@ -1486,6 +1492,7 @@ async function pairingStalledBodyScenario() {
     loopbackFetch: async () => new Response(body, { headers: { "content-type": "application/json" } }),
   });
   await importWorker("pairing-stalled-body");
+  await shortenPairingDeadline(value, 20);
   const result = await sendRuntime(value, { type: "morrow_pair" });
   assert.deepEqual(result, { ok: false, code: "bridge_pairing_response_timeout", error: "bridge_pairing_response_timeout" });
   assert.equal(bodyCancelled, true);
@@ -1493,8 +1500,6 @@ async function pairingStalledBodyScenario() {
 }
 
 async function pairingStalledCancellationScenario() {
-  const originalSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = (callback, delay, ...args) => originalSetTimeout(callback, delay === 10_000 ? 100 : delay, ...args);
   let bodyCancelled = false;
   const body = new ReadableStream({
     cancel() {
@@ -1507,6 +1512,7 @@ async function pairingStalledCancellationScenario() {
     loopbackFetch: async () => new Response(body, { headers: { "content-type": "application/json" } }),
   });
   await importWorker("pairing-stalled-cancellation");
+  await shortenPairingDeadline(value, 100);
   const startedAt = Date.now();
   const result = await sendRuntime(value, { type: "morrow_pair" });
   assert.deepEqual(result, { ok: false, code: "bridge_pairing_response_timeout", error: "bridge_pairing_response_timeout" });
