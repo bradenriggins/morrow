@@ -135,7 +135,8 @@ test("a saved change with no answer is recorded as unknown, never as a passed pr
 test("the harness Bridge answers Morrow's heartbeat, so a slow step keeps the course connection", async (t) => {
   const { LoopbackBridgeServer } = await import("../../packages/bridge-loopback/dist/index.js");
   const catalogDigest = "c".repeat(64);
-  const heartbeatMs = 250;
+  // Long enough that a busy test runner cannot delay one heartbeat answer past two periods.
+  const heartbeatMs = 1_000;
   const bridge = new LoopbackBridgeServer({
     token: HARNESS_BRIDGE.token,
     expectedRuntimeRevision: HARNESS_BRIDGE.runtimeRevision,
@@ -160,7 +161,7 @@ test("the harness Bridge answers Morrow's heartbeat, so a slow step keeps the co
   t.after(() => connector.close());
   // Morrow drops a Bridge that is silent for two heartbeat periods. The harness sends nothing
   // while Chrome opens or closes the review page, so only its heartbeat answer keeps it paired.
-  await new Promise((done) => setTimeout(done, heartbeatMs * 8));
+  await new Promise((done) => setTimeout(done, heartbeatMs * 5));
   assert.equal(bridge.health().connected, true, "Morrow dropped the harness Bridge for not answering its heartbeat");
   assert.deepEqual(connector.connection(), { open: true, closeCode: null, closeReason: null });
 });
