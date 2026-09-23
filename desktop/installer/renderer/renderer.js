@@ -961,8 +961,11 @@ async function submitBlackboard(event) {
       blackboardForm.reset();
       fillStoredBlackboardIdentity(blackboardTenant(state));
     } else {
+      // Every field passed its rule before saving, and Morrow empties the
+      // secret itself, so no field has a message: the problem states why.
       blackboardSecret.value = "";
-      showFieldProblems(blackboardConnectionFields);
+      blackboardProblemsShown = false;
+      clearFieldProblems(blackboardConnectionFields);
     }
     renderBlackboardReplacement(blackboardTenant(state));
   }

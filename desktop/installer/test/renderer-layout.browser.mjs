@@ -103,10 +103,10 @@ function serveInstaller() {
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
 }
 
-async function openSetup(browser, platform, state) {
+async function openSetup(browser, platform, state, failures = {}) {
   const page = await browser.newPage();
   page.on("pageerror", (error) => assert.fail(`the renderer failed: ${error.message}`));
-  await page.addInitScript(([snapshot, reported]) => {
+  await page.addInitScript(([snapshot, reported, refused]) => {
     window.__morrowTestClock = 100_000;
     window.__morrowInvocations = [];
     Date.now = () => window.__morrowTestClock;
@@ -115,7 +115,10 @@ async function openSetup(browser, platform, state) {
       platform: reported,
       invoke: async (...input) => {
         window.__morrowInvocations.push(input);
-        return { schema: "morrow.installer-result.v1", ok: true, state: snapshot };
+        const error = refused[input[0]];
+        return error
+          ? { schema: "morrow.installer-result.v1", ok: false, state: snapshot, error }
+          : { schema: "morrow.installer-result.v1", ok: true, state: snapshot };
       },
       subscribeUpdates(listener) {
         updateListener = listener;
@@ -123,7 +126,7 @@ async function openSetup(browser, platform, state) {
         return () => { if (updateListener === listener) updateListener = null; };
       }
     };
-  }, [state, platform]);
+  }, [state, platform, failures]);
   await page.goto(INDEX);
   await page.waitForSelector("#action-content:not([hidden])");
   return page;
@@ -348,6 +351,39 @@ try {
   assert.ok(shownFor >= 1_500 && shownFor <= 3_500, `Copied showed for ${shownFor}ms`);
   assert.equal(await copying.locator("#copy-status").textContent(), "");
   console.log(`copy    the chosen Copy button said Copied for ${shownFor}ms and announced it once`);
+
+  // A step started on Settings that fails shows its problem on Settings, in
+  // the same column as the Settings panels, at the default and narrowest window.
+  const refusal = { code: "assistant_config_busy", message: "The assistant is using its settings file.", recovery: "Quit the assistant, then try again. Morrow changed nothing." };
+  for (const width of [940, 320]) {
+    const settings = await openSetup(browser, "darwin", COURSE_CONNECTED, { "installer:remove-assistant": refusal });
+    await settings.setViewportSize({ width, height: 720 });
+    await settings.click("#nav-settings");
+    await settings.click('[data-action="remove-assistant"]');
+    await settings.waitForSelector("#problem:not([hidden])");
+    const shown = await settings.evaluate(() => {
+      const problem = document.querySelector("#problem").getBoundingClientRect();
+      const panel = document.querySelector("#updates-panel").getBoundingClientRect();
+      return {
+        text: document.querySelector("#problem").textContent,
+        width: problem.width,
+        height: problem.height,
+        inView: problem.top >= 0 && problem.bottom <= window.innerHeight,
+        left: Math.abs(problem.left - panel.left),
+        right: Math.abs(problem.right - panel.right),
+        sideways: document.documentElement.scrollWidth <= window.innerWidth
+      };
+    });
+    assert.match(shown.text, /The assistant is using its settings file\./);
+    assert.ok(shown.width > 0 && shown.height > 0, `the Settings problem must render at ${width}px, not in a ${shown.width}x${shown.height} box`);
+    assert.equal(shown.inView, true, `the Settings problem must be in view at ${width}px`);
+    assert.ok(shown.left <= 0.5 && shown.right <= 0.5, `the Settings problem must share the Settings panels' edges at ${width}px`);
+    assert.equal(shown.sideways, true, `the Settings problem must not scroll the window sideways at ${width}px`);
+    await settings.click("#nav-home");
+    const onHome = await settings.evaluate(() => document.querySelector("#problem").getBoundingClientRect().height);
+    assert.ok(onHome > 0, `the problem stays in view after returning Home at ${width}px`);
+    console.log(`${String(width).padStart(4)}px  problem  a failed Settings step shows its problem on Settings (${shown.width.toFixed(0)}x${shown.height.toFixed(0)})`);
+  }
 
   const unknown = await openSetup(browser, undefined, WELCOME);
   assert.equal(await unknown.locator("#windows-note").isVisible(), false);

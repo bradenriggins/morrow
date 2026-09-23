@@ -320,11 +320,15 @@ async function load(name, invoke, platform) {
   return dom;
 }
 
-test("a setup problem is placed above the step body, where it is visible without scrolling", () => {
+test("a setup problem is shared by Home and Settings and placed above both, where it is visible without scrolling", () => {
   const html = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "renderer", "index.html"), "utf8");
-  const panel = html.slice(html.indexOf('<section class="action-panel"'), html.indexOf("</section>", html.indexOf('<section class="action-panel"')));
-  assert.ok(panel.includes('id="problem"'), "the problem region belongs to the step panel");
-  assert.ok(panel.indexOf('id="problem"') < panel.indexOf('id="action-content"'), "the problem region comes before the step body");
+  const problemAt = html.indexOf('id="problem"');
+  const homeAt = html.indexOf('<div id="home-view"');
+  const settingsAt = html.indexOf('<div id="settings-view"');
+  assert.ok(problemAt > html.indexOf('<nav class="app-nav"'), "the problem region follows the app nav");
+  // Neither view contains it, so hiding the inactive view never hides a problem.
+  assert.ok(problemAt < homeAt && problemAt < settingsAt, "the problem region comes before both views");
+  assert.match(html.slice(html.lastIndexOf("<", problemAt), html.indexOf(">", problemAt)), /role="alert"/);
   const renderer = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "renderer", "renderer.js"), "utf8");
   const setProblem = renderer.slice(renderer.indexOf("function setProblem("), renderer.indexOf("\n}\n", renderer.indexOf("function setProblem(")));
   assert.match(setProblem, /scrollIntoView/, "a newly shown problem is brought into view");
@@ -648,11 +652,21 @@ test("a rejected Blackboard save keeps the three safe values and clears only the
   assert.equal(form.fields.baseUrl.value, BLACKBOARD_FIELDS.baseUrl);
   assert.equal(form.fields.applicationKey.value, BLACKBOARD_FIELDS.applicationKey);
   assert.match(dom.element("#problem").innerHTML, /Morrow could not save that connection\./);
-  // The emptied secret is the only field with something to correct.
-  assert.match(dom.element(BLACKBOARD_FIELD_ERRORS.applicationSecret).textContent, /Paste the application secret/);
-  for (const name of ["baseUrl", "applicationKey"]) {
+  // Morrow emptied the secret itself, so the field has no message of its own:
+  // the problem above states the real reason.
+  for (const name of ["baseUrl", "applicationKey", "applicationSecret"]) {
     assert.equal(dom.element(BLACKBOARD_FIELD_ERRORS[name]).textContent, "", name);
+    assert.equal(form.fields[name].getAttribute("aria-invalid"), "false", name);
   }
+  form.fields.applicationKey.value = "key-2";
+  await form.dispatch("input");
+  assert.equal(dom.element(BLACKBOARD_FIELD_ERRORS.applicationSecret).textContent, "", "editing another field does not raise the emptied secret");
+  form.fields.applicationKey.value = BLACKBOARD_FIELDS.applicationKey;
+  const attempts = request;
+  await form.dispatch("submit");
+  await settle();
+  assert.equal(request, attempts, "saving again without the secret reaches no IPC call");
+  assert.match(dom.element(BLACKBOARD_FIELD_ERRORS.applicationSecret).textContent, /Paste the application secret/);
   assert.equal(dom.element("#blackboard-courses").hidden, true);
   assert.equal(dom.element("#blackboard-admin-note").hidden, false);
   assert.equal(dom.element("#blackboard-saved-note").hidden, true);
