@@ -1745,11 +1745,9 @@ class InstallerController {
   }
 
   /**
-   * Removes Morrow's own entry from one assistant configuration file and keeps
-   * the rest of that file as it is. It writes only while the file on disk is
-   * still exactly the file Morrow wrote, so an edit made after that is refused
-   * and the file is left untouched. The file is read again afterwards: the
-   * removal is proven by what that file says, not by the write call.
+   * One assistant configuration file without Morrow's own entry, found by its
+   * marker, with the rest of the file kept as it is. `null` when the file holds
+   * no Morrow entry. A `morrow` entry Morrow did not write is refused.
    */
   async configurationWithoutMorrow(assistant, content, target = null) {
     const module = await this.clientConfigModule().catch(() => { throw errorDetails("setup_failed"); });
@@ -1775,6 +1773,13 @@ class InstallerController {
     }
   }
 
+  /**
+   * Removes Morrow's own entry from one assistant configuration file and keeps
+   * the rest of that file as it is, including edits made after Morrow wrote it.
+   * The write is refused when the file changes while Morrow writes it. The
+   * file is read again afterwards: the removal is proven by what that file
+   * says, not by the write call.
+   */
   async removeClientConfiguration(assistant, entry, recordBefore, recordAfter) {
     const target = entry?.target;
     if (typeof target !== "string" || !path.isAbsolute(target) || typeof entry.sha256 !== "string") throw errorDetails("setup_failed");
@@ -2478,7 +2483,8 @@ class InstallerController {
    * assistant file this installation configured, so each one points at this
    * copy of Morrow and its materials folder, including after Morrow moved.
    * Morrow replaces only an entry that carries its own marker: a server of
-   * that name someone else wrote is reported and left exactly as it is.
+   * that name someone else wrote is reported and left exactly as it is. A
+   * Claude Code or Gemini CLI setup whose project folder is gone is skipped.
    * Claude Desktop is configured by an approval inside that application, so
    * repair leaves it to the person and does not open another application.
    */

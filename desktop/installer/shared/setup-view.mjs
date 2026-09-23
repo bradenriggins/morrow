@@ -345,7 +345,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
       summary: "Morrow needs repair",
       title: "Repair Morrow before you connect a course.",
       copy: "Morrow did not confirm that its local runtime is ready. No course connection or course action will start from this state.",
-      body: '<div class="blocked-box"><strong>Setup needs repair</strong><p>Repair checks the files inside Morrow and restores what it can. It replaces the Morrow Bridge folder from the copy Morrow ships when the folder on this computer does not match it, and it writes your assistant setting again. It leaves a newer assistant setting alone, and it changes nothing in your course.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
+      body: '<div class="blocked-box"><strong>Setup needs repair</strong><p>Repair checks the files inside Morrow and restores what it can. It replaces the Morrow Bridge folder from the copy Morrow ships when the folder on this computer does not match it. It writes Morrow&#39;s own entry in each assistant&#39;s settings file again and leaves the rest of that file as it is. It changes nothing in your course.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
     };
   }
   if (current.assistantsNeedRepoint === true) return repointPanel();
@@ -435,7 +435,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
       summary: "Morrow Bridge is not ready to open",
       title: "Morrow Bridge is not ready to open.",
       copy: "Morrow could not verify its Bridge folder. Repair Morrow to restore the folder from the copy included with the app.",
-      body: '<div class="info-box"><strong>Repair the local setup</strong><p>Repair checks Morrow, restores its Bridge folder, and checks your assistant setup. It preserves newer assistant settings and makes no course changes.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
+      body: '<div class="info-box"><strong>Repair the local setup</strong><p>Repair checks Morrow and restores its Bridge folder. It writes Morrow&#39;s own entry in each assistant&#39;s settings file again and leaves the rest of that file as it is. It makes no course changes.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
     };
   }
   if (needsBridge(current) && bridge.delivery === "developer_temporary") {

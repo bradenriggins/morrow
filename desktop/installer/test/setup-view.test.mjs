@@ -529,6 +529,9 @@ test("the repair state offers the repair alone, with no setup to change", () => 
   const view = actionView(current, { chosenAssistantId: null });
   assert.deepEqual(actions(view.body), ["repair", "check-setup-state"]);
   assert.equal(view.body.includes(MATERIALS), false, "the folder cannot be changed from a state Morrow cannot read");
+  // Repair rewrites Morrow's own entry by its marker, also in a file edited since, so it promises only that.
+  assert.match(view.body, /It writes Morrow&#39;s own entry in each assistant&#39;s settings file again and leaves the rest of that file as it is\./);
+  assert.doesNotMatch(view.body, /newer assistant setting/);
   // Settings shows nothing to change either, so a repaired computer cannot
   // reach the folder or assistant list through either view.
   assert.equal(setupManagementView(current), null);
