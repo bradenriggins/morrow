@@ -1,5 +1,6 @@
-// Runs in a Morrow review tab. Morrow Bridge adds its signature to an approval form only when a
-// person's own click or key press submits it. A submit that a script starts is not trusted, so the
+// Runs in a Morrow review tab. Morrow Bridge adds its signature to an approval form, or to the
+// form that closes a change the person checked themselves, only when a person's own click or key
+// press submits it. A submit that a script starts is not trusted, so the
 // form stays unsent and the review server refuses any post without the signature.
 //
 // The review server shows each learner by label only, because any local program can read it. This
@@ -12,7 +13,7 @@
   const approvePath = (form) => {
     try {
       const path = new URL(form.getAttribute("action") || "", location.href).pathname;
-      return /\/approve$/.test(path) ? path : null;
+      return /\/(?:approve|close)$/.test(path) ? path : null;
     } catch {
       return null;
     }
@@ -140,7 +141,9 @@
         if (!response?.ok || typeof response.presence !== "string") {
           delete form.dataset.morrowApproving;
           buttons.forEach((button) => { button.disabled = false; });
-          showProblem(form, "Morrow Bridge could not confirm this approval. Check that Morrow Bridge is connected, reload this page, and select the button again. Nothing was approved.");
+          showProblem(form, /\/close$/.test(path)
+            ? "Morrow Bridge could not confirm this click. Check that Morrow Bridge is connected, reload this page, and select the button again. Nothing was closed."
+            : "Morrow Bridge could not confirm this approval. Check that Morrow Bridge is connected, reload this page, and select the button again. Nothing was approved.");
           return;
         }
         form.querySelectorAll('input[name="presence"], input[data-morrow-submitter]').forEach((input) => input.remove());

@@ -195,16 +195,20 @@ export interface ApprovalOperationController {
    * still satisfies this interface unchanged; a miss just leaves the course name off the row.
    */
   connectionName?(sourceBindingId: string | null): string | null | undefined;
+  /** Whether the status page of this unresolved change offers the person its close-out. */
+  personCloseAvailable?(operationId: string): boolean;
+  /** Closes the change after the person's own click on its status page, signed by Morrow Bridge. */
+  confirmPersonClose?(operationId: string): Promise<JsonObject>;
 }
 
 interface ApprovalTarget {
   readonly kind: "operations" | "batches";
   readonly id: string;
-  readonly action?: "approve" | "cancel" | "status";
+  readonly action?: "approve" | "cancel" | "close" | "status";
 }
 
 function approvalPath(pathname: string): ApprovalTarget | null {
-  const match = /^\/(operations|batches)\/([^/]+?)(?:\/(approve|cancel|status))?$/.exec(pathname);
+  const match = /^\/(operations|batches)\/([^/]+?)(?:\/(approve|cancel|close|status))?$/.exec(pathname);
   if (!match) return null;
   try {
     return {
@@ -1032,6 +1036,7 @@ function reviewLearnerNames(contexts: ReadonlyMap<string, ApprovalReviewContext>
 }
 
 const ENDED_REVIEW_STATES = new Set(["cancelled", "closed_by_person", "expired", "unavailable"]);
+const UNRESOLVED_REVIEW_STATES = new Set(["awaiting_verification", "applied_or_unknown"]);
 
 function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boolean, contexts?: ReadonlyMap<string, ApprovalReviewContext>, rememberText?: string, recentEntry?: string | null): string {
   let state = reviewState(target, snapshot);
@@ -1059,6 +1064,7 @@ function html(
   rememberOffer: RememberOffer | null,
   rememberText: string | undefined,
   recentEntry: string | null,
+  closeOffer = false,
 ): string {
   let issued: string | null = null;
   const nonce = (): string => (issued ??= grant());
@@ -1177,7 +1183,13 @@ function html(
   const reviewContent = batch ? `<section class="batch-review"><div class="change-list-controls" hidden><label for="change-search">Find a change</label><input id="change-search" type="search" placeholder="Search titles or courses" autocomplete="off"></div><div class="change-list">${changed}</div><nav class="change-pagination" aria-label="Review pages" hidden><p id="changes-count" role="status" aria-live="polite"></p><div><button id="changes-previous" type="button" class="secondary">Previous</button><button id="changes-next" type="button" class="secondary">Next</button></div></nav></section>` : changed;
   if (state !== "awaiting_approval") {
     const stop = batch && active ? `<div class="actions" id="stop-work"><form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="cancel" type="submit">Stop remaining changes</button></form></div>` : "";
-    return pageShell("Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active, contexts, rememberText, recentEntry)}</div>${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
+    // Only the person closes a change Morrow could not settle. Morrow Bridge signs this form
+    // after their own click, the same as an approval, so neither the assistant nor another
+    // program on this computer can close it.
+    const close = closeOffer && !batch && !active
+      ? `<section class="section person-close"><h2>Checked it yourself?</h2><p>Open the item in Canvas. If it is the way you want it, close this request. Morrow will not send this change again, and the request will say that you checked it, not Morrow.</p><div class="actions"><form method="post" action="/${target.kind}/${escapedId}/close"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="secondary" type="submit">I checked it in Canvas: close this change</button></form></div></section>`.replaceAll("Canvas", platform)
+      : "";
+    return pageShell("Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active, contexts, rememberText, recentEntry)}</div>${close}${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
   }
   const addingQuestion = !batch && plan.tool === "canvas_create_quiz_item";
   const planRouting = object(object(plan.arguments)._morrow);
@@ -1276,7 +1288,17 @@ function recentChangesContent(controller: ApprovalOperationController): string {
   return `<header class="hero"><h1>Recent changes</h1><p>Most recent first. A change that was cancelled or never sent says so and has nothing to undo.</p></header><section class="section recent-section">${list}</section>`;
 }
 
-function presenceRequiredPage(reviewPath: string): string {
+/** Why a close-out was refused, in the words the runtime gave the person. */
+function closeRefusalText(result: JsonObject): string {
+  const content = Array.isArray(result.content) ? result.content : [];
+  const text = content.map((entry) => object(entry).text).find((value): value is string => typeof value === "string" && value.length > 0);
+  return text ?? "Return to your assistant and ask Morrow to check this request.";
+}
+
+function presenceRequiredPage(reviewPath: string, closing = false): string {
+  if (closing) {
+    return pageShell("Close this request in Chrome", `<section class="outcome"><h1>Close this request in Chrome</h1><p>Morrow did not close anything. Morrow closes a request only after a click on its page in Chrome with Morrow Bridge connected, not from a program that sends the form itself.</p><p><a href="${escapeHtml(reviewPath)}">Open the request again</a>, check that Morrow Bridge is connected, and select the button there.</p></section>`);
+  }
   return pageShell("Approve this change in Chrome", `<section class="outcome"><h1>Approve this change in Chrome</h1><p>Morrow did not approve anything. Morrow accepts an approval only from a click on the review page in Chrome with Morrow Bridge connected, not from a program that sends the form itself.</p><p><a href="${escapeHtml(reviewPath)}">Open the review again</a>, check that Morrow Bridge is connected, and select the button there.</p></section>`);
 }
 
@@ -1596,9 +1618,11 @@ export class LoopbackApprovalServer {
           ? await this.controller.rememberOffer(target.id).catch(() => null)
           : null;
         const recentEntry = state === "verified" ? this.issueRecentChangesEntry(`${target.kind}:${target.id}`) : null;
-        const body = html(target, snapshot, () => (nonce = this.issueNonce(nonceKey, canApprove)), contexts, active, rememberOffer, this.rememberText(target), recentEntry);
+        const closeOffer = target.kind === "operations" && UNRESOLVED_REVIEW_STATES.has(state)
+          && this.controller.personCloseAvailable?.(target.id) === true;
+        const body = html(target, snapshot, () => (nonce = this.issueNonce(nonceKey, canApprove)), contexts, active, rememberOffer, this.rememberText(target), recentEntry, closeOffer);
         this.shareLearnerNames(target, ENDED_REVIEW_STATES.has(state) ? undefined : contexts);
-        if (nonce && canApprove && state === "awaiting_approval") {
+        if (nonce && ((canApprove && state === "awaiting_approval") || closeOffer)) {
           try {
             this.controller.announceApprovalPresence?.();
           } catch { /* the page still loads; the Bridge asks the person to reload when it has no key */ }
@@ -1611,7 +1635,8 @@ export class LoopbackApprovalServer {
         );
         return;
       }
-      if (method === "POST" && (target.action === "approve" || target.action === "cancel")) {
+      if (method === "POST" && (target.action === "approve" || target.action === "cancel"
+        || (target.action === "close" && target.kind === "operations"))) {
         if (!this.approvalAdmissionOpen) {
           sendJson(response, 409, { schema: "morrow.problem.v1", code: "approval_maintenance_held" });
           return;
@@ -1644,13 +1669,30 @@ export class LoopbackApprovalServer {
         // client can do. Approval also needs Morrow Bridge's signature over this exact form, which
         // it adds only after a real click in the review tab. A refusal keeps the nonce, so the
         // person can still approve in Chrome.
-        if (target.action === "approve" && !exactSecret(presence, reviewApprovalProof(this.presenceKey, url.pathname, formNonce!))) {
+        if ((target.action === "approve" || target.action === "close")
+          && !exactSecret(presence, reviewApprovalProof(this.presenceKey, url.pathname, formNonce!))) {
           if (String(request.headers.accept || "").includes("text/html")) {
-            sendHtml(response, 403, presenceRequiredPage(`/${target.kind}/${encodeURIComponent(target.id)}`));
+            sendHtml(response, 403, presenceRequiredPage(`/${target.kind}/${encodeURIComponent(target.id)}`, target.action === "close"));
           } else sendJson(response, 403, { schema: "morrow.problem.v1", code: "approval_presence_required" });
           return;
         }
         this.revokeTargetNonces(nonceKey);
+        if (target.action === "close") {
+          if (!this.controller.confirmPersonClose || this.stopping.signal.aborted) throw new Error("person close is unavailable");
+          const closed = await this.controller.confirmPersonClose(target.id);
+          const cookie = `${approvalCookieName(formNonce!)}=; HttpOnly; SameSite=Strict; Path=/${target.kind}/${encodeURIComponent(target.id)}; Max-Age=0`;
+          if (closed.isError === true) {
+            sendHtml(response, 409, pageShell("Request not closed", `<section class="outcome"><h1>Request not closed</h1><p>Morrow did not close this request. ${escapeHtml(closeRefusalText(closed))}</p></section>`), cookie);
+            return;
+          }
+          response.writeHead(303, {
+            location: `/${target.kind}/${encodeURIComponent(target.id)}`,
+            "cache-control": "no-store",
+            "set-cookie": cookie,
+          });
+          response.end();
+          return;
+        }
         if (this.stopping.signal.aborted || (target.action === "approve" && target.kind === "batches" && !this.controller.runApprovedBatch)) {
           throw new Error("review execution is unavailable");
         }

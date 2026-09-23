@@ -45,6 +45,21 @@ test("signs only for its own content script in the top frame of a review at the 
   assert.deepEqual(missing, { ok: false, code: "review_approval_key_missing" });
 });
 
+// A person closes a change Morrow could not settle from that change's own page, with the same
+// signed click as an approval. The Bridge signs no other action, and no close for a group.
+test("signs the close form of the change's own page, and no other action", async () => {
+  const closePath = `${pagePath}/close`;
+  assert.deepEqual(await signReviewApproval({ approvePath: closePath, nonce }, sender, presence, EXTENSION_ID),
+    { ok: true, presence: serverProof(presence.key, closePath, nonce) });
+  for (const path of [`${pagePath}/cancel`, `${pagePath}/status`, "/operations/op%3Aother/close"]) {
+    assert.equal((await signReviewApproval({ approvePath: path, nonce }, sender, presence, EXTENSION_ID)).code, "review_approval_request_invalid", path);
+  }
+  const batchPage = "/batches/batch-1234";
+  const batchSender = { ...sender, url: `${presence.origin}${batchPage}` };
+  assert.equal((await signReviewApproval({ approvePath: `${batchPage}/close`, nonce }, batchSender, presence, EXTENSION_ID)).code, "review_approval_request_invalid");
+  assert.equal((await signReviewApproval({ approvePath: `${batchPage}/approve`, nonce }, batchSender, presence, EXTENSION_ID)).ok, true);
+});
+
 test("accepts only a loopback review origin and a 32-byte key", () => {
   assert.deepEqual(parseReviewApprovalPresence(presence), presence);
   for (const bad of [
@@ -162,6 +177,23 @@ test("leaves every other form alone", async () => {
   const event = await tab.submit(tab.cancel, { isTrusted: true });
   assert.equal(event.prevented, false);
   assert.deepEqual(tab.messages, []);
+});
+
+test("signs a person's own click on the close form, and says a failed close closed nothing", async () => {
+  const tab = reviewTab({ ok: true, presence: "signed-close" });
+  tab.form.setAttribute("action", `${pagePath}/close`);
+  await tab.submit(tab.form, { isTrusted: true });
+  assert.deepEqual(JSON.parse(JSON.stringify(tab.messages)), [{ type: "morrow_review_approval_sign", approvePath: `${pagePath}/close`, nonce }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(tab.posted)), [{ nonce, presence: "signed-close" }]);
+  const refused = reviewTab({ ok: false, code: "review_approval_key_missing" });
+  refused.form.setAttribute("action", `${pagePath}/close`);
+  await refused.submit(refused.form, { isTrusted: true });
+  assert.deepEqual(refused.posted, []);
+  assert.match(refused.container.querySelector(".review-approval-problem").textContent, /^Morrow Bridge could not confirm this click\..*Nothing was closed\.$/);
+  const scripted = reviewTab({ ok: true, presence: "signed-close" });
+  scripted.form.setAttribute("action", `${pagePath}/close`);
+  await scripted.submit(scripted.form, { isTrusted: false });
+  assert.deepEqual(scripted.messages, []);
 });
 
 test("says so in the page and sends nothing when the Bridge cannot sign", async () => {

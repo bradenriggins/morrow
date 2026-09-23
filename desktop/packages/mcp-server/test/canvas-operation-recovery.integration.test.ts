@@ -4,11 +4,15 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import type { BridgeCommand } from "@morrow/bridge-protocol";
 import { loadCanvasApiCatalog, planCanvasRecoveryDescriptor } from "@morrow/canvas-api-catalog";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
+import { createFullMorrowServer } from "../src/full-server.js";
+import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
 import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
 
@@ -697,15 +701,77 @@ describe("Canvas unresolved-operation recovery", () => {
       expect(runtime.effects.get(blockedId)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
       expect(writeCommands).toBe(0);
 
+      // The assistant cannot close it. The tool only prepares the close-out and names the page
+      // where the person confirms it, and a person-confirmation argument closes nothing.
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const served = serveStdio(() => createFullMorrowServer(morrow), { transport: serverTransport });
+      const client = new Client({ name: "morrow-close-request", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
+      let statusUrl: string;
+      try {
+        await client.connect(clientTransport);
+        const tools = await client.listTools();
+        const tool = tools.tools.find((entry) => entry.name === "morrow_operation_close_unresolved")!;
+        expect(Object.keys((tool.inputSchema as JsonObject).properties as JsonObject)).not.toContain("confirmed_by_person");
+        const asked = await client.callTool({
+          name: "morrow_operation_close_unresolved",
+          arguments: { operation_id: retired.operationId, observed_state: "a".repeat(64), confirmed_by_person: true },
+        }) as JsonObject;
+        expect(asked.isError).not.toBe(true);
+        expect(structured(asked)).toMatchObject({
+          phase: "person_close_requested",
+          effectState: "applied_or_unknown",
+          data: { schema: "morrow.operation-person-close-request.v1" },
+        });
+        statusUrl = String((structured(asked).data as JsonObject).statusUrl);
+        expect(statusUrl).toBe(`${morrow.approval.baseUrl}/operations/${encodeURIComponent(retired.operationId)}`);
+      } finally {
+        await client.close();
+        await served.close();
+      }
+      expect(runtime.effects.get(retired.operationId).state).toBe("applied_or_unknown");
+      expect((await runtime.dispatchOperation(blockedId)).isError).toBe(true);
+      expect(writeCommands).toBe(0);
+
+      // The person's page offers the close-out. A post without Morrow Bridge's signature over the
+      // form, which it adds only after a real click in Chrome, closes nothing.
+      const page = await fetch(statusUrl);
+      const body = await page.text();
+      expect(body).toContain("I checked it in Canvas: close this change");
+      const nonce = /action="\/operations\/[^"]+\/close"><input type="hidden" name="nonce" value="([^"]+)"/.exec(body)?.[1];
+      const cookie = page.headers.get("set-cookie")?.split(";", 1)[0];
+      expect(nonce).toBeTruthy();
+      expect(cookie).toBeTruthy();
+      const post = (presence?: string) => fetch(`${statusUrl}/close`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          accept: "application/json",
+          cookie: cookie!,
+          origin: new URL(statusUrl).origin,
+          referer: statusUrl,
+        },
+        body: new URLSearchParams({ nonce: nonce!, ...(presence ? { presence } : {}) }),
+        redirect: "manual",
+      });
+      const unsigned = await post();
+      expect(unsigned.status).toBe(403);
+      expect(await unsigned.json()).toMatchObject({ code: "approval_presence_required" });
+      // A signature made for the approve form does not close.
+      const approveSigned = await post(bridgeSignedPresence(morrow.approval, `${statusUrl}/approve`, nonce!));
+      expect(approveSigned.status).toBe(403);
+      expect(runtime.effects.get(retired.operationId).state).toBe("applied_or_unknown");
+
       // The person checked the item themselves. Morrow has no reading of its
       // own for a route it no longer carries, so their check closes it.
-      const closed = await runtime.closeUnresolvedOperation(retired.operationId, "a".repeat(64), true);
-      expect(closed.isError).not.toBe(true);
-      expect(structured(closed)).toMatchObject({
-        phase: "closed_by_person",
-        effectState: "closed_by_person",
+      const signed = await post(bridgeSignedPresence(morrow.approval, `${statusUrl}/close`, nonce!));
+      expect(signed.status).toBe(303);
+      expect(runtime.effects.get(retired.operationId)).toMatchObject({
+        state: "closed_by_person",
+        attention: ["closed_after_person_checked_saved_state", "no_readable_provider_result"],
       });
-      expect(runtime.effects.get(retired.operationId).state).toBe("closed_by_person");
+      const closedPage = await (await fetch(statusUrl)).text();
+      expect(closedPage).toContain("Closed after your check");
+      expect(closedPage).not.toContain("I checked it in Canvas: close this change");
 
       // The hold is released, and the held change is sent.
       const sent = await runtime.dispatchOperation(blockedId);

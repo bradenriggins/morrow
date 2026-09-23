@@ -3650,6 +3650,11 @@ export class GatewayRuntime {
    * the Bridge popup were waiting for the person's review.
    */
   private readonly browserReviewWaiting = new Set<string>();
+  /**
+   * The close-outs the assistant prepared, each waiting for the person's own click on the
+   * change's status page. Kept in memory only: after a restart the assistant prepares it again.
+   */
+  private readonly personCloseRequests = new Map<string, string | null>();
 
   /**
    * Tracks whether one operation just entered or left `awaiting_approval`. On
@@ -8184,6 +8189,19 @@ export class GatewayRuntime {
     try {
       return await this.scopedNativeEgress(value, this.egressRequest(request), options);
     } catch {
+      // A prepared close-out still names the change's status page, which is local and holds no
+      // course content, so the person can be sent there.
+      if (options.toolName === "morrow_operation_close_unresolved" && value.isError !== true
+        && this.personCloseRequests.has(record.operationId)) {
+        return canonicalMorrowResult({
+          operationId: record.operationId,
+          tool: "morrow_operation_close_unresolved",
+          phase: "person_close_requested",
+          effectState: record.state,
+          verificationStatus: this.operationVerificationStatus(record),
+          result: this.personCloseRequestAnswer(record, null),
+        });
+      }
       return this.historicalOperationControlResult(record, options.toolName || "morrow_operation_get");
     }
   }
@@ -9828,42 +9846,136 @@ export class GatewayRuntime {
   }
 
   /**
-   * Closes one unresolved change after a person checked the item themselves.
-   * Morrow sends nothing here and confirms nothing here: the record keeps its
-   * unconfirmed verification status, and the close-out is refused unless it
-   * carries an explicit person confirmation and the exact digest of a fresh
-   * Morrow read. It is the exit for a change Morrow has no way to check.
+   * Prepares the close-out of one unresolved change a person checked themselves. It closes
+   * nothing: the assistant cannot say for a person that they checked the item. The change's
+   * status page then offers the person the close-out, and only their own click there, signed by
+   * Morrow Bridge, closes it (`confirmPersonClose`). A change Morrow can read back must first be
+   * read with Morrow, and the close-out carries the exact digest of that fresh read.
    */
-  async closeUnresolvedOperation(
+  async requestPersonClose(
     operationId: string,
-    observedState: string,
-    confirmedByPerson: boolean,
+    observedState: string | undefined,
     options: { readonly signal?: AbortSignal } = {},
   ): Promise<JsonObject> {
+    const operation = this.effects.get(operationId);
+    const checked = await this.personCloseEvidence(operation, observedState, "morrow_operation_close_unresolved", options);
+    if ("refused" in checked) return checked.refused;
+    this.personCloseRequests.set(operation.operationId, checked.observedState ?? null);
+    return this.effectResult(operation, "person_close_requested", this.personCloseRequestAnswer(operation, checked.evidence?.publicToolName ?? null));
+  }
+
+  private personCloseRequestAnswer(operation: EffectOperationRecord, readTool: string | null): JsonObject {
+    const statusUrl = this.approvalUrl(operation.operationId);
+    const provider = this.toolByPublicName.get(operation.publicToolName)?.capability?.provider;
+    const platform = provider ? `${provider.slice(0, 1).toUpperCase()}${provider.slice(1)}` : "Canvas";
+    return {
+      content: [{
+        type: "text",
+        text: `Morrow has not closed this request. Give the person the link in statusUrl. On that page they confirm with their own click that they checked the item in ${platform}, and only that closes the request. Morrow sends nothing.`,
+      }],
+      structuredContent: {
+        schema: "morrow.operation-person-close-request.v1",
+        ...(statusUrl ? { statusUrl } : {}),
+        readTool,
+      },
+    };
+  }
+
+  /** Whether the status page of this change offers the person its close-out now. */
+  personCloseAvailable(operationId: string): boolean {
+    let operation: EffectOperationRecord;
+    try {
+      operation = this.effects.get(operationId);
+    } catch {
+      return false;
+    }
+    if (!["awaiting_verification", "applied_or_unknown"].includes(operation.state)) return false;
+    // A change with no reading of its own has only the person's check as evidence, so the page
+    // offers it. A change Morrow can read back waits until the assistant brings a fresh read.
+    return !this.capabilityCloseReadsBack(operation.publicToolName) || this.personCloseRequests.has(operation.operationId);
+  }
+
+  /**
+   * Closes one unresolved change after a person's own click on its status page, which the
+   * review server accepts only with Morrow Bridge's signature. Morrow sends nothing and confirms
+   * nothing here: the record keeps its unconfirmed verification status.
+   */
+  async confirmPersonClose(
+    operationId: string,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<JsonObject> {
+    const operation = this.effects.get(operationId);
+    const requested = this.personCloseRequests.get(operation.operationId);
+    const checked = await this.personCloseEvidence(operation, requested ?? undefined, "morrow_person_close", options);
+    if ("refused" in checked) return checked.refused;
+    this.personCloseRequests.delete(operation.operationId);
+    if (!checked.evidence) {
+      // The person's own check is the only evidence, so the close records what they confirmed.
+      const confirmed = checked.observedState
+        ?? sha256Json({ schema: "morrow.person-close-confirmation.v1", operationId: operation.operationId, confirmedAt: new Date().toISOString() });
+      const closedWithoutRead = this.effects.closeWithoutReadableResult(operation.operationId, confirmed);
+      return this.effectResult(closedWithoutRead, "closed_by_person", {
+        content: [{
+          type: "text",
+          text: "Morrow closed this request because the person checked the saved state themselves. Morrow has no reading of its own that could settle this change, so Morrow confirmed nothing, and it will not send it again.",
+        }],
+        structuredContent: {
+          schema: "morrow.operation-person-close.v1",
+          observedState: confirmed,
+          readTool: null,
+          resentWrite: false,
+        },
+      });
+    }
+    const closed = this.effects.closeAfterPersonCheck(operation.operationId, checked.observedState!, checked.evidence.preparedCausalSequence!);
+    return this.effectResult(closed, "closed_by_person", {
+      content: [{
+        type: "text",
+        text: "Morrow closed this request because the person checked the saved state themselves. Morrow did not confirm the change, and it will not send it again.",
+      }],
+      structuredContent: {
+        schema: "morrow.operation-person-close.v1",
+        observedState: checked.observedState!,
+        readTool: checked.evidence.publicToolName,
+        readAt: checked.evidence.createdAt,
+        resentWrite: false,
+      },
+    });
+  }
+
+  /**
+   * What a close-out of this change may rest on: nothing but the person's check for a change
+   * Morrow cannot read back, or the exact digest of a successful Morrow read of this item, course,
+   * browser connection and sign-in made after the change was sent.
+   */
+  private async personCloseEvidence(
+    operation: EffectOperationRecord,
+    observedState: string | undefined,
+    tool: string,
+    options: { readonly signal?: AbortSignal },
+  ): Promise<
+    | { readonly refused: JsonObject }
+    | { readonly observedState: string | undefined; readonly evidence: GatewayOperationRecord | null }
+  > {
     const refused = (
       code: string,
       text: string,
       detail: JsonObject = {},
       limitations: readonly string[] = [],
-    ): JsonObject => canonicalMorrowResult({
-      operationId,
-      tool: "morrow_operation_close_unresolved",
-      phase: "rejected",
-      verificationStatus: "not_requested",
-      ...(limitations.length ? { limitations: [...limitations] } : {}),
-      result: {
-        content: [{ type: "text", text }],
-        isError: true,
-        structuredContent: { schema: "morrow.problem.v1", code, recoverable: true, ...detail },
-      },
+    ) => ({
+      refused: canonicalMorrowResult({
+        operationId: operation.operationId,
+        tool,
+        phase: "rejected",
+        verificationStatus: "not_requested",
+        ...(limitations.length ? { limitations: [...limitations] } : {}),
+        result: {
+          content: [{ type: "text", text }],
+          isError: true,
+          structuredContent: { schema: "morrow.problem.v1", code, recoverable: true, ...detail },
+        },
+      }),
     });
-    if (confirmedByPerson !== true) {
-      return refused(
-        "person_confirmation_required",
-        "Morrow closes an unresolved change only when a person says they checked the saved state themselves.",
-      );
-    }
-    const operation = this.effects.get(operationId);
     if (!["awaiting_verification", "applied_or_unknown"].includes(operation.state)) {
       return refused(
         "operation_not_unresolved",
@@ -9871,60 +9983,27 @@ export class GatewayRuntime {
         { effectState: operation.state },
       );
     }
-    // A change whose route offers the person no reading Morrow could accept has
-    // only their own check as evidence, so it is what closes the change. Every
-    // change Morrow can read back this way still needs that reading.
-    if (!this.capabilityCloseReadsBack(operation.publicToolName)) {
-      const closedWithoutRead = this.effects.closeWithoutReadableResult(operation.operationId, observedState);
-      return this.effectResult(closedWithoutRead, "closed_by_person", {
-        content: [{
-          type: "text",
-          text: "Morrow closed this request because you checked the saved state yourself. Morrow has no reading of its own that could settle this change, so Morrow confirmed nothing, and it will not send it again.",
-        }],
-        structuredContent: {
-          schema: "morrow.operation-person-close.v1",
-          observedState,
-          readTool: null,
-          resentWrite: false,
-        },
-      });
+    if (observedState !== undefined && !/^[0-9a-f]{64}$/u.test(observedState)) {
+      return refused("observed_state_invalid", "observed_state must be the SHA-256 digest a fresh Morrow read returned.");
     }
+    // A change whose route offers no reading Morrow could accept has only the person's own
+    // check as evidence. Every change Morrow can read back still needs that reading.
+    if (!this.capabilityCloseReadsBack(operation.publicToolName)) return { observedState, evidence: null };
+    const readRequired = [
+      "observed_state_not_from_fresh_read",
+      "That digest does not match a successful Morrow read of this exact item, course, browser connection and sign-in made after the change was sent. Read the item with Morrow again and close this request with the digest that read returns.",
+      {},
+      [PERSON_CLOSE_READ_REQUIRED_LIMITATION],
+    ] as const;
+    if (observedState === undefined) return refused(...readRequired);
     const evidence = this.freshReadEvidence(operation, observedState)
       ?? this.freshReadEvidence(
         operation,
         observedState,
         await this.historicalProviderScope(operation, options) ?? undefined,
       );
-    if (!evidence) {
-      return refused(
-        "observed_state_not_from_fresh_read",
-        "That digest does not match a successful Morrow read of this exact item, course, browser connection and sign-in made after the change was sent. Read the item with Morrow again and close this request with the digest that read returns.",
-        {},
-        [PERSON_CLOSE_READ_REQUIRED_LIMITATION],
-      );
-    }
-    if (!evidence.preparedCausalSequence) {
-      return refused(
-        "observed_state_not_from_fresh_read",
-        "That digest does not match a successful Morrow read of this exact item, course, browser connection and sign-in made after the change was sent. Read the item with Morrow again and close this request with the digest that read returns.",
-        {},
-        [PERSON_CLOSE_READ_REQUIRED_LIMITATION],
-      );
-    }
-    const closed = this.effects.closeAfterPersonCheck(operationId, observedState, evidence.preparedCausalSequence);
-    return this.effectResult(closed, "closed_by_person", {
-      content: [{
-        type: "text",
-        text: "Morrow closed this request because you checked the saved state yourself. Morrow did not confirm the change, and it will not send it again.",
-      }],
-      structuredContent: {
-        schema: "morrow.operation-person-close.v1",
-        observedState,
-        readTool: evidence.publicToolName,
-        readAt: evidence.createdAt,
-        resentWrite: false,
-      },
-    });
+    if (!evidence?.preparedCausalSequence) return refused(...readRequired);
+    return { observedState, evidence };
   }
 
   /** The read-only source tool a non-connector route declares as its review read, or null. */

@@ -787,6 +787,8 @@ export class MorrowRuntime {
         setApprovalPresence: (presence) => gateway.setApprovalPresence(presence),
         announceApprovalPresence: () => gateway.announceApprovalPresence(),
         setReviewLearnerNames: (reviewPath, names) => gateway.setReviewLearnerNames(reviewPath, names),
+        personCloseAvailable: (operationId) => gateway.personCloseAvailable(operationId),
+        confirmPersonClose: (operationId) => gateway.confirmPersonClose(operationId),
         batchApprovalGet: (batchId) => runtime!.batchApprovalGet(batchId),
         batchApprovalStatus: (batchId) => runtime!.batchApprovalStatus(batchId),
         approveBatch: (batchId) => runtime!.approveBatch(batchId),

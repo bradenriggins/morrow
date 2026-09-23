@@ -17,10 +17,10 @@ Measured at the end of this run: the journal holds 215,772 operations, of which 
 unknown outcome. A page create that verified reliably early in the run is answered with a target
 conflict by the end of it, on the same course and the same collection.
 
-Clearing one needs `morrow_operation_close_unresolved`, which requires a person to state what
-Canvas shows. That requirement is right, and finding 2 explains why. Together they mean an
-unattended run degrades itself: the more it does that Morrow cannot confirm, the less of the
-course it can still change, and nothing but a person can undo that.
+Clearing one needs a person's own click on the change's status page, which
+`morrow_operation_close_unresolved` prepares. That requirement is right, and finding 2 explains
+why. Together they mean an unattended run degrades itself: the more it does that Morrow cannot
+confirm, the less of the course it can still change, and nothing but a person can undo that.
 
 What this run could clear, it cleared: only requests that were never sent, which are safe to
 cancel. The 547 unknown ones stay.
@@ -49,9 +49,9 @@ Evidence: ledger rows `cleanup:MORROWPROOF1789874351`, `cleanup:verified-against
 
 ## 3. Morrow refuses to let an automated process certify what a person must see
 
-`morrow_operation_close_unresolved` requires `observed_state` and `confirmed_by_person`. A change
-Morrow could not confirm cannot be closed by the process that made it; a person has to say what
-Canvas shows. The harness cancels only requests that were never sent, and leaves anything that may
+`morrow_operation_close_unresolved` only prepares a close-out and returns the change's status page.
+A change Morrow could not confirm cannot be closed by the process that made it; a person closes it
+with their own click on that page, which Morrow Bridge signs. The harness cancels only requests that were never sent, and leaves anything that may
 have landed open and reported.
 
 This is correct behaviour and is recorded because it is load-bearing: it is the reason an

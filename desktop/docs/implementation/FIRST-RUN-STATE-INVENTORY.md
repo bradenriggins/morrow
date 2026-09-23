@@ -442,59 +442,59 @@ from `connector/extension/src/bridge-problem-copy.js:17` and written into the al
 
 Reached from the assistant, on this computer only (`packages/mcp-server/src/approval-server.ts:67`).
 Approve and cancel are `<button>` elements inside `<form method="post">`
-(`packages/mcp-server/src/approval-server.ts:822-823`), so the decision works by keyboard and without
-JavaScript; the search and pagination controls (`packages/mcp-server/src/approval-server.ts:803`) come
+(`packages/mcp-server/src/approval-server.ts:826-827`), so the decision works by keyboard and without
+JavaScript; the search and pagination controls (`packages/mcp-server/src/approval-server.ts:807`) come
 from the deferred script and only filter what is already on the page.
 
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
-| `review-awaiting` | A title naming the change, who asked for it, the destination, the requested values, any risk warning, and when approval expires | **Apply this change** (the label names the change; for a group, "Apply all N changes"), or **Cancel** | `packages/mcp-server/src/approval-server.ts:815-823` |
-| `review-missing-names` | "Morrow could not identify the course or a selected item in Canvas." and "Nothing can be approved here until those details load. Check your Canvas connection, then reload this page." | Reload the page after the connection is working. The approve control is absent by design, and the server also refuses an approval in this state (`packages/mcp-server/src/approval-server.ts:1006`) | `packages/mcp-server/src/approval-server.ts:819-820`, `packages/mcp-server/src/approval-server.ts:822` |
-| `review-target-absent` | "Canvas does not have the item this change names. It may have been renamed, moved, or removed since this change was prepared." and "Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review. This page has not changed anything." | Ask Morrow for a new review against the current content. The connection is working: Canvas answered and does not hold this item, so reloading changes nothing. | `packages/mcp-server/src/approval-server.ts:983` |
-| `review-limited` | "Too many different courses or activities to review at once." and "Return to your assistant and ask Morrow to split this into smaller groups. This page has not approved any changes." | Ask the assistant for smaller groups. See finding F-6 | `packages/mcp-server/src/approval-server.ts:817-818` |
-| `review-expired` | "Review expired" and "Return to the assistant where you started this request and ask Morrow for a new review. Check the new request before approving it." | Ask the assistant for a new review. The page has no control | `packages/mcp-server/src/approval-server.ts:604`, reached at `packages/mcp-server/src/approval-server.ts:705` |
-| `review-unavailable` | "Review unavailable" and "This review may have expired or the request may have changed… Do not repeat the change until Morrow checks the saved result." | Ask the assistant to check the saved result. The page has no control | `packages/mcp-server/src/approval-server.ts:1041` |
+| `review-awaiting` | A title naming the change, who asked for it, the destination, the requested values, any risk warning, and when approval expires | **Apply this change** (the label names the change; for a group, "Apply all N changes"), or **Cancel** | `packages/mcp-server/src/approval-server.ts:819-827` |
+| `review-missing-names` | "Morrow could not identify the course or a selected item in Canvas." and "Nothing can be approved here until those details load. Check your Canvas connection, then reload this page." | Reload the page after the connection is working. The approve control is absent by design, and the server also refuses an approval in this state (`packages/mcp-server/src/approval-server.ts:1010`) | `packages/mcp-server/src/approval-server.ts:823-824`, `packages/mcp-server/src/approval-server.ts:826` |
+| `review-target-absent` | "Canvas does not have the item this change names. It may have been renamed, moved, or removed since this change was prepared." and "Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review. This page has not changed anything." | Ask Morrow for a new review against the current content. The connection is working: Canvas answered and does not hold this item, so reloading changes nothing. | `packages/mcp-server/src/approval-server.ts:987` |
+| `review-limited` | "Too many different courses or activities to review at once." and "Return to your assistant and ask Morrow to split this into smaller groups. This page has not approved any changes." | Ask the assistant for smaller groups. See finding F-6 | `packages/mcp-server/src/approval-server.ts:821-822` |
+| `review-expired` | "Review expired" and "Return to the assistant where you started this request and ask Morrow for a new review. Check the new request before approving it." | Ask the assistant for a new review. The page has no control | `packages/mcp-server/src/approval-server.ts:608`, reached at `packages/mcp-server/src/approval-server.ts:709` |
+| `review-unavailable` | "Review unavailable" and "This review may have expired or the request may have changed… Do not repeat the change until Morrow checks the saved result." | Ask the assistant to check the saved result. The page has no control | `packages/mcp-server/src/approval-server.ts:1046` |
 
 ---
 
 ## 8. Result page
 
-One page per request after approval (`packages/mcp-server/src/approval-server.ts:806`). The state
+One page per request after approval (`packages/mcp-server/src/approval-server.ts:810`). The state
 region is `role="status"` and updates itself once a second while work is active
 (`packages/mcp-server/src/approval-server.ts:140-158`). Except for **Stop remaining changes** on an
-active group (`packages/mcp-server/src/approval-server.ts:805`), these states carry no control: the
+active group (`packages/mcp-server/src/approval-server.ts:809`), these states carry no control: the
 next action is in the assistant, or is reloading the page. That is deliberate: the page reports what
 Morrow saved and refuses to offer a repeat.
 
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
-| `approved` | "Changes not started" / "Your approval was saved, but this request is not running. Return to your assistant and ask Morrow to check this saved request before starting anything else." | Ask the assistant to check the saved request | `packages/mcp-server/src/approval-server.ts:601` |
-| `verified` | "Canvas saved the change. Morrow checked the result." with the success mark, the item name, "Return to your assistant. It continues on its own." and "See recent changes" | None. This is the end state | `packages/mcp-server/src/approval-server.ts:602` |
-| `cancelled` | "Request cancelled" / "Morrow will not start more changes for this request. Changes already sent may still finish…" | Ask the assistant to check the result | `packages/mcp-server/src/approval-server.ts:603` |
-| `expired` | "Review expired" | Ask the assistant for a new review | `packages/mcp-server/src/approval-server.ts:604` |
-| `dispatching` | "Applying your changes" / "Morrow will check the saved result in Canvas. This page updates automatically." plus "Keep your assistant and Chrome open while Morrow works." | None. Wait | `packages/mcp-server/src/approval-server.ts:605`, instruction `packages/mcp-server/src/approval-server.ts:596` |
-| `running` | The same as `dispatching`. An approved request with work in flight is shown as running | None. Wait | `packages/mcp-server/src/approval-server.ts:606`, mapped at `packages/mcp-server/src/approval-server.ts:686` |
-| `awaiting_verification` | "Check the result" / "Morrow could not confirm the saved result in Canvas. Return to your assistant and ask Morrow to check this saved request. Do not repeat the change." | Ask the assistant to check it | `packages/mcp-server/src/approval-server.ts:607` |
-| `awaiting_inner_approval` | "Review needed" / "This request needs another approval before it can finish…" | Return to the assistant for the next review | `packages/mcp-server/src/approval-server.ts:608` |
-| `applied_or_unknown` | "Result unconfirmed" / "Canvas may have received the changes… If Morrow cannot check it, open the item in Canvas and confirm it yourself. Do not repeat the change." | Ask the assistant to check it, or open the item and confirm it | `packages/mcp-server/src/approval-server.ts:609` |
-| `closed_by_person` | "Closed after your check" / "Morrow did not check this change itself. It is closed because you read the item and confirmed the saved state…" | None | `packages/mcp-server/src/approval-server.ts:610` |
-| `inspection_required` | "Check results" / "Canvas may have received some changes… Do not repeat the group of changes." | Ask the assistant to check each result | `packages/mcp-server/src/approval-server.ts:611` |
-| `partial` | "Changes stopped" / "Return to the assistant where you started this request to see which changes finished and which still need attention…" | Ask the assistant which changes finished | `packages/mcp-server/src/approval-server.ts:612` |
-| `paused` | "Work is paused" / "Morrow is not starting more changes. Work already sent may still finish…" | Ask the assistant to check or continue | `packages/mcp-server/src/approval-server.ts:613` |
-| `completed` | "Check results" / "The work has stopped, but not every requested change has a confirmed result…" | Ask the assistant to check the saved results | `packages/mcp-server/src/approval-server.ts:614` |
-| `failed` | "Request stopped" / "Return to the assistant where you started this request to find out what happened…" | Ask the assistant what happened | `packages/mcp-server/src/approval-server.ts:615` |
-| `interrupted` | "Work stopped" / "Morrow is not running this request now. Return to your assistant and ask Morrow to check the saved result before trying again." | Ask the assistant to check the saved result | `packages/mcp-server/src/approval-server.ts:616`, mapped at `packages/mcp-server/src/approval-server.ts:687` |
-| `no-change-sent` | "No change was sent" / "Morrow did not change anything in Canvas. Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review." | Ask the assistant for a new review | `packages/mcp-server/src/approval-server.ts:629`, condition `packages/mcp-server/src/approval-server.ts:618` |
-| `saved-otherwise` | "Did not save as approved" / "Morrow sent this change and read Canvas again. Canvas does not hold the result you approved. Morrow will not send this change again. Open the item in Canvas, then ask your assistant for a new review if it still needs the change." | Open the item, then ask the assistant for a new review | `packages/mcp-server/src/approval-server.ts:935`, condition `packages/mcp-server/src/approval-server.ts:922` |
-| `same-target-blocked` | "Check earlier change" / "Morrow has not sent this change. An earlier change to the same target is still unresolved…" | Ask the assistant to check the earlier request | `packages/mcp-server/src/approval-server.ts:624`, condition `packages/mcp-server/src/approval-server.ts:619` |
-| `historical-target-blocked` | "An earlier change from an older Morrow version is still unresolved, so Morrow has not sent this change. That earlier change has no saved check. Open the item it changed in Canvas, confirm it yourself, then ask Morrow for a new review." | Open the item and confirm it, then ask for a new review | `packages/mcp-server/src/approval-server.ts:622`, condition `packages/mcp-server/src/approval-server.ts:620` |
-| `unknown-state` | "Check this request" / "The request has changed or can no longer be approved here. Return to your assistant and ask Morrow to check its current status." | Ask the assistant to check the status | `packages/mcp-server/src/approval-server.ts:630` |
-| `group-progress` | How many of the group's changes are confirmed, beneath the state, and **Stop remaining changes** while the group is active | **Stop remaining changes**, or wait | `packages/mcp-server/src/approval-server.ts:693`, `packages/mcp-server/src/approval-server.ts:805` |
+| `approved` | "Changes not started" / "Your approval was saved, but this request is not running. Return to your assistant and ask Morrow to check this saved request before starting anything else." | Ask the assistant to check the saved request | `packages/mcp-server/src/approval-server.ts:605` |
+| `verified` | "Canvas saved the change. Morrow checked the result." with the success mark, the item name, "Return to your assistant. It continues on its own." and "See recent changes" | None. This is the end state | `packages/mcp-server/src/approval-server.ts:606` |
+| `cancelled` | "Request cancelled" / "Morrow will not start more changes for this request. Changes already sent may still finish…" | Ask the assistant to check the result | `packages/mcp-server/src/approval-server.ts:607` |
+| `expired` | "Review expired" | Ask the assistant for a new review | `packages/mcp-server/src/approval-server.ts:608` |
+| `dispatching` | "Applying your changes" / "Morrow will check the saved result in Canvas. This page updates automatically." plus "Keep your assistant and Chrome open while Morrow works." | None. Wait | `packages/mcp-server/src/approval-server.ts:609`, instruction `packages/mcp-server/src/approval-server.ts:600` |
+| `running` | The same as `dispatching`. An approved request with work in flight is shown as running | None. Wait | `packages/mcp-server/src/approval-server.ts:610`, mapped at `packages/mcp-server/src/approval-server.ts:690` |
+| `awaiting_verification` | "Check the result" / "Morrow could not confirm the saved result in Canvas. Return to your assistant and ask Morrow to check this saved request. Do not repeat the change." | Ask the assistant to check it | `packages/mcp-server/src/approval-server.ts:611` |
+| `awaiting_inner_approval` | "Review needed" / "This request needs another approval before it can finish…" | Return to the assistant for the next review | `packages/mcp-server/src/approval-server.ts:612` |
+| `applied_or_unknown` | "Result unconfirmed" / "Canvas may have received the changes… If Morrow cannot check it, open the item in Canvas and confirm it yourself. Do not repeat the change." | Ask the assistant to check it, or open the item and confirm it | `packages/mcp-server/src/approval-server.ts:613` |
+| `closed_by_person` | "Closed after your check" / "Morrow did not check this change itself. It is closed because you read the item and confirmed the saved state…" | None | `packages/mcp-server/src/approval-server.ts:614` |
+| `inspection_required` | "Check results" / "Canvas may have received some changes… Do not repeat the group of changes." | Ask the assistant to check each result | `packages/mcp-server/src/approval-server.ts:615` |
+| `partial` | "Changes stopped" / "Return to the assistant where you started this request to see which changes finished and which still need attention…" | Ask the assistant which changes finished | `packages/mcp-server/src/approval-server.ts:616` |
+| `paused` | "Work is paused" / "Morrow is not starting more changes. Work already sent may still finish…" | Ask the assistant to check or continue | `packages/mcp-server/src/approval-server.ts:617` |
+| `completed` | "Check results" / "The work has stopped, but not every requested change has a confirmed result…" | Ask the assistant to check the saved results | `packages/mcp-server/src/approval-server.ts:618` |
+| `failed` | "Request stopped" / "Return to the assistant where you started this request to find out what happened…" | Ask the assistant what happened | `packages/mcp-server/src/approval-server.ts:619` |
+| `interrupted` | "Work stopped" / "Morrow is not running this request now. Return to your assistant and ask Morrow to check the saved result before trying again." | Ask the assistant to check the saved result | `packages/mcp-server/src/approval-server.ts:620`, mapped at `packages/mcp-server/src/approval-server.ts:691` |
+| `no-change-sent` | "No change was sent" / "Morrow did not change anything in Canvas. Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review." | Ask the assistant for a new review | `packages/mcp-server/src/approval-server.ts:633`, condition `packages/mcp-server/src/approval-server.ts:622` |
+| `saved-otherwise` | "Did not save as approved" / "Morrow sent this change and read Canvas again. Canvas does not hold the result you approved. Morrow will not send this change again. Open the item in Canvas, then ask your assistant for a new review if it still needs the change." | Open the item, then ask the assistant for a new review | `packages/mcp-server/src/approval-server.ts:939`, condition `packages/mcp-server/src/approval-server.ts:926` |
+| `same-target-blocked` | "Check earlier change" / "Morrow has not sent this change. An earlier change to the same target is still unresolved…" | Ask the assistant to check the earlier request | `packages/mcp-server/src/approval-server.ts:628`, condition `packages/mcp-server/src/approval-server.ts:623` |
+| `historical-target-blocked` | "An earlier change from an older Morrow version is still unresolved, so Morrow has not sent this change. That earlier change has no saved check. Open the item it changed in Canvas, confirm it yourself, then ask Morrow for a new review." | Open the item and confirm it, then ask for a new review | `packages/mcp-server/src/approval-server.ts:626`, condition `packages/mcp-server/src/approval-server.ts:624` |
+| `unknown-state` | "Check this request" / "The request has changed or can no longer be approved here. Return to your assistant and ask Morrow to check its current status." | Ask the assistant to check the status | `packages/mcp-server/src/approval-server.ts:634` |
+| `group-progress` | How many of the group's changes are confirmed, beneath the state, and **Stop remaining changes** while the group is active | **Stop remaining changes**, or wait | `packages/mcp-server/src/approval-server.ts:697`, `packages/mcp-server/src/approval-server.ts:809` |
 | `poll-failed` | "Morrow cannot refresh this result. Reload this page to check it. Do not repeat the change." | Reload the page | `packages/mcp-server/src/approval-server.ts:155` |
 
 A state page names the platform the request belongs to, so a Moodle or Blackboard request does not
-say Canvas (`packages/mcp-server/src/approval-server.ts:631`,
-`packages/mcp-server/src/approval-server.ts:691`).
+say Canvas (`packages/mcp-server/src/approval-server.ts:635`,
+`packages/mcp-server/src/approval-server.ts:695`).
 
 ---
 
@@ -601,15 +601,16 @@ stale name here.
 | `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:132` |
 | `Open Canvas` | Plan and Edit settings | `connector/extension/settings/settings.js:436` |
 | `Open Moodle` | Plan and Edit settings | `connector/extension/settings/settings.js:437` |
-| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1196` |
-| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1196` |
-| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1196` |
-| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:1196` |
-| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:1196` |
-| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:1214` |
-| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:1180` |
-| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:1177` |
-| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:1179` |
+| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1208` |
+| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1208` |
+| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1208` |
+| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:1208` |
+| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:1208` |
+| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:1226` |
+| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:1192` |
+| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:1183` |
+| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:1185` |
+| `I checked it in Canvas: close this change` | Result page of a change Morrow could not settle | `packages/mcp-server/src/approval-server.ts:1190` |
 
 Names a person reads as landmarks rather than presses:
 
@@ -644,8 +645,8 @@ repair is required. Plan and Edit settings reports a failed status read as not c
 One earlier finding remains outside the setup work:
 
 **F-1. "This page has not approved any changes" can appear beside an approve button.**
-`packages/mcp-server/src/approval-server.ts:817-818` shows the split-into-smaller-groups copy whenever
-any review context is `limited`, and `packages/mcp-server/src/approval-server.ts:822` removes the
+`packages/mcp-server/src/approval-server.ts:821-822` shows the split-into-smaller-groups copy whenever
+any review context is `limited`, and `packages/mcp-server/src/approval-server.ts:826` removes the
 approve control only when a named target is missing. On the usual path both happen together. A
 limited context that still returns named targets can leave the copy and the control in conflict.
 This approval-page issue does not block first-run setup and was not changed in this setup pass.

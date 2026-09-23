@@ -1,7 +1,8 @@
-// Settling one unresolved change the way a person would: Morrow checks it again,
-// and what Morrow still cannot confirm is closed against a fresh read of the same
-// collection. A change left unresolved holds its target, so the next change to
-// that collection waits on this.
+// Settling one unresolved change as far as an automated run may: Morrow checks it
+// again, and what Morrow still cannot confirm gets a close-out prepared against a
+// fresh read of the same collection. Only a person closes it, with their own click
+// on the change's status page, so the run reports it and leaves it open. A change
+// left unresolved holds its target, so the next change to that collection waits.
 import { OPERATIONS, SB, fillArguments } from "./catalog.mjs";
 
 function listingFor(operation) {
@@ -35,10 +36,9 @@ export async function settleOperation(callTool, operationId, toolName, pool) {
   const recent = (await callTool("morrow_operations_recent", { limit: 50 }))?.structuredContent ?? {};
   const evidence = (recent.operations || []).find((row) => row.publicToolName === read.toolName);
   if (!evidence?.upstreamResultDigest) return "no_read_evidence";
-  const closed = (await callTool("morrow_operation_close_unresolved", {
+  const prepared = (await callTool("morrow_operation_close_unresolved", {
     operation_id: operationId,
     observed_state: evidence.upstreamResultDigest,
-    confirmed_by_person: true,
   }))?.structuredContent ?? {};
-  return closed.effectState === "closed_by_person" || closed.state === "closed_by_person" ? "closed" : "still_open";
+  return prepared.phase === "person_close_requested" ? "awaiting_person_close" : "still_open";
 }
