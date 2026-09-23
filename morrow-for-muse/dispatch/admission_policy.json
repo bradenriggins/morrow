@@ -2,6 +2,34 @@
  "admitted_on_proof": {
   "canvas_create_new_quiz": "2026-09-22 lane-7 battery: disposable quiz create through the integrated product path (build_request + page-context POST) with readback title match and full cleanup, terminal GET 404; admitted on ALL tenants per the parity law"
  },
+ "deletes_by_replacing": {
+  "note": "Live-proven writes that delete without the DELETE method: the request replaces a list, and Canvas deletes every item not on it. While the educator's confirm_destructive_writes setting is on, an edit-mode write here asks first, like a DELETE (dispatch/admission.py _is_destructive). A route rule applies to every request on the route; a body_fields rule applies when the query or body sends that field.",
+  "routes": [
+   {
+    "method": "PUT",
+    "path": "/api/v1/courses/{course_id}/blackout_dates",
+    "deletes": "C-58: a blackout date not on the list"
+   },
+   {
+    "method": "POST",
+    "path": "/api/v1/courses/{course_id}/calendar_events/timetable_events",
+    "deletes": "C-74: a timetable event not on the list"
+   },
+   {
+    "method": "PUT",
+    "path": "/api/v1/courses/{course_id}/modules/{context_module_id}/assignment_overrides",
+    "deletes": "C-284: a module date override not on the list"
+   }
+  ],
+  "body_fields": [
+   {
+    "method": "PUT",
+    "path": "/api/v1/courses/{course_id}/assignments/{id}",
+    "field": "assignment_overrides",
+    "deletes": "C-43: an assignment override not on the assignment_overrides list"
+   }
+  ]
+ },
  "evidence_holds": {
   "note": "Operations that are not yet live-proven through Morrow for Muse. Refused on EVERY tenant until a disposable, isolated, fully cleaned-up live battery proves the complete path. When one is proven it is admitted on ALL tenants. There are no tenant allowlists: no tenant is ever gated, restricted, or treated differently from any other.",
   "reasons": {

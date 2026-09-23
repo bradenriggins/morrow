@@ -107,9 +107,15 @@ def test_every_live_proven_write_reads_as_a_plain_action(row):
      "done", 'Mark the item "123" in the module "123" as done'),
     ("POST", "/api/v1/courses/{course_id}/quizzes/{id}/reorder",
      'Reorder the questions of the quiz "123"'),
+    # A list that replaces the course's own says what it deletes.
     ("POST", "/api/v1/courses/{course_id}/calendar_events/"
      "timetable_events",
-     "Replace the course's timetable events with this list"),
+     "Replace the course's timetable events with this list (a timetable "
+     "event not on it is deleted)"),
+    ("PUT", "/api/v1/courses/{course_id}/modules/{context_module_id}/"
+     "assignment_overrides",
+     'Replace the date overrides of the module "123" with this list (an '
+     "override not on it is deleted)"),
 ])
 def test_actions_read_as_what_they_do(method, path, sentence):
     assert _sentence(method, path) == sentence

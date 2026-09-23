@@ -362,8 +362,11 @@ also work in edit mode.
 
 A deletion asks first even in edit mode while the educator's
 `confirm_destructive_writes` setting is on ("always confirm
-deletions"). Tell them exactly what will be deleted and get their yes,
-then do one of these:
+deletions"). A change that replaces a list is a deletion too, because
+Canvas deletes what is not on the new list: the course's blackout
+dates, its timetable events, a module's date overrides, and an
+assignment change that sends `assignment_overrides`. Tell them exactly
+what will be deleted and get their yes, then do one of these:
 
 - Show the deletion with `plan-write` and run `approve-write` with
   their reply. Their reply confirms the deletion it approved.

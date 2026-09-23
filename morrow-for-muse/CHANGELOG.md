@@ -153,6 +153,12 @@ Settings and undo:
   deletion you said yes to was refused again while "always confirm
   deletions" was on. Your yes to the deletion you were shown is the
   confirmation.
+- "Always confirm deletions" covers a change that replaces a list,
+  because Canvas deletes what is not on the new list: the course's
+  blackout dates, its timetable events, a module's date overrides, and
+  a change to an assignment that sends its list of date overrides. In
+  Edit mode these ran without asking. The approval for the timetable events and for a module's
+  date overrides now says that an item not on the list is deleted.
 - Three settings that promised things Morrow does not do are gone:
   batched approvals, bulk action confirmations, and cleanup of test
   objects.

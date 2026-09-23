@@ -22,6 +22,15 @@ Failure modes this suite pins down (written before the fix; final sweep
      deletion the educator confirmed.
   3. The confirmation must stay: a deletion with no educator reply is
      still refused.
+  4. (muse engine audit, 2026-09-23) Only HTTP DELETE counted as a
+     deletion. A live-proven write that replaces a list, where Canvas
+     deletes every item not on it, ran in Edit mode with "always confirm
+     deletions" on and no yes: the course's blackout dates (C-58, its
+     own approval says "a blackout date not on it is deleted"), its
+     timetable events (C-74), a module's date overrides (C-284), and an
+     assignment change that sends its overrides list (C-43 with
+     assignment_overrides). They ask first now, like a DELETE, and the
+     educator's yes to the change as shown confirms it.
 
 Hermetic: fake Canvas session; journal, approvals, settings, grants,
 and the signing key live in pytest's tmp_path.
@@ -215,3 +224,113 @@ def test_skill_md_documents_the_deletion_confirmation():
         .split("\n## ", 1)[0]
     assert re.search(r"--destructive-confirmed", section), \
         "the Modes section does not say how a confirmed deletion runs"
+
+
+# -- replace-list deletions ---------------------------------------------------
+
+REPLACE_LIST = [
+    ("canvas_update_list_of_blackout_dates", "PUT",
+     "/api/v1/courses/{course_id}/blackout_dates", {"course_id": "101"},
+     {"blackout_dates": [{"start_date": "2026-11-26",
+                          "end_date": "2026-11-27",
+                          "event_title": "Thanksgiving"}]}),
+    ("canvas_create_or_update_events_directly_for_course_timetable", "POST",
+     "/api/v1/courses/{course_id}/calendar_events/timetable_events",
+     {"course_id": "101"},
+     {"events": [{"start_at": "2026-10-05T15:00:00Z",
+                  "end_at": "2026-10-05T16:00:00Z", "code": "mon"}]}),
+    ("canvas_update_module_s_overrides", "PUT",
+     "/api/v1/courses/{course_id}/modules/{context_module_id}/"
+     "assignment_overrides", {"course_id": "101", "context_module_id": "7"},
+     {"overrides": [{"id": 3, "title": "Section 1"}]}),
+    ("canvas_edit_assignment", "PUT",
+     "/api/v1/courses/{course_id}/assignments/{id}",
+     {"course_id": "101", "id": "555"},
+     {"assignment": {"assignment_overrides": []}}),
+]
+_IDS = ["blackout-dates", "timetable-events", "module-overrides",
+        "assignment-overrides"]
+
+
+def _writes(session):
+    return [c for c in session.calls if c[2]]
+
+
+def _catalog(name, method, path, params, body, *extra):
+    return _cli(["catalog", "--name", name, "--method", method,
+                 "--path", path, "--params", json.dumps(params),
+                 "--body", json.dumps(body), "--class", "write"]
+                + list(extra) + RESOLVED + _who())
+
+
+@pytest.mark.parametrize("name, method, path, params, body", REPLACE_LIST,
+                         ids=_IDS)
+def test_the_mode_gate_asks_first_for_a_replace_list_deletion(
+        edit_with_confirmations, name, method, path, params, body):
+    from modes import errors as mode_errors
+    entry = ex.catalog_descriptor_to_entry(name, method, path, None,
+                                           "canvas", None, {"body": body})
+    ctx = {"user_id": USER, "conversation_id": CONV,
+           "course_resolution": {"course_id": "101", "confidence": 1.0,
+                                 "user_confirmed": True}}
+    with pytest.raises(mode_errors.DestructiveConfirmationRequired):
+        admission_mod.check_mode_authority(entry, params, None, ctx,
+                                           journal=False)
+    ctx["destructive_confirmed"] = "Yes, replace them"
+    audit, _rec = admission_mod.check_mode_authority(
+        entry, params, None, ctx, journal=False)
+    assert audit["mode"] == "edit"
+
+
+# The module's overrides carry students: the direct lane refuses them
+# before the mode gate (LearnerDataGated), so the CLI case covers the rest.
+@pytest.mark.parametrize("name, method, path, params, body",
+                         [r for r, i in zip(REPLACE_LIST, _IDS)
+                          if i != "module-overrides"],
+                         ids=[i for i in _IDS if i != "module-overrides"])
+def test_a_replace_list_deletion_asks_first(edit_with_confirmations, name,
+                                            method, path, params, body):
+    session = edit_with_confirmations
+    code, out = _catalog(name, method, path, params, body)
+    assert code != 0, out
+    assert "DestructiveConfirmation" in out or "destroy" in out, out
+    assert _writes(session) == []
+
+
+def test_the_educators_yes_runs_a_replace_list_deletion(
+        edit_with_confirmations):
+    session = edit_with_confirmations
+    name, method, path, params, body = REPLACE_LIST[0]
+    code, out = _catalog(name, method, path, params, body,
+                         "--destructive-confirmed", "Yes, replace them")
+    assert "DestructiveConfirmation" not in out, out
+    assert [c[0] for c in _writes(session)] == ["PUT"], out
+
+
+def test_an_approved_replace_list_deletion_runs(edit_with_confirmations):
+    session = edit_with_confirmations
+    name, method, path, params, body = REPLACE_LIST[0]
+    code, out = _cli(["plan-write", "--name", name, "--method", method,
+                      "--path", path, "--params", json.dumps(params),
+                      "--body", json.dumps(body)] + _who())
+    assert code == 0, out
+    assert _writes(session) == []
+    code, out = _cli(["approve-write", "--op-id", json.loads(out)["op_id"],
+                      "--authorization", "Yes, replace them"] + _who())
+    assert "DestructiveConfirmation" not in out, out
+    assert [c[0] for c in _writes(session)] == ["PUT"], out
+
+
+def test_an_assignment_change_without_overrides_does_not_ask(
+        edit_with_confirmations):
+    from dispatch.admission import _is_destructive
+    entry = ex.catalog_descriptor_to_entry(
+        "canvas_edit_assignment", "PUT",
+        "/api/v1/courses/{course_id}/assignments/{id}", None, "canvas",
+        None, {"body": {"assignment": {"name": "Essay 2"}}})
+    assert _is_destructive(entry) is False
+    entry = ex.catalog_descriptor_to_entry(
+        "canvas_edit_assignment", "PUT",
+        "/api/v1/courses/{course_id}/assignments/{id}", None, "canvas",
+        None, {"body": {"assignment[assignment_overrides][][id]": "3"}})
+    assert _is_destructive(entry) is True

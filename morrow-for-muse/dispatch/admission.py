@@ -1993,15 +1993,58 @@ def reverify_approval(entry: dict, params: dict, tenant_base: str | None,
     }
 
 
+_ROUTE_SLOT_RE = re.compile(r"\{[^{}/]*\}")
+
+
+def _route_key(method, url):
+    """(METHOD, path) with every {slot} and number as "{}", or None. A
+    template's leading {canvas_base}, a real URL's origin, and the query
+    are dropped."""
+    text = str(url or "")
+    if text.startswith("{"):
+        text = text[text.find("}") + 1:] if "}" in text else ""
+    path = urllib.parse.urlsplit(text).path
+    if not path:
+        return None
+    path = _ROUTE_SLOT_RE.sub("{}", path)
+    path = re.sub(r"(?<=/)[0-9]+(?=/|$)", "{}", path).rstrip("/")
+    return str(method or "").upper(), path
+
+
+def _deletes_by_replacing(request: dict) -> bool:
+    """True when the request replaces a list and Canvas deletes every
+    item not on it (admission_policy.json deletes_by_replacing)."""
+    rules = load_policy().get("deletes_by_replacing") or {}
+    key = _route_key(request.get("method"), request.get("url"))
+    if key is None:
+        return False
+    if any(_route_key(r.get("method"), r.get("path")) == key
+           for r in rules.get("routes") or ()):
+        return True
+    url_query = urllib.parse.urlsplit(str(request.get("url") or "")).query
+    for rule in rules.get("body_fields") or ():
+        if _route_key(rule.get("method"), rule.get("path")) != key:
+            continue
+        fields = {rule.get("field"): True}
+        if any(part and _flag_set_in(part, fields)
+               for part in (request.get("query"), request.get("body"),
+                            url_query)):
+            return True
+    return False
+
+
 def _is_destructive(entry: dict) -> bool:
-    """True when the entry destroys data: HTTP DELETE, or an entry
-    explicitly marked destructive. Destructive writes are the one
+    """True when the entry destroys data: HTTP DELETE, a live-proven
+    write that replaces a list (Canvas deletes what is not on it), or an
+    entry explicitly marked destructive. Destructive writes are the one
     category where the educator's confirm_destructive_writes setting
     can still surface a confirmation inside edit mode."""
     if entry.get("destructive") is True:
         return True
     request = entry.get("request") or {}
-    return str(request.get("method", "")).upper() == "DELETE"
+    if str(request.get("method", "")).upper() == "DELETE":
+        return True
+    return _deletes_by_replacing(request)
 
 
 def _destructive_confirmation_required(user_id) -> bool:
@@ -2042,8 +2085,9 @@ def check_mode_authority(entry: dict, params: dict,
         bound. Returns (mode_audit_block, None): there is no signed
         record to persist, so the dispatcher's persist_signed_record /
         consume_approval calls are no-ops, exactly like reads.
-      - destructive writes (HTTP DELETE, or entries marked
-        destructive) in edit mode: admitted only with a recorded
+      - destructive writes (HTTP DELETE, a write that replaces a list
+        and deletes what is not on it, or entries marked destructive)
+        in edit mode: admitted only with a recorded
         educator confirmation for that action
         (mode_ctx["destructive_confirmed"]) while the educator's
         confirm_destructive_writes setting is on (off by default).
