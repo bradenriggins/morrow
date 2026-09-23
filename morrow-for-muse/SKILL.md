@@ -80,8 +80,13 @@ preemptively and never on every run: a healthy session needs no page.
    or in the tree's `helper/env` (the legacy global `~/.morrow/env` is
    honored for `CANVAS_BASE` only). There is no default tenant; the
    helper refuses to start on the placeholder.
-2. Start the helper if the installer has not already:
-   `bash helper/keepalive.sh` (from this tree).
+2. If the installer skipped the helper launch because `CANVAS_BASE`
+   was not set yet, run `bash install.sh` again (from this tree) once
+   it is set. The rerun checks the Canvas address first (a
+   placeholder, an address that does not load, or a Canvas error page
+   stops it with a message) and then starts the helper through
+   `helper/keepalive.sh`. Do not start keepalive.sh by hand for this:
+   it skips those checks.
    Do not hand-launch `helper/server.py` directly: it sources
    `<tree>/helper/env` itself, so it fails without `CANVAS_BASE`
    exported in the shell or the tree env file, and the production-port

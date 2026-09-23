@@ -26,11 +26,12 @@ prior knowledge of the project.
   Without it the install works and Morrow refuses all student data.
   Course content still works, but student names in it are hidden
   without labels, so a change that would save a hidden name back is
-  refused. Install it hash-pinned from this tree:
-  `python3 -m pip install --require-hashes -r requirements-optional.txt`.
-  Install step 1 checks for it and prints a warning (repeated at the
-  end) when it is missing or older than the pinned version. Everything
-  else in the tree is Python's standard library.
+  refused. Step 2 below installs it hash-pinned from the release
+  (`python3 -m pip`, so pip must be available). Install step 1 checks
+  for it and prints a warning (repeated at the end) when it is missing
+  or older than the pinned version. Everything else in the tree is
+  Python's standard library.
+- `unzip`, to unpack the release (step 1).
 - The command-line tools the installer and keepalive use: `curl`, `ss`,
   `pgrep`, `flock`, and `openssl` (the helper's TLS selftest makes a
   throwaway certificate). Install step 1 stops and names a missing
@@ -71,19 +72,38 @@ publish unless the secrets gate passes on the result. Do not run
 `install.sh` directly in a repository checkout: it has no carve manifest
 and step 2 refuses it on purpose.
 
-Unzip the release into the skills directory:
+Unpack the release into the skills directory, from the folder that
+holds the zip:
 
 ```
-mkdir -p ~/workspace/skills
-unzip morrow-muse-connector-0.4.1.zip -d ~/workspace/skills/
-mv ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas
+mkdir -p ~/workspace/skills/morrow-canvas
+STAGE="$(mktemp -d)"
+unzip -q morrow-muse-connector-0.4.1.zip -d "$STAGE"
+cp -R "$STAGE/morrow-muse-connector/." ~/workspace/skills/morrow-canvas/
+rm -rf "$STAGE"
 cd ~/workspace/skills/morrow-canvas
 ```
+
+The same commands install and upgrade. They unpack the zip into a
+temporary folder and copy its contents into
+`~/workspace/skills/morrow-canvas`, so a second run never puts one tree
+inside another. What an installed tree holds that the release does not
+ship stays: your `helper/env`, your signed-in session
+(`helper/profile/`), and the tree id (`.morrow-tree-id`).
 
 Everything below assumes you are in the tree root
 (`~/workspace/skills/morrow-canvas/`).
 
-## Step 2: run install.sh
+## Step 2: install the student-data package, then run install.sh
+
+First install the `cryptography` package the learner vault needs (see
+Prerequisites), hash-pinned from the tree:
+
+```
+python3 -m pip install --require-hashes -r requirements-optional.txt
+```
+
+Then run the installer:
 
 ```
 bash install.sh
@@ -253,16 +273,22 @@ curl -sf http://127.0.0.1:8901/status
 You should see JSON with your Canvas URL and `"logged_in": true` once
 you have signed in (step 5).
 
-If `CANVAS_BASE` was not set during the install, start the helper now:
+If `CANVAS_BASE` was not set during the install, the installer skipped
+the helper launch. Set it (step 3), then run the installer again:
 
 ```
 cd ~/workspace/skills/morrow-canvas
-bash helper/keepalive.sh
+bash install.sh
 ```
 
-(If you set `CANVAS_BASE` in `helper/env`, keepalive.sh sources
-that file (the legacy global `~/.morrow/env` is honored for
-`CANVAS_BASE` only). Do not hand-launch `helper/server.py` directly: it
+The rerun checks your Canvas address before it starts the helper: a
+placeholder, an address that does not load, or a Canvas error page
+stops it with a message naming the problem. Do not start
+`helper/keepalive.sh` by hand for this: it skips those checks.
+
+(keepalive.sh sources the tree's `helper/env` (the legacy global
+`~/.morrow/env` is honored for `CANVAS_BASE` only). Do not hand-launch
+`helper/server.py` directly: it
 sources `<tree>/helper/env` itself, so it fails without `CANVAS_BASE`
 exported in the shell or the tree env file, and the production-port
 guard treats a bare launch on the production ports with the live
@@ -388,8 +414,13 @@ reliably end the helper's separate session.
 
 ## Upgrading
 
-Unzip the new release over the tree (or into a fresh directory) and
-rerun `install.sh`. The installer:
+Download the new release, run the Step 1 commands with its file name,
+then run Step 2 again (`pip` first, then `bash install.sh`). Step 1
+copies the new release over the installed tree in place, which keeps
+your Canvas address, your sign-in, and the tree id. (A release unpacked
+into a different folder is a separate install: it starts without any of
+them.) Keep the previous release zip: the installer's backup covers
+its own changes, not the files the copy replaced. The installer:
 
 - Verifies the tree against `pack/carve-manifest.json` (SHA-256 of
   every shipped file) before touching anything.

@@ -174,6 +174,14 @@ Installing and the docs:
   installer's own checks still ship, and they keep to a scratch folder.
 - The troubleshooting guide names the Python version the installer
   needs: 3.11 or newer.
+- Upgrading works as the install guide says. Its unpack commands, run a
+  second time, moved the new release inside the installed folder, so
+  nothing was upgraded and the installer refused the folder. The same
+  commands now install and upgrade in place and keep your Canvas
+  address, your sign-in, and the folder's id. The guide installs the
+  student-data package as a step, names `unzip` as a prerequisite, and
+  starts a helper the installer skipped by running the installer again,
+  which checks your Canvas address first.
 - The setup, consent, and disconnect pages, and the assistant's
   instructions, say how to get help: email hello@meetmorrow.app or see
   meetmorrow.app/support, with the Morrow for Muse version and the step
