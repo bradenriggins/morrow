@@ -93,6 +93,27 @@ test("every documented Moodle operation count matches the catalog", () => {
   assert.ok(readme.includes("That count describes implementation breadth only."), `${README} must keep the breadth-only sentence`);
 });
 
+test("the README names no Moodle area as missing when the catalog implements it", () => {
+  const surface = section(read(README), SURFACE_HEADING, /\n## /);
+  const gaps = surface.match(/Missing areas include ([^\n]*?)\.(?:\s|$)/)?.[1];
+  assert.ok(gaps, `${README} must name the Moodle areas that are still missing`);
+  // Each area is named by one catalog operation that implements it.
+  const implementedBy = {
+    "participants and enrolment": "moodle_enrol_participant",
+    "calendar": "moodle_create_course_event",
+    "access restrictions": "moodle_update_activity_restrictions",
+    "completion": "moodle_update_activity_completion",
+    "backup and restore": "moodle_start_course_restore",
+    "import": "moodle_start_course_import",
+    "reports and logs": "moodle_get_course_log_summary",
+    "site administration": "moodle_get_site_inventory",
+  };
+  const contradicted = Object.entries(implementedBy)
+    .filter(([area, toolName]) => new RegExp(`\\b${area}\\b`, "i").test(gaps) && catalogToolNames.includes(toolName))
+    .map(([area, toolName]) => `${area} (${toolName})`);
+  assert.deepEqual(contradicted, [], `${README} calls these Moodle areas missing although the catalog implements them`);
+});
+
 test("no Moodle module with a catalog route is documented as Missing", () => {
   const scope = read(SCOPE);
   const rows = [...scope.matchAll(/^\| `([a-z0-9]+)` \| ([^|]+)\|/gm)];
