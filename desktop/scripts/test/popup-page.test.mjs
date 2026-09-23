@@ -465,7 +465,7 @@ test("Disconnect says plainly when Chrome still holds site access", async () => 
   await page.click("#disconnect");
   assert.deepEqual(page.messages("morrow_disconnect"), [{ type: "morrow_disconnect" }]);
   assert.equal(page.hidden("#notice"), false);
-  assert.equal(page.text("#notice"), "Morrow is disconnected. Chrome site access still needs removal in this extension's settings.");
+  assert.equal(page.text("#notice"), "Morrow is disconnected. Chrome kept site access for your learning platform. Remove it on the Chrome extensions page under Morrow Bridge site access.");
   assert.equal(page.hidden("#error"), true);
 
   permissionsRevoked = true;

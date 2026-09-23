@@ -445,7 +445,7 @@ setupGuide.addEventListener("click", () => {
 disconnect.addEventListener("click", async () => {
   await runAction(() => message("morrow_disconnect"), (result) => {
     if (result?.permissionsRevoked === false) {
-      showNotice("Morrow is disconnected. Chrome site access still needs removal in this extension's settings.");
+      showNotice("Morrow is disconnected. Chrome kept site access for your learning platform. Remove it on the Chrome extensions page under Morrow Bridge site access.");
     } else {
       clearNotice();
     }
