@@ -183,7 +183,7 @@ function readState(status) {
   if (ready) return {
     ...state,
     title: "Plan your first change",
-    detail: "Ask your assistant for a change in your selected course. Morrow keeps every change in Plan for your review.",
+    detail: "Ask your assistant for a change in your selected course. Each change waits for your review unless you turned on Edit for that kind of change in that course.",
     canOpenSettings: false,
   };
   if (pairing) return {

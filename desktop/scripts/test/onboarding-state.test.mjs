@@ -68,6 +68,10 @@ test("setup guide distinguishes a closed assistant, signed-out course, Plan sele
   const ready = setupGuideState(READY_STATUS);
   assert.equal(ready.ready, true);
   assert.equal(ready.title, "Plan your first change");
+  // The status this guide reads carries no Edit permission, so the ready text must be true whether
+  // or not the educator has turned on Edit for a kind of change in that course.
+  assert.equal(ready.detail, "Ask your assistant for a change in your selected course. Each change waits for your review unless you turned on Edit for that kind of change in that course.");
+  assert.doesNotMatch(ready.detail, /every change/i);
 });
 
 // Each next step names a control the popup or Plan and Edit settings really shows: Connect this

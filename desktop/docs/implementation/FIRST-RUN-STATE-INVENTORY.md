@@ -381,7 +381,7 @@ The exact heading, summary, next action, detail, and checklist strings emitted f
 - "Ready to use"
 - "1 selected course is ready in this Chrome session. Morrow completed a first read in Biology 101."
 - "Plan your first change"
-- "Ask your assistant for a change in your selected course. Morrow keeps every change in Plan for your review."
+- "Ask your assistant for a change in your selected course. Each change waits for your review unless you turned on Edit for that kind of change in that course."
 - "First read completed in Biology 101"
 
 The status dot is decorative, and every state also carries a heading, so colour alone never separates
