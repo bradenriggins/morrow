@@ -3,7 +3,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import type { JsonObject } from "@morrow/contracts";
 import { describe, expect, it } from "vitest";
 import { createMorrowServer } from "../src/server.js";
-import type { GatewayRuntime } from "../src/runtime.js";
+import { PrivateChatWaitEndedError, type GatewayRuntime } from "../src/runtime.js";
 
 function fixture({ closeImmediately = false, continueOnce = false } = {}) {
   const calls: JsonObject[] = [];
@@ -123,6 +123,26 @@ describe("Morrow Private Chat", () => {
       expect(result.isError).not.toBe(true);
       expect(result.structuredContent).toMatchObject({ status: "closed", turns: 0 });
       expect(calls).toHaveLength(1);
+    } finally { await client.close(); await server.close(); }
+  });
+
+  it("says Private Chat stopped waiting when no message arrived in time", async () => {
+    const runtime = {
+      catalog: { tools: [] },
+      config: { upstreams: [] },
+      redactMcpEgress: async (value: JsonObject) => value,
+      privateChatExchange: async () => { throw new PrivateChatWaitEndedError(); },
+    } as unknown as GatewayRuntime;
+    const client = new Client({ name: "Codex", version: "1" }, { capabilities: { sampling: {} }, versionNegotiation: { mode: { pin: "2026-07-28" } } });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const server = serveStdio(() => createMorrowServer(runtime), { transport: b });
+    await client.connect(a);
+    try {
+      const result = await client.callTool({ name: "morrow_private_chat", arguments: {} }, { allowInputRequired: true });
+      expect(result.isError).toBe(true);
+      expect((result.content as { text: string }[])[0]!.text).toBe(
+        "Private Chat unavailable. No message was sent in time, so Morrow stopped waiting and cleared the drawer. Ask the assistant to start Private Chat again.",
+      );
     } finally { await client.close(); await server.close(); }
   });
 

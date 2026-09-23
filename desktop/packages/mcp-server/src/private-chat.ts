@@ -11,7 +11,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
-import type { GatewayRuntime } from "./runtime.js";
+import { PrivateChatWaitEndedError, type GatewayRuntime } from "./runtime.js";
 
 const inputSchema = z.strictObject({});
 const sampleSchema = z.object({
@@ -231,7 +231,9 @@ export function registerPrivateChatTool(
     } catch (error) {
       return {
         isError: true,
-        content: [{ type: "text", text: `Private Chat unavailable. ${error instanceof PrivateChatError ? error.message : "Morrow could not validate the local relay or assistant response."}` }],
+        content: [{ type: "text", text: `Private Chat unavailable. ${error instanceof PrivateChatError ? error.message
+          : error instanceof PrivateChatWaitEndedError ? "No message was sent in time, so Morrow stopped waiting and cleared the drawer. Ask the assistant to start Private Chat again."
+            : "Morrow could not validate the local relay or assistant response."}` }],
         structuredContent: { schema: "morrow.problem.v1", code: "private_chat_unavailable" },
       };
     }

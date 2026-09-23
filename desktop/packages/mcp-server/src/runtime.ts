@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SdkError, SdkErrorCode } from "@modelcontextprotocol/client";
 import { DomUtils, parseDocument } from "htmlparser2";
 import sanitizeHtml from "sanitize-html";
 import {
@@ -428,6 +429,21 @@ function loadCanvasPlainLabels(): ReadonlyMap<string, string> {
     return labels;
   } catch {
     return new Map();
+  }
+}
+
+/**
+ * The Bridge waits up to 9 minutes for the educator's next Private Chat message
+ * (canvas-connector-mcp privateChatExchange). The gateway's call to the connector
+ * outlasts that wait, so the Bridge, not the MCP SDK's 60-second request default,
+ * decides when a wait ends.
+ */
+const PRIVATE_CHAT_EXCHANGE_TIMEOUT_MS = 10 * 60_000;
+
+/** No Private Chat message arrived before the wait ended, and the drawer was cleared. */
+export class PrivateChatWaitEndedError extends Error {
+  constructor() {
+    super("private_chat_wait_ended");
   }
 }
 
@@ -3953,9 +3969,21 @@ export class GatewayRuntime {
     // The Bridge asks once per message for the labels of the students it names,
     // then answers the labels exchange with the protected message.
     for (let round = 0; round < 2; round += 1) {
-      const raw = await upstream.callTool("morrow_private_chat_exchange", request, { safeToRetry: false, signal });
+      let raw: unknown;
+      try {
+        raw = await upstream.callTool("morrow_private_chat_exchange", request, { safeToRetry: false, signal, timeoutMs: PRIVATE_CHAT_EXCHANGE_TIMEOUT_MS });
+      } catch (error) {
+        // The SDK reports a cancelled request with the timeout code too, so a cancel is not a wait that ended.
+        if (error instanceof SdkError && error.code === SdkErrorCode.RequestTimeout && !signal?.aborted) {
+          throw new PrivateChatWaitEndedError();
+        }
+        throw error;
+      }
       const result = isJsonObject(raw) && isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
       if (!result || result.schema !== "morrow.private-chat.exchange.v1") throw new Error("The Private Chat relay returned an invalid result.");
+      if (result.status === "error" && isJsonObject(result.problem) && result.problem.code === "private_chat_wait_expired") {
+        throw new PrivateChatWaitEndedError();
+      }
       if (result.status === "closed" && Object.keys(result).every((key) => ["schema", "status"].includes(key))) return result;
       if (result.status === "labels_required" && round === 0) {
         const learnerIds = result.learnerIds;
