@@ -27,13 +27,14 @@ to the exact packaged extension before the builder can expose that route. The
 Bridge identity, active-folder, and pairing checks stay required for every
 delivery route.
 
-On 7 September, the unsigned 1.0.0 installer passed native `BOOTZ` installation,
-startup, damaged-payload refusal, exact repair, uninstall and retained-data
-checks through `scripts/test/desktop-windows-smoke.mjs`. That harness runs on
-native Windows only. Its saved receipt is
-`output/final-pass-20260907/smoke-1.0.0.harness.json`. It uses isolated application
-state. Public-download SmartScreen behavior and institution-managed deployment
-remain live-unverified. No signed Windows artifact exists.
+On 7 September, on the native Windows machine `BOOTZ`, the unsigned 1.0.0
+installer passed installation, startup, damaged-payload refusal, exact repair,
+uninstall and retained-data checks through
+`scripts/test/desktop-windows-smoke.mjs`. That harness runs on native Windows
+only and uses isolated application state. Its receipt stayed on that machine
+and is not in this repository. Public-download SmartScreen behavior and
+institution-managed deployment remain live-unverified. No signed Windows
+artifact exists.
 
 ## Silent deployment
 

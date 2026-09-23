@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -14,9 +15,10 @@ import { fileURLToPath } from "node:url";
  * the app renders, and the receipt a run wrote. This keeps a desktop document from
  * describe an application, an artifact, or a proof that does not exist.
  *
- * Receipts under `output/` are local evidence and are not tracked, so a missing
- * one is reported as a diagnostic rather than a failure. A receipt that is
- * present has to say what the documents say it says.
+ * Receipts under `output/` are local evidence and are not tracked. A public
+ * document may not cite one, because its reader cannot open it. In the
+ * implementation history a missing one is reported as a diagnostic rather than
+ * a failure. A receipt that is present has to say what the documents say it says.
  */
 const root = new URL("../../", import.meta.url);
 const rootPath = fileURLToPath(root);
@@ -26,12 +28,17 @@ const read = (relativePath) => readFileSync(new URL(relativePath, root), "utf8")
 // path is relative to the desktop product.
 const present = (relativePath) => existsSync(new URL(relativePath, relativePath.startsWith(".github/") ? new URL("../", root) : root));
 
-/** The documents that carry a desktop claim, public first. */
-const DOCS = [
+/** The desktop documents a person installing, updating or deploying Morrow reads. */
+const PUBLIC_DOCS = [
   "README.md",
   "LIMITATIONS.md",
   "installer/UPDATES.md",
   "installer/WINDOWS-DEPLOYMENT.md",
+];
+
+/** The documents that carry a desktop claim, public first, then implementation history. */
+const DOCS = [
+  ...PUBLIC_DOCS,
   "docs/implementation/STARTER-RELEASE-BOARD.md",
   "docs/implementation/MORROW-REMAINING-WORK.md",
   "docs/implementation/MORROW-1.0-COMPLETION-GOAL.md",
@@ -224,9 +231,24 @@ test("every repository path the desktop documents name exists", () => {
   assert.deepEqual(missing, [], "a desktop document names a file that is not in this repository");
 });
 
-test("the local receipts the desktop documents cite are present, or the run has not happened here", (t) => {
+test("a public desktop document cites only evidence a reader of the repository can open", () => {
+  const listed = spawnSync("git", ["ls-files", "-z", "--", ...LOCAL_EVIDENCE_ROOTS], { cwd: rootPath, encoding: "utf8" });
+  assert.equal(listed.status, 0, `git ls-files failed: ${listed.stderr}`);
+  const tracked = listed.stdout.split("\0").filter(Boolean);
+  const untracked = [];
+  for (const doc of PUBLIC_DOCS) {
+    for (const [target, line] of namedPaths(read(doc))) {
+      if (!LOCAL_EVIDENCE_ROOTS.has(target.split("/")[0])) continue;
+      const directory = target.endsWith("/") ? target : `${target}/`;
+      if (!tracked.some((file) => file === target || file.startsWith(directory))) untracked.push(`${doc}:${line} -> ${target}`);
+    }
+  }
+  assert.deepEqual(untracked, [], "a public document cites a receipt that stays on the machine that wrote it");
+});
+
+test("the local receipts the implementation history cites are present, or the run has not happened here", (t) => {
   const absent = [];
-  for (const doc of DOCS) {
+  for (const doc of DOCS.filter((entry) => !PUBLIC_DOCS.includes(entry))) {
     for (const [target, line] of namedPaths(read(doc))) {
       if (!LOCAL_EVIDENCE_ROOTS.has(target.split("/")[0])) continue;
       if (!present(target)) absent.push(`${doc}:${line} -> ${target}`);
