@@ -53,7 +53,7 @@ Then confirm the principal through the executor:
 ```
 PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py catalog \
   --name <a live-proven read row> --method GET --path <its path> \
-  --class read --backend chromium --canvas-base "$CANVAS_BASE"
+  --class read --backend chromium
 ```
 
 Confirm the returned identity is the educator before doing anything

@@ -275,7 +275,7 @@ real catalog row):
 PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py catalog \
   --name canvas_get_single_assignment --method GET \
   --path /api/v1/courses/{course_id}/assignments/{id} \
-  --class read --backend chromium --canvas-base "$CANVAS_BASE" \
+  --class read --backend chromium \
   --params '{"course_id": 12345, "id": 67890}'
 ```
 

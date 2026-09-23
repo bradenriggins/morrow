@@ -238,7 +238,7 @@ Reads (no approval needed):
 PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py catalog \
   --name canvas_get_course_settings --method GET \
   --path /api/v1/courses/{course_id}/settings \
-  --class read --backend chromium --canvas-base "$CANVAS_BASE" \
+  --class read --backend chromium \
   --params '{"course_id": 89585}'
 ```
 
@@ -255,8 +255,10 @@ unrecognized files on the next install/upgrade.)
 or a JSON array of objects for the bulk date update: the write's
 request body, which the post-write readback compares against; values
 may reference params as `"params.<name>"`),
-`--backend chromium`, and `--canvas-base` (or the `CANVAS_BASE` env
-var). The CLI always runs the shipped `pack/pack.json`; there is no
+and `--backend chromium`. The executor reads the Canvas address from
+the tree's `helper/env` (a `CANVAS_BASE` exported in the shell wins);
+`--canvas-base <url>` overrides it, before or after the command. The
+CLI always runs the shipped `pack/pack.json`; there is no
 pack override. A write result's `outcome` is `verified` (a readback
 confirmed it) or `unverified` (Canvas said success and nothing
 confirmed it): relay `unverified` to the educator as unconfirmed, never
@@ -309,7 +311,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py plan-write \
   --path '/api/v1/courses/{course_id}/pages/{url_or_id}' \
   --params '{"course_id": "89585", "url_or_id": "week-1"}' \
   --body '{"wiki_page": {"title": "Week 1 Overview"}}' \
-  --backend chromium --canvas-base "$CANVAS_BASE" \
+  --backend chromium \
   --user-id "$MORROW_USER_ID" --conversation-id "$MORROW_CONVERSATION_ID"
 ```
 
@@ -322,7 +324,7 @@ The educator replies "Yes, do it". You run:
 ```
 PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py approve-write \
   --op-id <op_id from plan-write> --authorization "Yes, do it" \
-  --backend chromium --canvas-base "$CANVAS_BASE" \
+  --backend chromium \
   --user-id "$MORROW_USER_ID" --conversation-id "$MORROW_CONVERSATION_ID"
 ```
 
@@ -731,9 +733,8 @@ The educator names students; you never guess which one they mean.
 1. The educator names a student. Run
    `morrow students find --course C "<the name exactly as the educator
    typed it>"` (pass `--conversation-id`, or set
-   `MORROW_CONVERSATION_ID`; add `--canvas-base` or `CANVAS_BASE`).
-   It reads the course roster through the login helper and prints one
-   JSON object.
+   `MORROW_CONVERSATION_ID`). It reads the course roster through the
+   login helper and prints one JSON object.
 2. `status: resolved`: one student matched. Use `student` (the
    label) or `shown_as` ("Jane Doe (Student A3)") wherever a write
    needs that student. From now on in this conversation, outputs show

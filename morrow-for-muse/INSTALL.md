@@ -315,7 +315,7 @@ You should see JSON with your Canvas URL and `"logged_in": true`.
 cd ~/workspace/skills/morrow-canvas
 PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py catalog \
   --name users_self --method GET --path /api/v1/users/self \
-  --class read --backend chromium --canvas-base "$CANVAS_BASE"
+  --class read --backend chromium
 ```
 
 (The `PYTHONDONTWRITEBYTECODE=1` prefix keeps Python from writing

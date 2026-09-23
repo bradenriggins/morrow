@@ -10340,9 +10340,8 @@ def _require_destructive_confirm(command, warning, yes):
         raise ExecutorError("%s aborted by operator" % command)
 
 
-def main(argv=None):
-    # W5-P2-1: graceful SIGTERM/SIGINT handling for the whole CLI.
-    _install_shutdown_handlers()
+def build_parser():
+    """The executor CLI's argument parser (main parses with it)."""
     parser = argparse.ArgumentParser(
         description="Morrow Direct dispatch executor")
     parser.add_argument("--session", default=SESSION_PATH,
@@ -10354,6 +10353,11 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_backend(p):
+        # Accepted after the command too. SUPPRESS leaves the top-level
+        # value in place when the flag is not repeated here.
+        p.add_argument("--canvas-base", default=argparse.SUPPRESS,
+                       help="the same Canvas base URL override as "
+                            "--canvas-base before the command")
         p.add_argument("--backend", default="chromium", choices=("https", "chromium"),
                        help="chromium: synchronous executor through the local "
                             "Chromium's authenticated tab via CDP on "
@@ -10607,8 +10611,13 @@ def main(argv=None):
              "persist indefinitely.")
     add_dry_run(p_undo)
     add_channel_gate(p_undo)
+    return parser
 
-    args = parser.parse_args(argv)
+
+def main(argv=None):
+    # W5-P2-1: graceful SIGTERM/SIGINT handling for the whole CLI.
+    _install_shutdown_handlers()
+    args = build_parser().parse_args(argv)
     # Only the shipped pack runs from the CLI: a caller-chosen pack would
     # let the caller pin any entry it authored, so there is no --pack
     # flag and no environment override.
@@ -10840,6 +10849,10 @@ def _describe_operation(method, path, where=None):
     return describe_operation(method, path, where)
 
 
+# Options before the command that take a value (build_parser).
+_TOP_LEVEL_VALUE_FLAGS = ("--session", "--canvas-base")
+
+
 def _funnel_operation(argv, exc=None):
     """What was attempted, in the words the educator reads: "changing a
     page in course 101". approve-write labels its own failures with the
@@ -10861,7 +10874,16 @@ def _funnel_operation(argv, exc=None):
                 return token[len(name) + 1:]
         return None
 
-    subcommand = next((t for t in tokens if not t.startswith("-")), None)
+    subcommand = None
+    skip_value = False
+    for token in tokens:
+        if skip_value:
+            skip_value = False
+        elif token in _TOP_LEVEL_VALUE_FLAGS:
+            skip_value = True
+        elif not token.startswith("-"):
+            subcommand = token
+            break
     if subcommand in ("catalog", "plan-write"):
         method, path = _flag("--method"), _flag("--path")
         if not (method and path):

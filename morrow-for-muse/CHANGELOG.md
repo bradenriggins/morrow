@@ -144,6 +144,12 @@ Installing and the docs:
   installer's own checks still ship, and they keep to a scratch folder.
 - The troubleshooting guide names the Python version the installer
   needs: 3.11 or newer.
+- The example commands in the assistant's instructions and the install
+  guide run as written. They put the Canvas address option after the
+  command, where Morrow refused it, so every example read and change
+  stopped before it started. The option now works in either place, and
+  the examples leave it out: Morrow reads your Canvas address from
+  `helper/env`.
 
 Technical notes:
 
@@ -185,6 +191,11 @@ Technical notes:
 - `test_release_version.py` requires every current-version statement
   (`pack/version.txt`, `pack/pack.json`, SKILL.md, INSTALL.md, the
   install selftest stub, and this changelog) to name `VERSION`.
+- `dispatch/executor.py` accepts `--canvas-base` before or after the
+  subcommand (`build_parser`), and the error funnel skips the values of
+  top-level options when it names the step. `dispatch/test_documented_commands.py`
+  parses every executor command in the docs' code blocks and
+  install.sh's operator check.
 
 ## 0.4.0 (2026-09-22)
 
