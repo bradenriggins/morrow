@@ -5,7 +5,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import { executeMoodleLtiInPage } from "../../connector/extension/src/moodle-lti-executor.js";
 
 const ANCHOR_SESSION = "moodle-lti-session-a";
@@ -274,7 +274,7 @@ test("the Moodle External tool route reads, creates hidden, and edits bounded se
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("lti test server did not bind");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=1`);

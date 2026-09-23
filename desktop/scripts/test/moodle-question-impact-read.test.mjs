@@ -5,7 +5,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import { executeMoodleQuestionBankImpactScopeInPage } from "../../connector/extension/src/moodle-question-impact-read.js";
 
 const OPERATION = Object.freeze({
@@ -126,7 +126,7 @@ test("Moodle Question Bank impact scope enumerates stored references and fails c
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("test server did not bind");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(`${origin}/course/view.php?id=2`);
     const invoke = (args = { course_id: 2 }) => page.evaluate(

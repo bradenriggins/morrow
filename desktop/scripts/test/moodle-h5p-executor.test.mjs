@@ -6,7 +6,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import { executeMoodleH5pInPage } from "../../connector/extension/src/moodle-h5p-executor.js";
 
 const SESSION = "synthetic-session";
@@ -305,7 +305,7 @@ test("Moodle H5P executor creates one hidden activity from a reviewed package an
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("H5P test server did not bind");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=${COURSE_ID}`);

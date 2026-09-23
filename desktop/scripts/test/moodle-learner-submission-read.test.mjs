@@ -5,7 +5,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import { executeMoodleAssignmentSubmissionSummaryInPage } from "../../connector/extension/src/moodle-learner-submission-read.js";
 
 const OPERATION = Object.freeze({
@@ -88,7 +88,7 @@ test("Moodle Assignment submission summary binds the module then returns only co
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("test server did not bind");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(`${origin}/course/view.php?id=2`);
     const invoke = (args = { course_id: 2, module_id: 8 }, expiresAt = Date.now() + 60_000) => page.evaluate(

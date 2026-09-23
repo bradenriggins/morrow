@@ -5,7 +5,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import { executeCanvasClassicQuizSubmissionSummaryInPage } from "../../connector/extension/src/canvas-classic-quiz-submission-read.js";
 
 const OPERATION = Object.freeze({
@@ -74,7 +74,7 @@ test("Canvas Classic Quiz submission summary follows only bounded exact paginati
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("test server did not bind");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(`${origin}/courses/2/quizzes/8`);
     const invoke = (args = { course_id: "2", quiz_id: "8" }, binding = { origin, siteUrl: `${origin}/courses/2/quizzes/8`, principalId: "3", courseId: "2" }, expiresAt = Date.now() + 60_000) => page.evaluate(

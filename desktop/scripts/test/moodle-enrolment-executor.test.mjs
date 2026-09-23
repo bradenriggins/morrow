@@ -5,7 +5,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import { executeMoodleEnrolmentInPage } from "../../connector/extension/src/moodle-enrolment-executor.js";
 import { executeMoodleCourseParticipantsInPage } from "../../connector/extension/src/moodle-participants-read.js";
 import { categoriesForBinding } from "../../connector/extension/src/edit-policy.js";
@@ -432,7 +432,7 @@ test("each enrolment and role write binds one rostered person, sends one request
     if (!address || typeof address === "string") throw new Error("test server did not bind");
     origin = `https://127.0.0.1:${address.port}`;
     model = initialModel();
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(`${origin}/course/view.php?id=${COURSE_ID}`);
     const binding = { origin, siteUrl: `${origin}/`, principalId: "3", courseId: String(COURSE_ID) };

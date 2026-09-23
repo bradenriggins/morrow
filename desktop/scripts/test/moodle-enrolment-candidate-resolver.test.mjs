@@ -5,7 +5,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import {
   executeMoodleEnrolmentCandidateInPage,
   executeMoodleEnrolmentInPage,
@@ -96,7 +96,7 @@ test("the private resolver returns only one native candidate ID and refuses unsa
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("candidate fixture did not bind");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(`${origin}/course/view.php?id=${COURSE_ID}`);
     const binding = { origin, siteUrl: `${origin}/`, principalId: String(PRINCIPAL_ID), courseId: String(COURSE_ID) };
