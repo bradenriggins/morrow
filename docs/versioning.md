@@ -20,9 +20,9 @@ Tags are created from `main` after the product's CI suite is green. A change tha
 
 `.github/workflows/ci.yml` detects which products changed:
 
-- `desktop/**` changed: the desktop suite runs (`pnpm check`, browser harnesses, installer suites).
-- `morrow-for-muse/**` changed: the muse suite runs (`pytest`).
-- `.github/**` changed (workflow edits): both suites run.
-- None of these changed (root docs, root README): both suites skip, and the required `check` still reports success.
+- `desktop/**` changed: the desktop suite runs on Linux (`pnpm check`, browser harnesses, installer suites). Morrow Desktop ships for Windows and macOS, not Linux, so the installer suites also run on Windows (`windows-2022`) and on macOS on Apple silicon (`macos-14`), the runners `desktop-release.yml` packages on, together with every desktop test that Linux skips.
+- `morrow-for-muse/**` changed: the Muse suite runs (`pytest`, then the install suites on a carved release tree).
+- `.github/**` changed (workflow edits): every suite runs.
+- None of these changed (root docs, root README): every suite skips, and the required `check` still reports success.
 
 A change spanning both products runs both suites.
