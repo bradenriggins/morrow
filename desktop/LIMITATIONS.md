@@ -1,6 +1,6 @@
 # Limitations
 
-Morrow `1.0.5` is the current release build. Publication and live verification remain subject to the evidence below. The version is not an Instructure authorization claim.
+Morrow Desktop `1.0.5` is the current release build. Publication and live verification remain subject to the evidence below. The version is not an Instructure authorization claim.
 
 ## Platform coverage
 

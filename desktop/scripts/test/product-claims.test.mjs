@@ -100,6 +100,28 @@ test("no product-facing page anywhere in the repository uses a retired phrase", 
   assert.deepEqual(found, [], "these phrases are retired; scripts/test/lib/retired-claims.mjs says what each one got wrong");
 });
 
+// The desktop product's public name is Morrow Desktop, for Mac and Windows. "Morrow" alone is the
+// family and the app's own name on the computer, so a version number needs the product it belongs
+// to: Morrow Desktop, Morrow Bridge, or Morrow for Muse. Written before the fix (final sweep
+// 2026-09-23): LIMITATIONS.md said "Morrow `1.0.5`", the website said "Morrow for Mac and Windows",
+// and the existing release was titled "Morrow 1.0.4", so one product had three names.
+test("every page that states a version names the Morrow product it belongs to", () => {
+  const repositoryRoot = new URL("../", root);
+  const listed = spawnSync("git", ["-C", fileURLToPath(repositoryRoot), "ls-files", "-z", "--", "*.md", "*.html"], { encoding: "utf8" });
+  assert.equal(listed.status, 0, listed.stderr);
+  const pages = listed.stdout.split("\0").filter((path) => path && !INTERNAL_RECORDS.test(path));
+  const unnamed = pages.flatMap((page) => {
+    const text = readFileSync(new URL(page, repositoryRoot), "utf8");
+    return [...text.matchAll(/\bMorrow `?v?\d+\.\d+(?:\.\d+)?/g)]
+      .map((match) => `${page}:${text.slice(0, match.index).split("\n").length} "${match[0]}"`);
+  });
+  assert.deepEqual(unnamed, [], "write Morrow Desktop, Morrow Bridge, or Morrow for Muse before a version number");
+
+  const versioning = readFileSync(new URL("docs/versioning.md", repositoryRoot), "utf8");
+  const titles = [...versioning.matchAll(/gh release create (\S+)\/vX\.Y\.Z [^`]*--title "([^"]+)"/g)].map(([, tag, title]) => `${tag}: ${title}`);
+  assert.deepEqual(titles, ["desktop: Morrow Desktop X.Y.Z", "muse: Morrow for Muse X.Y.Z"], "each release title names its product");
+});
+
 test("the documented platform coverage matches the packages that ship", (t) => {
   if (present(BLACKBOARD_PACKAGE)) {
     for (const doc of ["ARCHITECTURE.md", "LIMITATIONS.md"]) {
