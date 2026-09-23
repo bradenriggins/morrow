@@ -67,8 +67,9 @@ Changes to your courses:
   Morrow refuses such a task even if you ask. That option is gone.
 - What this version does not do is refused even when it is part of a
   task we tested: making a page the course home page, choosing the
-  course home page, publishing a New Quiz, and making a graded
-  discussion. Each one ran after your approval, or in Edit mode. To
+  course home page, publishing a New Quiz, making a graded
+  discussion, and a question group that draws from a classic question
+  bank. Each one ran after your approval, or in Edit mode. To
   catch a New Quiz published through its assignment or module item,
   Morrow reads that item first. Make these changes in Canvas yourself
   for now.

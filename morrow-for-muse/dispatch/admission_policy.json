@@ -107,6 +107,20 @@
      "when": "contains",
      "value": "discussion_topic",
      "why": "makes a graded discussion, and discussions are not in this version"
+    },
+    {
+     "method": "POST",
+     "path": "/api/v1/courses/{course_id}/quizzes/{quiz_id}/groups",
+     "field": "assessment_question_bank_id",
+     "when": "present",
+     "why": "draws the group's questions from a classic question bank, and classic question banks are not in this version"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/v1/courses/{course_id}/quizzes/{quiz_id}/groups/{id}",
+     "field": "assessment_question_bank_id",
+     "when": "present",
+     "why": "draws the group's questions from a classic question bank, and classic question banks are not in this version"
     }
    ]
   }

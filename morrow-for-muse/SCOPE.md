@@ -187,7 +187,9 @@ live battery marks them live-proven in
   the query) and creating an announcement external feed (C-25) are
   never-dispatch in the admission policy. Posting an announcement
   notifies every student in the course.
-- Classic question banks: never tested. Not a v1 claim.
+- Classic question banks: never tested. Not a v1 claim. A question
+  group that draws from one (`assessment_question_bank_id` on C-347 or
+  C-352) is refused.
 - The remainder of the 457-row for-muse catalog (437 Canvas rows
   plus 20 Item Bank rows): only rows marked `live-proven` are v1
   claims. (The desktop harvest catalog is a separate 1,137-operation

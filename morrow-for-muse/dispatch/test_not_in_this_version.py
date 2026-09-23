@@ -24,6 +24,9 @@ after an approval (or in Edit mode) the untested change ran:
   5. A graded discussion: submission_types holding discussion_topic on
      assignment create (C-38) or update (C-43). Discussions are not in
      this version.
+  6. A classic question bank: a question group that draws from one
+     (assessment_question_bank_id on question group create C-347 or
+     update C-352). Classic question banks are not in this version.
 Each refusal happens before approval, on every lane, and reads to the
 educator as a task that is on hold in this version (evidence-hold).
 
@@ -68,6 +71,12 @@ ASSIGNMENT_CREATE = ("canvas_create_assignment", "POST",
 ASSIGNMENT_UPDATE = ("canvas_edit_assignment", "PUT",
                      "/api/v1/courses/{course_id}/assignments/{id}",
                      {"course_id": "101", "id": "900"})
+GROUP_CREATE = ("canvas_create_question_group", "POST",
+                "/api/v1/courses/{course_id}/quizzes/{quiz_id}/groups",
+                {"course_id": "101", "quiz_id": "55"})
+GROUP_UPDATE = ("canvas_update_question_group", "PUT",
+                "/api/v1/courses/{course_id}/quizzes/{quiz_id}/groups/{id}",
+                {"course_id": "101", "quiz_id": "55", "id": "5"})
 MODULE_ITEM_UPDATE = ("canvas_update_module_item", "PUT",
                       "/api/v1/courses/{course_id}/modules/{module_id}/"
                       "items/{id}",
@@ -93,6 +102,11 @@ REFUSED = [
     ("graded-discussion-update", ASSIGNMENT_UPDATE,
      {"assignment": {"submission_types": ["online_text_entry",
                                           "discussion_topic"]}}),
+    ("question-bank-group", GROUP_CREATE,
+     {"quiz_groups": [{"name": "Pool", "pick_count": 2,
+                       "assessment_question_bank_id": 12}]}),
+    ("question-bank-group-form", GROUP_UPDATE,
+     {"quiz_groups[][assessment_question_bank_id]": "12"}),
 ]
 ADMITTED = [
     ("page-rename", PAGE_UPDATE, {"wiki_page": {"title": "Welcome!",
@@ -103,6 +117,8 @@ ADMITTED = [
     ("text-assignment", ASSIGNMENT_CREATE,
      {"assignment": {"name": "Essay",
                      "submission_types": ["online_text_entry"]}}),
+    ("question-group", GROUP_CREATE,
+     {"quiz_groups": [{"name": "Pool", "pick_count": 2}]}),
 ]
 
 

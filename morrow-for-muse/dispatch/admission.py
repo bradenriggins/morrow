@@ -596,7 +596,8 @@ def check_evidence_holds(entry: dict, policy: dict) -> None:
     operation, it is removed from the hold list and admitted on all tenants.
     A live-proven route is refused too when its request sends a field
     whose effect is not in this version (evidence_holds.request_fields:
-    the course home page, publishing a New Quiz, a graded discussion).
+    the course home page, publishing a New Quiz, a graded discussion, a
+    classic question bank).
     """
     name = entry.get("name") or ""
     holds = policy.get("evidence_holds", {}) or {}
