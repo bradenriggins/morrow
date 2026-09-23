@@ -17,11 +17,11 @@ test("only the current explicit course-data agreement is accepted", () => {
   }
 });
 
-test("the Bridge cannot read bindings, poll pairing, or open its socket before agreement", () => {
+test("the Bridge cannot read bindings, pair, or open its socket before agreement", () => {
   for (const [signature, consentCheck] of [
     ["async function canvasTabChanged(tabId)", /if \(!await courseDataConsentAccepted\(\)\) return;/],
     ["async function connectBridge()", /if \(!await courseDataAuthorityCurrent\(authorityGeneration\)\) return;/],
-    ["async function pollPairing()", /if \(!await courseDataAuthorityCurrent\(authorityGeneration\)\) return;/],
+    ["async function requestPairing()", /await requireCourseDataAuthority\(authorityGeneration\);/],
   ]) {
     const start = worker.indexOf(signature);
     assert.notEqual(start, -1, signature);
