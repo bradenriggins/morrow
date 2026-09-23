@@ -1034,9 +1034,10 @@ def sign_approval(record: dict, authorization: str,
     two questions.
 
     Before asking for either authorization, show the educator the full
-    payload with dispatch.approval_display.render_approval_display
-    (W6-P1-A1): op, category, target, expiry, the complete canonical
-    params, and the undo-availability disclosure (W6-P1-H1).
+    payload with dispatch.approval_display.render_educator_display
+    (W6-P1-A1): in plain words, the course, the change, every value
+    that will be sent, and the undo-availability disclosure (W6-P1-H1).
+    render_approval_display is the audit detail of the same request.
 
     Honest trust statement: this function runs in the agent's process,
     so it cannot cryptographically prove the authorization string came
@@ -2205,9 +2206,10 @@ Build an educator-signed v2 approval record in Python:
                                      ttl_seconds=3600,
                                      target_identity={"course_id": ...,
                                                       "course_name": ...})
-    # Show the educator the FULL payload first (W6-P1-A1):
+    # Show the educator the FULL payload first (W6-P1-A1), in plain
+    # words (render_approval_display is the audit detail):
     from dispatch import approval_display
-    print(approval_display.render_approval_display(record, params,
+    print(approval_display.render_educator_display(record, params,
                                                    entry=entry))
     # ... educator replies with explicit authorization ...
     signed = admission.sign_approval(

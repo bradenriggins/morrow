@@ -9466,10 +9466,12 @@ def prepare_plan_write(name: str, method: str, path_template: str,
     approve-write refuses when a label names a different issue."""
     try:
         from dispatch.admission import mint_approval
-        from dispatch.approval_display import render_approval_display
+        from dispatch.approval_display import (render_approval_display,
+                                               render_educator_display)
     except ImportError:  # run as a script: dispatch/ itself is on sys.path
         from admission import mint_approval
-        from approval_display import render_approval_display
+        from approval_display import (render_approval_display,
+                                      render_educator_display)
     expire_write_ceremony_files(quiet=True)
     params = dict(params or {})
     extra = {"body": body} if body is not None else None
@@ -9528,7 +9530,8 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         plan["target_identity"] = target
     record = mint_approval(entry, params, tenant_base, ttl_seconds,
                            target_identity=target)
-    display = render_approval_display(record, params, entry=entry)
+    display = render_educator_display(record, params, entry=entry)
+    audit_detail = render_approval_display(record, params, entry=entry)
     if learner_tokens and conversation_id and course_id is not None:
         # Shown to the educator (through the agent, in this conversation
         # only): the names the educator typed, next to their labels.
@@ -9551,10 +9554,13 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         "course": ({"id": target["course_id"], "name": target["course_name"],
                     "term": target.get("term")} if target else None),
         "approval_display": display,
+        "audit_detail": audit_detail,
         "expires_at": record.get("expires_at"),
         "message": ("Nothing was sent. Show the educator approval_display "
                     "exactly as written and ask them to approve this write. "
-                    "When they approve, run approve-write --op-id %s "
+                    "Do not show them audit_detail: it is the technical "
+                    "record of the same request, for reviewers. When they "
+                    "approve, run approve-write --op-id %s "
                     "--authorization \"<their reply, verbatim>\"." % op_id),
     }
 

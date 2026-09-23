@@ -18,7 +18,9 @@ product code calls `vault.lookup()` (a selftest asserts this). Wave 6
 added a NEW, different renderer, `dispatch/approval_display.py`
 (W6-P1-A1 / W6-P1-H1): it renders the full approval payload (op,
 category, target, issued/expiry, complete canonical params, undo
-availability, identity schedule) WITHOUT any vault lookup. Params
+availability, identity schedule) WITHOUT any vault lookup. It renders
+it twice: `render_educator_display` in plain words for the educator,
+and `render_approval_display` as the audit detail. Params
 carry tokens (lrn_...) by construction; the schedule's
 `displayed_as` values are the educator's own citation words relayed
 by the agent. A selftest asserts zero vault references in the new
@@ -71,10 +73,14 @@ signed record. Nothing in this tree de-tokenizes.
    `approval_id`, so two approvals of the same change are two
    records. The record is unsigned (`by=None`).
 2. **Show.** The agent shows the educator the approval display
-   (`dispatch/approval_display.py`; `executor.py plan-write` prints
-   it): op name, category, **tenant, course ID, and course name**
-   (read from Canvas), expiry, and the exact request that will be
-   sent (method, path, query, and body). The display, not the
+   (`dispatch/approval_display.py` `render_educator_display`;
+   `executor.py plan-write` prints it as `approval_display`): in plain
+   words, **the course as Canvas names it** (and the Canvas site), the
+   change, every value that will be sent, whether Morrow can undo it,
+   and how long the request stays open. The audit detail of the same
+   request (op name, category, method, path, query, JSON body, params,
+   integrity codes; `render_approval_display`, printed as
+   `audit_detail`) is for reviewers and is never relayed. The display, not the
    educator's reply, carries the target: dispatch later refuses when
    the provider's course name/term disagrees with the one shown
    (W4-P0-11), and when the request differs from the one shown. If

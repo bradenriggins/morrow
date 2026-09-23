@@ -261,13 +261,17 @@ a frozen plan, an approval record, or a course resolution by hand:
    course from Canvas (the course name the educator will see comes from
    Canvas, not from you), builds the frozen plan and the approval bound
    to the exact request (method, path, query, and body), and prints
-   `approval_display`: the op, the course (id and Canvas name), the
-   exact body that will be sent, the params, expiry, and whether the
-   change can be undone.
+   `approval_display`: in plain words, the course (as Canvas names it),
+   the change, every value that will be sent, whether Morrow can undo
+   it, and how to approve. It also prints `audit_detail`: the same
+   request as the method, path, JSON body, params, and integrity
+   codes, for reviewers.
 2. Show the educator `approval_display` exactly as printed (it is
    produced by `dispatch/approval_display.py`) and ask them to approve
-   it. Change nothing between showing it and sending it: a changed
-   request, params, or course is refused.
+   it. Never relay `audit_detail`: it is the technical record of the
+   same request, not something the educator reads. Change nothing
+   between showing it and sending it: a changed request, params, or
+   course is refused.
 3. When the educator approves, in any words ("Yes" is enough), run
    `approve-write` with their reply verbatim. It signs that reply, then
    sends the write through every gate and prints the result. An
@@ -298,10 +302,10 @@ PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py plan-write \
 ```
 
 It prints one JSON object: `op_id`, `course` (`id`, `name`, `term`),
-`approval_display`, `expires_at`, and `message`. You show
-`approval_display` (it names the course as Canvas does, for example
-"Biology 101", and the body `{"wiki_page": {"title": "Week 1
-Overview"}}`). The educator replies "Yes, do it". You run:
+`approval_display`, `audit_detail`, `expires_at`, and `message`. You
+show `approval_display` (it names the course as Canvas does, for
+example "Biology 101", and the new value "Title: Week 1 Overview").
+The educator replies "Yes, do it". You run:
 
 ```
 PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py approve-write \

@@ -11,6 +11,11 @@ is the one the approval's digest binds (round-4 audit H1): a record
 whose shown request does not match its digest is refused, never
 displayed.
 
+Two renderings of one approval: render_educator_display is what the
+educator reads (plain words, every value that will be sent), and
+render_approval_display is the audit detail (method, path, JSON,
+digests, category) that the agent does not relay.
+
 Privacy boundary (W3-P2-37, still enforced): this renderer NEVER
 resolves learner tokens back to display names. Params carry tokens
 (lrn_...) by construction; the identity schedule's `displayed_as`
@@ -143,9 +148,201 @@ def approval_display_dict(record, params, entry=None):
     }
 
 
+# Plain words for the educator (final sweep 2026-09-22): the display
+# the educator reads names the course, the change, every value that
+# will be sent, and whether Morrow can undo it. The method, path, JSON,
+# digests, and category are audit detail (render_approval_display).
+_ACTIONS = {"POST": "Create", "PUT": "Change", "PATCH": "Change",
+            "DELETE": "Delete"}
+_NOUNS = {
+    "pages": "page", "assignments": "assignment", "quizzes": "quiz",
+    "questions": "quiz question", "modules": "module",
+    "items": "module item", "discussion_topics": "discussion",
+    "entries": "discussion reply", "files": "file", "folders": "folder",
+    "overrides": "due date override",
+    "assignment_groups": "assignment group", "rubrics": "rubric",
+    "sections": "section", "enrollments": "enrollment",
+    "submissions": "submission", "grading_standards": "grading scheme",
+    "front_page": "front page", "groups": "group",
+    "calendar_events": "calendar event", "outcome_groups":
+    "outcome group", "outcomes": "outcome", "items_bank": "item bank",
+    "banks": "item bank", "users": "student",
+}
+_FIELDS = {
+    "title": "Title", "name": "Name", "body": "Content",
+    "message": "Message", "description": "Description",
+    "due_at": "Due date", "unlock_at": "Available from",
+    "lock_at": "Available until", "points_possible": "Points",
+    "published": "Published", "position": "Position",
+    "student_ids": "Students", "grading_type": "Grading type",
+    "posted_grade": "Grade", "comment": "Comment",
+    "text_comment": "Comment", "workflow_state": "State",
+    "submission_types": "Submission types",
+}
+_SKIP_PATH = {"api", "v1", "quiz"}
+
+
+def _noun(segment):
+    if segment in _NOUNS:
+        return _NOUNS[segment]
+    word = segment.replace("_", " ")
+    return word[:-1] if word.endswith("s") else word
+
+
+def _article(noun):
+    return "an" if noun[:1] in "aeiou" else "a"
+
+
+def _change_sentence(request):
+    """"Change the page \"week-1\"", "Create an assignment", ..."""
+    method = str((request or {}).get("method") or "").upper()
+    action = _ACTIONS.get(method, "Change")
+    parts = [p for p in str((request or {}).get("path") or "").split("/")
+             if p and p not in _SKIP_PATH]
+    pairs = []
+    i = 0
+    while i < len(parts):
+        if parts[i] == "courses" and i + 1 < len(parts):
+            i += 2
+            continue
+        ident = parts[i + 1] if i + 1 < len(parts) else None
+        pairs.append((_noun(parts[i]), ident))
+        i += 2
+    if not pairs:
+        return "%s something in the course" % action
+    noun, ident = pairs[-1]
+    if ident is not None:
+        sentence = '%s the %s "%s"' % (action, noun, ident)
+    else:
+        sentence = "%s %s %s" % (action, _article(noun), noun)
+    if len(pairs) > 1 and pairs[-2][1] is not None:
+        sentence += ' in the %s "%s"' % pairs[-2]
+    return sentence
+
+
+def _field_name(key):
+    return _FIELDS.get(key) or key.replace("_", " ").capitalize()
+
+
+def _plain_value(value):
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    if value is None:
+        return "(empty)"
+    if isinstance(value, list) and all(
+            not isinstance(v, (dict, list)) for v in value):
+        return ", ".join(_plain_value(v) for v in value) or "(none)"
+    return str(value)
+
+
+def _value_lines(value, indent=""):
+    """Every value in a request body as "Name: value" lines, whole."""
+    lines = []
+    if isinstance(value, dict):
+        # A lone wrapper ({"wiki_page": {...}}) adds nothing to read.
+        if len(value) == 1 and isinstance(next(iter(value.values())),
+                                          dict) and not indent:
+            return _value_lines(next(iter(value.values())), indent)
+        for key in sorted(value):
+            item = value[key]
+            if isinstance(item, dict) or (
+                    isinstance(item, list)
+                    and any(isinstance(v, (dict, list)) for v in item)):
+                lines.append("%s%s:" % (indent, _field_name(str(key))))
+                lines.extend(_value_lines(item, indent + "  "))
+            else:
+                lines.append("%s%s: %s" % (indent, _field_name(str(key)),
+                                            _plain_value(item)))
+    elif isinstance(value, list):
+        for n, item in enumerate(value, 1):
+            lines.append("%s%d." % (indent, n))
+            lines.extend(_value_lines(item, indent + "  "))
+    elif value is not None:
+        lines.append("%s%s" % (indent, _plain_value(value)))
+    return lines
+
+
+def _open_minutes(record):
+    from datetime import datetime
+    try:
+        start = datetime.fromisoformat(str(record.get("at")).replace(
+            "Z", "+00:00"))
+        end = datetime.fromisoformat(str(record.get("expires_at")).replace(
+            "Z", "+00:00"))
+    except ValueError:
+        return None
+    minutes = int((end - start).total_seconds() // 60)
+    return minutes if minutes > 0 else None
+
+
+def render_educator_display(record, params, entry=None):
+    """What the educator reads before approving, in plain words: the
+    course, the change, every value that will be sent (whole, never
+    shortened), whether Morrow can undo it, and how to approve. The
+    request shown is the one the approval binds (_bound_request)."""
+    record = record or {}
+    request = _bound_request(record, params, entry)
+    target = record.get("target") or {}
+    lines = []
+    where = []
+    if target.get("course_name"):
+        where.append('the course "%s"' % target.get("course_name"))
+    elif target.get("course_id") is not None:
+        where.append("course %s" % target.get("course_id"))
+    if target.get("term"):
+        where.append("(%s)" % target.get("term"))
+    if target.get("tenant"):
+        where.append("on %s" % str(target.get("tenant")).split("://")[-1])
+    lines.append("Morrow wants to make this change%s:"
+                 % ((" in " + " ".join(where)) if where else ""))
+    lines.append(_change_sentence(request) + ".")
+    shown = _value_lines((request or {}).get("body"))
+    if (request or {}).get("query"):
+        shown.extend(_value_lines((request or {}).get("query")))
+    if shown:
+        lines.append("")
+        lines.append("What it sends:")
+        lines.extend("  " + line for line in shown)
+    if (request or {}).get("multi_step"):
+        lines.append("")
+        lines.append("It takes %d steps, sent in order."
+                     % len(request.get("multi_step")))
+    schedule = [item.get("displayed_as") for item in
+                (record.get("resolved_identities") or [])
+                if isinstance(item, dict) and item.get("displayed_as")]
+    if schedule:
+        lines.append("")
+        lines.append("Students you named: %s" % ", ".join(schedule))
+    lines.append("")
+    undo_request = (params or {}).get("_undo_request") \
+        if isinstance(params, dict) else None
+    if isinstance(undo_request, dict) or \
+            str((entry or {}).get("name") or "").endswith("#undo"):
+        lines.append("This change undoes an earlier change. Morrow cannot "
+                     "undo it in turn.")
+    elif undo_available(entry):
+        lines.append("You can undo this change later.")
+    else:
+        lines.append("Morrow cannot undo this change automatically.")
+    minutes = _open_minutes(record)
+    if minutes:
+        lines.append("This request stays open for %d minutes." % minutes)
+    lines.append("")
+    lines.append("To approve this change, reply in any words (\"Yes\" is "
+                 "enough). Your reply is kept word for word with the "
+                 "approval. If you do not want it, say so, and nothing "
+                 "changes.")
+    return "\n".join(lines)
+
+
 def render_approval_display(record, params, entry=None):
-    """Render the human-readable approval display the educator reviews
-    before authorizing. Includes the FULL canonical params."""
+    """The audit detail of an approval: op name, category, target,
+    issue and expiry times, the exact request (method, path, query, and
+    body), the FULL canonical params, integrity digests, and the undo
+    disclosure. For the journal and reviewers; the educator reads
+    render_educator_display."""
     record = record or {}
     request = _bound_request(record, params, entry)
     target = record.get("target") or {}
