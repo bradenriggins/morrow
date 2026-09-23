@@ -105,3 +105,25 @@ def test_the_educator_hears_who_else_can_read_course_traffic(rel):
     assert "Canvas sign-in session and the course pages" in text, rel
     assert "Morrow cannot prevent that" in text, rel
     assert "check them before you connect" in text, rel
+
+
+def _helper_page_text():
+    with open(os.path.join(TREE, "helper", "index.html"),
+              encoding="utf-8") as fh:
+        page = fh.read()
+    page = re.sub(r"(?s)<(script|style)\b.*?</\1>", " ", page)
+    page = re.sub(r"<[^>]+>", " ", page)
+    page = page.replace("&rsquo;", "'").replace("&middot;", " ")
+    return " ".join(page.split())
+
+
+def test_the_sign_in_page_says_the_session_lives_on_the_muse_computer():
+    # Failure mode (final sweep 2026-09-23, written before the fix): the
+    # helper page said "Morrow keeps your Canvas session on your own
+    # machine" and "Your sign-in stays in this browser on your machine".
+    # The session lives in the helper's private browser on the Muse
+    # computer, as consent.md and the website privacy page say.
+    text = _helper_page_text()
+    assert "own machine" not in text
+    assert "on your machine" not in text
+    assert text.count("private browser on your Muse computer") == 2, text
