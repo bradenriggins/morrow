@@ -2559,8 +2559,8 @@ class InstallerController {
   /**
    * Removes the Morrow data this installation owns. It runs only after an
    * explicit confirmation that names every path, it removes only the places
-   * inside Morrow's own user-data folder and the Blackboard credential folder,
-   * and it reports what is gone by reading each path again rather than from the
+   * inside Morrow's own user-data folder, the Blackboard credential folder, and
+   * the Blackboard configuration file, and it reports what is gone by reading each path again rather than from the
    * removal calls. It never removes an assistant's own configuration file.
    *
    * Removing the application itself is a step of this computer, not of Morrow.
