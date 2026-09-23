@@ -33,7 +33,8 @@ Failure modes this suite pins down (written before the code):
   8. The roster read is now the first Canvas call of a course dispatch,
      so a sign-in that died there must arm the re-sign-in flow (write
      halt, quarantine, notice) exactly as a death on the first call
-     did before.
+     did before, and a write refused by an active write halt must still
+     reach Canvas not at all.
 
 The run writes a repeatable artifact of the flow to
 .selftest-work/course-content-e2e-artifact.json (labels only).
@@ -351,6 +352,17 @@ def test_a_sign_in_that_died_at_the_roster_read_arms_the_resign_in_flow(
         _show(session)
     assert armed == ["canvas_show_page_courses"]
     assert ("GET", "/api/v1/courses/1/pages/week-1") not in session.paths()
+
+
+def test_a_halted_write_reaches_canvas_not_at_all(monkeypatch):
+    from reauth import state_machine as rsm
+    monkeypatch.setattr(rsm, "check_write_allowed",
+                        lambda: (False, "write halt active: sign in again"))
+    _edit_mode()
+    session = Canvas()
+    with pytest.raises(ex.WriteHaltActive):
+        _update(session, {"title": "Week 2"})
+    assert session.calls == []
 
 
 def _artifact(record):

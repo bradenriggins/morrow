@@ -8127,6 +8127,12 @@ def _read_course_roster_first(entry, params, session, tenant_base,
     arms the re-sign-in flow as an attach-time death does."""
     if dry_run or not getattr(session, "browser_owned_auth", False):
         return
+    if entry.get("effects") == "write":
+        # A write the halt refuses must reach Canvas not at all; the
+        # write gates refuse it right after this.
+        from reauth import state_machine as _rsm
+        if not _rsm.check_write_allowed()[0]:
+            return
     # The course the request path names, or for an Item Bank route the
     # course its launch is bound to (params.course_id).
     course_id = _write_target_course_id(entry, params)
