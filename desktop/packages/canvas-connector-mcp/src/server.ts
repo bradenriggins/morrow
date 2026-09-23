@@ -10,9 +10,25 @@ import {
   PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
   type CanvasConnectorRuntime,
 } from "./runtime.js";
-const fromJsonSchema = (schema: JsonObject, additionalLearnerIdentifierFields: readonly string[] = []) => (
-  validateJsonSchema(sourcePrivacyInputSchema(schema, additionalLearnerIdentifierFields))
-);
+type JsonInputSchema = ReturnType<typeof validateJsonSchema>;
+
+// Every connection builds this server again, and the catalog names more than a
+// thousand tools, so compiling every input validator up front held the first
+// connection for seconds. A tool's validator is compiled when its input is first
+// checked; the published schema is the same object either way.
+const fromJsonSchema = (schema: JsonObject, additionalLearnerIdentifierFields: readonly string[] = []): JsonInputSchema => {
+  const exact = sourcePrivacyInputSchema(schema, additionalLearnerIdentifierFields);
+  let compiled: JsonInputSchema | null = null;
+  const standard = () => (compiled ??= validateJsonSchema(exact))["~standard"];
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "mcp",
+      jsonSchema: { input: () => exact, output: () => exact },
+      validate: (data: unknown) => standard().validate(data),
+    },
+  } as JsonInputSchema;
+};
 
 
 export function canvasConnectorSummary(value: JsonObject): string {
