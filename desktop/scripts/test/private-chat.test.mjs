@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import test, { after } from "node:test";
 import { clearExtensionGlobals, loadExtensionPage } from "./lib/extension-dom.mjs";
+import { PROBLEM_CODES, problemText } from "../../connector/extension/src/bridge-problem-copy.js";
 import {
   canvasProtectedRoster,
   protectLocalRequest,
@@ -618,4 +619,42 @@ test("the drawer says a sent message waits for the assistant's reply, and asks t
   assert.equal(page.text("#private-chat-status"), "This Private Chat reached its message limit. Close this drawer, then ask your assistant to start a new Private Chat.");
   assert.equal(page.query("#private-chat-message").disabled, true);
   assert.match(page.text("#private-chat-history"), /Michaela Brook has two missing labs\./u);
+});
+
+// A send that fails names what happened and the one step that helps, and keeps the message and the
+// list, so the educator can send again once that step is done.
+test("the drawer names why a message was not sent, and keeps it for the next try", async () => {
+  const binding = { sourceBindingId: "canvas:course-1", provider: "canvas", origin: "https://canvas.example.edu", courseId: "1", courseName: "Biology", runtimeVerified: true, editPolicyRevision: 0 };
+  const privateChat = {
+    schema: "morrow.private-chat.status.v1", transportAvailable: true,
+    clients: [{ id: "assistant-1", name: "Desktop assistant", protocolVersion: "2025-06-18", sampling: true, pushSampling: true }],
+  };
+  let answer = null;
+  const page = await loadExtensionPage("settings/settings.html", {
+    handlers: {
+      morrow_edit_policy_status: () => ({ bindings: [binding], catalogDigest: "c".repeat(64), siteAnchors: [], bindingLimit: 500, privateChat }),
+      morrow_private_chat_send: () => answer(),
+      morrow_private_chat_close: () => ({ status: "closed" }),
+    },
+  });
+  await page.click("#private-chat-open");
+  await page.type("#private-chat-identifiers", "Maria");
+  await page.type("#private-chat-message", "How is Maria doing?");
+  for (const code of ["private_chat_course_unavailable", "private_chat_roster_incomplete", "protected_request_identifier_unknown",
+    "protected_request_identifier_ambiguous", "protected_request_assertion_missing", "protected_request_existing_label_refused",
+    "private_chat_exchange_changed", "private_chat_scope_change_refused", "private_chat_message_invalid", "private_chat_send_failed"]) {
+    assert.ok(PROBLEM_CODES.includes(code), `${code} has no copy of its own`);
+    answer = () => ({ ok: false, code, error: code });
+    await page.click("#private-chat-send");
+    assert.equal(page.text("#private-chat-status"), problemText(code), code);
+    assert.equal(page.text("#announcement"), problemText(code), code);
+    assert.equal(page.query("#private-chat-message").value, "How is Maria doing?", code);
+    assert.equal(page.query("#private-chat-identifiers").value, "Maria", code);
+  }
+  answer = () => { throw new Error("Extension context invalidated."); };
+  await page.click("#private-chat-send");
+  assert.equal(page.text("#private-chat-status"), problemText("bridge_extension_reloaded"));
+  // The copy names a real next step for each state, and no two states share one.
+  assert.match(problemText("private_chat_course_unavailable"), /open the course/i);
+  assert.match(problemText("private_chat_exchange_changed"), /start Private Chat again/);
 });

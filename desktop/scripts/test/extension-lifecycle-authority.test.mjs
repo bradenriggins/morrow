@@ -978,6 +978,62 @@ async function editScopePageCreateScenario() {
   assert.equal(calls[0], "write:new-unit-8", "a reviewed change is sent as the educator approved it");
 }
 
+// Every Private Chat send that fails reaches the drawer with its own reason, so the educator reads
+// the one step that helps: reopen the course, keep it open while Morrow reads the class list, fix
+// the student list, or ask the assistant to start Private Chat again.
+async function privateChatSendCodesScenario() {
+  let tabOpen = true;
+  let rosterReadable = false;
+  const courseTab = { id: 9, windowId: 4, url: `${courseOrigin}/courses/42` };
+  const value = fixture({
+    tabs: {
+      get: async (id) => (tabOpen && id === 9 ? courseTab : null),
+      query: async () => (tabOpen ? [courseTab] : []),
+    },
+    tabMessage: async ({ message }) => {
+      if (!tabOpen) return null;
+      if (message?.type === "morrow_canvas_probe") return { ok: true, profile: { origin: courseOrigin, id: "7" } };
+      if (message?.type !== "morrow_canvas_execute") return null;
+      if (!rosterReadable) return { ok: false, sent: true, status: 500, error: { message: "unavailable" } };
+      if (message.operation?.toolName === "canvas_list_users_in_course_users") {
+        return { ok: true, sent: true, status: 200, truncated: false, data: [{ id: "101", name: "Maria Lopez", sortable_name: "Lopez, Maria", short_name: "Maria", login_id: "mlopez" }] };
+      }
+      if (message.operation?.toolName === "canvas_list_enrollments_courses") return { ok: true, sent: true, status: 200, truncated: false, data: [] };
+      throw new Error(`unexpected Canvas operation ${message.operation?.toolName}`);
+    },
+  });
+  await importWorker("private-chat-send-codes");
+  const socket = await authenticate(value);
+  const send = async (text, assertedIdentifiers) => {
+    const answer = await sendRuntime(value, { type: "morrow_private_chat_send", sourceBindingId: bindingId, text, assertedIdentifiers }, settingsSender());
+    assert.equal(answer.ok, false, JSON.stringify(answer));
+    assert.equal(answer.error, answer.code);
+    return answer.code;
+  };
+
+  assert.equal(await send("How is Maria doing?", ["Maria"]), "private_chat_exchange_changed", "no assistant is waiting for a message");
+
+  socket.receive({
+    schema: "morrow.bridge.command.v1", protocolVersion: 1,
+    requestId: "bridge:pc-listen-0001", operationId: "private-chat:pc-listen-0001",
+    kind: "private_chat_exchange",
+    arguments: { schema: "morrow.private-chat.exchange.v1", sessionId: "session-0001", assistantName: "Claude", action: "listen" },
+    generation: 9, createdAt: Date.now(), expiresAt: Date.now() + 60_000,
+  });
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const status = await sendRuntime(value, { type: "morrow_edit_policy_status" }, settingsSender());
+    if (status.result?.privateChat?.waitingForMessage === true) break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+
+  assert.equal(await send("How is Maria doing?", ["Maria"]), "private_chat_roster_incomplete", "the class list could not be read");
+  rosterReadable = true;
+  assert.equal(await send("How is Jordan doing?", ["Jordan"]), "protected_request_identifier_unknown", "a listed student is not in the course");
+  assert.equal(await send("How is she doing?", ["Maria Lopez"]), "protected_request_assertion_missing", "a listed student is not in the message");
+  tabOpen = false;
+  assert.equal(await send("How is Maria doing?", ["Maria"]), "private_chat_course_unavailable", "the course tab is closed");
+}
+
 async function settingsSaveUntimedScenario() {
   const value = fixture();
   await importWorker("settings-save-untimed");
@@ -1776,6 +1832,7 @@ const scenarios = {
   "policy-merge-legacy": policySetMergeLegacyTimedScenario,
   "settings-save-untimed": settingsSaveUntimedScenario,
   "edit-scope-page-create": editScopePageCreateScenario,
+  "private-chat-send-codes": privateChatSendCodesScenario,
   "popup-edit-status": popupEditStatusScenario,
   "course-disconnect": courseDisconnectScenario,
   "reviews-socket": () => reviewsFollowConnectionScenario("socket"),
@@ -2012,6 +2069,10 @@ test("consent withdrawal fences a late Settings course selection", async () => {
 
 test("an Edit change on a Canvas Update/create page route is sent only when Canvas holds the page", async () => {
   await isolatedScenario("edit-scope-page-create");
+});
+
+test("a Private Chat send that fails names its own reason to the drawer", async () => {
+  await isolatedScenario("private-chat-send-codes");
 });
 
 test("consent withdrawal fences a late Settings Edit-policy save", async () => {

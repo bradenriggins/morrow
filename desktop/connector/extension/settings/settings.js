@@ -368,7 +368,7 @@ async function sendPrivateChatMessage() {
     text,
     assertedIdentifiers: identifiers,
     ...privateChatConfirmedNames(JSON.stringify([binding.sourceBindingId, text, identifiers])),
-  }).catch(() => ({ ok: false, error: "private_chat_send_failed" }));
+  }).catch((cause) => ({ ok: false, code: problemCode(cause) }));
   state.privateChatBusy = false;
   state.privateChatReview = null;
   if (response?.ok && response.result?.status === "review" && Array.isArray(response.result.names)) {
@@ -380,7 +380,7 @@ async function sendPrivateChatMessage() {
   }
   if (!response?.ok) {
     renderPrivateChat();
-    privateChatStatus.textContent = "Morrow could not protect and send this message. Check every listed student identity and try again.";
+    privateChatStatus.textContent = problemText(problemCode(response?.code || "private_chat_send_failed"));
     announce(privateChatStatus.textContent);
     return;
   }

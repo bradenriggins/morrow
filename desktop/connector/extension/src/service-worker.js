@@ -1702,6 +1702,48 @@ function policyCode(error) {
     : "edit_policy_failed";
 }
 
+// A Private Chat send that fails reaches the drawer as the state that names its one next step:
+// reopen the course, keep it open while Morrow reads the class list again, fix the student list or
+// the message, or ask the assistant to start Private Chat again. connector/extension/src/
+// bridge-problem-copy.js explains each code this returns.
+const PRIVATE_CHAT_SEND_CODES = Object.freeze({
+  course_data_consent_required: "course_data_consent_required",
+  private_chat_course_unavailable: "private_chat_course_unavailable",
+  private_chat_scope_change_refused: "private_chat_scope_change_refused",
+  private_chat_roster_unavailable: "private_chat_roster_incomplete",
+  private_chat_roster_incomplete: "private_chat_roster_incomplete",
+  protected_request_course_missing: "private_chat_roster_incomplete",
+  protected_request_roster_stale: "private_chat_roster_incomplete",
+  protected_request_roster_incomplete: "private_chat_roster_incomplete",
+  protected_request_roster_invalid: "private_chat_roster_incomplete",
+  protected_request_roster_duplicate: "private_chat_roster_incomplete",
+  protected_request_roster_history_invalid: "private_chat_roster_incomplete",
+  protected_request_roster_history_mismatch: "private_chat_roster_incomplete",
+  protected_request_roster_history_conflict: "private_chat_roster_incomplete",
+  private_chat_start_required: "private_chat_exchange_changed",
+  private_chat_exchange_changed: "private_chat_exchange_changed",
+  private_chat_closed: "private_chat_exchange_changed",
+  private_chat_labels_unavailable: "private_chat_exchange_changed",
+  private_chat_labels_invalid: "private_chat_exchange_changed",
+  protected_request_identifier_unknown: "protected_request_identifier_unknown",
+  protected_request_identifier_ambiguous: "protected_request_identifier_ambiguous",
+  protected_request_assertion_missing: "protected_request_assertion_missing",
+  protected_request_existing_label_refused: "protected_request_existing_label_refused",
+  private_chat_message_invalid: "private_chat_message_invalid",
+  protected_request_invalid: "private_chat_message_invalid",
+  protected_request_text_invalid: "private_chat_message_invalid",
+  protected_request_identifiers_required: "private_chat_message_invalid",
+  protected_request_identifier_invalid: "private_chat_message_invalid",
+  protected_request_structured_invalid: "private_chat_message_invalid",
+  protected_request_too_deep: "private_chat_message_invalid",
+  protected_request_key_collision: "private_chat_message_invalid",
+});
+
+function privateChatCode(error) {
+  const code = String(error?.message || "");
+  return Object.hasOwn(PRIVATE_CHAT_SEND_CODES, code) ? PRIVATE_CHAT_SEND_CODES[code] : "private_chat_send_failed";
+}
+
 // Every page request answers with a stable code as well as a message, so the popup, the setup guide
 // and Plan and Edit settings name one state and one next action through
 // connector/extension/src/bridge-problem-copy.js. A failure that carries no code of its own is
@@ -6487,7 +6529,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     const authorityGeneration = state.courseDataAuthorityGeneration;
     Promise.resolve(requireCourseDataAuthority(authorityGeneration)).then(() => settingsAction(authorityGeneration)).then((result) => sendResponse({ ok: true, result }), (error) => {
-      const code = policyCode(error);
+      const code = message.type === "morrow_private_chat_send" ? privateChatCode(error) : policyCode(error);
       sendResponse({ ok: false, code, error: code });
     });
     return true;

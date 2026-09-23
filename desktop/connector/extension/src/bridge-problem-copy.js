@@ -224,6 +224,58 @@ const COPY = {
     action: "Remove that permission on the Chrome extensions page under Morrow Bridge site access.",
   },
 
+  // --- A Private Chat message Morrow did not send ------------------------------------------------
+  private_chat_course_unavailable: {
+    title: "The course for this Private Chat is not open",
+    detail: "Morrow sent nothing. Morrow reads the course's class list from its signed-in Canvas or Moodle tab, and that tab is closed or signed out.",
+    action: "Open the course in Canvas or Moodle and sign in if asked, then send the message again.",
+  },
+  private_chat_roster_incomplete: {
+    title: "Morrow could not read this course's class list",
+    detail: "Morrow sent nothing. Morrow protects student names only against the complete class list, and Canvas or Moodle did not return all of it.",
+    action: "Keep the course open and signed in, wait a moment, then send the message again.",
+  },
+  protected_request_identifier_unknown: {
+    title: "A student detail matches no student in this course",
+    detail: "Morrow sent nothing. A student you listed, or an email address or student ID in the message, is not on this course's class list.",
+    action: "Check the spelling of each listed student, and remove any email address or ID that is not a student in this course, then send again.",
+  },
+  protected_request_identifier_ambiguous: {
+    title: "A name in the message matches more than one student",
+    detail: "Morrow sent nothing. Morrow cannot tell which student the name means.",
+    action: "Use the student's full name or email address in the list and in the message, then send again.",
+  },
+  protected_request_assertion_missing: {
+    title: "A listed student is not named in the message",
+    detail: "Morrow sent nothing. Each student in the list must appear in the message, so Morrow knows the list matches what you wrote.",
+    action: "Name that student in the message, or remove the student from the list, then send again.",
+  },
+  protected_request_existing_label_refused: {
+    title: "The message uses a student label this chat has not given",
+    detail: "Morrow sent nothing. A label such as Student A1 names a student only after Morrow gives that label in this course.",
+    action: "Write the student's name instead of the label, then send again.",
+  },
+  private_chat_exchange_changed: {
+    title: "The assistant is no longer waiting for this message",
+    detail: "Morrow sent nothing. The assistant's Private Chat ended or started over before this message was protected and sent.",
+    action: "Ask your assistant to start Private Chat again, then send your message.",
+  },
+  private_chat_scope_change_refused: {
+    title: "This Private Chat belongs to another course",
+    detail: "Morrow sent nothing. One Private Chat works in one course, and this message names a different course.",
+    action: "Close this drawer, then ask your assistant to start a new Private Chat for this course.",
+  },
+  private_chat_message_invalid: {
+    title: "Morrow could not read this message",
+    detail: "Morrow sent nothing. The message or the student list is longer than Morrow accepts, or the message starts with a bracket, which Morrow reads as a data block, and the block is not complete.",
+    action: "Shorten the message or the list, or start the message with a word, then send again.",
+  },
+  private_chat_send_failed: {
+    title: "Morrow could not send this message",
+    detail: "Morrow Bridge reported no reason for this one, and the message was not sent.",
+    action: "Send the message again. If it fails again, close this drawer and ask your assistant to start a new Private Chat.",
+  },
+
   // --- One course read or change Morrow Bridge could not complete -------------------------------
   canvas_binding_required: {
     title: "The Canvas or Moodle tab is not open and signed in",
