@@ -19,6 +19,7 @@ suite: from the tree root, in a fresh scratch HOME under .selftest-work/,
 with every variable that names live state removed.
 """
 
+import importlib.util
 import os
 import re
 import shutil
@@ -41,6 +42,11 @@ NOT_A_SELFTEST = {"config/selftest_home.py"}
 # Selftests an install suite runs itself.
 RUN_BY_AN_INSTALL_SUITE = {
     "helper/keepalive_selftest.sh": "helper/helper_selftest.py"}
+# Selftests that read student data through the learner vault, which needs
+# the optional 'cryptography' package. Without it they are skipped, as the
+# learner-privacy tests are, and conftest.py warns at the end of the run.
+NEEDS_CRYPTOGRAPHY = {"dispatch/wave3_hardening_selftest.py",
+                      "transport/browser_backend_selftest.py"}
 
 
 def _tracked_selftests():
@@ -73,6 +79,7 @@ def test_every_selftest_is_run_by_the_install_suites_or_by_pytest():
             assert os.path.basename(rel) in fh.read(), (runner, rel)
     assert "transport/local_chromium_selftest.py" in _run_here()
     assert "dispatch/wave3_hardening_selftest.py" in _run_here()
+    assert NEEDS_CRYPTOGRAPHY <= set(_run_here())
 
 
 def _processes():
@@ -132,6 +139,9 @@ def _stop(pids):
 
 @pytest.mark.parametrize("rel", _run_here())
 def test_selftest_passes_and_stops_what_it_started(rel):
+    if rel in NEEDS_CRYPTOGRAPHY and \
+            importlib.util.find_spec("cryptography") is None:
+        pytest.skip("needs the optional 'cryptography' package")
     work = os.path.join(TREE, ".selftest-work")
     os.makedirs(work, exist_ok=True)
     home = os.path.realpath(tempfile.mkdtemp(prefix="selftest-home-",
