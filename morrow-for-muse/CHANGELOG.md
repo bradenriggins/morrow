@@ -131,6 +131,11 @@ Messages:
   was sent.
 - A change refused before it was sent no longer stays listed as
   unfinished.
+- When you approve a change that is no longer waiting, nothing is sent,
+  and you are told why: it was already sent with your earlier approval
+  (the assistant reads the course before it prepares it again), or it
+  was never sent (a prepared change waits one hour). It was reported as
+  a failure Morrow could not explain.
 
 Installing and the docs:
 
