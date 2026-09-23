@@ -21,6 +21,11 @@ const COPY = {
     detail: "Morrow Bridge asked the Morrow app on this computer to start a connection, and nothing answered.",
     action: "Open the Morrow app, then select Connect Morrow again.",
   },
+  bridge_pairing_refused: {
+    title: "Morrow answered but did not start a connection",
+    detail: "The Morrow app on this computer answered Morrow Bridge, and it did not open a new connection approval.",
+    action: "Quit and reopen the Morrow app, then select Connect Morrow again.",
+  },
   bridge_version_mismatch: {
     title: "Morrow and Morrow Bridge versions do not match",
     detail: "The Morrow app on this computer refused the connection because it expects a different Morrow Bridge.",

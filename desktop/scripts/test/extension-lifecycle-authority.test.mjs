@@ -1615,6 +1615,33 @@ async function pairingReopenScenario() {
   assert.equal(after.result.pairing, true);
 }
 
+// Connect Morrow before the Morrow app is open: nothing answers at the local address, so the popup
+// names that state, not a failure with no reason. A Morrow that answers and does not start a
+// connection is its own state.
+async function pairingNotRunningScenario() {
+  const value = fixture({
+    initialLocal: { [consentKey]: consentValue },
+    loopbackFetch: async () => { throw new TypeError("Failed to fetch"); },
+  });
+  await importWorker("pairing-not-running");
+  const result = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
+  assert.deepEqual(result, { ok: false, code: "bridge_not_connected", error: "bridge_not_connected" });
+  assert.equal(value.local.values.pairing, undefined);
+  assert.deepEqual(value.createdTabs, []);
+}
+
+async function pairingRefusedScenario() {
+  const value = fixture({
+    initialLocal: { [consentKey]: consentValue },
+    loopbackFetch: async () => jsonResponse({ error: "pairing_limit_reached" }, { status: 429 }),
+  });
+  await importWorker("pairing-refused");
+  const result = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
+  assert.deepEqual(result, { ok: false, code: "bridge_pairing_refused", error: "bridge_pairing_refused" });
+  assert.equal(value.local.values.pairing, undefined);
+  assert.deepEqual(value.createdTabs, []);
+}
+
 async function pairingDeclaredOverflowScenario() {
   const value = fixture({
     initialLocal: { [consentKey]: consentValue },
@@ -1865,6 +1892,8 @@ const scenarios = {
   "pairing-exact-schema": pairingExactSchemaScenario,
   "version-mismatch": versionMismatchScenario,
   "pairing-reopen": pairingReopenScenario,
+  "pairing-not-running": pairingNotRunningScenario,
+  "pairing-refused": pairingRefusedScenario,
 };
 
 async function runScenario(name) {
@@ -2113,6 +2142,14 @@ test("pairing refuses an offer with fields outside the exact schema", async () =
 
 test("pairing ignores an approved status with fields outside the exact schema", async () => {
   await isolatedScenario("pairing-exact-schema");
+});
+
+test("Connect Morrow with the Morrow app closed says Morrow is not running", async () => {
+  await isolatedScenario("pairing-not-running");
+});
+
+test("a Morrow that answers Connect Morrow without starting a connection is named as that", async () => {
+  await isolatedScenario("pairing-refused");
 });
 
 test("asking to pair again while approval waits reopens the same approval page", async () => {

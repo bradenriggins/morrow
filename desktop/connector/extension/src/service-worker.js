@@ -1016,12 +1016,16 @@ async function fetchPairing(input, init, readBody) {
     controller.abort();
   }, PAIRING_RESPONSE_TIMEOUT_MS);
   state.pairingFetchControllers.add(controller);
+  let answered = false;
   try {
     const response = await fetch(input, { ...init, signal: controller.signal });
+    answered = true;
     return { response, body: await readBody(response, controller.signal) };
   } catch (error) {
     if (timedOut) throw new Error("bridge_pairing_response_timeout");
     if (controller.signal.aborted) throw new Error("bridge_pairing_response_interrupted");
+    // Nothing answered at Morrow's local address, so the Morrow app is not running here.
+    if (!answered) throw new Error("bridge_not_connected");
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -5983,7 +5987,7 @@ async function requestPairing() {
     if (response.status === 403 && hasExactKeys(body, ["error"]) && body.error === "connector_identity_refused") {
       throw new Error("bridge_version_mismatch");
     }
-    throw new Error("bridge_not_connected");
+    throw new Error("bridge_pairing_refused");
   }
   const offer = pairingOffer(body);
   if (!offer) throw new Error("bridge_pairing_response_invalid");
