@@ -83,6 +83,14 @@ jobs:
           python -c "import cryptography"
       - name: Muse test suite
         run: python -m pytest -q
+      # pytest collects none of the *_selftest.py install suites. Carve
+      # the release tree the way a release does (the carve also runs the
+      # secrets gate with no exclusions), then run the install suites
+      # from it through the runner install.sh step 9 uses.
+      - name: Carve the release tree
+        run: python scripts/carve.py --out "$RUNNER_TEMP/carve/morrow-muse-connector"
+      - name: Install suites on the carved tree
+        run: bash "$RUNNER_TEMP/carve/morrow-muse-connector/scripts/install-suites.sh" --show-failures
 
   check:
     needs: [changes, check-desktop, check-muse]
