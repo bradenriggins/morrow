@@ -235,7 +235,7 @@ it. After acceptance the popup keeps one link with that same name instead of rep
 | `not-paired` | Morrow "Not connected", Course "Not connected", and the detail says to add Morrow to the assistant and that connecting approves no change. | **Connect Morrow**. | `connector/extension/popup/popup-view.js:210` |
 | `connecting` | Morrow "Connecting…" and a settled waiting detail. | No action. Return in a moment. | `connector/extension/popup/popup-view.js:212` |
 | `paired-not-connected` | Morrow "Not available" and the popup says the assistant must be open. | Open the assistant. | `connector/extension/popup/popup-view.js:214` |
-| `runtime-mismatch` | Morrow "Reload needed", Course "Not available", and a version-mismatch detail. | **Open setup guide**, update or repair, then reload Bridge. | `connector/extension/popup/popup-view.js:202` |
+| `runtime-mismatch` | Morrow "Reload needed", Course "Not available", and a version-mismatch detail. | Reload Morrow Bridge on the Chrome extensions page, then open the popup; if the versions still differ, follow the Morrow app's Morrow Bridge step. **Open setup guide** shows the same step. | `connector/extension/popup/popup-view.js:202` |
 | `authentication-failed` | Morrow "Reconnect needed", Course "Not connected", and the detail says Morrow refused the saved connection. | **Reconnect Morrow**, which connects again in one step. | `connector/extension/popup/popup-view.js:208` |
 | `connected-no-site` | Morrow "Connected", Course "Not connected", no primary action, and instructions to open a signed-in course. | Open a signed-in Canvas or Moodle course in this tab. | `connector/extension/popup/popup-view.js:225` |
 | `detected-platform` | The active course is detected. The primary action and detail both say **Connect this course**, on Canvas or Moodle alike. | Select **Connect this course** and allow the exact address Chrome shows. | `connector/extension/popup/popup-view.js:191` |
@@ -259,7 +259,7 @@ The exact status, course, action, and detail strings emitted for these branches 
 - "Open the assistant where you added Morrow. This popup will reconnect when Morrow is ready."
 - "Reload needed"
 - "Open setup guide"
-- "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome."
+- "The Morrow app and Morrow Bridge versions do not match. Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step."
 - "Reconnect needed"
 - "Reconnect Morrow"
 - "Morrow refused the connection Morrow Bridge saved. Select Reconnect Morrow to connect again. Your selected courses stay saved."
@@ -313,7 +313,7 @@ action. **Setup overview** shows the same three stages as the app, popup, and we
 | `authentication-failed` | "Reconnect needed" / "Reconnect Morrow", with the same detail the popup shows. | **Reconnect Morrow**, which connects again in one step. | `connector/extension/onboarding/onboarding-state.js:192` |
 | `connecting` | "Connecting Morrow" and a waiting detail. | No action. Return in a moment. | `connector/extension/onboarding/onboarding-state.js:199` |
 | `paired-not-connected` | "Open Morrow again" and the assistant recovery. | Open Morrow and choose the assistant again. | `connector/extension/onboarding/onboarding-state.js:211` |
-| `runtime-mismatch` | "Morrow needs a reload" / "Reload Morrow Bridge" with version detail. | Update Morrow, reload Bridge, then open the Morrow Bridge popup. | `connector/extension/onboarding/onboarding-state.js:217` |
+| `runtime-mismatch` | "Morrow Bridge needs a reload" / "Reload Morrow Bridge" with version detail. | Reload Morrow Bridge, then open the Morrow Bridge popup; if the versions still differ, follow the Morrow app's Morrow Bridge step. | `connector/extension/onboarding/onboarding-state.js:217` |
 | `connected-no-site` | "Open Canvas or Moodle" and the exact platform-detection behavior. | Open a signed-in course, then select **Connect this course** in the popup. | `connector/extension/onboarding/onboarding-state.js:225` |
 | `site-saved-not-verified` | "Reconnect Canvas" and a detail that names the saved Canvas course. | Select **Open Canvas** in the popup, or open the course, and sign in if asked. | `connector/extension/onboarding/onboarding-state.js:224` |
 | `site-ready-no-course` | "Select a course in Plan" and the exact final course-selection control. | **Open Plan and Edit settings**, then **Connect** on a course under Not connected. | `connector/extension/onboarding/onboarding-state.js:231` |
@@ -352,10 +352,10 @@ The exact heading, summary, next action, detail, and checklist strings emitted f
 - "Morrow Bridge is connecting to Morrow"
 - "Open Morrow again"
 - "Open Morrow and choose your assistant again. Then return to Morrow Bridge."
-- "Morrow needs a reload"
+- "Morrow Bridge needs a reload"
 - "Morrow and Morrow Bridge report different versions, so Morrow Bridge cannot confirm which course actions Morrow can use."
 - "Reload Morrow Bridge"
-- "Morrow and Morrow Bridge report different versions. Update Morrow, then reload Morrow Bridge on the Chrome extensions page and open the Morrow Bridge popup."
+- "Morrow and Morrow Bridge report different versions. Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step."
 - "Morrow Bridge reached Morrow, and Morrow expects a different version"
 - "Morrow Bridge is connected to Morrow"
 - "Morrow reports a different version from this Morrow Bridge"

@@ -1,4 +1,4 @@
-import { problemCode } from "../src/bridge-problem-copy.js";
+import { problemCode, VERSION_MISMATCH_RECOVERY } from "../src/bridge-problem-copy.js";
 import { CURATED_CATEGORY_SPECS } from "../src/edit-policy.js";
 
 const NOT_CHECKED = "Not checked";
@@ -199,7 +199,7 @@ function staleAnchorDetail(platform) {
 
 export function detailText(status, detectedProvider = null) {
   if (!status) return "Morrow could not read this connection state. Select Try again. If the state does not change, close this popup and open it again.";
-  if (runtimeNeedsReload(status)) return "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome.";
+  if (runtimeNeedsReload(status)) return `The Morrow app and Morrow Bridge versions do not match. ${VERSION_MISMATCH_RECOVERY}`;
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
   const platform = currentPlatform(status, detectedProvider);

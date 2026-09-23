@@ -166,10 +166,10 @@ test("the version check separates a matching Morrow from one this connection can
   const connected = { paired: true, connected: true, bindings: [{ runtimeVerified: true }], siteAnchors: [{ runtimeVerified: true }], firstCourseRead: FIRST_READ };
   const mismatch = setupGuideState({ ...connected, runtimeHealthy: false });
   assert.equal(mismatch.ready, false);
-  assert.equal(mismatch.heading, "Morrow needs a reload");
+  assert.equal(mismatch.heading, "Morrow Bridge needs a reload");
   assert.equal(mismatch.title, "Reload Morrow Bridge");
   assert.equal(textOf(mismatch, "runtime"), "Morrow reports a different version from this Morrow Bridge");
-  assert.match(mismatch.detail, /reload Morrow Bridge on the Chrome extensions page/);
+  assert.match(mismatch.detail, /Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup/);
   // Before the connection there is no version result to report, and none is invented.
   assert.equal(textOf(setupGuideState({ paired: true, connected: false, bindings: [], siteAnchors: [] }), "runtime"),
     "Morrow version is checked when Morrow Bridge connects");
@@ -181,14 +181,29 @@ test("the version check separates a matching Morrow from one this connection can
   assert.doesNotMatch(mismatch.detail, /Connect Morrow/);
 });
 
+// After a Morrow update Chrome still runs the old Morrow Bridge. Every surface gives the one real
+// step, a reload of Morrow Bridge, and the Morrow app's own Bridge step when a reload is not enough.
+test("the setup guide, the popup and the Connect Morrow error give the same version recovery", () => {
+  const recovery = "Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.";
+  const guide = setupGuideState({ paired: true, connected: false, versionMismatch: true, runtimeHealthy: false, bindings: [], siteAnchors: [] });
+  assert.equal(guide.heading, "Morrow Bridge needs a reload");
+  assert.equal(guide.detail, `Morrow and Morrow Bridge report different versions. ${recovery}`);
+  const popup = popupDetailText({ paired: true, connected: false, versionMismatch: true, runtimeHealthy: false, bindings: [], siteAnchors: [] });
+  assert.equal(popup, `The Morrow app and Morrow Bridge versions do not match. ${recovery}`);
+  assert.equal(problemCopy("bridge_version_mismatch").action, recovery);
+  for (const text of [guide.heading, guide.detail, popup, problemText("bridge_version_mismatch")]) {
+    assert.doesNotMatch(text, /Update Morrow|repair|Morrow needs a reload/u, text);
+  }
+});
+
 test("a Morrow that refused this Bridge version asks for a reload, not for Morrow to be opened again", () => {
   const state = setupGuideState({ paired: true, connected: false, versionMismatch: true, runtimeHealthy: false, bindings: [], siteAnchors: [] });
   assert.equal(state.open, "runtime");
-  assert.equal(state.heading, "Morrow needs a reload");
+  assert.equal(state.heading, "Morrow Bridge needs a reload");
   assert.equal(state.title, "Reload Morrow Bridge");
   assert.equal(textOf(state, "connection"), "Morrow Bridge reached Morrow, and Morrow expects a different version");
   assert.equal(textOf(state, "runtime"), "Morrow reports a different version from this Morrow Bridge");
-  assert.match(state.detail, /reload Morrow Bridge on the Chrome extensions page/);
+  assert.match(state.detail, /Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup/);
   assert.doesNotMatch(state.detail, /Connect Morrow/);
 });
 
@@ -272,7 +287,7 @@ test("each readiness state carries its own words, so the coloured dot is never t
   const headings = states.map((state) => state.heading);
   assert.equal(new Set(headings).size, headings.length, headings.join(" | "));
   assert.equal(connecting.heading, "Connecting Morrow");
-  assert.equal(mismatch.heading, "Morrow needs a reload");
+  assert.equal(mismatch.heading, "Morrow Bridge needs a reload");
   assert.equal(oneLeft.heading, "One step left");
   assert.equal(ready.heading, "Ready to use");
   assert.equal(ready.summary, "1 selected course is ready in this Chrome session. Morrow completed a first read in Biology 101.");

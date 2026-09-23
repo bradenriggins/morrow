@@ -1,3 +1,5 @@
+import { VERSION_MISMATCH_RECOVERY } from "../src/bridge-problem-copy.js";
+
 export const SETUP_MODE_KEY = "morrowSetupGuideMode";
 
 /**
@@ -84,7 +86,7 @@ function readiness(state) {
   };
   if (state.open === "runtime") return {
     tone: "attention",
-    heading: "Morrow needs a reload",
+    heading: "Morrow Bridge needs a reload",
     summary: "Morrow and Morrow Bridge report different versions, so Morrow Bridge cannot confirm which course actions Morrow can use.",
   };
   if (state.open === "read") return {
@@ -214,7 +216,7 @@ function readState(status) {
   if (open === "runtime") return {
     ...state,
     title: "Reload Morrow Bridge",
-    detail: "Morrow and Morrow Bridge report different versions. Update Morrow, then reload Morrow Bridge on the Chrome extensions page and open the Morrow Bridge popup.",
+    detail: `Morrow and Morrow Bridge report different versions. ${VERSION_MISMATCH_RECOVERY}`,
     canOpenSettings: false,
   };
   if (open === "course" && readySites === 0) return {

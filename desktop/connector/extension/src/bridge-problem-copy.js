@@ -14,6 +14,14 @@
  * it, so a support conversation starts from the word the person can see.
  */
 
+/**
+ * The one recovery for Morrow and Morrow Bridge versions that do not match, shown by the popup, the
+ * setup guide and this copy alike. After a Morrow update Chrome still runs the old Morrow Bridge
+ * until it is reloaded; when the Bridge folder itself is out of date, the Morrow app shows its own
+ * Morrow Bridge step.
+ */
+export const VERSION_MISMATCH_RECOVERY = "Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.";
+
 const COPY = {
   // --- Connecting Morrow, Chrome and a learning platform ---------------------------------------------
   bridge_not_connected: {
@@ -39,7 +47,7 @@ const COPY = {
   bridge_version_mismatch: {
     title: "Morrow and Morrow Bridge versions do not match",
     detail: "The Morrow app on this computer refused the connection because it expects a different Morrow Bridge.",
-    action: "Update Morrow, then reload Morrow Bridge on the Chrome extensions page and open the Morrow Bridge popup.",
+    action: VERSION_MISMATCH_RECOVERY,
   },
   bridge_port_in_use: {
     title: "Another Morrow is already using this connection",

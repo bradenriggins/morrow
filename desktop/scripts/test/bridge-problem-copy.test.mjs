@@ -116,7 +116,7 @@ test("no code describes Edit access as having a length or an end time", () => {
 // shows no Connect Morrow button while one is saved.
 test("a version mismatch sends the educator to the popup after the reload, not to Connect Morrow", () => {
   assert.doesNotMatch(problemText("bridge_version_mismatch"), /Connect Morrow/);
-  assert.match(problemText("bridge_version_mismatch"), /reload Morrow Bridge on the Chrome extensions page/);
+  assert.match(problemText("bridge_version_mismatch"), /Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup/);
 });
 
 test("each code reads as its own state rather than one repeated sentence", () => {

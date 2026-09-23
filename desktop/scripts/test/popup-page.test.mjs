@@ -243,7 +243,7 @@ test("a version-mismatched Bridge exposes only setup recovery", async () => {
     primary: "Open setup guide", primaryDisabled: false, primaryBusy: "false",
     secondary: null, openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: false,
     account: "Course: Anatomy",
-    detail: "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome.",
+    detail: "The Morrow app and Morrow Bridge versions do not match. Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.",
   });
   assert.equal(page.hidden("#setup-guide"), true);
   await page.click("#primary");
@@ -295,7 +295,7 @@ test("a Bridge whose version Morrow refused offers the setup guide, not a new co
   assert.equal(view(page).connection, "Reload needed");
   assert.equal(view(page).primary, "Open setup guide");
   assert.equal(view(page).primaryDisabled, false);
-  assert.equal(view(page).detail, "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome.");
+  assert.equal(view(page).detail, "The Morrow app and Morrow Bridge versions do not match. Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.");
   await page.click("#primary");
   assert.deepEqual(page.messages("morrow_open_setup"), [{ type: "morrow_open_setup" }]);
   assert.deepEqual(page.messages("morrow_pair"), []);
