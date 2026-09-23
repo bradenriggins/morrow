@@ -288,7 +288,12 @@ def _t_verify_forwarder_holder_not_forwarder_refused():
 
 
 def _t_proc_environ_real():
-    # _proc_environ reads the real /proc for a live process.
+    # _proc_environ reads the real /proc for a live process. Linux only:
+    # the Muse VM has /proc, and a host without it has nothing to read.
+    if not os.path.isdir("/proc/self"):
+        print("skip proc-environ-real (this host has no /proc)")
+        return
+
     def _run():
         env = lc._proc_environ(os.getpid())
         assert isinstance(env, dict) and env, "must parse own environ"
@@ -1541,15 +1546,28 @@ def _mk_test_launcher(d, name):
     return launcher, bin_path
 
 
-def _assert_no_cmdline_fragment(fragment, what):
+def _command_lines():
+    """[(pid, command line bytes)] of every process: from /proc where the
+    host has it, else from ps (macOS)."""
+    if not os.path.isdir("/proc/self"):
+        out = subprocess.run(["ps", "-axww", "-o", "pid=,command="],
+                             capture_output=True, check=True).stdout
+        return [tuple(line.strip().split(b" ", 1)) for line in
+                out.splitlines() if b" " in line.strip()]
+    found = []
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
         try:
             with open("/proc/%s/cmdline" % pid, "rb") as fh:
-                data = fh.read()
+                found.append((pid, fh.read()))
         except (FileNotFoundError, PermissionError):
             continue
+    return found
+
+
+def _assert_no_cmdline_fragment(fragment, what):
+    for pid, data in _command_lines():
         if fragment.encode() in data:
             raise AssertionError(
                 "orphaned %s still running: pid %s" % (what, pid))

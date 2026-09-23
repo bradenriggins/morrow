@@ -256,6 +256,17 @@ Technical notes:
   top-level options when it names the step. `dispatch/test_documented_commands.py`
   parses every executor command in the docs' code blocks and
   install.sh's operator check.
+- The retired form-host server (`transport/form_host_server.py`, its
+  selftest, and `transport/form-host/`) is deleted. Nothing used it and
+  the release already left it out, but its selftest started servers it
+  could not stop on macOS (it looked for them in /proc), so they kept
+  running for hours after a test run.
+- pytest runs every selftest script the install suites do not run (22
+  scripts, `test_selftest_scripts.py`), each the way
+  `scripts/install-suites.sh` runs a suite, and fails a script that
+  leaves a process running. Nothing ran them before. The Chromium and
+  keepalive selftests pass on macOS: a check that needs Linux's /proc
+  uses a stand-in there, or is skipped when there is nothing to read.
 
 ## 0.4.0 (2026-09-22)
 

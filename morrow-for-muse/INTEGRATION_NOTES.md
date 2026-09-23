@@ -84,9 +84,10 @@ pair for one operation, then the handle zeroes itself.
 - `dispatch/executor_selftest.py`: all PASS.
 - `dispatch/admission_selftest.py`: all PASS.
 - `privacy/learner_vault_selftest.py`: 15/15 PASS.
-- `transport/browser_backend_selftest.py`, `form_host_server_selftest.py`:
-  PASS. (`form_relay_selftest.py` was removed 2026-09-21 with the retired
-  form-relay lane.)
+- `transport/browser_backend_selftest.py`: PASS. (`form_relay_selftest.py`
+  was removed 2026-09-21 with the retired form-relay lane, and
+  `form_host_server_selftest.py` on 2026-09-23 with the retired form-host
+  server.)
 - Static scans: no em dashes, no temp-directory paths, no regional quiz-api
   host assumptions, no live mint-chain references in touched code.
 
