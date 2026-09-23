@@ -134,6 +134,13 @@ INSTALL.md; INSTALL.md sits outside the in-scope tree for this
 remediation, so they live here instead and the gap is reported with the
 fix.)
 
+The "Coverage:" lines name the selftest suites that check each
+decision. `egress_selftest.py`, `helper_selftest.py`, and
+`helper/cdp_http_auth_selftest.py` are install suites: they ship and run
+at every install (`scripts/install-suites.sh`). `local_chromium_selftest.py`
+runs in the source repository's CI (`scripts/dev-suites.sh`) and is not
+part of the release.
+
 ### No TCP CDP: pipe only (W4-P0-3, W4-P2-16)
 
 Chromium launches with `--remote-debugging-pipe`, never
