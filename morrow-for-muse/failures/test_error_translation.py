@@ -396,6 +396,20 @@ MODE_CASES = {
         "provider": "canvas", "http_status": 429,
         "rate_limit_remaining": 0.0, "retry_after_present": True,
     },
+    "canvas-not-permitted": lambda: {
+        "http_status": 401, "provider": "canvas", "operation_kind": "write",
+        "body_text": '{"status":"unauthorized","errors":[{"message":'
+                     '"user not authorized to perform that action"}]}',
+    },
+    "canvas-not-found": lambda: {
+        "http_status": 404, "provider": "canvas", "operation_kind": "read",
+        "body_text": '{"errors":[{"message":"The specified resource does '
+                     'not exist."}]}',
+    },
+    "canvas-refused-request": lambda: {
+        "http_status": 409, "provider": "canvas", "operation_kind": "write",
+        "body_text": '{"errors":[{"message":"conflict"}]}',
+    },
     "canvas-session-dead": lambda: ChromiumSessionDead("browser gone"),
     "canvas-session-dead-mid-write-uncertain": lambda: {
         "session_dead_signal": True, "uncertain_write": True,
@@ -657,8 +671,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_93_modes(self):
-        self.assertEqual(93, len(CATALOG.entries))
+    def test_catalog_has_96_modes(self):
+        self.assertEqual(96, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):

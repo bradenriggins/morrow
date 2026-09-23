@@ -124,6 +124,14 @@ Messages:
 
 - When Canvas refuses a value, you are told what Canvas said and that
   nothing changed.
+- When Canvas says your account may not do something (for example a TA
+  changing a setting only a teacher can change), cannot find an item
+  (a renamed page, a deleted assignment), or refuses a request for
+  another reason, you are told what Canvas said and that nothing
+  changed. These got a message that said the change might have
+  applied and promised an engineering follow-up.
+- A failure Morrow cannot classify no longer promises a follow-up that
+  never comes. It gives the support address instead.
 - When changes are paused because your Canvas sign-in expired, you
   are told to sign in again on the helper page. This also happens when
   the sign-in expires just as Morrow starts work in a course. While
@@ -256,6 +264,15 @@ Technical notes:
   lane, not only on the https lane. A body the lane cannot encode
   raises `WriteNotAttempted`, so its claim is released instead of being
   journaled as a write that may have applied.
+- The failure catalog gains `canvas-not-permitted` (401
+  "unauthorized", 403), `canvas-not-found` (404), and
+  `canvas-refused-request` (any other standard 4xx), each only for a
+  refusal the executor classified as fail-fast (it sets
+  `operation_kind`). A 401 "unauthenticated" is never "not permitted".
+  The translator reads Canvas's words from every 4xx body except the
+  CSRF 422. The `unknown` fallback and the funnel's degraded message
+  point to hello@meetmorrow.app instead of an engineering review.
+  `failures/test_canvas_refusals.py` checks every standard 4xx status.
 - `modes/state.py` journals `mode.write_admitted` and
   `mode.write_refused` with `for_op_id`, not `op_id`: the gate runs
   before the executor claims the op id, and an `op_id` field put the

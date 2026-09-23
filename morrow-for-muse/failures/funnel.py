@@ -103,9 +103,10 @@ _FALLBACK_MESSAGE = (
     "classifying it. "
     "What this means: the operation did not complete normally and I "
     "cannot tell you why from the available evidence. "
-    "What happens next: I am preserving the full evidence bundle for "
-    "engineering review and parking the operation safely; do not retry "
-    "anything that might have applied. Reference {correlation_id}."
+    "What happens next: I am not retrying anything that might have "
+    "applied. If it happens again, you can email hello@meetmorrow.app "
+    "with reference {correlation_id}, the Morrow for Muse version, and "
+    "what you asked for. Leave student information out of the email."
 )
 
 
@@ -235,11 +236,11 @@ def _degraded_payload(operation, raw_error) -> dict:
         "evidence": "(evidence unavailable: the translator failed)",
         "meaning": ("The failure could not be classified and the "
                     "translation layer itself hit an internal error."),
-        "next_step": ("Preserve the evidence bundle for engineering "
-                      "review; park the op; never blind-retry. "
-                      "Escalate when: engineering asks."),
-        "auto_action": ("Capture the full evidence bundle; park the op; "
-                        "never blind-retry."),
+        "next_step": ("Park the op; never blind-retry; give the "
+                      "educator the reference and the support address. "
+                      "Escalate when: always."),
+        "auto_action": ("Park the op; never blind-retry; give the "
+                        "educator the support address."),
         "escalate": True,
         "engineering_detail": _detail_label(raw_error) + scrub_secrets(
             _raw_text(raw_error, _ENGINEERING_LIMIT)),
