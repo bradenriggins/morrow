@@ -5,6 +5,7 @@ const fsConstants = require("node:fs").constants;
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const { AsyncLocalStorage } = require("node:async_hooks");
 const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const { ASSISTANTS, errorDetails, installerState } = require("./contract.cjs");
@@ -607,6 +608,7 @@ class InstallerController {
     this.discoverBlackboardConnection = deps.discoverBlackboardConnection || ((input) => this.readBlackboardConnection(input));
     this.desktopMutationInProgress = null;
     this.desktopMutationGuard = null;
+    this.desktopMutationScope = new AsyncLocalStorage();
     this.dataRemovalInProgress = null;
     this.dataRemovalGuard = null;
     this.dataRemoval = null;
@@ -1345,13 +1347,11 @@ class InstallerController {
       }
       return status;
     };
-    if (writeRequired && !this.desktopMutationGuard) {
+    if (writeRequired) {
       status = await this.withDesktopMutation(async (transaction) => {
         await transaction.stopRuntime();
         return writeBridge();
       });
-    } else if (writeRequired) {
-      status = await writeBridge();
     }
     // Rollback copies an interrupted update left behind. A failed prune must
     // not block startup; the next start repeats it.
@@ -2682,9 +2682,14 @@ class InstallerController {
   /**
    * Serializes one file mutation under exact owner maintenance authority. A
    * Bridge reconciliation that makes the mutation itself passes
-   * `fromBridgeReconciliation`, so its own marker does not refuse it.
+   * `fromBridgeReconciliation`, so its own marker does not refuse it. A step
+   * that runs inside a mutation its own call chain already holds, as repair's
+   * Bridge rebuild does, joins that mutation; any other caller is refused while
+   * the guard is held.
    */
   async withDesktopMutation(action, { fromBridgeReconciliation = false } = {}) {
+    const held = this.desktopMutationScope.getStore();
+    if (held?.active === true) return action(held.transaction);
     const refused = this.maintenanceAdmission({ fromBridgeReconciliation });
     if (refused) throw errorDetails(refused);
     const pending = (async () => {
@@ -2697,9 +2702,11 @@ class InstallerController {
           this.desktopMutationGuard = stopped;
         }
       });
+      const scope = { active: true, transaction };
       try {
-        return await action(transaction);
+        return await this.desktopMutationScope.run(scope, () => action(transaction));
       } finally {
+        scope.active = false;
         await this.releaseDesktopMutationGuard(guard);
       }
     })();

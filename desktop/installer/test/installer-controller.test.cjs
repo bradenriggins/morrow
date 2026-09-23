@@ -1531,6 +1531,60 @@ test("repair rebuilds a Bridge folder that was removed and re-issues its active-
 });
 
 /**
+ * Repair holds the one maintenance guard for its whole run. Rebuilding the
+ * Bridge reconciles Claude Desktop's generated setups, which is itself a guarded
+ * mutation, so that step joins the guard repair holds instead of being refused
+ * as other work in progress.
+ */
+test("repair finishes when Claude Desktop setup folders are present", async () => {
+  const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const { installer } = await repairableController(root);
+  const stateDirectory = path.join(root, "UserData", "State");
+  await fs.mkdir(stateDirectory, { recursive: true });
+  await fs.writeFile(path.join(stateDirectory, "morrow.upstreams.json"), "{}\n");
+  await installer.initializeBridgeAtStartup();
+  const unrecorded = path.join(stateDirectory, "ClaudeDesktop", "setup-unrecorded");
+  await fs.mkdir(unrecorded, { recursive: true });
+  await fs.writeFile(path.join(unrecorded, "Morrow.mcpb"), "bundle");
+
+  const state = await installer.repair();
+
+  assert.equal(state.bridge.folderReady, true);
+  assert.equal(await fs.lstat(unrecorded).then(() => true, () => false), false,
+    "repair revokes a Claude Desktop setup the installer record does not name");
+  assert.equal(installer.desktopMutationGuard, null, "repair releases the one guard it held");
+  assert.equal(installer.desktopMutationInProgress, null);
+});
+
+test("Bridge startup never writes the Bridge folder under a guard another step holds", async () => {
+  const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const { installer } = await repairableController(root);
+  const stateDirectory = path.join(root, "UserData", "State");
+  await fs.mkdir(stateDirectory, { recursive: true });
+  await fs.writeFile(path.join(stateDirectory, "morrow.upstreams.json"), "{}\n");
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  let entered;
+  const holding = new Promise((resolve) => { entered = resolve; });
+  const other = installer.withDesktopMutation(async () => {
+    entered();
+    await held;
+  });
+  await holding;
+
+  await assert.rejects(() => installer.initializeBridgeAtStartup(), { code: "active_or_uncertain_operations" });
+  assert.equal(await fs.lstat(path.join(root, "UserData", "Bridge", "manifest.json")).then(() => true, () => false), false,
+    "a Bridge write waits for its own guard");
+  release();
+  await other;
+
+  const status = await installer.initializeBridgeAtStartup();
+  assert.equal(status.installed, true, "startup writes the Bridge once the other step has let go");
+});
+
+/**
  * A durable swap that can no longer converge: the transaction still names a
  * stage and a backup that are both gone. Repair discards that installation,
  * so it must discard the transaction with it. A transaction left behind fails
