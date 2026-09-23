@@ -168,3 +168,57 @@ def test_every_item_bank_status_claim_matches_the_catalog():
                 wrong += [(rel, i, "said live-proven") for i in ids
                           if status.get(i) != "live-proven"]
     assert wrong == []
+
+
+# Failure mode (final sweep 2026-09-23, written before the fix): SCOPE.md
+# and the operations runbook said 113 verified GETs (108 Canvas plus 5
+# Item Bank) after the catalog reached 115 live-proven reads (110 plus
+# 5), and SCOPE.md said the live-proven people-bearing reads and the
+# override writes "are refused", while the executor dispatches them
+# de-identified on the Chromium lane with the learner vault.
+def test_verified_read_counts_in_every_doc():
+    counts = _counts()
+    seen = 0
+    for rel in DOCS:
+        text = _read(rel)
+        for match in re.finditer(r"(\d+) verified GETs", text):
+            seen += 1
+            assert int(match.group(1)) == counts["live_reads"], \
+                (rel, match.group(0))
+        for match in re.finditer(
+                r"(\d+) Canvas (?:reads )?plus (\d+) Item Bank", text):
+            seen += 1
+            assert [int(match.group(1)), int(match.group(2))] == [
+                counts["live_canvas_reads"], counts["live_ib_reads"]], \
+                (rel, match.group(0))
+    assert seen >= 3, "the docs no longer state the read counts"
+
+
+def _scope_reads_bullet():
+    text = _read("SCOPE.md")
+    start = text.index("verified GETs")
+    return text[start:text.index(" - ", start)]
+
+
+def test_scope_says_the_people_bearing_rows_it_names_dispatch():
+    import pytest
+    pytest.importorskip("cryptography")
+    from types import SimpleNamespace
+    from dispatch import executor as ex
+    bullet = _scope_reads_bullet()
+    assert not re.search(r"\bare refused\b|refused like", bullet), bullet
+    assert "de-identified" in bullet, bullet
+    ids = set()
+    for m in re.finditer(r"C-(\d+)((?:/C-\d+)*)", bullet):
+        ids.add("C-" + m.group(1))
+        ids.update(re.findall(r"C-\d+", m.group(2)))
+    assert len(ids) >= 20, sorted(ids)
+    rows = {d["id"]: (n, d) for n, d in ex._load_operation_catalog().items()}
+    vault_lane = SimpleNamespace(browser_owned_auth=True)
+    for row_id in sorted(ids):
+        name, desc = rows[row_id]
+        entry = ex.catalog_descriptor_to_entry(name, desc["method"],
+                                               desc["path"])
+        assert ex._catalog_provenance_gate(
+            entry, name, desc["method"], desc["path"], {},
+            session=vault_lane) == "live-proven", row_id

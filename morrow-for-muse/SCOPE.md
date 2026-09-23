@@ -69,23 +69,26 @@ marked `live-proven` is not a v1 claim.
   answers 404 on live items; the bank entry GET is the working item
   read), item delete (IB-19, never proven on any lane), and the quiz
   entry routes (IB-2/IB-3/IB-8/IB-14, evidence-hold).
-- 113 verified GETs (2026-09-21; GET/HEAD only, no writes):
-  108 Canvas reads plus 5 Item Bank reads, all recorded
+- 115 verified GETs (GET/HEAD only, no writes):
+  110 Canvas reads plus 5 Item Bank reads, all recorded
   `live-proven` in `proof-battery/OPERATION_CATALOG.md`, across course
   settings, tabs, sections, files and folders, pages, modules,
   assignments, assignment groups, classic quizzes, New Quiz reads,
   grading standards, rubrics, outcomes, external tools and feeds,
   content migrations and exports, groups, users and search, conferences,
   collaborations, media objects, permissions, and activity stream.
-  Some of these reads return people and are now classified as learner
-  data, so they are refused like every other learner-data row (see
+  Some of these reads return people, so they are learner data (see
   "Out for v1"): C-78 potential collaborators, C-105/C-106 activity
   stream, C-112 effective due dates, C-274/C-343/C-344 assignment
   overrides, C-327/C-331/C-332 page revisions, C-231/C-234/C-235/C-236
   date details (override student lists), C-403 course search, and
-  C-322 outcome alignments for a student. The live-proven
-  override writes (C-34, C-36, C-39, C-41, C-51, C-284) and the page
-  revision revert (C-328) are refused for the same reason.
+  C-322 outcome alignments for a student. Like every learner-data row,
+  they dispatch only on the Chromium lane with the encrypted learner
+  vault, de-identified before the agent or the journal sees them
+  (fixture-proven, see "Out for v1"); no other lane runs them
+  (`LearnerDataGated`). The live-proven override writes (C-34, C-36,
+  C-39, C-41, C-51, C-284) and the page revision revert (C-328) follow
+  the same rule.
 - The governance layer that makes it safe: frozen plans, the admission
   gate (`dispatch/admission.py`) enforcing the live-proven catalog,
   educator-signed approvals, per-category never-dispatch lists, and
@@ -165,7 +168,7 @@ live battery marks them live-proven in
   (discussion date_details PUT) is live-proven through the 2026-09-21
   Chromium write battery (PUT 204). The admission policy holds all
   four on every lane (see "In scope but pending live proof"). No
-  discussion reads are among the 113 verified GETs (all discussion
+  discussion reads are among the 115 verified GETs (all discussion
   reads are pending).
 - Announcements: never posted, even when the educator asks. Any
   request that sets `is_announcement` (on any route, in the body or

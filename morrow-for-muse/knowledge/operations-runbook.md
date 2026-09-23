@@ -100,7 +100,7 @@ readback and cleanup:
   gate refuses them. quiz_entries routes
   (IB-2/3/8/14) are evidence-hold (401 under the banks.build scope).
   Full mechanism: `knowledge/item-banks-sdk.md`.
-- **Reads**: 113 verified GETs (108 Canvas plus 5 Item Bank) across
+- **Reads**: 115 verified GETs (110 Canvas plus 5 Item Bank) across
   course settings, tabs, sections, files and folders, pages, modules,
   assignments, assignment groups, classic quizzes, New Quiz reads,
   grading standards, rubrics, outcomes, external tools and feeds,

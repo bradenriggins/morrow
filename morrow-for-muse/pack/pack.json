@@ -42,7 +42,7 @@
       "Session death: nothing is journaled; unjournaled op ids (never consumed) stay reusable. A retry needs a freshly signed approval and re-sign-in through the login helper.",
       "Write halt: if ~/.morrow/write_halt exists, all writes refuse.",
       "Fail closed: 4xx fails fast; uncertain writes are never retried.",
-      "Evidence hold: learner-data operations refuse until the learner tokenization boundary is proven; nothing is gated or restricted by tenant (parity law).",
+      "Learner data: operations whose responses carry people dispatch only on the Chromium lane with the encrypted learner vault, de-identified before the agent or the journal sees them; every other lane refuses them. Nothing is gated or restricted by tenant (parity law).",
       "Scope: v1 is Canvas-only. Blackboard is an honestly-disclosed roadmap item, not a ship criterion."
     ]
   },
