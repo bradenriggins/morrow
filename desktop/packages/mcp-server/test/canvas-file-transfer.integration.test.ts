@@ -56,7 +56,8 @@ describe("reviewed Canvas file dispatch", () => {
     });
     const bytes = Buffer.from("selected canonical Canvas material");
     const digest = createHash("sha256").update(bytes).digest("hex");
-    const input = { source_binding_id: sourceBindingId, course_id: 2, folder_id: 71, material_path: "materials/guide.txt" };
+    // Desktop runs the assistant in the educator's Materials folder, so a file placed directly there is named by its own name.
+    const input = { source_binding_id: sourceBindingId, course_id: 2, folder_id: 71, material_path: "guide.txt" };
     const runtime = await GatewayRuntime.connect(config);
     let bridge: BridgeTestClient | undefined;
     let server: ReturnType<typeof serveStdio> | undefined;

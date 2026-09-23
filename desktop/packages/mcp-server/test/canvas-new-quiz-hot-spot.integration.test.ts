@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -98,8 +98,8 @@ async function harness(options: {
     privacy: { canvasOrigin: "browser-session", account: "local", principal: "local", learnerVaultPath: join(directory, "vault.json") },
     maxCatalogTools: 2_000,
   });
-  await mkdir(join(directory, "materials"));
-  await writeFile(join(directory, "materials/cell.png"), PNG);
+  // Desktop runs the assistant in the educator's Materials folder; the image sits directly in it.
+  await writeFile(join(directory, "cell.png"), PNG);
   const runtime = await GatewayRuntime.connect(config);
   await assertPortListening(port);
   const bridge: BridgeTestClient = await connectBridgeTestClient({
@@ -177,7 +177,7 @@ async function plan(client: Client, overrides: JsonObject = {}): Promise<JsonObj
       course_id: COURSE_ID,
       quiz_id: QUIZ_ID,
       item: HOT_SPOT_ITEM,
-      material_path: "materials/cell.png",
+      material_path: "cell.png",
       ...overrides,
     },
   }) as unknown as JsonObject;
@@ -198,7 +198,7 @@ describe("reviewed New Quiz Hot Spot dispatch", () => {
     expect(planned.isError, JSON.stringify(planned)).not.toBe(true);
     const plannedText = JSON.stringify(planned);
     expect(plannedText).not.toContain(PNG.toString("base64"));
-    expect(plannedText).not.toContain("materials/cell.png");
+    expect(plannedText).not.toContain("\"cell.png\"");
 
     const id = operationId(planned);
     const record = runtime.operationGet(id) as JsonObject;
