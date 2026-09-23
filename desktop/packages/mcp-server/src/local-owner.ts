@@ -3,11 +3,13 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   closeSync,
   constants,
+  existsSync,
   openSync,
   readFileSync,
   realpathSync,
   statSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -213,6 +215,17 @@ function ownerStartTimeoutMs(): number {
   return Number.isSafeInteger(configured) && configured >= 25 && configured <= OWNER_START_TIMEOUT_MS
     ? configured
     : OWNER_START_TIMEOUT_MS;
+}
+
+/**
+ * Test mode only: a file whose appearance starts the owner start deadline, so
+ * a test times out a start after the step that writes it, not after however
+ * long a busy computer takes to reach that step.
+ */
+function testOwnerStartDeadlineGate(): string | null {
+  if (process.env.MORROW_INSTALLER_TEST_MODE !== "1") return null;
+  const configured = process.env.MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_AFTER_PATH;
+  return configured && isAbsolute(configured) && !/[\0\r\n]/.test(configured) ? configured : null;
 }
 
 async function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
@@ -727,6 +740,8 @@ async function startLocalOwner(config: GatewayConfig): Promise<void> {
     && process.env.MORROW_LOCAL_OWNER_TEST_STUBBORN_STARTUP === "1"
   ) {
     console.error(`[morrow-test] stubborn local owner pid=${process.pid}`);
+    const pidPath = process.env.MORROW_LOCAL_OWNER_TEST_STUBBORN_PID_PATH;
+    if (pidPath && isAbsolute(pidPath)) writeFileSync(pidPath, String(process.pid), { mode: 0o600 });
     process.on("SIGINT", () => undefined);
     process.on("SIGTERM", () => undefined);
     setInterval(() => undefined, 1_000);
@@ -1407,13 +1422,16 @@ async function waitForOwner(journalPath: string, configDigest: string): Promise<
   let launchedChild: ChildProcess | null = null;
   let launchError: Error | null = null;
   let ready = false;
-  const deadline = Date.now() + ownerStartTimeoutMs();
+  const startTimeoutMs = ownerStartTimeoutMs();
+  const deadlineGate = testOwnerStartDeadlineGate();
+  let deadline = deadlineGate ? Number.POSITIVE_INFINITY : Date.now() + startTimeoutMs;
   const runtimeIdentity = localOwnerRuntimeIdentity();
   const retirementChecked = new Set<string>();
   const retiringOwners = new Set<string>();
   try {
     for (;;) {
       if (launchError) throw launchError;
+      if (deadlineGate && deadline === Number.POSITIVE_INFINITY && existsSync(deadlineGate)) deadline = Date.now() + startTimeoutMs;
       const descriptor = readOwnerDescriptor(journalPath);
       const descriptorLifetime = descriptor
         ? await processMatchesRecordedLifetimeAsync(descriptor.pid, descriptor.startedAt)

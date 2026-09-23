@@ -18,28 +18,22 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
-async function within<T>(promise: Promise<T>, milliseconds: number, detail: string): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`Timed out waiting for ${detail}`)), milliseconds);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-async function waitForPid(path: string): Promise<number> {
-  return within((async () => {
-    for (;;) {
-      try {
-        const pid = Number((await readFile(path, "utf8")).trim());
-        if (Number.isSafeInteger(pid) && pid > 0) return pid;
-      } catch {}
-      await new Promise((resolve) => setTimeout(resolve, 10));
+/**
+ * Waits for a process to write its PID to `path`. A busy computer only makes
+ * this wait longer: it fails when `launcher` exits first, and the test's own
+ * limit ends a wait that never settles.
+ */
+async function waitForPid(path: string, launcher: ChildProcessWithoutNullStreams): Promise<number> {
+  for (;;) {
+    try {
+      const pid = Number((await readFile(path, "utf8")).trim());
+      if (Number.isSafeInteger(pid) && pid > 0) return pid;
+    } catch {}
+    if (launcher.exitCode !== null || launcher.signalCode !== null) {
+      throw new Error(`the launched process exited before ${path} named a PID`);
     }
-  })(), 3_000, "the delayed upstream PID");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 async function writeConfig(
@@ -119,11 +113,10 @@ describe("local owner startup lifecycle", () => {
     const processRun = launch(configPath);
     let upstreamPid = 0;
     try {
-      upstreamPid = await waitForPid(upstreamPidPath);
+      upstreamPid = await waitForPid(upstreamPidPath, processRun.child);
       processRun.child.stdin.end();
 
-      await expect(within(processRun.exit, 5_000, "the dedicated gateway exit"))
-        .resolves.toEqual({ code: 0, signal: null });
+      await expect(processRun.exit).resolves.toEqual({ code: 0, signal: null });
       expect(processIsAlive(upstreamPid)).toBe(false);
       expect(existsSync(lifecyclePath)).toBe(false);
     } finally {
@@ -139,26 +132,18 @@ describe("local owner startup lifecycle", () => {
     const ownerPath = `${journalPath}.local-owner.json`;
     const ownerStderrPath = join(directory, "owner.stderr");
     const { configPath, upstreamPidPath, lifecyclePath } = await writeConfig(directory, journalPath, 60_000);
+    // The proxy's one-second start limit begins when the owner's upstream has
+    // started, so the timed-out owner always has an upstream to reclaim.
     const processRun = launch(configPath, {
       MORROW_INSTALLER_TEST_MODE: "1",
       MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_MS: "1000",
+      MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_AFTER_PATH: upstreamPidPath,
       MORROW_LOCAL_OWNER_TEST_STDERR_PATH: ownerStderrPath,
     });
     let upstreamPid = 0;
     try {
-      upstreamPid = await waitForPid(upstreamPidPath);
-      let result: { code: number | null; signal: NodeJS.Signals | null };
-      try {
-        result = await within(processRun.exit, 6_000, "the timed-out proxy exit");
-      } catch (error) {
-        const ownerError = await readFile(ownerStderrPath, "utf8").catch(() => "");
-        const lifecycle = await readFile(lifecyclePath, "utf8").catch(() => "");
-        throw new Error(
-          `${error instanceof Error ? error.message : String(error)}; `
-          + `proxy stderr=${JSON.stringify(processRun.stderr())}; `
-          + `owner stderr=${JSON.stringify(ownerError)}; lifecycle=${JSON.stringify(lifecycle)}`,
-        );
-      }
+      upstreamPid = await waitForPid(upstreamPidPath, processRun.child);
+      const result = await processRun.exit;
 
       expect(result.code).not.toBe(0);
       expect(result.signal).toBeNull();
@@ -178,17 +163,23 @@ describe("local owner startup lifecycle", () => {
     const journalPath = join(directory, "gateway.sqlite3");
     const ownerStderrPath = join(directory, "owner.stderr");
     const { configPath } = await writeConfig(directory, journalPath, 60_000);
+    const ownerPidPath = join(directory, "owner.pid");
+    // The proxy's one-second start limit begins when the stubborn owner has
+    // started, so the proxy always has that owner to force-kill.
     const processRun = launch(configPath, {
       MORROW_INSTALLER_TEST_MODE: "1",
       MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_MS: "1000",
+      MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_AFTER_PATH: ownerPidPath,
       MORROW_LOCAL_OWNER_TEST_STDERR_PATH: ownerStderrPath,
       MORROW_LOCAL_OWNER_TEST_STUBBORN_STARTUP: "1",
+      MORROW_LOCAL_OWNER_TEST_STUBBORN_PID_PATH: ownerPidPath,
     });
     let ownerPid = 0;
     try {
-      const result = await within(processRun.exit, 5_000, "the stubborn owner timeout");
+      ownerPid = await waitForPid(ownerPidPath, processRun.child);
+      const result = await processRun.exit;
       const ownerError = await readFile(ownerStderrPath, "utf8");
-      ownerPid = Number(/stubborn local owner pid=(\d+)/u.exec(ownerError)?.[1]);
+      expect(Number(/stubborn local owner pid=(\d+)/u.exec(ownerError)?.[1])).toBe(ownerPid);
 
       expect(result.code).not.toBe(0);
       expect(result.signal).toBeNull();
