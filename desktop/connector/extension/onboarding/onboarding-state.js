@@ -102,7 +102,7 @@ function readiness(state) {
 
 export function setupGuideState(status) {
   const known = Boolean(status) && typeof status === "object";
-  const state = { ...(known ? readState(status) : unreadState()), known };
+  const state = { canOpenApproval: false, ...(known ? readState(status) : unreadState()), known };
   return { ...state, ...readiness(state) };
 }
 
@@ -189,8 +189,9 @@ function readState(status) {
   if (pairing) return {
     ...state,
     title: "Allow connection",
-    detail: "Select Allow connection in the Morrow page that opened. Then return here while Morrow connects.",
+    detail: "Select Allow connection on the Morrow page that opened. If you closed that page, select Open the approval page.",
     canOpenSettings: false,
+    canOpenApproval: true,
   };
   if (connecting) return {
     ...state,

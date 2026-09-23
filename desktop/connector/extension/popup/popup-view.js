@@ -170,7 +170,8 @@ export function statusAnnouncement(status) {
 export function primaryLabel(status, detectedProvider = null) {
   if (!status) return "Try again";
   if (runtimeNeedsReload(status)) return "Open setup guide";
-  if (status.pairing) return "Waiting for approval";
+  // A closed approval tab is opened again: Morrow answers a second request with the one pending.
+  if (status.pairing) return "Open the approval page";
   if (status.authenticationFailed === true) return "Reconnect Morrow";
   if (!status.paired) return "Connect Morrow";
   if (canChooseCourses(status)) return "Choose courses";
@@ -202,7 +203,7 @@ export function detailText(status, detectedProvider = null) {
   const platform = currentPlatform(status, detectedProvider);
   const savedPlatform = currentPlatform(status);
   return status.pairing
-    ? "Confirm this connection on the Morrow page that opens. Then return to this popup."
+    ? "Select Allow connection on the Morrow page that opened. If you closed that page, select Open the approval page."
     : status.authenticationFailed === true
       ? "Morrow Bridge refused the saved local connection. Select Reconnect Morrow, then approve the new connection in Morrow. Your selected courses stay saved."
     : !status.paired
@@ -226,12 +227,12 @@ export function detailText(status, detectedProvider = null) {
 
 export function controlState(status, { actionInFlight = false, detectedProvider = null } = {}) {
   if (!status) return { primaryDisabled: actionInFlight, primaryBusy: actionInFlight, secondaryDisabled: true };
-  const waiting = Boolean(status.pairing || (status.authenticationFailed !== true && !runtimeNeedsReload(status) && !canChooseCourses(status) && status.paired && !status.connected));
+  const waiting = Boolean(status.pairing !== true && status.authenticationFailed !== true && !runtimeNeedsReload(status) && !canChooseCourses(status) && status.paired && !status.connected);
   const needsDetectedCourse = status.paired === true && status.connected === true
     && !canChooseCourses(status) && currentBinding(status)?.runtimeVerified !== true;
   return {
     primaryDisabled: actionInFlight || waiting || (needsDetectedCourse && !currentPlatform(status, detectedProvider)),
-    primaryBusy: actionInFlight || status.pairing === true || status.connecting === true,
+    primaryBusy: actionInFlight || status.connecting === true,
     secondaryDisabled: actionInFlight,
   };
 }

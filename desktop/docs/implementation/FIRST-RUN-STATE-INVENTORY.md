@@ -233,7 +233,7 @@ it. After acceptance the popup keeps one link with that same name instead of rep
 | --- | --- | --- | --- |
 | `read-failed` | Morrow and Course are "Not checked". The detail names the failed read and retry. | **Try again**. | `connector/extension/popup/popup-view.js:196` |
 | `not-paired` | Morrow "Not connected", Course "Not connected", and the detail says to add Morrow to the assistant. | **Connect Morrow**. | `connector/extension/popup/popup-view.js:207` |
-| `pairing` | Morrow "Waiting for approval" and the detail names the Morrow page that opened. | **Allow connection** on that page. | `connector/extension/popup/popup-view.js:203` |
+| `pairing` | Morrow "Waiting for approval" and the detail names the Morrow page that opened. | **Allow connection** on that page, or **Open the approval page** if it was closed. | `connector/extension/popup/popup-view.js:203` |
 | `connecting` | Morrow "Connecting…" and a settled waiting detail. | No action. Return in a moment. | `connector/extension/popup/popup-view.js:209` |
 | `paired-not-connected` | Morrow "Not available" and the popup says the assistant must be open. | Open the assistant. | `connector/extension/popup/popup-view.js:211` |
 | `runtime-mismatch` | Morrow "Reload needed", Course "Not available", and a version-mismatch detail. | **Open setup guide**, update or repair, then reload Bridge. | `connector/extension/popup/popup-view.js:197` |
@@ -254,7 +254,8 @@ The exact status, course, action, and detail strings emitted for these branches 
 - "Connect Morrow"
 - "Add Morrow to your assistant, then open it. Select Connect Morrow to continue."
 - "Waiting for approval"
-- "Confirm this connection on the Morrow page that opens. Then return to this popup."
+- "Open the approval page"
+- "Select Allow connection on the Morrow page that opened. If you closed that page, select Open the approval page."
 - "Connecting…"
 - "Waiting for your assistant"
 - "Connecting to Morrow. Keep this popup open or return in a moment."
@@ -313,7 +314,7 @@ action. **Setup overview** shows the same three stages as the app, popup, and we
 | --- | --- | --- | --- |
 | `read-failed` | "Setup state not checked", five explicit not-checked lines, and a detail that names **Setup overview**. | **Setup overview**, or return to this tab to read again. | `connector/extension/onboarding/onboarding-state.js:58` |
 | `not-paired` | "Setup in progress" and "Open Morrow" with the exact assistant and Bridge connection action. | Open Morrow, choose the assistant, then **Connect Morrow** and **Allow connection**. | `connector/extension/onboarding/onboarding-state.js:199` |
-| `pairing` | "Waiting for approval" / "Allow connection". | **Allow connection** on the Morrow page. | `connector/extension/onboarding/onboarding-state.js:187` |
+| `pairing` | "Waiting for approval" / "Allow connection". | **Allow connection** on the Morrow page, or **Open the approval page** if it was closed. | `connector/extension/onboarding/onboarding-state.js:187` |
 | `connecting` | "Connecting Morrow" and a waiting detail. | No action. Return in a moment. | `connector/extension/onboarding/onboarding-state.js:193` |
 | `paired-not-connected` | "Open Morrow again" and the assistant recovery. | Open Morrow and choose the assistant again. | `connector/extension/onboarding/onboarding-state.js:205` |
 | `runtime-mismatch` | "Morrow needs a reload" / "Reload Morrow Bridge" with version detail. | Update Morrow, reload Bridge, then open the Morrow Bridge popup. | `connector/extension/onboarding/onboarding-state.js:211` |
@@ -346,7 +347,7 @@ The exact heading, summary, next action, detail, and checklist strings emitted f
 - "Waiting for approval"
 - "Morrow is waiting for you to allow this connection on the Morrow page that opened."
 - "Allow connection"
-- "Select Allow connection in the Morrow page that opened. Then return here while Morrow connects."
+- "Select Allow connection on the Morrow page that opened. If you closed that page, select Open the approval page."
 - "An assistant approval is waiting on the Morrow page that opened"
 - "Morrow Bridge connects after you allow this connection"
 - "Connecting Morrow"
@@ -569,6 +570,7 @@ stale name here.
 | `Connect Morrow` | Popup | `connector/extension/popup/popup.html:41`, `connector/extension/popup/popup-view.js:173` |
 | `Try again` | Popup | `connector/extension/popup/popup-view.js:169` |
 | `Waiting for approval` | Popup | `connector/extension/popup/popup-view.js:106` |
+| `Open the approval page` | Popup | `connector/extension/popup/popup-view.js:175` |
 | `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:175` |
 | `Choose courses` | Popup | `connector/extension/popup/popup-view.js:174` |
 | `Connect this course` | Popup | `connector/extension/popup/popup-view.js:177` |
@@ -585,6 +587,7 @@ stale name here.
 | `How to connect` | Popup | `connector/extension/popup/popup.html:50` |
 | `Guide me` | Setup guide | `connector/extension/onboarding/onboarding.html:29` |
 | `Setup overview` | Setup guide | `connector/extension/onboarding/onboarding.html:30` |
+| `Open the approval page` | Setup guide | `connector/extension/onboarding/onboarding.html:48` |
 | `Open Plan and Edit settings` | Setup guide | `connector/extension/onboarding/onboarding.html:48`, `connector/extension/onboarding/onboarding.html:48` |
 | `Ask first in all courses` | Courses and access | `connector/extension/settings/settings.html:23` |
 | `Refresh connected courses` | Courses and access | `connector/extension/settings/settings.html:35` |

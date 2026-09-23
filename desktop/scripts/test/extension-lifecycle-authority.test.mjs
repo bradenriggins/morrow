@@ -1452,6 +1452,36 @@ async function pairingAlarmPeriodScenario() {
   assert.equal(value.createdTabs.length, 1);
 }
 
+// A closed approval tab is not a dead end: asking to pair again while a request waits reopens the
+// same approval, because Morrow answers a second request with the one already pending.
+async function pairingReopenScenario() {
+  const generation = "33333333-3333-4333-8333-333333333333";
+  const offer = pairingOffer();
+  const posts = [];
+  const value = fixture({
+    initialLocal: {
+      [consentKey]: consentValue,
+      pairing: { ...offer, pairingGeneration: generation },
+      pairingAuthority: { schema: "morrow.bridge-pairing-authority.v1", generation, status: "pending", changedAt: Date.now() },
+    },
+    loopbackFetch: async (url, init) => {
+      if (url === pairingStatusUrl) return jsonResponse({ schema: "morrow.bridge.pairing-status.v1", status: "pending", expiresAt: offer.expiresAt });
+      posts.push(url);
+      return jsonResponse(offer);
+    },
+  });
+  await importWorker("pairing-reopen");
+  const before = await sendRuntime(value, { type: "morrow_status" }, popupSender());
+  assert.equal(before.result.pairing, true);
+  const reopened = await sendRuntime(value, { type: "morrow_pair" }, popupSender());
+  assert.equal(reopened.ok, true, JSON.stringify(reopened));
+  assert.deepEqual(posts, ["http://127.0.0.1:32147/morrow-bridge/v1/pair"]);
+  assert.deepEqual(value.createdTabs, [{ url: offer.approvalUrl }]);
+  assert.equal(value.local.values.pairing.pairingId, offer.pairingId);
+  const after = await sendRuntime(value, { type: "morrow_status" }, popupSender());
+  assert.equal(after.result.pairing, true);
+}
+
 async function pairingDeclaredOverflowScenario() {
   const value = fixture({
     initialLocal: { [consentKey]: consentValue },
@@ -1692,6 +1722,7 @@ const scenarios = {
   "pairing-offer-exact-schema": pairingOfferExactSchemaScenario,
   "pairing-exact-schema": pairingExactSchemaScenario,
   "version-mismatch": versionMismatchScenario,
+  "pairing-reopen": pairingReopenScenario,
 };
 
 async function runScenario(name) {
@@ -1928,6 +1959,10 @@ test("pairing refuses an offer with fields outside the exact schema", async () =
 
 test("pairing ignores an approved status with fields outside the exact schema", async () => {
   await isolatedScenario("pairing-exact-schema");
+});
+
+test("asking to pair again while approval waits reopens the same approval page", async () => {
+  await isolatedScenario("pairing-reopen");
 });
 
 test("a version mismatch names a reload, not a refused connection", async () => {

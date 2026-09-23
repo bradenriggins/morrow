@@ -103,9 +103,9 @@ test("before a course site is connected the popup names the state it is in", asy
     }],
     ["the person has not approved this connection yet", () => connection({ pairing: true }), {
       connection: "Waiting for approval", courseLabel: "Course", course: "Not connected",
-      primary: "Waiting for approval", primaryDisabled: true, primaryBusy: "true",
+      primary: "Open the approval page", primaryDisabled: false, primaryBusy: "false",
       secondary: null, openPlatform: null, disconnect: null, planAndEdit: false, online: false, account: null,
-      detail: "Confirm this connection on the Morrow page that opens. Then return to this popup.",
+      detail: "Select Allow connection on the Morrow page that opened. If you closed that page, select Open the approval page.",
     }],
     ["Morrow Bridge is connecting", () => connection({ paired: true, connecting: true }), {
       connection: "Connecting…", courseLabel: "Course", course: "Not connected",
@@ -255,6 +255,16 @@ test("a version-mismatched Bridge exposes only setup recovery", async () => {
   await page.click("#primary");
   assert.deepEqual(page.messages("morrow_open_setup"), [{ type: "morrow_open_setup" }]);
   assert.deepEqual(page.messages("morrow_connect_course_prepare"), []);
+});
+
+test("while approval waits, the popup reopens the approval page", async () => {
+  const page = await openPopup({
+    status: () => connection({ pairing: true }),
+    handlers: { morrow_pair: () => ({ status: "pending" }) },
+  });
+  await page.click("#primary");
+  assert.deepEqual(page.messages("morrow_pair"), [{ type: "morrow_pair" }]);
+  assert.equal(page.hidden("#error"), true);
 });
 
 test("a Bridge whose version Morrow refused offers the setup guide, not a new connection", async () => {

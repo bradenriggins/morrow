@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { clearExtensionGlobals, loadExtensionPage } from "./lib/extension-dom.mjs";
 import { problemCode, problemCopy, problemText } from "../../connector/extension/src/bridge-problem-copy.js";
 import {
   SETUP_CHECK_IDS,
@@ -43,6 +44,9 @@ const textOf = (state, id) => state.checks.find((check) => check.id === id).text
 test("setup guide prioritizes a live pairing approval over an unpaired state", () => {
   const state = setupGuideState({ pairing: true, paired: false, connected: false, bindings: [], siteAnchors: [] });
   assert.equal(state.title, "Allow connection");
+  assert.equal(state.detail, "Select Allow connection on the Morrow page that opened. If you closed that page, select Open the approval page.");
+  assert.equal(state.canOpenApproval, true);
+  assert.equal(setupGuideState({ paired: false, connected: false, bindings: [], siteAnchors: [] }).canOpenApproval, false);
   assert.equal(textOf(state, "assistant"), "An assistant approval is waiting on the Morrow page that opened");
   assert.equal(textOf(state, "connection"), "Morrow Bridge connects after you allow this connection");
 });
@@ -351,6 +355,7 @@ test("the setup guide answers a failed status read with an unknown checklist, th
     "#next-title": stubElement("Open Morrow"),
     "#next-detail": stubElement("Open Morrow, choose your assistant, then return to Morrow Bridge."),
     "#open-settings": stubElement("Open Plan and Edit settings", true),
+    "#open-approval": stubElement("Open the approval page", true),
     "#data-disclosure": stubElement(),
     "#quick-open-settings": stubElement("Open Plan and Edit settings"),
     "#error": stubElement("", true),
@@ -464,5 +469,27 @@ test("the setup guide answers a failed status read with an unknown checklist, th
     delete globalThis.document;
     delete globalThis.window;
     delete globalThis.chrome;
+  }
+});
+
+// A closed approval tab is not a dead end on the guide either: its Allow connection step reopens it.
+test("the guide's Allow connection step reopens the approval page, and only while approval waits", async () => {
+  let status = { consentRequired: false, pairing: true, paired: false, connected: false, bindings: [], siteAnchors: [] };
+  try {
+    const page = await loadExtensionPage("onboarding/onboarding.html", {
+      handlers: { morrow_status: () => status, morrow_pair: () => ({ status: "pending" }) },
+    });
+    assert.equal(page.text("#next-title"), "Allow connection");
+    assert.equal(page.hidden("#open-approval"), false);
+    assert.equal(page.text("#open-approval"), "Open the approval page");
+    await page.click("#open-approval");
+    assert.deepEqual(page.messages("morrow_pair"), [{ type: "morrow_pair" }]);
+    assert.equal(page.hidden("#error"), true);
+
+    status = { consentRequired: false, pairing: false, paired: false, connected: false, bindings: [], siteAnchors: [] };
+    const unpaired = await loadExtensionPage("onboarding/onboarding.html", { handlers: { morrow_status: () => status } });
+    assert.equal(unpaired.hidden("#open-approval"), true);
+  } finally {
+    clearExtensionGlobals();
   }
 });

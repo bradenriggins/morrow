@@ -207,7 +207,9 @@ test("known connection states keep their own value, label, and detail", () => {
   assert.equal(statusValue(statuses[1]), "Not connected");
   assert.equal(primaryLabel(statuses[1]), "Connect Morrow");
   assert.equal(statusValue(statuses[2]), "Waiting for approval");
-  assert.equal(controlState(statuses[2]).primaryDisabled, true);
+  // A closed approval tab can always be opened again.
+  assert.equal(primaryLabel(statuses[2]), "Open the approval page");
+  assert.equal(controlState(statuses[2]).primaryDisabled, false);
   assert.equal(statusValue(statuses[3]), "Connecting…");
   assert.equal(controlState(statuses[3]).primaryBusy, true);
   assert.equal(statusValue(statuses[4]), "Not available");

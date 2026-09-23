@@ -16,6 +16,7 @@ const statusDot = document.querySelector("#status-dot");
 const nextTitle = document.querySelector("#next-title");
 const nextDetail = document.querySelector("#next-detail");
 const openSettings = document.querySelector("#open-settings");
+const openApproval = document.querySelector("#open-approval");
 const quickOpenSettings = document.querySelector("#quick-open-settings");
 const error = document.querySelector("#error");
 
@@ -56,6 +57,7 @@ function render(status) {
   nextTitle.textContent = state.title;
   nextDetail.textContent = state.detail;
   openSettings.hidden = !state.canOpenSettings;
+  openApproval.hidden = !state.canOpenApproval;
 }
 
 // The cause reaches the page, not only the console: one code becomes what happened, why, and the
@@ -127,6 +129,18 @@ consentAction.addEventListener("click", async () => {
   }
 });
 openSettings.addEventListener("click", () => { void chrome.runtime.openOptionsPage(); });
+// Morrow answers a second connection request with the one already waiting, so this reopens its page.
+openApproval.addEventListener("click", async () => {
+  openApproval.disabled = true;
+  try {
+    await message("morrow_pair");
+    clearError();
+  } catch (cause) {
+    showError(cause);
+  } finally {
+    openApproval.disabled = false;
+  }
+});
 quickOpenSettings.addEventListener("click", () => { void chrome.runtime.openOptionsPage(); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleRefresh(); });
 window.addEventListener("focus", () => scheduleRefresh());
