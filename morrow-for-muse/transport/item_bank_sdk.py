@@ -902,7 +902,10 @@ class ItemBankSdk:
                 # connection dropped after the request was sent).
                 raise ItemBankSdkMaybeAttempted(
                     "SDK page-context call failed: %s" % error)
-            raise ItemBankSdkError("SDK page-context call failed: %s" % error)
+            # The program was dispatched and did not return its own
+            # outcome shape, so its fetch may have run.
+            raise ItemBankSdkMaybeAttempted(
+                "SDK page-context call failed: %s" % error)
         return int(outcome.get("status", 0)), str(outcome.get("body", ""))
 
     # -- convenience item operations ---------------------------------------
