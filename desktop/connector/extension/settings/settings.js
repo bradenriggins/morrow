@@ -319,8 +319,11 @@ function renderPrivateChat() {
     ? messages.map((message) => `<div class="private-chat-message private-chat-message-${message.role === "assistant" ? "assistant" : "user"}"><strong>${message.role === "assistant" ? escapeHtml(selectedClient?.name || "Assistant") : "You"}</strong><p>${privateChatMessageHtml(message)}</p></div>`).join("")
     : '<p class="state-message">No messages in this local conversation.</p>';
   privateChatHistory.scrollTop = privateChatHistory.scrollHeight;
+  // A chat that exists but waits for no message is answering the one just sent.
   privateChatStatus.textContent = !transportAvailable
-    ? "Ask the connected assistant to start Morrow Private Chat. Keep this drawer open while you chat."
+    ? clients.length
+      ? messages.length ? "Sent. Waiting for the assistant's reply. Keep this drawer open." : "Waiting for the assistant. Keep this drawer open."
+      : "Ask the connected assistant to start Morrow Private Chat. Keep this drawer open while you chat."
     : !clients.length
       ? "The assistant relay is not ready."
       : !courses.length

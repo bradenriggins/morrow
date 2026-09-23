@@ -538,3 +538,26 @@ test("the drawer shows the educator real names and asks before sending unmatched
   assert.deepEqual(page.messages("morrow_private_chat_send")[1].confirmedNames, ["Bobby Smith"]);
   assert.equal(page.query("#private-chat-message").value, "");
 });
+
+// After a send the chat keeps running while the assistant answers. It is not a chat that needs starting.
+test("the drawer says a sent message waits for the assistant's reply, and asks to start a chat only when none exists", async () => {
+  const binding = { sourceBindingId: "canvas:course-89585", provider: "canvas", origin: "https://canvas.example.edu", courseId: "89585", courseName: "Biology", runtimeVerified: true, editPolicyRevision: 0 };
+  const client = { id: "session-12345678", name: "Claude Desktop", protocolVersion: "2026-07-28", sampling: true, pushSampling: false };
+  const sent = {
+    schema: "morrow.private-chat.status.v1", transportAvailable: false, waitingForMessage: false, clients: [client],
+    messages: [{ role: "user", text: "Review Student A1's missing work.", parts: [{ text: "Review " }, { name: "Michaela Brook", label: "Student A1" }, { text: "'s missing work." }] }],
+    sourceBindingId: binding.sourceBindingId, courseId: "89585", code: "private_chat_start_required",
+  };
+  const none = { schema: "morrow.private-chat.status.v1", transportAvailable: false, waitingForMessage: false, clients: [], messages: [], code: "private_chat_start_required" };
+  let privateChat = sent;
+  const page = await loadExtensionPage("settings/settings.html", {
+    handlers: { morrow_edit_policy_status: () => ({ bindings: [binding], catalogDigest: "c".repeat(64), siteAnchors: [], bindingLimit: 500, privateChat }) },
+  });
+  await page.click("#private-chat-open");
+  assert.equal(page.text("#private-chat-status"), "Sent. Waiting for the assistant's reply. Keep this drawer open.");
+  assert.equal(page.query("#private-chat-message").disabled, true);
+  privateChat = none;
+  await page.click("#refresh");
+  await page.waitFor(() => page.text("#private-chat-status") !== "Sent. Waiting for the assistant's reply. Keep this drawer open.", "the drawer kept the waiting line after the chat ended");
+  assert.equal(page.text("#private-chat-status"), "Ask the connected assistant to start Morrow Private Chat. Keep this drawer open while you chat.");
+});
