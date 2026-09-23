@@ -199,6 +199,51 @@ test("local protection replaces a rostered platform id written after a person wo
   assert.equal(protectCourse("Jane Doe scored 44 in module 44001", ["Jane Doe"]).protectedText.endsWith("in module 44001"), true);
 });
 
+// A student number or a numeric login names one student as surely as the platform id does.
+const NUMBERED_COURSE = [
+  { id: 98765, name: "Jane Doe", sortable_name: "Doe, Jane", login_id: "jdoe", email: "jane.doe@school.edu", sis_user_id: "20231234" },
+  { id: 55123, name: "José García", sortable_name: "García, José", login_id: "70011222", email: "jgarcia@school.edu", sis_user_id: "20239876" },
+  { id: 44001, name: "Will Grant", sortable_name: "Grant, Will", login_id: "wgrant", integration_id: "30004444" },
+];
+
+function protectNumbered(text, assertedIdentifiers) {
+  return protectLocalRequest({
+    sourceBindingId: "canvas:course-1", courseId: "1", text, assertedIdentifiers,
+    roster: canvasProtectedRoster(NUMBERED_COURSE, [], "1"), rosterComplete: true, rosterFreshAt: NOW, now: NOW,
+  });
+}
+
+test("local protection replaces a rostered student number or numeric login the educator did not list", () => {
+  const cases = [
+    ["Jane Doe and 98765 both missed the lab.", /^(Student A\d+) and \1 both missed the lab\.$/u],
+    ["Jane Doe and 20239876 both missed the lab.", /^Student A\d+ and Student A\d+ both missed the lab\.$/u],
+    ["Jane Doe and 70011222 both missed the lab.", /^Student A\d+ and Student A\d+ both missed the lab\.$/u],
+    ["Jane Doe's student number is 20231234.", /^(Student A\d+)'s student number is \1\.$/u],
+    ["Jane Doe and student 30004444 need more time.", /^Student A\d+ and student Student A\d+ need more time\.$/u],
+  ];
+  for (const [text, expected] of cases) {
+    const result = protectNumbered(text, ["Jane Doe"]);
+    assert.match(result.protectedText, expected, text);
+    assert.doesNotMatch(result.protectedText, /98765|20239876|70011222|20231234|30004444/u, text);
+  }
+  const garcia = protectNumbered("Jane Doe and 20239876 both missed the lab.", ["Jane Doe"]);
+  const login = protectNumbered("Jane Doe and 70011222 both missed the lab.", ["Jane Doe"]);
+  assert.equal(garcia.protectedText, login.protectedText, "a student number and a login of one student get one label");
+  // A number written after a course word stays a course number.
+  assert.equal(protectNumbered("Jane Doe is in section 20239876.", ["Jane Doe"]).protectedText.endsWith("in section 20239876."), true);
+});
+
+test("local protection refuses a number that is an identifier of two different students", () => {
+  const shared = [
+    { id: 98765, name: "Jane Doe", sortable_name: "Doe, Jane", sis_user_id: "55123" },
+    { id: 55123, name: "José García", sortable_name: "García, José" },
+  ];
+  assert.throws(() => protectLocalRequest({
+    sourceBindingId: "canvas:course-1", courseId: "1", text: "Jane Doe and 55123 both missed the lab.", assertedIdentifiers: ["Jane Doe"],
+    roster: canvasProtectedRoster(shared, [], "1"), rosterComplete: true, rosterFreshAt: NOW, now: NOW,
+  }), /protected_request_identifier_ambiguous/);
+});
+
 test("local protection does not turn common words that match a lone name part into labels", () => {
   const ordinary = protectCourse("Jane Doe will get a grant for this", ["Jane Doe"]);
   assert.match(ordinary.protectedText, /^Student A\d+ will get a grant for this$/u);

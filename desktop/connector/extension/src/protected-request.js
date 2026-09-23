@@ -270,6 +270,7 @@ function aliasIndex(roster, priorLabels, assignedLabels) {
   const aliases = new Map();
   const kinds = new Map();
   const byId = new Map();
+  const numbers = new Map();
   const labelsById = { ...priorLabels };
   let nextLabel = Math.max(0, ...Object.values(labelsById).map((label) => Number(label.slice("Student A".length)))) + 1;
   roster.forEach((raw) => {
@@ -294,8 +295,24 @@ function aliasIndex(roster, priorLabels, assignedLabels) {
       aliases.set(key, matches);
       if (!kinds.has(key)) kinds.set(key, aliasKind(value, identity));
     }
+    // A student number or a numeric login names a student as surely as the platform id does, so a
+    // bare one is replaced whether or not the educator listed it.
+    for (const value of [identity.id, identity.loginId, identity.sisUserId, ...identity.aliases]) {
+      const key = normalize(value || "");
+      if (!/^[0-9]+$/u.test(key)) continue;
+      const matches = numbers.get(key) || [];
+      if (!matches.some((candidate) => candidate.identity.id === identity.id)) matches.push(entry);
+      numbers.set(key, matches);
+    }
   });
-  return { aliases, kinds, byId, labelsById };
+  return { aliases, kinds, byId, numbers, labelsById };
+}
+
+/** The one student a number names, or null. A number that names two students is refused. */
+function numberEntry(numbers, value) {
+  const matches = numbers.get(value) || [];
+  if (matches.length > 1) fail("protected_request_identifier_ambiguous");
+  return matches[0] || null;
 }
 
 function exactAlias(value, aliases) {
@@ -310,11 +327,12 @@ function containsAlias(value, alias) {
 }
 
 // A number this long in a request is a platform id, not a count or a score. A word
-// before it that names a course object says whose id it is.
-const BARE_ID = /(?<![\p{L}\p{N}_/=.#:%&-])([0-9]{5,500})(?![\p{L}\p{N}_/.%])/gu;
+// before it that names a course object says whose id it is. A period that ends the
+// sentence still ends the number; one inside a decimal or a file name does not.
+const BARE_ID = /(?<![\p{L}\p{N}_/=.#:%&-])([0-9]{5,500})(?![\p{L}\p{N}_/%]|\.[\p{L}\p{N}_])/gu;
 const OBJECT_WORD = /\b(?:course|courses|assignment|assignments|quiz|quizzes|module|modules|page|pages|file|files|section|sections|group|groups|item|items|question|questions|rubric|outcome|term|account|attempt|version|order|room|zip|phone|ext)\s*$/iu;
 
-function replaceContextualIds(value, byId, usedIds) {
+function replaceContextualIds(value, numbers, usedIds) {
   const patterns = [
     /((?:["']?(?:learner|student|user|recipient|enrollment|submission)[_-]?id["']?)\s*[:=]\s*["']?)([0-9]{1,500})/giu,
     /((?:\b(?:learner|student|user|recipient|enrollment|submission|grade)\b\s*(?:id\b\s*)?[#:=]\s*))([0-9]{1,500})\b/giu,
@@ -324,14 +342,15 @@ function replaceContextualIds(value, byId, usedIds) {
   let output = value;
   for (const pattern of patterns) {
     output = output.replace(pattern, (whole, prefix, id) => {
-      const entry = byId.get(id);
+      const entry = numberEntry(numbers, id);
       if (entry) usedIds.add(entry.identity.id);
       return entry ? `${prefix}${entry.label}` : whole;
     });
   }
   return output.replace(BARE_ID, (whole, id, offset, text) => {
-    const entry = byId.get(id);
-    if (!entry || OBJECT_WORD.test(text.slice(Math.max(0, offset - 40), offset))) return whole;
+    if (OBJECT_WORD.test(text.slice(Math.max(0, offset - 40), offset))) return whole;
+    const entry = numberEntry(numbers, id);
+    if (!entry) return whole;
     usedIds.add(entry.identity.id);
     return entry.label;
   });
@@ -370,7 +389,7 @@ function transformStructured(value, index, byId, usedIds, asserted, flagged, key
       usedIds.add(entry.identity.id);
       return entry.label;
     }
-    return replaceContextualIds(replaceAliases(value, index, usedIds, asserted, flagged), byId, usedIds);
+    return replaceContextualIds(replaceAliases(value, index, usedIds, asserted, flagged), index.numbers, usedIds);
   }
   if (typeof value === "number" && Number.isSafeInteger(value) && IDENTITY_KEY.test(key)) {
     const entry = byId.get(String(value));
@@ -416,7 +435,7 @@ export function protectLocalRequest(input) {
   }
   const roster = input.roster.map(exactIdentity).sort((left, right) => left.id.localeCompare(right.id, "en", { numeric: true }));
   const index = aliasIndex(roster, input.labelsById, input.assignedLabelsById);
-  const { aliases, byId, labelsById } = index;
+  const { aliases, byId, numbers, labelsById } = index;
   const usedIds = new Set();
   const flagged = [];
   const allowedLabels = new Set(Object.values(input.labelsById || {}));
@@ -437,13 +456,13 @@ export function protectLocalRequest(input) {
     try { parsed = JSON.parse(input.text); } catch { fail("protected_request_structured_invalid"); }
     protectedText = JSON.stringify(transformStructured(parsed, index, byId, usedIds, assertedAliases, flagged));
   } else {
-    protectedText = replaceContextualIds(replaceAliases(input.text, index, usedIds, assertedAliases, flagged), byId, usedIds);
+    protectedText = replaceContextualIds(replaceAliases(input.text, index, usedIds, assertedAliases, flagged), numbers, usedIds);
   }
   if ([...usedIds].some((id) => !byId.get(id)?.label)) fail("protected_request_label_unavailable");
   if (remainingUnknownIdentifier(protectedText)) fail("protected_request_identifier_unknown");
   const leaks = aliasMatches(protectedText, index, assertedAliases, [])
     .some(({ start, end }) => !/^Student A[1-9][0-9]*$/u.test(protectedText.slice(start, end)));
-  if (leaks || [...protectedText.matchAll(BARE_ID)].some((match) => byId.has(match[1])
+  if (leaks || [...protectedText.matchAll(BARE_ID)].some((match) => numbers.has(match[1])
     && !OBJECT_WORD.test(protectedText.slice(Math.max(0, match.index - 40), match.index)))) {
     fail("protected_request_identity_leak_refused");
   }
