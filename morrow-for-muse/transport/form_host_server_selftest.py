@@ -25,6 +25,14 @@ for _p in (REPO, os.path.join(REPO, "transport")):
 
 from transport import form_host_server as fhs  # noqa: E402
 
+# The daemon's identity check reads /proc/<pid>/cmdline, so without /proc
+# stop_server() can never stop the daemons this suite starts. Refuse
+# before starting any.
+if not os.path.isdir("/proc"):
+    print("FAIL: form_host_server selftest needs Linux (/proc); nothing "
+          "was started")
+    sys.exit(1)
+
 PASS = []
 FAIL = []
 
