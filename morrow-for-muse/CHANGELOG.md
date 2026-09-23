@@ -39,14 +39,25 @@ Student privacy:
 - Some names are still not hidden, and the consent page lists them: a
   name Canvas does not list for the student, such as a nickname; a
   course named for its student, such as an independent study; and a
-  page's web address, which keeps the words of the page's title in
-  small letters.
+  first or last name alone in small letters, such as "jane" in a page's
+  web address.
+- A student's full name is hidden in a page's web address
+  ("jane-doe-iep-accommodations") and in a file name
+  ("Jane_Doe_essay.pdf", "JaneDoe.pdf", "doe_jane.docx"). Both reached
+  the assistant as written. The assistant can still open and change
+  such a page, and the address goes back exactly as Canvas has it.
+- A name is hidden however its accents and apostrophes are written:
+  "José Álvarez" when Canvas lists "Jose Alvarez", "Zoe Mueller" for
+  "Zoë Müller", and "O’Brien" with a curly apostrophe. These reached
+  the assistant as written.
 - The consent page says that on some Muse computers, the network that
   carries traffic out of the computer can read that traffic, including
   your Canvas sign-in and the course pages Morrow loads.
 - Privacy fix: a course given by its SIS code (for example
   `sis_course_id:BIO101`) skipped the step that hides student names, so
-  a page's names, emails, and logins reached the assistant. Morrow now
+  a page's names, emails, and logins reached the assistant. Looking up
+  a student by name in such a course gave a label that could name a
+  different student in the same course given by its number. Morrow now
   refuses such a course before it reads anything, and the assistant
   asks for the course by name or by the number in its Canvas address.
 
@@ -66,6 +77,14 @@ Changes to your courses:
 - The assistant can read a course's content security settings, one of
   the 115 tested reads. Morrow refused that read along with changes to
   those settings; only a change is refused now.
+- What this version does not do is refused even when it is part of a
+  task we tested: making a page the course home page, choosing the
+  course home page, publishing a New Quiz, making a graded
+  discussion, and a question group that draws from a classic question
+  bank. Each one ran after your approval, or in Edit mode. To
+  catch a New Quiz published through its assignment or module item,
+  Morrow reads that item first. Make these changes in Canvas yourself
+  for now.
 - The approval you read before a change is in plain words: the
   course, the change, every value that will be sent, and whether
   Morrow can undo it. A course rename and a change to the dates of
@@ -107,9 +126,19 @@ Changes to your courses:
   another page while Morrow was sending a change, Morrow sent it again,
   so Canvas could end up with two copies. Now Morrow reports the change
   as unconfirmed and does not send it again.
+- Every server error from Canvas, or from a service in front of it,
+  is a failure. Some (for example 501, or 522 and 524 when the
+  connection to Canvas timed out) were taken as the answer: a read gave
+  the assistant the error page as course content, and a change could
+  be reported as failed while Canvas still applied it. Now a read
+  reports the error, and a change is reported as unconfirmed and is
+  not sent again.
 - A course page whose title starts with "Login" (for example "Login
   Help") can be read and changed. Morrow took it for Canvas's sign-in
   page, paused every change, and said your Canvas connection expired.
+  The same happened to a page, quiz question, or post that shows the
+  field names of Canvas's sign-in form. It can be read and changed
+  now too.
 - The approval names what a change touches by its title, for example
   Delete the assignment "Week 3 Quiz", never only by its number.
   Morrow reads the page, assignment, module, quiz, discussion, or item
@@ -144,6 +173,12 @@ Settings and undo:
   deletion you said yes to was refused again while "always confirm
   deletions" was on. Your yes to the deletion you were shown is the
   confirmation.
+- "Always confirm deletions" covers a change that replaces a list,
+  because Canvas deletes what is not on the new list: the course's
+  blackout dates, its timetable events, a module's date overrides, and
+  a change to an assignment that sends its list of date overrides. In
+  Edit mode these ran without asking. The approval for the timetable events and for a module's
+  date overrides now says that an item not on the list is deleted.
 - Three settings that promised things Morrow does not do are gone:
   batched approvals, bulk action confirmations, and cleanup of test
   objects.
@@ -165,6 +200,9 @@ Messages:
   applied and promised an engineering follow-up.
 - A failure Morrow cannot classify no longer promises a follow-up that
   never comes. It gives the support address instead.
+- When the helper is not running, looking up a student by name says so
+  and that your Canvas sign-in is not affected. It told the assistant
+  to have you sign in again.
 - When changes are paused because your Canvas sign-in expired, you
   are told to sign in again on the helper page. This also happens when
   the sign-in expires just as Morrow starts work in a course. While

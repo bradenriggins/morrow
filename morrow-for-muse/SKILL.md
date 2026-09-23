@@ -366,8 +366,11 @@ also work in edit mode.
 
 A deletion asks first even in edit mode while the educator's
 `confirm_destructive_writes` setting is on ("always confirm
-deletions"). Tell them exactly what will be deleted and get their yes,
-then do one of these:
+deletions"). A change that replaces a list is a deletion too, because
+Canvas deletes what is not on the new list: the course's blackout
+dates, its timetable events, a module's date overrides, and an
+assignment change that sends `assignment_overrides`. Tell them exactly
+what will be deleted and get their yes, then do one of these:
 
 - Show the deletion with `plan-write` and run `approve-write` with
   their reply. Their reply confirms the deletion it approved.
@@ -391,6 +394,18 @@ and no override: rows marked `pending`, `failed`, `unsupported`,
 even when the educator asks and even with a signed approval. Tell the
 educator plainly that Morrow does not do that task yet, and offer a
 live-proven task that gets them close, if there is one.
+
+A live-proven route is refused the same way when the request sends a
+field whose effect is not in this version: making a page the course
+home page (`front_page` true on a page create or update), choosing the
+course home page (`default_view` on a course update), publishing a New
+Quiz (`published` true on a New Quiz create or update, or on the
+assignment or module item of a New Quiz; Morrow reads the assignment or
+module item first to check), a graded discussion
+(`submission_types` holding `discussion_topic` on an assignment create
+or update), and a question group that draws from a classic question
+bank (`assessment_question_bank_id`). Leave the field out, and tell the educator to make that
+change in Canvas themselves.
 
 Undo: this release has no automatic undo. Every write's
 `approval_display` says "Morrow cannot undo this change automatically",
@@ -761,6 +776,8 @@ student's label plus a marker that names the form it replaced:
 - `Student A3`: the full name. `Student A3 (first name)`,
   `(last name)`, `(name, last name first)`, `(email)`, `(login)`,
   `(SIS id)`, `(user id)`, `(other name)`: the other forms.
+  `(joined name)`: the name written as one token, as in a page's web
+  address (`jane-doe-iep`) or a file name (`Jane_Doe_essay.pdf`).
 - `Student A3 or Student A4 (first name)`: a form two students share.
 - `Student A7 (as written)`: text that already read like a label.
   It is not a student.
@@ -799,6 +816,10 @@ The educator names students; you never guess which one they mean.
 4. `status: not_found`: no student matched. Tell the educator, and ask
    them to check the spelling or say whether to include inactive or
    concluded enrollments (`--include-inactive`, `--include-concluded`).
+   `status: refused` or `error`: nothing was looked up. Relay
+   `message` and follow `next_step`; `correlation_id` is the reference.
+   `--course` takes only the course's Canvas number, never its SIS
+   form: find the course by name (canvas_list_courses) first.
 5. Write by label: put the label (or the `shown_as` form) where the
    operation takes a student, as a path parameter (`--params
    '{"user_id": "Student A3", ...}'`) or in the body (`--body
@@ -861,10 +882,13 @@ Honest limitations (not defects, but know them):
   roster does not know is not labeled: a nickname (above), or someone
   who was never a student in the course.
 - A name in lowercase is labeled only when it is the full name, the
-  email, or the login (a lowercase first or last name alone is often an
-  ordinary word). So a page's web address (`url`, `html_url`), which
-  keeps the words of the page's title in lowercase, can carry a
-  student's name; Morrow needs the address to find the page.
+  email, the login, or the name joined as one token (a lowercase first
+  or last name alone is often an ordinary word). A page's web address
+  (`url`, `html_url`) and a file name that hold the full name show it
+  as `Student A3 (joined name N)`: keep it exactly as you read it, and
+  use it as `url_or_id` to read or change that page; Morrow puts back
+  the real address. A first or last name alone in lowercase there
+  (`janes-reading-log`) is not labeled.
 - A course's own name is shown as Canvas has it wherever Morrow names
   the course (the course list, approvals, messages), so a course named
   for a student (an independent study) shows that name.

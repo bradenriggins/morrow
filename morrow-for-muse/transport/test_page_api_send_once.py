@@ -22,6 +22,13 @@ Failure modes this suite pins down (written before the fix; final sweep
      "login" (a page titled "Login Help") stopped every change and told
      the educator their Canvas connection expired. Only Canvas's own
      sign-in path (/login, /login/...) means a dead session.
+  5. api() read any answer whose first 8 KB held "pseudonym_session"
+     as Canvas's sign-in page, JSON included. A course page, quiz
+     question, or discussion that shows the sign-in form's field names
+     (a login-help page) halted every change, quarantined the session,
+     and told the educator their Canvas connection expired, and the
+     page could never be read. Login markers count only in an HTML
+     document; an answer that is valid JSON is never a sign-in page.
 
 Stdlib only; a fake CDP stands in for the browser.
 """
@@ -64,11 +71,14 @@ class FakeCDP(lc.CDP):
     the error the first evaluate raises (after the program ran, unless
     the error says the world was already gone)."""
 
-    def __init__(self, fail=None, error_cls=lc.CDPError, url=None):
+    def __init__(self, fail=None, error_cls=lc.CDPError, url=None,
+                 body=None, content_type="application/json"):
         super().__init__(port=19223, owner="test")
         self.fail = fail
         self.error_cls = error_cls
         self.url = url
+        self.body = body
+        self.content_type = content_type
         self.worlds = 0
         self.programs_run = []
 
@@ -88,8 +98,10 @@ class FakeCDP(lc.CDP):
             raise self.error_cls(self.fail)
         self.programs_run.append(_program_method(expression))
         path = _program_path(expression)
+        body = self.body if self.body is not None else \
+            json.dumps({"id": 2, "url": "login-help"})
         return json.dumps({"status": 200, "url": self.url or path,
-                           "body": json.dumps({"id": 2, "url": "login-help"}),
+                           "body": body, "contentType": self.content_type,
                            "link": None, "retryAfter": None,
                            "truncated": False, "redirected": False})
 
@@ -195,3 +207,54 @@ def test_a_page_named_for_logging_in_is_read_and_changed(pinned, slug):
 def test_canvas_sign_in_path_still_means_a_dead_session(url):
     with pytest.raises(lc.SessionDead):
         _transport(FakeCDP(url=url)).api("GET", "/api/v1/courses/1")
+
+
+LOGIN_HELP = json.dumps({
+    "id": 2, "url": "login-help", "title": "How to sign in",
+    "body": "<p>The sign-in form has a box named <code>pseudonym_session"
+            "[unique_id]</code> for your username and <input "
+            "type=\"password\" name=\"pseudonym_session[password]\"> "
+            "for your password.</p><title>Log in</title>"})
+
+
+def test_a_page_that_shows_the_sign_in_form_is_read_and_changed(pinned):
+    path = "/api/v1/courses/1/pages/login-help"
+    status, _h, body = _transport(FakeCDP(body=LOGIN_HELP)).api("GET", path)
+    assert status == 200 and json.loads(body)["title"] == "How to sign in"
+    sess = _session(FakeCDP(body=LOGIN_HELP))
+    status, _h, raw, _n = sess.raw_request("GET", BASE + path,
+                                           {"Accept": "application/json"},
+                                           None)
+    assert status == 200 and b"pseudonym_session" in raw
+    status, _h, _raw, _n = sess.raw_request(
+        "PUT", BASE + path, {"Content-Type": "application/json"},
+        b'{"wiki_page": {"title": "How to sign in"}}', is_write=True)
+    assert status == 200
+    assert sess._session_dead is False
+
+
+def test_json_is_never_a_sign_in_page_even_when_labeled_html():
+    status, _h, _b = _transport(FakeCDP(
+        body=LOGIN_HELP, content_type="text/html; charset=utf-8")).api(
+            "GET", "/api/v1/courses/1/pages/login-help")
+    assert status == 200
+
+
+SIGN_IN_FORM = ('<form action="/login/canvas"><input name="pseudonym_session'
+                '[unique_id]"><input type="password" name="pseudonym_session'
+                '[password]"></form>')
+
+
+@pytest.mark.parametrize("body, content_type", [
+    ("<!DOCTYPE html><html><body>%s</body></html>" % SIGN_IN_FORM,
+     "text/html"),
+    ("\ufeff  <html><body>%s</body></html>" % SIGN_IN_FORM, None),
+    # A comment before the doctype: the content type says HTML.
+    ("<!-- sso --><!DOCTYPE html><body>%s</body>" % SIGN_IN_FORM,
+     "text/html; charset=utf-8"),
+])
+def test_the_sign_in_page_served_with_200_is_still_a_dead_session(
+        body, content_type):
+    with pytest.raises(lc.SessionDead):
+        _transport(FakeCDP(body=body, content_type=content_type)).api(
+            "GET", "/api/v1/courses/1")

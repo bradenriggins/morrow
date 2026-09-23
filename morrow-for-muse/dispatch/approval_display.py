@@ -217,7 +217,8 @@ _ROUTE_WORDS = {
          "replacing the blackout dates"),
     ("POST", "/api/v1/courses/{course_id}/calendar_events/"
              "timetable_events"):
-        ("Replace the course's timetable events with this list",
+        ("Replace the course's timetable events with this list (a "
+         "timetable event not on it is deleted)",
          "replacing the timetable events"),
     ("POST", "/api/v1/courses/{course_id}/content_exports"):
         ("Start an export of the course's content",
@@ -273,8 +274,9 @@ _ROUTE_WORDS = {
          "locking a module again"),
     ("PUT", "/api/v1/courses/{course_id}/modules/{context_module_id}/"
             "assignment_overrides"):
-        ("Change the date overrides of the module {context_module_id}",
-         "changing the date overrides of a module"),
+        ("Replace the date overrides of the module {context_module_id} "
+         "with this list (an override not on it is deleted)",
+         "replacing the date overrides of a module"),
     ("POST", "/api/v1/courses/{course_id}/pages/{url_or_id}/duplicate"):
         ("Copy the page {url_or_id}", "copying a page"),
     ("POST", "/api/v1/courses/{course_id}/pages/{url_or_id}/revisions/"

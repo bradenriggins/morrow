@@ -68,8 +68,10 @@ SKILL.md "Working by name"; policy: `privacy/FERPA_POLICY.md`.
 - Course content is labeled through the course roster, so a name the
   roster does not know (a nickname, someone never enrolled) is not.
 - A lowercase first or last name alone is not labeled (it is often an
-  ordinary word), so a page's web address (`url`, `html_url`) can carry
-  a student's name in lowercase.
+  ordinary word), so a page's web address (`url`, `html_url`) made from
+  a title with only one of them can carry it. The full name joined as
+  one token (`jane-doe`, `Jane_Doe`, `JaneDoe`, `doe.jane`) is labeled
+  as `(joined name N)` and goes back exactly as written.
 - A course's own name shows as Canvas has it wherever Morrow names the
   course, so an independent study named for its student shows it.
 

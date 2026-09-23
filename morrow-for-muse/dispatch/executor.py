@@ -4678,15 +4678,15 @@ def request_with_retry(method: str, url: str, headers: dict, body_bytes,
 
     Reads: retry transport errors and 408/429/500/502/503/504; a 429 with
     a Retry-After header sleeps that long (capped at RETRY_AFTER_CAP_S);
-    fail fast on other 4xx. Writes: retry ONLY on transport failures that
-    prove the request never reached the server (DNS failure, connection
-    refused, unreachable host). A reset, incomplete read, or timeout after
+    fail fast on other 4xx and 5xx. Writes: retry ONLY on transport
+    failures that prove the request never reached the server (DNS
+    failure, connection refused, unreachable host). A reset, incomplete read, or timeout after
     the bytes left is indistinguishable from a reset before the server
     applied the write, so those become UncertainWrite, never a silent
     retry (W2-P0-1). A 429 on a write is likewise uncertain (the provider
     may have applied it before throttling); the Retry-After value is
-    reported in the detail for reconciliation. 5xx with a response is
-    uncertain, never retried.
+    reported in the detail for reconciliation. Any 5xx with a response
+    is uncertain, never retried.
     """
     attempts = 0
     last_exc = None
@@ -4736,7 +4736,9 @@ def request_with_retry(method: str, url: str, headers: dict, body_bytes,
                         _backoff_sleep(attempts - 1)
                         continue
                 raise ExecutorError("read transport failed: %s" % exc)
-        if status in RETRYABLE_STATUSES:
+        # Every 5xx is a provider failure: a CDN in front of Canvas
+        # answers 520-526 while the origin may still apply a write.
+        if status in RETRYABLE_STATUSES or status >= 500:
             if is_write:
                 detail = ("write returned HTTP %s; effect state unknown, "
                           "not retried" % status)
@@ -4749,6 +4751,9 @@ def request_with_retry(method: str, url: str, headers: dict, body_bytes,
                     detail, attempts=attempts,
                     evidence=[{"method": method, "url": _redacted_url(url),
                                "status": status, "attempts": attempts}])
+            if status not in RETRYABLE_STATUSES:
+                raise ProviderHttpError(
+                    status, "provider error, not retried", body=raw)
             if attempts < MAX_ATTEMPTS:
                 delay = _retry_after_delay(resp_headers) \
                     if status == 429 else None
@@ -7842,6 +7847,14 @@ def _render_dry_run(entry, params, session, pack, plan, op_id,
                       "detail": "dry-run: no provider calls; the fresh-read "
                                 "comparison would run after the claim, before "
                                 "any write"})
+        publish_target = _new_quiz_publish_target(entry)
+        if publish_target:
+            gates.append({"gate": "new_quiz_publish_check",
+                          "result": "skipped",
+                          "detail": "dry-run: no provider calls; the %s "
+                                    "is read before the change is sent, "
+                                    "and publishing a New Quiz is refused"
+                                    % publish_target})
     config = {"canvas_base": tenant_base or ""}
     secret_headers = _dry_run_secret_headers(entry, pack)
     requests = []
@@ -8150,7 +8163,7 @@ def _read_all_pages(session, url):
     return items
 
 
-_COURSE_NUMBER_RE = re.compile(r"[0-9]+")
+_COURSE_NUMBER_RE = re.compile(r"[1-9][0-9]*")
 
 
 def _require_numbered_course(entry, params):
@@ -8159,7 +8172,8 @@ def _require_numbered_course(entry, params):
     scope, and the course checks all know a course by its number. A SIS
     form (sis_course_id:BIO101) reaches the same course in Canvas but
     none of them, so the students named in its content would reach the
-    agent and the journal unlabeled."""
+    agent and the journal unlabeled. A leading zero ("0101") reaches
+    course 101 but scopes its labels apart from "101"."""
     course_id = _write_target_course_id(entry, params)
     if course_id is not None and not _COURSE_NUMBER_RE.fullmatch(
             str(course_id)):
@@ -8319,6 +8333,10 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # globally-wrong tenant cannot sail through.
         _chromium_session_mod().verify_helper_tenant_binding(tenant_base)
     _check_auxiliary_learner_data(entry, _learner_vault_ready(session))
+    if is_write and not dry_run:
+        # Before the mode gate and the approval: publishing a New Quiz is
+        # refused whatever was approved.
+        _refuse_new_quiz_publish(entry, params, session, pack)
     approval_audit, approval_record = admit(
         entry, params, tenant_base=tenant_base, approval=approval, op_id=op_id,
         require_educator_channel=require_educator_channel,
@@ -10050,19 +10068,28 @@ def _read_named_object(entry, params, session, pack, tenant_base,
     no name. Refuses (TargetIdentityMismatch) when the object cannot be
     read: the educator never approves a change to an object Morrow
     could not name."""
+    from privacy import executor_wire as _wire
+    from dispatch.approval_display import _noun
+    # The agent can name the object by its labeled address (a page whose
+    # address holds a student's name): the read goes to the real one.
+    shown_params = params
+    params, _ids = _wire.resolve_learner_labels(
+        {"params": params}, tenant_base,
+        _write_target_course_id(entry, params), None,
+        error_cls=LearnerLabelUnresolved, provider=entry.get("provider"),
+        extra_keys=_wire.learner_route_param_keys(entry))
+    params = params["params"]
     found = _named_object_route(entry, params)
     if found is None:
         return None
     template, slot = found
-    from privacy import executor_wire as _wire
-    from dispatch.approval_display import _noun
     read_entry = dict(entry, effects="read",
                       request={"method": "GET", "url": template,
                                "headers": {}})
     config = {"canvas_base": session.base_for("canvas")}
     words = template.split("?", 1)[0].split("/")
     what = "%s %s" % (_noun(words[-2], words[-4] if len(words) > 3
-                            else None), params.get(slot))
+                            else None), shown_params.get(slot))
     rosters = _wire.begin_course_rosters()
     try:
         if project:
@@ -10098,6 +10125,97 @@ def _read_named_object(entry, params, session, pack, tenant_base,
     return {"object_slot": slot, "object_name": shown,
             "object_name_digest": hashlib.sha256(
                 (title or "").encode("utf-8")).hexdigest()}
+
+
+# Routes that can publish a New Quiz without naming one: the assignment
+# a New Quiz is (C-43) and its module item (C-283). Publishing a New Quiz
+# was never tested (SCOPE.md), so Morrow reads the target first (C-44 and
+# C-281 are live-proven reads) and refuses a New Quiz. The New Quiz routes
+# themselves are refused by admission_policy.json request_fields.
+_PUBLISH_TARGETS = {
+    ("PUT", "/api/v1/courses/{}/assignments/{}"): "assignment",
+    ("PUT", "/api/v1/courses/{}/modules/{}/items/{}"): "module item",
+}
+
+
+def _new_quiz_publish_target(entry):
+    """"assignment" or "module item" when the write sets published on a
+    route whose target can be a New Quiz, else None."""
+    from dispatch.admission import _field_values, _flag_is_false, _route_key
+    request = (entry or {}).get("request") or {}
+    kind = _PUBLISH_TARGETS.get(_route_key(request.get("method"),
+                                           request.get("url")))
+    if kind is None:
+        return None
+    url_query = urllib.parse.urlsplit(str(request.get("url") or "")).query
+    for part in (request.get("query"), request.get("body"), url_query):
+        if part and any(not _flag_is_false(value)
+                        for value in _field_values(part, "published")):
+            return kind
+    return None
+
+
+def _is_new_quiz_assignment(doc):
+    """True for an assignment that is a New Quiz: Canvas flags it
+    is_quiz_lti_assignment, and it launches the quiz-lti tool."""
+    if doc.get("is_quiz_lti_assignment") is True:
+        return True
+    tool = doc.get("external_tool_tag_attributes")
+    url = tool.get("url") if isinstance(tool, dict) else None
+    return "external_tool" in (doc.get("submission_types") or []) \
+        and ".quiz-lti" in str(url or "").lower()
+
+
+def _read_publish_target(entry, url_template, params, session, pack, what):
+    read_entry = dict(entry, effects="read",
+                      request={"method": "GET", "url": url_template,
+                               "headers": {}})
+    config = {"canvas_base": session.base_for("canvas")}
+    rmethod, rurl, rheaders, rbody = build_request(
+        read_entry, read_entry["request"], params, session, pack, config,
+        {})
+    try:
+        _status, _hdrs, raw, _attempts = session.raw_request(
+            rmethod, rurl, rheaders, rbody, is_write=False)
+        return _parse_provider_json(raw, "the %s read" % what)
+    except (ProviderHttpError, TargetIdentityMismatch) as exc:
+        raise WriteNotAttempted(
+            "the %s could not be read (%s), so Morrow could not check that "
+            "it is not a New Quiz before publishing it. Nothing was sent."
+            % (what, "HTTP %s" % exc.status
+               if isinstance(exc, ProviderHttpError) else exc))
+
+
+def _refuse_new_quiz_publish(entry, params, session, pack):
+    """Refuse (EvidenceHold) a write that publishes a New Quiz through its
+    assignment or module item. Reads the target first; a target Morrow
+    cannot read is not published (WriteNotAttempted)."""
+    kind = _new_quiz_publish_target(entry)
+    if kind is None:
+        return
+    from reauth import state_machine as _rsm
+    if not _rsm.check_write_allowed()[0]:
+        # Changes are paused: the write gates refuse it, and nothing is
+        # read or sent.
+        return
+    url = entry["request"]["url"].split("?", 1)[0]
+    doc = _read_publish_target(entry, url, params, session, pack, kind)
+    if kind == "module item":
+        new_quiz = doc.get("quiz_lti") is True
+        if "quiz_lti" not in doc and doc.get("type") == "Assignment":
+            course_url = url.split("/modules/", 1)[0]
+            new_quiz = _is_new_quiz_assignment(_read_publish_target(
+                entry, course_url + "/assignments/{content_id}",
+                dict(params, content_id=doc.get("content_id")), session,
+                pack, "assignment"))
+    else:
+        new_quiz = _is_new_quiz_assignment(doc)
+    if new_quiz:
+        from dispatch.admission import EvidenceHold
+        raise EvidenceHold(
+            "operation %r publishes a New Quiz (the %s is one), which was "
+            "never tested; refused on every tenant until a live battery "
+            "proves it. Nothing was sent." % (entry.get("name"), kind))
 
 
 def _educator_time_zone(user_id, course_zone):
@@ -10173,6 +10291,7 @@ def prepare_plan_write(name: str, method: str, path_template: str,
                              session=session)
     check_policy_gates(entry, bool(getattr(session, "browser_owned_auth",
                                            False)))
+    _refuse_new_quiz_publish(entry, params, session, pack)
     tenant_base = session.base_for(provider or "canvas")
     course_id = _write_target_course_id(entry, params)
     target = None

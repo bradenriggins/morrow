@@ -34,7 +34,10 @@ marked `live-proven` is not a v1 claim.
 - Pages: create/read/update/delete/duplicate/revert, proven 2026-09-21.
   Front-page management is excluded: C-333 failed live (PUT returned 200
   but the provider returned the original front page, so readback caught
-  no state change). Setting the front page is not a v1 claim.
+  no state change). Setting the front page is not a v1 claim, and the
+  same effect through a field is refused: `front_page` true on a page
+  create or update (C-323, C-334), and `default_view` on a course update
+  (C-128).
 - Classic quizzes: create/read/update/delete, question groups
   (create/update/delete/reorder), and quiz questions
   (create/update/delete), proven 2026-09-21 (quiz 338345; question
@@ -57,7 +60,10 @@ marked `live-proven` is not a v1 claim.
   left evidence-hold on 2026-09-22 (admission_policy.json v1.2.0) after
   the integrated-path battery passed with full cleanup. Explicitly
   excluded: quiz publish (never tested) and quiz reports (provider
-  400s on report creation; honestly failed).
+  400s on report creation; honestly failed). A publish is refused on
+  every route that can make one: `published` true on a New Quiz create
+  or update (C-286, C-299), and on the assignment (C-43) or module item
+  (C-283) of a New Quiz, which the executor reads first to check.
 - Item Banks, through the Item Banks SDK lane (`transport/item_bank_sdk.py`:
   course-scoped banks.build launch, token held in memory only,
   per-tenant quiz-api host). Bank writes (IB-1 archive, IB-4 attach
@@ -181,7 +187,9 @@ live battery marks them live-proven in
   the query) and creating an announcement external feed (C-25) are
   never-dispatch in the admission policy. Posting an announcement
   notifies every student in the course.
-- Classic question banks: never tested. Not a v1 claim.
+- Classic question banks: never tested. Not a v1 claim. A question
+  group that draws from one (`assessment_question_bank_id` on C-347 or
+  C-352) is refused.
 - The remainder of the 457-row for-muse catalog (437 Canvas rows
   plus 20 Item Bank rows): only rows marked `live-proven` are v1
   claims. (The desktop harvest catalog is a separate 1,137-operation

@@ -551,6 +551,32 @@ class CliPrivacyBoundaryTests(unittest.TestCase):
                     "5550101", "5550103"):
             self.assertNotIn(raw, out)
 
+    def test_a_course_not_given_by_its_number_is_refused_first(self):
+        # Muse engine audit 2026-09-23: labels are numbered per course
+        # scope, so a course given another way ("sis_course_id:BIO101")
+        # got labels that name different students than the same numbers
+        # in the course given by number. Refused before any read.
+        import contextlib
+        import io
+        from learners import resolve_student as rs
+
+        def no_helper(*_a, **_k):
+            raise AssertionError("the helper was reached for a bad course")
+        saved = (rs.helper_fetch_factory, sys.argv)
+        rs.helper_fetch_factory = no_helper
+        out = io.StringIO()
+        try:
+            for course in ("sis_course_id:BIO101", "1/../2", "0101"):
+                sys.argv = ["resolve_student.py", "--tenant-base",
+                            "https://canvas.example.edu", "--course-id",
+                            course, "--query", "jdoe"]
+                with contextlib.redirect_stdout(out):
+                    code = rs._cli()
+                self.assertNotEqual(code, 0, out.getvalue())
+        finally:
+            rs.helper_fetch_factory, sys.argv = saved
+        self.assertIn("not as its Canvas course number", out.getvalue())
+
     def test_no_vault_fails_closed(self):
         def broken(*_a):
             raise RuntimeError("vault unavailable (cryptography missing)")

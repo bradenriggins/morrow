@@ -578,6 +578,17 @@ def fetch_paginated(fetcher, first_url, *, max_pages=100):
     return items, pages
 
 
+# Labels are numbered per course scope, so a course given another way
+# (sis_course_id:BIO101, 1/../2, 0101) gets labels that name different
+# students than the same numbers in the course by number. Only a plain
+# Canvas course number is accepted: the rule query/chain.py applies.
+COURSE_NUMBER_RE = re.compile(r"[1-9][0-9]{0,15}")
+
+
+def is_course_number(course_id):
+    return bool(COURSE_NUMBER_RE.fullmatch(str(course_id)))
+
+
 def users_url(tenant_base, course_id, *, per_page=100):
     base = check_tenant_base(tenant_base)
     query = urllib.parse.urlencode([
@@ -728,6 +739,14 @@ def _cdp_capture_with_headers(cdp, tab, url, timeout=60):
             pass
 
 
+class HelperUnavailable(RuntimeError):
+    """The login helper did not answer /status: it is not running."""
+
+
+class HelperSignedOut(RuntimeError):
+    """The helper answered, but its Canvas session is signed out."""
+
+
 def helper_fetch_factory(canvas_base, timeout=60):
     """Build a fetcher(url) -> (status, headers, body) via the login helper.
 
@@ -757,9 +776,10 @@ def helper_fetch_factory(canvas_base, timeout=60):
     try:
         status_doc = helper_status(timeout=10)
     except Exception as exc:
-        raise RuntimeError("helper status unreachable: %s" % exc)
+        raise HelperUnavailable("helper status unreachable: %s" % exc)
     if not status_doc.get("logged_in"):
-        raise RuntimeError("helper reports logged_in:false; refusing fetch")
+        raise HelperSignedOut(
+            "helper reports logged_in:false; refusing fetch")
 
     launcher = ChromiumLauncher(
         default_binary(), tree_helper_profile_dir(),
@@ -843,6 +863,16 @@ def _cli():
     parser.add_argument("--include-concluded", action="store_true")
     parser.add_argument("--include-test-student", action="store_true")
     args = parser.parse_args()
+    if not is_course_number(args.course_id):
+        print(json.dumps({
+            "resolved": False,
+            "error_class": "InvalidCourseId",
+            "message": "the course is given as %r, not as its Canvas course "
+                       "number; find the course by name and use the number "
+                       "in its Canvas address. Nothing was read."
+                       % args.course_id[:80],
+        }, indent=1))
+        return 2
 
     section_id = None
     if args.section_id is not None:

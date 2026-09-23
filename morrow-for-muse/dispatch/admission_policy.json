@@ -2,6 +2,34 @@
  "admitted_on_proof": {
   "canvas_create_new_quiz": "2026-09-22 lane-7 battery: disposable quiz create through the integrated product path (build_request + page-context POST) with readback title match and full cleanup, terminal GET 404; admitted on ALL tenants per the parity law"
  },
+ "deletes_by_replacing": {
+  "note": "Live-proven writes that delete without the DELETE method: the request replaces a list, and Canvas deletes every item not on it. While the educator's confirm_destructive_writes setting is on, an edit-mode write here asks first, like a DELETE (dispatch/admission.py _is_destructive). A route rule applies to every request on the route; a body_fields rule applies when the query or body sends that field.",
+  "routes": [
+   {
+    "method": "PUT",
+    "path": "/api/v1/courses/{course_id}/blackout_dates",
+    "deletes": "C-58: a blackout date not on the list"
+   },
+   {
+    "method": "POST",
+    "path": "/api/v1/courses/{course_id}/calendar_events/timetable_events",
+    "deletes": "C-74: a timetable event not on the list"
+   },
+   {
+    "method": "PUT",
+    "path": "/api/v1/courses/{course_id}/modules/{context_module_id}/assignment_overrides",
+    "deletes": "C-284: a module date override not on the list"
+   }
+  ],
+  "body_fields": [
+   {
+    "method": "PUT",
+    "path": "/api/v1/courses/{course_id}/assignments/{id}",
+    "field": "assignment_overrides",
+    "deletes": "C-43: an assignment override not on the assignment_overrides list"
+   }
+  ]
+ },
  "evidence_holds": {
   "note": "Operations that are not yet live-proven through Morrow for Muse. Refused on EVERY tenant until a disposable, isolated, fully cleaned-up live battery proves the complete path. When one is proven it is admitted on ALL tenants. There are no tenant allowlists: no tenant is ever gated, restricted, or treated differently from any other.",
   "reasons": {
@@ -25,7 +53,77 @@
    "canvas_item_bank_list_quiz_draws",
    "canvas_update_learning_object_s_date_information_discussion_topics",
    "canvas_update_topic_courses"
-  ]
+  ],
+  "request_fields": {
+   "note": "Changes the website and the consent page call not in this version, sent as a field on a live-proven route. Refused on every tenant and every lane, before approval, with no override (dispatch/admission.py check_evidence_holds). A rule applies to a request on its method and path template whose query, body, or URL query sends the field: 'true' when it is set to anything Canvas does not read as false, 'present' when it is sent at all, 'contains' when its value holds the given word. Publishing a New Quiz through its assignment or module item is refused after a read of the target (dispatch/executor.py _refuse_new_quiz_publish). When one of these is live-proven, lift its rule and the website line together.",
+   "rules": [
+    {
+     "method": "POST",
+     "path": "/api/v1/courses/{course_id}/pages",
+     "field": "front_page",
+     "when": "true",
+     "why": "makes the page the course home page, which is not in this version (the front page route C-333 failed live)"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/v1/courses/{course_id}/pages/{url_or_id}",
+     "field": "front_page",
+     "when": "true",
+     "why": "makes the page the course home page, which is not in this version (the front page route C-333 failed live)"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/v1/courses/{id}",
+     "field": "default_view",
+     "when": "present",
+     "why": "chooses the course home page, which is not in this version"
+    },
+    {
+     "method": "POST",
+     "path": "/api/quiz/v1/courses/{course_id}/quizzes",
+     "field": "published",
+     "when": "true",
+     "why": "publishes a New Quiz, which was never tested"
+    },
+    {
+     "method": "PATCH",
+     "path": "/api/quiz/v1/courses/{course_id}/quizzes/{assignment_id}",
+     "field": "published",
+     "when": "true",
+     "why": "publishes a New Quiz, which was never tested"
+    },
+    {
+     "method": "POST",
+     "path": "/api/v1/courses/{course_id}/assignments",
+     "field": "submission_types",
+     "when": "contains",
+     "value": "discussion_topic",
+     "why": "makes a graded discussion, and discussions are not in this version"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/v1/courses/{course_id}/assignments/{id}",
+     "field": "submission_types",
+     "when": "contains",
+     "value": "discussion_topic",
+     "why": "makes a graded discussion, and discussions are not in this version"
+    },
+    {
+     "method": "POST",
+     "path": "/api/v1/courses/{course_id}/quizzes/{quiz_id}/groups",
+     "field": "assessment_question_bank_id",
+     "when": "present",
+     "why": "draws the group's questions from a classic question bank, and classic question banks are not in this version"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/v1/courses/{course_id}/quizzes/{quiz_id}/groups/{id}",
+     "field": "assessment_question_bank_id",
+     "when": "present",
+     "why": "draws the group's questions from a classic question bank, and classic question banks are not in this version"
+    }
+   ]
+  }
  },
  "learner_data": {
   "note": "Operations touching learner PII. They are admitted only on a lane with a projection point and the encrypted learner vault (the Chromium lane with the optional 'cryptography' package), where every receipt is de-identified before the agent or the journal sees it; everywhere else they are refused (LearnerDataGated). users/self is the educator's own profile and is not learner data. Substrings were extended in the wave-3 hardening to cover every learner-bearing path the lane-8 gap scan found (students, search_users, recent_students, bulk_user_tags, gradeable_students, moderated_students, provisional_grades, custom_gradebook_columns, rubric_assessments, peer_reviews, bulk_user_progress, outcome_results, anonymous submissions, collaborations, conferences, audits, what-if grades, test-student reads, content-share users, submission summaries).",
