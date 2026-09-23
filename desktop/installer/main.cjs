@@ -500,7 +500,7 @@ const MAINTENANCE_REFUSALS = Object.freeze([
 
 /** The error one step answers with: a known refusal keeps its own text, anything else the step's fixed text. */
 function knownRefusalOr(error, codes, fallback) {
-  return codes.includes(error?.code) ? errorDetails(error.code) : errorDetails(fallback);
+  return codes.includes(error?.code) ? errorDetails(error.code) : fallback;
 }
 
 /**
@@ -775,8 +775,8 @@ async function startMorrow(lifecycle) {
     try {
       await installer.configureBlackboard(input);
       return respond();
-    } catch {
-      return failed(errorDetails("blackboard_configuration_invalid"));
+    } catch (error) {
+      return failed(knownRefusalOr(error, MAINTENANCE_REFUSALS, errorDetails("blackboard_configuration_invalid")));
     }
   });
   ipcMain.handle("installer:select-blackboard-courses", async (event, input) => {
@@ -784,8 +784,8 @@ async function startMorrow(lifecycle) {
     try {
       await installer.selectBlackboardCourses(input);
       return respond();
-    } catch {
-      return failed(errorDetails("blackboard_course_selection_invalid"));
+    } catch (error) {
+      return failed(knownRefusalOr(error, MAINTENANCE_REFUSALS, errorDetails("blackboard_course_selection_invalid")));
     }
   });
   // Removal answers with the state Morrow read back from its own files, so a
@@ -795,8 +795,8 @@ async function startMorrow(lifecycle) {
     try {
       await installer.removeBlackboardTenant(input);
       return respond();
-    } catch {
-      return failed(errorDetails("blackboard_removal_failed"));
+    } catch (error) {
+      return failed(knownRefusalOr(error, MAINTENANCE_REFUSALS, errorDetails("blackboard_removal_failed")));
     }
   });
   ipcMain.handle("installer:remove-blackboard-data", async (event, ...input) => {
@@ -805,8 +805,8 @@ async function startMorrow(lifecycle) {
       noInput(input);
       await installer.removeBlackboardData();
       return respond();
-    } catch {
-      return failed(errorDetails("blackboard_removal_failed"));
+    } catch (error) {
+      return failed(knownRefusalOr(error, MAINTENANCE_REFUSALS, errorDetails("blackboard_removal_failed")));
     }
   });
   ipcMain.handle("installer:install-assistant", async (event, input) => {
@@ -885,7 +885,7 @@ async function startMorrow(lifecycle) {
       return respond();
     } catch (error) {
       // A known refusal keeps its own fixed public text; anything else stays generic.
-      return failed(knownRefusalOr(error, [...MAINTENANCE_REFUSALS, "bridge_reload_unconfirmed", "bridge_update_failed"], "bridge_check_failed"));
+      return failed(knownRefusalOr(error, [...MAINTENANCE_REFUSALS, "bridge_reload_unconfirmed", "bridge_update_failed"], errorDetails("bridge_check_failed")));
     }
   });
   ipcMain.handle("installer:check-for-updates", async (event, ...input) => {

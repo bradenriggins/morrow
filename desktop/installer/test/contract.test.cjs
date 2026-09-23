@@ -802,6 +802,44 @@ test("an assistant settings error names only that absolute file, and only for er
   assert.equal(JSON.stringify(unrelated).includes(file), false);
 });
 
+// Every Blackboard step writes Morrow's own files under the maintenance fence,
+// so an open assistant or a running change refuses it before Blackboard is
+// contacted. That refusal says what holds Morrow; the Blackboard text would
+// blame the credentials or ask for a retry that fails the same way.
+test("a Blackboard step the maintenance fence refused keeps the refusal's own words", async () => {
+  const state = repairRequiredState();
+  let failure = null;
+  const refuse = async () => { throw failure; };
+  const started = await startedMorrow({
+    configureBlackboard: refuse,
+    selectBlackboardCourses: refuse,
+    removeBlackboardTenant: refuse,
+    removeBlackboardData: refuse,
+    state: async () => state
+  });
+  const event = { sender: started.window.webContents, senderFrame: started.window.webContents.mainFrame };
+  const steps = [
+    ["installer:configure-blackboard", [{ baseUrl: "https://learn.example.edu", applicationKey: "key-1", applicationSecret: "secret-1" }], "blackboard_configuration_invalid"],
+    ["installer:select-blackboard-courses", [{ tenantId: "learn-example-edu", courseBindings: [] }], "blackboard_course_selection_invalid"],
+    ["installer:remove-blackboard-tenant", [{ tenantId: "learn-example-edu" }], "blackboard_removal_failed"],
+    ["installer:remove-blackboard-data", [], "blackboard_removal_failed"]
+  ];
+  for (const [channel, input, own] of steps) {
+    const run = () => started.handlers.get(channel)(event, ...input);
+    for (const code of ["runtime_other_client_connected", "runtime_request_in_flight", "runtime_change_running", "active_or_uncertain_operations", "runtime_repair_required"]) {
+      failure = Object.assign(new Error("private fence detail"), { code });
+      const answer = await run();
+      assert.deepEqual(answer.error, errorDetails(code), `${channel} answers ${code} with its own words`);
+      assert.doesNotMatch(JSON.stringify(answer), /private|Blackboard web address/);
+    }
+    // A failure on the Blackboard side keeps the step's own fixed text.
+    failure = Object.assign(new Error("private Blackboard detail"), { code: "blackboard_discovery_failed" });
+    assert.deepEqual((await run()).error, errorDetails(own), `${channel} keeps its own text for a Blackboard failure`);
+    failure = new Error("private Blackboard detail");
+    assert.deepEqual((await run()).error, errorDetails(own));
+  }
+});
+
 test("Blackboard recoveries name only what the Blackboard form and course list offer", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "renderer", "index.html"), "utf8");
   const renderer = fs.readFileSync(path.join(__dirname, "..", "renderer", "renderer.js"), "utf8");

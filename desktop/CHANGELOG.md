@@ -33,6 +33,7 @@ This release fixes every Critical and High defect found in the adversarial audit
 - On a busy Windows computer, confirming the Claude Desktop app could take longer than Morrow waited, and Morrow then asked for approval in Claude Desktop again. Morrow now waits up to 10 seconds, says it is still checking, and checks again on its own. Messages between Claude Desktop and Morrow keep flowing during the check.
 - Morrow starts faster on Windows: it checks each private file once per start instead of once per read.
 - A newer Morrow Bridge in the app no longer stops setup when Chrome has not loaded the Bridge or is closed. Update Bridge appears only while Morrow Bridge is connected. With no Bridge connected, Check Bridge replaces the Bridge folder with the newer files. A failed update names only the steps on the Update screen.
+- When an open assistant or a running change keeps Morrow busy, saving, choosing, or removing a Blackboard connection says so. It no longer blames the web address, key, or secret.
 - The app says where unsigned builds get updates. The Mac note now says that moving Morrow to Applications can ask for an administrator password.
 
 ### Privacy
