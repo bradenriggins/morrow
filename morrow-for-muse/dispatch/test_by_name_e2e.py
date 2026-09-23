@@ -30,6 +30,7 @@ The run writes a repeatable artifact of the flow to
 
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -150,11 +151,28 @@ def _journal_text():
         return ""
 
 
+_WORD_RE = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def found_in(text, needles):
+    """The needles that occur in text.
+
+    A needle made only of letters, digits, "_" and "-" counts only as a
+    whole word. Ciphertext, HMACs, digests, keys, and op ids are long
+    random runs of exactly those characters, so a short name or id can
+    sit inside one by chance with no leak. A needle with any other
+    character ("jane.doe@", "Doe, Jane") cannot occur inside such a run
+    and counts anywhere."""
+    words = set(_WORD_RE.findall(text))
+    return [n for n in needles
+            if (n in words if _WORD_RE.fullmatch(n) else n in text)]
+
+
 def _leaks(value, introduced=("Jane Doe",)):
     text = value if isinstance(value, str) else json.dumps(value)
     for name in introduced:
         text = text.replace(name, "")
-    return [s for s in NOT_INTRODUCED + ("Jane", "Doe") if s in text]
+    return found_in(text, NOT_INTRODUCED + ("Jane", "Doe"))
 
 
 def _find(query, conversation=CONV, **kw):

@@ -22,6 +22,12 @@ audit 2026-09-22, proofs final-muse/tests/test_planwrite_by_label.py):
       Labels resolve only in learner-id positions, and relabeling
       touches only learner-id fields and URL segments after a person
       route word.
+  F1. The leak checks searched for "Jane", "Doe", and 5-digit ids
+      anywhere in the stored files. The vault ciphertext, the journal's
+      HMACs and digests, the signing key, and op ids are random runs of
+      base64url or hex, so about 1 run in 55 found a needle inside them
+      with no leak (CI run 35798238486). A stored name or id stands as
+      its own word; the checks match it that way.
 """
 
 import glob
@@ -42,7 +48,7 @@ from dispatch import executor as ex  # noqa: E402
 from dispatch import admission as admission_mod  # noqa: E402
 from dispatch.test_by_name_e2e import (  # noqa: E402,F401
     BASE, CONV, COURSE, EXTENDED_DUE, JANE_ID, OVERRIDE, USER, BrowserFake,
-    _edit_mode, _find, _journal_text, hermetic, world)
+    _edit_mode, _find, _journal_text, found_in, hermetic, world)
 from dispatch.test_direct_lane_hardening import _pack  # noqa: E402
 from learners.test_students_find import ROSTER, fake_canvas  # noqa: E402
 
@@ -66,6 +72,10 @@ def _posts(session):
     return [b for m, _u, b in session.calls if m == "POST"]
 
 
+def _ids_in(text, ids=RAW_IDS):
+    return found_in(text, ids)
+
+
 def _files_containing(root, needles):
     hits = {}
     for path in glob.glob(str(root) + "/**/*", recursive=True):
@@ -76,10 +86,30 @@ def _files_containing(root, needles):
                 text = fh.read()
         except (OSError, UnicodeDecodeError):
             continue
-        found = [n for n in needles if n in text]
+        found = found_in(text, needles)
         if found:
             hits[os.path.relpath(path, str(root))] = found
     return hits
+
+
+# -- F1 ----------------------------------------------------------------------
+
+def test_leak_search_ignores_random_runs_but_finds_a_stored_name_or_id(
+        hermetic):
+    (hermetic / "vault.json").write_text(json.dumps({
+        "iv": "hCn1HQlmx07kDoew", "tag": "ae270001adbe55123b9e",
+        "ciphertext": "hCn1HQlmx07kDoewV4X-Jane_q7XGMnGXJI0Og"}))
+    (hermetic / "ops.jsonl").write_text(
+        '{"rec_hmac":"hmac-sha256:ae270001adbe","query_digest":'
+        '"501655123b9e","op_id":"bb5b725f-f353-4cf8-7000-155123d2dfda",'
+        '"ts":"2026-09-23T07:44:44.551230+00:00"}\n')
+    assert _files_containing(hermetic, ("Jane", "Doe") + RAW_IDS) == {}
+    assert _ids_in(json.dumps({"sig": "a6170002367e98765"}), RAW_IDS) == []
+    (hermetic / "leak.json").write_text(json.dumps({
+        "shown": "Jane Doe (Student A2)", "student_ids": [55123],
+        "url": "https://s.example/api/v1/users/70001?as_user_id=70002"}))
+    assert _files_containing(hermetic, ("Jane", "Doe") + RAW_IDS) == {
+        "leak.json": ["Jane", "Doe", "55123", "70001", "70002"]}
 
 
 # -- M1 ----------------------------------------------------------------------
@@ -93,8 +123,7 @@ def test_plan_binds_each_label_to_its_vault_token_never_the_real_id():
     tokens = doc["plan"]["request"]["learner_tokens"]
     assert list(tokens) == [label]
     assert tokens[label].startswith("learner_")
-    text = json.dumps(doc)
-    assert [r for r in RAW_IDS if r in text] == []
+    assert _ids_in(json.dumps(doc)) == []
 
 
 def test_same_student_at_approve_sends_the_real_id():
@@ -102,14 +131,13 @@ def test_same_student_at_approve_sends_the_real_id():
     session = BrowserFake()
     prepared = _plan(session, shown)
     assert shown in prepared["approval_display"]
-    for rid in RAW_IDS:
-        assert rid not in prepared["approval_display"]
+    assert _ids_in(prepared["approval_display"]) == []
     out = ex.approve_plan_write(prepared["op_id"], "yes", session, _pack(),
                                 mode_ctx=_ctx())
     assert _posts(session)[0]["assignment_override"]["student_ids"] == \
         [JANE_ID]
-    assert [r for r in RAW_IDS if r in json.dumps(out)] == []
-    assert [r for r in RAW_IDS if r in _journal_text()] == []
+    assert _ids_in(json.dumps(out)) == []
+    assert _ids_in(_journal_text()) == []
 
 
 def test_label_reissued_to_another_student_between_plan_and_approve_is_refused():
@@ -141,7 +169,7 @@ def test_label_reissued_to_another_student_between_plan_and_approve_is_refused()
     assert _posts(session) == []
     message = str(info.value)
     assert label in message and "Nothing was sent" in message
-    assert [r for r in RAW_IDS if r in message] == []
+    assert _ids_in(message) == []
 
 
 def test_tampered_token_in_the_pending_plan_is_refused():
