@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { brandHead, brandHeader, serveBrandAsset } from "@morrow/bridge-loopback";
 import { canvasOperationMap, loadCanvasApiCatalog } from "@morrow/canvas-api-catalog";
+import { CORRECTABLE_EFFECT_OPERATION_STATES, type EffectOperationState } from "@morrow/operation-journal";
 import type { ApprovalReviewContext, ApprovalReviewReadCache } from "./approval-context.js";
 import { escapeHtml, formattedTextPreview } from "./approval-preview.js";
 import { BLACKBOARD_CONTENT_PATCH_APPLY_TOOL } from "./blackboard-content-patch.js";
@@ -1242,8 +1243,14 @@ function recentChangeRow(operation: JsonObject, index: number, controller: Appro
   const context = [courseName, itemReference].filter((part): part is string => Boolean(part)).join(" · ") || platform;
   const operationId = String(operation.operationId || "");
   const statusUrl = `/operations/${encodeURIComponent(operationId)}`;
+  const state = String(operation.state || "");
   const reverseRequest = `Reverse change ${operationId}.`;
-  return `<li class="recent-row"><span class="recent-number">${index + 1}</span><span class="recent-heading"><strong>${escapeHtml(reviewTitle(tool))}</strong><span class="recent-context">${escapeHtml(context)}</span></span><span class="recent-meta"><span class="recent-time">${escapeHtml(recentChangeTime(operation))}</span><span class="recent-state">${escapeHtml(operationStatus(String(operation.state || ""), platform))}</span></span><span class="recent-links"><a href="${escapeHtml(statusUrl)}">See this change</a><span class="recent-reverse"><p>To undo this, ask your assistant: <code>${escapeHtml(reverseRequest)}</code></p><button type="button" class="recent-reverse-copy" data-copy-text="${escapeHtml(reverseRequest)}">Copy the request</button></span></span></li>`;
+  // A correction can be planned only for a change Morrow may have sent. A cancelled or failed
+  // change never reached the platform, so it offers no undo request the assistant would refuse.
+  const reverse = CORRECTABLE_EFFECT_OPERATION_STATES.has(state as EffectOperationState)
+    ? `<p>To undo this, ask your assistant: <code>${escapeHtml(reverseRequest)}</code></p><button type="button" class="recent-reverse-copy" data-copy-text="${escapeHtml(reverseRequest)}">Copy the request</button>`
+    : "<p>Nothing was sent, so there is nothing to undo.</p>";
+  return `<li class="recent-row"><span class="recent-number">${index + 1}</span><span class="recent-heading"><strong>${escapeHtml(reviewTitle(tool))}</strong><span class="recent-context">${escapeHtml(context)}</span></span><span class="recent-meta"><span class="recent-time">${escapeHtml(recentChangeTime(operation))}</span><span class="recent-state">${escapeHtml(operationStatus(state, platform))}</span></span><span class="recent-links"><a href="${escapeHtml(statusUrl)}">See this change</a><span class="recent-reverse">${reverse}</span></span></li>`;
 }
 
 /**
@@ -1259,7 +1266,7 @@ function recentChangesContent(controller: ApprovalOperationController): string {
   const list = finished.length
     ? `<ul class="recent-list">${finished.map((operation, index) => recentChangeRow(operation, index, controller)).join("")}</ul>`
     : `<p class="recent-empty">Morrow has not finished any changes yet.</p>`;
-  return `<header class="hero"><h1>Recent changes</h1><p>Changes Morrow finished, most recent first.</p></header><section class="section recent-section">${list}</section>`;
+  return `<header class="hero"><h1>Recent changes</h1><p>Most recent first. A change that was cancelled or never sent says so and has nothing to undo.</p></header><section class="section recent-section">${list}</section>`;
 }
 
 function presenceRequiredPage(reviewPath: string): string {

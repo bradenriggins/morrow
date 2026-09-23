@@ -315,7 +315,7 @@ export function registerOperationTools(
     "morrow_recent_changes",
     {
       title: "See recent changes",
-      description: "Give the person a one-time link to Morrow's recent changes page: the last 50 finished operations, each with its plain label, course, item reference, time, state, a link to its own status page, and a ready request to reverse it. The Bridge never links here on its own; this tool and a result page's own \"See recent changes\" link are the only ways to it.",
+      description: "Give the person a one-time link to Morrow's recent changes page: the last 50 operations that reached an end, each with its plain label, course, item reference, time, state, and a link to its own status page. A change Morrow may have sent also carries a ready request to reverse it; a cancelled change or one that was never sent says nothing was sent and offers no reverse request. The Bridge never links here on its own; this tool and a result page's own \"See recent changes\" link are the only ways to it.",
       inputSchema: z.object({}),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },

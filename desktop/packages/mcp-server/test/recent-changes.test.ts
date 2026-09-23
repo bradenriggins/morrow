@@ -116,6 +116,40 @@ describe("GET /recent", () => {
     }
   });
 
+  it("offers an undo request only for a change that may have reached the platform", async () => {
+    const reachable = ["verified", "applied_or_unknown", "closed_by_person"].map((state) =>
+      finishedOperation({ operationId: `op:recent-${state}`, state }));
+    const unsent = [
+      finishedOperation({ operationId: "op:recent-cancel-1234", state: "cancelled", attention: ["cancelled_by_person"] }),
+      finishedOperation({ operationId: "op:recent-failed-1234", state: "failed", attention: ["dispatch_failed_before_send"] }),
+      finishedOperation({ operationId: "op:recent-inner-1234", state: "failed", attention: ["inner_operation_failed_without_effect"] }),
+    ];
+    const server = new LoopbackApprovalServer(recentController([...reachable, ...unsent]));
+    try {
+      const baseUrl = await server.start();
+      const code = server.issueRecentChangesEntry();
+      const exchanged = await fetch(`${baseUrl}/recent?entry=${encodeURIComponent(code)}`, { redirect: "manual" });
+      const cookie = exchanged.headers.get("set-cookie")!.split(";", 1)[0];
+      const body = await (await fetch(`${baseUrl}/recent`, { headers: { cookie } })).text();
+      const rows = body.split('<li class="recent-row">').slice(1);
+      expect(rows).toHaveLength(6);
+      for (const operation of reachable) {
+        const row = rows.find((entry) => entry.includes(`/operations/${encodeURIComponent(String(operation.operationId))}"`))!;
+        expect(row).toContain(`Reverse change ${operation.operationId}.`);
+        expect(row).not.toContain("Nothing was sent");
+      }
+      for (const operation of unsent) {
+        const row = rows.find((entry) => entry.includes(`/operations/${encodeURIComponent(String(operation.operationId))}"`))!;
+        expect(row).toContain("Nothing was sent");
+        expect(row).not.toContain("Reverse change");
+        expect(row).not.toContain("To undo this");
+      }
+      expect(body).not.toContain("Changes Morrow finished");
+    } finally {
+      await server.close();
+    }
+  });
+
   it("keeps only operations that reached a final state, newest first, up to 50", async () => {
     const pending = finishedOperation({ operationId: "op:still-open", state: "awaiting_approval", terminalAt: null });
     const done = finishedOperation({ operationId: "op:recent-1234" });
