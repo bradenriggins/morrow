@@ -489,3 +489,43 @@ test("the New Quiz question and settings limits follow the attended record", () 
     .map(({ task, stale }) => `LIMITATIONS.md says ${stale} although ${ITEM_BANK_COVERAGE} marks "${task}" proven`);
   assert.deepEqual(problems, []);
 });
+
+// Written before the fix (final sweep 2026-09-23): the README said the quiz check covers only
+// directly listed questions and choice-based answer settings, does not judge bank contents, and
+// marks every bank draw incomplete. The check reads the bank behind each draw, checks every
+// question type, and marks a bank incomplete only when it cannot read it in full.
+const QUIZ_CHECK = "packages/mcp-server/src/quiz-check.ts";
+const QUIZ_ITEM_PAYLOAD = "packages/mcp-server/src/quiz-item-payload.ts";
+
+test("the README's quiz check says what the quiz check reads and checks", () => {
+  const source = read(QUIZ_CHECK);
+  const bound = (name) => {
+    const value = new RegExp(`^const ${name} = ([0-9_]+);$`, "m").exec(source)?.[1];
+    assert.ok(value, `${QUIZ_CHECK} must declare ${name}`);
+    return Number(value.replaceAll("_", ""));
+  };
+  const types = Number(/cover all (\d+) question types/.exec(source)?.[1]);
+  const algorithms = /const CREATE_ALGORITHMS[^{]*\{([\s\S]*?)\}\);/.exec(read(QUIZ_ITEM_PAYLOAD))?.[1] ?? "";
+  assert.equal([...algorithms.matchAll(/^\s+"?[a-z-]+"?: \[/gm)].length, types,
+    `${QUIZ_CHECK} must name the question types ${QUIZ_ITEM_PAYLOAD} checks`);
+  assert.match(source, /Morrow reads that bank to check the questions it can supply/, `${QUIZ_CHECK} must keep its bank-draw limit`);
+
+  const readme = read("README.md");
+  const start = readme.indexOf("\n## Check a New Quiz");
+  assert.notEqual(start, -1, "README.md must keep its Check a New Quiz section");
+  const section = collapse(readme.slice(start, readme.indexOf("\n## ", start + 1)));
+  for (const stale of [/directly listed/, /choice-based/, /bank contents/, /bank draws are marked incomplete/i]) {
+    assert.doesNotMatch(section, stale, "README.md must describe the quiz check the code runs");
+  }
+  assert.ok(section.includes(`all ${types} question types`), `README.md must say the check covers all ${types} question types`);
+  assert.ok(section.includes(`up to ${bound("MAX_BANKS")} Item Banks for each quiz`), "README.md must state the bank limit per quiz");
+  assert.ok(section.includes(`${bound("MAX_BANK_ITEM_READS")} bank questions in one check`), "README.md must state the bank question limit per check");
+  assert.match(section, /A bank Morrow cannot read in full is marked incomplete/);
+
+  const proven = read(ITEM_BANK_COVERAGE).split("\n")
+    .some((line) => line.startsWith("| Check a quiz's saved state") && /\| proven \|\s*$/.test(line));
+  if (proven) {
+    assert.doesNotMatch(section, /Live Canvas verification is still required/, `${ITEM_BANK_COVERAGE} marks the quiz check proven`);
+    assert.ok(section.includes("NEW-QUIZZES-ITEM-BANKS-COVERAGE.md"), `README.md must cite ${ITEM_BANK_COVERAGE} for the quiz check's live status`);
+  }
+});

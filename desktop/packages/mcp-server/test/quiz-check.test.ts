@@ -204,6 +204,29 @@ describe("New Quiz check with bank-backed content", () => {
     expect(quizOf(report)).toMatchObject({ bankQuestionsChecked: 0, contentComplete: false });
   });
 
+  // desktop/README.md states both bounds; a quiz past either one is incomplete, never quietly partial.
+  it("marks a quiz incomplete when it draws from more banks, or more bank questions, than one check reads", async () => {
+    const draws = Array.from({ length: 21 }, (_, index) => drawRow({
+      id: String(index + 1), position: index + 1,
+      entry: { id: String(200 + index), title: `Bank ${index}`, archived: false, entry_count: 1, item_entry_count: 1 },
+    }, { sample_num: 1 }));
+    const wide = fixture({ ...quizReads("100", "Wide quiz", draws), ...cellBank() });
+    const wideReport = structured(await checkNewQuiz(wide.runtime, { ...base, quiz_id: "100" }));
+    expect(wideReport.status).toBe("incomplete");
+    expect(wideReport.incomplete).toContain("Wide quiz: this quiz draws from 21 Item Banks, more than the 20 one check reads. Its bank questions were not checked.");
+    expect(quizOf(wideReport)).toMatchObject({ bankQuestionsChecked: 0, contentComplete: false });
+    expect(wide.calls.some((call) => call.name.startsWith("canvas_item_bank_"))).toBe(false);
+
+    const items = Object.fromEntries(Array.from({ length: 301 }, (_, index) => [String(1000 + index),
+      { id: String(1000 + index), entry_type: "Item", entry: question(`<p>Bank question ${index}.</p>`) }]));
+    const deep = fixture({ ...quizReads("100", "Deep quiz", [drawRow({}, { sample_num: 2 })]), ...cellBank(items) });
+    const deepReport = structured(await checkNewQuiz(deep.runtime, { ...base, quiz_id: "100" }));
+    expect(deepReport.status).toBe("incomplete");
+    expect(deepReport.incomplete).toContain("Deep quiz: Morrow read 300 of the questions in Item Bank 91 and could not read the rest.");
+    expect((quizOf(deepReport).bankBackedRows as JsonObject[])[0]).toMatchObject({ bankQuestionsChecked: 300, bankFullyChecked: false });
+    expect(deep.calls.filter((call) => call.name === "canvas_item_bank_get_item")).toHaveLength(300);
+  });
+
   it("refuses to guess a draw size Canvas did not report", async () => {
     const { runtime } = fixture({ ...quizReads("100", "Bank quiz", [drawRow({}, null)]), ...cellBank() });
     const report = structured(await checkNewQuiz(runtime, { ...base, quiz_id: "100" }));

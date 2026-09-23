@@ -141,19 +141,29 @@ questions worth 20 question points. Check for repeated question content in the
 Week 2 quiz too.” Your assistant resolves the named course and quizzes, then calls
 `morrow_check_new_quiz` with those exact targets.
 
-The report names the course and quizzes. It checks the number of directly listed
-questions, their total points, saved choice-based answer settings, and repeated
-question content. It can compare up to three other New Quizzes in the same
-course. Reads use the existing Chrome connection. No change approval is needed.
+The report names the course and quizzes. It counts the questions and their
+total points, checks each question's saved shape and scoring settings for all 12
+question types, and finds repeated question content. It can compare up to three
+other New Quizzes in the same course. Reads use the existing Chrome connection.
+No change approval is needed.
+
+The check covers the questions written in the quiz and the single bank questions
+the saved quiz carries. A bank draw holds only its bank, so Morrow reads that
+Item Bank and checks the questions it can supply, up to 20 Item Banks for each
+quiz and 300 bank questions in one check. A draw counts as the number of
+questions it takes, each worth its points per question. Canvas picks the drawn
+questions for each learner when the learner starts the quiz, so the report
+cannot say which ones a learner got. A bank Morrow cannot read in full is marked
+incomplete, and so is a quiz past either limit.
 
 This is a structural check, not a complete assessment review. Repeated content
 means identical question content apart from extra whitespace, not similar ideas.
 The check does not judge answer correctness, learning objectives, accessibility,
-bank contents, or student access. Partial reads and bank draws are marked
-incomplete. Question points are not the same as Canvas assignment gradebook points.
+or student access. Partial reads are marked incomplete. Question points are not
+the same as Canvas assignment gradebook points.
 
-This workflow has automated connector tests. Live Canvas verification is still
-required before treating it as a production-ready feature.
+Attended runs on the BT2 test course confirmed this check, and the [attended
+record](docs/implementation/NEW-QUIZZES-ITEM-BANKS-COVERAGE.md) lists it.
 
 ## Review a lesson against your source
 
