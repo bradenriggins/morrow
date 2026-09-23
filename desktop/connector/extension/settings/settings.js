@@ -1258,7 +1258,7 @@ function renderCourseDetail(binding, isOpen) {
     ? `Morrow makes the routine edits below without another approval until you choose Plan. ${routineAsks([binding.provider])}`
     : level === "custom"
       ? "Morrow makes the changes you selected in Customize until you choose Plan. It asks before every other change."
-      : "Morrow asks before each change. To skip the review for one kind of edit, choose Edit above, or use “do not ask again” on a review.";
+      : "Morrow asks before each change. To skip the review for all routine edits, choose “Edit. Routine edits.” above. To choose single kinds of edit, select Customize, or use “do not ask again” on a review.";
   const listHtml = ids.length ? `<div class="routine-bundle-list">${ids.map((id) => `
     <div class="routine-bundle-item">
       <span>${escapeHtml(categoryLabelFor(id))}</span>

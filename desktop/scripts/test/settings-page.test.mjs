@@ -1184,7 +1184,9 @@ test("a Plan-level course's detail states what Morrow may do, with no allowed li
   assert.equal(detail.querySelector('[data-open-customize="1"][aria-pressed]'), null);
   assert.equal(detail.querySelector("[data-end-duration]"), null);
   assert.equal(detail.querySelector(".routine-bundle-list"), null);
-  assert.match(detail.textContent, /Morrow asks before each change\./);
+  // The Edit button above turns on the whole routine set, so the lead names it for that and sends
+  // a single kind of edit to Customize or a review's "do not ask again".
+  assert.equal(detail.querySelector(".field-help").textContent, "Morrow asks before each change. To skip the review for all routine edits, choose “Edit. Routine edits.” above. To choose single kinds of edit, select Customize, or use “do not ask again” on a review.");
   assert.notEqual(detail.querySelector('[data-open-customize="1"]'), null);
   assert.notEqual(detail.querySelector('[data-disconnect="1"]'), null);
 });
