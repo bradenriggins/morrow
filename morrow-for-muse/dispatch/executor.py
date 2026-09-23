@@ -10358,8 +10358,9 @@ def build_parser():
                         help="path to session.json (https backend only)")
     parser.add_argument("--canvas-base", default=None,
                         help="Canvas base URL override (chromium backend; "
-                             "default precedence: this flag, CANVAS_BASE env, "
-                             "then the lane state store)")
+                             "default precedence: this flag, CANVAS_BASE "
+                             "from the environment or this tree's "
+                             "helper/env, then the lane state store)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_backend(p):

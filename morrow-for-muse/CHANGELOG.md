@@ -227,6 +227,10 @@ Technical notes:
   raises `ApiCallMaybeSent`, which the Chromium session journals as an
   uncertain write. A read still retries once. Only a response path of
   `/login` or under `/login/` means a dead session.
+- `ChromiumSession.load` reads `CANVAS_BASE` the way every other agent
+  command does (`config/tree_config`: the environment, then the tree's
+  `helper/env`) before the pinned account's lane state, so an executor
+  command before the pin no longer says Canvas is not connected.
 - `transport/chromium_session.py` `_decode_body` sends a JSON array of
   objects as JSON, so the bulk date update (C-37) runs on the Chromium
   lane, not only on the https lane. A body the lane cannot encode

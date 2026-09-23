@@ -16,6 +16,13 @@ Failure modes this suite pins down (written before the fix; final sweep
   3. The same commands ignored LOGIN_HELPER_PORT from helper/env and
      talked to port 8901 (query, students find, doctor), or read the
      port from the shell only (reauth, the executor's helper client).
+  4. The executor's Chromium session read the tenant only from
+     --canvas-base, the shell's CANVAS_BASE, and the pinned account's
+     lane state, so before the account was pinned every executor
+     command (INSTALL.md step 6, install.sh's operator check, the
+     SKILL.md examples) said Canvas was not connected and asked for an
+     address already set in helper/env. (Added 2026-09-23, written
+     before the fix.)
 
 Resolution order, as keepalive.sh and helper/server.py resolve it: the
 process environment, then <tree>/helper/env, then (CANVAS_BASE only)
@@ -39,7 +46,7 @@ for _p in (TREE, os.path.join(TREE, "transport")):
 from config import tree_config  # noqa: E402
 # The executor binds its journal to the session's scratch state dir at
 # import; the fixtures below point only the helper token elsewhere.
-from dispatch import executor  # noqa: E402,F401
+from dispatch import executor  # noqa: E402
 
 TENANT = "https://myschool.example.edu"
 TOKEN = "ab" * 32
@@ -264,6 +271,30 @@ def test_audit_runner_takes_the_tenant_from_helper_env(tree_env,
                                     seen.setdefault("base", base_url)))
     runner._need_chromium_session()
     assert seen["base"] == TENANT
+
+
+# ------------------------------------------------------------ executor --
+
+def test_the_executor_takes_the_tenant_from_helper_env(tree_env,
+                                                        monkeypatch,
+                                                        capsys):
+    cs = executor._chromium_session_mod()
+    monkeypatch.setattr(cs, "_lane_state_base", lambda: None)
+    assert cs.ChromiumSession.load().base_for("canvas") == TENANT
+    code = executor.main(["catalog", "--name", "users_self", "--method",
+                          "GET", "--path", "/api/v1/users/self", "--class",
+                          "read", "--backend", "chromium", "--dry-run"])
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["tenant"] == TENANT
+
+
+def test_the_executor_flag_still_overrides_helper_env(tree_env,
+                                                      monkeypatch):
+    cs = executor._chromium_session_mod()
+    monkeypatch.setattr(cs, "_lane_state_base", lambda: None)
+    other = "https://other.example.edu"
+    assert cs.ChromiumSession.load(base_url=other).base_for("canvas") \
+        == other
 
 
 def test_doctor_checks_the_helper_on_the_tree_port(tree_env, fake_helper,

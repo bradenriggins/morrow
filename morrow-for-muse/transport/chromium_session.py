@@ -8,8 +8,9 @@ configured CDP port (LOGIN_HELPER_CDP_PORT, default 19223).
 
 Session contract parity with dispatch.executor.SessionStore:
 
-  base_for(provider)   Canvas base URL from CANVAS_BASE env, the explicit
-                       base_url override, or the browser lane state. Any
+  base_for(provider)   Canvas base URL from the explicit base_url
+                       override, CANVAS_BASE (the environment, then the
+                       tree's helper/env), or the browser lane state. Any
                        other provider raises SessionMissing: this lane serves
                        the Canvas tenant only.
   slot_secret(slot)    Always raises SessionMissing. The educator's browser
@@ -390,8 +391,10 @@ class ChromiumSession:
     def load(cls, base_url=None):
         """Resolve the tenant base without touching the browser.
 
-        Precedence: explicit base_url, CANVAS_BASE env, browser lane state.
-        Fails closed when none is configured; the tenant is never hardcoded.
+        Precedence: explicit base_url, CANVAS_BASE (the environment, then
+        this tree's helper/env, as config/tree_config resolves it for
+        every agent command), browser lane state. Fails closed when none
+        is configured; the tenant is never hardcoded.
 
         W4-P2-27: the resolved dispatch tenant is bound to the helper's
         configured tenant here, in the session-load path: when the lane
@@ -399,13 +402,14 @@ class ChromiumSession:
         the resolved base differs from it, the load is refused loudly
         (TenantBindingMismatch naming both tenants).
         """
-        base = (base_url or os.environ.get("CANVAS_BASE")
+        from config import tree_config
+        base = (base_url or tree_config.canvas_base()
                 or _lane_state_base())
         if not base:
             raise ex.SessionMissing(
                 "chromium backend needs a Canvas base URL: pass base_url, "
-                "set CANVAS_BASE, or onboard the browser lane state "
-                "(~/.morrow/browser_lane.json)")
+                "set CANVAS_BASE in this tree's helper/env, or onboard the "
+                "browser lane state (~/.morrow/browser_lane.json)")
         verify_helper_tenant_binding(base)
         return cls(base)
 
