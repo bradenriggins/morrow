@@ -540,11 +540,14 @@ function repointPanel() {
 
 // Remove Morrow's data takes Morrow's entry out of the assistant settings files
 // Morrow changed and nothing out of Claude Desktop, so no step claims it stops
-// every assistant from starting Morrow.
+// every assistant from starting Morrow. The Claude Desktop step goes between
+// the two when Claude Desktop keeps its own copy of the extension.
+const UNINSTALL_FIRST_STEP = "To remove the Morrow application, first select Remove Morrow's data. It takes Morrow's entry out of every assistant settings file Morrow changed.";
+const UNINSTALL_CLAUDE_STEP = "Also remove Morrow in Claude Desktop under Settings, Extensions.";
 const UNINSTALL_STEPS = Object.freeze({
-  move_to_trash: "To remove the Morrow application, first select Remove Morrow's data. It takes Morrow's entry out of every assistant settings file Morrow changed. Then quit Morrow and move it to the Trash.",
-  windows_settings_apps: "To remove the Morrow application, first select Remove Morrow's data. It takes Morrow's entry out of every assistant settings file Morrow changed. Then quit Morrow, open Settings, select Apps, then Installed apps, find Morrow, select More, and select Uninstall.",
-  unknown: "To remove the Morrow application, first select Remove Morrow's data. It takes Morrow's entry out of every assistant settings file Morrow changed. Then quit Morrow and remove it the way this computer removes an application."
+  move_to_trash: "Then quit Morrow and move it to the Trash.",
+  windows_settings_apps: "Then quit Morrow, open Settings, select Apps, then Installed apps, find Morrow, select More, and select Uninstall.",
+  unknown: "Then quit Morrow and remove it the way this computer removes an application."
 });
 
 const KEPT_REASONS = Object.freeze({
@@ -613,10 +616,11 @@ export function retentionView(current) {
       removable.length ? `<div><h3>Morrow can remove these</h3>${retentionRows(removable)}</div>` : "",
       kept.length ? `<div><h3>Morrow does not remove these</h3>${retentionRows(kept)}</div>` : "",
       retentionRemoval(retention.removal),
-      `<p>${escapeHtml(UNINSTALL_STEPS[retention.uninstall] || UNINSTALL_STEPS.unknown)}</p>`,
-      retention.locations.some((location) => location.id === "claude_desktop_extension")
-        ? "<p>Claude Desktop keeps its own copy of the Morrow extension, so also remove Morrow in Claude Desktop under Settings, Extensions.</p>"
-        : "",
+      `<p>${escapeHtml([
+        UNINSTALL_FIRST_STEP,
+        ...(retention.locations.some((location) => location.id === "claude_desktop_extension") ? [UNINSTALL_CLAUDE_STEP] : []),
+        UNINSTALL_STEPS[retention.uninstall] || UNINSTALL_STEPS.unknown
+      ].join(" "))}</p>`,
       `<p>${bridgeRemovalSentence(current, retention.locations)}</p>`,
       removable.length ? '<div class="inline-actions"><button class="secondary-button danger-button" type="button" data-action="remove-data">Remove Morrow&#39;s data</button></div>' : ""
     ].join("")

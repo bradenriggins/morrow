@@ -805,7 +805,9 @@ test("the retention section names Claude Desktop's own copy of the Morrow extens
   const kept = view.body.slice(view.body.indexOf("Morrow does not remove these"));
   assert.ok(kept.includes(escapeHtml(extension.path)));
   assert.match(kept, /Claude Desktop keeps its own copy of the Morrow extension\. Remove Morrow in Claude Desktop under Settings, Extensions\./);
-  assert.match(view.body, /also remove Morrow in Claude Desktop under Settings, Extensions\./);
+  // The uninstall steps carry the Claude Desktop step in order, once.
+  assert.match(view.body, /first select Remove Morrow&#39;s data\. It takes Morrow&#39;s entry out of every assistant settings file Morrow changed\. Also remove Morrow in Claude Desktop under Settings, Extensions\. Then quit Morrow and move it to the Trash\./);
+  assert.equal(view.body.split("Claude Desktop keeps its own copy").length - 1, 1, "the reason is said once, beside the folder");
   // Remove Morrow's data does not stop Claude Desktop starting Morrow, so no step claims it does.
   for (const current of [view, retention()]) assert.doesNotMatch(current.body, /stop starting Morrow/);
   assert.doesNotMatch(retention().body, /Claude Desktop/, "no Claude Desktop step without its extension on this computer");
