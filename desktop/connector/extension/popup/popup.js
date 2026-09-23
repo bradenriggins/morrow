@@ -21,7 +21,7 @@ const announcement = document.querySelector("#status-announcement");
 const account = document.querySelector("#account");
 const accountLabel = document.querySelector("#account-label");
 const accountOrigin = document.querySelector("#account-origin");
-const accountLastChecked = document.querySelector("#account-last-checked");
+const accountConnectedAt = document.querySelector("#account-connected-at");
 const notice = document.querySelector("#notice");
 const editAccess = document.querySelector(".edit-access");
 const editingSettings = document.querySelector("#editing-settings");
@@ -136,7 +136,7 @@ function render(status) {
     accountOrigin.textContent = binding
       ? `${binding.courseName || "Selected course"}${status.bindingCount > 1 ? ` · ${status.bindingCount} courses selected` : ""}`
       : `${anchor?.provider === "moodle" ? "Moodle" : anchor?.provider === "canvas" ? "Canvas" : "Learning platform"}`;
-    setLastChecked(binding?.lastSeenAt ?? anchor?.lastSeenAt);
+    setConnectedAt(binding?.lastSeenAt ?? anchor?.lastSeenAt);
   }
   courseLabel.textContent = binding ? "Connection" : anchor?.runtimeVerified === true ? "Course selection" : anchor ? "Learning platform" : "Course";
   canvasValue.textContent = courseValue(status);
@@ -164,15 +164,16 @@ function render(status) {
   updateControls(status);
 }
 
-function setLastChecked(lastSeenAt) {
+/** The Bridge records lastSeenAt when the course or its site is connected, and at no other time. */
+function setConnectedAt(lastSeenAt) {
   const date = new Date(typeof lastSeenAt === "number" && Number.isFinite(lastSeenAt) ? lastSeenAt : NaN);
   if (Number.isNaN(date.getTime())) {
-    accountLastChecked.textContent = "Last checked time is not available";
-    accountLastChecked.removeAttribute("datetime");
+    accountConnectedAt.textContent = "Connection time is not available";
+    accountConnectedAt.removeAttribute("datetime");
     return;
   }
-  accountLastChecked.dateTime = date.toISOString();
-  accountLastChecked.textContent = `Last checked ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" }).format(date)}`;
+  accountConnectedAt.dateTime = date.toISOString();
+  accountConnectedAt.textContent = `Connected on ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" }).format(date)}`;
 }
 
 function updateControls(status = current) {

@@ -301,14 +301,17 @@ test("a Bridge whose version Morrow refused offers the setup guide, not a new co
   assert.deepEqual(page.messages("morrow_pair"), []);
 });
 
-test("the popup states when it last saw the course site, or that it cannot say", async () => {
+// The Bridge records lastSeenAt only when a course or its site is connected, so the line names that
+// time as the connection time. The Connection line above it says whether the course is reachable now.
+test("the popup states when the course was connected, or that it cannot say", async () => {
   const page = await openPopup({ status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }) });
-  assert.equal(page.query("#account-last-checked").getAttribute("datetime"), new Date(LAST_SEEN).toISOString());
-  assert.match(page.text("#account-last-checked"), /^Last checked \S/);
+  assert.equal(page.query("#account-connected-at").getAttribute("datetime"), new Date(LAST_SEEN).toISOString());
+  assert.match(page.text("#account-connected-at"), /^Connected on \S/);
+  assert.doesNotMatch(page.text("#account-connected-at"), /checked/i);
 
   const undated = await openPopup({ status: () => connection({ paired: true, connected: true, bindings: [binding({ lastSeenAt: undefined })], bindingCount: 1, siteAnchors: [] }) });
-  assert.equal(undated.text("#account-last-checked"), "Last checked time is not available");
-  assert.equal(undated.query("#account-last-checked").getAttribute("datetime"), null);
+  assert.equal(undated.text("#account-connected-at"), "Connection time is not available");
+  assert.equal(undated.query("#account-connected-at").getAttribute("datetime"), null);
 });
 
 test("Connect this course asks Chrome for that one address, then opens course selection", async () => {

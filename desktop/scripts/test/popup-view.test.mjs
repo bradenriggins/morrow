@@ -322,7 +322,7 @@ test("the popup answers a failed first status read with a retry, then clears it 
     "#account": stubElement("", true),
     "#account-label": stubElement(),
     "#account-origin": stubElement(),
-    "#account-last-checked": stubElement(),
+    "#account-connected-at": stubElement(),
     "#notice": stubElement("", true),
     ".edit-access": stubElement(),
     "#editing-settings": stubElement("Open Plan and Edit settings"),
