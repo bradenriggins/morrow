@@ -83,7 +83,9 @@ It has limits you should know:
   conversation, and whether it matched; never the name itself), so a
   guess leaves a trail.
 - Some names are not hidden: a name Canvas does not list for the
-  student, such as a nickname ("Bobby" for Robert); a first or last
+  student, such as a nickname ("Bobby" for Robert); a name written
+  with a grammatical ending that changes the word, such as "Annas" for
+  Anna in German or "Марии" for Мария in Russian; a first or last
   name used alone and written in small letters ("rose" or "adams" for
   Rose Adams, or "jane" in a page's web address), because in small
   letters it is usually an ordinary word; the name of someone who was

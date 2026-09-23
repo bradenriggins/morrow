@@ -271,6 +271,51 @@ test("the gateway and Morrow Bridge replace the same names in the same places", 
   }
 });
 
+// Both boundaries match a rostered name only as a whole word. Russian, Polish, German, and other
+// languages write a name with an ending that changes the word, so that form reaches the assistant
+// as written. The learner privacy limits must say so, and must say where Private Chat asks.
+const ENDING_ROSTER = [
+  { id: 741, name: "Мария Иванова" },
+  { id: 742, name: "Łukasz Nowak" },
+  { id: 743, name: "Anna Schmidt" },
+];
+const ENDING_FORMS = ["Напишите Марии Ивановой.", "Sprawdź pracę Łukasza Nowaka.", "Bitte lies Annas Aufsatz."];
+
+function protectEndings(text) {
+  return protectLocalRequest({
+    sourceBindingId: "canvas:course-1", courseId: "1", text, assertedIdentifiers: [],
+    roster: sourceProtectedRoster(ENDING_ROSTER), rosterComplete: true, rosterFreshAt: NOW, now: NOW,
+  });
+}
+
+test("a name written with a grammatical ending passes through as written, as the learner privacy limits say", async () => {
+  const { LearnerRoster, LearnerVault, redactKnownLearnerText } = await import("../../packages/gateway-core/dist/privacy.js");
+  const scope = { canvasOrigin: "https://canvas.example.test", account: "1", course: "1", principal: "instructor:7", profile: "private-full" };
+  const learnerRoster = new LearnerRoster();
+  learnerRoster.register(scope, ENDING_ROSTER.map(({ id, name }) => ({ id: String(id), name })));
+  const context = { learnerRoster, learnerVault: new LearnerVault(":memory:"), learnerScope: scope };
+  for (const { name } of ENDING_ROSTER) assert.match(redactKnownLearnerText(`Bitte lies ${name}.`, context), /^Bitte lies Student A\d+\.$/u, name);
+  for (const text of ENDING_FORMS) {
+    assert.equal(redactKnownLearnerText(text, context), text, text);
+    const bridge = protectEndings(text);
+    assert.equal(bridge.protectedText, text.normalize("NFKC"), text);
+    assert.notDeepEqual(bridge.unmatchedNames, [], `Private Chat asks about a capitalized unknown name inside a sentence: ${text}`);
+  }
+  // One capitalized word that starts a sentence is sent as written, whether it is an ending form or a nickname.
+  for (const text of ["Марии нужно помочь.", "Łukasza nie było.", "Bobby did well."]) {
+    const bridge = protectEndings(text);
+    assert.equal(bridge.protectedText, text.normalize("NFKC"), text);
+    assert.deepEqual(bridge.unmatchedNames, [], text);
+  }
+
+  const limitations = readFileSync(new URL("LIMITATIONS.md", root), "utf8");
+  const start = limitations.indexOf("\n## Learner privacy");
+  const privacy = limitations.slice(start, limitations.indexOf("\n## ", start + 1)).replace(/\s+/g, " ");
+  assert.match(privacy, /A name written with a grammatical ending[^.]*passes through as written/u);
+  for (const form of ["Марии", "Łukasza", "Annas"]) assert.ok(privacy.includes(form), `LIMITATIONS.md must give ${form} as an example`);
+  assert.match(privacy, /matches no student stops the message until the educator sends it again, unless it is one word that starts a sentence/u);
+});
+
 // A follow-up such as "Make it shorter" names no student, so it needs no list. The roster still
 // protects every student detail the text holds, listed or not.
 test("a message that lists no student is protected by the class list alone", () => {
