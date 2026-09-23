@@ -396,6 +396,19 @@ test("the data-retention section names every place, what it removes, and the ste
   assert.equal(retentionView(null), null);
 });
 
+// The summary sits above the two groups, so it must not claim the removal
+// takes what the second group, "Morrow does not remove these", keeps.
+test("the data-retention summary says which group the removal takes and which it never takes", () => {
+  const both = retention();
+  assert.equal(both.copy, "Removing the Morrow application removes the application only. Remove Morrow's data removes the first group below. Morrow never removes the second group.");
+  assert.doesNotMatch(both.copy, /Everything below/);
+  const removableOnly = retentionView(state({ retention: { uninstall: "move_to_trash", locations: RETENTION_LOCATIONS.filter((location) => location.removable) } }));
+  assert.equal(removableOnly.copy, "Removing the Morrow application removes the application only. Remove Morrow's data removes everything below.");
+  const keptOnly = retentionView(state({ retention: { uninstall: "move_to_trash", locations: RETENTION_LOCATIONS.filter((location) => !location.removable) } }));
+  assert.equal(keptOnly.copy, "Removing the Morrow application removes the application only. Morrow never removes anything below.");
+  assert.doesNotMatch(keptOnly.body, /data-action="remove-data"/);
+});
+
 test("the data-retention section reports one removal exactly as the receipt supports it", () => {
   const cancelled = retention({ removal: { status: "cancelled", removed: [], remaining: [], kept: ["/Home/.codex/config.toml"] } });
   assert.match(cancelled.body, /Nothing was removed/);

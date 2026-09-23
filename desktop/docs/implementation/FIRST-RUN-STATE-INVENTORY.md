@@ -79,7 +79,7 @@ Two facts apply to every row, so they are stated once:
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
 | `first-paint` | "Checking Morrow setup…" alone; the action panel is hidden; the rail shows three stages, each "Not checked yet"; the header live region says "Checking setup"; **Check status** is disabled | None. The read answers and replaces this state. `respond()` catches its own failures and always answers, so this state ends unless the main process never settles `installer:get-state` | `installer/renderer/index.html:39`, `installer/renderer/renderer.js:567`, `installer/shared/setup-view.mjs:101` |
-| `setup-unavailable` | "Morrow could not read its setup state." / "Morrow could not read the setup record it keeps on this computer, so it cannot show which steps are complete. No setup step ran." and "No setup state was returned" | **Check again** in the panel | `installer/shared/setup-view.mjs:631` |
+| `setup-unavailable` | "Morrow could not read its setup state." / "Morrow could not read the setup record it keeps on this computer, so it cannot show which steps are complete. No setup step ran." and "No setup state was returned" | **Check again** in the panel | `installer/shared/setup-view.mjs:633` |
 | `repair` | "Repair Morrow before you connect a course." / "Morrow did not confirm that its local runtime is ready. No course connection or course action will start from this state." The three-stage rail marks no ordinary setup stage as current and says the assistant is waiting for repair. | **Repair Morrow**, or **Check again** | `installer/shared/setup-view.mjs:339` |
 | `claude-checking` | "Morrow is checking the Claude Desktop connection." / "Claude Desktop started Morrow, and Morrow is confirming that the Claude Desktop app on this computer started it. On a busy computer this can take a minute. Morrow keeps checking on its own. Select Check setup to see the result." | **Check setup**, or **Open Claude Desktop**. The Claude Desktop launcher asks again on its own until it can confirm the app. | `installer/shared/setup-view.mjs:352` |
 | `claude-pending` | "Finish setting up Claude Desktop." / "Morrow prepared its extension for Claude Desktop. Install it there, then return here to check the connection." | **Open Claude Desktop**, install **Morrow.mcpb** through **Settings > Extensions > Advanced settings > Install Extension**, then **Check setup**. **Show Morrow extension** opens its folder. | `installer/shared/setup-view.mjs:360` |
@@ -182,10 +182,10 @@ Home. The Blackboard and retention panels are disclosures reachable through thei
 | `blackboard-saved` | "Blackboard REST API configured. Live Blackboard access has not been tested.", and the saved site, account and stored name in one row | Saving verifies the integration account and opens a native chooser for the courses returned by Blackboard. **Remove connection** takes the connection and its secret off this computer | `installer/renderer/renderer.js:430-431`, `installer/renderer/renderer.js:388-408` |
 | `blackboard-save-failed` | The step's own problem in `#problem`; the secret field is cleared and the web address and key keep what was typed | Correct the value and save again | `installer/renderer/renderer.js:964-971` |
 | `blackboard-removal-failed` | The step's own problem in `#problem`; the saved connection row and its courses stay exactly as they are | Check status, then remove it again | `installer/renderer/renderer.js:823-839`, `installer/main.cjs:761-778` |
-| `retention` | "What stays on this computer", every path this installation keeps, and which ones Morrow can remove. When Claude Desktop has its own copy of the Morrow extension, that folder is listed as kept, with the step that removes it in Claude Desktop under Settings, Extensions | Optional: **Remove Morrow's data** | `installer/shared/setup-view.mjs:602-621` |
+| `retention` | "What stays on this computer", every path this installation keeps, and which ones Morrow can remove. When Claude Desktop has its own copy of the Morrow extension, that folder is listed as kept, with the step that removes it in Claude Desktop under Settings, Extensions | Optional: **Remove Morrow's data** | `installer/shared/setup-view.mjs:602-623` |
 | `retention-partial` | "Morrow could not remove everything", the paths removed and the paths still on this computer | Close what is using them, then remove again, or remove them by hand | `installer/shared/setup-view.mjs:566` |
-| `removal-announced` | Nothing on screen. The result of a removal is read once in a `role="status"` region, in the words the section shows, because focus stays on the button that ran it | None. It repeats what the section already shows | `installer/shared/setup-view.mjs:656-654`, `installer/renderer/index.html:109`, `installer/renderer/renderer.js:494` |
-| `support` | "Where to get help", the Morrow version, the materials folder, the folder Morrow keeps its setup record in, and the support address | Select **Support** to open the support page in the default browser; Morrow opens no other page from here (D5) | `installer/shared/setup-view.mjs:631-640`, `installer/renderer/renderer.js:484-488` |
+| `removal-announced` | Nothing on screen. The result of a removal is read once in a `role="status"` region, in the words the section shows, because focus stays on the button that ran it | None. It repeats what the section already shows | `installer/shared/setup-view.mjs:658-656`, `installer/renderer/index.html:109`, `installer/renderer/renderer.js:494` |
+| `support` | "Where to get help", the Morrow version, the materials folder, the folder Morrow keeps its setup record in, and the support address | Select **Support** to open the support page in the default browser; Morrow opens no other page from here (D5) | `installer/shared/setup-view.mjs:633-642`, `installer/renderer/renderer.js:484-488` |
 
 ---
 
@@ -568,9 +568,9 @@ stale name here.
 | `Try restart again` | Morrow app | `installer/renderer/renderer.js:278` |
 | `Retry the update` | Morrow app | `installer/renderer/renderer.js:294` |
 | `Try again` | Morrow app | `installer/renderer/renderer.js:299` |
-| `https://meetmorrow.app/support` | Morrow app | `installer/shared/setup-view.mjs:649` |
+| `https://meetmorrow.app/support` | Morrow app | `installer/shared/setup-view.mjs:651` |
 | `Save Blackboard connection` | Morrow app | `installer/renderer/index.html:92` |
-| `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:619` |
+| `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:621` |
 | `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:543` |
 | `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:543` |
 | `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:543` |
@@ -632,7 +632,7 @@ Names a person reads as landmarks rather than presses:
 | `Set up Morrow on this computer` | Morrow app | `installer/renderer/index.html:28` |
 | `Setup you can change` | Morrow app | `installer/shared/setup-view.mjs:268` |
 | `Materials folder` | Morrow app | `installer/shared/setup-view.mjs:220` |
-| `Where to get help` | Morrow app | `installer/shared/setup-view.mjs:673` |
+| `Where to get help` | Morrow app | `installer/shared/setup-view.mjs:675` |
 | `Assistant` | Morrow app progress rail | `installer/shared/setup-view.mjs:143` |
 | `Morrow Bridge` | Morrow app progress rail | `installer/shared/setup-view.mjs:144` |
 | `Course` | Morrow app progress rail | `installer/shared/setup-view.mjs:145` |

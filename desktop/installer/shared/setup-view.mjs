@@ -606,7 +606,9 @@ export function retentionView(current) {
   const kept = retention.locations.filter((location) => location.removable !== true);
   return {
     title: "What stays on this computer",
-    copy: "Removing the Morrow application removes the application only. Everything below stays on this computer until you remove it here.",
+    copy: `Removing the Morrow application removes the application only. ${removable.length && kept.length
+      ? "Remove Morrow's data removes the first group below. Morrow never removes the second group."
+      : removable.length ? "Remove Morrow's data removes everything below." : "Morrow never removes anything below."}`,
     body: [
       removable.length ? `<div><h3>Morrow can remove these</h3>${retentionRows(removable)}</div>` : "",
       kept.length ? `<div><h3>Morrow does not remove these</h3>${retentionRows(kept)}</div>` : "",
