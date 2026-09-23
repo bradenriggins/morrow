@@ -156,6 +156,8 @@ const RUNTIME_IDENTITY = /^(?:source|[a-f0-9]{64})$/;
  * with against the files now installed at its own path.
  */
 function localOwnerRuntimeIdentity(): string {
+  const payload = mcpRuntimeHealthFromPayload();
+  if (payload) return payload.manifestSha256;
   if (process.env.MORROW_INSTALLER_TEST_MODE === "1" && process.env.MORROW_LOCAL_OWNER_TEST_RUNTIME_IDENTITY_FILE) {
     try {
       const value = readFileSync(process.env.MORROW_LOCAL_OWNER_TEST_RUNTIME_IDENTITY_FILE, "utf8").trim();
@@ -164,7 +166,17 @@ function localOwnerRuntimeIdentity(): string {
       return "source";
     }
   }
-  return mcpRuntimeHealthFromPayload()?.manifestSha256 ?? "source";
+  return "source";
+}
+
+/**
+ * Whether the test hooks that change how an owner starts apply: in installer test mode, and only
+ * from a source checkout. A shipped runtime runs beside its sealed runtime manifest, so it ignores
+ * them even in test mode. The installed-app smoke sets test mode on a shipped runtime, and only
+ * its owner stderr copy applies there.
+ */
+function sourceStartTestHooks(): boolean {
+  return process.env.MORROW_INSTALLER_TEST_MODE === "1" && mcpRuntimeHealthFromPayload() === undefined;
 }
 
 function durableJournalPath(config: GatewayConfig): string | null {
@@ -210,7 +222,7 @@ function testOwnerStderrDescriptor(): number | null {
 }
 
 function ownerStartTimeoutMs(): number {
-  if (process.env.MORROW_INSTALLER_TEST_MODE !== "1") return OWNER_START_TIMEOUT_MS;
+  if (!sourceStartTestHooks()) return OWNER_START_TIMEOUT_MS;
   const configured = Number(process.env.MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_MS);
   return Number.isSafeInteger(configured) && configured >= 25 && configured <= OWNER_START_TIMEOUT_MS
     ? configured
@@ -218,12 +230,12 @@ function ownerStartTimeoutMs(): number {
 }
 
 /**
- * Test mode only: a file whose appearance starts the owner start deadline, so
- * a test times out a start after the step that writes it, not after however
- * long a busy computer takes to reach that step.
+ * Source test mode only: a file whose appearance starts the owner start
+ * deadline, so a test times out a start after the step that writes it, not
+ * after however long a busy computer takes to reach that step.
  */
 function testOwnerStartDeadlineGate(): string | null {
-  if (process.env.MORROW_INSTALLER_TEST_MODE !== "1") return null;
+  if (!sourceStartTestHooks()) return null;
   const configured = process.env.MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_AFTER_PATH;
   return configured && isAbsolute(configured) && !/[\0\r\n]/.test(configured) ? configured : null;
 }
@@ -735,10 +747,7 @@ export function runLocalOwner(config: GatewayConfig): Promise<void> {
 }
 
 async function startLocalOwner(config: GatewayConfig): Promise<void> {
-  if (
-    process.env.MORROW_INSTALLER_TEST_MODE === "1"
-    && process.env.MORROW_LOCAL_OWNER_TEST_STUBBORN_STARTUP === "1"
-  ) {
+  if (process.env.MORROW_LOCAL_OWNER_TEST_STUBBORN_STARTUP === "1" && sourceStartTestHooks()) {
     console.error(`[morrow-test] stubborn local owner pid=${process.pid}`);
     const pidPath = process.env.MORROW_LOCAL_OWNER_TEST_STUBBORN_PID_PATH;
     if (pidPath && isAbsolute(pidPath)) writeFileSync(pidPath, String(process.pid), { mode: 0o600 });

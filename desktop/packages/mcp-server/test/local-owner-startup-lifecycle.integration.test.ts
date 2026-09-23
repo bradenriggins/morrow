@@ -1,13 +1,40 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { Client } from "@modelcontextprotocol/client";
+import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { describe, expect, it } from "vitest";
 
 const fixtureUrl = pathToFileURL(fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url))).href;
 const entryPath = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+
+/**
+ * Lays out this build the way a shipped payload holds it: the compiled server under
+ * app/packages/mcp-server, with the sealed runtime manifest at app/. Returns the entry to run.
+ */
+async function sealedPayloadEntry(directory: string): Promise<string> {
+  const serverRoot = join(directory, "app", "packages", "mcp-server");
+  await mkdir(serverRoot, { recursive: true });
+  await cp(join(packageRoot, "dist"), join(serverRoot, "dist"), { recursive: true });
+  await cp(join(packageRoot, "package.json"), join(serverRoot, "package.json"));
+  await symlink(join(packageRoot, "node_modules"), join(serverRoot, "node_modules"), "dir");
+  await writeFile(join(directory, "app", "mcp-runtime-manifest.json"), `${JSON.stringify({
+    schema: "morrow.mcp-runtime-manifest.v2",
+    package: { name: "@morrow-lms/gateway", version: "1.0.0" },
+    entrypoint: { path: "packages/mcp-server/dist/index.js", bytes: 1, sha256: "c".repeat(64) },
+    dependencies: [],
+  })}\n`, "utf8");
+  return join(serverRoot, "dist", "index.js");
+}
+
+/** Waits for a process this test did not start as its own child to exit. */
+async function waitForExit(pid: number): Promise<void> {
+  while (processIsAlive(pid)) await new Promise((resolve) => setTimeout(resolve, 20));
+}
 
 function processIsAlive(pid: number): boolean {
   try {
@@ -157,6 +184,49 @@ describe("local owner startup lifecycle", () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 10_000);
+
+  // The hooks that change how an owner starts are for a source checkout. A shipped runtime runs
+  // beside its sealed manifest, so it starts normally even when installer test mode sets them.
+  it("ignores the owner start test hooks when it runs from a sealed payload", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-owner-sealed-payload-"));
+    const journalPath = join(directory, "gateway.sqlite3");
+    const ownerPath = `${journalPath}.local-owner.json`;
+    const stubbornPidPath = join(directory, "stubborn.pid");
+    const { configPath, upstreamPidPath } = await writeConfig(directory, journalPath, 0);
+    const client = new Client({ name: "morrow-sealed-payload", version: "1.0.0" }, { versionNegotiation: { mode: "legacy" } });
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [await sealedPayloadEntry(directory)],
+      env: {
+        ...getDefaultEnvironment(),
+        MORROW_UPSTREAMS_FILE: configPath,
+        MORROW_INSTALLER_TEST_MODE: "1",
+        MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_MS: "25",
+        MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_AFTER_PATH: configPath,
+        MORROW_LOCAL_OWNER_TEST_STUBBORN_STARTUP: "1",
+        MORROW_LOCAL_OWNER_TEST_STUBBORN_PID_PATH: stubbornPidPath,
+      },
+      stderr: "pipe",
+    });
+    let ownerPid = 0;
+    let upstreamPid = 0;
+    try {
+      await client.connect(transport);
+      ownerPid = (JSON.parse(await readFile(ownerPath, "utf8")) as { pid: number }).pid;
+      upstreamPid = Number((await readFile(upstreamPidPath, "utf8")).trim());
+      const health = await client.callTool({ name: "morrow_health", arguments: {} });
+      expect(health.isError, JSON.stringify(health)).not.toBe(true);
+      expect(existsSync(stubbornPidPath)).toBe(false);
+      await client.close();
+      await waitForExit(ownerPid);
+      await waitForExit(upstreamPid);
+    } finally {
+      await client.close().catch(() => undefined);
+      if (ownerPid && processIsAlive(ownerPid)) process.kill(ownerPid, "SIGKILL");
+      if (upstreamPid && processIsAlive(upstreamPid)) process.kill(upstreamPid, "SIGKILL");
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it("force-kills a stubborn exact owner and settles the startup failure", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-stubborn-owner-timeout-"));
