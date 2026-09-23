@@ -134,6 +134,33 @@ test("no document claims a tested live Blackboard tenant", () => {
   assert.deepEqual(problems, [], "the Blackboard route is proved against local mocked-HTTPS tests only");
 });
 
+// LIMITATIONS.md holds the technical platform sentence. The desktop README quotes it word for word;
+// every other surface states its three facts in plain words, because the sentence's technical
+// terms do not belong on educator pages. The repository's landing documents are checked here.
+test("the platform sentence is quoted where LIMITATIONS.md says, and the landing documents state its facts plainly", () => {
+  const limitations = read("LIMITATIONS.md");
+  const section = limitations.slice(limitations.indexOf("## Platform coverage"), limitations.indexOf("\n## ", limitations.indexOf("## Platform coverage") + 1));
+  const quoted = section.match(/^> (.+)$/m);
+  assert.ok(quoted, "LIMITATIONS.md must keep the platform sentence as a quotation under Platform coverage");
+  const sentence = collapse(quoted[1]);
+  assert.ok(collapse(read("README.md")).includes(sentence), "README.md must quote the LIMITATIONS.md platform sentence word for word");
+  assert.doesNotMatch(section, /(?:website|desktop app|extension)[^.]*quotes? it exactly/i,
+    "only this document and the desktop README quote the sentence; other surfaces state its facts in plain words");
+
+  const plainFacts = [
+    [/\bCanvas\b[^.]*\b(?:live|real) test course/i, "selected Canvas tasks have live test-course proof"],
+    [/\bMoodle\b[^.]*\bMoodle test course/i, "part of the Moodle catalog has been checked on a Moodle test course"],
+    [/no live Blackboard site has been tested/i, "no live Blackboard site has been tested"],
+  ];
+  const problems = [];
+  for (const doc of ["../README.md", "../docs/products.md"]) {
+    const text = collapse(read(doc));
+    for (const [fact, meaning] of plainFacts) if (!fact.test(text)) problems.push(`${doc} does not say that ${meaning}`);
+    for (const term of ["Anthology Learn REST API", "tenant"]) if (text.includes(term)) problems.push(`${doc} uses the technical term "${term}"`);
+  }
+  assert.deepEqual(problems, []);
+});
+
 test("every repo-relative link in the claim documents resolves", () => {
   const broken = [];
   for (const doc of CLAIM_DOCS) {

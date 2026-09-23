@@ -4,11 +4,13 @@ Morrow `1.0.5` is the current release build. Publication and live verification r
 
 ## Platform coverage
 
-This is the canonical platform sentence. Every Morrow surface that states platform coverage, including the website, the desktop app, the extension, and the README, quotes it exactly as written here:
+This is the canonical platform sentence. It is the technical statement of platform coverage, and this document and the [desktop README](README.md) quote it exactly as written here:
 
 > Morrow works with Canvas and Moodle through the signed-in Chrome connection and with Blackboard through the official Anthology Learn REST API; Canvas has selected live test-course proof, part of the Moodle catalog has been checked on a signed-in Moodle test course, and no live Blackboard tenant has been tested.
 
-Morrow is working toward the same core features across all three platforms. It does not claim current parity. The checked and unchecked Moodle operation counts are in the Moodle product limits below, and the Blackboard route, review contract, and evidence are in the Blackboard product limits below. A surface with room for one platform only quotes that platform's clause from the sentence, with its words unchanged. A surface that needs more detail than the sentence carries states it from those limits; it does not restate the sentence in other words.
+Every other Morrow surface that states platform coverage to educators, including the root README, `docs/products.md`, the website, and the desktop app, states the same facts in its own plain words, without the sentence's technical terms: selected Canvas tasks have live test-course proof, part of the Moodle catalog has been checked on a Moodle test course, and no live Blackboard site has been tested. A surface with room for one platform only states that platform's fact. A maintainer document such as [ARCHITECTURE.md](ARCHITECTURE.md) may keep the technical terms. No surface claims more than the sentence does.
+
+Morrow is working toward the same core features across all three platforms. It does not claim current parity. The checked and unchecked Moodle operation counts are in the Moodle product limits below, and the Blackboard route, review contract, and evidence are in the Blackboard product limits below. A surface that needs more detail than these facts states it from those limits.
 
 ## Current external gates
 
