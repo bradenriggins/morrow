@@ -35,8 +35,10 @@ Removal completed 2026-09-20 (code now matches the decision above):
   `transport/briefA2.txt`, `transport/briefB.txt`) were deleted. The only
   remaining "squarefree" mentions in the tree are selftest assertions that
   rendered briefs contain no third-party form builder, and the historical
-  audit notes. The first-party form host is `transport/form-host/index.html`,
-  bundled inside the connector. TRANSPORT STATUS 2026-09-20: the ephemeral
+  audit notes. The retired first-party form host
+  (`transport/form-host/index.html`, `transport/form_host_server.py`) stays
+  in the source repository only: the release does not ship it
+  (scripts/carve.py). TRANSPORT STATUS 2026-09-20: the ephemeral
   localhost server (`transport/form_host_server.py`) was proven unreachable
   from the managed browser (the managed browser runs on a separate leased
   VM; loopback on the engineering VM is not its loopback), and file://

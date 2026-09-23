@@ -111,7 +111,12 @@ def test_dev_only_surface_does_not_ship(carved):
                 # pytest-only: the conftest warning check, and the doc
                 # count check (it reads DEPLOY.md, which does not ship)
                 "test_optional_dependency_warning.py",
-                "test_doc_catalog_counts.py"):
+                "test_doc_catalog_counts.py",
+                # the retired form relay (SCOPE.md: no form-relay code
+                # ships) and internal audit notes with stale status
+                "transport/form_host_server.py",
+                "transport/form_host_server_selftest.py",
+                "transport/form-host", "audit", "INTEGRATION_NOTES.md"):
         assert not os.path.exists(os.path.join(carved, rel)), rel
     for rel in ("install.sh", "proof-battery/OPERATION_CATALOG.md",
                 "scripts/uninstall.sh", "dispatch/executor.py",
