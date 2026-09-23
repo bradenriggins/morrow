@@ -735,7 +735,8 @@ class ChromiumSession:
         Same retry discipline as the canvas-origin path: reads retry
         transport errors and 408/429/500/502/503/504; writes retry ONLY on
         transport failures that prove the provider never saw the request
-        (W2-P0-1) and raise UncertainWrite otherwise; other 4xx fail fast.
+        (W2-P0-1) and raise UncertainWrite otherwise; other 4xx and 5xx
+        fail fast (a write's 5xx is uncertain).
         Launch/token failures mean no provider call was attempted, so they
         are hard failures, never uncertain writes (the op_id stays
         meaningful, like SessionDead). A dead SDK session is sticky and
@@ -826,7 +827,7 @@ class ChromiumSession:
                             continue
                     raise ex.ExecutorError(
                         "SDK read transport failed: %s" % exc)
-            if status in ex.RETRYABLE_STATUSES:
+            if status in ex.RETRYABLE_STATUSES or status >= 500:
                 if is_write:
                     raise ex.UncertainWrite(
                         "SDK write returned HTTP %s; effect state unknown, "
@@ -834,6 +835,10 @@ class ChromiumSession:
                         attempts=attempts,
                         evidence=[{"method": method, "url": path,
                                    "status": status, "attempts": attempts}])
+                if status not in ex.RETRYABLE_STATUSES:
+                    raise ex.ProviderHttpError(
+                        status, "provider error, not retried",
+                        body=body_text)
                 if attempts < ex.MAX_ATTEMPTS:
                     ex._backoff_sleep(attempts - 1)
                     continue
@@ -1150,7 +1155,10 @@ class ChromiumSession:
                             ex._backoff_sleep(attempts - 1)
                             continue
                     raise ex.ExecutorError("read transport failed: %s" % exc)
-            if status in ex.RETRYABLE_STATUSES:
+            # Every 5xx is a provider failure, never a success: a CDN in
+            # front of Canvas answers 520-526 while the origin may still
+            # apply a write.
+            if status in ex.RETRYABLE_STATUSES or status >= 500:
                 if is_write:
                     # W2-P0-1: a 429/5xx WITH a response is uncertain for
                     # a write (the provider may have applied it before
@@ -1167,6 +1175,10 @@ class ChromiumSession:
                         detail, attempts=attempts,
                         evidence=[{"method": method, "url": path,
                                    "status": status, "attempts": attempts}])
+                if status not in ex.RETRYABLE_STATUSES:
+                    raise ex.ProviderHttpError(
+                        status, "provider error, not retried",
+                        body=body_text)
                 if attempts < ex.MAX_ATTEMPTS:
                     # W2-P2-7: honor the provider's Retry-After on 429.
                     delay = ex._retry_after_delay(api_headers) \

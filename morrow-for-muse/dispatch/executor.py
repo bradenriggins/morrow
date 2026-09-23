@@ -4649,15 +4649,15 @@ def request_with_retry(method: str, url: str, headers: dict, body_bytes,
 
     Reads: retry transport errors and 408/429/500/502/503/504; a 429 with
     a Retry-After header sleeps that long (capped at RETRY_AFTER_CAP_S);
-    fail fast on other 4xx. Writes: retry ONLY on transport failures that
-    prove the request never reached the server (DNS failure, connection
-    refused, unreachable host). A reset, incomplete read, or timeout after
+    fail fast on other 4xx and 5xx. Writes: retry ONLY on transport
+    failures that prove the request never reached the server (DNS
+    failure, connection refused, unreachable host). A reset, incomplete read, or timeout after
     the bytes left is indistinguishable from a reset before the server
     applied the write, so those become UncertainWrite, never a silent
     retry (W2-P0-1). A 429 on a write is likewise uncertain (the provider
     may have applied it before throttling); the Retry-After value is
-    reported in the detail for reconciliation. 5xx with a response is
-    uncertain, never retried.
+    reported in the detail for reconciliation. Any 5xx with a response
+    is uncertain, never retried.
     """
     attempts = 0
     last_exc = None
@@ -4707,7 +4707,9 @@ def request_with_retry(method: str, url: str, headers: dict, body_bytes,
                         _backoff_sleep(attempts - 1)
                         continue
                 raise ExecutorError("read transport failed: %s" % exc)
-        if status in RETRYABLE_STATUSES:
+        # Every 5xx is a provider failure: a CDN in front of Canvas
+        # answers 520-526 while the origin may still apply a write.
+        if status in RETRYABLE_STATUSES or status >= 500:
             if is_write:
                 detail = ("write returned HTTP %s; effect state unknown, "
                           "not retried" % status)
@@ -4720,6 +4722,9 @@ def request_with_retry(method: str, url: str, headers: dict, body_bytes,
                     detail, attempts=attempts,
                     evidence=[{"method": method, "url": _redacted_url(url),
                                "status": status, "attempts": attempts}])
+            if status not in RETRYABLE_STATUSES:
+                raise ProviderHttpError(
+                    status, "provider error, not retried", body=raw)
             if attempts < MAX_ATTEMPTS:
                 delay = _retry_after_delay(resp_headers) \
                     if status == 429 else None

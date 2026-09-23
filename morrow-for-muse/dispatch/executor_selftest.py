@@ -594,6 +594,37 @@ finally:
 check("retryable read error is retried",
       _attempts2["n"] == 3, "attempts=%d" % _attempts2["n"])
 
+# Every 5xx is a provider failure, never a success: a read raises
+# ProviderHttpError, a write is uncertain and never retried.
+for _code in (501, 520, 524):
+    _calls = {"n": 0}
+
+    def _cdn(*a, _code=_code, **k):
+        _calls["n"] += 1
+        return _code, {}, b"<html>Error</html>"
+    ex._do_request = _cdn
+    try:
+        try:
+            ex.request_with_retry("GET", "https://example.invalid/x", {},
+                                  None, is_write=False)
+            check("read %d raises ProviderHttpError" % _code, False,
+                  "returned as success")
+        except ex.ProviderHttpError as exc:
+            check("read %d raises ProviderHttpError" % _code,
+                  exc.status == _code and _calls["n"] == 1,
+                  "status=%s calls=%d" % (exc.status, _calls["n"]))
+        _calls["n"] = 0
+        try:
+            ex.request_with_retry("PUT", "https://example.invalid/x", {},
+                                  b"{}", is_write=True)
+            check("write %d raises UncertainWrite" % _code, False,
+                  "returned as success")
+        except ex.UncertainWrite:
+            check("write %d raises UncertainWrite, not retried" % _code,
+                  _calls["n"] == 1, "calls=%d" % _calls["n"])
+    finally:
+        ex._do_request = _real_do_request
+
 for name in PASS:
     print("  ok %s" % name)
 if FAIL:

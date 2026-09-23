@@ -106,6 +106,13 @@ Changes to your courses:
   another page while Morrow was sending a change, Morrow sent it again,
   so Canvas could end up with two copies. Now Morrow reports the change
   as unconfirmed and does not send it again.
+- Every server error from Canvas, or from a service in front of it,
+  is a failure. Some (for example 501, or 522 and 524 when the
+  connection to Canvas timed out) were taken as the answer: a read gave
+  the assistant the error page as course content, and a change could
+  be reported as failed while Canvas still applied it. Now a read
+  reports the error, and a change is reported as unconfirmed and is
+  not sent again.
 - A course page whose title starts with "Login" (for example "Login
   Help") can be read and changed. Morrow took it for Canvas's sign-in
   page, paused every change, and said your Canvas connection expired.

@@ -464,6 +464,31 @@ except ex.UncertainWrite:
     check("write 500 raises UncertainWrite", True)
 check("write 500 not retried", len(t.calls) == 1)
 
+# Every 5xx is a provider failure, never a success. A CDN in front of
+# Canvas answers 520-526 (522/524: the origin timed out, and may still
+# apply a write); 501, 505, and 507 are not in the retryable set either.
+for _code in (501, 505, 507, 520, 522, 524, 599):
+    t = FakeTransport([("ok", _code, "<html>Error %d</html>" % _code)])
+    s = cs.ChromiumSession(BASE, transport=t)
+    try:
+        s.raw_request("GET", BASE + "/api/v1/x", {}, None, is_write=False)
+        check("read %d raises ProviderHttpError" % _code, False,
+              "returned as success")
+    except ex.ProviderHttpError as exc:
+        check("read %d raises ProviderHttpError" % _code,
+              exc.status == _code and len(t.calls) == 1,
+              "status=%s calls=%d" % (exc.status, len(t.calls)))
+    t = FakeTransport([("ok", _code, "<html>Error %d</html>" % _code)])
+    s = cs.ChromiumSession(BASE, transport=t)
+    try:
+        s.raw_request("PUT", BASE + "/api/v1/x", {},
+                      json.dumps({"a": 1}).encode(), is_write=True)
+        check("write %d raises UncertainWrite" % _code, False,
+              "returned as success")
+    except ex.UncertainWrite:
+        check("write %d raises UncertainWrite, not retried" % _code,
+              len(t.calls) == 1, "calls=%d" % len(t.calls))
+
 t = FakeTransport([("raise", ConnectionRefusedError("refused")),
                    ("ok", 200, "{}")])
 s = cs.ChromiumSession(BASE, transport=t)
@@ -1151,6 +1176,26 @@ try:
         check("SDK write 500 -> UncertainWrite", False, "no exception")
     except ex.UncertainWrite:
         check("SDK write 500 -> UncertainWrite", True)
+    for _code in (501, 524):
+        s5b, _t5b = _sdk_session()
+        s5b.raw_request("GET", BASE + "/api/banks/7", {}, None)
+        _FakeSdk.instances[-1].script.append(("status", _code, "x"))
+        try:
+            s5b.raw_request("POST", BASE + "/api/banks/7/items",
+                            {"Content-Type": "application/json"}, body,
+                            is_write=True)
+            check("SDK write %d -> UncertainWrite" % _code, False,
+                  "returned as success")
+        except ex.UncertainWrite:
+            check("SDK write %d -> UncertainWrite" % _code, True)
+        _FakeSdk.instances[-1].script.append(("status", _code, "x"))
+        try:
+            s5b.raw_request("GET", BASE + "/api/banks/7/items/9", {}, None)
+            check("SDK read %d -> ProviderHttpError" % _code, False,
+                  "returned as success")
+        except ex.ProviderHttpError as exc:
+            check("SDK read %d -> ProviderHttpError" % _code,
+                  exc.status == _code)
     s6, t6 = _sdk_session()
     s6.raw_request("GET", BASE + "/api/banks/7", {}, None)
     _FakeSdk.instances[-1].script.append(("status", 422, "x"))
