@@ -155,8 +155,9 @@ class _FakeRsm:
     def __init__(self):
         self.calls = []
 
-    def impose_halt(self, detection, reason="session_expiry"):
-        self.calls.append(("impose_halt", detection, reason))
+    def impose_halt(self, detection, reason="session_expiry",
+                    cause="session_expired"):
+        self.calls.append(("impose_halt", detection, reason, cause))
 
     def quarantine_session(self, cause, detection=None):
         self.calls.append(("quarantine_session", cause, detection))
@@ -1358,6 +1359,9 @@ check("wiring: halt detection carries the taxonomy cause",
 check("wiring: quarantine records the taxonomy cause",
       quar and quar[0][1] == cs.AUTH_DEATH_SESSION_ENDED,
       repr(quar))
+check("wiring: the halt records the session-expiry cause",
+      halt and halt[0][3] == "session_expired",
+      repr(halt[0]) if halt else "no halt call")
 
 # Sticky (W4-P2-2): the next write on the same dead object fails fast
 # as ChromiumSessionDead: no provider call, no second UncertainWrite,

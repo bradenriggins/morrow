@@ -372,6 +372,14 @@ def _session_expired_halt():
     return exc
 
 
+def _account_mismatch_halt():
+    """The halt the Chromium lane imposes when another account signed in."""
+    exc = WriteHaltActive("write halt is active: a different Canvas "
+                          "account is signed in to the helper")
+    exc.halt_cause = "account_mismatch"
+    return exc
+
+
 MODE_CASES = {
     "query-arguments-invalid":
         lambda: _qchain.QueryArgumentsInvalid(
@@ -571,6 +579,7 @@ MODE_CASES = {
     "form-lane-fail-closed": lambda: {"gate": "FormTransportUnavailable"},
     "write-halt-active": lambda: WriteHaltActive("halt engaged"),
     "write-halt-session-expired": _session_expired_halt,
+    "write-halt-account-mismatch": _account_mismatch_halt,
     "write-approval-missing": lambda: {"gate": "WriteApprovalMissing"},
     "learner-data-gated": lambda: {"gate": "LearnerDataGated"},
     "catalog-effect-mismatch": lambda: {"gate": "CatalogEffectMismatch"},
@@ -657,8 +666,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_93_modes(self):
-        self.assertEqual(93, len(CATALOG.entries))
+    def test_catalog_has_94_modes(self):
+        self.assertEqual(94, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):

@@ -391,23 +391,44 @@ def is_write_halted():
     return os.path.exists(HALT_PATH)
 
 
+# The causes the re-auth machinery records in the halt file. Each is
+# lifted by a verified resume once the pinned account is signed in.
+HALT_CAUSES = ("session_expired", "account_mismatch")
+
+# Halt files written before the cause field existed (0.4.0) name their
+# cause only in the reason text.
+_LEGACY_ACCOUNT_MISMATCH_REASON = (
+    "a different Canvas account is signed in to the helper")
+
+
 def halt_cause():
-    """Why writes are paused: "session_expired" when the re-auth
-    machinery imposed the halt after a session death, "manual" for a
+    """Why writes are paused, from the cause the halt file records:
+    "session_expired" (the Canvas session died), "account_mismatch" (a
+    different Canvas account signed in to the helper), "manual" for a
     halt file placed any other way (or unreadable), None when writes
-    are not paused. Only a verified resume lifts a session-expiry
-    halt."""
+    are not paused."""
     if not os.path.exists(HALT_PATH):
         return None
     try:
         with open(HALT_PATH) as f:
-            reason = str((json.load(f) or {}).get("reason") or "")
+            info = json.load(f) or {}
+        cause = info.get("cause")
+        reason = str(info.get("reason") or "")
     except (ValueError, OSError, AttributeError):
         return "manual"
-    return "session_expired" if reason == "session_expiry" else "manual"
+    if cause is not None:
+        return cause if cause in HALT_CAUSES else "manual"
+    if reason == "session_expiry" or reason.startswith(
+            "chromium session death"):
+        return "session_expired"
+    if reason == _LEGACY_ACCOUNT_MISMATCH_REASON:
+        return "account_mismatch"
+    return "manual"
 
 
-def impose_halt(detection, reason="session_expiry"):
+def impose_halt(detection, reason="session_expiry", cause="session_expired"):
+    if cause not in HALT_CAUSES:
+        raise ValueError("unknown halt cause %r" % (cause,))
     # W4-P2-5: a fresh death ages out any superseded session.json.prev
     # left behind by an earlier incomplete re-auth cycle before the new
     # halt is recorded. Fresh .prev files (younger than the threshold)
@@ -416,6 +437,7 @@ def impose_halt(detection, reason="session_expiry"):
     age_out_stale_prev()
     _write_json(HALT_PATH, {"halted_at": _now(),
                             "reason": reason,
+                            "cause": cause,
                             "detection": detection})
     set_state(EXPIRED, detection)
 

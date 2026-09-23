@@ -366,7 +366,8 @@ class ChromiumSession:
             rsm.impose_halt(
                 detection,
                 reason="chromium session death (%s)"
-                % (self._dead_cause_key or "unknown"))
+                % (self._dead_cause_key or "unknown"),
+                cause="session_expired")
             rsm.quarantine_session(self._dead_cause_key, detection)
             rsm.write_notify_expired(len(rsm.quarantined_ops()))
         except Exception:
@@ -586,7 +587,8 @@ class ChromiumSession:
                 rsm.impose_halt({"signal": "principal_mismatch",
                                  "cause": "different_account_signed_in"},
                                 reason="a different Canvas account is "
-                                       "signed in to the helper")
+                                       "signed in to the helper",
+                                cause="account_mismatch")
             except Exception:
                 pass
             name = str(pin.get("name") or "").strip() or "the pinned account"
