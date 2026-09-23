@@ -24,7 +24,8 @@ const connection = (fields = {}) => ({
   ...fields,
 });
 const anchor = (fields = {}) => ({ siteAnchorId: "canvas:site", provider: "canvas", origin: COURSE_ORIGIN, principalId: "teacher@example.edu", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
-const binding = (fields = {}) => ({ sourceBindingId: "canvas:course-1", provider: "canvas", courseName: "Anatomy", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
+// morrow_status names each course's own saved site, as the worker sends it.
+const binding = (fields = {}) => ({ sourceBindingId: "canvas:course-1", siteAnchorId: "canvas:site", provider: "canvas", courseName: "Anatomy", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
 const editPermission = (sourceBindingId, enabledCategories = ["canvas_page_content"]) => ({
   schema: "morrow.bridge.edit-permission.v1", sourceBindingId, revision: 1, scopeDigest: "d".repeat(64), catalogDigest: "c".repeat(64), enabledCategories,
 });
@@ -179,6 +180,16 @@ test("Open Canvas opens the saved site itself, with no permission prompt, and as
   assert.equal(page.hidden("#error"), true);
   assert.equal(page.hidden("#notice"), false);
   assert.equal(page.text("#notice"), "Sign in to Canvas in the tab that opened. Morrow continues after that.");
+});
+
+test("Open Canvas names a selected course whose saved site is gone, and opens no other site", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding({ runtimeVerified: false, siteAnchorId: undefined })], bindingCount: 1, siteAnchors: [anchor()] }),
+  });
+  await page.click("#open-platform-action");
+  assert.deepEqual(page.messages("morrow_open_platform"), []);
+  assert.equal(page.hidden("#error"), false);
+  assert.equal(page.text("#error"), problemText("platform_open_anchor_missing"));
 });
 
 test("Open Canvas clears its sign-in notice once the reopened site verifies", async () => {

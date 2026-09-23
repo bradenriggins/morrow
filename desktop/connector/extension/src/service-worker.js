@@ -1728,6 +1728,7 @@ async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityG
       && Array.isArray(storedPermission.enabledCategories) ? [...storedPermission.enabledCategories] : null;
     return {
       sourceBindingId: binding.sourceBindingId,
+      siteAnchorId: binding.siteAnchorId,
       provider: binding.provider,
       origin: binding.origin,
       ...(binding.siteUrl ? { siteUrl: binding.siteUrl } : {}),
@@ -6205,6 +6206,9 @@ async function status() {
   const bindings = await publicBindings();
   const siteAnchors = await publicSiteAnchors(stored);
   if (!await courseDataAuthorityCurrent(authorityGeneration)) return { consentRequired: true };
+  // publicBindings leaves out the site anchor, because Morrow never receives it. This extension's
+  // own pages need it to reopen a closed course on its own site.
+  const siteAnchorIds = new Map(((await storage()).bindings || []).map((binding) => [binding.sourceBindingId, binding.siteAnchorId]));
   const connected = state.socket?.readyState === WebSocket.OPEN && state.generation > 0;
   const completedBinding = bindings.find((binding) => binding.runtimeVerified && binding.firstReadCompleted);
   const firstCourseRead = completedBinding && firstCourseReadMatchesBinding(stored.firstCourseRead, completedBinding)
@@ -6223,7 +6227,7 @@ async function status() {
     siteAnchors,
     bindingCount: bindings.length,
     reviews: connected ? state.reviews : [],
-    bindings: bindings.map((binding) => ({ sourceBindingId: binding.sourceBindingId, provider: binding.provider, origin: binding.origin, siteUrl: binding.siteUrl, courseId: binding.courseId, courseName: binding.courseName, runtimeVerified: binding.runtimeVerified, ...(binding.firstReadCompleted ? { firstReadCompleted: true } : {}), lastSeenAt: binding.lastSeenAt })),
+    bindings: bindings.map((binding) => ({ sourceBindingId: binding.sourceBindingId, siteAnchorId: siteAnchorIds.get(binding.sourceBindingId), provider: binding.provider, origin: binding.origin, siteUrl: binding.siteUrl, courseId: binding.courseId, courseName: binding.courseName, runtimeVerified: binding.runtimeVerified, ...(binding.firstReadCompleted ? { firstReadCompleted: true } : {}), lastSeenAt: binding.lastSeenAt })),
   };
 }
 
@@ -6267,8 +6271,9 @@ async function openPlatform(siteAnchorId, sourceBindingId) {
   const stored = await storage();
   const anchor = storedAnchors(stored.siteAnchors).find((entry) => entry.siteAnchorId === siteAnchorId);
   if (!anchor) throw new Error("platform_open_anchor_missing");
-  const rawBinding = sourceBindingId ? (stored.bindings || []).find((entry) => entry.sourceBindingId === sourceBindingId) : null;
-  const binding = rawBinding && rawBinding.siteAnchorId === siteAnchorId ? rawBinding : null;
+  const binding = sourceBindingId ? (stored.bindings || []).find((entry) => entry.sourceBindingId === sourceBindingId) : null;
+  // A named course opens only on its own site. Another site's root would leave that course closed.
+  if (sourceBindingId && binding?.siteAnchorId !== siteAnchorId) throw new Error("platform_open_anchor_missing");
   const url = anchor.provider === "moodle"
     ? (binding ? `${anchor.siteUrl}course/view.php?id=${binding.courseId}` : anchor.siteUrl)
     : (binding ? `${anchor.origin}/courses/${binding.courseId}` : `${anchor.origin}/`);

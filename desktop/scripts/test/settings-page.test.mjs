@@ -53,7 +53,7 @@ const FIELD_SELECTION_NO_BUNDLE = Object.freeze({ id: "action:canvas:canvas_upda
 
 function canvasCourse(id, courseName, fields = {}) {
   return {
-    sourceBindingId: `canvas:course-${id}`, provider: "canvas", origin: "https://canvas.example.edu",
+    sourceBindingId: `canvas:course-${id}`, siteAnchorId: "canvas:site-1", provider: "canvas", origin: "https://canvas.example.edu",
     siteUrl: "https://canvas.example.edu", principalId: "teacher@example.edu", courseId: String(id),
     courseName, runtimeVerified: true, editPolicyRevision: 0, ...fields,
   };
@@ -62,7 +62,7 @@ function canvasCourse(id, courseName, fields = {}) {
 // WI-5.6: a Moodle course, the other half of a mixed Canvas and Moodle selection.
 function moodleCourse(id, courseName, fields = {}) {
   return {
-    sourceBindingId: `moodle:course-${id}`, provider: "moodle", origin: "https://moodle.example.edu",
+    sourceBindingId: `moodle:course-${id}`, siteAnchorId: "moodle:site-1", provider: "moodle", origin: "https://moodle.example.edu",
     siteUrl: "https://moodle.example.edu", principalId: "teacher@example.edu", courseId: String(id),
     courseName, runtimeVerified: true, editPolicyRevision: 0, ...fields,
   };
@@ -546,7 +546,7 @@ test("an options response that is not runtime verified moves the course to site 
 
 test("a closed course row offers its own Open Canvas action, targeted at that exact course", async () => {
   const opened = [];
-  const closed = { ...ANATOMY, runtimeVerified: false, siteAnchorId: "canvas:site-1" };
+  const closed = { ...ANATOMY, runtimeVerified: false };
   const page = await openSettings({
     status: () => statusFixture([closed]),
     handlers: {
@@ -562,6 +562,15 @@ test("a closed course row offers its own Open Canvas action, targeted at that ex
   assert.equal(page.hidden("#error"), true);
 });
 
+test("a closed course row whose saved site is gone says so when Open Canvas is selected", async () => {
+  const { siteAnchorId: _siteAnchorId, ...closed } = { ...ANATOMY, runtimeVerified: false };
+  const page = await openSettings({ status: () => statusFixture([closed]) });
+  await page.click(`[data-open-platform="${closed.sourceBindingId}"]`);
+  assert.deepEqual(page.messages("morrow_open_platform"), []);
+  assert.equal(page.hidden("#error"), false);
+  assert.equal(page.text("#error"), problemText("platform_open_anchor_missing"));
+});
+
 // Every recovery step the page names is one the person can take from a control that exists.
 test("recovery text names the Open and Connect controls that exist, not a reconnect step", async () => {
   const unnamed = { sourceBindingId: "canvas:unnamed", provider: "canvas", runtimeVerified: true, editPolicyRevision: 0 };
@@ -572,7 +581,7 @@ test("recovery text names the Open and Connect controls that exist, not a reconn
 });
 
 test("a closed course's Open Canvas shows a sign-in notice when the reopened site is still unverified", async () => {
-  const closed = { ...ANATOMY, runtimeVerified: false, siteAnchorId: "canvas:site-1" };
+  const closed = { ...ANATOMY, runtimeVerified: false };
   const page = await openSettings({
     status: () => statusFixture([closed]),
     handlers: { morrow_open_platform: () => ({ opened: true, verified: false }) },

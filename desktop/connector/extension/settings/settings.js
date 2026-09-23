@@ -2350,6 +2350,7 @@ courseList.addEventListener("click", (event) => {
     const sourceBindingId = openPlatformButton.dataset.openPlatform;
     const binding = (state.status?.bindings || []).find((entry) => entry.sourceBindingId === sourceBindingId);
     if (binding?.siteAnchorId) void openSavedPlatform(binding.siteAnchorId, binding.sourceBindingId, binding.provider);
+    else showError("platform_open_anchor_missing");
     return;
   }
   const connectButton = event.target.closest("[data-connect-row]");

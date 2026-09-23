@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, fork } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
+import { clearExtensionGlobals, loadExtensionPage } from "./lib/extension-dom.mjs";
 
 const root = new URL("../../", import.meta.url);
 const extensionId = "a".repeat(32);
@@ -21,7 +22,14 @@ const pairingStatusUrl = `http://127.0.0.1:32147/morrow-bridge/v1/pair/${pairing
 
 function event() {
   const listeners = [];
-  return { listeners, addListener(listener) { listeners.push(listener); } };
+  return {
+    listeners,
+    addListener(listener) { listeners.push(listener); },
+    removeListener(listener) {
+      const index = listeners.indexOf(listener);
+      if (index >= 0) listeners.splice(index, 1);
+    },
+  };
 }
 
 function storageArea(initial = {}) {
@@ -1565,6 +1573,53 @@ async function pairingExactSchemaScenario() {
   assert.equal(value.FakeWebSocket.instances.length, 0);
 }
 
+const otherOrigin = "https://other.instructure.com";
+const otherAnchorId = "canvas:account:g2";
+
+/**
+ * Keeps the real worker running in this child process and answers a shipped page's runtime
+ * messages over IPC, so a page test sees exactly the fields the worker sends. `site` names the
+ * Chrome tabs open at the start: "closed-course" has none, and "two-sites" has a second saved
+ * Canvas site open while the Biology course on the first site is closed. A tab the worker opens
+ * loads, and a Canvas tab answers the probe as the saved account.
+ */
+async function servePagesScenario(site) {
+  const tabs = site === "two-sites" ? [{ id: 11, windowId: 4, url: `${otherOrigin}/courses/7` }] : [];
+  const initialLocal = connectedState();
+  if (site === "two-sites") {
+    initialLocal.siteAnchors.push({ ...initialLocal.siteAnchors[0], siteAnchorId: otherAnchorId, origin: otherOrigin, principalFingerprint: "e".repeat(64), tabId: 11 });
+  }
+  const value = fixture({
+    initialLocal,
+    tabs: {
+      get: async (id) => tabs.find((tab) => tab.id === id) ?? null,
+      query: async ({ url } = {}) => tabs.filter((tab) => typeof url !== "string" || tab.url.startsWith(url.replace(/\*$/, ""))),
+    },
+    tabMessage: async ({ tabId, message }) => {
+      const tab = tabs.find((entry) => entry.id === tabId);
+      return tab && message?.type === "morrow_canvas_probe" ? { ok: true, profile: { origin: new URL(tab.url).origin, id: "7" } } : null;
+    },
+  });
+  value.granted.add(`${otherOrigin}/*`);
+  globalThis.chrome.tabs.create = async (properties) => {
+    value.createdTabs.push(properties);
+    const tab = { id: 70 + value.createdTabs.length, windowId: 4, url: properties.url };
+    tabs.push(tab);
+    setTimeout(() => { for (const listener of [...value.tabsUpdated.listeners]) listener(tab.id, { status: "complete" }, tab); }, 0);
+    return tab;
+  };
+  await importWorker(`serve-${site}`);
+  await authenticate(value);
+  const senders = { settings: settingsSender(), popup: popupSender() };
+  process.on("message", async ({ id, kind, page, message }) => {
+    const response = kind === "tabsCreated"
+      ? value.createdTabs
+      : await sendRuntime(value, message, senders[page]).catch((cause) => ({ ok: false, code: "message_refused", error: String(cause?.message || cause) }));
+    process.send({ id, response });
+  });
+  process.send({ ready: true });
+}
+
 const scenarios = {
   "consent-connect": consentConnectScenario,
   "consent-pre-effect": () => preEffectScenario("consent"),
@@ -1621,13 +1676,42 @@ async function runScenario(name) {
 }
 
 const scenarioName = process.argv[2];
-if (scenarioName) {
+if (scenarioName === "serve-pages") {
+  await servePagesScenario(process.argv[3]);
+} else if (scenarioName) {
   await runScenario(scenarioName);
   process.stdout.write(`${scenarioName}: ok\n`);
   process.exit(0);
 }
 
 const execute = promisify(execFile);
+/** A real worker in a child process, and the page handlers that send each message to it. */
+async function servedWorker(site) {
+  const child = fork(fileURLToPath(import.meta.url), ["serve-pages", site], { cwd: fileURLToPath(root), stdio: ["ignore", "pipe", "pipe", "ipc"] });
+  let stderr = "";
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  const waiting = new Map();
+  let nextId = 0;
+  const ready = new Promise((resolve, reject) => {
+    child.once("exit", (code) => reject(new Error(`the served worker exited with ${code}: ${stderr}`)));
+    child.on("message", (reply) => {
+      if (reply?.ready) resolve();
+      else waiting.get(reply?.id)?.(reply.response);
+    });
+  });
+  await ready;
+  const ask = (request) => new Promise((resolve) => {
+    const id = ++nextId;
+    waiting.set(id, resolve);
+    child.send({ id, ...request });
+  });
+  return {
+    handlers: (page) => new Proxy({}, { get: (_target, type) => typeof type === "string" ? (message) => ask({ kind: "message", page, message }) : undefined }),
+    tabsCreated: () => ask({ kind: "tabsCreated" }),
+    close: () => { child.removeAllListeners("exit"); child.kill(); },
+  };
+}
+
 async function isolatedScenario(name) {
   const result = await execute(process.execPath, [fileURLToPath(import.meta.url), name], {
     cwd: fileURLToPath(root),
@@ -1819,4 +1903,35 @@ test("pairing refuses an offer with fields outside the exact schema", async () =
 
 test("pairing ignores an approved status with fields outside the exact schema", async () => {
   await isolatedScenario("pairing-exact-schema");
+});
+
+// A shipped page must work with the fields the worker really sends, not a fixture's guess at them.
+test("Plan and Edit settings reopens a closed course at its own address through the real worker", { timeout: 20_000 }, async (t) => {
+  const worker = await servedWorker("closed-course");
+  t.after(() => { worker.close(); clearExtensionGlobals(); });
+  const page = await loadExtensionPage("settings/settings.html", { handlers: worker.handlers("settings") });
+  const open = `[data-open-platform="${bindingId}"]`;
+  assert.equal(page.text('[data-row-kind="attention"] .course-row-note'), "Canvas is closed. Morrow Bridge can open it for you.");
+  assert.equal(page.text(open), "Open Canvas");
+  await page.click(open);
+  await page.waitFor(() => page.messages("morrow_open_platform").length === 1, "Open Canvas sent nothing to the worker");
+  assert.deepEqual(page.messages("morrow_open_platform"), [{ type: "morrow_open_platform", siteAnchorId: anchorId, sourceBindingId: bindingId }]);
+  await page.waitFor(() => page.queryAll(open).length === 0 && page.queryAll(`[data-binding-id="${bindingId}"]`).length === 1,
+    "the reopened course never became connected");
+  assert.deepEqual(await worker.tabsCreated(), [{ url: `${courseOrigin}/courses/42`, active: false }]);
+  assert.equal(page.hidden("#error"), true);
+});
+
+test("the popup reopens the selected closed course, not a different saved site that is open", { timeout: 20_000 }, async (t) => {
+  const worker = await servedWorker("two-sites");
+  t.after(() => { worker.close(); clearExtensionGlobals(); });
+  const page = await loadExtensionPage("popup/popup.html", { handlers: worker.handlers("popup") });
+  assert.equal(page.text("#canvas-value"), "Canvas is closed");
+  assert.equal(page.text("#open-platform-action"), "Open Canvas");
+  await page.click("#open-platform-action");
+  await page.waitFor(() => page.messages("morrow_open_platform").length === 1, "Open Canvas sent nothing to the worker");
+  assert.deepEqual(page.messages("morrow_open_platform"), [{ type: "morrow_open_platform", siteAnchorId: anchorId, sourceBindingId: bindingId }]);
+  await page.waitFor(() => page.text("#canvas-value") === "Connected", "the selected course never became connected");
+  assert.deepEqual(await worker.tabsCreated(), [{ url: `${courseOrigin}/courses/42`, active: false }]);
+  assert.equal(page.hidden("#error"), true);
 });

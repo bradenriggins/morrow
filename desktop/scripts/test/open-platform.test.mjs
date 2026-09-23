@@ -185,10 +185,20 @@ test("the address never comes from the page message", async () => {
   assert.equal(harness1.calls.tabsCreated[0].url, "https://school.instructure.com/courses/42");
 });
 
-test("a binding for a different site is ignored, not mixed into the address", async () => {
-  const harness1 = harness({ anchors: [ANCHOR], bindings: [MOODLE_BINDING] });
-  await harness1.dispatch({ type: "morrow_open_platform", siteAnchorId: ANCHOR.siteAnchorId, sourceBindingId: MOODLE_BINDING.sourceBindingId });
-  assert.equal(harness1.calls.tabsCreated[0].url, "https://school.instructure.com/", "the mismatched binding's courseId is not used");
+// Opening a different site's root in place of the named course would report success while the
+// course stays closed.
+test("a binding for a different site is refused, and no tab opens", async () => {
+  const harness1 = harness({ anchors: [ANCHOR, MOODLE_ANCHOR], bindings: [MOODLE_BINDING] });
+  const response = await harness1.dispatch({ type: "morrow_open_platform", siteAnchorId: ANCHOR.siteAnchorId, sourceBindingId: MOODLE_BINDING.sourceBindingId });
+  assert.deepEqual(response, { ok: false, code: "platform_open_anchor_missing", error: "platform_open_anchor_missing" });
+  assert.equal(harness1.calls.tabsCreated.length, 0);
+});
+
+test("a course that is no longer saved is refused, and no tab opens", async () => {
+  const harness1 = harness({ anchors: [ANCHOR], bindings: [] });
+  const response = await harness1.dispatch({ type: "morrow_open_platform", siteAnchorId: ANCHOR.siteAnchorId, sourceBindingId: BINDING.sourceBindingId });
+  assert.deepEqual(response, { ok: false, code: "platform_open_anchor_missing", error: "platform_open_anchor_missing" });
+  assert.equal(harness1.calls.tabsCreated.length, 0);
 });
 
 test("a missing anchor raises platform_open_anchor_missing and opens no tab", async () => {

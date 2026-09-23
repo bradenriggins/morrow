@@ -382,8 +382,12 @@ openPlatformAction.addEventListener("click", async () => {
   if (actionInFlight) return;
   const binding = currentBinding(current);
   const anchor = currentSiteAnchor(current);
-  const siteAnchorId = binding?.siteAnchorId || anchor?.siteAnchorId;
-  if (!siteAnchorId) return;
+  // A selected course opens only on its own site, never on another saved site that happens to be open.
+  const siteAnchorId = binding ? binding.siteAnchorId : anchor?.siteAnchorId;
+  if (!siteAnchorId) {
+    reportError("action", new Error("platform_open_anchor_missing"));
+    return;
+  }
   const platform = currentPlatform(current);
   actionInFlight = true;
   openPlatformProgressVisible = false;
