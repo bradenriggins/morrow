@@ -538,16 +538,20 @@ function repointPanel() {
   };
 }
 
+// Remove Morrow's data takes Morrow's entry out of the assistant settings files
+// Morrow changed and nothing out of Claude Desktop, so no step claims it stops
+// every assistant from starting Morrow.
 const UNINSTALL_STEPS = Object.freeze({
-  move_to_trash: "To remove the Morrow application, first select Remove Morrow's data so your assistants stop starting Morrow. Then quit Morrow and move it to the Trash.",
-  windows_settings_apps: "To remove the Morrow application, first select Remove Morrow's data so your assistants stop starting Morrow. Then quit Morrow, open Settings, select Apps, then Installed apps, find Morrow, select More, and select Uninstall.",
-  unknown: "To remove the Morrow application, first select Remove Morrow's data so your assistants stop starting Morrow. Then quit Morrow and remove it the way this computer removes an application."
+  move_to_trash: "To remove the Morrow application, first select Remove Morrow's data. It takes Morrow's entry out of every assistant settings file Morrow changed. Then quit Morrow and move it to the Trash.",
+  windows_settings_apps: "To remove the Morrow application, first select Remove Morrow's data. It takes Morrow's entry out of every assistant settings file Morrow changed. Then quit Morrow, open Settings, select Apps, then Installed apps, find Morrow, select More, and select Uninstall.",
+  unknown: "To remove the Morrow application, first select Remove Morrow's data. It takes Morrow's entry out of every assistant settings file Morrow changed. Then quit Morrow and remove it the way this computer removes an application."
 });
 
 const KEPT_REASONS = Object.freeze({
   assistant_configuration: "Your assistant's own settings file. Remove Morrow's data takes only Morrow's own entry out of it and leaves the rest.",
   assistant_backup: "Copies of your assistant settings from before Morrow changed them. Morrow keeps these copies so you can put a settings file back.",
-  outside_morrow_data: "Outside the folders Morrow keeps its own files in. Morrow leaves it as it is."
+  outside_morrow_data: "Outside the folders Morrow keeps its own files in. Morrow leaves it as it is.",
+  claude_desktop_extension: "Claude Desktop keeps its own copy of the Morrow extension. Remove Morrow in Claude Desktop under Settings, Extensions."
 });
 
 function retentionRows(locations) {
@@ -608,6 +612,9 @@ export function retentionView(current) {
       kept.length ? `<div><h3>Morrow does not remove these</h3>${retentionRows(kept)}</div>` : "",
       retentionRemoval(retention.removal),
       `<p>${escapeHtml(UNINSTALL_STEPS[retention.uninstall] || UNINSTALL_STEPS.unknown)}</p>`,
+      retention.locations.some((location) => location.id === "claude_desktop_extension")
+        ? "<p>Claude Desktop keeps its own copy of the Morrow extension, so also remove Morrow in Claude Desktop under Settings, Extensions.</p>"
+        : "",
       `<p>${bridgeRemovalSentence(current, retention.locations)}</p>`,
       removable.length ? '<div class="inline-actions"><button class="secondary-button danger-button" type="button" data-action="remove-data">Remove Morrow&#39;s data</button></div>' : ""
     ].join("")

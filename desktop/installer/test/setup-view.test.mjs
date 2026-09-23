@@ -786,6 +786,18 @@ test("kept copies of assistant settings, and the entry a data removal takes out,
   assert.match(view.body, /first select Remove Morrow&#39;s data/);
 });
 
+test("the retention section names Claude Desktop's own copy of the Morrow extension and the step that removes it", () => {
+  const extension = { id: "claude_desktop_extension", label: "The Morrow extension in Claude Desktop", path: "/Home/Library/Application Support/Claude/Claude Extensions/local.mcpb.morrow.morrow", removable: false, keptReason: "claude_desktop_extension" };
+  const view = retentionView(state({ retention: { uninstall: "move_to_trash", locations: [...RETENTION_LOCATIONS, extension] } }));
+  const kept = view.body.slice(view.body.indexOf("Morrow does not remove these"));
+  assert.ok(kept.includes(escapeHtml(extension.path)));
+  assert.match(kept, /Claude Desktop keeps its own copy of the Morrow extension\. Remove Morrow in Claude Desktop under Settings, Extensions\./);
+  assert.match(view.body, /also remove Morrow in Claude Desktop under Settings, Extensions\./);
+  // Remove Morrow's data does not stop Claude Desktop starting Morrow, so no step claims it does.
+  for (const current of [view, retention()]) assert.doesNotMatch(current.body, /stop starting Morrow/);
+  assert.doesNotMatch(retention().body, /Claude Desktop/, "no Claude Desktop step without its extension on this computer");
+});
+
 test("an assistant card says Claude Desktop is not installed and where to get it", () => {
   const view = actionView(state({ assistants: [{ ...CHATGPT, detected: true }, { ...CLAUDE_DESKTOP, detected: false }] }));
   assert.match(view.body, /Claude Desktop is not installed on this computer\. Get it from claude\.ai\/download, then select Check status\./);

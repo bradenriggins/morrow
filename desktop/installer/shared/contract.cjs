@@ -22,7 +22,8 @@ const RETENTION_IDS = new Set([
   "materials",
   "blackboard_credentials",
   "blackboard_configuration",
-  "assistant_configuration"
+  "assistant_configuration",
+  "claude_desktop_extension"
 ]);
 /**
  * Every error the renderer can be shown, with the exact message and recovery

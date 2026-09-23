@@ -7,7 +7,7 @@ const STATE_VERSION = 1;
 const RETENTION_SCHEMA = "morrow.installer-retention.v1";
 const DATA_REMOVAL_SCHEMA = "morrow.installer-data-removal.v1";
 const UNINSTALL_STEPS = new Set(["move_to_trash", "windows_settings_apps", "unknown"]);
-const KEPT_REASONS = new Set(["assistant_configuration", "assistant_backup", "outside_morrow_data"]);
+const KEPT_REASONS = new Set(["assistant_configuration", "assistant_backup", "outside_morrow_data", "claude_desktop_extension"]);
 const REMOVAL_STATUSES = new Set(["cancelled", "removed", "incomplete"]);
 const CONFIGURED_ASSISTANT_IDS = new Set(["codex", "claude-desktop", "claude-code", "gemini-cli"]);
 const RECORD_KEYS = new Set(["schema", "version", "selectedAssistantId", "materialsFolder", "configured"]);
@@ -271,6 +271,9 @@ function retentionSnapshot(input = {}) {
   for (const assistant of Array.isArray(input.assistantConfigurations) ? input.assistantConfigurations : []) {
     add("assistant_configuration", `${assistant?.title} settings file`, assistant?.path, "assistant_configuration");
   }
+  // Claude Desktop keeps its own copy of the Morrow extension and starts it on
+  // every launch. It belongs to Claude Desktop, so only Claude Desktop removes it.
+  add("claude_desktop_extension", "The Morrow extension in Claude Desktop", input.claudeDesktopExtension, "claude_desktop_extension");
   return {
     schema: RETENTION_SCHEMA,
     appRemoval: policy.appRemoval,

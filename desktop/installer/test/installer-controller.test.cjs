@@ -11,6 +11,7 @@ const test = require("node:test");
 const { pathToFileURL } = require("node:url");
 const { bridgeDeliveryMode, createInstallerController, readCommandOutput, readMacApplicationBundleIdentifier, runBoundedCommand } = require("../shared/installer-controller.cjs");
 const { freshRecord } = require("../shared/state-policy.cjs");
+const { claudeDesktopLauncherPath } = require("../shared/claude-desktop.cjs");
 const { errorDetails } = require("../shared/contract.cjs");
 
 const installerRoot = path.resolve(__dirname, "..");
@@ -2219,6 +2220,43 @@ test("the state and the removal confirmation name only places on this computer, 
   assert.equal((await installer.removeData(null)).status, "cancelled");
   detail = messageBoxes.at(-1).detail;
   assert.match(detail, /This cannot be undone\. Chrome loaded Morrow Bridge from the Bridge folder, so remove Morrow Bridge in Chrome as well\.$/);
+});
+
+// Claude Desktop installs its own copy of the Morrow extension and starts it on
+// every launch. Remove Morrow's data cannot take that copy out, so the list of
+// what stays and the confirmation both name it and the step in Claude Desktop.
+test("the retention list and the removal confirmation name Claude Desktop's own copy of the Morrow extension", {
+  skip: process.platform !== "darwin" && process.platform !== "win32" ? "Claude Desktop runs only on macOS and Windows" : false
+}, async (t) => {
+  const root = await temporaryRoot();
+  const { installer, messageBoxes, paths } = await installationWithData(root, 0);
+  const appData = path.join(root, "AppData", "Roaming");
+  if (process.platform === "win32") {
+    const previous = process.env.APPDATA;
+    process.env.APPDATA = appData;
+    t.after(() => { if (previous === undefined) delete process.env.APPDATA; else process.env.APPDATA = previous; });
+  }
+  const launcher = claudeDesktopLauncherPath({ platform: process.platform, homeDirectory: paths.home, appDataDirectory: appData });
+  const extension = path.dirname(path.dirname(launcher));
+  const listed = async () => (await installer.state()).retention.locations.find((location) => location.id === "claude_desktop_extension");
+  assert.equal(await listed(), undefined, "Claude Desktop has no Morrow extension yet");
+
+  await fs.mkdir(path.dirname(launcher), { recursive: true });
+  await fs.writeFile(launcher, "launcher\n");
+  assert.deepEqual(await listed(), {
+    id: "claude_desktop_extension",
+    label: "The Morrow extension in Claude Desktop",
+    path: extension,
+    removable: false,
+    keptReason: "claude_desktop_extension"
+  });
+
+  assert.equal((await installer.removeData(null)).status, "cancelled");
+  const detail = messageBoxes.at(-1).detail;
+  const kept = detail.slice(detail.indexOf("Morrow will not remove:"));
+  assert.ok(kept.includes(`- The Morrow extension in Claude Desktop: ${extension}`), "the confirmation names the copy it leaves");
+  assert.match(detail, /Claude Desktop keeps its own copy of the Morrow extension\. Remove Morrow in Claude Desktop under Settings, Extensions\./);
+  assert.equal(await fs.stat(launcher).then(() => true, () => false), true);
 });
 
 test("a data removal without an explicit confirmation removes nothing", async () => {

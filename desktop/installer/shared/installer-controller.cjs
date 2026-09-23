@@ -73,6 +73,7 @@ const {
   isCurrentClaudeDesktopSetup,
   prepareClaudeDesktopBundle,
   processAlive,
+  resolveClaudeDesktopLauncher,
 } = require("./claude-desktop.cjs");
 const {
   WINDOWS_POWERSHELL_TIMEOUT_MS,
@@ -2479,10 +2480,26 @@ class InstallerController {
       blackboardCredentials: blackboard.credentialDirectory,
       blackboardConfiguration: blackboard.config,
       assistantConfigurations,
+      claudeDesktopExtension: await this.claudeDesktopExtensionFolder(),
       removal: this.dataRemoval
     });
     const present = await Promise.all(snapshot.locations.map((location) => fs.lstat(location.path).then(() => true, () => false)));
     return { ...snapshot, locations: snapshot.locations.filter((_location, index) => present[index]) };
+  }
+
+  /**
+   * The folder where Claude Desktop keeps its own copy of the Morrow extension,
+   * or null when Claude Desktop has none on this computer.
+   */
+  async claudeDesktopExtensionFolder() {
+    try {
+      const location = await resolveClaudeDesktopLauncher({ platform: this.platform, homeDirectory: this.home });
+      if (!location) return null;
+      const pathApi = this.platform === "win32" ? path.win32 : path.posix;
+      return pathApi.dirname(pathApi.dirname(location.physical));
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -2767,6 +2784,9 @@ class InstallerController {
         "Morrow will remove:",
         ...lines(removable),
         ...(kept.length ? ["", "Morrow will not remove:", ...lines(kept)] : []),
+        ...(kept.some((location) => location.id === "claude_desktop_extension")
+          ? ["", "Claude Desktop keeps its own copy of the Morrow extension. Remove Morrow in Claude Desktop under Settings, Extensions."]
+          : []),
         "",
         bridgeLoaded && this.bridgeDelivery === "developer_temporary"
           ? "This cannot be undone. Chrome loaded Morrow Bridge from the Bridge folder, so remove Morrow Bridge in Chrome as well."
