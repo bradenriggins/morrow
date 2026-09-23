@@ -182,7 +182,7 @@ const POPUP_STATES = new Map([
   ["not-paired", { status: { ...connection } }],
   ["connecting", { status: { ...connection, paired: true, connecting: true } }],
   ["paired-not-connected", { status: { ...connection, paired: true } }],
-  ["runtime-mismatch", { status: { ...connection, paired: true, versionMismatch: true } }],
+  ["runtime-mismatch", { status: { ...connection, paired: true, versionMismatch: true }, sourceNeedle: "The Morrow app and Morrow Bridge versions do not match. ${VERSION_MISMATCH_RECOVERY}" }],
   ["authentication-failed", { status: { ...connection, ...healthyPopup, authenticationFailed: true } }],
   ["connected-no-site", { status: { ...connection, ...healthyPopup } }],
   ["detected-platform", { status: { ...connection, ...healthyPopup }, detectedProvider: "moodle", sourceNeedle: "Morrow Bridge detected" }],
@@ -253,6 +253,8 @@ const GUIDE_STATES = new Map([
 const GUIDE_SECTION = "5. Morrow Bridge setup guide";
 const GUIDE_SOURCE_NEEDLES = new Map([
   ["site-saved-not-verified", "or open the saved ${platform"],
+  // The version recovery is one sentence the popup and the Connect Morrow error share.
+  ["runtime-mismatch", "Morrow and Morrow Bridge report different versions. ${VERSION_MISMATCH_RECOVERY}"],
 ]);
 
 test("the inventory carries what every setup guide state renders", () => {
