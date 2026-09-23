@@ -40,7 +40,7 @@ def _uid(name):
     return "test-%s" % clean
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def _morrow_home():
     root = os.path.join(MODES_DIR, ".test-state", "pid-%d" % os.getpid())
     shutil.rmtree(root, ignore_errors=True)
