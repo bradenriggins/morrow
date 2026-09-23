@@ -35,6 +35,8 @@ export type PrivateChatRequestState = {
 };
 
 const CONTINUATION_TTL_MS = 10 * 60 * 1_000;
+/** The assistant replies one Private Chat session allows. The last one ends the chat. */
+const REPLY_LIMIT = 100;
 const MAX_CONTINUATION_CLAIMS = 2_048;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -98,6 +100,20 @@ function resultClosed(state: Pick<PrivateChatRequestState, "sessionId" | "turns"
   };
 }
 
+function resultLimitReached(state: PrivateChatRequestState): CallToolResult {
+  return {
+    content: [{ type: "text", text: `Private Chat reached its ${REPLY_LIMIT}-message limit. Morrow showed the last reply in the drawer and ended the chat. To continue, the educator closes the drawer and asks you to start a new Private Chat.` }],
+    structuredContent: {
+      schema: "morrow.private-chat.v1",
+      status: "limit_reached",
+      sessionId: state.sessionId,
+      sourceBindingId: state.sourceBindingId,
+      courseId: state.courseId,
+      turns: state.turns,
+    },
+  };
+}
+
 function stateFromMessage(exchange: JsonObject, assistantName: string): PrivateChatRequestState {
   requireChat(exchange.status === "message"
     && typeof exchange.sessionId === "string"
@@ -123,10 +139,15 @@ function stateForNextRound(state: PrivateChatRequestState): PrivateChatRequestSt
   };
 }
 
+/**
+ * Delivers the assistant's reply. It listens for the educator's next message
+ * unless this reply is the last one the session allows: then the Bridge shows it
+ * and ends the chat, so no message is taken that could not be answered.
+ */
 async function nextExchange(runtime: GatewayRuntime, state: PrivateChatRequestState, reply: string, signal: AbortSignal) {
   return runtime.privateChatExchange({
     schema: "morrow.private-chat.exchange.v1",
-    action: "reply_and_listen",
+    action: state.turns + 1 >= REPLY_LIMIT ? "reply_at_limit" : "reply_and_listen",
     sessionId: state.sessionId,
     assistantName: state.assistantName,
     assistantReply: reply,
@@ -174,7 +195,7 @@ export function registerPrivateChatTool(
         state = stateFromMessage(exchange, assistantName);
       } else {
         requireChat(state.workflow === "morrow.private-chat.v1" && state.assistantName === assistantName
-          && state.turns >= 0 && state.turns < 100 && state.messages.length === state.turns * 2 + 1,
+          && state.turns >= 0 && state.turns < REPLY_LIMIT && state.messages.length === state.turns * 2 + 1,
           "The Private Chat session state is invalid or belongs to another assistant.");
       }
 
@@ -204,6 +225,7 @@ export function registerPrivateChatTool(
           messages: [...state.messages, { role: "assistant", text: reply }],
           turns: state.turns + 1,
         };
+        if (replied.turns >= REPLY_LIMIT) return resultLimitReached(replied);
         if (next.status === "closed") return resultClosed(replied);
         requireChat(next.status === "message" && next.sessionId === state.sessionId
           && next.sourceBindingId === state.sourceBindingId && next.courseId === state.courseId
@@ -217,11 +239,11 @@ export function registerPrivateChatTool(
       }
 
       for (;;) {
-        requireChat(state.turns < 100, "Private Chat reached its 100-message limit. Close the drawer and start a new session.");
         const response = sampleSchema.parse(await context.mcpReq.requestSampling(samplingRequest(state)));
         const reply = response.content.text;
         const next = await nextExchange(runtime, state, reply, context.mcpReq.signal);
         state = { ...state, messages: [...state.messages, { role: "assistant", text: reply }], turns: state.turns + 1 };
+        if (state.turns >= REPLY_LIMIT) return resultLimitReached(state);
         if (next.status === "closed") return resultClosed(state);
         requireChat(next.status === "message" && next.sessionId === state.sessionId
           && next.sourceBindingId === state.sourceBindingId && next.courseId === state.courseId

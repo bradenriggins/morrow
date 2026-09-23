@@ -482,6 +482,47 @@ test("Private Chat takes each student's label from the gateway and shows the edu
   assert.equal(api.privateChatStatus().messages.length, 0);
 });
 
+// The gateway sends the last reply a session allows as reply_at_limit. The Bridge shows it, ends the
+// chat, and takes no further message, so no educator message is left without an answer.
+test("Private Chat shows the last reply at the limit, ends the chat, and takes no further message", async () => {
+  const { api, sent, command } = privateChatWorker();
+  await api.handlePrivateChatExchange(command({ action: "listen" }));
+  const submitted = api.submitPrivateChatMessage("canvas:course-1", "Extend Jane Doe's due date.", ["Jane Doe"]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await api.handlePrivateChatExchange(command({
+    action: "labels", sourceBindingId: "canvas:course-1", courseId: "1", labelsById: { 98765: "Student A1" },
+  }));
+  await submitted;
+  await api.handlePrivateChatExchange(command({
+    action: "reply_at_limit", sourceBindingId: "canvas:course-1", courseId: "1",
+    assistantReply: "Student A1 now has until Friday.",
+  }));
+  const ended = sent.at(-1);
+  assert.equal(ended.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(ended.result)), { schema: "morrow.private-chat.exchange.v1", status: "closed" });
+  const status = JSON.parse(JSON.stringify(api.privateChatStatus()));
+  assert.equal(status.ended, true);
+  assert.equal(status.transportAvailable, false);
+  assert.deepEqual(status.messages.map((entry) => entry.text), ["Extend Student A1's due date.", "Student A1 now has until Friday."]);
+  await assert.rejects(api.submitPrivateChatMessage("canvas:course-1", "One more thing for Jane Doe.", ["Jane Doe"]), /private_chat_start_required/u);
+  const before = sent.length;
+  await api.handlePrivateChatExchange(command({
+    action: "reply_and_listen", sourceBindingId: "canvas:course-1", courseId: "1", assistantReply: "Another reply.",
+  }));
+  assert.equal(sent.length, before + 1);
+  assert.equal(sent.at(-1).failure.code, "private_chat_scope_changed");
+  assert.equal(api.privateChatStatus().messages.length, 2);
+
+  // A new Private Chat the assistant starts replaces the ended one instead of reporting it busy.
+  const next = command({ action: "listen" });
+  next.arguments.sessionId = "session-87654321";
+  await api.handlePrivateChatExchange(next);
+  const restarted = JSON.parse(JSON.stringify(api.privateChatStatus()));
+  assert.equal(restarted.ended, false);
+  assert.equal(restarted.transportAvailable, true);
+  assert.deepEqual(restarted.messages, []);
+});
+
 test("Private Chat asks the educator to confirm name-like words it could not match before sending", async () => {
   const { api, sent, command } = privateChatWorker();
   await api.handlePrivateChatExchange(command({ action: "listen" }));
@@ -560,4 +601,11 @@ test("the drawer says a sent message waits for the assistant's reply, and asks t
   await page.click("#refresh");
   await page.waitFor(() => page.text("#private-chat-status") !== "Sent. Waiting for the assistant's reply. Keep this drawer open.", "the drawer kept the waiting line after the chat ended");
   assert.equal(page.text("#private-chat-status"), "Ask the connected assistant to start Morrow Private Chat. Keep this drawer open while you chat.");
+  // A chat that reached its message limit keeps its last reply in view and says how to continue.
+  privateChat = { ...sent, ended: true, messages: [...sent.messages, { role: "assistant", text: "Student A1 has two missing labs.", parts: [{ name: "Michaela Brook", label: "Student A1" }, { text: " has two missing labs." }] }] };
+  await page.click("#refresh");
+  await page.waitFor(() => page.text("#private-chat-status").startsWith("This Private Chat"), "the drawer did not show that the chat ended");
+  assert.equal(page.text("#private-chat-status"), "This Private Chat reached its message limit. Close this drawer, then ask your assistant to start a new Private Chat.");
+  assert.equal(page.query("#private-chat-message").disabled, true);
+  assert.match(page.text("#private-chat-history"), /Michaela Brook has two missing labs\./u);
 });

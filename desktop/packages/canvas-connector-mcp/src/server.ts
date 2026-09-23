@@ -287,6 +287,13 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
       }),
       z.strictObject({
         ...privateChatBase,
+        action: z.literal("reply_at_limit"),
+        assistantReply: z.string().min(1).max(100_000),
+        sourceBindingId: z.string().min(1).max(160).regex(/^[A-Za-z0-9_.:@-]+$/),
+        courseId: z.string().regex(/^[1-9][0-9]{0,18}$/),
+      }),
+      z.strictObject({
+        ...privateChatBase,
         action: z.literal("labels"),
         sourceBindingId: z.string().min(1).max(160).regex(/^[A-Za-z0-9_.:@-]+$/),
         courseId: z.string().regex(/^[1-9][0-9]{0,18}$/),

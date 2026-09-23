@@ -3984,6 +3984,7 @@ export class GatewayRuntime {
         throw new PrivateChatWaitEndedError();
       }
       if (result.status === "closed" && Object.keys(result).every((key) => ["schema", "status"].includes(key))) return result;
+      if (input.action === "reply_at_limit") throw new Error("The Private Chat relay did not end the chat at its limit.");
       if (result.status === "labels_required" && round === 0) {
         const learnerIds = result.learnerIds;
         if (Object.keys(result).some((key) => !["schema", "status", "sessionId", "sourceBindingId", "courseId", "learnerIds"].includes(key))

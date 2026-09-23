@@ -37,7 +37,91 @@ function fixture({ closeImmediately = false, continueOnce = false } = {}) {
   return { runtime, calls };
 }
 
+/** A Bridge whose educator always sends another message, so only the reply limit ends the chat. */
+function endlessChat() {
+  const calls: JsonObject[] = [];
+  const runtime = {
+    catalog: { tools: [] },
+    config: { upstreams: [] },
+    redactMcpEgress: async (value: JsonObject) => value,
+    privateChatExchange: async (input: JsonObject) => {
+      calls.push(structuredClone(input));
+      if (input.action === "reply_at_limit") return { schema: "morrow.private-chat.exchange.v1", status: "closed" };
+      return {
+        schema: "morrow.private-chat.exchange.v1",
+        status: "message",
+        sessionId: input.sessionId,
+        sourceBindingId: "canvas:course-42",
+        courseId: "42",
+        protectedText: `Message ${calls.length}.`,
+      };
+    },
+  } as unknown as GatewayRuntime;
+  return { runtime, calls };
+}
+
+const LIMIT_TEXT = "Private Chat reached its 100-message limit. Morrow showed the last reply in the drawer and ended the chat. To continue, the educator closes the drawer and asks you to start a new Private Chat.";
+
+/** The last reply is delivered without taking another message, so no educator message goes unanswered. */
+function expectEndedAtLimit(calls: readonly JsonObject[]) {
+  expect(calls.filter((call) => call.action === "listen")).toHaveLength(1);
+  expect(calls.filter((call) => call.action === "reply_and_listen")).toHaveLength(99);
+  expect(calls.at(-1)).toMatchObject({ action: "reply_at_limit", assistantReply: "Reply 100.", sourceBindingId: "canvas:course-42", courseId: "42" });
+  expect(calls).toHaveLength(101);
+}
+
 describe("Morrow Private Chat", () => {
+  it("ends at the 100-message limit on the legacy era without taking another message", async () => {
+    const { runtime, calls } = endlessChat();
+    const client = new Client({ name: "Codex", version: "1" }, { capabilities: { sampling: {} }, versionNegotiation: { mode: "legacy" } });
+    let replies = 0;
+    client.setRequestHandler("sampling/createMessage", async () => {
+      replies += 1;
+      return { model: "local-test", role: "assistant", content: { type: "text", text: `Reply ${replies}.` }, stopReason: "endTurn" };
+    });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const server = serveStdio(() => createMorrowServer(runtime), { transport: b });
+    await client.connect(a);
+    try {
+      const result = await client.callTool({ name: "morrow_private_chat", arguments: {} });
+      expect(result.isError).not.toBe(true);
+      expect((result.content as { text: string }[])[0]!.text).toBe(LIMIT_TEXT);
+      expect(result.structuredContent).toMatchObject({ schema: "morrow.private-chat.v1", status: "limit_reached", turns: 100 });
+      expect(replies).toBe(100);
+      expectEndedAtLimit(calls);
+    } finally { await client.close(); await server.close(); }
+  });
+
+  it("ends at the 100-message limit on 2026-07-28 without taking another message", async () => {
+    const { runtime, calls } = endlessChat();
+    const client = new Client({ name: "Codex", version: "1" }, { capabilities: { sampling: {} }, versionNegotiation: { mode: { pin: "2026-07-28" } } });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const server = serveStdio(() => createMorrowServer(runtime), { transport: b });
+    await client.connect(a);
+    try {
+      let round = await client.callTool({ name: "morrow_private_chat", arguments: {} }, { allowInputRequired: true }) as unknown as { requestState: string };
+      let result: Awaited<ReturnType<Client["callTool"]>> | undefined;
+      for (let reply = 1; reply <= 100; reply += 1) {
+        result = await client.callTool({
+          name: "morrow_private_chat",
+          arguments: {},
+          requestState: round.requestState,
+          inputResponses: {
+            private_chat_reply: { model: "local-test", role: "assistant", content: { type: "text", text: `Reply ${reply}.` } },
+          },
+        } as Parameters<Client["callTool"]>[0], { allowInputRequired: true });
+        if (reply < 100) {
+          expect(result.resultType, `reply ${reply}`).toBe("input_required");
+          round = result as unknown as { requestState: string };
+        }
+      }
+      expect(result!.isError).not.toBe(true);
+      expect((result!.content as { text: string }[])[0]!.text).toBe(LIMIT_TEXT);
+      expect(result!.structuredContent).toMatchObject({ schema: "morrow.private-chat.v1", status: "limit_reached", turns: 100 });
+      expectEndedAtLimit(calls);
+    } finally { await client.close(); await server.close(); }
+  });
+
   it("uses push sampling on the legacy era and sends only the protected transcript", async () => {
     const { runtime, calls } = fixture();
     const client = new Client({ name: "Codex", version: "1" }, { capabilities: { sampling: {} }, versionNegotiation: { mode: "legacy" } });

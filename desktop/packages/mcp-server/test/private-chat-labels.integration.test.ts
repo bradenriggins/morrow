@@ -172,3 +172,31 @@ describe("Private Chat waits for the educator", () => {
     } finally { await bridge?.close(); await runtime.close(); rmSync(directory, { recursive: true, force: true }); }
   }, 30_000);
 });
+
+describe("Private Chat at its message limit", () => {
+  it("sends the last reply through the connector to the Bridge without listening for another message", async () => {
+    const root = resolve("../..");
+    const directory = mkdtempSync(join(tmpdir(), "morrow-private-chat-limit-"));
+    const port = await availablePort();
+    const catalogDigest = bridgeCatalogDigestForTests(root);
+    const runtime = await GatewayRuntime.connect(connectorConfig(root, directory, port));
+    let bridge: BridgeTestClient | undefined;
+    const exchanges: JsonObject[] = [];
+    try {
+      bridge = await connectBridgeTestClient({ port, token: TOKEN, extensionId: EXTENSION_ID, catalogDigest, bindings: [{ ...BINDING, catalogDigest }] });
+      bridge.onCommand((command: BridgeCommand) => {
+        if (command.kind !== "private_chat_exchange") return;
+        exchanges.push(structuredClone(command.arguments as JsonObject));
+        bridge?.respond(command, { schema: "morrow.private-chat.exchange.v1", status: "closed" });
+      });
+      await expect(runtime.privateChatExchange({
+        schema: "morrow.private-chat.exchange.v1", action: "reply_at_limit", sessionId: "session-12345678", assistantName: "Desktop assistant",
+        assistantReply: "Student A1 has until Friday.", sourceBindingId: SOURCE_BINDING_ID, courseId: "2",
+      })).resolves.toEqual({ schema: "morrow.private-chat.exchange.v1", status: "closed" });
+      expect(exchanges).toEqual([{
+        schema: "morrow.private-chat.exchange.v1", action: "reply_at_limit", sessionId: "session-12345678", assistantName: "Desktop assistant",
+        assistantReply: "Student A1 has until Friday.", sourceBindingId: SOURCE_BINDING_ID, courseId: "2",
+      }]);
+    } finally { await bridge?.close(); await runtime.close(); rmSync(directory, { recursive: true, force: true }); }
+  }, 30_000);
+});

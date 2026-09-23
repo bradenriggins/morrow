@@ -1759,6 +1759,7 @@ function privateChatStatus() {
     schema: "morrow.private-chat.status.v1",
     transportAvailable: Boolean(chat?.pending),
     waitingForMessage: Boolean(chat?.pending),
+    ended: Boolean(chat?.ended),
     clients: chat ? [{
       id: chat.sessionId,
       name: chat.assistantName,
@@ -1827,7 +1828,7 @@ function privateChatCommandInput(command) {
     || value.schema !== "morrow.private-chat.exchange.v1"
     || typeof value.sessionId !== "string" || !/^[A-Za-z0-9_.:@-]{8,160}$/.test(value.sessionId)
     || typeof value.assistantName !== "string" || !value.assistantName.trim() || value.assistantName.length > 200
-    || !["listen", "reply_and_listen", "labels"].includes(value.action)) return null;
+    || !["listen", "reply_and_listen", "reply_at_limit", "labels"].includes(value.action)) return null;
   const reply = value.assistantReply;
   const hasScope = typeof value.sourceBindingId === "string" && /^[A-Za-z0-9_.:@-]{1,160}$/.test(value.sourceBindingId)
     && typeof value.courseId === "string" && /^[1-9][0-9]{0,18}$/.test(value.courseId);
@@ -1883,6 +1884,11 @@ async function handlePrivateChatExchange(command) {
     }
     awaiting.resolve({ command, labelsById: input.labelsById });
   } else if (input.action === "listen") {
+    // A chat that ended at its message limit only waits for the drawer to close; a new chat replaces it.
+    if (chat?.ended) {
+      clearPrivateChat();
+      chat = null;
+    }
     if (chat && (chat.sessionId !== input.sessionId || chat.assistantName !== input.assistantName)) {
       sendResult(command, false, null, problem("private_chat_busy", "Another Private Chat is already open.", true));
       return;
@@ -1891,11 +1897,17 @@ async function handlePrivateChatExchange(command) {
     if (!chat) chat = state.privateChat = { sessionId: input.sessionId, assistantName: input.assistantName, messages: [], labelsById: {}, namesByLabel: {}, awaitingLabels: null, pending: null, timer: null };
   } else {
     if (!chat || chat.sessionId !== input.sessionId || chat.assistantName !== input.assistantName
-      || chat.sourceBindingId !== input.sourceBindingId || chat.courseId !== input.courseId || chat.pending) {
+      || chat.sourceBindingId !== input.sourceBindingId || chat.courseId !== input.courseId || chat.pending || chat.ended) {
       sendResult(command, false, null, problem("private_chat_scope_changed", "The Private Chat assistant or course changed.", false));
       return;
     }
     chat.messages.push({ role: "assistant", text: input.assistantReply });
+    if (input.action === "reply_at_limit") {
+      chat.ended = true;
+      sendResult(command, true, { schema: "morrow.private-chat.exchange.v1", status: "closed" }, null);
+      notifyPrivateChatChanged();
+      return;
+    }
   }
   if (chat.pending) {
     sendResult(command, false, null, problem("private_chat_exchange_pending", "Private Chat is already waiting for a message.", true));
