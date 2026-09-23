@@ -1080,12 +1080,21 @@ export class LoopbackBridgeServer {
         || authorization.policyRevision !== permission.revision) {
         throw new BridgeUnavailableError("The current edit permission no longer authorizes this change. Create a fresh plan from the current binding.");
       }
-      const detailResponse = await this.invoke({
-        kind: "edit_policy_options_get",
-        sourceBindingId: selectedBinding.sourceBindingId,
-        operationId: `edit-options:${randomUUID()}`,
-        ...(invocation.signal ? { signal: invocation.signal } : {}),
-      });
+      let detailResponse: BridgeResult;
+      try {
+        detailResponse = await this.invoke({
+          kind: "edit_policy_options_get",
+          sourceBindingId: selectedBinding.sourceBindingId,
+          operationId: `edit-options:${randomUUID()}`,
+          ...(invocation.signal ? { signal: invocation.signal } : {}),
+        });
+      } catch (error) {
+        // An unknown outcome of this read is an unknown read, not an unknown write: the write is sent only after it.
+        if (error instanceof BridgeOutcomeUnknownError) {
+          throw new BridgeUnavailableError("Morrow could not read the current Edit permission for this course, so it did not send the change. Create a fresh plan from the current binding.", { cause: error });
+        }
+        throw error;
+      }
       // A cancel that lands during this read ends the write before it was sent; say so.
       if (!detailResponse.ok && detailResponse.problem?.code === "request_cancelled_before_dispatch") return detailResponse;
       if (!detailResponse.ok || !detailResponse.result) {

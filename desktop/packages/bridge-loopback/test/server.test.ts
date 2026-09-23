@@ -1409,6 +1409,53 @@ describe("LoopbackBridgeServer", () => {
     expect(server.health().pendingCount).toBe(0);
   });
 
+  // The write is sent only after its Edit permission is read. A permission read that never answers,
+  // or a Bridge that disconnects during it, leaves the write unsent, so its outcome is known.
+  it.each([
+    ["the permission read reaches its deadline", (_socket: WebSocket) => undefined],
+    ["the Bridge disconnects during the permission read", (socket: WebSocket) => socket.terminate()],
+  ])("reports a write as not sent when %s", async (_name, onOptionsRead) => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+      callTimeoutMs: 300,
+    });
+    servers.push(server);
+    const socket = await connect(server, [editableCanvasBinding()]);
+    let writes = 0;
+    socket.on("message", (raw) => {
+      const message = parseBridgeJson(raw.toString()) as { schema?: string; kind?: string } | undefined;
+      if (message?.schema !== BRIDGE_SCHEMAS.command) return;
+      if (message.kind === "edit_policy_options_get") onOptionsRead(socket);
+      else writes += 1;
+    });
+    const failure = await server.invoke({
+      kind: "invoke_write",
+      toolName: "canvas_update_create_page_courses",
+      operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page",
+      sourceBindingId: "canvas-course-42",
+      arguments: { course_id: "42", url_or_id: "week-1", morrow_page_guard: pageGuard },
+      outerGrant: {
+        planDigest: digest,
+        approvalGrantDigest: "b".repeat(64),
+        effectReceiptId: "effect:permission-read-unanswered",
+        dispatchAttempt: 1 as const,
+        gatewayProcessId: "gateway:12345678",
+        authorization: { kind: "edit_scope" as const, policyDigest: "c".repeat(64), policyRevision: 1 },
+      },
+      timeoutMs: 5_000,
+    }).then(() => undefined, (error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(BridgeUnavailableError);
+    expect(failure).not.toBeInstanceOf(BridgeOutcomeUnknownError);
+    expect((failure as Error).message).toBe("Morrow could not read the current Edit permission for this course, so it did not send the change. Create a fresh plan from the current binding.");
+    expect(writes).toBe(0);
+    expect(server.health().pendingCount).toBe(0);
+  });
+
   it("refuses a revoked edit permission before sending", async () => {
     const server = new LoopbackBridgeServer({
       token,
