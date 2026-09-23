@@ -295,6 +295,13 @@ Installing and the docs:
 - The shipped `transport/local_chromium_selftest.py` runs in the
   release: its allowlist check no longer opens a file the release
   leaves out.
+- The installer's own notes match the install guide: upgrade by
+  copying the new release over the installed folder (a new folder
+  loses your Canvas address and sign-in), and 3 backups are kept.
+  When your Canvas address is not set, it says to set it and run the
+  installer again, which checks the address before it starts the
+  helper. It no longer suggests waiting for the helper to start on its
+  own, which skips that check.
 - Installing no longer leaves an empty test folder
   (`helper/.selftest-warn-profile`) in the installed folder.
 

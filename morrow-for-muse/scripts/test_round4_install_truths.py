@@ -191,3 +191,44 @@ def test_the_playbook_matches_supervision_notice_and_halt():
     assert "imposes the write halt" in text
     assert "<a live-proven read row>" not in text
     assert "--name users_self --method GET --path /api/v1/users/self" in text
+
+
+# Final sweep 2026-09-23 (written before the fix): install.sh's own header
+# recommended upgrading into a new directory ("New directory
+# (recommended)") and said 2 upgrade backups are kept, while INSTALL.md
+# says a fresh directory loses helper/env and the sign-in, and the code
+# keeps 3. Its step-10 message told the operator to "wait for the next
+# keepalive run" when CANVAS_BASE was unset, but keepalive skips the
+# address check, and INSTALL.md and SKILL.md say never to start the
+# helper for the first time that way.
+def _install_header():
+    text = _read("install.sh")
+    return " ".join(text[:text.index("\nset -u")].split())
+
+
+def test_the_install_header_upgrades_in_place_only():
+    header = _install_header()
+    assert "New directory" not in header
+    assert "somewhere new" not in header
+    assert "Do not unzip into a fresh directory" in header
+    assert "helper/env" in header and "helper/profile" in header
+
+
+def test_the_install_header_states_the_backups_the_code_keeps():
+    keep = int(re.search(r"^\s*_keep_n=(\d+);", _read("install.sh"),
+                         re.M).group(1))
+    header = _install_header()
+    assert re.findall(r"the (\d+) most recent are kept", header) == \
+        [str(keep)]
+    upgrading = " ".join(_read("INSTALL.md").split())
+    assert "Only the %d most recent backups are kept" % keep in upgrading
+
+
+def test_install_never_offers_keepalive_as_the_first_start():
+    text = _read("install.sh")
+    assert "keepalive run)" not in text
+    assert not re.search(r"wait for the next\s+keepalive", text)
+    unset = text[text.index('note "CANVAS_BASE is not set yet'):]
+    unset = unset[:unset.index("\nelse\n")]
+    assert "rerun this installer" in unset
+    assert "keepalive" not in unset

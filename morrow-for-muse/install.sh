@@ -11,29 +11,27 @@
 # re-verifies every step and repairs drift (missing cron entry, missing
 # profile dir), but it never duplicates and never deletes your state.
 #
-# Upgrade: two supported paths.
-#   * New directory (recommended): unzip the new dist somewhere new and
-#     run this installer there. Supervision (the keepalive cron entry) is
-#     migrated from the old tree to this one, loudly; the old tree is
-#     otherwise untouched.
-#   * In place: unzip the new dist over the old tree and run this
-#     installer. The installer backs the tree up to a timestamped
-#     directory first, then removes files the new version no longer ships
-#     (diffed against the previous install's manifest, loudly logged). If
-#     the upgrade fails afterwards, the backup is restored automatically,
-#     but ONLY from a verified-complete backup: the installer records
-#     the backup's file count and byte total at backup time and
-#     re-verifies them before any restore. A backup interrupted mid-write
-#     (e.g. disk full) is NEVER restored over the tree; the tree is left
-#     in place, the partial backup is quarantined as <tree>.bak-<ts>.PARTIAL,
-#     and the failure names the recovery steps. (The backup covers the
-#     installer's own in-place writes. If you unzipped over the old tree,
-#     the pre-unzip tree is already gone; keep the previous release zip
-#     for full rollback.)
+# Upgrade: in place only (INSTALL.md, "Upgrading"). Copy the new release
+#   over the existing tree with INSTALL.md's Step 1 commands, then run
+#   this installer from the tree. Do not unzip into a fresh directory:
+#   helper/env (the Canvas address) and helper/profile (the sign-in) live
+#   inside the tree, so a fresh tree starts without them and the educator
+#   must sign in again. The installer backs the tree up to a timestamped
+#   directory first, then removes files the new version no longer ships
+#   (diffed against the previous install's manifest, loudly logged). If
+#   the upgrade fails afterwards, the backup is restored automatically,
+#   but ONLY from a verified-complete backup: the installer records a
+#   per-path SHA-256 manifest of the backup at backup time and
+#   re-verifies it before any restore. A backup interrupted mid-write
+#   (e.g. disk full) is NEVER restored over the tree; the tree is left
+#   in place, the partial backup is quarantined as <tree>.bak-<ts>.PARTIAL,
+#   and the failure names the recovery steps. (The backup covers the
+#   installer's own in-place writes, not the files the copy replaced;
+#   keep the previous release zip for full rollback.)
 #   A failed FRESH install (no backup) rolls back everything the run
 #   created (state dirs, helper/env, helper/profile, the cron entry),
 #   itemized, instead of leaving a half-install. Upgrade backups keep
-#   a bounded retention: the 2 most recent are kept, older ones pruned.
+#   a bounded retention: the 3 most recent are kept, older ones pruned.
 #   scripts/uninstall.sh removes the tree, the state dir, backups
 #   (<tree>.bak-* incl. .PARTIAL), and failed trees (<tree>.failed-*).
 #
@@ -1051,7 +1049,7 @@ if [ -z "${CANVAS_BASE:-}" ] && [ -f "${LEGACY_ENV_FILE}" ]; then
 fi
 if [ -z "${CANVAS_BASE:-}" ]; then
   note "CANVAS_BASE is not set yet: skipping the helper launch."
-  note "Set it in ${ENV_FILE}, then rerun this installer (or wait for the next keepalive run). The one-time sign-in comes after."
+  note "Set it in ${ENV_FILE}, then rerun this installer: it checks the address before it starts the helper. The one-time sign-in comes after."
 else
   if [ -n "${_SHELL_CANVAS_BASE}" ] \
     && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?CANVAS_BASE=' "${ENV_FILE}" 2>/dev/null; then
