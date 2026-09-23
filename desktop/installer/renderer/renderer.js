@@ -563,7 +563,7 @@ function render(current) {
   state = current;
   if (!chosenAssistantId && current?.selectedAssistantId) chosenAssistantId = current.selectedAssistantId;
   const view = current ? actionView(current, { chosenAssistantId, platform: API?.platform || null, bridgeWaitExpired: bridgeWaitExpired(current) }) : loadAttempted ? setupUnavailableView() : null;
-  headerStatus.textContent = current || !view ? statusSummary(current) : view.summary;
+  headerStatus.textContent = view ? view.summary : statusSummary(current);
   loading.hidden = Boolean(view);
   actionContent.hidden = !view;
   renderWelcome(current);

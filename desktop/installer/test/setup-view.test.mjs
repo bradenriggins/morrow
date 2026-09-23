@@ -54,7 +54,7 @@ test("no assistant is chosen yet", () => {
   assert.equal(view.title, "Choose your assistant.");
   assert.match(view.body, /data-action="choose-assistant" data-assistant-id="codex"/);
   assert.match(view.body, /data-action="install-assistant"/);
-  assert.equal(statusSummary(current), "Continue setup");
+  assert.equal(statusSummary(current), "Choose your assistant");
   assert.equal(step(current, "Assistant").status, "current");
   assert.equal(step(current, "Assistant").detail, "Choose an installed assistant");
 });
@@ -832,4 +832,63 @@ test("the renderer can tell when the Chrome folder step is the one on screen", (
   assert.equal(awaitingBridgeFolder(addBridgeState()), true);
   assert.equal(awaitingBridgeFolder(state({ ...addBridgeStateInput(), bridgeLoadedInChrome: true })), false);
   assert.equal(awaitingBridgeFolder(state({ lifecycle: "ready_for_assistant" })), false);
+});
+
+// The one line the header's polite live region announces for each panel. A
+// screen reader hears the step on screen, never a later or an earlier one.
+const PANEL_SUMMARIES = Object.freeze({
+  "Move Morrow to Applications.": "Move Morrow to Applications",
+  "Repair Morrow before you connect a course.": "Morrow needs repair",
+  "Update your assistant settings.": "Update your assistant settings",
+  "Finish setting up Claude Desktop.": "Finish setting up Claude Desktop",
+  "Choose your assistant.": "Choose your assistant",
+  "Morrow is getting ready.": "Morrow is getting ready",
+  "Morrow Bridge is not available yet.": "Morrow Bridge is not available yet",
+  "Reload Morrow Bridge.": "Reload Morrow Bridge in Chrome",
+  "Update Morrow Bridge.": "Update Morrow Bridge",
+  "Morrow Bridge is not ready to open.": "Morrow Bridge is not ready to open",
+  "Add Morrow Bridge.": "Set up Morrow Bridge in Chrome",
+  "Install Morrow Bridge.": "Set up Morrow Bridge in Chrome",
+  "Connect Morrow Bridge.": "Connect Morrow Bridge",
+  "Open your course in Chrome.": "Morrow Bridge is connected",
+  "Morrow cannot read your course yet.": "Morrow cannot read your course yet",
+  "Check your course connection.": "First read is ready",
+  "Quit and reopen your assistant.": "Quit and reopen ChatGPT",
+  "Your course is connected.": "First read complete"
+});
+
+test("the header live region announces the same step the action panel shows, for every panel", () => {
+  const panels = [
+    state({ lifecycle: "move_required", appLocation: "move_required", assistants: [{ ...CHATGPT, detected: true }] }),
+    state({ lifecycle: "repair_required", runtimeStatus: "repair_required" }),
+    // Morrow moved: the panel asks for the assistant settings even after a first read.
+    state({ ...CONNECTED_COURSE, assistantsNeedRepoint: true, firstPreview: { available: true, completed: true } }),
+    state({ lifecycle: "assistant_pending", assistants: [{ ...CLAUDE_DESKTOP, detected: true, pending: true, selected: true }], selectedAssistantId: "claude-desktop" }),
+    state({ assistants: [{ ...CHATGPT, detected: true }] }),
+    state({ ...READY_ASSISTANT, runtimeStatus: "uncertain" }),
+    state({ ...READY_ASSISTANT, bridgeDelivery: "unavailable" }),
+    state({ ...READY_ASSISTANT, bridgeManualChromeReloadRequired: true }),
+    state({ ...READY_ASSISTANT, bridgeUpdateAvailable: true }),
+    // The Bridge folder is not verified.
+    state({ ...READY_ASSISTANT, bridgeFolderReady: false }),
+    state(READY_ASSISTANT),
+    state({ ...READY_ASSISTANT, bridgeDelivery: "available" }),
+    // Chrome loaded the Bridge, and it is not paired yet.
+    state({ ...READY_ASSISTANT, bridgeLoadedInChrome: true }),
+    state(PAIRED),
+    state(CONNECTED_COURSE),
+    state({ ...CONNECTED_COURSE, firstPreview: { available: true } }),
+    connectedCourse(),
+    connectedCourse({ connected: true })
+  ];
+  const seen = new Set();
+  for (const current of panels) {
+    const view = actionView(current, { chosenAssistantId: null });
+    assert.ok(Object.hasOwn(PANEL_SUMMARIES, view.title), `no summary is recorded for "${view.title}"`);
+    assert.equal(view.summary, PANEL_SUMMARIES[view.title], `the panel "${view.title}" carries its own summary`);
+    assert.equal(statusSummary(current), view.summary, `the header announces "${statusSummary(current)}" while the panel shows "${view.title}"`);
+    seen.add(view.title);
+  }
+  assert.deepEqual([...seen].sort(), Object.keys(PANEL_SUMMARIES).sort(), "every panel is covered");
+  assert.equal(statusSummary(null), "Checking setup");
 });
