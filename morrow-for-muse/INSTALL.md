@@ -46,11 +46,11 @@ prior knowledge of the project.
 ## Step 1: get the release and unzip it
 
 The release is `morrow-muse-connector-<version>.zip` (this version:
-`morrow-muse-connector-0.4.0.zip`). Download it from the `muse/v0.4.0`
+`morrow-muse-connector-0.4.1.zip`). Download it from the `muse/v0.4.1`
 GitHub release:
 
 ```
-curl -fLO https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.0/morrow-muse-connector-0.4.0.zip
+curl -fLO https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.1/morrow-muse-connector-0.4.1.zip
 ```
 
 If you have the source repository instead of a release zip, build the
@@ -59,7 +59,7 @@ zip from it (Python 3, git):
 ```
 cd <repo>/morrow-for-muse
 python3 scripts/carve.py --zip
-# -> <repo>/dist/morrow-muse-connector-0.4.0.zip
+# -> <repo>/dist/morrow-muse-connector-0.4.1.zip
 ```
 
 `scripts/carve.py` (in the source repository only, not shipped in the
@@ -75,7 +75,7 @@ Unzip the release into the skills directory:
 
 ```
 mkdir -p ~/workspace/skills
-unzip morrow-muse-connector-0.4.0.zip -d ~/workspace/skills/
+unzip morrow-muse-connector-0.4.1.zip -d ~/workspace/skills/
 mv ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas
 cd ~/workspace/skills/morrow-canvas
 ```

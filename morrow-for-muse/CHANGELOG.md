@@ -1,90 +1,43 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 (2026-09-23)
 
-Fixes found in the final sweep of 0.4.0 (2026-09-22).
+Release: `morrow-muse-connector-0.4.1.zip` from the `muse/v0.4.1`
+GitHub release. This release fixes what a final review of 0.4.0
+found, including two privacy fixes.
 
 In plain words:
 
-- Installing on a computer without cron (the Muse VM) works, and so
-  does running the installer again. Logs and the keepalive loop's
-  state now live in `~/.morrow/trees/<tree id>/`, never in the tree,
-  so the install checks no longer mistake them for release files. A
-  fresh install now records the tree's stable id.
-- You can approve the same change again (rename a page, rename it
-  back, rename it again). Each approval is still used once. After a
-  sign-in expiry, the change is prepared again and you approve it
-  again.
-- The failed-students question, sign-in recovery, and finding a
-  student by name read your Canvas address and the helper's port from
-  `helper/env`, where the installer asks you to put them.
-- The assistant never sees real student names you did not type. The
-  old "reveal" that showed a course's names for 30 minutes is gone.
-  To check who a label is, name the student you have in mind.
-- "Last week's quiz" uses your time zone: your timezone setting, then
-  the course's time zone, then your Canvas profile. If none is set,
-  Morrow asks.
-- The approval you read before a change is in plain words: the
-  course, the change, every value that will be sent, and whether
-  Morrow can undo it.
-- When Canvas refuses a value, you are told what Canvas said and that
-  nothing changed. When changes are paused because your sign-in
-  expired, you are told to sign in again on the helper page.
-- Three settings that promised things Morrow does not do are gone:
-  batched approvals, bulk action confirmations, and cleanup of test
-  objects.
-- The docs no longer describe an undo command. This release has no
-  automatic undo, and each approval says so. To reverse a change,
-  Morrow prepares the reverse change as a new change you approve.
-- When something fails, you are told what was tried in plain words
-  ("changing a page in the course "Biology 101""), never an internal
-  command name or id.
-- Turning on edit mode, or changing a setting, is confirmed once, in
-  plain words: what changed and what it means for you.
-- The installer warns when the `cryptography` package is missing.
-  Without it, Morrow refuses everything that touches student data
-  (working by name, the failed-students question, rosters, grades), so
-  the warning names the one command that fixes it.
-- The consent, setup, and disconnect pages use plain words. To sign
-  out, open the helper page and use Canvas's own menu: Account, then
-  Logout.
-- The release no longer ships the retired form relay or internal audit
-  notes, and the docs no longer mention a Moodle lane or ask for a
-  Canvas token.
-- Renaming a course or changing its late policy now names the course
-  in the approval, checks the course before the change, and, for a
-  rename, reads the course back after it.
-- A course whose name mixes languages (for example "Русский язык
-  (Russian Language I)" or "Statistics: μ and σ") can be changed. A
-  name that mixes alphabets inside one word, the way a lookalike name
-  does, is still refused.
-- Item Banks no longer refuse a school whose Canvas runs on its own
-  web address (for example canvas.school.edu). This is tested with a
-  stand-in for such a school, not yet on a live one.
-- After a change to several due date overrides, or to the dates of
-  several assignments, Morrow reads back each item it changed. Canvas
-  applies a change to the dates of several assignments in the
-  background, so a date that has not moved yet is reported as
-  unconfirmed, never as failed.
-- Deleting a classic quiz is confirmed by the quiz leaving the
-  course's quiz list, so a successful delete is no longer reported as
-  failed.
-- The assistant can change the dates of several assignments at once.
-  When Morrow refuses a request's own input, you are told that nothing
-  was sent.
-- The deletion confirmations setting says what it does: deletions ask
-  first. It never covered other kinds of changes.
-- A change refused before it was sent no longer stays listed as
-  unfinished.
-- Morrow closes the Item Banks tabs it opens in the helper browser
-  when it finishes.
-- Student names in course content are hidden too. When Morrow reads a
-  page, an assignment description, a quiz question, or a quiz title
-  that names a student, the assistant sees the student's label. To do
-  that, Morrow first reads the course's student list, and if it cannot,
-  it reads and changes nothing in the course. When the assistant saves
-  the content back, Morrow puts the real text back in: a first name
-  stays a first name, and an email stays an email.
+Student privacy:
+
+- Privacy fix: the name "reveal" is removed. In 0.4.0, when you asked
+  to see a course's student names, Morrow gave every student's real
+  name, email, and login in that course to the assistant, and so to
+  the Muse model, for up to 30 minutes. Now nothing can turn the
+  labels off, and the assistant never sees a real student name you did
+  not type. To check who a label is, name the student you have in
+  mind: the assistant looks that name up and tells you whether it is
+  the same label.
+- Privacy fix: student names in course content are hidden too. In
+  0.4.0, a page, an assignment description, or a quiz question that
+  named a student reached the assistant as written. Now the assistant
+  sees the student's label there and in quiz titles, including the
+  quiz titles in the answer to "who failed last week's quiz". To do
+  that, Morrow first reads the course's student list, and if it
+  cannot, it reads and changes nothing in the course. When the
+  assistant saves the content back, Morrow puts the real text back in:
+  a first name stays a first name, and an email stays an email.
+- Some names are still not hidden, and the consent page lists them: a
+  name Canvas does not list for the student, such as a nickname; a
+  course named for its student, such as an independent study; and a
+  page's web address, which keeps the words of the page's title in
+  small letters.
+- The consent page says that on some Muse computers, the network that
+  carries traffic out of the computer can read that traffic, including
+  your Canvas sign-in and the course pages Morrow loads.
+
+Changes to your courses:
+
 - Morrow never posts an announcement, even when asked: posting one
   notifies every student in the course. A request that would post one,
   or add a feed that posts them, is refused before anything is sent,
@@ -92,30 +45,123 @@ In plain words:
 - Discussion changes are refused until they are tested through the
   browser Morrow uses today; they were tested only through an older,
   retired route.
+- The approval you read before a change is in plain words: the
+  course, the change, every value that will be sent, and whether
+  Morrow can undo it. A course rename and a change to the dates of
+  several assignments read as plain actions too.
+- You can approve the same change again (rename a page, rename it
+  back, rename it again). Each approval is still used once. After a
+  sign-in expiry, the change is prepared again and you approve it
+  again.
+- Renaming a course or changing its late policy now names the course
+  in the approval, checks the course before the change, and, for a
+  rename, reads the course back after it.
+- A course whose name mixes languages (for example "Русский язык
+  (Russian Language I)" or "Statistics: μ and σ") can be changed. A
+  name that mixes alphabets inside one word, the way a lookalike name
+  does, is still refused.
+- The assistant can change the dates of several assignments at once.
+  After a change to several due date overrides, or to the dates of
+  several assignments, Morrow reads back each item it changed. Canvas
+  applies a change to the dates of several assignments in the
+  background, so a date that has not moved yet is reported as
+  unconfirmed, never as failed.
+- Deleting a classic quiz is confirmed by the quiz leaving the
+  course's quiz list, so a successful delete is no longer reported as
+  failed. When the list is too long to read in full, the delete is
+  reported as unconfirmed unless Canvas says the quiz is gone.
+- Item Banks no longer refuse a school whose Canvas runs on its own
+  web address (for example canvas.school.edu). This is tested with a
+  stand-in for such a school, not yet on a live one.
+- Morrow closes the Item Banks tabs it opens in the helper browser
+  when it finishes.
 - The assistant offers New Quiz creation again: it was tested and
   turned on for 0.4.0, but the assistant's instructions still said it
   was on hold. A task that is on hold is now described as the task you
   asked for, not as a New Quiz.
-- The consent page says that on some Muse computers, the network that
-  carries traffic out of the computer can read that traffic, including
-  your Canvas sign-in and the course pages Morrow loads.
+- "Last week's quiz" uses your time zone: your timezone setting, then
+  the course's time zone, then your Canvas profile. If none is set,
+  Morrow asks.
+
+Settings and undo:
+
+- Turning on edit mode, or changing a setting, is confirmed once, in
+  plain words: what changed and what it means for you.
+- The deletion confirmations setting says what it does: deletions ask
+  first. It never covered other kinds of changes.
+- Three settings that promised things Morrow does not do are gone:
+  batched approvals, bulk action confirmations, and cleanup of test
+  objects.
+- The docs no longer describe an undo command. This release has no
+  automatic undo, and each approval says so. To reverse a change,
+  Morrow prepares the reverse change as a new change you approve. If
+  an undo is tried anyway, you are told that nothing was sent and
+  nothing changed.
+
+Messages:
+
+- When Canvas refuses a value, you are told what Canvas said and that
+  nothing changed.
+- When changes are paused because your Canvas sign-in expired, you
+  are told to sign in again on the helper page. This also happens when
+  the sign-in expires just as Morrow starts work in a course. While
+  changes are paused, a change you ask for is refused before Morrow
+  contacts Canvas.
+- When something fails, you are told what was tried in plain words
+  ("changing a page in the course "Biology 101""), never an internal
+  command name or id.
+- When Morrow refuses a request's own input, you are told that nothing
+  was sent.
+- A change refused before it was sent no longer stays listed as
+  unfinished.
+
+Installing and the docs:
+
+- Installing on a Muse computer works, and so does running the
+  installer again. A Muse computer has no scheduled-task service
+  (cron), and the installer's checks mistook Morrow's own logs for
+  release files. Logs now live in `~/.morrow/trees/<tree id>/`, never
+  in the installed folder, and a fresh install records the folder's
+  stable id.
+- The failed-students question, sign-in recovery, and finding a
+  student by name read your Canvas address and the helper's port from
+  `helper/env`, where the installer asks you to put them.
+- The installer warns when the `cryptography` package is missing.
+  Without it, Morrow refuses everything that touches student data
+  (working by name, the failed-students question, rosters, grades), so
+  the warning names the one command that fixes it.
+- The consent, setup, and disconnect pages use plain words. To sign
+  out, open the helper page and use Canvas's own menu: Account, then
+  Logout.
 - The first-run checklist starts with your install; the test-only
   steps moved to the install test.
+- The release no longer ships old code that nothing uses (the retired
+  form relay) or internal review notes, and the docs no longer mention
+  Moodle or ask for a Canvas token.
 - The release no longer includes the developer tests. Run from an
   installed copy, they wrote to Morrow's own records, and Morrow then
   refused to make changes until the records were restored. The
   installer's own checks still ship, and they keep to a scratch folder.
+- The troubleshooting guide names the Python version the installer
+  needs: 3.11 or newer.
 
 Technical notes:
 
+- The educator reveal is gone: `dispatch.admission.mint_pii_reveal`,
+  `check_pii_reveal`, the executor's `--pii-reveal`, and the journal's
+  reveal audit field are removed, and `project_learner_result` always
+  projects.
 - `privacy/course_content.py` projects every course-scoped result
   (and learner receipts after the boundary) through the course roster
   with reversible form markers, and `resolve_learner_labels` restores
   labels in a write's free text; `dispatch/executor.py`
   `_read_course_roster_first` reads the roster (users in every
   enrollment state, deleted enrollments) before a Chromium-lane course
-  dispatch and fails closed (`CourseRosterUnavailable`). The roster read
-  is fixture-proven, not yet live-proven through this lane.
+  dispatch and fails closed (`CourseRosterUnavailable`). A session
+  death there arms the write halt, quarantine, and re-sign-in notice,
+  and the roster read steps aside for a write the write halt refuses.
+  The roster read is fixture-proven, not yet live-proven through this
+  lane.
 - `dispatch/admission_policy.json` 1.4.0: `never_dispatch.request_flags`
   refuses `is_announcement` on any route; `canvas_create_external_feed_courses`
   is never-dispatch; C-139, C-141, C-167, and C-238 are evidence holds.
@@ -131,8 +177,14 @@ Technical notes:
   install.sh step 9 runs it, and CI runs it on the carved release tree
   after the carve's secrets gate. The carve drops every `test_*.py`
   that is not an install suite.
+- The carve's secrets gate passes again: a docstring in
+  `transport/item_bank_sdk.py` no longer names a real tenant host.
+- CI installs pytest from the hash-locked `requirements-test.txt`.
 - The troubleshooting playbook names the Python 3.11 floor that
   install.sh enforces.
+- `test_release_version.py` requires every current-version statement
+  (`pack/version.txt`, `pack/pack.json`, SKILL.md, INSTALL.md, the
+  install selftest stub, and this changelog) to name `VERSION`.
 
 ## 0.4.0 (2026-09-22)
 
@@ -159,6 +211,8 @@ In plain words:
   by label reaches the right student, and a name reveal is
   educator-only, for one course, short-lived, and never journaled in
   the clear.
+  (Correction, 0.4.1: the reveal gave the course's real names to the
+  assistant, and so to the Muse model. 0.4.1 removes it.)
 - More learner data is labeled: ids inside URLs, SIS ids, bare user
   records, content editors, date details, smart search, and outcome
   alignments.
