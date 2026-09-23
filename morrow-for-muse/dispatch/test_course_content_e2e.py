@@ -30,6 +30,10 @@ Failure modes this suite pins down (written before the code):
      name, and approve sends the real name.
   7. A page write whose readback does not match reaches the agent and
      the journal with labels only.
+  8. The roster read is now the first Canvas call of a course dispatch,
+     so a sign-in that died there must arm the re-sign-in flow (write
+     halt, quarantine, notice) exactly as a death on the first call
+     did before.
 
 The run writes a repeatable artifact of the flow to
 .selftest-work/course-content-e2e-artifact.json (labels only).
@@ -322,6 +326,31 @@ def test_a_page_readback_mismatch_reaches_the_agent_with_labels():
     payload = agent_error_payload("renaming the page Week 1", info.value)
     assert _leaks(payload) == [], json.dumps(payload)
     assert _leaks(_journal_text()) == [], _journal_text()[-2000:]
+
+
+# -- 8 ------------------------------------------------------------------------
+
+class ChromiumSessionDead(ex.ExecutorError):
+    """Stands for the lane's attach-time session death (matched by name,
+    as dispatch/executor.py _is_session_dead does)."""
+
+
+def test_a_sign_in_that_died_at_the_roster_read_arms_the_resign_in_flow(
+        monkeypatch):
+    armed = []
+    monkeypatch.setattr(ex, "_on_session_death",
+                        lambda op_id, name, evidence: armed.append(name))
+
+    class Dead(Canvas):
+        def raw_request(self, method, url, headers, body, is_write=False,
+                        max_bytes=None):
+            self.calls.append((method, url, None))
+            raise ChromiumSessionDead("Canvas session died")
+    session = Dead()
+    with pytest.raises(ChromiumSessionDead):
+        _show(session)
+    assert armed == ["canvas_show_page_courses"]
+    assert ("GET", "/api/v1/courses/1/pages/week-1") not in session.paths()
 
 
 def _artifact(record):

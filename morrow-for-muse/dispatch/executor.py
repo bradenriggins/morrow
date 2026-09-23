@@ -8113,7 +8113,7 @@ def _read_all_pages(session, url):
 
 
 def _read_course_roster_first(entry, params, session, tenant_base,
-                              dry_run):
+                              dry_run, op_id=None):
     """Read the course's whole student roster before a Chromium-lane
     dispatch reads or changes anything in that course. Course content
     (a page body, an assignment description) can name any student, and
@@ -8122,7 +8122,9 @@ def _read_course_roster_first(entry, params, session, tenant_base,
     when their name appears in what the agent sees, and without the
     vault the names are hidden one way. The roster is held for this
     dispatch only: never journaled, never shown. Fails closed: when the
-    roster cannot be read, nothing in the course is read or changed."""
+    roster cannot be read, nothing in the course is read or changed. It
+    is the dispatch's first Canvas call, so a sign-in that died here
+    arms the re-sign-in flow as an attach-time death does."""
     if dry_run or not getattr(session, "browser_owned_auth", False):
         return
     # The course the request path names, or for an Item Bank route the
@@ -8155,6 +8157,12 @@ def _read_course_roster_first(entry, params, session, tenant_base,
             "nothing in the course was read or changed: without it, "
             "Morrow cannot hide student names in course content. Nothing "
             "was sent." % (course_id, detail)) from None
+    except Exception as exc:
+        if _is_session_dead(exc):
+            _on_session_death(op_id, entry.get("name"),
+                              "session dead while reading the course "
+                              "roster: %s" % str(exc)[:200])
+        raise
 
 
 def _resolve_dispatch_labels(entry, params, tenant_base, mode_ctx):
@@ -8260,7 +8268,8 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
     # Course content can name any student: read the course roster (and
     # refuse the course when it cannot be read) before anything in the
     # course is read, changed, or restored from labels.
-    _read_course_roster_first(entry, params, session, tenant_base, dry_run)
+    _read_course_roster_first(entry, params, session, tenant_base, dry_run,
+                              op_id)
     # Working by name: resolve learner labels to real ids AFTER the mode
     # gate and BEFORE the write gates claim the op (a refusal here leaves
     # nothing claimed). The gates and every journal record keep the
