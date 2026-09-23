@@ -4,7 +4,7 @@ import { execFile, fork } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import test from "node:test";
+import nodeTest from "node:test";
 import { clearExtensionGlobals, loadExtensionPage } from "./lib/extension-dom.mjs";
 
 const root = new URL("../../", import.meta.url);
@@ -1651,7 +1651,14 @@ async function servePagesScenario(site) {
     },
     tabMessage: async ({ tabId, message }) => {
       const tab = tabs.find((entry) => entry.id === tabId);
-      return tab && message?.type === "morrow_canvas_probe" ? { ok: true, profile: { origin: new URL(tab.url).origin, id: "7" } } : null;
+      if (!tab) return null;
+      const origin = new URL(tab.url).origin;
+      if (message?.type === "morrow_canvas_probe") return { ok: true, profile: { origin, id: "7" } };
+      // A signed-in Canvas tab lists the teacher's courses, as Plan and Edit settings asks once a site is verified.
+      if (message?.type === "morrow_canvas_list_courses") {
+        return { ok: true, profile: { origin, id: "7" }, courses: [{ id: "42", name: "Biology" }, { id: "43", name: "Chemistry" }], pageUrl: `${origin}/api/v1/courses?per_page=100`, nextUrl: null, complete: true };
+      }
+      return null;
     },
   });
   value.granted.add(`${otherOrigin}/*`);
@@ -1732,6 +1739,10 @@ async function runScenario(name) {
 }
 
 const scenarioName = process.argv[2];
+// A scenario child runs only its scenario. The served-pages child stays alive
+// after its scenario, so it must not register this file's tests: each would
+// fork another served child, without end.
+const test = scenarioName ? () => undefined : nodeTest;
 if (scenarioName === "serve-pages") {
   await servePagesScenario(process.argv[3]);
 } else if (scenarioName) {
@@ -1983,6 +1994,9 @@ test("Plan and Edit settings reopens a closed course at its own address through 
   await page.waitFor(() => page.queryAll(open).length === 0 && page.queryAll(`[data-binding-id="${bindingId}"]`).length === 1,
     "the reopened course never became connected");
   assert.deepEqual(await worker.tabsCreated(), [{ url: `${courseOrigin}/courses/42`, active: false }]);
+  await page.waitFor(() => page.queryAll('[data-row-kind="available"]').length === 1,
+    "the reopened site's other course was never listed");
+  assert.equal(page.text('[data-row-kind="available"] .course-row-name'), "Chemistry");
   assert.equal(page.hidden("#error"), true);
 });
 
