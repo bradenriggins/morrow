@@ -319,17 +319,19 @@ PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py catalog \
 `__pycache__` into the tree, which the installer's integrity gate
 would reject on the next install.)
 
-Expect a JSON result naming you (id, name, email). This tenant's
-`/users/self` response carries no `login_id` field; email is the
-account identifier. Confirm the principal
-is you before asking for anything else. This proves the full path:
+Expect a JSON result naming you: your own Canvas id and name (which
+other fields appear depends on your school's Canvas settings). Confirm
+the account is yours before asking for anything else. This proves the full path:
 executor governance, the Chromium lane, your session, your tenant.
 
 ## Dispatching real work
 
-Reads need nothing further. Writes need a frozen plan (`--plan`) and an
-educator-signed approval (`--approval`); see `SKILL.md` for the
-governance rules. The v1 capability scope is declared in `SCOPE.md`:
+Reads need nothing further. In plan mode (the default), a write waits
+for the educator: the agent runs `plan-write`, shows the educator the
+change in plain words, and runs `approve-write` with their reply
+(`SKILL.md`, "Dispatching operations"). In edit mode, writes run
+without asking (deletions ask only when the educator turned on
+deletion confirmations). The v1 capability scope is declared in `SCOPE.md`:
 the live-proven Canvas core only.
 
 ## Disconnect (keep the install)
@@ -481,14 +483,6 @@ journal, the vault key, the helper token, the env files, and the
 browser profile. Do not run untrusted code as the same user on a
 machine holding an educator's Morrow state.
 
-## Moodle lane: HTTPS is mandatory
-
-The Moodle lane refuses a plaintext `http://` base before any session
-or cookie is created: session cookies and credentials would otherwise
-cross the network unencrypted. Use `https://`. The escape hatch
-`MOODLE_BASE_ALLOW_HTTP=1` exists for test fixtures and LAN-only
-deployments only; never set it for a real tenant.
-
 ## Troubleshooting
 
 - `install.sh` fails at **egress probe**: the VM cannot reach any tenant.
@@ -498,9 +492,12 @@ deployments only; never set it for a real tenant.
   `helper/env` (or the legacy `~/.morrow/env`, or the environment).
 - `users/self` fails with a session error: the helper's Chromium holds no
   live session. Re-run step 5 (sign in again through the helper).
-- The executor refuses a write: expected without `--plan` and
-  `--approval`, or while `~/.morrow/write_halt` exists. That is the
-  governance working; see `SKILL.md`.
+- The executor refuses a write: in plan mode a write runs only
+  through `plan-write` and `approve-write` with the educator's reply,
+  and every write is refused while `~/.morrow/write_halt` exists
+  (after an expired sign-in: the educator signs in again on the helper
+  page, then `reauth/state_machine.py resume`). That is the governance
+  working; see `SKILL.md`.
 
 ## Recovery runbooks (W6-P2-9)
 

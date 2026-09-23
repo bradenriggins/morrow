@@ -188,9 +188,9 @@ a fresh profile): never a dead session, never a re-sign-in case. Check
 The session is durable-but-expirable. When it dies mid-operation the
 run stops loudly instead of writing through a half-dead session:
 
-1. **Detect.** A 401 `{"status":"unauthenticated"}` on the API lane, a
-   redirect to `/login` on the browser lane, or a classified re-auth
-   signal on the Moodle lane. The dead session is marked sticky: the
+1. **Detect.** Canvas answers a request with a 401
+   `{"status":"unauthenticated"}` or a redirect to its `/login` page.
+   The dead session is marked sticky: the
    first ambiguous write raises uncertain, and every later call on the
    same session refuses immediately without another provider call.
 2. **Halt.** A write halt is imposed (`write_halt` under `MORROW_HOME`);
@@ -227,12 +227,6 @@ run stops loudly instead of writing through a half-dead session:
 pinning) exists only between a re-auth start and its successful
 completion: it is retained on failed or mismatched recovery and deleted
 only after verified resume.
-
-**PAT lane 401.** A 401 on the token HTTPS lane means the provider
-rejected the personal access token (revoked, expired, or invalid; the
-401 alone does not prove which). Re-signing in through the login helper
-cannot fix this: mint a fresh token in the provider admin console and
-configure it again.
 
 ## Dispatching operations
 
@@ -755,10 +749,14 @@ whole profile); per-tenant purge cannot scope the profile (its stores
 mix tenants). The uninstall script removes everything including the
 whole profile, and warns that bytes already held open by other
 processes cannot be revoked by unlinking (close agent sessions
-first). The legacy purge/wipe commands
-(`python3 -m privacy.pseudonym purge|wipe`,
-`python3 -m privacy.learner_vault purge|wipe`) cover only their own
-legacy state and are not shipped in the distribution. Full policy:
+first). The same deletions run from the command line:
+`python3 -m privacy.executor_wire purge --tenant <tenant base>`,
+`purge-course --tenant <tenant base> --course-id <id>`, and
+`purge-all` (add `--full` to wipe the whole browser profile). The
+legacy `python3 -m privacy.pseudonym purge|wipe` and
+`python3 -m privacy.learner_vault purge|wipe` commands also ship, but
+they cover only their own older state; use the `executor_wire`
+commands for the educator's deletion. Full policy:
 `privacy/FERPA_POLICY.md`.
 
 Honest limitations (not defects, but know them):
