@@ -1674,6 +1674,47 @@ function requestedJsonShapeMatches(actual: unknown, expected: unknown): boolean 
   return actual === expected;
 }
 
+/**
+ * What one complete fresh course New Quiz list proves about an unresolved New
+ * Quiz create or delete. Only a list that lacks the approved result proves a
+ * mismatch. A list that holds it and also changed in another way, such as a
+ * second copy Chrome sent on its own or a colleague's change at the same
+ * moment, cannot single this change out, so it stays unconfirmed.
+ * `readQuiz` answers null when the created quiz could not be read.
+ */
+export async function newQuizLifecycleRecoveryVerification(
+  lifecycle: NonNullable<CanvasRecoveryDescriptor["newQuizLifecycle"]>,
+  strategy: string,
+  afterIds: readonly string[],
+  readQuiz: (quizId: string) => Promise<unknown>,
+): Promise<JsonObject> {
+  const base = { schema: "morrow.browser-verification.v1", strategy };
+  const additions = afterIds.filter((id) => !lifecycle.beforeIds.includes(id));
+  const removals = lifecycle.beforeIds.filter((id) => !afterIds.includes(id));
+  if (lifecycle.kind === "delete") {
+    if (lifecycle.targetId && afterIds.includes(lifecycle.targetId)) {
+      return { ...base, status: "mismatch", reason: "new_quiz_delete_readback_mismatch" };
+    }
+    return additions.length === 0 && removals.length === 1 && removals[0] === lifecycle.targetId
+      ? { ...base, status: "verified", evidence: "complete_course_new_quiz_list_reread_after_restart" }
+      : { ...base, status: "unconfirmed", reason: "new_quiz_list_changed_concurrently" };
+  }
+  if (additions.length === 0) return { ...base, status: "mismatch", reason: "new_quiz_create_membership_mismatch" };
+  if (additions.length > 1) return { ...base, status: "unconfirmed", reason: "new_quiz_duplicate_effect_suspected" };
+  const quizId = additions[0]!;
+  const requested = lifecycle.requestedQuiz;
+  const created = requested ? await readQuiz(quizId) : null;
+  if (!requested || created === null || created === undefined) {
+    return { ...base, status: "unconfirmed", reason: "new_quiz_created_read_unavailable" };
+  }
+  if (!isJsonObject(created) || targetIdentityValue(created.id) !== quizId || !requestedJsonShapeMatches(created, requested)) {
+    return { ...base, status: "mismatch", reason: "new_quiz_create_readback_mismatch" };
+  }
+  return removals.length > 0
+    ? { ...base, status: "unconfirmed", reason: "new_quiz_list_changed_concurrently" }
+    : { ...base, status: "verified", evidence: "complete_course_quiz_list_and_created_quiz_reread_after_restart" };
+}
+
 function canvasRecoveryReadDescriptor(value: unknown): CanvasRecoveryRead | null {
   if (!isJsonObject(value) || typeof value.readTool !== "string" || !isJsonObject(value.arguments)) return null;
   const argumentsValue: Record<string, string | readonly string[]> = {};
@@ -10456,30 +10497,14 @@ export class GatewayRuntime {
         const afterIds = rows ? rows.map((row) => isJsonObject(row) && targetIdentityValue(row.id)).filter((id): id is string => Boolean(id)) : [];
         let verification: JsonObject = { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: descriptor.strategy, reason: "complete_new_quiz_list_unavailable" };
         if (rows && afterIds.length === rows.length && new Set(afterIds).size === afterIds.length) {
-          const compareExactIds = (left: string, right: string): number => left.length - right.length || (left < right ? -1 : left > right ? 1 : 0);
-          const sortedAfter = [...afterIds].sort(compareExactIds);
-          const sortedBefore = [...lifecycle.beforeIds].sort(compareExactIds);
-          if (lifecycle.kind === "delete") {
-            const expected = sortedBefore.filter((id) => id !== lifecycle.targetId);
-            verification = sortedAfter.length === expected.length && sortedAfter.every((id, index) => id === expected[index])
-              ? { schema: "morrow.browser-verification.v1", status: "verified", strategy: descriptor.strategy, evidence: "complete_course_new_quiz_list_reread_after_restart" }
-              : { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: descriptor.strategy, reason: "new_quiz_delete_readback_mismatch" };
-          } else {
-            const additions = sortedAfter.filter((id) => !sortedBefore.includes(id));
-            const removals = sortedBefore.filter((id) => !sortedAfter.includes(id));
-            if (sortedAfter.length === sortedBefore.length + 1 && additions.length === 1 && removals.length === 0
-              && lifecycle.getTool && lifecycle.requestedQuiz) {
-              const created = await this.canvasRecoveryRead({ readTool: lifecycle.getTool, arguments: {
-                course_id: String(descriptor.collection.arguments.course_id), assignment_id: additions[0]!,
-              } }, operation.sourceBindingId);
-              verification = created && isJsonObject(created.data) && targetIdentityValue(created.data.id) === additions[0]
-                && requestedJsonShapeMatches(created.data, lifecycle.requestedQuiz)
-                ? { schema: "morrow.browser-verification.v1", status: "verified", strategy: descriptor.strategy, evidence: "complete_course_quiz_list_and_created_quiz_reread_after_restart" }
-                : { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: descriptor.strategy, reason: "new_quiz_create_readback_mismatch" };
-            } else {
-              verification = { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: descriptor.strategy, reason: "new_quiz_create_membership_mismatch" };
-            }
-          }
+          const courseId = String(descriptor.collection.arguments.course_id);
+          const getTool = lifecycle.getTool;
+          verification = await newQuizLifecycleRecoveryVerification(lifecycle, descriptor.strategy, afterIds, async (quizId) => {
+            const created = getTool ? await this.canvasRecoveryRead({ readTool: getTool, arguments: {
+              course_id: courseId, assignment_id: quizId,
+            } }, operation.sourceBindingId) : null;
+            return created ? created.data : null;
+          });
         }
         evidence.verification = verification;
         const settled = this.effects.recordReadback(operation.operationId, sha256Json(verification), readbackOutcome(verification.status));
