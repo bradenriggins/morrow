@@ -10103,9 +10103,10 @@ def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
 def _approve_plan_write(op_id, authorization, session, pack, mode_ctx,
                         channel, label):
     try:
-        from dispatch.admission import approval_used, sign_approval
+        from dispatch.admission import (approval_used, sign_approval,
+                                        _is_destructive)
     except ImportError:  # run as a script: dispatch/ itself is on sys.path
-        from admission import approval_used, sign_approval
+        from admission import approval_used, sign_approval, _is_destructive
     expire_write_ceremony_files(quiet=True)
     path = pending_write_path(op_id)
     try:
@@ -10140,6 +10141,16 @@ def _approve_plan_write(op_id, authorization, session, pack, mode_ctx,
                      "which named course %r" % target.get("course_name"),
         }
     body = descriptor.get("body")
+    # The educator's reply approved this exact deletion as shown, so it
+    # is also the explicit yes that confirm_destructive_writes asks for
+    # in edit mode.
+    if ctx is not None and not ctx.get("destructive_confirmed") \
+            and _is_destructive(catalog_descriptor_to_entry(
+                descriptor.get("name"), descriptor.get("method"),
+                descriptor.get("path"), None,
+                descriptor.get("provider") or "canvas", None,
+                {"body": body} if body is not None else None)):
+        ctx["destructive_confirmed"] = authorization
     try:
         out = dispatch_catalog_op(
             descriptor.get("name"), descriptor.get("method"),

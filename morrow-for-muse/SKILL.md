@@ -340,6 +340,20 @@ educator (lower `confidence` below 0.9 without their confirmation is
 refused as ambiguous, never guessed). `plan-write` and `approve-write`
 also work in edit mode.
 
+A deletion asks first even in edit mode while the educator's
+`confirm_destructive_writes` setting is on ("always confirm
+deletions"). Tell them exactly what will be deleted and get their yes,
+then do one of these:
+
+- Show the deletion with `plan-write` and run `approve-write` with
+  their reply. Their reply confirms the deletion it approved.
+- Run the `catalog` deletion with `--destructive-confirmed "<their
+  reply, verbatim>"`.
+
+Never pass `--destructive-confirmed` without the educator's reply to
+that exact deletion. Without a yes the deletion is refused and nothing
+is deleted.
+
 Every write is refused while `~/.morrow/write_halt` exists.
 
 The lower-level path (`catalog --plan <file> --approval <file>`, built
@@ -467,7 +481,11 @@ both modes.
   approval, including for destructive writes. `confirm_destructive_writes`
   is an opt-in guardrail (default off, matching the model; the
   educator can turn it on: `morrow settings set
-  confirm_destructive_writes true`).
+  confirm_destructive_writes true`). While it is on, an edit-mode
+  deletion runs only with the educator's yes to that deletion:
+  `approve-write` with their reply, or `catalog` with
+  `--destructive-confirmed "<their reply>"` (see "Dispatching
+  operations").
 - You change the mode or a setting only because the educator asked
   for it. The command takes effect when you call it (there is no
   second confirmation call); relay its `message`, which says what the

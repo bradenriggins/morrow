@@ -106,6 +106,11 @@ Settings and undo:
   plain words: what changed and what it means for you.
 - The deletion confirmations setting says what it does: deletions ask
   first. It never covered other kinds of changes.
+- In Edit mode, a change the assistant showed you and you approved now
+  runs. Morrow refused every one of them as already sent, and a
+  deletion you said yes to was refused again while "always confirm
+  deletions" was on. Your yes to the deletion you were shown is the
+  confirmation.
 - Three settings that promised things Morrow does not do are gone:
   batched approvals, bulk action confirmations, and cleanup of test
   objects.
@@ -251,6 +256,15 @@ Technical notes:
   lane, not only on the https lane. A body the lane cannot encode
   raises `WriteNotAttempted`, so its claim is released instead of being
   journaled as a write that may have applied.
+- `modes/state.py` journals `mode.write_admitted` and
+  `mode.write_refused` with `for_op_id`, not `op_id`: the gate runs
+  before the executor claims the op id, and an `op_id` field put the
+  id in the journal's op-id index, so the claim refused every Edit-mode
+  `approve-write` (and any retry after a mode refusal) with
+  `DuplicateOpId`. `_approve_plan_write` passes the educator's reply as
+  `destructive_confirmed` when the prepared request is destructive.
+  SKILL.md documents `--destructive-confirmed` for edit-mode deletions.
+  `dispatch/test_edit_mode_approve_write.py` covers both.
 - `scripts/carve.py` ships the repository's `LICENSE` at the tree
   root (`REPO_FILES`), listed in `pack/carve-manifest.json` and in the
   zip; the carve fails when it is missing or untracked, or when

@@ -853,6 +853,11 @@ def journal_event(event, payload):
     journal_append(record)
 
 
+# The mode gate decides before the executor claims the op id. A decision
+# record keyed "op_id" would enter the journal's op-id index, and the
+# claim would then refuse the op as already dispatched (every Edit-mode
+# approve-write, and any retry after a refusal). The decision names its
+# op as "for_op_id" instead.
 def journal_write_admitted(auth, entry_name, course_id, op_id, user_id,
                            resolution=None):
     """Journal one edit-mode write admitted under a grant (or standing)."""
@@ -860,7 +865,7 @@ def journal_write_admitted(auth, entry_name, course_id, op_id, user_id,
         "user_id": user_id,
         "entry": entry_name,
         "course_id": course_id,
-        "op_id": op_id,
+        "for_op_id": op_id,
         "scope_type": auth.get("scope_type"),
         "grant_id": auth.get("grant_id"),
         "grant_revision": auth.get("grant_revision"),
@@ -880,7 +885,7 @@ def journal_write_refused(user_id, entry_name, course_id, op_id, code,
         "user_id": user_id,
         "entry": entry_name,
         "course_id": course_id,
-        "op_id": op_id,
+        "for_op_id": op_id,
         "reason_code": code,
         "detail": detail,
     }

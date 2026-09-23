@@ -198,9 +198,12 @@ lives inside the deploy tree. `user_id` is restricted to
   identity, reason (explicit revoke, `switch_mode:plan`, or
   `superseded by grant <id>`).
 - `mode.write_admitted`: one per edit-mode write admitted under a
-  grant (or standing): entry, course_id, op_id, grant id/revision,
+  grant (or standing): entry, course_id, for_op_id, grant id/revision,
   educator identity, resolution confidence when supplied.
-- `mode.write_refused`: one per mode refusal with the reason code.
+- `mode.write_refused`: one per mode refusal with the reason code and
+  for_op_id. Both name the op as `for_op_id`, never `op_id`: the gate
+  runs before the executor claims the op id, and an `op_id` field
+  would reserve it, so the claim would refuse the op as already sent.
 - `mode.switched_to_plan`: switch events with the revoked-grant count,
   the cleared-override count, and whether the standing default changed.
 
