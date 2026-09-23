@@ -300,6 +300,13 @@ class CourseRosterUnavailable(ExecutorError):
     content could not be hidden."""
 
 
+class InvalidCourseId(ExecutorError):
+    """A request names its course by something other than the course's
+    Canvas number (a SIS form such as sis_course_id:BIO101). Refused
+    before anything is sent; the failure catalog matches this name, as
+    it does query/chain.py's refusal of the same kind."""
+
+
 class RedirectDowngradeRefused(ExecutorError):
     """An https:// -> http:// redirect, or a redirect off the LMS host,
     was refused (W4-P2-7).
@@ -8103,6 +8110,26 @@ def _read_all_pages(session, url):
     return items
 
 
+_COURSE_NUMBER_RE = re.compile(r"[0-9]+")
+
+
+def _require_numbered_course(entry, params):
+    """Refuse a request whose course is not named by its Canvas number.
+    The roster read, the course-content projection, the learner-label
+    scope, and the course checks all know a course by its number. A SIS
+    form (sis_course_id:BIO101) reaches the same course in Canvas but
+    none of them, so the students named in its content would reach the
+    agent and the journal unlabeled."""
+    course_id = _write_target_course_id(entry, params)
+    if course_id is not None and not _COURSE_NUMBER_RE.fullmatch(
+            str(course_id)):
+        raise InvalidCourseId(
+            "the course is given as %r, not as its Canvas course number; "
+            "find the course by name (canvas_list_courses) and use the "
+            "number in its Canvas address. Nothing was sent."
+            % str(course_id)[:80])
+
+
 def _read_course_roster_first(entry, params, session, tenant_base,
                               dry_run, op_id=None):
     """Read the course's whole student roster before a Chromium-lane
@@ -8127,8 +8154,9 @@ def _read_course_roster_first(entry, params, session, tenant_base,
     # The course the request path names, or for an Item Bank route the
     # course its launch is bound to (params.course_id).
     course_id = _write_target_course_id(entry, params)
-    if course_id is None or not str(course_id).isdigit():
+    if course_id is None:
         return
+    _require_numbered_course(entry, params)
     from privacy import executor_wire as _wire
     base = session.base_for("canvas").rstrip("/")
     users_url = "%s/api/v1/courses/%s/users?%s" % (
@@ -8233,6 +8261,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         if isinstance(_aux, dict) and _aux.get("url"):
             _assert_read_only_block(entry, _aux, _key)
     live_proven_gate(entry, unproven_override, journal=not dry_run)
+    _require_numbered_course(entry, params)
     if is_write:
         _require_course_resolution(entry, params, mode_ctx)
 
