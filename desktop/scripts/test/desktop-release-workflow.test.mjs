@@ -380,6 +380,37 @@ test("the release procedure smoke-tests the exact installers it publishes, befor
   }
 });
 
+/**
+ * Each release's notes are its product's CHANGELOG.md section. docs/versioning.md gives the command
+ * that saves that section as the notes file, and this test runs the documented command for each
+ * product's current version and compares it with the whole section.
+ *
+ * Failure mode pinned down (written before the fix; final sweep 2026-09-23): the step said only
+ * "Save the version's section as a notes file". The published muse/v0.4.0 notes stop in the middle
+ * of the section ("Documentation:"), and they kept an undo claim the changelog had corrected.
+ */
+test("the documented notes command saves each product's whole changelog section", () => {
+  const versions = {
+    desktop: JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version,
+    "morrow-for-muse": readFileSync(join(repositoryRoot, "morrow-for-muse", "VERSION"), "utf8").trim(),
+  };
+  const commands = [...versioning.matchAll(/`(awk -v v="X\.Y\.Z" '[^']+' (desktop|morrow-for-muse)\/CHANGELOG\.md) > <notes file>`/g)];
+  assert.deepEqual(commands.map(([, , product]) => product), ["desktop", "morrow-for-muse"],
+    `${versioningPath} must give the notes command for Morrow Desktop (step 4) and Morrow for Muse (step 5)`);
+  for (const [, command, product] of commands) {
+    const version = versions[product];
+    const lines = readFileSync(join(repositoryRoot, product, "CHANGELOG.md"), "utf8").split("\n");
+    const start = lines.findIndex((line) => line.startsWith(`## ${version} (`));
+    assert.ok(start >= 0, `${product}/CHANGELOG.md has no section for ${version}`);
+    const end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
+    const section = lines.slice(start + 1, end === -1 ? lines.length : end).join("\n") + (end === -1 ? "" : "\n");
+    const saved = spawnSync("sh", ["-c", command.replace("X.Y.Z", version)], { cwd: repositoryRoot, encoding: "utf8" });
+    assert.equal(saved.status, 0, saved.stderr);
+    assert.ok(section.trim().length > 0);
+    assert.equal(saved.stdout, section, `the ${product} notes command must save the whole ${version} section`);
+  }
+});
+
 test("the macOS job mounts and tests the same disk image it uploads", () => {
   const job = jobs(release).get("macos-installer");
   assert.match(job, /cp "\$\{images\[0\]\}" "\$artifactRoot\/\$\(basename "\$\{images\[0\]\}"\)"/);
