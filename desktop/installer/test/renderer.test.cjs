@@ -1089,9 +1089,15 @@ test("the nav switches between Home and Settings, and Manage on Home reaches Set
   // Manage, on the Assistant status line, reaches Settings the same way.
   const manage = dom.element("#action-body").querySelectorAll("[data-action]").find((entry) => entry.dataset.action === "open-settings");
   assert.ok(manage, "Home offers a Manage control for the Assistant status line");
+  manage.focus();
   await dom.element("#action-body").dispatch("click", { target: manage });
   assert.equal(dom.element("#settings-view").hidden, false);
   assert.equal(dom.element("#home-view").hidden, true);
+  // Manage sits in the view it hides, so focus moves to the Settings heading
+  // instead of falling to the page, and a later answer does not pull it back.
+  assert.equal(dom.document.activeElement, dom.element("#setup-management-title"), "focus lands on the Settings heading");
+  await checkStatus(dom);
+  assert.equal(dom.document.activeElement, dom.element("#setup-management-title"), "a refresh keeps focus on Settings");
 });
 
 test("Home shows the three status lines once the first read is complete, and no setup to change", async () => {

@@ -57,28 +57,28 @@ closed disclosures (Blackboard (`installer/renderer/index.html:61`) and what sta
 Two facts apply to every row, so they are stated once:
 
 - **Keyboard.** Every control in the action panel is a `<button>`. `render()` replaces the whole panel
-  (`installer/renderer/renderer.js:576`), and it saves the focused control's `data-action` before the
+  (`installer/renderer/renderer.js:586`), and it saves the focused control's `data-action` before the
   replacement and restores it after (`installer/renderer/renderer.js:166`,
-  `installer/renderer/renderer.js:571`, `installer/renderer/renderer.js:592`). A control that is
+  `installer/renderer/renderer.js:581`, `installer/renderer/renderer.js:602`). A control that is
   disabled while Morrow works keeps its place: the key is held
-  (`installer/renderer/renderer.js:597`) and focus returns when the step finishes. The header
+  (`installer/renderer/renderer.js:607`) and focus returns when the step finishes. The header
   **Check status** button (`installer/renderer/index.html:15`) is outside the panel and survives every
   re-render. The Home and Settings nav buttons (`installer/renderer/index.html:19-22`) are outside the
   panel too, and follow the same rule.
-- **If a step fails.** Every step goes through `invoke()` (`installer/renderer/renderer.js:626`), which
+- **If a step fails.** Every step goes through `invoke()` (`installer/renderer/renderer.js:636`), which
   writes one message and one recovery into `#problem`, a `role="alert"` region
-  (`installer/renderer/index.html:38`, `installer/renderer/renderer.js:230`): no preload bridge gives
+  (`installer/renderer/index.html:38`, `installer/renderer/renderer.js:240`): no preload bridge gives
   "Morrow setup is unavailable." / "Restart Morrow, then check status again."
-  (`installer/renderer/renderer.js:628`); a malformed answer gives "Morrow returned an incomplete setup
-  state." / "Check status again." (`installer/renderer/renderer.js:636`); a rejected call gives
-  "Morrow could not check setup." / "Check status again." (`installer/renderer/renderer.js:643`); a
-  handled failure shows the step's own message (`installer/renderer/renderer.js:639`). The alert is
-  rewritten only when its text changes (`installer/renderer/renderer.js:223`), so returning to the
+  (`installer/renderer/renderer.js:638`); a malformed answer gives "Morrow returned an incomplete setup
+  state." / "Check status again." (`installer/renderer/renderer.js:646`); a rejected call gives
+  "Morrow could not check setup." / "Check status again." (`installer/renderer/renderer.js:653`); a
+  handled failure shows the step's own message (`installer/renderer/renderer.js:649`). The alert is
+  rewritten only when its text changes (`installer/renderer/renderer.js:233`), so returning to the
   window does not read the same error again.
 
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
-| `first-paint` | "Checking Morrow setup…" alone; the action panel is hidden; the rail shows three stages, each "Not checked yet"; the header live region says "Checking setup"; **Check status** is disabled | None. The read answers and replaces this state. `respond()` catches its own failures and always answers, so this state ends unless the main process never settles `installer:get-state` | `installer/renderer/index.html:39`, `installer/renderer/renderer.js:567`, `installer/shared/setup-view.mjs:101` |
+| `first-paint` | "Checking Morrow setup…" alone; the action panel is hidden; the rail shows three stages, each "Not checked yet"; the header live region says "Checking setup"; **Check status** is disabled | None. The read answers and replaces this state. `respond()` catches its own failures and always answers, so this state ends unless the main process never settles `installer:get-state` | `installer/renderer/index.html:39`, `installer/renderer/renderer.js:577`, `installer/shared/setup-view.mjs:101` |
 | `setup-unavailable` | "Morrow could not read its setup state." / "Morrow could not read the setup record it keeps on this computer, so it cannot show which steps are complete. No setup step ran." and "No setup state was returned" | **Check again** in the panel | `installer/shared/setup-view.mjs:633` |
 | `repair` | "Repair Morrow before you connect a course." / "Morrow did not confirm that its local runtime is ready. No course connection or course action will start from this state." The three-stage rail marks no ordinary setup stage as current and says the assistant is waiting for repair. | **Repair Morrow**, or **Check again** | `installer/shared/setup-view.mjs:339` |
 | `claude-checking` | "Morrow is checking the Claude Desktop connection." / "Claude Desktop started Morrow, and Morrow is confirming that the Claude Desktop app on this computer started it. On a busy computer this can take a minute. Morrow keeps checking on its own. Select Check setup to see the result." | **Check setup**, or **Open Claude Desktop**. The Claude Desktop launcher asks again on its own until it can confirm the app. | `installer/shared/setup-view.mjs:352` |
@@ -154,7 +154,7 @@ Home. The Blackboard and retention panels are disclosures reachable through thei
 
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
-| `home-settings-nav` | Two buttons, **Home** and **Settings**, the active one marked current | Select **Settings** to reach the setup a person can change, Updates, Blackboard, what stays on this computer and Support; select **Home** to return | `installer/renderer/index.html:19-22`, `installer/renderer/renderer.js:523-529` |
+| `home-settings-nav` | Two buttons, **Home** and **Settings**, the active one marked current | Select **Settings** to reach the setup a person can change, Updates, Blackboard, what stays on this computer and Support; select **Home** to return | `installer/renderer/index.html:19-22`, `installer/renderer/renderer.js:533-539` |
 | `home-status-lines` | Once the first read is complete: three status lines (Assistant "Ready", Morrow Bridge "Connected", Courses "Connected"), each with one action | **Manage** opens Settings; **Check Bridge** reconciles the Bridge; **Check connection** re-runs the first read | `installer/shared/setup-view.mjs:292-299` |
 | `manage-setup` | "Setup you can change", the materials folder, and one row per assistant on this computer | Change the folder, add another assistant, or remove one | `installer/shared/setup-view.mjs:275-282` |
 | `folder-unset` | "Materials folder" says Morrow creates and uses its own Materials folder unless the person wants another location. On the first screen it is inside **Optional: Choose another materials folder**, closed by default. | **Choose folder** | `installer/shared/setup-view.mjs:225` |
@@ -164,28 +164,28 @@ Home. The Blackboard and retention panels are disclosures reachable through thei
 | `assistant-pending` | "Waiting for your approval in Claude Desktop." | **Open Claude Desktop**, **Show Morrow extension**, **Check setup**, or **Remove** | `installer/shared/setup-view.mjs:239`, `installer/shared/setup-view.mjs:249` |
 | `assistant-available` | "Not set up yet." | **Set up <assistant>** | `installer/shared/setup-view.mjs:241`, `installer/shared/setup-view.mjs:256` |
 | `assistant-absent` | "Not found on this computer." or "Not available in this Morrow version." | None. The row carries no control | `installer/shared/setup-view.mjs:240` |
-| `updates-hidden` | Nothing | None. No update record | `installer/renderer/renderer.js:244-249` |
-| `updates-unavailable` | "This copy of Morrow does not update itself. Get newer versions from meetmorrow.app/download." | None. Newer versions come from the download page | `installer/renderer/renderer.js:238-243` |
-| `updates-idle` | "Morrow checks for updates automatically. You can also check now." or "Morrow is ready to check for an update." | **Check for updates** | `installer/renderer/renderer.js:253-256` |
-| `updates-checking` | "Morrow is checking for an update." | None. It answers itself | `installer/renderer/renderer.js:258-261` |
-| `updates-downloading` | "Morrow found version N and will download it in the background." or "Morrow is downloading … You can keep working while it finishes." | None. It answers itself | `installer/renderer/renderer.js:263-268` |
-| `updates-held` | "Morrow will restart after course work finishes or its current state is clear." | None. Morrow restarts when the work is settled | `installer/renderer/renderer.js:271-274` |
-| `updates-install-failed` | "Morrow could not install the update. Try again when course work is idle." | **Try restart again** | `installer/renderer/renderer.js:276-279` |
-| `updates-ready` | "Version N is ready." and "Restart Morrow when course work is idle to finish the update." | **Restart to update** | `installer/renderer/renderer.js:281-282` |
-| `updates-installing` | "Morrow is installing its update. It will reopen when the update is complete." | None. Morrow reopens | `installer/renderer/renderer.js:285-288` |
-| `updates-rolled-back` | "The update did not start; Morrow is running version N." | **Retry the update** | `installer/renderer/renderer.js:290-295` |
-| `updates-no-space` | "Morrow could not download the update: this computer does not have enough free space for it." | Free space, then **Try again** | `installer/renderer/renderer.js:297-300` |
-| `updates-check-failed` | "Morrow could not check for an update." | **Try again** | `installer/renderer/renderer.js:302-303` |
-| `blackboard-hidden` | Nothing | None. The panel appears only after an assistant is configured and the local runtime is ready, so the first screen never asks for credentials | `installer/shared/setup-view.mjs:47-49`, `installer/renderer/renderer.js:415` |
-| `blackboard-empty` | "Connect a Blackboard Learn site (optional)", "Most people do not need this…" and four fields | Ask a Blackboard administrator for the key and secret, then **Save Blackboard connection** | `installer/renderer/index.html:61-92`, `installer/renderer/renderer.js:432` |
-| `blackboard-invalid` | One message under each field that is not ready, and focus moves to the first of them | Correct the named field. Messages clear as the value becomes right | `installer/renderer/renderer.js:911-920`, `installer/renderer/renderer.js:989-992` |
-| `blackboard-saved` | "Blackboard REST API configured. Live Blackboard access has not been tested.", and the saved site, account and stored name in one row | Saving verifies the integration account and opens a native chooser for the courses returned by Blackboard. **Remove connection** takes the connection and its secret off this computer | `installer/renderer/renderer.js:430-431`, `installer/renderer/renderer.js:388-408` |
-| `blackboard-save-failed` | The step's own problem in `#problem`; the secret field is cleared and the web address and key keep what was typed | Correct the value and save again | `installer/renderer/renderer.js:964-971` |
-| `blackboard-removal-failed` | The step's own problem in `#problem`; the saved connection row and its courses stay exactly as they are | Check status, then remove it again | `installer/renderer/renderer.js:823-839`, `installer/main.cjs:761-778` |
+| `updates-hidden` | Nothing | None. No update record | `installer/renderer/renderer.js:254-259` |
+| `updates-unavailable` | "This copy of Morrow does not update itself. Get newer versions from meetmorrow.app/download." | None. Newer versions come from the download page | `installer/renderer/renderer.js:248-253` |
+| `updates-idle` | "Morrow checks for updates automatically. You can also check now." or "Morrow is ready to check for an update." | **Check for updates** | `installer/renderer/renderer.js:263-266` |
+| `updates-checking` | "Morrow is checking for an update." | None. It answers itself | `installer/renderer/renderer.js:268-271` |
+| `updates-downloading` | "Morrow found version N and will download it in the background." or "Morrow is downloading … You can keep working while it finishes." | None. It answers itself | `installer/renderer/renderer.js:273-278` |
+| `updates-held` | "Morrow will restart after course work finishes or its current state is clear." | None. Morrow restarts when the work is settled | `installer/renderer/renderer.js:281-284` |
+| `updates-install-failed` | "Morrow could not install the update. Try again when course work is idle." | **Try restart again** | `installer/renderer/renderer.js:286-289` |
+| `updates-ready` | "Version N is ready." and "Restart Morrow when course work is idle to finish the update." | **Restart to update** | `installer/renderer/renderer.js:291-292` |
+| `updates-installing` | "Morrow is installing its update. It will reopen when the update is complete." | None. Morrow reopens | `installer/renderer/renderer.js:295-298` |
+| `updates-rolled-back` | "The update did not start; Morrow is running version N." | **Retry the update** | `installer/renderer/renderer.js:300-305` |
+| `updates-no-space` | "Morrow could not download the update: this computer does not have enough free space for it." | Free space, then **Try again** | `installer/renderer/renderer.js:307-310` |
+| `updates-check-failed` | "Morrow could not check for an update." | **Try again** | `installer/renderer/renderer.js:312-313` |
+| `blackboard-hidden` | Nothing | None. The panel appears only after an assistant is configured and the local runtime is ready, so the first screen never asks for credentials | `installer/shared/setup-view.mjs:47-49`, `installer/renderer/renderer.js:425` |
+| `blackboard-empty` | "Connect a Blackboard Learn site (optional)", "Most people do not need this…" and four fields | Ask a Blackboard administrator for the key and secret, then **Save Blackboard connection** | `installer/renderer/index.html:61-92`, `installer/renderer/renderer.js:442` |
+| `blackboard-invalid` | One message under each field that is not ready, and focus moves to the first of them | Correct the named field. Messages clear as the value becomes right | `installer/renderer/renderer.js:926-935`, `installer/renderer/renderer.js:1004-1007` |
+| `blackboard-saved` | "Blackboard REST API configured. Live Blackboard access has not been tested.", and the saved site, account and stored name in one row | Saving verifies the integration account and opens a native chooser for the courses returned by Blackboard. **Remove connection** takes the connection and its secret off this computer | `installer/renderer/renderer.js:440-441`, `installer/renderer/renderer.js:398-418` |
+| `blackboard-save-failed` | The step's own problem in `#problem`; the secret field is cleared and the web address and key keep what was typed | Correct the value and save again | `installer/renderer/renderer.js:979-986` |
+| `blackboard-removal-failed` | The step's own problem in `#problem`; the saved connection row and its courses stay exactly as they are | Check status, then remove it again | `installer/renderer/renderer.js:838-854`, `installer/main.cjs:761-778` |
 | `retention` | "What stays on this computer", every path this installation keeps, and which ones Morrow can remove. When Claude Desktop has its own copy of the Morrow extension, that folder is listed as kept, with the step that removes it in Claude Desktop under Settings, Extensions | Optional: **Remove Morrow's data** | `installer/shared/setup-view.mjs:602-623` |
 | `retention-partial` | "Morrow could not remove everything", the paths removed and the paths still on this computer | Close what is using them, then remove again, or remove them by hand | `installer/shared/setup-view.mjs:566` |
-| `removal-announced` | Nothing on screen. The result of a removal is read once in a `role="status"` region, in the words the section shows, because focus stays on the button that ran it | None. It repeats what the section already shows | `installer/shared/setup-view.mjs:658-656`, `installer/renderer/index.html:109`, `installer/renderer/renderer.js:494` |
-| `support` | "Where to get help", the Morrow version, the materials folder, the folder Morrow keeps its setup record in, and the support address | Select **Support** to open the support page in the default browser; Morrow opens no other page from here (D5) | `installer/shared/setup-view.mjs:633-642`, `installer/renderer/renderer.js:484-488` |
+| `removal-announced` | Nothing on screen. The result of a removal is read once in a `role="status"` region, in the words the section shows, because focus stays on the button that ran it | None. It repeats what the section already shows | `installer/shared/setup-view.mjs:658-656`, `installer/renderer/index.html:109`, `installer/renderer/renderer.js:504` |
+| `support` | "Where to get help", the Morrow version, the materials folder, the folder Morrow keeps its setup record in, and the support address | Select **Support** to open the support page in the default browser; Morrow opens no other page from here (D5) | `installer/shared/setup-view.mjs:633-642`, `installer/renderer/renderer.js:494-498` |
 
 ---
 
@@ -524,7 +524,7 @@ source.** Three groups need naming, because "has a next action" means something 
 
 Two states in group 3 depend on something outside their own code to end them, and neither has a
 timeout: `first-paint` ends only when the main process answers `installer:get-state`
-(`installer/renderer/renderer.js:345`; `installer/main.cjs:411` always answers unless
+(`installer/renderer/renderer.js:355`; `installer/main.cjs:411` always answers unless
 `installer.state()` never settles), and `updates-installing` ends only when the update process
 restarts Morrow. Neither was observed here.
 
@@ -558,16 +558,16 @@ stale name here.
 | `Change folder` | Morrow app | `installer/shared/setup-view.mjs:220` |
 | `Show folder` | Morrow app | `installer/shared/setup-view.mjs:220` |
 | `Copy path` | Morrow app | `installer/shared/setup-view.mjs:220`, `installer/shared/setup-view.mjs:327` |
-| `Remove` | Morrow app | `installer/shared/setup-view.mjs:248`, `installer/renderer/renderer.js:395` |
+| `Remove` | Morrow app | `installer/shared/setup-view.mjs:248`, `installer/renderer/renderer.js:405` |
 | `Show Bridge folder` | Morrow app | `installer/shared/setup-view.mjs:439` |
 | `Check Bridge` | Morrow app | `installer/shared/setup-view.mjs:281`, `installer/shared/setup-view.mjs:415` |
 | `Update Bridge` | Morrow app | `installer/shared/setup-view.mjs:423` |
 | `Check connection` | Morrow app | `installer/shared/setup-view.mjs:282`, `installer/shared/setup-view.mjs:482` |
-| `Check for updates` | Morrow app | `installer/renderer/renderer.js:255` |
-| `Restart to update` | Morrow app | `installer/renderer/renderer.js:282` |
-| `Try restart again` | Morrow app | `installer/renderer/renderer.js:278` |
-| `Retry the update` | Morrow app | `installer/renderer/renderer.js:294` |
-| `Try again` | Morrow app | `installer/renderer/renderer.js:299` |
+| `Check for updates` | Morrow app | `installer/renderer/renderer.js:265` |
+| `Restart to update` | Morrow app | `installer/renderer/renderer.js:292` |
+| `Try restart again` | Morrow app | `installer/renderer/renderer.js:288` |
+| `Retry the update` | Morrow app | `installer/renderer/renderer.js:304` |
+| `Try again` | Morrow app | `installer/renderer/renderer.js:309` |
 | `https://meetmorrow.app/support` | Morrow app | `installer/shared/setup-view.mjs:651` |
 | `Save Blackboard connection` | Morrow app | `installer/renderer/index.html:92` |
 | `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:621` |

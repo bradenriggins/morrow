@@ -188,6 +188,16 @@ function focusSettingsTransition() {
   return document.activeElement === setupManagementTitle;
 }
 
+/** Focuses the first Settings heading whose section is on screen. */
+function focusSettingsHeading() {
+  for (const [section, heading] of [[setupManagementPanel, setupManagementTitle], [updatesPanel, updatesTitle], [blackboardPanel, blackboardSummary], [retentionPanel, retentionSummary]]) {
+    if (section.hidden) continue;
+    heading.focus();
+    if (document.activeElement === heading) return true;
+  }
+  return false;
+}
+
 function applyBusy() {
   setupMain.setAttribute("aria-busy", String(busy));
   refreshButton.disabled = busy;
@@ -709,7 +719,12 @@ async function handleAction(event) {
     return;
   }
   if (action === "open-settings") {
+    // Manage sits in the Home view it hides, so focus moves to the first
+    // Settings heading on screen instead of falling to the page.
+    userActionFocusPending = false;
+    heldFocusKey = null;
     setActiveView("settings");
+    focusSettingsHeading();
     return;
   }
   if (action === "choose-workspace") {
