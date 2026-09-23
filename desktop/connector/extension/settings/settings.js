@@ -843,14 +843,28 @@ function clearNotice() {
 // connector/extension/src/bridge-problem-copy.js. A code that file does not explain still reaches
 // this page with its own state name in it. Work that finished before the failure is stated first,
 // so a person reads what was saved as well as what stopped.
-function showError(cause, { prefix = "" } = {}) {
+//
+// Every action reads the course state again when it ends, and Morrow Bridge writes storage while an
+// action runs, which reads it again too. A read of the course state or of a course's actions that
+// succeeds says nothing about an action, or about a list of available courses (read again only when
+// the person selects Refresh connected courses), so it clears only an error such a read raised. The
+// popup's nextError keeps the same rule. A new action clears any error.
+let errorSource = null;
+
+function showError(cause, { prefix = "", source = "action" } = {}) {
+  errorSource = source;
   error.hidden = false;
   error.textContent = `${prefix}${problemText(problemCode(cause))}`;
 }
 
 function clearError() {
+  errorSource = null;
   error.hidden = true;
   error.textContent = "";
+}
+
+function clearReadError() {
+  if (errorSource === "read") clearError();
 }
 
 function categoryFlags(category) {
@@ -1684,7 +1698,7 @@ async function refresh() {
     }
     rebuildCategories();
     reconcileSelectedCategories();
-    clearError();
+    clearReadError();
   } catch (cause) {
     if (generation !== state.readGeneration) return;
     state.status = null;
@@ -1692,7 +1706,7 @@ async function refresh() {
     state.categories = [];
     state.optionsByBinding.clear();
     state.selected.clear();
-    showError(cause);
+    showError(cause, { source: "read" });
   } finally {
     if (generation !== state.readGeneration) return;
     refreshButton.disabled = state.busy;
@@ -1735,13 +1749,13 @@ async function refreshSelectedOptions() {
     state.optionsLoading = false;
     rebuildCategories();
     reconcileSelectedCategories();
-    clearError();
+    clearReadError();
   } catch (cause) {
     if (requestToken !== state.optionsRequestToken) return;
     state.optionsLoading = false;
     rebuildCategories();
     reconcileSelectedCategories();
-    showError(cause);
+    showError(cause, { source: "read" });
   }
   render();
 }
@@ -1950,7 +1964,6 @@ async function disconnectCourse(binding) {
   setBusy(true);
   clearError();
   clearNotice();
-  let failure = null;
   try {
     const result = await request("morrow_course_disconnect", { sourceBindingId: binding.sourceBindingId });
     if (result?.disconnected !== true || result.sourceBindingId !== binding.sourceBindingId) throw new Error("edit_policy_failed");
@@ -1958,14 +1971,12 @@ async function disconnectCourse(binding) {
     state.selected.delete(binding.sourceBindingId);
     showNotice(`${courseName(binding)} is disconnected. Its Edit access was removed.`);
   } catch (cause) {
-    failure = cause;
+    showError(cause);
   } finally {
     state.confirmingDisconnect = null;
     setBusy(false);
     await refresh();
   }
-  // Shown after the read that follows, because a successful read clears the error region.
-  if (failure) showError(failure);
 }
 
 /**
@@ -2079,8 +2090,6 @@ async function autoStartDiscovery() {
   const pending = anchors().filter((anchor) => !state.discoveries.has(anchor.siteAnchorId) && !state.discoveryFailed.has(anchor.siteAnchorId));
   if (!pending.length) return;
   setBusy(true);
-  clearError();
-  clearNotice();
   try {
     for (const anchor of pending) await readDiscovery(anchor);
   } finally {
@@ -2440,6 +2449,8 @@ courseList.addEventListener("change", (event) => {
 // Refresh connected courses also reads every site's list of available courses again, including a
 // list that could not be read before.
 refreshButton.addEventListener("click", () => {
+  clearError();
+  clearNotice();
   state.discoveries.clear();
   state.discoveryFailed.clear();
   void refresh();
