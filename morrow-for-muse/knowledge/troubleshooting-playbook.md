@@ -163,8 +163,8 @@ If CDP attach fails:
 ## Install, onboarding sentinel, and the one-time sign-in notice
 
 `install.sh` is idempotent (safe to run twice) and never writes
-secrets. What it does: checks python3 >= 3.10, locates Chromium,
-probes egress, creates the `~/.morrow` state layout and
+secrets. What it does: checks python3 >= 3.11 (3.10 is refused),
+locates Chromium, probes egress, creates the `~/.morrow` state layout and
 `helper/profile/` on first install (an existing profile is never
 wiped, reset, or repackaged), installs the keepalive cron without
 duplicating it, launches the helper when `CANVAS_BASE` is set,
