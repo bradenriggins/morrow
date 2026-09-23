@@ -29,6 +29,7 @@ Linux container: scripts/install-e2e.sh. Scratch lives under
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -194,6 +195,68 @@ def test_shipped_docs_name_no_missing_file_as_shipped(carved):
                 continue
             stale.append("%s: %s" % (rel, name))
     assert not stale, stale
+
+
+# A doc says a path is not in the release with one of these (known-6).
+_LEFT_OUT_RE = re.compile(r"source repository|not shipped|not in the "
+                          r"release|does not (?:ship|carry)|not carried")
+_PATH_TOKEN_RE = re.compile(r"(?<![\w./~<$-])((?:[\w.-]+/)+[\w.-]*"
+                            r"|[\w-]+\.(?:py|sh|md|json|txt|html))")
+
+
+def _left_out():
+    """(files, dirs) git tracks here that the release leaves out."""
+    shipped = set(carve.shipped_files())
+    tracked = {p for p in _git("ls-files", "-z").stdout.split("\0") if p}
+    files = tracked - shipped
+    dirs = set()
+    for rel in files:
+        parts = rel.split("/")
+        for i in range(1, len(parts)):
+            d = "/".join(parts[:i])
+            if not any(s.startswith(d + "/") for s in shipped):
+                dirs.add(d)
+    return files, dirs
+
+
+def _catalog_citations(text):
+    """The catalog's "Evidence citations" section: row notes cite
+    provenance records it names there."""
+    section = text.split("## Evidence citations", 1)[-1].split("\n## ", 1)[0]
+    section = " ".join(section.split())
+    return section if _LEFT_OUT_RE.search(section) else ""
+
+
+def test_shipped_docs_say_so_when_they_name_what_the_release_leaves_out():
+    # known-6: transport/README.md and other shipped docs named files the
+    # carve drops (session/capture.py, lanes/detect.py, proof-battery
+    # evidence) as if they were there. A shipped doc may name one only
+    # while saying it is not in the release. CHANGELOG.md is history.
+    files, dirs = _left_out()
+    unmarked = []
+    for doc in carve.shipped_files():
+        if not doc.endswith(".md") or doc == "CHANGELOG.md":
+            continue
+        with open(os.path.join(TREE, doc), encoding="utf-8") as fh:
+            text = fh.read()
+        citations = _catalog_citations(text) \
+            if doc == "proof-battery/OPERATION_CATALOG.md" else ""
+        for match in _PATH_TOKEN_RE.finditer(text):
+            token = match.group(1).rstrip("/.,:;")
+            names = {token, os.path.normpath(
+                os.path.join(os.path.dirname(doc), token))}
+            named = sorted(n for n in names if n in files or n in dirs)
+            if not named:
+                continue
+            window = text[max(0, match.start() - 300):match.end() + 300]
+            if _LEFT_OUT_RE.search(" ".join(window.split())):
+                continue
+            line_start = text.rfind("\n", 0, match.start()) + 1
+            if citations and text.startswith("|", line_start) \
+                    and token in citations:
+                continue
+            unmarked.append("%s: %s" % (doc, named[0]))
+    assert unmarked == [], sorted(set(unmarked))
 
 
 def test_no_shipped_file_invokes_a_dev_only_script(carved):

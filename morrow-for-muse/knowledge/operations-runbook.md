@@ -248,22 +248,17 @@ readback-verify, delete, verify-gone.
 ## Doc map: what to read, what to skip
 
 Agent-facing (read these): `SKILL.md` (this file's parent),
-`INSTALL.md`, `SCOPE.md`, the `knowledge/` files, the Status column of
-`proof-battery/OPERATION_CATALOG.md`, and `defects/DEFECTS.md` (open
-defects D-002 and D-005 affect delete receipts and Item Banks; D-003
-and D-004 were closed as moot 2026-09-21 when the relay/form lanes were
-retired; D-006 is superseded by the SDK lane).
+`INSTALL.md`, `SCOPE.md`, the `knowledge/` files, and the Status column
+of `proof-battery/OPERATION_CATALOG.md`. The delete-receipt rules D-002
+and D-005 are in `knowledge/api-patterns-and-errors.md`.
 
-Investigation notes (not agent-facing, do not ship to agents):
-`weasel-b1-runtime-browser.md`, `weasel-b2-canvas-auth.md`,
-`weasel-b3-lti-tokens.md`, `weasel-options-sweep.md`, and the
-`proof-battery/waves/`, `proof-battery/editor-transport/`,
-`proof-battery/js-execution-gate/`, `proof-battery/localhost-proof/`,
-and `proof-battery/data-url-diagnostic/` drafts. They record how
-proofs were run, not what agents should do. The approval ceremony
-behavior is implemented in `dispatch/admission.py` (v2 HMAC-sealed
-records, single-use digests, educator signing); the educator-facing
-UX wiring is open.
+The source repository also keeps investigation notes, which are not in
+the release: the proof battery's wave, editor-transport,
+JavaScript-gate, localhost, and data: URL drafts. They record how
+proofs were run, not what agents should do. The approval ceremony is
+implemented in `dispatch/admission.py` (v2 HMAC-sealed records,
+single-use digests, educator signing), and SKILL.md says how the agent
+runs it (`plan-write`, then `approve-write`).
 
 ## Dispatching
 

@@ -7,7 +7,8 @@ tokens, PATs, or any credential material.
 
 This lane replaces the old cookie-capture model (session/capture.py writing
 raw cookie values to ~/.morrow/session.json, replayed over raw HTTPS). That
-model is retired for the Muse product for two independent reasons:
+model is retired for the Muse product for two independent reasons
+(capture.py itself is in the source repository only, not in the release):
 
 1. The raw-HTTPS replay is OTP-walled on tenants like CHCP (302 to
    /login/otp), so it does not work where it is needed most.
@@ -15,8 +16,9 @@ model is retired for the Muse product for two independent reasons:
    is built on.
 
 Conflict resolved 2026-09-20: `session/capture.py` is retained as RIG/PROOF
-infrastructure only (bannered in its docstring); the installed product never
-runs it. The executor's `--backend https` lane is the same rig lane; the
+infrastructure only (bannered in its docstring), in the source repository:
+it is not in the release, and the installed product never runs it. The
+executor's `--backend https` lane is the same rig lane; the
 installed product lane for Canvas/Item Banks reads and writes is
 `--backend chromium` (synchronous, through the local Chromium's
 authenticated tab via CDP), which supersedes `--backend browser` for
@@ -35,11 +37,9 @@ Removal completed 2026-09-20 (code now matches the decision above):
   `transport/briefA2.txt`, `transport/briefB.txt`) were deleted. The only
   remaining "squarefree" mentions in the tree are selftest assertions that
   rendered briefs contain no third-party form builder, and the historical
-  audit notes. The retired first-party form host
-  (`transport/form-host/index.html`, `transport/form_host_server.py`) stays
-  in the source repository only: the release does not ship it
-  (scripts/carve.py). TRANSPORT STATUS 2026-09-20: the ephemeral
-  localhost server (`transport/form_host_server.py`) was proven unreachable
+  audit notes. The retired first-party form host (a static page and an
+  ephemeral localhost server for it) was deleted 2026-09-23. TRANSPORT
+  STATUS 2026-09-20: that localhost server was proven unreachable
   from the managed browser (the managed browser runs on a separate leased
   VM; loopback on the engineering VM is not its loopback), and file://
   navigation crashes the managed browser (proven twice 2026-09-20). A
@@ -47,17 +47,19 @@ Removal completed 2026-09-20 (code now matches the decision above):
   data: content renders and scripts execute, but the browser-task
   automation crashes on data: URL navigation (goto) and Chromium blocks
   web-initiated top-frame data: navigation, so there is no shippable way
-  to open the brief. Full evidence:
-  proof-battery/data-url-diagnostic/RESULT-2026-09-20.md. The no-PAT lane
-  currently has no viable transport; this is a managed-browser/platform
-  launch blocker. Zero hosted dependencies either way: no Cloudflare,
-  no remote server, nothing the user provisions. (A
+  to open the brief. The full evidence is in the source repository
+  (proof-battery/data-url-diagnostic/RESULT-2026-09-20.md), not in the
+  release. The browser-task lane therefore had no viable transport; the
+  local Chromium lane (`--backend chromium`, above) superseded it. Zero
+  hosted dependencies either way: no Cloudflare, no remote server,
+  nothing the user provisions. (A
   Cloudflare-hosted proof-of-concept at form-helper.meetmorrow.app existed
   briefly on 2026-09-20 and was removed the same day at Braden's direction;
   the deploy script is gone and the page must never be published to any
   hosted service.)
-- `lanes/detect.py` (PAT-mintability prober) still accepts raw cookie input
-  as a one-shot setup diagnostic; it is not a transport and is flagged for
+- `lanes/detect.py` (PAT-mintability prober, in the source repository only,
+  not in the release) still accepts raw cookie input as a one-shot setup
+  diagnostic; it is not a transport and is flagged for
   a browser-task-native rewrite. Out of scope for this decision.
 
 ## How it works
@@ -114,14 +116,16 @@ material.
 - session/capture.py, session/cdp.py: the rig capture path (the educator
   signs in through the login helper page; capture.py reaches the helper's
   browser through its token-authenticated /cdp/* proxy, W4-P0-3). Not
-  used by this lane. Left in place until Braden retires it.
+  used by this lane. capture.py is in the source repository only, not in
+  the release.
 - dispatch/executor.py: the manifest pipeline with raw-HTTPS egress. Its
   governance (frozen plans, journal, verify blocks, retry discipline) is
   sound and reusable; its egress layer needs a browser-task backend, which
   is the next build step (executor calls render_brief, the agent runs the
   task, results feed back into apply_result_block).
-- lanes/detect.py: lane prober built on raw cookie input. Needs a
-  browser-task-native rewrite (probe via the browser, no cookie values).
+- lanes/detect.py: lane prober built on raw cookie input, in the source
+  repository only (not in the release). Needs a browser-task-native
+  rewrite (probe via the browser, no cookie values).
 - reauth/state_machine.py: halt/quarantine/notify mechanics are reusable;
   the "re-run capture.py" re-sign-in step becomes takeover sign-in plus
   browser-task verification.

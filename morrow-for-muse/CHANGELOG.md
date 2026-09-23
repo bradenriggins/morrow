@@ -171,6 +171,11 @@ Installing and the docs:
   installer's own checks still ship, and they keep to a scratch folder.
 - The troubleshooting guide names the Python version the installer
   needs: 3.11 or newer.
+- The docs say so wherever they name a file the release leaves out,
+  such as the proof records, the Moodle code, and the old sign-in
+  capture script. Some named them as if they were in the installed
+  folder, and the operations runbook sent the assistant to a defects
+  file that does not exist.
 - Morrow's commands run on a computer that has another Python package
   named `dispatch` (Homebrew's Python can have one). Approving a
   change stopped with "cannot import name 'executor' from 'dispatch'",
