@@ -1885,6 +1885,97 @@ describe("Canvas connector gateway path", () => {
     }
   }, CASE_TIMEOUT_MS);
 
+  it("pauses a connector batch whose Canvas answer was lost and keeps that change as one that may have been saved", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-canvas-connector-batch-lost-"));
+    const port = await reserveLoopbackPort();
+    const runtime = await MorrowRuntime.connect(connectorConfig(directory, port), {
+      statePath: join(directory, "morrow.sqlite3"),
+      batchKeyPath: join(directory, "batch.key"),
+    });
+    const browserCatalogDigest = bridgeCatalogDigestForTests(resolve("../.."));
+    const binding = (courseId: string) => ({
+      sourceBindingId: `canvas:test-account:${courseId}`,
+      provider: "canvas" as const,
+      origin: "https://school.instructure.com",
+      courseId,
+      principalFingerprint: "c".repeat(64),
+      sessionGeneration: 1,
+      catalogDigest: browserCatalogDigest,
+      runtimeVerified: true,
+    });
+    let bridge: BridgeTestClient | undefined;
+    try {
+      bridge = await connectBridgeTestClient({
+        port,
+        token: "gateway-connector-secret-".repeat(3),
+        extensionId: "a".repeat(32),
+        catalogDigest: browserCatalogDigest,
+        bindings: [binding("41"), binding("42")],
+      });
+      let writeCommands = 0;
+      bridge.onCommand((command) => {
+        if (command.kind === "ui_state") {
+          bridge?.respond(command, {});
+          return;
+        }
+        if (command.kind === "invoke_write") {
+          writeCommands += 1;
+          // Morrow Bridge sent the change and Canvas never answered, so Canvas may have saved it.
+          bridge?.respondProblem(command, {
+            schema: "morrow.bridge.problem.v1",
+            code: "write_outcome_unknown",
+            message: "Canvas did not answer this change, so it may have been saved.",
+            recoverable: false,
+          });
+          return;
+        }
+        const id = String(command.arguments?.id);
+        bridge?.respond(command, { schema: "morrow.canvas-browser-result.v1", ok: true, sent: true, status: 200, data: { id, name: `Course ${id}` } });
+      });
+
+      const created = await runtime.batchCreate({
+        name: "Hide final grades",
+        mode: "stage_writes",
+        concurrency: 1,
+        courseSet: { source: "explicit", courseIds: ["41", "42"], complete: true },
+        operations: ["41", "42"].map((courseId) => ({
+          childId: `course:${courseId}`,
+          courseId,
+          tool: "canvas_update_course_settings",
+          sourceBindingId: `canvas:test-account:${courseId}`,
+          arguments: { course_id: courseId, hide_final_grades: true },
+        })),
+      });
+      const batchId = String((created.batch as JsonObject).batchId);
+      const approvalUrl = String(created.approvalUrl);
+      await approveBatch(runtime.approval, approvalUrl);
+      await expect.poll(async () => (await (await fetch(`${approvalUrl}/status`)).json()).active).toBe(false);
+
+      expect(writeCommands).toBe(1);
+      const result = runtime.batchGet({ batchId });
+      expect(result.batch).toMatchObject({ state: "paused", pendingChildren: 1 });
+      expect(result.sourceSettlement).toMatchObject({
+        outcome: "inspection_required",
+        failedNoEffect: 0,
+        inspectionRequired: 1,
+        terminal: false,
+        requiresAttention: true,
+      });
+      expect(runtime.batchResultsPage({ batchId, limit: 10 }).children).toMatchObject([
+        { childId: "course:41", state: "unknown", gatewayOperationState: "applied_or_unknown" },
+        { childId: "course:42", state: "pending" },
+      ]);
+      expect(runtime.batchApprovalStatus(batchId)).toMatchObject({ states: { 0: "Needs checking", 1: "Not started" } });
+      const view = await (await fetch(approvalUrl)).text();
+      expect(view).toContain("<span data-operation-status>Needs checking</span>");
+      expect(view).not.toContain("<span data-operation-status>Did not finish</span>");
+    } finally {
+      await bridge?.close();
+      await runtime.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, CASE_TIMEOUT_MS);
+
   it("settles a refused Canvas page write as failed, locks the page after an uncertain one, and releases it only on a person-confirmed close-out", async () => {
     const directory = mkdtempSync(join(tmpdir(), "morrow-canvas-write-outcome-"));
     const port = await reserveLoopbackPort();

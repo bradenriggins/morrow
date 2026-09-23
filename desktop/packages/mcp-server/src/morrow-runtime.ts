@@ -580,6 +580,17 @@ function verifiedCanvasCreateArtifact(child: BatchChildRecord, result: JsonObjec
   };
 }
 
+/**
+ * The effect states in which a sent change may be held by the provider: it went out, or may have,
+ * and no readback has settled it yet.
+ */
+const EFFECT_STATES_THAT_MAY_HAVE_REACHED_THE_PROVIDER: ReadonlySet<string> = new Set([
+  "dispatching",
+  "awaiting_inner_approval",
+  "awaiting_verification",
+  "applied_or_unknown",
+]);
+
 function childResult(
   runtime: GatewayRuntime,
   batch: BatchRecord,
@@ -615,6 +626,23 @@ function childResult(
       ...(sourceResultState ? { sourceResultState } : {}),
       ...(sourceTaskId ? { sourceTaskId } : {}),
       errorDigest: sha256Text("gateway_source_unknown"),
+      ...(ratePolicy ? { ratePolicy } : {}),
+    };
+  }
+
+  // A staged change whose own record says it may have reached the provider is never a failure
+  // with no effect, even when the dispatch answered with an error: the LMS may hold it, so it
+  // needs checking and the batch stops before the next change.
+  if (result.isError === true && batch.mode === "stage_writes" && operationId.startsWith("op:")
+    && EFFECT_STATES_THAT_MAY_HAVE_REACHED_THE_PROVIDER.has(gatewayOperationState)) {
+    return {
+      state: "unknown",
+      resultDigest,
+      gatewayOperationId: operationId,
+      gatewayOperationState,
+      ...(sourceResultState ? { sourceResultState } : {}),
+      ...(sourceTaskId ? { sourceTaskId } : {}),
+      errorDigest: sha256Text(problemCode(result) || "gateway_tool_error"),
       ...(ratePolicy ? { ratePolicy } : {}),
     };
   }
