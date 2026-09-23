@@ -10535,11 +10535,12 @@ export class GatewayRuntime {
     if (!safeToRetry && !upstream.health().connected) {
       const failed = this.journal.recordFailedBeforeSend(prepared.record.operationId, new UpstreamNotDispatchedError(upstream.id));
       return attachOperationMeta({
-        content: [{ type: "text", text: `The source for ${publicName} is unavailable.` }],
+        content: [{ type: "text", text: `The source for ${publicName} is not connected right now. Morrow did not send this request.` }],
         isError: true,
         structuredContent: {
           schema: "morrow.problem.v1",
           code: "upstream_unavailable",
+          recoverable: true,
           source: mapping.upstreamId,
         },
       }, mapping, this.catalog.digest, failed, this.config.profile);
