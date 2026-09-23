@@ -770,6 +770,8 @@ student's label plus a marker that names the form it replaced:
 - `Student A3`: the full name. `Student A3 (first name)`,
   `(last name)`, `(name, last name first)`, `(email)`, `(login)`,
   `(SIS id)`, `(user id)`, `(other name)`: the other forms.
+  `(joined name)`: the name written as one token, as in a page's web
+  address (`jane-doe-iep`) or a file name (`Jane_Doe_essay.pdf`).
 - `Student A3 or Student A4 (first name)`: a form two students share.
 - `Student A7 (as written)`: text that already read like a label.
   It is not a student.
@@ -874,10 +876,13 @@ Honest limitations (not defects, but know them):
   roster does not know is not labeled: a nickname (above), or someone
   who was never a student in the course.
 - A name in lowercase is labeled only when it is the full name, the
-  email, or the login (a lowercase first or last name alone is often an
-  ordinary word). So a page's web address (`url`, `html_url`), which
-  keeps the words of the page's title in lowercase, can carry a
-  student's name; Morrow needs the address to find the page.
+  email, the login, or the name joined as one token (a lowercase first
+  or last name alone is often an ordinary word). A page's web address
+  (`url`, `html_url`) and a file name that hold the full name show it
+  as `Student A3 (joined name N)`: keep it exactly as you read it, and
+  use it as `url_or_id` to read or change that page; Morrow puts back
+  the real address. A first or last name alone in lowercase there
+  (`janes-reading-log`) is not labeled.
 - A course's own name is shown as Canvas has it wherever Morrow names
   the course (the course list, approvals, messages), so a course named
   for a student (an independent study) shows that name.

@@ -25,6 +25,25 @@ Failure modes this suite pins down (written before the code; final sweep
   6. Without the encrypted vault there are no labels, so every form is
      hidden one way ("[hidden: student name]"), and text that still
      carries a hidden form is recognized so it is never saved back.
+  7. (muse engine audit, 2026-09-23) A name with accents did not match
+     the same name without them, in either direction ("José Álvarez" in a
+     page, "Jose Alvarez" on the roster), and a typographic apostrophe
+     did not match a straight one ("Liam O’Brien"). The model read
+     the full name. Every spelling that differs only by accents,
+     apostrophes, or a letter such as ł or ß is labeled, and so is a
+     German name written with ae, oe, or ue for ä, ö, or ü ("Mueller"
+     for "Müller"); a roster spelling goes back exactly as the roster
+     spells it.
+  8. (muse engine audit, 2026-09-23) A name written as one joined token
+     was not labeled: a Canvas page address ("jane-doe-iep-
+     accommodations", in url and html_url), and file names such as
+     "Jane_Doe_essay.pdf", "JaneDoe.pdf", or "doe_jane.docx". Each part
+     alone is lowercase or glued to the other, and "_" counted as part
+     of a word. Every joined form of a roster name (first and last
+     name, last and first, joined by "-", "_", "." or nothing, in any
+     case, with or without accents and apostrophes) is labeled as
+     "(joined name N)" and goes back exactly as written, so a link or
+     page address still works.
 """
 
 import os
@@ -201,3 +220,108 @@ def test_without_labels_every_form_is_hidden_one_way():
     assert cc.has_hidden({"body": [cc.project_text("Jane Doe",
                                                    cc.prepare_hidden(ROSTER))]})
     assert cc.has_hidden("https://s.example/?q=%5Bhidden%3A%20student%20name%5D")
+
+
+# -- 7 ------------------------------------------------------------------------
+
+JOSE = {"id": "80001", "name": "Jose Alvarez"}
+JOSE_ACCENTED = {"id": "80002", "name": "José Álvarez",
+                 "aliases": ["Jose Alvarez"]}
+ZOE = {"id": "80003", "name": "Zoë Müller"}
+LIAM = {"id": "80004", "name": "Liam O'Brien"}
+LIAM_CURLY = {"id": "80005", "name": "Liam O\u2019Brien"}
+LUKASZ = {"id": "80006", "name": "Łukasz Strauß"}
+MORE_LABELS = {"80001": "Student A5", "80002": "Student A6",
+               "80003": "Student A7", "80004": "Student A8",
+               "80005": "Student A9", "80006": "Student A10"}
+
+
+def _one(identity):
+    return cc.prepare([(identity, MORE_LABELS[identity["id"]])])
+
+
+def _restore_one(identity):
+    return {MORE_LABELS[identity["id"]]: identity}.get
+
+
+@pytest.mark.parametrize("identity, text, secrets", [
+    (JOSE, "Great job, José Álvarez! Álvarez leads.",
+     ("José", "Álvarez", "Jose", "Alvarez")),
+    (JOSE_ACCENTED, "Jose Alvarez and JOSÉ ÁLVAREZ presented.",
+     ("José", "JOSÉ", "Jose", "Alvarez", "ÁLVAREZ")),
+    (ZOE, "Zoe Muller asked; Muller agreed.", ("Zoe", "Muller")),
+    (ZOE, "Zoe Mueller asked; Mueller agreed.", ("Zoe", "Mueller")),
+    (LIAM, "Liam O\u2019Brien and O\u2018Brien wrote.", ("Liam", "Brien")),
+    (LIAM_CURLY, "Liam O'Brien wrote; O'Brien agreed.", ("Liam", "Brien")),
+    (LUKASZ, "Lukasz Strauss and Strauss.", ("Lukasz", "Strauss")),
+])
+def test_accents_and_apostrophes_do_not_hide_a_name(identity, text,
+                                                    secrets):
+    out = cc.project_text(text, _one(identity))
+    for secret in secrets:
+        assert secret not in out, (secret, out)
+    assert MORE_LABELS[identity["id"]] in out
+    restored = cc.restore_text(out, _restore_one(identity))
+    assert cc.project_text(restored, _one(identity)) == out
+
+
+def test_a_roster_spelling_goes_back_exactly():
+    text = "Jose Alvarez and José Álvarez are one student."
+    out = cc.project_text(text, _one(JOSE_ACCENTED))
+    assert cc.restore_text(out, _restore_one(JOSE_ACCENTED)) == text
+
+
+# -- 8 ------------------------------------------------------------------------
+
+ALICE_JOINED = ("alice-b-thornton-notes", "alice-thornton-plan",
+                "Alice_Thornton.docx")
+
+
+@pytest.mark.parametrize("identity, text, secrets", [
+    (JANE, "Jane_Doe_essay.pdf", ("Jane", "Doe")),
+    (JANE, "jane-doe-iep-accommodations", ("jane", "doe")),
+    (JANE, "JaneDoe.pdf", ("Jane", "Doe")),
+    (JANE, "janedoe.pdf", ("jane", "doe")),
+    (JANE, "doe_jane.docx", ("doe", "jane")),
+    (JANE, "JANE_DOE_FINAL.pdf", ("JANE", "DOE")),
+    (JANE, "notes.jane.doe.txt", ("jane", "doe")),
+    (JANE, "Doe-Jane report", ("Doe", "Jane")),
+    (JANE, "https://school.instructure.com/courses/1/pages/"
+           "jane-doe-iep-accommodations", ("jane", "doe")),
+    (ALICE, " ".join(ALICE_JOINED), ("alice", "Alice", "thornton",
+                                     "Thornton")),
+    (JOSE_ACCENTED, "jose-alvarez-notes José_Álvarez.pdf",
+     ("jose", "José", "alvarez", "Álvarez")),
+    (LIAM, "liam-obrien-reading-log liam-o-brien Liam_O'Brien.pdf",
+     ("liam", "Liam", "brien", "Brien")),
+])
+def test_a_joined_name_is_labeled_and_goes_back_exactly(identity, text,
+                                                        secrets):
+    labels = dict(LABELS, **MORE_LABELS)
+    prepared = cc.prepare([(identity, labels[identity["id"]])])
+    out = cc.project_text(text, prepared)
+    for secret in secrets:
+        assert secret not in out, (secret, out)
+    assert "%s (joined name" % labels[identity["id"]] in \
+        urllib.parse.unquote(out), out
+    restored = cc.restore_text(out, {labels[identity["id"]]: identity}.get)
+    assert restored == text, (out, restored)
+
+
+def test_a_joined_name_in_a_link_keeps_the_link_one_token():
+    url = ("https://school.instructure.com/courses/1/pages/"
+           "jane-doe-iep-accommodations")
+    out = cc.project_text("See %s today." % url, _prepared())
+    link = out.split(" ")[1]
+    assert link.startswith("https://") and "jane" not in link, out
+    assert "%28joined%20name" in link, out
+
+
+def test_a_joined_name_does_not_match_inside_a_longer_word():
+    text = "xjanedoe janedoes jane-doe2"
+    assert cc.project_text(text, _prepared()) == text
+
+
+def test_a_lowercase_first_name_alone_is_still_an_ordinary_word():
+    text = "jane's reading log and the doe in the woods"
+    assert cc.project_text(text, _prepared()) == text

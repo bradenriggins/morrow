@@ -9992,19 +9992,28 @@ def _read_named_object(entry, params, session, pack, tenant_base,
     no name. Refuses (TargetIdentityMismatch) when the object cannot be
     read: the educator never approves a change to an object Morrow
     could not name."""
+    from privacy import executor_wire as _wire
+    from dispatch.approval_display import _noun
+    # The agent can name the object by its labeled address (a page whose
+    # address holds a student's name): the read goes to the real one.
+    shown_params = params
+    params, _ids = _wire.resolve_learner_labels(
+        {"params": params}, tenant_base,
+        _write_target_course_id(entry, params), None,
+        error_cls=LearnerLabelUnresolved, provider=entry.get("provider"),
+        extra_keys=_wire.learner_route_param_keys(entry))
+    params = params["params"]
     found = _named_object_route(entry, params)
     if found is None:
         return None
     template, slot = found
-    from privacy import executor_wire as _wire
-    from dispatch.approval_display import _noun
     read_entry = dict(entry, effects="read",
                       request={"method": "GET", "url": template,
                                "headers": {}})
     config = {"canvas_base": session.base_for("canvas")}
     words = template.split("?", 1)[0].split("/")
     what = "%s %s" % (_noun(words[-2], words[-4] if len(words) > 3
-                            else None), params.get(slot))
+                            else None), shown_params.get(slot))
     rosters = _wire.begin_course_rosters()
     try:
         if project:

@@ -56,6 +56,7 @@ import base64
 import binascii
 import contextlib
 import fcntl
+import functools
 import hashlib
 import hmac
 import json
@@ -1042,18 +1043,57 @@ def _confusable_fold_table():
 
 _CONFUSABLE_FOLD = _confusable_fold_table()
 
+# A roster and a course often spell one name with and without accents
+# ("Jose Alvarez", "José Álvarez"), and text pasted from a word processor
+# carries typographic apostrophes ("O\u2019Brien"). Matching compares base
+# letters: accents are dropped (NFD, then the combining marks), letters
+# NFD keeps whole fold to the base letters a plain spelling uses, and
+# every apostrophe reads as the straight one.
+LETTER_FOLD = {
+    "\u0142": "l", "\u0141": "L", "\u00f8": "o", "\u00d8": "O",
+    "\u0111": "d", "\u0110": "D", "\u0131": "i", "\u00df": "ss",
+    "\u00e6": "ae", "\u00c6": "AE", "\u0153": "oe", "\u0152": "OE",
+    "\u00fe": "th", "\u00de": "TH",
+}
+APOSTROPHES = frozenset({"\u2019", "\u2018", "\u02bc", "\u02bb",
+                         "\uff07"})
+
+
+@functools.lru_cache(maxsize=8192)
+def base_letters(char):
+    """char with its accents dropped and a whole-letter fold applied
+    (\u00e9 -> e, \u0141 -> L, \u00df -> ss); case is kept."""
+    return "".join(LETTER_FOLD.get(part, part)
+                   for part in unicodedata.normalize("NFD", char)
+                   if unicodedata.category(part) != "Mn")
+
+
+@functools.lru_cache(maxsize=8192)
+def _fold_char(char):
+    """What one character contributes to alias matching: base letters
+    (accents dropped), lookalike letters folded (W2-P0-12), every
+    apostrophe straight, invisible format characters dropped
+    (W2-P0-13), lowercase."""
+    out = []
+    for part in base_letters(char):
+        part = _CONFUSABLE_FOLD.get(part, part)
+        if part in APOSTROPHES:
+            part = "'"
+        # Category Cf: zero-width space/joiner/non-joiner, BOM, word
+        # joiner, soft hyphen, bidi marks. Invisible in rendering; their
+        # only effect here would be to defeat matching.
+        if unicodedata.category(part) == "Cf":
+            continue
+        out.append(part.lower())
+    return "".join(out)
+
 
 def _normalize_alias(value):
-    """Alias key normalization: NFKC, confusable fold (W2-P0-12), strip
-    invisible format characters (W2-P0-13), whitespace-collapse, lower."""
-    folded = "".join(_CONFUSABLE_FOLD.get(char, char)
+    """Alias key normalization: NFKC, then each character folded
+    (_fold_char), whitespace collapsed."""
+    folded = "".join(_fold_char(char)
                      for char in unicodedata.normalize("NFKC", value))
-    # Category Cf: zero-width space/joiner/non-joiner, BOM, word joiner,
-    # soft hyphen, bidi marks. Invisible in rendering; their only effect
-    # here would be to defeat matching.
-    stripped = "".join(char for char in folded
-                       if unicodedata.category(char) != "Cf")
-    return re.sub(r"\s+", " ", stripped.strip()).lower()
+    return re.sub(r"\s+", " ", folded.strip()).lower()
 
 
 def _fold_match_text(text):
@@ -1069,17 +1109,14 @@ def _fold_match_text(text):
     re-apply NFKC: whole-string NFKC is not position-preserving (it can
     expand ligatures or compose combining marks), so re-applying it here
     would make index_map point at the wrong source positions. The fold
-    is strictly per-character (confusable map, Cf strip, lower, which
-    can expand only via str.lower and is tracked per source char), so
-    the mapping stays exact.
+    is strictly per-character (_fold_char: accents dropped, confusable
+    map, apostrophes, Cf strip, lower; an expansion such as \u00df -> ss
+    is tracked per source char), so the mapping stays exact.
     """
     folded = []
     index_map = []
     for i, char in enumerate(text):
-        char = _CONFUSABLE_FOLD.get(char, char)
-        if unicodedata.category(char) == "Cf":
-            continue
-        for out in char.lower():
+        for out in _fold_char(char):
             folded.append(out)
             index_map.append(i)
     return "".join(folded), index_map
@@ -1199,16 +1236,41 @@ def _add_alias(aliases, alias, token, partial_surnames=(),
         existing["name_token"] = True
 
 
+def _alias_trie_expression(candidates):
+    """One expression for every alias, as a character trie: a course
+    roster has thousands of aliases, and a flat alternation tries each
+    one at every position. At each node the longer continuations come
+    before ending there, so the longest alias the text holds matches
+    (the text allows at most one branch per character). A space in an
+    alias matches any run of whitespace."""
+    trie = {}
+    for candidate in candidates:
+        node = trie
+        for char in candidate:
+            node = node.setdefault(char, {})
+        node[None] = True
+
+    def emit(node):
+        branches = [(r"\s+" if char == " " else _escape_regexp(char))
+                    + emit(child)
+                    for char, child in sorted(
+                        (k, v) for k, v in node.items() if k is not None)]
+        if not branches:
+            return ""
+        if len(branches) == 1 and None not in node:
+            return branches[0]
+        return "(?:%s)%s" % ("|".join(branches), "?" if None in node else "")
+    return emit(trie)
+
+
 def _build_alias_matcher(aliases):
-    candidates = sorted(aliases.keys(), key=len, reverse=True)
+    candidates = [key for key in aliases if key]
     if not candidates:
         return None
-    expression = "|".join(
-        _escape_regexp(candidate).replace(r"\ ", r"\s+").replace(" ", r"\s+")
-        for candidate in candidates)
-    # Divergence note: \p{L}\p{N} -> \w under re.UNICODE (equivalent for
-    # letter/number/underscore).
-    return re.compile(r"(?<!\w)(?:%s)(?!\w)" % expression,
+    # A name ends at anything but a letter or a digit: "_" separates
+    # words in a file name ("Jane_Doe_essay.pdf") as a space does.
+    return re.compile(r"(?<![^\W_])(?:%s)(?![^\W_])"
+                      % _alias_trie_expression(candidates),
                       re.IGNORECASE | re.UNICODE)
 
 

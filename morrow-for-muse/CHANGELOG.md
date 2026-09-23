@@ -39,8 +39,17 @@ Student privacy:
 - Some names are still not hidden, and the consent page lists them: a
   name Canvas does not list for the student, such as a nickname; a
   course named for its student, such as an independent study; and a
-  page's web address, which keeps the words of the page's title in
-  small letters.
+  first or last name alone in small letters, such as "jane" in a page's
+  web address.
+- A student's full name is hidden in a page's web address
+  ("jane-doe-iep-accommodations") and in a file name
+  ("Jane_Doe_essay.pdf", "JaneDoe.pdf", "doe_jane.docx"). Both reached
+  the assistant as written. The assistant can still open and change
+  such a page, and the address goes back exactly as Canvas has it.
+- A name is hidden however its accents and apostrophes are written:
+  "José Álvarez" when Canvas lists "Jose Alvarez", "Zoe Mueller" for
+  "Zoë Müller", and "O’Brien" with a curly apostrophe. These reached
+  the assistant as written.
 - The consent page says that on some Muse computers, the network that
   carries traffic out of the computer can read that traffic, including
   your Canvas sign-in and the course pages Morrow loads.

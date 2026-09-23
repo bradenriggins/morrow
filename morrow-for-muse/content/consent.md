@@ -84,9 +84,11 @@ with two limits you should know:
   guess leaves a trail.
 - Some names are not hidden: a name Canvas does not list for the
   student, such as a nickname ("Bobby" for Robert); a course's own
-  name, such as an independent study named for its student; and a
-  page's web address, which keeps the words of the page's title in
-  small letters (Morrow needs the address to find the page).
+  name, such as an independent study named for its student; and a first
+  or last name alone in small letters, such as "jane" in a page's web
+  address (in small letters it is often an ordinary word). A full name
+  in a web address or a file name is hidden, and so is a name written
+  with or without accents.
 
 Apart from those limits, the assistant never sees the names of
 students you did not name, and this cannot be turned off. To check who a label is, tell the assistant

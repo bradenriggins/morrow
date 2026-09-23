@@ -21,6 +21,10 @@ it replaced:
     Student A3 (other name N)           another roster spelling (a
                                         nickname, the name without its
                                         middle initial, ...)
+    Student A3 (joined name N)          the name as one token, as in a
+                                        page address or a file name
+                                        ("jane-doe", "Jane_Doe",
+                                        "JaneDoe", "doe.jane")
     Student A3 or Student A4 (first name)
                                         a form two students share
     Student A3 or Student A4 (name)     a full name two students share
@@ -57,11 +61,13 @@ LOGIN = "login"
 SIS = "SIS id"
 USER_ID = "user id"
 OTHER = "other name"
+JOINED = "joined name"
 AS_WRITTEN = "as written"
 # A form one student can own; when two students own the same spelling
 # the lower rank wins the marker (both labels are still named).
 _FORM_RANK = {FULL: 0, LAST_FIRST: 1, OTHER: 2, EMAIL: 3, LOGIN: 4, SIS: 5,
-              FIRST: 6, LAST: 7}
+              JOINED: 6, FIRST: 7, LAST: 8}
+_INDEXED_FORMS = (OTHER, JOINED)
 
 _LABEL = r"Student A[1-9][0-9]*"
 _LABEL_RE = re.compile(r"(?<![A-Za-z0-9])%s(?![0-9])" % _LABEL)
@@ -72,8 +78,9 @@ _MARKER_FORMS = (AS_WRITTEN, SHARED_NAME, FIRST, LAST, LAST_FIRST, EMAIL,
 def _marker_pattern(quote):
     fixed = "|".join(re.escape(quote(f)) for f in
                      sorted(_MARKER_FORMS, key=len, reverse=True))
-    return r"(?:%s|%s(?:%s[1-9][0-9]*)?)" % (
-        fixed, re.escape(quote(OTHER)), re.escape(quote(" ")))
+    indexed = "|".join(re.escape(quote(f)) for f in _INDEXED_FORMS)
+    return r"(?:%s|(?:%s)(?:%s[1-9][0-9]*)?)" % (
+        fixed, indexed, re.escape(quote(" ")))
 
 
 def _quoted(text):
@@ -173,14 +180,24 @@ def _named_forms(identity):
     return forms
 
 
+_UMLAUT_SPELLINGS = str.maketrans({"ä": "ae", "ö": "oe",
+                                   "ü": "ue", "Ä": "Ae",
+                                   "Ö": "Oe", "Ü": "Ue"})
+
+
+def _collapsed(text):
+    return " ".join(str(text).split())
+
+
 def _other_spellings(identity):
     """Every other roster spelling of the student, in a fixed order: the
     roster's aliases (short name, sortable name, SIS login), the name
     last name first without the comma, and the first and last name
-    without a middle name. Spellings a named form already covers are
-    left out."""
+    without a middle name. A spelling a named form already has is left
+    out; one that differs only by accents or case stays, so it goes
+    back exactly as written."""
     forms = _named_forms(identity)
-    taken = {_core._normalize_alias(v) for v in forms.values()}
+    taken = {_collapsed(v) for v in forms.values()}
     candidates = [a for a in identity.get("aliases") or []
                   if isinstance(a, str) and a.strip()]
     name = forms.get(FULL)
@@ -191,20 +208,91 @@ def _other_spellings(identity):
         if given and surname:
             candidates.append("%s %s" % (surname, given))
             candidates.append("%s %s" % (given, surname))
+    if name:
+        # German writes ä, ö, ü as ae, oe, ue without umlauts
+        # ("Mueller" for "Müller"): the name and each part alone.
+        composed = unicodedata.normalize("NFC", name)
+        spelled = composed.translate(_UMLAUT_SPELLINGS)
+        if spelled != composed:
+            candidates.append(spelled)
+            candidates.extend(part.translate(_UMLAUT_SPELLINGS)
+                              for part in _name_parts(composed)
+                              if part and part.translate(_UMLAUT_SPELLINGS)
+                              != part)
     out = {}
     for spelling in candidates:
-        key = _core._normalize_alias(spelling)
-        if key and key not in taken and key not in out:
-            out[key] = " ".join(spelling.split())
-    return [out[key] for key in sorted(out)]
+        text = _collapsed(spelling)
+        if text and _core._normalize_alias(text) and text not in taken:
+            out[text] = (_core._normalize_alias(text), text)
+    return [text for _key, text in sorted(out.values())]
+
+
+_JOIN_SEPARATORS = ("-", "_", ".", "")
+
+
+def _name_words(name):
+    """The words of a roster name, first name first ("Doe, Jane Q." ->
+    Jane, Q., Doe), without generational suffixes."""
+    normalized = _core._without_name_suffixes(_collapsed(name))
+    if "," in normalized:
+        last, _, first = normalized.partition(",")
+        return first.split() + last.split()
+    return normalized.split()
+
+
+def _word_variants(words):
+    """The words as written, in plain letters (accents dropped, an
+    apostrophe or period removed: O'Brien -> OBrien, Q. -> Q), and with
+    such a mark read as a hyphen (O-Brien), as page addresses and file
+    names write a name."""
+    plain = []
+    hyphened = []
+    for word in words:
+        letters = "".join(_core.base_letters(c) for c in word)
+        plain.append("".join(c for c in letters if c.isalnum() or c == "-"))
+        hyphened.append("-".join(
+            p for p in re.split(r"[^\w-]+", letters) if p))
+    return [list(words), plain, hyphened]
+
+
+def _joined_spellings(identity):
+    """Every spelling of the student's name as one token, in a fixed
+    order: the name's words first name first, the first and last name,
+    and the last and first name, joined by "-", "_", "." or nothing, as
+    written, in plain letters, or with marks as hyphens, and in the
+    roster's case, lowercase, or uppercase. Only a name with a
+    plausible first and last name has joined spellings."""
+    name = _real_name(identity)
+    given, surname = _name_parts(name) if name else ("", "")
+    if not (given and surname):
+        return []
+    orders = [_name_words(name), [given, surname], [surname, given]]
+    out = set()
+    for order in orders:
+        for words in _word_variants(order):
+            if not all(words):
+                continue
+            for sep in _JOIN_SEPARATORS:
+                joined = sep.join(words)
+                for text in (joined, joined.lower(), joined.upper()):
+                    out.add(text)
+    return sorted(out)
 
 
 def _rank(form):
-    return _FORM_RANK.get(OTHER if form.startswith(OTHER) else form, 9)
+    for family in _INDEXED_FORMS:
+        if form.startswith(family):
+            return _FORM_RANK[family]
+    return _FORM_RANK.get(form, 9)
 
 
 def _label_number(label):
     return int(label.split("A", 1)[1])
+
+
+def _indexed(form, spellings):
+    return [("%s %d" % (form, i) if i > 1 else form, text)
+            for i, text in enumerate(spellings, 1)]
 
 
 def prepare(pairs):
@@ -216,23 +304,35 @@ def prepare(pairs):
             continue
         ids[str(identity.get("id"))] = label
         spellings = list(_named_forms(identity).items())
-        spellings += [("%s %d" % (OTHER, i) if i > 1 else OTHER, text)
-                      for i, text in enumerate(_other_spellings(identity), 1)]
+        spellings += _indexed(OTHER, _other_spellings(identity))
+        spellings += _indexed(JOINED, _joined_spellings(identity))
         for form, text in spellings:
             key = _core._normalize_alias(text)
             if not key:
                 continue
-            entry = aliases.setdefault(key, {"forms": {},
-                                             "name_token": False})
+            entry = aliases.setdefault(key, {"forms": {}, "exact": {},
+                                             "name_token": False,
+                                             "joined": False})
             known = entry["forms"].get(label)
             if known is None or _rank(form) < _rank(known):
                 entry["forms"][label] = form
+            # The form whose spelling matches the text exactly is the
+            # one restored, so each spelling goes back as written.
+            written = entry["exact"].setdefault(label, {})
+            current = written.get(_collapsed(text))
+            if current is None or _rank(form) < _rank(current):
+                written[_collapsed(text)] = form
             # A one-word name fragment can also be an ordinary word
             # ("Brown", "Will"); it is rewritten only when capitalized.
-            if form in (FIRST, LAST) or (form.startswith(OTHER)
-                                         and " " not in key):
+            # A joined name is never an ordinary word.
+            if form.startswith(JOINED):
+                entry["joined"] = True
+            elif form in (FIRST, LAST) or (form.startswith(OTHER)
+                                           and " " not in key):
                 entry["name_token"] = True
     for entry in aliases.values():
+        if entry["joined"]:
+            entry["name_token"] = False
         entry["labels"] = sorted(entry["forms"], key=_label_number)
         # The marker is the first label's form: restoration reads that
         # student's spelling, which normalizes to the same text as the
@@ -254,7 +354,7 @@ def prepare_hidden(identities):
 def _reference(prepared, labels, form):
     if prepared.get("hidden"):
         word = _HIDDEN_WORDS.get(form)
-        return HIDDEN % (word or ("name" if form.startswith(OTHER)
+        return HIDDEN % (word or ("name" if form.startswith(_INDEXED_FORMS)
                                   else form))
     head = " or ".join(labels)
     if form == FULL:
@@ -320,9 +420,10 @@ def project_text(text, prepared, protect_literals=True):
             source = _core._source_range_for_view(view, vstart, vend)
             if source is None:
                 continue
+            form = entry["exact"].get(entry["labels"][0], {}).get(
+                _collapsed(view["text"][vstart:vend]), entry["form"])
             add(source["start"], source["end"], _core._url_safe_replacement(
-                source, _reference(prepared, entry["labels"],
-                                   entry["form"]),
+                source, _reference(prepared, entry["labels"], form),
                 url_spans))
     for pattern in _USER_ID_RES:
         for match in pattern.finditer(view["text"]):
@@ -359,10 +460,13 @@ def _spelling(identity, form, label):
         form = FULL
     if form == USER_ID:
         value = identity.get("id")
-    elif form.startswith(OTHER):
-        index = int(form[len(OTHER):].strip() or 1)
-        others = _other_spellings(identity)
-        value = others[index - 1] if 0 < index <= len(others) else None
+    elif form.startswith(_INDEXED_FORMS):
+        family = OTHER if form.startswith(OTHER) else JOINED
+        index = int(form[len(family):].strip() or 1)
+        spellings = _other_spellings(identity) if family == OTHER \
+            else _joined_spellings(identity)
+        value = spellings[index - 1] if 0 < index <= len(spellings) \
+            else None
     else:
         value = _named_forms(identity).get(form)
     if not value:

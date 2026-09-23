@@ -54,6 +54,15 @@ Failure modes this suite pins down (written before the code):
      title reaches the agent with labels, and the prepared write on
      disk keeps no name. (Round-2 finding, 2026-09-23, written before
      the fix.)
+ 12. A page's address is made from its title, so a page titled "Jane
+     Doe IEP accommodations" has the address "jane-doe-iep-
+     accommodations". The page list labeled the title but gave url and
+     html_url as Canvas has them, to the agent and the journal, and a
+     course file named "Jane_Doe_essay.pdf" kept the name in its
+     display name and file name. The joined name is labeled now, and a
+     page the agent names by its labeled address is read, prepared, and
+     changed at its real address. (Muse engine audit, 2026-09-23,
+     written before the fix.)
 
 The run writes a repeatable artifact of the flow to
 .selftest-work/course-content-e2e-artifact.json (labels only).
@@ -505,6 +514,137 @@ def test_an_object_title_that_names_a_student_is_shown_with_a_label():
     order = session.paths()
     assert order.index(("GET", "/api/v1/courses/1/users")) \
         < order.index(("GET", "/api/v1/courses/1/pages/week-1"))
+
+
+# -- 12 -----------------------------------------------------------------------
+
+IEP_SLUG = "jane-doe-iep-accommodations"
+IEP_PAGE = {"page_id": 11, "url": IEP_SLUG,
+            "title": "Jane Doe IEP accommodations",
+            "html_url": BASE + "/courses/1/pages/" + IEP_SLUG,
+            "body": "<p>Accommodations for Jane Doe.</p>"}
+FILES = [{"id": 5, "folder_id": 2, "display_name": "Jane_Doe_essay.pdf",
+          "filename": "JaneDoe.pdf", "content-type": "application/pdf",
+          "url": BASE + "/files/5/download?download_frd=1&verifier=abc",
+          "size": 1200},
+         {"id": 6, "folder_id": 2, "display_name": "doe_jane.docx",
+          "filename": "doe_jane.docx", "size": 800,
+          "url": BASE + "/files/6/download?download_frd=1&verifier=def"}]
+JOINED_SECRETS = ("jane-doe", "Jane_Doe", "JaneDoe", "doe_jane")
+
+
+class AddressCanvas(Canvas):
+    """The course also has a page titled for Jane and two files named for
+    her."""
+
+    def __init__(self):
+        super().__init__()
+        self.iep = dict(IEP_PAGE)
+
+    def raw_request(self, method, url, headers, body, is_write=False,
+                    max_bytes=None):
+        path = urllib.parse.urlsplit(url).path
+        if path == "/api/v1/courses/1/pages" and method == "GET":
+            self.calls.append((method, url, None))
+            return self._ok([dict(self.page, page_id=7,
+                                  html_url=BASE + "/courses/1/pages/week-1"),
+                             {k: v for k, v in self.iep.items()
+                              if k != "body"}])
+        if path == "/api/v1/courses/1/pages/" + IEP_SLUG:
+            data = json.loads(body) if body else None
+            self.calls.append((method, url, data))
+            if method == "PUT":
+                self.iep.update(data["wiki_page"])
+            return self._ok(self.iep)
+        if path == "/api/v1/courses/1/files" and method == "GET":
+            self.calls.append((method, url, None))
+            return self._ok(FILES)
+        return super().raw_request(method, url, headers, body, is_write,
+                                   max_bytes)
+
+
+def _joined_leaks(value):
+    text = value if isinstance(value, str) else json.dumps(value)
+    return _leaks(text) + [s for s in JOINED_SECRETS
+                           if s.lower() in text.lower()]
+
+
+def _list(session, name, path):
+    return ex.dispatch_catalog_op(name, "GET", path, "read",
+                                  {"course_id": COURSE}, pack=_pack(),
+                                  session=session)
+
+
+def test_a_page_address_made_from_a_name_is_labeled():
+    session = AddressCanvas()
+    out = _list(session, "canvas_list_pages_courses",
+                "/api/v1/courses/{course_id}/pages")
+    assert _joined_leaks(out) == [], json.dumps(out)[:2000]
+    assert _joined_leaks(_journal_text()) == [], _journal_text()[-2000:]
+    iep = [p for p in out["receipt"] if p["page_id"] == 11][0]
+    assert "(joined name" in iep["url"], iep
+    assert iep["html_url"].startswith(BASE + "/courses/1/pages/Student%20A")
+    assert " " not in iep["html_url"]
+    week = [p for p in out["receipt"] if p["page_id"] == 7][0]
+    assert week["url"] == "week-1"
+
+
+def test_a_page_named_by_its_labeled_address_is_read_and_changed():
+    _edit_mode()
+    session = AddressCanvas()
+    listed = _list(session, "canvas_list_pages_courses",
+                   "/api/v1/courses/{course_id}/pages")
+    labeled = [p for p in listed["receipt"] if p["page_id"] == 11][0]["url"]
+    name, method, path = SHOW
+    shown = ex.dispatch_catalog_op(
+        name, method, path, "read",
+        {"course_id": COURSE, "url_or_id": labeled}, pack=_pack(),
+        session=session)
+    assert ("GET", "/api/v1/courses/1/pages/" + IEP_SLUG) in session.paths()
+    assert _joined_leaks(shown) == [], json.dumps(shown)[:2000]
+    assert shown["receipt"]["url"] == labeled
+    name, method, path = UPDATE
+    ex.dispatch_catalog_op(
+        name, method, path, "write",
+        {"course_id": COURSE, "url_or_id": labeled}, pack=_pack(),
+        session=session, mode_ctx=_ctx(),
+        extra={"body": {"wiki_page": {"title": "IEP accommodations"}}})
+    puts = [(u, b) for m, u, b in session.calls if m == "PUT"]
+    assert urllib.parse.urlsplit(puts[0][0]).path \
+        == "/api/v1/courses/1/pages/" + IEP_SLUG
+    assert _joined_leaks(_journal_text()) == [], _journal_text()[-2000:]
+
+
+def test_plan_write_prepares_a_page_named_by_its_labeled_address():
+    session = AddressCanvas()
+    listed = _list(session, "canvas_list_pages_courses",
+                   "/api/v1/courses/{course_id}/pages")
+    labeled = [p for p in listed["receipt"] if p["page_id"] == 11][0]["url"]
+    name, method, path = UPDATE
+    prepared = ex.prepare_plan_write(
+        name, method, path, {"course_id": COURSE, "url_or_id": labeled},
+        {"wiki_page": {"title": "IEP accommodations"}}, session, _pack(),
+        conversation_id=CONV)
+    assert _joined_leaks(prepared) == [], json.dumps(prepared)[:2000]
+    with open(ex.pending_write_path(prepared["op_id"]),
+              encoding="utf-8") as fh:
+        assert _joined_leaks(fh.read()) == []
+    ex.approve_plan_write(prepared["op_id"], "yes", session, _pack(),
+                          mode_ctx={"user_id": USER,
+                                    "conversation_id": CONV})
+    puts = [u for m, u, _b in session.calls if m == "PUT"]
+    assert urllib.parse.urlsplit(puts[0]).path \
+        == "/api/v1/courses/1/pages/" + IEP_SLUG
+
+
+def test_file_names_made_from_a_name_are_labeled():
+    session = AddressCanvas()
+    out = _list(session, "canvas_list_files_courses",
+                "/api/v1/courses/{course_id}/files")
+    assert _joined_leaks(out) == [], json.dumps(out)[:2000]
+    assert _joined_leaks(_journal_text()) == [], _journal_text()[-2000:]
+    names = [f.get("display_name") for f in out["receipt"]]
+    assert all("(joined name" in n for n in names), names
 
 
 def _artifact(record):

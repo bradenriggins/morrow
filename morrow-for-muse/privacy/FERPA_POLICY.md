@@ -75,9 +75,10 @@ Every course-scoped result then passes through that roster
 each form of a student's name becomes the student's label plus a marker
 naming the form it replaced (`Student A3` for the full name; `(first
 name)`, `(last name)`, `(name, last name first)`, `(email)`, `(login)`,
-`(SIS id)`, `(user id)`, `(other name)` for the rest), and text that
-already reads like a label is marked `(as written)`. A student gets a
-label in the vault only when their name appears in what the agent sees.
+`(SIS id)`, `(user id)`, `(other name)`, `(joined name)` for the
+rest), and text that already reads like a label is marked `(as
+written)`. A student gets a label in the vault only when their name
+appears in what the agent sees.
 Learner-data receipts get the same roster pass after the boundary, so a
 classmate named only in a post's text is labeled too. Item Bank results
 use the roster of the course the Item Banks launch is bound to.
@@ -343,9 +344,18 @@ the wired vault file above.
   restored exactly when saved back.
 - A first or last name alone is labeled only when it is capitalized
   (a lowercase one is often an ordinary word); the full name, email,
-  and login are labeled in any case. So a page's web address (`url`,
-  `html_url`, the slug Canvas makes from the title in lowercase) can
-  carry a student's name. Morrow needs the address to find the page.
+  login, and the name joined as one token (a page's web address such
+  as `jane-doe-iep`, a file name such as `Jane_Doe_essay.pdf`) are
+  labeled in any case. The joined name is marked `(joined name N)` and
+  goes back exactly as written, and a page the agent names by its
+  labeled address is read and changed at its real address. A page
+  address made from a title with only the first or the last name can
+  still carry that name in lowercase.
+- Matching compares base letters: accents are dropped, every
+  apostrophe reads as a straight one, a letter such as ł or ß folds to
+  l or ss, and German ae, oe, ue match ä, ö, ü. A spelling the roster
+  has goes back exactly as the roster spells it; another spelling goes
+  back as the roster's.
 - A course's own name is shown as Canvas has it wherever Morrow names
   the course (the course list, the approval display, operation labels
   in messages), so a course named for a student (an independent study)
