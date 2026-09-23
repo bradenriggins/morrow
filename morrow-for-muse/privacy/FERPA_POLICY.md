@@ -356,7 +356,13 @@ the wired vault file above.
   URL path segment or query value equal to a rostered learner id
   (except the segment right after `/courses/` or `/accounts/`, which
   is the course or account by Canvas URL grammar), whole-string ids,
-  structured identity fields, and numeric identity values.
+  structured identity fields, and numeric identity values. Course
+  content counts a number as a student's id only after a person word
+  (`student 912345`, `student_id=912345`, `/users/912345`) or as the
+  user segment of a grades, assignment submission, or profile link
+  (`/courses/1/grades/912345`, `/assignments/5/submissions/912345`,
+  `/about/912345`), so an assignment or page id that equals a
+  student's id is left alone.
 - Secret-shaped text (API keys, tokens, launch parameters) fails
   closed instead of being partially projected: the op is refused
   rather than leaking a redacted fragment.

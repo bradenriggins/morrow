@@ -25,6 +25,12 @@ Failure modes this suite pins down (written before the code; final sweep
   6. Without the encrypted vault there are no labels, so every form is
      hidden one way ("[hidden: student name]"), and text that still
      carries a hidden form is recognized so it is never saved back.
+  7. A link to a student's grades, to an assignment submission, or to a
+     profile ("/courses/1/grades/98765", "/assignments/5/submissions/
+     98765", "/about/98765") kept the student's Canvas id, although the
+     consent page says ID numbers inside links are hidden: only a person
+     word ("user", "/users/") marked a number as a student's id (final
+     sweep 2026-09-23).
 """
 
 import os
@@ -97,6 +103,29 @@ def test_a_user_id_after_a_person_word_is_labeled():
 
 def test_an_object_id_that_equals_a_student_id_is_left_alone():
     text = "Open /courses/1/assignments/98765 for the rubric (id 98765)."
+    assert cc.project_text(text, _prepared()) == text
+
+
+@pytest.mark.parametrize("link", [
+    "https://s.example/courses/1/grades/98765",
+    "https://s.example/courses/1/grades/98765#tab-assignments",
+    "/courses/1/assignments/5/submissions/98765",
+    "https://s.example/api/v1/courses/1/assignments/5/submissions/98765",
+    "https://s.example/about/98765",
+])
+def test_a_link_to_a_students_grades_submission_or_profile_is_labeled(link):
+    text = "<a href=\"%s\">open</a> %s" % (link, link)
+    out = cc.project_text(text, _prepared())
+    assert "98765" not in out, out
+    assert cc.restore_text(out, _by_label()) == text
+
+
+def test_other_ids_in_those_links_are_left_alone():
+    # The assignment and the course keep their ids, and a classic quiz
+    # submission's id is not a student's id even when the numbers match.
+    text = ("/courses/1/assignments/98765/submissions/12 and "
+            "/courses/98765/grades/12 and /courses/1/quizzes/5/"
+            "submissions/98765")
     assert cc.project_text(text, _prepared()) == text
 
 

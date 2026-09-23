@@ -36,6 +36,10 @@ Student privacy:
   name, so for "Martin Luther King Jr." the name "King" reached the
   assistant as written, and a "Jr." elsewhere in the course was hidden
   instead.
+- Privacy fix: a link in course content to a student's grades, to an
+  assignment submission, or to a profile showed the student's Canvas
+  ID number. Now it shows the student's label, and Morrow puts the
+  number back when it saves the content.
 - Some names are still not hidden, and the consent page lists them: a
   name Canvas does not list for the student, such as a nickname; a
   course named for its student, such as an independent study; and a
