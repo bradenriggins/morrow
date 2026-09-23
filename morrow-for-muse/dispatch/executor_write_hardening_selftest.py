@@ -1109,7 +1109,7 @@ def _t_notification_failure_loud():
     fake = mock.MagicMock()
     fake.on_expiry_detected.return_value = None
     fake.quarantine_op.return_value = None
-    fake.quarantined_ops.return_value = [{"op_id": "x"}]
+    fake.paused_ops.return_value = [{"op_id": "x"}]
     fake.write_notify_expired.side_effect = OSError("disk full")
     fake.write_notify_stale.side_effect = OSError("disk full")
     err = io.StringIO()

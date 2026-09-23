@@ -41,6 +41,19 @@ Failure modes this suite pins down (written before the code):
      request as the agent wrote it, with labels, and says the real text
      goes back only when the change is sent. (Added in the final sweep,
      2026-09-23, written before the fix.)
+ 10. A course given by its SIS code (course_id "sis_course_id:BIO101",
+     which the path check accepts) skipped the roster read, because the
+     roster read and the projection knew a course only by its number:
+     the page reached the agent and the journal with every name, email,
+     and login. Such a course is now refused before any Canvas call, and
+     the projection refuses content from a course it cannot identify
+     instead of passing it through. (Round-2 finding, 2026-09-23,
+     written before the fix.)
+ 11. plan-write now names the object a change names by its title (the
+     page "Week 1", not "week-1"). A title can name a student, so the
+     title reaches the agent with labels, and the prepared write on
+     disk keeps no name. (Round-2 finding, 2026-09-23, written before
+     the fix.)
 
 The run writes a repeatable artifact of the flow to
 .selftest-work/course-content-e2e-artifact.json (labels only).
@@ -410,6 +423,85 @@ def test_a_dry_run_of_a_label_the_model_wrote_shows_the_label():
     text = json.dumps(out)
     assert _leaks(text) == [], text[:2000]
     assert label in text
+
+
+# -- 10 -----------------------------------------------------------------------
+
+SIS = "sis_course_id:BIO101"
+
+
+class SisCanvas(Canvas):
+    """Canvas answers a course's SIS form as the course itself."""
+
+    def raw_request(self, method, url, headers, body, is_write=False,
+                    max_bytes=None):
+        return super().raw_request(
+            method, url.replace("/courses/" + SIS, "/courses/1"), headers,
+            body, is_write, max_bytes)
+
+
+@pytest.mark.parametrize("op, params", [
+    (SHOW, {"course_id": SIS, "url_or_id": "week-1"}),
+    (("canvas_get_single_course_courses", "GET", "/api/v1/courses/{id}"),
+     {"id": SIS}),
+])
+def test_a_course_given_by_its_sis_code_is_refused_before_any_call(op,
+                                                                   params):
+    from failures.translator import translate
+    session = SisCanvas()
+    name, method, path = op
+    with pytest.raises(ex.InvalidCourseId) as info:
+        ex.dispatch_catalog_op(name, method, path, "read", dict(params),
+                               pack=_pack(), session=session)
+    assert session.calls == []
+    assert _leaks(_journal_text()) == [], _journal_text()[-2000:]
+    assert "Nothing was sent" in str(info.value)
+    tr = translate("reading a page", info.value)
+    assert tr.mode_id == "query-course-id-invalid", tr.mode_id
+
+
+def test_a_change_to_a_course_given_by_its_sis_code_is_refused():
+    _edit_mode()
+    session = SisCanvas()
+    name, method, path = UPDATE
+    with pytest.raises(ex.ExecutorError):
+        ex.dispatch_catalog_op(
+            name, method, path, "write",
+            {"course_id": SIS, "url_or_id": "week-1"}, pack=_pack(),
+            session=session, mode_ctx=_ctx(),
+            extra={"body": {"wiki_page": {"title": "Week 2"}}})
+    assert session.calls == []
+    assert ex.journal_pending_ops() == []
+
+
+def test_content_from_a_course_the_projection_cannot_identify_is_refused():
+    from privacy import executor_wire as wire
+    entry = {"name": "canvas_show_page_courses", "provider": "canvas",
+             "request": {"method": "GET", "url": BASE
+                         + "/api/v1/courses/%s/pages/week-1" % SIS}}
+    with pytest.raises(ex.ExecutorError):
+        wire._project_course_content(
+            entry, {"receipt": {"body": BODY}}, BASE, {},
+            error_cls=ex.ExecutorError)
+
+
+# -- 11 -----------------------------------------------------------------------
+
+def test_an_object_title_that_names_a_student_is_shown_with_a_label():
+    session = Canvas(page_title="Make-up plan for Jane Doe")
+    name, method, path = UPDATE
+    prepared = ex.prepare_plan_write(
+        name, method, path, dict(PAGE_PARAMS),
+        {"wiki_page": {"published": True}}, session, _pack())
+    text = prepared["approval_display"]
+    assert _leaks(text) == [], text
+    assert 'Change the page "Make-up plan for Student A' in text, text
+    with open(ex.pending_write_path(prepared["op_id"]),
+              encoding="utf-8") as fh:
+        assert _leaks(fh.read()) == []
+    order = session.paths()
+    assert order.index(("GET", "/api/v1/courses/1/users")) \
+        < order.index(("GET", "/api/v1/courses/1/pages/week-1"))
 
 
 def _artifact(record):

@@ -42,6 +42,7 @@ from privacy import course_content as _content
 SOURCE_VAULT_ENV_VAR = "MORROW_SOURCE_VAULT_PATH"
 SOURCE_VAULT_BASENAME = "morrow_source_vault.json"
 _COURSE_ID_RE = re.compile(r"/courses/(\d+)", re.IGNORECASE)
+_COURSE_SEGMENT_RE = re.compile(r"/courses/([^/?#]+)", re.IGNORECASE)
 
 # Fields that, together with an "id", mark a bare dict as a learner
 # record. Plain "name" is deliberately excluded: assignments, courses,
@@ -102,6 +103,20 @@ def _entry_course_id(entry):
         match = _COURSE_ID_RE.search(url or "")
         if match:
             return match.group(1)
+    return None
+
+
+def _unnumbered_course(entry):
+    """The first course an entry's URLs name by something other than its
+    number (a SIS form), or None. Template slots do not count."""
+    try:
+        urls = _admission.extract_urls(entry)
+    except Exception:
+        urls = []
+    for url in urls:
+        for segment in _COURSE_SEGMENT_RE.findall(url or ""):
+            if not segment.isdigit() and "{" not in segment:
+                return segment
     return None
 
 
@@ -368,6 +383,11 @@ def _project_course_content(entry, result, tenant_base, lane_context,
     receipt = result.get("receipt") if isinstance(result, dict) else None
     if receipt is None:
         return result
+    if _unnumbered_course(entry) is not None:
+        raise error_cls(
+            "course content for entry %r comes from a course not named by "
+            "its number, so its students cannot be identified; refusing "
+            "rather than showing student names" % entry.get("name"))
     course_id = _entry_course_id(entry)
     if course_id is None:
         synced = list(_COURSE_ROSTERS.get() or {})

@@ -533,9 +533,14 @@ def _t_proxy_generic_call_methods_allowlisted():
             assert ("def %s(" % name) in inspect.getsource(lc.ProxyCDP), \
                 "ProxyCDP must shadow %s (dedicated route)" % name
         via_generic = set()
-        for rel in ("local_chromium.py", "item_bank_sdk.py",
-                    os.path.join("..", "session", "cdp.py"),
-                    os.path.join("..", "session", "capture.py")):
+        sources = ["local_chromium.py", "item_bank_sdk.py",
+                   os.path.join("..", "session", "cdp.py")]
+        # The rig-only header capture is left out of the release
+        # (scripts/carve.py DEV_ONLY), where this suite also ships.
+        capture = os.path.join("..", "session", "capture.py")
+        if os.path.exists(os.path.join(HERE, capture)):
+            sources.append(capture)
+        for rel in sources:
             text = open(os.path.join(HERE, rel)).read()
             via_generic |= set(re.findall(
                 r'\.call\(\s*(?:[a-z_]+\s*,\s*)?"([A-Za-z]+\.[A-Za-z]+)"',

@@ -94,7 +94,9 @@ def test_create_and_delete_read_as_plain_actions():
         record, {"course_id": "101"}, entry=post)
     assert "Create an assignment" in text
     assert "Name: Essay 1" in text and "Points: 10" in text
-    assert "Due date: 2026-10-01T23:59:00Z" in text
+    # Dates read as a day and a time; with no time zone known, in UTC.
+    assert "Due date: Thursday, October 1, 2026 at 11:59 PM (UTC)" in text
+    assert "2026-10-01T23:59:00Z" not in text
     delete = ex.catalog_descriptor_to_entry(
         "canvas_delete_assignment", "DELETE",
         "/api/v1/courses/{course_id}/assignments/{id}", "write")
@@ -146,8 +148,8 @@ def test_course_level_and_batch_changes_read_as_plain_actions():
         assert sentence in text, text
         for word in banned:
             assert word not in text, (word, text)
-        assert "Due date: 2026-10-01T23:59:00Z" in text or \
-            "Name: Bio 101 (Fall)" in text
+        assert "Due date: Thursday, October 1, 2026 at 11:59 PM (UTC)" \
+            in text or "Name: Bio 101 (Fall)" in text
 
 
 def test_failure_labels_for_batch_changes_are_plain():

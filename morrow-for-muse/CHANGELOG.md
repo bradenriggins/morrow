@@ -44,6 +44,11 @@ Student privacy:
 - The consent page says that on some Muse computers, the network that
   carries traffic out of the computer can read that traffic, including
   your Canvas sign-in and the course pages Morrow loads.
+- Privacy fix: a course given by its SIS code (for example
+  `sis_course_id:BIO101`) skipped the step that hides student names, so
+  a page's names, emails, and logins reached the assistant. Morrow now
+  refuses such a course before it reads anything, and the assistant
+  asks for the course by name or by the number in its Canvas address.
 
 Changes to your courses:
 
@@ -98,6 +103,22 @@ Changes to your courses:
 - A course page whose title starts with "Login" (for example "Login
   Help") can be read and changed. Morrow took it for Canvas's sign-in
   page, paused every change, and said your Canvas connection expired.
+- The approval names what a change touches by its title, for example
+  Delete the assignment "Week 3 Quiz", never only by its number.
+  Morrow reads the page, assignment, module, quiz, discussion, or item
+  bank first. If it cannot, nothing is prepared. If it was renamed
+  before you approve, nothing is sent, and the assistant prepares the
+  change again for you to approve. A title that names a student shows
+  the student's label.
+- Every change reads as what it does. Restoring a page to an earlier
+  version says it replaces what the page says now; replacing the
+  course's blackout dates says a date not on the list is deleted;
+  adding a course to your favorites, marking a module item done, and
+  reordering quiz questions say so.
+- Dates in an approval are shown in your time zone (your timezone
+  setting, else the course's time zone), for example "Wednesday,
+  September 30, 2026 at 7:59 PM (America/New_York)". With neither set,
+  they are shown in UTC and say so.
 
 Settings and undo:
 
@@ -141,6 +162,20 @@ Messages:
   (the assistant reads the course before it prepares it again), or it
   was never sent (a prepared change waits one hour). It was reported as
   a failure Morrow could not explain.
+- When changes are paused because another Canvas account signed in on
+  the helper page, you are told to sign out there and sign back in with
+  your own account. When they are paused because your sign-in expired
+  while Morrow worked in the helper browser, you are told to sign in
+  again. Before, both said that someone who looks after your setup
+  paused changes and that you could not lift the pause.
+- When Morrow stops a change before sending it (the helper page had no
+  security token for changes, no account was confirmed as yours, the
+  account check got no answer, or the helper browser or Item Banks
+  could not be reached), you are told nothing was sent. Before, some of
+  these said the change might have been applied.
+- The notice about paused changes counts only changes that are still
+  waiting for you, not earlier expired sign-ins, and it goes away once
+  nothing waits.
 
 Installing and the docs:
 
@@ -187,6 +222,12 @@ Installing and the docs:
   stopped before it started. The option now works in either place, and
   the examples leave it out: Morrow reads your Canvas address from
   `helper/env`.
+- The documented `python3 dispatch/executor.py` runs even when the
+  computer's Python has another package named `dispatch` (on a Mac,
+  PyObjC ships one). Every executor command failed there.
+- The shipped `transport/local_chromium_selftest.py` runs in the
+  release: its allowlist check no longer opens a file the release
+  leaves out.
 
 Technical notes:
 
@@ -272,6 +313,40 @@ Technical notes:
   leaves a process running. Nothing ran them before. The Chromium and
   keepalive selftests pass on macOS: a check that needs Linux's /proc
   uses a stand-in there, or is skipped when there is nothing to read.
+- `reauth/state_machine.py` records a `cause` in the write halt file
+  (`session_expired` or `account_mismatch`) and `halt_cause()` reads
+  it; a halt file from 0.4.0 keeps its meaning through its reason text.
+  `transport/chromium_session.py` records `session_expired` for a
+  session death and `account_mismatch` for a different signed-in
+  account. New failure mode `write-halt-account-mismatch`.
+- Chromium-lane refusals before the page's fetch are `WriteNotAttempted`
+  subclasses, so the claim is released and nothing is journaled as
+  possibly applied: `CsrfWriteNotSent`, `PrincipalNotPinned`,
+  `PrincipalMismatch`, `AccountCheckFailed`, `HelperNotReached`,
+  `ItemBanksNotReached`, and `RequestNotSendable`. New failure modes
+  `canvas-account-check-failed`, `helper-browser-not-reached`, and
+  `item-banks-not-reached`; with the two prepared-write modes, the catalog has 99 modes. An Item Banks
+  page-program outcome other than the program's own is now
+  `ItemBankSdkMaybeAttempted` (uncertain), never "not sent".
+- `reauth/state_machine.py` `paused_ops()` (one entry per op, newest
+  status quarantined or awaiting_approval) sets every notice count; a
+  verified resume with nothing waiting removes `notify.txt`. SKILL.md
+  tells the agent to run `reauth/state_machine.py notify` after resume.
+- `dispatch/executor.py` refuses a request whose course is not a plain
+  number (`InvalidCourseId`, mode `query-course-id-invalid`) before
+  anything is sent, and `privacy/executor_wire.py` refuses content from
+  a course not named by its number instead of passing it through.
+- `plan-write` reads the object the write names (`_read_named_object`:
+  the deepest member on the path the write readback re-reads, or the
+  course of a favorite), labels its title through the course roster,
+  and stores `object_slot` and `object_name` in the sealed approval
+  target and a digest of the title in the plan; `approve-write` reads
+  it again and refuses a changed title before the approval is used.
+  `dispatch/approval_display.py` has its own words for action routes
+  (`_ROUTE_WORDS`), plain nouns for every live-proven collection, and
+  `render_educator_display(..., time_zone=)`.
+- `dispatch/executor.py` puts the tree root on `sys.path` before its
+  first tree import.
 
 ## 0.4.0 (2026-09-22)
 

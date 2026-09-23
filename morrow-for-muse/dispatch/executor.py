@@ -135,6 +135,7 @@ from dispatch.admission import (  # noqa: E402
     request_subject as admission_request_subject,
     request_digest as admission_request_digest,
     write_target_course_id as admission_write_target_course_id,
+    _render_path as admission_render_path,
 )
 from config.paths import morrow_home, read_tree_uuid  # noqa: E402
 # W6-P2-7: one-shot journal-secret uses go through a zeroizable buffer
@@ -312,6 +313,13 @@ class CourseRosterUnavailable(ExecutorError):
     content could not be hidden."""
 
 
+class InvalidCourseId(ExecutorError):
+    """A request names its course by something other than the course's
+    Canvas number (a SIS form such as sis_course_id:BIO101). Refused
+    before anything is sent; the failure catalog matches this name, as
+    it does query/chain.py's refusal of the same kind."""
+
+
 class RedirectDowngradeRefused(ExecutorError):
     """An https:// -> http:// redirect, or a redirect off the LMS host,
     was refused (W4-P2-7).
@@ -402,7 +410,7 @@ def _on_session_death(op_id, entry_name, evidence):
     # via `state_machine.py notify` and the helper /status, so a
     # missing file is detectable, not silent.
     try:
-        n_paused = len(_rsm.quarantined_ops())
+        n_paused = len(_rsm.paused_ops())
     except Exception:
         n_paused = -1  # count unknown; the warning below still names it
     try:
@@ -439,7 +447,7 @@ def _on_stale_verify(op_id, entry_name, evidence):
     # W6-P1-S2: see _on_session_dead: never swallow a failed educator
     # notification silently.
     try:
-        _rsm.write_notify_stale(len(_rsm.quarantined_ops()))
+        _rsm.write_notify_stale(len(_rsm.paused_ops()))
     except Exception as exc:
         print("MORROW WARNING: the educator notification for the stale "
               "verify of op %s FAILED to write (%s); read the quarantine "
@@ -8121,6 +8129,26 @@ def _read_all_pages(session, url):
     return items
 
 
+_COURSE_NUMBER_RE = re.compile(r"[0-9]+")
+
+
+def _require_numbered_course(entry, params):
+    """Refuse a request whose course is not named by its Canvas number.
+    The roster read, the course-content projection, the learner-label
+    scope, and the course checks all know a course by its number. A SIS
+    form (sis_course_id:BIO101) reaches the same course in Canvas but
+    none of them, so the students named in its content would reach the
+    agent and the journal unlabeled."""
+    course_id = _write_target_course_id(entry, params)
+    if course_id is not None and not _COURSE_NUMBER_RE.fullmatch(
+            str(course_id)):
+        raise InvalidCourseId(
+            "the course is given as %r, not as its Canvas course number; "
+            "find the course by name (canvas_list_courses) and use the "
+            "number in its Canvas address. Nothing was sent."
+            % str(course_id)[:80])
+
+
 def _read_course_roster_first(entry, params, session, tenant_base,
                               dry_run, op_id=None):
     """Read the course's whole student roster before a Chromium-lane
@@ -8145,8 +8173,9 @@ def _read_course_roster_first(entry, params, session, tenant_base,
     # The course the request path names, or for an Item Bank route the
     # course its launch is bound to (params.course_id).
     course_id = _write_target_course_id(entry, params)
-    if course_id is None or not str(course_id).isdigit():
+    if course_id is None:
         return
+    _require_numbered_course(entry, params)
     from privacy import executor_wire as _wire
     base = session.base_for("canvas").rstrip("/")
     users_url = "%s/api/v1/courses/%s/users?%s" % (
@@ -8251,6 +8280,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         if isinstance(_aux, dict) and _aux.get("url"):
             _assert_read_only_block(entry, _aux, _key)
     live_proven_gate(entry, unproven_override, journal=not dry_run)
+    _require_numbered_course(entry, params)
     if is_write:
         _require_course_resolution(entry, params, mode_ctx)
 
@@ -9959,20 +9989,156 @@ def _read_course_identity(entry: dict, params: dict, session, pack: dict,
     term_name = term.get("name") if isinstance(term, dict) else term
     if isinstance(term_name, str) and term_name.strip():
         identity["term"] = term_name
+    zone = course.get("time_zone")
+    if isinstance(zone, str) and zone.strip():
+        identity["time_zone"] = zone.strip()
     return identity
+
+
+# The objects Canvas serves by GET: the routes the write readback
+# re-reads (a course is named by _read_course_identity instead). A
+# favorite names a course in a user route; the course is read.
+_NAMED_OBJECT_READ_ALIASES = {
+    "/api/v1/users/self/favorites/courses/{id}": "/api/v1/courses/{id}",
+}
+
+
+def _named_object_route(entry, params):
+    """(read URL template, path slot) for the object a write names: the
+    deepest object on its path that Canvas serves by GET (the page a
+    revision restores, the module an item goes into, the assignment
+    itself). None when the path names no such object."""
+    url = str(((entry or {}).get("request") or {}).get("url") or "")
+    url = url.split("?", 1)[0]
+    base = re.match(r"^\{[a-z_]+_base\}", url)
+    if not base:
+        return None
+    template = "/" + url[base.end():].strip("/")
+    alias = _NAMED_OBJECT_READ_ALIASES.get(template)
+    if alias is not None:
+        return base.group(0) + alias, alias.rsplit("/", 1)[1][1:-1]
+    tparts = template.strip("/").split("/")
+    rparts = admission_render_path(url, params).strip("/").split("/")
+    if len(tparts) != len(rparts):
+        return None
+    for n in range(len(tparts), 0, -1):
+        slot = tparts[n - 1]
+        if not (slot.startswith("{") and slot.endswith("}")):
+            continue
+        rendered = "/" + "/".join(rparts[:n])
+        if _WRITE_READBACK_MEMBER_RE.match(rendered) or \
+                _IB_READBACK_BANK_MEMBER_RE.match(rendered):
+            return (base.group(0) + "/" + "/".join(tparts[:n]),
+                    slot[1:-1])
+    return None
+
+
+def _object_title(payload):
+    """The name Canvas gives an object: its title or name (a New Quiz
+    item keeps its title under "entry", an item bank under "bank")."""
+    if not isinstance(payload, dict):
+        return None
+    for node in (payload, payload.get("entry"), payload.get("bank")):
+        if isinstance(node, dict):
+            for key in ("title", "name", "display_name"):
+                value = node.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    return None
+
+
+def _read_named_object(entry, params, session, pack, tenant_base,
+                       project=True, stage="prepared"):
+    """The object a write names, read before the educator approves it:
+    {"object_slot", "object_name", "object_name_digest"}, or None when
+    the path names no object Canvas serves by GET. object_name is
+    labeled like course content (project=True), so a student named in a
+    title reaches the agent as a label; it is None for an object with
+    no name. Refuses (TargetIdentityMismatch) when the object cannot be
+    read: the educator never approves a change to an object Morrow
+    could not name."""
+    found = _named_object_route(entry, params)
+    if found is None:
+        return None
+    template, slot = found
+    from privacy import executor_wire as _wire
+    from dispatch.approval_display import _noun
+    read_entry = dict(entry, effects="read",
+                      request={"method": "GET", "url": template,
+                               "headers": {}})
+    config = {"canvas_base": session.base_for("canvas")}
+    words = template.split("?", 1)[0].split("/")
+    what = "%s %s" % (_noun(words[-2], words[-4] if len(words) > 3
+                            else None), params.get(slot))
+    rosters = _wire.begin_course_rosters()
+    try:
+        if project:
+            _read_course_roster_first(read_entry, params, session,
+                                      tenant_base, dry_run=False)
+        rmethod, rurl, rheaders, rbody = build_request(
+            read_entry, read_entry["request"], params, session, pack,
+            config, {})
+        try:
+            _status, _hdrs, raw, _attempts = session.raw_request(
+                rmethod, rurl, rheaders, rbody, is_write=False)
+        except ProviderHttpError as exc:
+            missing = exc.status in (404, 410)
+            raise TargetIdentityMismatch(
+                "the %s %s in Canvas (HTTP %s), so it cannot be named for "
+                "the educator. Nothing was %s. Check which one the "
+                "educator means." % (what, "was not found" if missing
+                                     else "could not be read", exc.status,
+                                     stage))
+        title = _object_title(_parse_provider_json(raw, "%s read" % what))
+        shown = title
+        if project and title:
+            view = {"name": entry.get("name"),
+                    "provider": entry.get("provider") or "canvas",
+                    "effects": "read",
+                    "request": {"method": "GET",
+                                "url": rurl.split("?", 1)[0]}}
+            shown = _wire.project_learner_result(
+                view, {"receipt": {"name": title}}, tenant_base,
+                error_cls=ExecutorError)["receipt"]["name"]
+    finally:
+        _wire.end_course_rosters(rosters)
+    return {"object_slot": slot, "object_name": shown,
+            "object_name_digest": hashlib.sha256(
+                (title or "").encode("utf-8")).hexdigest()}
+
+
+def _educator_time_zone(user_id, course_zone):
+    """The zone the approval shows dates in: the educator's timezone
+    setting, then the course's time zone in Canvas; None (UTC) when
+    neither is set."""
+    from config.identity import default_user_id
+    uid = user_id or default_user_id()
+    if uid:
+        try:
+            from settings import store as _settings
+            name = _settings.get_setting(uid, "timezone")
+        except Exception:
+            name = None
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return course_zone
 
 
 def prepare_plan_write(name: str, method: str, path_template: str,
                        params: dict, body, session, pack: dict,
                        provider: str = "canvas",
                        ttl_seconds: int = 3600,
-                       conversation_id: str | None = None) -> dict:
+                       conversation_id: str | None = None,
+                       user_id: str | None = None) -> dict:
     """Prepare one Plan-mode catalog write for the educator's approval.
 
-    Runs the catalog and policy gates, reads the target course, builds
-    the frozen plan and the unsigned approval record bound to the exact
-    request, and stores them as a pending write. Sends nothing and
-    journals nothing. Returns what the agent shows the educator.
+    Runs the catalog and policy gates, reads the target course and the
+    object the write names (_read_named_object), builds the frozen plan
+    and the unsigned approval record bound to the exact request, and
+    stores them as a pending write. Sends nothing and journals nothing.
+    Returns what the agent shows the educator; its dates are in the
+    educator's time zone (user_id's timezone setting, then the
+    course's).
 
     Students named by label (or by the echoed "<typed name> (label)"
     form, checked against conversation_id) are stored as bare labels,
@@ -10021,6 +10187,10 @@ def prepare_plan_write(name: str, method: str, path_template: str,
     if course_id is not None:
         target = _read_course_identity(entry, params, session, pack,
                                        course_id)
+    time_zone = _educator_time_zone(user_id, (target or {}).get("time_zone"))
+    named = _read_named_object(entry, params, session, pack, tenant_base)
+    if named is not None:
+        target = dict(target or {}, **named)
     op_id = str(uuid.uuid4())
     subject = admission_request_subject(entry, params)
     if learner_tokens:
@@ -10032,7 +10202,7 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         "before_state_digest": "",
         "frozen_readback": ({"course_id": target["course_id"],
                              "name": target["course_name"]}
-                            if target else {}),
+                            if target and course_id is not None else {}),
         "request": subject,
         "request_digest": admission_request_digest(subject),
     }
@@ -10040,7 +10210,8 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         plan["target_identity"] = target
     record = mint_approval(entry, params, tenant_base, ttl_seconds,
                            target_identity=target)
-    display = render_educator_display(record, params, entry=entry)
+    display = render_educator_display(record, params, entry=entry,
+                                      time_zone=time_zone)
     audit_detail = render_approval_display(record, params, entry=entry)
     if learner_tokens and conversation_id and course_id is not None:
         # Shown to the educator (through the agent, in this conversation
@@ -10048,7 +10219,7 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         display = _wire.apply_name_echo(display, tenant_base, course_id,
                                         conversation_id)
     where = None
-    if target:
+    if target and target.get("course_name") and course_id is not None:
         where = 'the course "%s"' % target["course_name"]
     elif course_id is not None:
         where = "course %s" % course_id
@@ -10069,7 +10240,8 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         "status": "awaiting_approval",
         "op_id": op_id,
         "course": ({"id": target["course_id"], "name": target["course_name"],
-                    "term": target.get("term")} if target else None),
+                    "term": target.get("term")}
+                   if target and course_id is not None else None),
         "approval_display": display,
         "audit_detail": audit_detail,
         "expires_at": record.get("expires_at"),
@@ -10080,6 +10252,32 @@ def prepare_plan_write(name: str, method: str, path_template: str,
                     "approve, run approve-write --op-id %s "
                     "--authorization \"<their reply, verbatim>\"." % op_id),
     }
+
+
+def _recheck_named_object(descriptor, target, session, pack):
+    """Before an approved write is sent, read the object it names again:
+    it must still be the object the educator was shown by name (the
+    prepared plan's target). Refuses (TargetIdentityMismatch) before the
+    approval is used."""
+    expected = (target or {}).get("object_name_digest") \
+        if isinstance(target, dict) else None
+    if not expected:
+        return
+    body = descriptor.get("body")
+    provider = descriptor.get("provider") or "canvas"
+    entry = catalog_descriptor_to_entry(
+        descriptor.get("name"), descriptor.get("method"),
+        descriptor.get("path"), None, provider, None,
+        {"body": body} if body is not None else None)
+    seen = _read_named_object(entry, descriptor.get("params") or {},
+                              session, pack, session.base_for(provider),
+                              project=False, stage="sent")
+    if seen is None or seen["object_name_digest"] != expected:
+        raise TargetIdentityMismatch(
+            "the object this change names was renamed or replaced in "
+            "Canvas after the educator approved it by name. Nothing was "
+            "sent. Run plan-write again and show the educator the new "
+            "approval.")
 
 
 def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
@@ -10130,6 +10328,9 @@ def _approve_plan_write(op_id, authorization, session, pack, mode_ctx,
     elif descriptor.get("method") and descriptor.get("path"):
         label["text"] = _describe_operation(descriptor["method"],
                                             descriptor["path"])
+    _recheck_named_object(
+        descriptor, (doc.get("plan") or {}).get("target_identity"),
+        session, pack)
     plan_path = path[:-len(".json")] + ".plan.json"
     _write_private_json(plan_path, doc.get("plan") or {})
     plan = load_frozen_plan(plan_path, descriptor.get("name"))
@@ -10723,12 +10924,13 @@ def main(argv=None):
                 body = None
                 if args.body is not None:
                     body = _load_body(args.body)
+                mode_ctx = _mode_ctx_from_args(args) or {}
                 out = prepare_plan_write(
                     args.name, args.method, args.path,
                     _load_params(args.params), body, session, pack,
                     provider=args.provider,
-                    conversation_id=(_mode_ctx_from_args(args) or {}).get(
-                        "conversation_id"))
+                    conversation_id=mode_ctx.get("conversation_id"),
+                    user_id=mode_ctx.get("user_id"))
             else:
                 out = approve_plan_write(args.op_id, args.authorization,
                                          session, pack,

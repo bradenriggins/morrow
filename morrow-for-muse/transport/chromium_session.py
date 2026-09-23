@@ -105,15 +105,47 @@ class ChromiumSessionDead(ex.ExecutorError):
     attempted. Nothing is journaled, so the op_id stays reusable."""
 
 
-class PrincipalMismatch(ex.ExecutorError):
+# The refusals below happen before the lane's fetch. They subclass
+# WriteNotAttempted because the executor marks a write attempted before it
+# calls the lane: that class is how it learns nothing was sent, releases
+# the claim, and journals nothing as possibly applied. Each keeps its own
+# class name, which the failure catalog matches for its plain message.
+
+class PrincipalMismatch(ex.WriteNotAttempted):
     """The Canvas account signed in to the helper browser is not the
     pinned account. Nothing was sent; the re-auth write halt stands
     until the pinned account signs back in (reauth resume)."""
 
 
-class PrincipalNotPinned(ex.ExecutorError):
+class PrincipalNotPinned(ex.WriteNotAttempted):
     """No Canvas account is pinned (or the pin store cannot be trusted),
     so a write cannot prove it runs as the educator. Nothing was sent."""
+
+
+class AccountCheckFailed(ex.WriteNotAttempted):
+    """The check of which Canvas account is signed in to the helper got
+    no account back. Nothing was sent."""
+
+
+class CsrfWriteNotSent(ex.WriteNotAttempted):
+    """The helper's Canvas page had no _csrf_token cookie, so the page
+    refused to send the write (local_chromium.CsrfTokenMissing). Nothing
+    was sent."""
+
+
+class HelperNotReached(ex.WriteNotAttempted):
+    """The helper browser could not be started, attached, or checked for
+    this session's first call. Nothing was sent."""
+
+
+class ItemBanksNotReached(ex.WriteNotAttempted):
+    """The Item Banks lane failed before its page-context call was
+    dispatched (tool lookup, launch, token, course scope). Nothing was
+    sent."""
+
+
+class RequestNotSendable(ex.WriteNotAttempted):
+    """The lane cannot encode this request body. Nothing was sent."""
 
 
 # Final muse audit M3: the signed-in account is compared with the pinned
@@ -269,7 +301,7 @@ def _decode_body(body_bytes, headers):
     try:
         obj = json.loads(body_bytes.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
-        raise ex.WriteNotAttempted(
+        raise RequestNotSendable(
             "chromium backend cannot encode a non-JSON request body; "
             "nothing was sent") from None
     if isinstance(obj, dict):
@@ -277,7 +309,7 @@ def _decode_body(body_bytes, headers):
     if isinstance(obj, list) and obj and all(
             isinstance(item, dict) for item in obj):
         return obj, True
-    raise ex.WriteNotAttempted(
+    raise RequestNotSendable(
         "chromium backend sends a JSON object or a JSON array of objects "
         "as the request body; nothing was sent")
 
@@ -366,9 +398,10 @@ class ChromiumSession:
             rsm.impose_halt(
                 detection,
                 reason="chromium session death (%s)"
-                % (self._dead_cause_key or "unknown"))
+                % (self._dead_cause_key or "unknown"),
+                cause="session_expired")
             rsm.quarantine_session(self._dead_cause_key, detection)
-            rsm.write_notify_expired(len(rsm.quarantined_ops()))
+            rsm.write_notify_expired(len(rsm.paused_ops()))
         except Exception:
             pass
 
@@ -568,7 +601,7 @@ class ChromiumSession:
             raise self._dead_exc("no live session when checking the "
                                  "signed-in account")
         except Exception as exc:
-            raise ex.ExecutorError(
+            raise AccountCheckFailed(
                 "chromium backend: could not confirm which Canvas account "
                 "is signed in (%s); nothing was sent" % type(exc).__name__)
         try:
@@ -577,7 +610,7 @@ class ChromiumSession:
             me = None
         live_id = me.get("id") if isinstance(me, dict) else None
         if live_id in (None, ""):
-            raise ex.ExecutorError(
+            raise AccountCheckFailed(
                 "chromium backend: GET %s did not return the signed-in "
                 "account (HTTP %s); nothing was sent"
                 % (_PRINCIPAL_PATH, status))
@@ -586,7 +619,8 @@ class ChromiumSession:
                 rsm.impose_halt({"signal": "principal_mismatch",
                                  "cause": "different_account_signed_in"},
                                 reason="a different Canvas account is "
-                                       "signed in to the helper")
+                                       "signed in to the helper",
+                                cause="account_mismatch")
             except Exception:
                 pass
             name = str(pin.get("name") or "").strip() or "the pinned account"
@@ -714,7 +748,7 @@ class ChromiumSession:
         """
         course_id = self._sdk_course_id
         if course_id is None:
-            raise ex.ExecutorError(
+            raise ItemBanksNotReached(
                 "Item Banks SDK lane needs params.course_id: the LTI "
                 "launch that mints the banks.build token is course-scoped; "
                 "refusing rather than launching in the wrong course")
@@ -756,7 +790,7 @@ class ChromiumSession:
                 self._mark_session_dead(exc)
                 raise self._dead_exc("Item Banks SDK session died")
             except ibsdk.ItemBankSdkError as exc:
-                raise ex.ExecutorError(
+                raise ItemBanksNotReached(
                     "Item Banks SDK lane failed (%s); no provider call "
                     "was attempted" % exc)
             except Exception as exc:  # noqa: BLE001 - transport-level failure
@@ -1012,7 +1046,13 @@ class ChromiumSession:
         (W2-P1-6); bodies are truncated at max_bytes in page context
         (W2-P2-8); 429s honor Retry-After on reads (W2-P2-7).
         """
-        transport = self._ensure_transport()
+        try:
+            transport = self._ensure_transport()
+        except ChromiumSessionDead:
+            raise
+        except Exception as exc:
+            raise HelperNotReached(
+                "%s; nothing was sent" % exc) from exc
         base = self._base
         # W2-P0-9: exact-origin check, never a prefix match. The old
         # url.startswith(base) let a sibling host (tenant.evil.com)
@@ -1051,6 +1091,10 @@ class ChromiumSession:
                 # A completed provider call proves the session was live
                 # (W4-P2-4 taxonomy evidence).
                 self._had_live_session = True
+            except lc.CsrfTokenMissing as exc:
+                if is_write:
+                    raise CsrfWriteNotSent(str(exc)) from exc
+                raise ex.ExecutorError("read transport failed: %s" % exc)
             except lc.SessionDead as exc:
                 # W2-P0-4: a dead session DURING a write is ambiguous --
                 # the page may have executed the write before the socket

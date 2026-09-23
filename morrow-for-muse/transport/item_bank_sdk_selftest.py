@@ -649,8 +649,11 @@ def _t_request_context_loss_resets():
 
 def _t_request_fetch_error_is_maybe_attempted():
     # LANE6-8: a page-level fetch that throws may still have reached
-    # the provider, so it surfaces as MaybeAttempted. A non-fetch
-    # program failure stays a plain (not-attempted) ItemBankSdkError.
+    # the provider, so it surfaces as MaybeAttempted. So does any other
+    # failed outcome of the dispatched program: the program itself
+    # reports only fetch errors, so an outcome it did not produce says
+    # nothing about whether its fetch ran. A plain ItemBankSdkError
+    # means the call was refused before dispatch (nothing was sent).
     cdp = _FakeCDP()
     s = sdk.ItemBankSdk(cdp, "https://school.instructure.com", "89585")
     assert s.launch() is True
@@ -665,13 +668,10 @@ def _t_request_fetch_error_is_maybe_attempted():
                       sdk.ItemBankSdkError)
     cdp.item_outcome = {"ok": False, "error": "weird program bug"}
     expect_raises("nonfetch", lambda: s.get_item("1", "2"),
-                  sdk.ItemBankSdkError)
-    try:
-        s.get_item("1", "2")
-    except sdk.ItemBankSdkMaybeAttempted:
-        raise AssertionError("non-fetch failure must not be MaybeAttempted")
-    except sdk.ItemBankSdkError:
-        pass
+                  sdk.ItemBankSdkMaybeAttempted)
+    cdp.item_outcome = "not an object"
+    expect_raises("non-object outcome", lambda: s.get_item("1", "2"),
+                  sdk.ItemBankSdkMaybeAttempted)
     s.close()
 
 

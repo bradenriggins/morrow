@@ -141,7 +141,8 @@ def test_a_prepared_write_that_is_gone_is_the_change_you_approved(
     ("PUT", "/api/v1/courses/{course_id}/settings", {"course_id": 5},
      "changing the settings in course 5"),
     ("POST", "/api/v1/courses/{course_id}/quizzes/{id}/reorder",
-     {"course_id": 5, "id": 3}, "changing a quiz in course 5"),
+     {"course_id": 5, "id": 3},
+     "reordering the questions of a quiz in course 5"),
     ("PUT", "/api/v1/courses/{course_id}/pages/{url_or_id}",
      {"course_id": "not a number", "url_or_id": "x"}, "changing a page"),
 ])

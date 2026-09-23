@@ -164,3 +164,20 @@ def test_approve_write_runs_in_script_mode_beside_an_installed_dispatch(
                       if line.startswith("{")][-1])
     assert "cannot import" not in text
     assert out["error"] != "ImportError", out
+def test_executor_run_as_a_script_uses_the_trees_packages(tmp_path):
+    # `python3 dispatch/executor.py` puts dispatch/ first on sys.path, not the
+    # tree root, so a `dispatch` package found on PYTHONPATH (PyObjC ships one
+    # on macOS) must not be the one the executor imports.
+    for name in TREE_PACKAGES:
+        pkg = tmp_path / "shadow" / name
+        pkg.mkdir(parents=True)
+        (pkg / "__init__.py").write_text("SHADOW = True\n")
+    env = dict(os.environ, PYTHONPATH=str(tmp_path / "shadow"))
+    result = subprocess.run(
+        [sys.executable, os.path.join("dispatch", "executor.py"),
+         "--canvas-base", "https://canvas.example.edu",
+         "catalog", "--name", "users_self", "--method", "GET",
+         "--path", "/api/v1/users/self", "--dry-run"],
+        cwd=TREE, env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["dry_run"] is True

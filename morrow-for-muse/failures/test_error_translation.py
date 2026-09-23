@@ -166,6 +166,18 @@ class PrincipalNotPinned(Exception):
     pass
 
 
+class AccountCheckFailed(Exception):
+    pass
+
+
+class HelperNotReached(Exception):
+    pass
+
+
+class ItemBanksNotReached(Exception):
+    pass
+
+
 class BrowserStaleCommand(Exception):
     pass
 
@@ -381,6 +393,14 @@ def _session_expired_halt():
     return exc
 
 
+def _account_mismatch_halt():
+    """The halt the Chromium lane imposes when another account signed in."""
+    exc = WriteHaltActive("write halt is active: a different Canvas "
+                          "account is signed in to the helper")
+    exc.halt_cause = "account_mismatch"
+    return exc
+
+
 MODE_CASES = {
     "query-arguments-invalid":
         lambda: _qchain.QueryArgumentsInvalid(
@@ -519,6 +539,14 @@ MODE_CASES = {
         "account this connector is pinned to (Edu T. Or)."),
     "canvas-account-not-pinned": lambda: PrincipalNotPinned(
         "chromium backend: no Canvas account is pinned yet"),
+    "canvas-account-check-failed": lambda: AccountCheckFailed(
+        "chromium backend: GET /api/v1/users/self did not return the "
+        "signed-in account (HTTP 500); nothing was sent"),
+    "helper-browser-not-reached": lambda: HelperNotReached(
+        "no Chromium binary found; nothing was sent"),
+    "item-banks-not-reached": lambda: ItemBanksNotReached(
+        "Item Banks SDK lane failed (refusing ambiguous Item Banks "
+        "launch); no provider call was attempted"),
     "setup-tenant-not-configured": lambda: {
         "error_class": "SessionMissing", "provider": "canvas",
         "error_text": "chromium backend needs a Canvas base URL: pass "
@@ -580,6 +608,7 @@ MODE_CASES = {
     "form-lane-fail-closed": lambda: {"gate": "FormTransportUnavailable"},
     "write-halt-active": lambda: WriteHaltActive("halt engaged"),
     "write-halt-session-expired": _session_expired_halt,
+    "write-halt-account-mismatch": _account_mismatch_halt,
     "write-approval-missing": lambda: {"gate": "WriteApprovalMissing"},
     "learner-data-gated": lambda: {"gate": "LearnerDataGated"},
     "catalog-effect-mismatch": lambda: {"gate": "CatalogEffectMismatch"},
@@ -670,8 +699,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_95_modes(self):
-        self.assertEqual(95, len(CATALOG.entries))
+    def test_catalog_has_99_modes(self):
+        self.assertEqual(99, len(CATALOG.entries))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):

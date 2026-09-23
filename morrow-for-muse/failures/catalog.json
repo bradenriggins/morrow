@@ -46,20 +46,22 @@
       "severity_hint": "medium",
       "root_cause": "The page-context write path harvests the X-CSRF-Token fresh from the _csrf_token cookie on every call. When the live document.cookie has no _csrf_token (helper tab navigated away, cookie expired, or session otherwise degraded), the write is refused before any network call. This is the fail-closed fix for the 2026-09-22 incident where missing tokens produced misleading provider 422s; the product path can no longer produce a silent missing-token write.",
       "is_not": "This is not a provider refusal: no HTTP request was sent, so there is no 422 and nothing was applied. It is not session death either (a dead session redirects API calls to the login page); it is specifically the CSRF cookie missing from a live page.",
-      "agent_message": "What was attempted: {operation}. What the evidence showed: the browser refused to send the write because the live page had no _csrf_token cookie, so no CSRF header could be built. No request reached Canvas and nothing was applied. What this means: the helper browser session is degraded (the tab may have navigated away or the cookie expired); the Canvas sign-in itself is not proven broken. What happens next: I am re-checking the helper session and re-harvesting the token from the live page, then resending the write through the normal page-context path.",
-      "auto_action": "Verify the helper session is alive and the tenant tab is open, re-harvest _csrf_token from the live document.cookie, and resend the write through the canonical page-context path.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: the Canvas page in the helper browser had no security token for changes, so Morrow did not send the change (reference {correlation_id}). What this means: nothing was sent and nothing changed. This happens when the helper tab is on another page or its Canvas sign-in cookie expired. What happens next: I will check that the helper page shows you signed in to Canvas, then prepare the change again.",
+      "auto_action": "Check the helper /status and that the helper page shows the educator signed in to Canvas (sign in again there if it does not); then run the change again: for a Plan-mode write, run plan-write again and ask the educator to approve it. Never build a CSRF header by hand.",
       "escalate_when": "the helper session is healthy and the tenant tab is open but document.cookie still has no _csrf_token",
       "signature": {
         "error_class": {
           "in": [
             "CsrfTokenMissing",
-            "BrowserCsrfTokenMissing"
+            "BrowserCsrfTokenMissing",
+            "CsrfWriteNotSent"
           ]
         }
       },
-      "signature_notes": "fail-closed pre-send refusal raised by transport/local_chromium.py (CsrfTokenMissing) or transport/browser_backend.py (BrowserCsrfTokenMissing); no provider contact happened",
+      "signature_notes": "fail-closed pre-send refusal raised by transport/local_chromium.py (CsrfTokenMissing; transport/chromium_session.py raises it for a write as CsrfWriteNotSent, a WriteNotAttempted) or transport/browser_backend.py (BrowserCsrfTokenMissing); no provider contact happened",
       "severity_hint_inventory": "config",
       "placeholders": [
+        "correlation_id",
         "operation"
       ]
     },
@@ -547,6 +549,26 @@
       "placeholders": []
     },
     {
+      "id": "item-banks-not-reached",
+      "title": "Item Banks could not be opened for the course, so nothing was sent",
+      "surface": "canvas",
+      "severity_hint": "medium",
+      "root_cause": "Item Bank requests go through the Item Banks tool that Canvas opens for the course in the helper browser. Opening it failed before the request was dispatched (the tool lookup, the launch, the access token, or the course scope), so the lane refused before sending (transport/chromium_session.py _sdk_item_request).",
+      "is_not": "This is not a change that may have applied and not an expired sign-in: nothing was sent.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow could not open Item Banks for this course in the helper browser, so it did not send the request (reference {correlation_id}). What this means: nothing was sent and nothing changed. What happens next: I will check that the helper page shows you signed in to Canvas and try again; if Item Banks still does not open, I will tell you what Canvas showed.",
+      "auto_action": "Read engineering_detail for the cause (tool lookup, launch, token, or course scope); check the helper session; then run the operation again (for a Plan-mode write, run plan-write again and ask the educator to approve it).",
+      "escalate_when": "Item Banks still does not open for the course after the helper page shows the educator signed in",
+      "signature": {
+        "error_class": "ItemBanksNotReached"
+      },
+      "signature_notes": "evidence: transport/chromium_session.py _sdk_item_request raises ItemBanksNotReached (a WriteNotAttempted) for an ItemBankSdkError raised before the page-context call is dispatched; a call whose outcome was lost after dispatch is ItemBankSdkMaybeAttempted, an uncertain write",
+      "severity_hint_inventory": "transient",
+      "placeholders": [
+        "correlation_id",
+        "operation"
+      ]
+    },
+    {
       "id": "grade-update-no-test-student",
       "title": "Grade update not applicable: course has no students to grade",
       "surface": "canvas",
@@ -702,9 +724,14 @@
       "auto_action": "Read engineering_detail for the argument that was refused, correct it, and run the command again. Nothing was sent, so the retry is safe.",
       "escalate_when": "Never on its own: the refusal is a local input check. Escalate only if a correct argument is refused.",
       "signature": {
-        "error_class": "CallerInputError"
+        "error_class": {
+          "in": [
+            "CallerInputError",
+            "RequestNotSendable"
+          ]
+        }
       },
-      "signature_notes": "evidence: 2026-09-22 final sweep: 'catalog --name canvas_bulk_update_assignment_dates ... --body [{\"id\":1}]' raised ExecutorError '--body must be a JSON object' and fell through to the unknown fallback, labeled as untrusted provider data, although nothing was sent.",
+      "signature_notes": "evidence: 2026-09-22 final sweep: 'catalog --name canvas_bulk_update_assignment_dates ... --body [{\"id\":1}]' raised ExecutorError '--body must be a JSON object' and fell through to the unknown fallback, labeled as untrusted provider data, although nothing was sent.; RequestNotSendable: transport/chromium_session.py cannot encode the request body, refused before anything is sent",
       "severity_hint_inventory": "user-action",
       "placeholders": [
         "operation",
@@ -722,14 +749,39 @@
       "auto_action": "Run helper/keepalive.sh to relaunch, then run bin/morrow start so supervision keeps it up (it starts the keepalive background loop on a machine without cron and is a no-op with cron), then re-probe /status and session health.",
       "escalate_when": "Escalate if the helper fails to come up after keepalive recovery (log the real failure from server.log), since a human may need to re-sign in.",
       "signature": {
-        "error_class": "ExecutorError",
+        "error_class": {
+          "in": [
+            "ExecutorError",
+            "HelperNotReached"
+          ]
+        },
         "error_text": {
           "contains": "login helper endpoint is down"
         }
       },
-      "signature_notes": "evidence: transport/chromium_session.py _ensure_transport raises ExecutorError('chromium backend: browser unavailable (...); the login helper endpoint is down too -- start it with helper/keepalive.sh, then retry') when the browser launch fails and the helper /status endpoint is unreachable. Previous signature keyed on 'helper_reachable', which no production code ever sets, so the entry could never match (2026-09-22 first-run audit).",
+      "signature_notes": "evidence: transport/chromium_session.py _ensure_transport raises ExecutorError('chromium backend: browser unavailable (...); the login helper endpoint is down too -- start it with helper/keepalive.sh, then retry') when the browser launch fails and the helper /status endpoint is unreachable. Previous signature keyed on 'helper_reachable', which no production code ever sets, so the entry could never match (2026-09-22 first-run audit). ChromiumSession.raw_request raises it as HelperNotReached (a WriteNotAttempted: nothing was sent) with the same text.",
       "severity_hint_inventory": "transient",
       "placeholders": []
+    },
+    {
+      "id": "helper-browser-not-reached",
+      "title": "The helper browser could not be reached, so nothing was sent",
+      "surface": "helper",
+      "severity_hint": "medium",
+      "root_cause": "The Chromium lane attaches to the helper's browser (or starts its own) on the first call of a session. That failed for a reason other than a dead Canvas session or a stopped helper service (for example no Chromium binary, or the session probe failed), so the lane refused before sending the request (transport/chromium_session.py raw_request).",
+      "is_not": "This is not an expired Canvas sign-in and not a change that may have applied: nothing was sent.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow could not reach the helper browser, so it did not send the request (reference {correlation_id}). What this means: nothing was sent and nothing changed. What happens next: I will check the helper and then try again.",
+      "auto_action": "Read engineering_detail for the cause; check the helper /status and run helper/keepalive.sh if the helper is not healthy; then run the operation again (for a Plan-mode write, run plan-write again and ask the educator to approve it).",
+      "escalate_when": "the helper is healthy and the browser still cannot be reached",
+      "signature": {
+        "error_class": "HelperNotReached"
+      },
+      "signature_notes": "evidence: transport/chromium_session.py ChromiumSession.raw_request raises HelperNotReached (a WriteNotAttempted) when _ensure_transport fails with anything other than ChromiumSessionDead; the helper-down mode takes the case where the helper service is down too",
+      "severity_hint_inventory": "transient",
+      "placeholders": [
+        "correlation_id",
+        "operation"
+      ]
     },
     {
       "id": "canvas-account-mismatch",
@@ -766,6 +818,26 @@
       "signature_notes": "evidence: transport/chromium_session.py ChromiumSession._verify_principal raises PrincipalNotPinned for a write with no pin, or for any call when pinned_principal() raises PrincipalPinError (final muse audit M3).",
       "severity_hint_inventory": "user-action",
       "placeholders": [
+        "operation"
+      ]
+    },
+    {
+      "id": "canvas-account-check-failed",
+      "title": "The signed-in account could not be checked, so nothing was sent",
+      "surface": "canvas",
+      "severity_hint": "medium",
+      "root_cause": "Before every write, and once per session for reads, the Chromium lane reads GET /api/v1/users/self to compare the signed-in account with the pinned one (transport/chromium_session.py _verify_principal). That read failed or returned no account id (for example HTTP 500), so the lane refused before sending the request.",
+      "is_not": "This is not a different account signed in, not an expired sign-in, and not a change that may have applied: nothing was sent.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: before sending anything, Morrow checks which Canvas account is signed in on the helper page, and Canvas did not answer that check (reference {correlation_id}). What this means: Morrow did not send the request, so nothing was sent and nothing changed. What happens next: I will check that the helper page shows you signed in to Canvas, then try again.",
+      "auto_action": "Check the helper /status; then run the operation again (for a Plan-mode write, run plan-write again and ask the educator to approve it). If the check keeps failing, report it with the engineering detail.",
+      "escalate_when": "the account check fails again after the helper page shows the educator signed in",
+      "signature": {
+        "error_class": "AccountCheckFailed"
+      },
+      "signature_notes": "evidence: transport/chromium_session.py ChromiumSession._verify_principal raises AccountCheckFailed (a WriteNotAttempted) when GET /api/v1/users/self fails or returns no id",
+      "severity_hint_inventory": "transient",
+      "placeholders": [
+        "correlation_id",
         "operation"
       ]
     },
@@ -1114,7 +1186,7 @@
       "title": "Changes are paused by an operator (manual write halt)",
       "surface": "canvas",
       "severity_hint": "medium",
-      "root_cause": "The write_halt file under MORROW_HOME is present and was not imposed by the re-auth machinery after a session death (its reason is not session_expiry, or it cannot be read), so an operator placed it by hand. Every write is refused at the gate while it stands; reads keep working. Only whoever placed it lifts it, on the computer where Morrow runs.",
+      "root_cause": "The write_halt file under MORROW_HOME is present and records no cause the re-auth machinery writes (session_expired or account_mismatch), or it cannot be read, so an operator placed it by hand. Every write is refused at the gate while it stands; reads keep working. Only whoever placed it lifts it, on the computer where Morrow runs.",
       "is_not": "This is not a provider failure, not session death, and not something the educator's words can lift.",
       "agent_message": "What was attempted: I did not go ahead with {operation} because changes are paused. What the evidence showed: someone who looks after this Morrow setup paused all changes on the computer where it runs (reference {correlation_id}). What this means: nothing was changed, and I will not work around the pause. What happens next: the pause stays until whoever set it removes it there. I cannot lift it, and nothing you tell me lifts it; please ask the person who looks after your Morrow setup.",
       "auto_action": "Refuse all writes at the gate; keep reads working; never bypass or remove the halt; tell the educator who can lift it",
@@ -1124,7 +1196,7 @@
           "truthy": true
         }
       },
-      "signature_notes": "behavior: \"every write gate refuses; reads unaffected\"; state: \"write_halt file present, reason not session_expiry (halt_cause=manual)\"; the session-expiry halt has its own mode (write-halt-session-expired)",
+      "signature_notes": "behavior: \"every write gate refuses; reads unaffected\"; state: \"write_halt file present with no re-auth cause (halt_cause=manual)\"; the re-auth halts have their own modes (write-halt-session-expired, write-halt-account-mismatch)",
       "severity_hint_inventory": "user-action",
       "placeholders": [
         "operation"
@@ -1135,7 +1207,7 @@
       "title": "Changes are paused because the Canvas sign-in expired",
       "surface": "canvas",
       "severity_hint": "medium",
-      "root_cause": "When the Canvas session dies, the re-auth machinery (reauth/state_machine.py on_expiry_detected) pauses every write (the write_halt file, reason session_expiry) and parks the op in the quarantine ledger. The pause lifts only when the educator signs in again on the helper page and `reauth/state_machine.py resume` verifies that the account is the pinned one; a parked op needs the educator's approval again after that.",
+      "root_cause": "When the Canvas session dies, the re-auth machinery pauses every write (the write_halt file, cause session_expired: reauth/state_machine.py on_expiry_detected, or transport/chromium_session.py on the Chromium lane) and parks the op in the quarantine ledger. The pause lifts only when the educator signs in again on the helper page and `reauth/state_machine.py resume` verifies that the account is the pinned one; a parked op needs the educator's approval again after that.",
       "is_not": "This is not a pause the educator's words can lift, not a provider failure, and not a change that applied.",
       "agent_message": "What was attempted: I did not go ahead with {operation}. What the evidence showed: changes are paused because your Canvas sign-in expired (reference {correlation_id}). What this means: nothing was changed, and I will not work around the pause. What happens next: Sign in again on the helper page. I will check that it is still your account, and then ask you before re-running anything.",
       "auto_action": "Point the educator to the helper page to sign in again; then run `reauth/state_machine.py resume`, which checks the account and lifts the pause; then ask the educator before re-running any paused change (for a Plan-mode write, run plan-write again)",
@@ -1146,7 +1218,30 @@
         },
         "halt_cause": "session_expired"
       },
-      "signature_notes": "classification: \"WriteHaltActive with halt_cause=session_expired\"; triggers: [\"the halt imposed by on_expiry_detected\", \"an op quarantined after a session death\"]; lifted_by: \"verified resume only\"",
+      "signature_notes": "classification: \"WriteHaltActive with halt_cause=session_expired\"; triggers: [\"the halt imposed by on_expiry_detected\", \"the halt the Chromium lane imposes on a session death\", \"an op quarantined after a session death\"]; lifted_by: \"verified resume only\"",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "correlation_id",
+        "operation"
+      ]
+    },
+    {
+      "id": "write-halt-account-mismatch",
+      "title": "Changes are paused because a different Canvas account signed in to the helper",
+      "surface": "canvas",
+      "severity_hint": "medium",
+      "root_cause": "Before a write, the Chromium lane found the helper browser signed in to a Canvas account other than the one pinned at first sign-in (transport/chromium_session.py _verify_principal), so it paused every write (the write_halt file, cause account_mismatch). The pause lifts only when the pinned account signs in again on the helper page and `reauth/state_machine.py resume` verifies it.",
+      "is_not": "This is not a pause an operator placed, not a pause the educator's words can lift, and not an expired sign-in. The other account's identity is never shown.",
+      "agent_message": "What was attempted: I did not go ahead with {operation}. What the evidence showed: changes are paused because a different Canvas account is signed in on the helper page, not the account Morrow was set up with (reference {correlation_id}). What this means: nothing was changed, and I will not work around the pause. What happens next: On the helper page, sign out of Canvas (Account, then Logout) and sign back in with your own account. I will check that it is your account, and then ask you before re-running anything.",
+      "auto_action": "Tell the educator to sign out on the helper page and sign back in with the pinned account; then run `reauth/state_machine.py resume`, which checks the account and lifts the pause; then ask the educator before re-running any paused change (for a Plan-mode write, run plan-write again). To connect a different account instead, run bin/morrow disconnect with the educator's yes, then sign in and pin again.",
+      "escalate_when": "resume refuses because the account that signed in is still not the pinned account",
+      "signature": {
+        "write_halt_active": {
+          "truthy": true
+        },
+        "halt_cause": "account_mismatch"
+      },
+      "signature_notes": "classification: \"WriteHaltActive with halt_cause=account_mismatch\"; trigger: \"the halt ChromiumSession._verify_principal imposes on a principal mismatch\"; lifted_by: \"verified resume only\"",
       "severity_hint_inventory": "user-action",
       "placeholders": [
         "correlation_id",
