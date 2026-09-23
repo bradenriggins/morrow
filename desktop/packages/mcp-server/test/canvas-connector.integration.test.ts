@@ -222,6 +222,7 @@ describe("Canvas connector gateway path", () => {
     let pagePlanOperationId = "";
     let pageContentGuard: JsonObject;
     let conversationId = "";
+    let learnerLeftCourse = false;
 
     /** Waits for the connector to take up the course connections just sent. */
     const bindingsApplied = () => new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
@@ -296,7 +297,7 @@ describe("Canvas connector gateway path", () => {
               : command.toolName === "canvas_list_quiz_items"
                 ? command.arguments.assignment_id === "77" ? quizItems : [{ ...quizItems[3], id: "8" }]
               : command.toolName === "canvas_list_users_in_course_users"
-                ? [{ id: "9001", name: "Jane Doe", email: "jane.doe@example.edu", login_id: "jdoe" }]
+                ? learnerLeftCourse ? [] : [{ id: "9001", name: "Jane Doe", email: "jane.doe@example.edu", login_id: "jdoe" }]
               : command.toolName === "canvas_get_single_user"
                 ? { id: command.arguments.id, name: "Jane Doe", email: "jane.doe@example.edu", login_id: "jdoe" }
               : command.toolName === "canvas_update_course_settings"
@@ -1361,6 +1362,59 @@ describe("Canvas connector gateway path", () => {
       }
       bridge?.updateBindings([binding("canvas_inbox_messages")]);
       await bindingsApplied();
+    }, CASE_TIMEOUT_MS);
+
+    it("settles an approved private Inbox message as not sent when its student left the course before it was sent", async () => {
+      const roster = await runtime.call("canvas_list_users_in_course_users", {
+        course_id: "42",
+        enrollment_type: ["student"],
+        enrollment_state: ["active", "invited", "completed", "inactive"],
+        morrow_max_pages: 50,
+        _morrow: { source_binding_id: sourceBindingId },
+      });
+      const learnerToken = /Student A[1-9][0-9]*/.exec(JSON.stringify(roster))?.[0];
+      expect(learnerToken).toBeTruthy();
+      const [plannerClientTransport, plannerServerTransport] = InMemoryTransport.createLinkedPair();
+      const plannerServer = serveStdio(() => createFullMorrowServer(morrow), { transport: plannerServerTransport });
+      const plannerClient = new Client(
+        { name: "morrow-canvas-inbox-left-course-planner", version: "1" },
+        { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+      );
+      let plan: JsonObject;
+      try {
+        await plannerClient.connect(plannerClientTransport);
+        plan = await plannerClient.callTool({
+          name: "morrow_plan_canvas_conversation",
+          arguments: {
+            action: "create",
+            source_binding_id: sourceBindingId,
+            course_id: "42",
+            recipient_tokens: [learnerToken!],
+            subject: "Lab make-up",
+            body: "Your lab make-up is on Friday.",
+          },
+        }) as unknown as JsonObject;
+      } finally {
+        await plannerClient.close();
+        await plannerServer.close();
+      }
+      expect(plan.isError, JSON.stringify(plan)).not.toBe(true);
+      const id = operationId(plan);
+      expect(runtime.effects.get(id)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
+      learnerLeftCourse = true;
+      let dispatched: JsonObject;
+      try {
+        dispatched = await runtime.dispatchOperation(id);
+      } finally {
+        learnerLeftCourse = false;
+      }
+      // Canvas no longer lists the student, so Morrow cannot say who the message is for. Nothing
+      // was sent, and the request says so instead of waiting as a change that may have landed.
+      expect(dispatched.structuredContent, JSON.stringify(dispatched)).toMatchObject({ effectState: "failed" });
+      expect((dispatched.structuredContent as { attention: string[] }).attention).toContain("dispatch_failed_before_send");
+      expect(runtime.effects.get(id)).toMatchObject({ state: "failed" });
+      expect(runtime.hasActiveWork()).toBe(false);
+      expect(writeCommands).toBe(4);
     }, CASE_TIMEOUT_MS);
 
     it("plans a Canvas object change and a site change that name no course, and sends the site change once approved", async () => {
