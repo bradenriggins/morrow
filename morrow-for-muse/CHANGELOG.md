@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+Fixes found in the final sweep of 0.4.0 (2026-09-22).
+
+In plain words:
+
+- Installing on a computer without cron (the Muse VM) works, and so
+  does running the installer again. Logs and the keepalive loop's
+  state now live in `~/.morrow/trees/<tree id>/`, never in the tree,
+  so the install checks no longer mistake them for release files. A
+  fresh install now records the tree's stable id.
+- You can approve the same change again (rename a page, rename it
+  back, rename it again). Each approval is still used once. After a
+  sign-in expiry, the change is prepared again and you approve it
+  again.
+- The failed-students question, sign-in recovery, and finding a
+  student by name read your Canvas address and the helper's port from
+  `helper/env`, where the installer asks you to put them.
+- The assistant never sees real student names you did not type. The
+  old "reveal" that showed a course's names for 30 minutes is gone.
+  To check who a label is, name the student you have in mind.
+- "Last week's quiz" uses your time zone: your timezone setting, then
+  the course's time zone, then your Canvas profile. If none is set,
+  Morrow asks.
+- The approval you read before a change is in plain words: the
+  course, the change, every value that will be sent, and whether
+  Morrow can undo it.
+- When Canvas refuses a value, you are told what Canvas said and that
+  nothing changed. When changes are paused because your sign-in
+  expired, you are told to sign in again on the helper page.
+- Three settings that promised things Morrow does not do are gone:
+  batched approvals, bulk action confirmations, and cleanup of test
+  objects.
+
 ## 0.4.0 (2026-09-22)
 
 Release: `morrow-muse-connector-0.4.0.zip` from the `muse/v0.4.0`
