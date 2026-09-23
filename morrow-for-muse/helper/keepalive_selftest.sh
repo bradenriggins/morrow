@@ -304,6 +304,24 @@ test_shipped() {
         OWN_PID=$!
         sleep 60 &
         OTHER_PID=$!
+        # A host without /proc (macOS) would refuse all three for lack of
+        # /proc, not because of the gate. The gate reads only
+        # PROC_ROOT/<pid>/cmdline and PROC_ROOT/<pid>/cwd, so describe
+        # the same three processes there.
+        if [ ! -d /proc/self ]; then
+          PROC_ROOT="${SCRATCH}/proc-kill-gate"
+          _fake_proc() {  # pid cwd argv...
+            local _p="$1" _c="$2"
+            shift 2
+            mkdir -p "${PROC_ROOT}/${_p}"
+            printf '%s\0' "$@" > "${PROC_ROOT}/${_p}/cmdline"
+            ln -s "${_c}" "${PROC_ROOT}/${_p}/cwd"
+          }
+          _fake_proc "${FOREIGN_PID}" "${HELPER_DIR}" \
+            "/other/tree/helper/server.py" 60
+          _fake_proc "${OWN_PID}" "${HELPER_DIR}" "${HELPER_DIR}/server.py" 60
+          _fake_proc "${OTHER_PID}" "${HELPER_DIR}" sleep 60
+        fi
         SS_PID="${FOREIGN_PID}"
         ss() { printf 'tcp LISTEN 0 127.0.0.1:%s *:* users:(("python3",pid=%s,fd=3))\n' \
           "${SERVER_PORT}" "${SS_PID}"; }
@@ -562,6 +580,13 @@ print(lc._slug_old(sys.argv[2]))
     if declare -F acquire_keepalive_lock >/dev/null 2>&1; then
       (
         _lockdir="$(mktemp -d "${HOME}/workspace/.keepalive-locktest-XXXXXX")"
+        # A host without flock (macOS; the Muse VM has it, and install
+        # step 1 requires it) could never take the lock. What is under
+        # test is that opening the lockfile keeps stderr, so a stand-in
+        # grants the lock there.
+        if ! command -v flock >/dev/null 2>&1; then
+          flock() { return 0; }
+        fi
         # Success path: fd 9 is held AND later stderr is intact.
         (
           LOCKFILE="${_lockdir}/keepalive.lock"
