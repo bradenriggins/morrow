@@ -9629,9 +9629,9 @@ def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
     approval display; the provider name is re-verified before the
     write."""
     try:
-        from dispatch.admission import sign_approval
+        from dispatch.admission import approval_used, sign_approval
     except ImportError:  # run as a script: dispatch/ itself is on sys.path
-        from admission import sign_approval
+        from admission import approval_used, sign_approval
     expire_write_ceremony_files(quiet=True)
     path = pending_write_path(op_id)
     try:
@@ -9668,6 +9668,16 @@ def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
             op_id=plan.op_id, pack=pack,
             extra={"body": body} if body is not None else None,
             approval=signed, session=session, mode_ctx=ctx)
+    except Exception:
+        # A refusal before the approval was used keeps the prepared
+        # write, so the educator's reply can be sent again. Once it was
+        # used (the write was attempted), a retry is a new plan-write.
+        if approval_used(signed):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        raise
     finally:
         try:
             os.unlink(plan_path)

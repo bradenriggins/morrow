@@ -202,7 +202,11 @@ run stops loudly instead of writing through a half-dead session:
    authorization is required, the agent cannot self-approve, W6-P2-A5)
    before it may be re-dispatched; the executor refuses quarantined and
    awaiting-approval ops. Ops never approved stay quarantined forever.
-   Nothing auto-resumes, ever.
+   Nothing auto-resumes, ever. A Plan-mode write (plan-write and
+   approve-write) is retried as a new write instead: after `resume`,
+   run plan-write again for the same change, show the educator the new
+   `approval_display`, and ask them to approve it. approve-write on the
+   old op id is refused, because its approval was already used.
 
 `session.json.prev` (the superseded session record used for principal
 pinning) exists only between a re-auth start and its successful
@@ -374,8 +378,11 @@ is on. `--dry-run` journals nothing, in either mode.
   journaled release under the caller's op id (the op id stays reusable,
   and absence of a completion record is not evidence of failure);
   pre-claim death journals nothing at all. The approval was already
-  consumed before the network call, so a retry needs a freshly signed
-  approval AND the educator re-signing in through the login helper.
+  used before the network call, so a retry waits for the educator to
+  sign in again through the login helper and for `resume`; then run
+  plan-write again and ask the educator for a new approval. Approving
+  the same change again is allowed: single use applies to one signed
+  approval, not to one kind of change.
   Known limitation: in a multi-step write, steps that completed before
   the death applied real effects with only a claim record journaled
   (ambiguous write failure journals the claim plus an audit record under

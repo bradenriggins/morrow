@@ -974,9 +974,8 @@ def t_concurrent_consume_single_winner():
                if m in _mp.get_all_start_methods()]
     assert methods, "no multiprocessing start method available"
     for method in methods:
-        digest = ap["op_digest"]
         consumed = _admission_mod._load_consumed()
-        consumed.pop(digest, None)
+        consumed.pop(_admission_mod._use_key(ap), None)
         with open(_admission_mod.CONSUMED_PATH, "w", encoding="utf-8") as fh:
             json.dump(consumed, fh)
         # W6-P1-6: the consumed set is HMAC-sealed; re-seal after the

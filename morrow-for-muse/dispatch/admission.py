@@ -48,8 +48,12 @@ The gate recomputes the op digest from the actual dispatch (entry name,
 canonical params, tenant base, and the exact request: method, path,
 query, and body) and refuses on any mismatch, so one approval
 authorizes exactly one request on one tenant. Approvals expire
-(time-boxed, max 24h TTL) and are single-use: a consumed op_digest is
-recorded under ~/.morrow/approvals/consumed.json and refused on replay.
+(time-boxed, max 24h TTL) and are single-use: each minted record
+carries a random approval_id under the seal, and its use key (the
+op_digest bound to that approval_id) is recorded under
+~/.morrow/approvals/consumed.json and refused on replay. A new approval
+of the same change (a new plan-write and a new educator reply) has a new
+approval_id and is admitted.
 Only "educator" is accepted as the approver; the agent cannot
 self-approve. v1 records (no digest binding, no expiry, no category) are
 retired and refused outright.
@@ -957,6 +961,10 @@ def mint_approval(entry: dict, params: dict, tenant_base: str | None = None,
         "op": entry.get("name"),
         "op_digest": op_digest_of(entry.get("name"), params, tenant_base,
                                   category, request=subject),
+        # Single use is per approval, not per change: the educator may
+        # approve the same change again (rename, revert, rename). The
+        # seal covers the id, so one signed record is still single-use.
+        "approval_id": secrets.token_hex(16),
         "category": category,
         "params_digest": canonical_params_digest(params),
         # Round-4 H1: the exact request this approval covers, for the
@@ -1387,8 +1395,28 @@ def _prune_consumed_dict(consumed: dict):
     return kept, dropped
 
 
-def _record_consumed(op_digest: str) -> None:
-    """Mark an approval's op_digest consumed (single-use). Fails closed.
+def _use_key(record: dict) -> str:
+    """The consumed-set key of one signed approval: its op_digest bound
+    to its own approval_id. A record minted before approval ids existed
+    is keyed by its op_digest alone."""
+    digest = record.get("op_digest")
+    approval_id = record.get("approval_id")
+    if not approval_id:
+        return digest
+    return hashlib.sha256(("morrow-approval-use-v1\n%s\n%s"
+                           % (digest, approval_id)).encode("utf-8")
+                          ).hexdigest()
+
+
+def approval_used(record: dict | None) -> bool:
+    """True when this signed approval record was already consumed."""
+    if not isinstance(record, dict) or not record.get("op_digest"):
+        return False
+    return _use_key(record) in _load_consumed()
+
+
+def _record_consumed(use_key: str) -> None:
+    """Mark an approval's use key consumed (single-use). Fails closed.
 
     The read-modify-write runs under an exclusive inter-process lock
     (fcntl.flock on a lock file beside the consumed set), so two
@@ -1404,7 +1432,7 @@ def _record_consumed(op_digest: str) -> None:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
         try:
             consumed = _load_consumed()
-            if op_digest in consumed:
+            if use_key in consumed:
                 raise ApprovalMismatch(
                     "approval for this op was already consumed; refusing "
                     "replay")
@@ -1412,7 +1440,7 @@ def _record_consumed(op_digest: str) -> None:
             # (parsed ~3x and fully rewritten per dispatch) stays
             # bounded instead of growing forever.
             consumed, _dropped = _prune_consumed_dict(consumed)
-            consumed[op_digest] = datetime.datetime.now(
+            consumed[use_key] = datetime.datetime.now(
                 datetime.timezone.utc).isoformat()
             tmp = CONSUMED_PATH + ".tmp"
             try:
@@ -1583,7 +1611,7 @@ def check_write_approval(entry: dict, params: dict, approval: dict | None,
     audit = _verify_record_binding(entry, params, record, tenant_base,
                                    provenance,
                                    require_educator_channel=require_educator_channel)
-    if audit["op_digest"] in _load_consumed():
+    if _use_key(record) in _load_consumed():
         raise ApprovalMismatch(
             "approval for %r was already consumed; approvals are single-use"
             % entry.get("name"))
@@ -1807,7 +1835,7 @@ def check_unproven_override(entry: dict, params: dict, approval: dict | None,
                                    provenance,
                                    require_educator_channel=require_educator_channel)
     audit["allow_unproven"] = True
-    if audit["op_digest"] in _load_consumed():
+    if _use_key(record) in _load_consumed():
         raise ApprovalMismatch(
             "unproven override for %r was already consumed; overrides are "
             "single-use" % entry.get("name"))
@@ -1815,7 +1843,7 @@ def check_unproven_override(entry: dict, params: dict, approval: dict | None,
 
 
 def consume_approval(record: dict | None) -> None:
-    """Mark an approval's op_digest consumed (single-use).
+    """Mark one signed approval consumed (single-use, by its use key).
 
     Call AFTER persist_signed_record(record, op_id) and only after every
     dispatch gate has passed (write halt, frozen plan, duplicate op id,
@@ -1838,7 +1866,7 @@ def consume_approval(record: dict | None) -> None:
     if not isinstance(digest, str) or not digest:
         raise ApprovalMismatch(
             "cannot consume an approval record with no op_digest")
-    _record_consumed(digest)
+    _record_consumed(_use_key(record))
 
 
 def persist_signed_record(record: dict, op_id: str | None) -> None:
@@ -2005,7 +2033,7 @@ def reverify_approval(entry: dict, params: dict, tenant_base: str | None,
             "persisted approval op_digest does not match this complete "
             "(entry, params, tenant, request); completing something other "
             "than what was approved is refused")
-    if expected_digest not in _load_consumed():
+    if _use_key(record) not in _load_consumed():
         raise ApprovalMismatch(
             "approval for op %s was never consumed at dispatch; refusing "
             "to complete an unadmitted write" % (op_id,))

@@ -74,20 +74,8 @@ def _approve(entry, params):
                             "course_id": params.get("course_id"),
                             "course_name": "Browser Backend",
                         } if params.get("course_id") else None)
-    # Fresh test fixtures must be admittable even if an identical fixture
-    # was consumed by an earlier test: evict this digest from the
-    # test-local consumed store. Single-use within one dispatch is still
-    # enforced (covered by the admission selftest).
-    try:
-        consumed = _admission_mod._load_consumed()
-        consumed.pop(rec["op_digest"], None)
-        with open(_admission_mod.CONSUMED_PATH, "w", encoding="utf-8") as fh:
-            json.dump(consumed, fh)
-        # The fixture bypasses the admission gate's seal writer, so
-        # refresh the test-local seal to match the file we just wrote.
-        _admission_mod._write_consumed_seal()
-    except OSError:
-        pass
+    # Each minted record has its own approval_id, so a fresh fixture is
+    # admittable even after an identical one was consumed.
     return sign_approval(rec, "selftest: the educator approved this exact "
                               "fixture action in the test harness",
                          # W6-P1-A2: the harness simulates a genuine
