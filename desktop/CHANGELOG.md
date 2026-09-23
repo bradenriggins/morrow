@@ -2,11 +2,11 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
-## 1.0.5 (2026-09-22)
+## 1.0.5 (2026-09-23)
 
 Unsigned installers: `Morrow-1.0.5-mac-arm64.dmg`, `Morrow-1.0.5-mac-arm64.zip`, and `Morrow-1.0.5-win-x64.exe`. Ships with Morrow Bridge 1.0.120.
 
-This release fixes every Critical and High defect found in the adversarial audits after the 2026-09-22 handoff.
+This release fixes every Critical and High defect found in the adversarial audits after the 2026-09-22 handoff, and what the final review before release found.
 
 ### Approvals and Edit access
 
@@ -14,6 +14,16 @@ This release fixes every Critical and High defect found in the adversarial audit
 - Morrow Bridge pairs with Morrow only when you select Connect Morrow, and only with a proof from the Bridge folder Morrow set up. A local program can no longer pair itself over HTTP, read the connection token, and then approve changes. The Chrome page that asked you to allow the connection is gone.
 - Edit access has no time limit. Old timed grants fall back to Plan and are never extended.
 - A review that is waiting ends when its Morrow connection ends.
+- Routine Edit and the publish choice no longer create a Canvas page, or publish a new front page, without your review. When the page is not there, or Morrow cannot read it, the change waits for your review.
+- The Routine edits description names every change the routine set makes with no review, including making Canvas folders, moving files between folders, and moving module items. It describes only the platforms you selected.
+- The date choice is named Change due dates and availability dates, and says what it changes on each platform.
+- In Plan, a course's detail says that "Edit. Routine edits." turns on every routine edit, and that Customize or "do not ask again" on a review turns on a single kind.
+- When a course connection closes before a change goes out, or Morrow cannot first read the course's Edit access, Morrow says nothing was sent. It no longer says the platform may have received the change and holds that item for a check.
+- In a group of changes, a change whose answer from the learning platform was lost shows Needs checking instead of Did not finish, and the group pauses before its next change.
+- Recent changes offers a Reverse change request only for a change that was sent. A cancelled or failed request says nothing was sent, so there is nothing to undo.
+- While a review of a group of changes is open, or Morrow is applying approved work, the assistant keeps waiting. It says you approved only when you did.
+- After your computer sleeps, Chrome restarts, or Morrow Bridge reloads, the popup lists the reviews that still wait, and an open review tab can approve again.
+- Replies about a group of requests no longer name Canvas for a Moodle or Blackboard course.
 
 ### Morrow Bridge
 
@@ -22,6 +32,23 @@ This release fixes every Critical and High defect found in the adversarial audit
 - Course lists are read again after they expire, keep every site's courses, show true counts, and use natural order.
 - When a course site is closed, Morrow names the right button: Open Canvas or Open Moodle.
 - Long permission and privacy text is behind disclosures. Setup, recovery, and help text name only controls that exist.
+- Open Canvas and Open Moodle reopen the course's own site. They used to open another saved site's home page and report success.
+- When Morrow and Morrow Bridge versions do not match, the popup says Reload needed, and the popup and the setup guide give the same reload step.
+- Connect Morrow with the Morrow app closed says Morrow is not running.
+- When Morrow refuses the saved connection, the setup guide offers Reconnect Morrow, as the popup does. The popup's main button does what its label says.
+- The settings page is named Plan and Edit settings, the name every link to it uses. Its error messages stay on screen after the page reads the course list again.
+- The course search also finds a site address, a term, or a platform.
+- With no course connected, Plan and Edit settings names the step that connects one: Connect this course in the Morrow Bridge popup.
+- A closed course is listed as closed, with Open Canvas or Open Moodle, even when its Edit access is out of date.
+- The popup says when a course was connected. It used to call that date the last check.
+- The setup guide no longer says every change waits for your review when a course is in Edit.
+- When Chrome keeps site access after Disconnect Morrow, the popup says to remove it on the Chrome extensions page.
+- Private Chat waits up to 9 minutes for your next message and up to 10 minutes for the assistant's reply. It used to end after one minute.
+- After you send a Private Chat message, the drawer says it is waiting for the assistant's reply.
+- A Private Chat follow-up that names no student, such as "Make it shorter", can be sent without a student list.
+- A Private Chat message that was not sent says why and what to do, and keeps your text.
+- At its 100-message limit, Private Chat ends after the last reply, and the drawer says how to start a new chat.
+- When Morrow Bridge is not connected, or another Private Chat is already open, Private Chat says so and names the step that fixes it.
 
 ### Setup
 
@@ -40,6 +67,17 @@ This release fixes every Critical and High defect found in the adversarial audit
 - What stays on this computer, the uninstall steps, and the removal confirmation name the copy of the Morrow extension Claude Desktop keeps, and say to remove Morrow in Claude Desktop under Settings, Extensions. They no longer say that Remove Morrow's data stops every assistant from starting Morrow.
 - Morrow finds Gemini CLI by reading its installed package instead of running it, so detection no longer writes to your Gemini folder and no longer misses a slow first start.
 - The app says where unsigned builds get updates. The Mac note now says that moving Morrow to Applications can ask for an administrator password.
+- Setting up or updating Morrow Bridge no longer fails when Windows is slow to start PowerShell.
+- Errors from the Settings page now show on the Settings page.
+- The Materials folder row has Show folder and Copy path, because the folder Morrow makes sits inside a folder macOS and Windows hide.
+- Canvas file uploads can use files you put in the Materials folder, as Moodle uploads already could.
+- Check connection says when Morrow could not read your course, with the step to fix it. It no longer calls that course connected.
+- Selecting Check Bridge before Chrome reloaded Morrow Bridge names the reload step.
+- Blackboard error steps name only the fields and buttons the form shows. The saved connection note says a new secret needs the application key too.
+- The Windows uninstall steps follow Settings, Apps, Installed apps, then More and Uninstall.
+- "What stays on this computer" lists only what is on this computer, and says which part Remove Morrow's data removes and which part Morrow never removes.
+- Repair Morrow finishes when Claude Desktop is set up. It used to stop with "Morrow has work in progress".
+- Morrow starts more reliably on a slow or busy computer. Its course connection starts faster, and Morrow waits the full 30 seconds its first start is allowed instead of giving up after 15.
 
 ### Privacy
 
@@ -47,17 +85,29 @@ This release fixes every Critical and High defect found in the adversarial audit
 - Each student has one label everywhere. Real names reach the educator only through Morrow Bridge in their own tab (Private Chat and the review tab). Every HTTP endpoint serves labels only.
 - Private Chat reads a sentence start correctly through quotes and line breaks.
 - A first name used alone, such as Will or Grace, is replaced only where it is written with a capital letter, as a family name already was. In small letters it is usually an ordinary word, and replacing it put the student's full name into text the assistant saved. A name part in a script with no capital letters, such as Korean, is now replaced wherever it appears.
+- A student's family name written alone, such as "Adams replied.", is replaced with the student's label in Private Chat and in course text the assistant reads, where it is written with a capital letter. A suffix such as Jr. is not taken for the family name.
+- Private Chat replaces a student's ID number or a login made only of numbers, and refuses a message that still holds one.
 
 ### Interface
 
 - Supporting text fills its container instead of wrapping early.
 - Each setup state has one primary action, and the connected Home is clearer.
+- In "Try asking", every Copy button sits in the same place: at the right edge, or under its example in the narrowest windows.
+- The Edit banner in Plan and Edit settings stacks in a narrow window, so its sentence uses the full width.
+- What a screen reader announces in the header matches the step on screen.
+- Manage on Home moves focus to the Settings heading.
 
 ### Build and CI
 
 - CI reads workflows from the repository root, runs each product's suite when it changes, and runs both suites when a workflow changes. The aggregate check fails when change detection fails.
 - Dependabot points at the real manifests. The pre-commit hook runs each product's suite from its own directory.
 - Both release jobs preflight the signed release configuration. The installer layout check runs with the browser harnesses.
+- The required check also runs the desktop contracts on Windows and on macOS.
+- The em dash and retired-phrase checks read the whole repository, and run on every change.
+- Workflow actions run on their current releases, and Dependabot groups its updates into weekly pull requests.
+- Morrow builds with TypeScript 7 and tests with Vitest 5, type-checked against the Node release the app embeds.
+- An installed Morrow ignores the start settings that only Morrow's own tests use.
+- The Windows packager starts pnpm with no shell.
 
 ### Not verified for this release
 
