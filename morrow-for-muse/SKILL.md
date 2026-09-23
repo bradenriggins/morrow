@@ -75,13 +75,21 @@ only when it reports `"logged_in": false` (genuine reauthentication
 need), or once for the first onboarding below. Never open it
 preemptively and never on every run: a healthy session needs no page.
 
-1. Make sure `CANVAS_BASE` is set to the educator's Canvas host
-   (e.g. `https://myschool.instructure.com`), either in the environment
-   or in the tree's `helper/env` (the legacy global `~/.morrow/env` is
-   honored for `CANVAS_BASE` only). There is no default tenant; the
-   helper refuses to start on the placeholder.
-2. Start the helper if the installer has not already:
-   `bash helper/keepalive.sh` (from this tree).
+1. Write the educator's Canvas address to the tree's `helper/env` as
+   `CANVAS_BASE=https://...` (e.g. `https://myschool.instructure.com`),
+   after confirming it with them. When the host does not end in
+   `.instructure.com`, confirm with the educator that it is their
+   school's Canvas, then add
+   `CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=<exact host>` too. There is no
+   default tenant; the helper refuses to start on the placeholder.
+2. Start the helper by running the installer again: `bash install.sh`
+   (from this tree). It first checks the address: a placeholder, an
+   address that does not load, or a Canvas error page stops it with a
+   plain reason. Tell the educator what it said, ask for the address
+   again, and fix `helper/env`. Only then does it start the helper.
+   Never start the helper for the first time with
+   `helper/keepalive.sh`: it skips that check, so a mistyped address
+   shows the educator a sign-in page that cannot load.
    Do not hand-launch `helper/server.py` directly: it sources
    `<tree>/helper/env` itself, so it fails without `CANVAS_BASE`
    exported in the shell or the tree env file, and the production-port

@@ -23,10 +23,15 @@ Run `install.sh` from the dist root. Expected:
 2. Agent shows `content/consent.md` and waits for agreement.
 3. Agent asks for the school's Canvas URL only if it cannot determine
    it safely; confirms it with the educator otherwise.
-4. The tenant is probed before anything else: placeholder hosts
-   (`your-school`, `example.com`, bare `instructure.com`) and
-   unreachable hosts fail loudly here, not three minutes into a
-   browser launch.
+4. Agent writes `CANVAS_BASE=<address>` to the tree's `helper/env`
+   (plus `CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=<exact host>` when the
+   host does not end in `.instructure.com` and the educator confirmed
+   it is their school's Canvas), then runs `bash install.sh` again.
+   The installer probes the tenant before anything else: placeholder
+   hosts (`your-school`, `example.com`, bare `instructure.com`),
+   unreachable hosts, and Canvas error pages fail loudly here, not
+   three minutes into a browser launch. Only then does it start the
+   helper.
 
 ## 3. Sign in (educator's hands only)
 

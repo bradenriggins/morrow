@@ -130,3 +130,42 @@ def test_an_educator_without_morrow_is_sent_to_the_setup_page():
     for rel in ("INSTALL.md", "content/setup-guide.md"):
         head = " ".join(_read(rel).split())[:2500]
         assert "https://meetmorrow.app/morrow-for-muse" in head, rel
+
+
+# Final sweep 2026-09-23 (written before the fix): SKILL.md's first run
+# started the helper with `bash helper/keepalive.sh` once CANVAS_BASE was
+# set, INSTALL.md step 4 did the same, FIRST_RUN.md's "Connect Canvas"
+# named no command, and the setup-tenant-not-configured failure mode said
+# "record it in the helper env, start the helper". Only install.sh probes
+# the address (placeholder, unreachable, Canvas error page) before it
+# starts the helper, so a mistyped address reached the educator as a
+# sign-in page that could not load.
+def _section(rel, heading):
+    text = _read(rel)
+    start = text.index(heading)
+    end = text.find("\n## ", start + len(heading))
+    return " ".join(text[start:end if end != -1 else None].split())
+
+
+def test_install_probes_the_address_before_it_starts_the_helper():
+    text = _read("install.sh")
+    probe = text.index('fail "tenant" "CANVAS_BASE=${CANVAS_BASE} is unreachable')
+    start = text.index('"${TREE}/helper/keepalive.sh" >/dev/null 2>&1')
+    assert probe < start
+
+
+def test_every_first_start_of_the_helper_runs_install():
+    first_run = _section("SKILL.md", "## First run: sign the educator in")
+    assert "bash install.sh" in first_run
+    assert "bash helper/keepalive.sh" not in first_run
+    connect = _section("FIRST_RUN.md", "## 2. Connect Canvas")
+    assert "helper/env" in connect and "bash install.sh" in connect
+    step4 = _section("INSTALL.md", "## Step 4: confirm the login helper")
+    assert "bash install.sh" in step4
+    assert "bash helper/keepalive.sh" not in step4
+    import json
+    with open(os.path.join(TREE, "failures", "catalog.json"),
+              encoding="utf-8") as fh:
+        modes = {e["id"]: e for e in json.load(fh)["entries"]}
+    assert "bash install.sh" in \
+        modes["setup-tenant-not-configured"]["auto_action"]

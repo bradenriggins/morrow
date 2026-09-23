@@ -264,16 +264,19 @@ curl -sf http://127.0.0.1:8901/status
 You should see JSON with your Canvas URL and `"logged_in": true` once
 you have signed in (step 5).
 
-If `CANVAS_BASE` was not set during the install, start the helper now:
+If `CANVAS_BASE` was not set during the install, set it in
+`helper/env` (step 3), then run the installer again. It checks that the
+address loads and is not a Canvas error page, then starts the helper:
 
 ```
 cd ~/workspace/skills/morrow-canvas
-bash helper/keepalive.sh
+bash install.sh
 ```
 
-(If you set `CANVAS_BASE` in `helper/env`, keepalive.sh sources
-that file (the legacy global `~/.morrow/env` is honored for
-`CANVAS_BASE` only). Do not hand-launch `helper/server.py` directly: it
+(Do not start the helper for the first time with
+`helper/keepalive.sh`: it skips that address check. keepalive.sh keeps
+an already-checked helper running. Do not hand-launch
+`helper/server.py` directly: it
 sources `<tree>/helper/env` itself, so it fails without `CANVAS_BASE`
 exported in the shell or the tree env file, and the production-port
 guard treats a bare launch on the production ports with the live
