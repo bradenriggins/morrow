@@ -6832,11 +6832,17 @@ def _url_path(url) -> str:
         return ""
 
 
+# A course index (every classic quiz of a course) can be far larger than
+# one operation's receipt bound; only its ids are read.
+_INDEX_READ_MAX_BYTES = 8 * 1024 * 1024
+
+
 def _read_collection_ids(entry, session, pack, config, params, transients,
-                         url, method, max_bytes):
+                         url, method):
     """The ids a paginated collection lists, and whether every page was
-    read: ({id, ...}, complete). Follows Link rel="next" (and the
-    Chromium lane's next page) up to PAGINATION_MAX_PAGES. A failed read
+    read in full: ({id, ...}, complete). Follows Link rel="next" (and
+    the Chromium lane's next page) up to PAGINATION_MAX_PAGES; a page
+    cut at the byte bound makes the read incomplete. A failed read
     raises UncertainWrite: the write returned 2xx."""
     ids, pages = set(), 0
     while True:
@@ -6848,8 +6854,7 @@ def _read_collection_ids(entry, session, pack, config, params, transients,
                 transients or {})
             _status, resp_headers, raw, _attempts = session.raw_request(
                 rmethod, rurl, rheaders, rbody, is_write=False,
-                max_bytes=max_bytes)
-            payload = apply_result_block(entry, raw, resp_headers)["payload"]
+                max_bytes=_INDEX_READ_MAX_BYTES)
         except ProviderHttpError as exc:
             raise UncertainWrite(
                 "delete readback GET %s failed HTTP %s; the %s effect is "
@@ -6859,13 +6864,24 @@ def _read_collection_ids(entry, session, pack, config, params, transients,
                 "delete readback GET %s failed (%s); the %s effect is "
                 "unconfirmed, not a proven failure"
                 % (url, type(exc).__name__, method))
+        headers = {str(k).lower(): v for k, v in (resp_headers or {}).items()}
+        cut = len(raw or b"") > _INDEX_READ_MAX_BYTES \
+            or bool(headers.get("x-morrow-truncated"))
+        try:
+            payload = json.loads((raw or b"").decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            payload = None
         if not isinstance(payload, list):
+            if cut:
+                return ids, False
             raise UncertainWrite(
                 "delete readback GET %s did not return a list; the %s effect "
                 "is unconfirmed, not a proven failure" % (url, method))
         for item in payload:
             if isinstance(item, dict) and item.get("id") is not None:
                 ids.add(str(item["id"]))
+        if cut:
+            return ids, False
         pagination = _pagination_state(resp_headers)
         if pagination is None or not pagination.get("partial"):
             return ids, True
@@ -6884,7 +6900,7 @@ def _verify_classic_quiz_delete(entry, session, pack, config, params,
     index = member[:-len("/" + quiz_id)]
     listed, complete = _read_collection_ids(
         entry, session, pack, config, params, transients,
-        index + "?per_page=100", method, max_bytes)
+        index + "?per_page=100", method)
     if quiz_id in listed:
         raise WriteFieldMismatch(
             "delete readback mismatch on %s %s: the quiz is still listed in "

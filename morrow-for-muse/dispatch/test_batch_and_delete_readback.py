@@ -240,7 +240,7 @@ def test_bulk_date_update_not_applied_yet_is_unverified_not_failed():
 
 # ---------------------------------------------- C-375 classic quiz delete --
 
-def _quiz_canvas(index_pages):
+def _quiz_canvas(index_pages, index_headers=None):
     """Canvas that still serves the deleted quiz on its member GET
     (D-002) and lists the course quiz index in index_pages."""
     def handler(method, url, body):
@@ -254,7 +254,7 @@ def _quiz_canvas(index_pages):
                 {"id": 338345, "title": "Quiz 1"}).encode()
         if method == "GET" and path.endswith("/courses/101/quizzes"):
             page = int(dict(_query(url)).get("page", "1"))
-            headers = {}
+            headers = dict(index_headers or {})
             if page < len(index_pages):
                 headers["Link"] = ('<%s/api/v1/courses/101/quizzes?page=%d'
                                    '&per_page=100>; rel="next"'
@@ -286,3 +286,34 @@ def test_classic_quiz_still_in_the_index_is_a_failed_delete():
                                         [{"id": 338345, "title": "Quiz 1"}]]))
     with pytest.raises(ex.WriteFieldMismatch):
         _delete_quiz(session)
+
+
+def test_a_cut_off_quiz_index_is_not_proof_of_a_delete():
+    """A quiz index read that was cut at the byte bound cannot prove the
+    quiz is gone: the quiz may sit in the part that was not read."""
+    session = FakeSession(_quiz_canvas(
+        [[{"id": 1}]], {"x-morrow-truncated": "body truncated"}))
+    out = _delete_quiz(session)
+    assert out["outcome"] == "unverified"
+
+
+class _BoundRecorder(FakeSession):
+    def __init__(self, handler):
+        super().__init__(handler)
+        self.bounds = []
+
+    def raw_request(self, method, url, headers, body, is_write=False,
+                    max_bytes=None):
+        self.bounds.append((method, _path(url), max_bytes))
+        return super().raw_request(method, url, headers, body,
+                                   is_write=is_write, max_bytes=max_bytes)
+
+
+def test_the_quiz_index_is_read_with_room_for_a_large_course():
+    """A course with many quizzes has an index larger than one
+    operation's 256 KB receipt bound; the index read gets its own."""
+    session = _BoundRecorder(_quiz_canvas([[{"id": 1}]]))
+    _delete_quiz(session)
+    bounds = [b for m, p, b in session.bounds
+              if m == "GET" and p.endswith("/courses/101/quizzes")]
+    assert bounds and all(b >= 4 * 1024 * 1024 for b in bounds)
