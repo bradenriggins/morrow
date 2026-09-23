@@ -87,9 +87,10 @@ It keeps the `Assistant settings backups` folder. It never removes an
 assistant's own configuration file. After the removal it reads each path again
 and reports which are gone and which are still on the computer.
 
-Removing the application itself stays a Windows step: Settings, Apps,
-Installed apps, Morrow, More, Uninstall, or the uninstaller the installed copy
-registered for the current user. `installer/test/installer-controller.test.cjs` proves the in-app removal
+Removing the application itself stays a Windows step. Windows 11: Settings,
+Apps, Installed apps, Morrow, More, Uninstall. Windows 10: Settings, Apps, Apps &
+features, Morrow, Uninstall. The uninstaller the installed copy registered for
+the current user does the same. `installer/test/installer-controller.test.cjs` proves the in-app removal
 on macOS. `scripts/test/desktop-windows-smoke.mjs` runs the Windows uninstaller
 and then compares State, Materials, backups, and the assistant configuration
 byte for byte against the reading it took before the uninstall. The harness

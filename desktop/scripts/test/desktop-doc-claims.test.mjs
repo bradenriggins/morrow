@@ -455,8 +455,8 @@ test("the data-removal action the Windows guide describes is the one the policy 
     assert.deepEqual(claiming, [], "the retention policy marks nothing removable, so no document may name a data-removal action");
   }
   assert.match(guide, /It never removes an assistant's own configuration file\./);
-  assert.match(guide, /Settings, Apps, Installed apps, Morrow, More, Uninstall/,
-    "the guide must state the removal step this platform uses, which the policy names as windows_settings_apps");
+  assert.match(guide, /Windows 11: Settings, Apps, Installed apps, Morrow, More, Uninstall\. Windows 10: Settings, Apps, Apps & features, Morrow, Uninstall/,
+    "the guide must state the removal step this platform uses, which the policy names as windows_settings_apps, on both supported Windows versions");
 });
 
 test("every section that states a Windows desktop result keeps its unverified qualifier", () => {

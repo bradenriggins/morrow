@@ -565,7 +565,8 @@ const UNINSTALL_FIRST_STEP = "To remove the Morrow application, first select Rem
 const UNINSTALL_CLAUDE_STEP = "Also remove Morrow in Claude Desktop under Settings, Extensions.";
 const UNINSTALL_STEPS = Object.freeze({
   move_to_trash: "Then quit Morrow and move it to the Trash.",
-  windows_settings_apps: "Then quit Morrow, open Settings, select Apps, then Installed apps, find Morrow, select More, and select Uninstall.",
+  // Windows 11 and Windows 10 name the Settings page and its buttons differently.
+  windows_settings_apps: "Then quit Morrow and open Settings, then Apps. On Windows 11, select Installed apps, find Morrow, select More, then Uninstall. On Windows 10, select Apps & features, select Morrow, then Uninstall.",
   unknown: "Then quit Morrow and remove it the way this computer removes an application."
 });
 

@@ -371,8 +371,9 @@ test("the data-retention section names every place, what it removes, and the ste
   assert.match(view.body, /data-action="remove-data"/);
 
   const windows = retentionView(state({ retention: { uninstall: "windows_settings_apps", locations: RETENTION_LOCATIONS } }));
-  // Microsoft's steps: Start > Settings > Apps > Installed apps, then the app's More > Uninstall.
-  assert.match(windows.body, /open Settings, select Apps, then Installed apps, find Morrow, select More, and select Uninstall\./);
+  // Microsoft's steps. Windows 11: Start > Settings > Apps > Installed apps, then the app's More > Uninstall.
+  // Windows 10: Start > Settings > Apps > Apps & features, then select the app and Uninstall.
+  assert.match(windows.body, /Then quit Morrow and open Settings, then Apps\. On Windows 11, select Installed apps, find Morrow, select More, then Uninstall\. On Windows 10, select Apps &amp; features, select Morrow, then Uninstall\./);
   assert.equal(/Trash/.test(windows.body), false);
 
   // Chrome loaded the Bridge from the folder listed above only when Chrome loaded
