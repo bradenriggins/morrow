@@ -10,6 +10,10 @@ final sweep 2026-09-22):
   2. The reveal also handed those names to the agent, and so to the
      model. The reveal is gone: every roster read reaches the agent and
      the journal as labels, and the journal records no reveal.
+  3. The checks searched the journal and the result for 5-digit ids and
+     short names as substrings, so an HMAC, digest, or op id that
+     happened to contain one failed the suite with no leak. A stored
+     name or id stands as its own word (found_in).
 """
 
 import json
@@ -27,7 +31,7 @@ pytest.importorskip("cryptography")
 
 from dispatch import executor as ex  # noqa: E402
 from dispatch.test_by_name_e2e import (  # noqa: E402,F401
-    BASE, CONV, USER, BrowserFake, _journal_text, hermetic, world)
+    BASE, CONV, USER, BrowserFake, _journal_text, found_in, hermetic, world)
 from dispatch.test_direct_lane_hardening import _pack  # noqa: E402
 from learners.test_students_find import ROSTER  # noqa: E402
 
@@ -68,10 +72,10 @@ def _journal_records():
 def test_roster_read_is_de_identified_for_the_agent_and_the_journal():
     before = _journal_text()
     out = _read("1")
-    assert [s for s in IDENTIFIERS if s in json.dumps(out)] == []
+    assert found_in(json.dumps(out), IDENTIFIERS) == []
     added = _journal_text()[len(before):]
     assert added.strip(), "the read journaled nothing"
-    assert [s for s in IDENTIFIERS if s in added] == []
+    assert found_in(added, IDENTIFIERS) == []
     reads = [r for r in _journal_records() if r.get("entry_name")
              == _users_op() and r.get("wal") == "complete"]
     assert reads and "pii_reveal" not in reads[-1]
@@ -85,4 +89,4 @@ def test_every_course_read_stays_de_identified():
         assert "Jane" not in json.dumps(_read(course))
     op_text = "\n".join(json.dumps(r) for r in _journal_records()
                         if r.get("entry_name") == _users_op())
-    assert [s for s in IDENTIFIERS if s in op_text] == []
+    assert found_in(op_text, IDENTIFIERS) == []
