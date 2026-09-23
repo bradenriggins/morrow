@@ -115,3 +115,55 @@ def test_status_breakdowns_in_the_knowledge_docs():
     assert [int(x) for x in m.groups()] == [
         counts["live_reads"], counts["live_writes"],
         counts["live_canvas_reads"], counts["live_ib_reads"]], m.group(0)
+
+
+def test_live_proven_read_counts_in_every_doc():
+    # SCOPE.md and the operations runbook said "113 verified GETs (108
+    # Canvas plus 5 Item Bank)" after the catalog gained the educator's
+    # own reads (C-436 users/self, C-437 list courses) (final sweep
+    # 2026-09-23).
+    counts = _counts()
+    seen = 0
+    for rel in DOCS:
+        text = _read(rel)
+        for match in re.finditer(
+                r"(?<![-\w])(\d{3}) (?:verified GETs|live-proven reads)"
+                r"(?: \([^)]*\))?:? \(?(\d{3}) Canvas(?: reads)? plus "
+                r"(\d+) Item Bank", text):
+            seen += 1
+            assert [int(x) for x in match.groups()] == [
+                counts["live_reads"], counts["live_canvas_reads"],
+                counts["live_ib_reads"]], (rel, match.group(0))
+        for match in re.finditer(r"(?<![-\w])(\d{3}) (?:verified GETs|"
+                                 r"live-proven reads)", text):
+            assert int(match.group(1)) == counts["live_reads"], (
+                rel, match.group(0))
+    assert seen >= 2, "the docs no longer state the read counts"
+
+
+def _scope_section(heading):
+    with open(os.path.join(TREE, "SCOPE.md"), encoding="utf-8") as fh:
+        text = fh.read()
+    start = text.index(heading)
+    end = text.find("\n#", start + len(heading))
+    return " ".join(text[start:end if end != -1 else None].split())
+
+
+def test_scope_ships_the_educators_own_live_proven_reads():
+    # SCOPE.md, "the exact, complete statement of what v1 ships", listed
+    # course and user reads as having no catalog rows, while C-437 (list
+    # your courses: the educator's first request) and C-436 (your own
+    # profile) are live-proven, so the agent hedged on "Show me my
+    # courses" (final sweep 2026-09-23).
+    live = set()
+    with open(CATALOG, encoding="utf-8") as fh:
+        for line in fh:
+            f = [x.strip() for x in line.split("|")]
+            if len(f) >= 9 and f[1] in ("C-436", "C-437") \
+                    and f[7].startswith("live-proven"):
+                live.add(f[1])
+    assert live == {"C-436", "C-437"}
+    ships = _scope_section("## Ships in v1")
+    assert "C-436" in ships and "C-437" in ships
+    pending = _scope_section("### In scope but pending live proof")
+    assert "courses" not in pending and "users/self" not in pending

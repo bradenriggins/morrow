@@ -161,6 +161,10 @@ Installing and the docs:
   installer's own checks still ship, and they keep to a scratch folder.
 - The troubleshooting guide names the Python version the installer
   needs: 3.11 or newer.
+- The list of what this version does names "Show me my courses" and
+  reading your own Canvas profile. Both were tested live, but the list
+  called them untested, so the assistant could hesitate on the first
+  thing you ask. It also counts 115 tested reads, not 113.
 - The release zip includes the license (MIT) at the top of the
   folder, so anyone reviewing the zip has the license with it.
 - A restored backup works. The backup left out the key that checks

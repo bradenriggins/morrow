@@ -16,6 +16,10 @@ marked `live-proven` is not a v1 claim.
   through `dispatch/executor.py` with `--backend chromium`, executing as
   in-page `fetch()` inside the educator's own authenticated Chromium
   session via CDP on 127.0.0.1:19223.
+- Your own account: list your courses (C-437, the first request an
+  educator makes: "Show me my courses") and read your own profile
+  (C-436, `/api/v1/users/self`), proven live on 2026-09-22 and
+  2026-09-21.
 - Course read/update: get course, update course (rename, readback
   verified and restored), course settings, course tabs. Course create was
   never tested. Course delete/conclude (C-108) is on evidence hold and
@@ -69,14 +73,15 @@ marked `live-proven` is not a v1 claim.
   answers 404 on live items; the bank entry GET is the working item
   read), item delete (IB-19, never proven on any lane), and the quiz
   entry routes (IB-2/IB-3/IB-8/IB-14, evidence-hold).
-- 113 verified GETs (2026-09-21; GET/HEAD only, no writes):
-  108 Canvas reads plus 5 Item Bank reads, all recorded
-  `live-proven` in `proof-battery/OPERATION_CATALOG.md`, across course
-  settings, tabs, sections, files and folders, pages, modules,
-  assignments, assignment groups, classic quizzes, New Quiz reads,
-  grading standards, rubrics, outcomes, external tools and feeds,
-  content migrations and exports, groups, users and search, conferences,
-  collaborations, media objects, permissions, and activity stream.
+- 115 live-proven reads (GET/HEAD only, no writes): 110 Canvas reads
+  plus 5 Item Bank reads, all recorded `live-proven` in
+  `proof-battery/OPERATION_CATALOG.md`, across your courses and your
+  own profile, course settings, tabs, sections, files and folders,
+  pages, modules, assignments, assignment groups, classic quizzes, New
+  Quiz reads, grading standards, rubrics, outcomes, external tools and
+  feeds, content migrations and exports, groups, users and search,
+  conferences, collaborations, media objects, permissions, and
+  activity stream.
   Some of these reads return people and are now classified as learner
   data, so they are refused like every other learner-data row (see
   "Out for v1"): C-78 potential collaborators, C-105/C-106 activity
@@ -111,10 +116,11 @@ yet, so the skill must not claim or dispatch them until a disposable
 live battery marks them live-proven in
 `proof-battery/OPERATION_CATALOG.md`:
 
-- Account, user, and global reads (accounts, users, courses, search,
-  terms, help links): in scope by the parity rule, but there are
-  currently no catalog rows proving them. Dispatch requires educator
-  sign-in to confirm.
+- Account, other-user, and global reads (listing accounts, another
+  person's profile, global search, terms, help links): in scope by the
+  parity rule, but there are currently no catalog rows proving them.
+  Your own course list and profile are live-proven and ship (see "Ships
+  in v1").
 - Discussion writes (C-139 create, C-141 delete, C-167 update,
   C-238 date_details): catalog live-proven only (C-139/C-141/C-167
   through the retired form lane 2026-09-20; C-238 through the
@@ -171,7 +177,7 @@ live battery marks them live-proven in
   (discussion date_details PUT) is live-proven through the 2026-09-21
   Chromium write battery (PUT 204). The admission policy holds all
   four on every lane (see "In scope but pending live proof"). No
-  discussion reads are among the 113 verified GETs (all discussion
+  discussion reads are among the 115 live-proven reads (all discussion
   reads are pending).
 - Announcements: never posted, even when the educator asks. Any
   request that sets `is_announcement` (on any route, in the body or
