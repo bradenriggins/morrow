@@ -39,12 +39,17 @@ interface RecentChangesCapableRuntime {
 
 /** The operation states `morrow_operation_wait` keeps polling through. Any other reported state,
  * known or not, ends the wait: the point of this tool is to sleep through a review a person has not
- * answered yet and the work they approved, not to model every state an operation can reach. */
+ * answered yet and the work Morrow is applying, not to model every state an operation can reach. */
 const OPERATION_REVIEW_OPEN_STATES: ReadonlySet<string> = new Set(["awaiting_approval"]);
 const OPERATION_APPLYING_STATES: ReadonlySet<string> = new Set(["approved", "dispatching"]);
 
 const REVIEW_OPEN_ATTENTION = "The person has not approved yet. Say that the review is still open. Call morrow_operation_wait again when they are ready. Do not call it more than 6 times in a row.";
 const APPLYING_ATTENTION = "The person approved. Morrow is still applying what they approved. Call morrow_operation_wait again to wait for the result.";
+const WORKING_ATTENTION = "Morrow is still working on this. Call morrow_operation_wait again to wait for the result.";
+const EDIT_CHANGE_NOT_SENT = "Edit already allows this change, and nothing has sent it yet. Send it with morrow_operation_dispatch. If it belongs to a group, run the group with morrow_batch_run instead.";
+const EDIT_BATCH_NOT_STARTED = "Edit already allows these changes, and nothing has sent them yet. Run them with morrow_batch_run.";
+const APPROVED_BATCH_NOT_RUNNING = "The person approved these changes, and nothing is sending them now. Run them with morrow_batch_run.";
+const BATCH_NOT_RUNNING = "Nothing is running this group now. Run its remaining requests with morrow_batch_run.";
 
 const WAIT_POLL_INTERVAL_MS = 500;
 const WAIT_PROGRESS_INTERVAL_MS = 5000;
@@ -72,20 +77,33 @@ function waitDelay(ms: number, signal: AbortSignal): Promise<void> {
 interface WaitSnapshot {
   readonly record: JsonObject;
   readonly state: string;
-  /** Whether the person still has to answer the review, or already approved work Morrow is applying. */
-  readonly phase: "review_open" | "applying" | "ended";
+  /** Whether the person still has to answer the review, Morrow is applying the work, nothing runs
+   * work that is ready to start, or the work ended. */
+  readonly phase: "review_open" | "applying" | "idle" | "ended";
+  /** What to tell the assistant: while the wait runs out, or when it ends because nothing runs. */
+  readonly attention?: string;
+}
+
+function editAllowed(record: JsonObject): boolean {
+  const plan = record.plan;
+  return isJsonObject(plan) && isJsonObject(plan.authorization) && plan.authorization.kind === "edit_scope";
 }
 
 /** Reads the current state of the one id the caller named, from whichever store holds it. An
  * operation id is read with `operationGet`, the same call `morrow_operation_get` makes. A batch id
  * needs `batchApprovalStatus`, read from the batch's own `state` field, because a batch has no single
- * outer operation record of its own. */
+ * outer operation record of its own. Work a person approved is started by the review page; work
+ * that Edit allows, or a group's next window, is started only by the assistant's own call. */
 function readWaitSnapshot(runtime: GatewayRuntime, composition: OperationToolComposition, operationId: string | undefined, batchId: string | undefined): WaitSnapshot {
   if (operationId !== undefined) {
     const record = runtime.operationGet(operationId);
     const state = typeof record.state === "string" ? record.state : "unknown";
-    const phase = OPERATION_REVIEW_OPEN_STATES.has(state) ? "review_open" : OPERATION_APPLYING_STATES.has(state) ? "applying" : "ended";
-    return { record, state, phase };
+    if (OPERATION_REVIEW_OPEN_STATES.has(state)) return { record, state, phase: "review_open", attention: REVIEW_OPEN_ATTENTION };
+    if (!OPERATION_APPLYING_STATES.has(state)) return { record, state, phase: "ended" };
+    if (!editAllowed(record)) return { record, state, phase: "applying", attention: APPLYING_ATTENTION };
+    return state === "approved"
+      ? { record, state, phase: "idle", attention: EDIT_CHANGE_NOT_SENT }
+      : { record, state, phase: "applying", attention: WORKING_ATTENTION };
   }
   if (typeof composition.batchApprovalStatus !== "function") {
     throw new Error("this server cannot report a batch's approval status");
@@ -93,12 +111,18 @@ function readWaitSnapshot(runtime: GatewayRuntime, composition: OperationToolCom
   const record = composition.batchApprovalStatus(batchId as string);
   const batch = record.batch;
   const state = isJsonObject(batch) && typeof batch.state === "string" ? batch.state : "unknown";
-  // A planned batch of staged writes is either still in review or approved and waiting for its batch
-  // window; its status says which. A planned batch with no review has nothing to wait for.
-  const phase = state === "running" || (state === "planned" && record.approval === "approved") ? "applying"
-    : state === "planned" && record.approval === "awaiting_approval" ? "review_open"
-      : "ended";
-  return { record, state, phase };
+  if (state !== "planned" && state !== "running") return { record, state, phase: "ended" };
+  if (state === "planned" && record.approval === "awaiting_approval") return { record, state, phase: "review_open", attention: REVIEW_OPEN_ATTENTION };
+  // `applying` says a batch window runs this batch now or a run waits for one. A planned or running
+  // batch that no window holds does not change until the assistant runs it.
+  if (record.applying === true) {
+    return { record, state, phase: "applying", attention: record.approval === "approved" ? APPLYING_ATTENTION : WORKING_ATTENTION };
+  }
+  const attention = state === "running" ? BATCH_NOT_RUNNING
+    : record.approval === "edit" ? EDIT_BATCH_NOT_STARTED
+      : record.approval === "approved" ? APPROVED_BATCH_NOT_RUNNING
+        : BATCH_NOT_RUNNING;
+  return { record, state, phase: "idle", attention };
 }
 
 /** What the wider server composition adds to a GatewayRuntime for these tools. */
@@ -130,7 +154,7 @@ export function registerOperationTools(
     "morrow_operation_wait",
     {
       title: "Wait for a review to be answered",
-      description: "Poll one saved operation or batch and return as soon as a person answers its review, or when the wait ends, whichever is first. Call this instead of asking the person whether they are done. It never sends a request to the source provider, and it never starts or changes the operation it watches.",
+      description: "Poll one saved operation or batch and return as soon as a person answers its review or Morrow finishes the work, or when the wait ends, whichever is first. When nothing is running work that is ready to start, it returns at once and names the call that starts it. Call this instead of asking the person whether they are done. It never sends a request to the source provider, and it never starts or changes the operation it watches.",
       inputSchema: z.object({
         operation_id: z.string().min(8).max(160).optional(),
         batch_id: z.string().min(1).max(160).optional(),
@@ -148,7 +172,7 @@ export function registerOperationTools(
         const progressToken = context.mcpReq._meta?.progressToken;
         let lastProgressAt = startedAt;
         let snapshot = readWaitSnapshot(runtime, composition, operation_id, batch_id);
-        while (snapshot.phase !== "ended" && Date.now() < deadlineAt && !context.mcpReq.signal.aborted) {
+        while ((snapshot.phase === "review_open" || snapshot.phase === "applying") && Date.now() < deadlineAt && !context.mcpReq.signal.aborted) {
           const now = Date.now();
           if (progressToken !== undefined && now - lastProgressAt >= WAIT_PROGRESS_INTERVAL_MS) {
             lastProgressAt = now;
@@ -167,11 +191,11 @@ export function registerOperationTools(
           snapshot = readWaitSnapshot(runtime, composition, operation_id, batch_id);
         }
         const seconds = Math.round((Date.now() - startedAt) / 1000);
-        const timedOut = !context.mcpReq.signal.aborted && snapshot.phase !== "ended";
+        const timedOut = !context.mcpReq.signal.aborted && (snapshot.phase === "review_open" || snapshot.phase === "applying");
         const attention = Array.isArray(snapshot.record.attention)
           ? snapshot.record.attention.filter((entry): entry is string => typeof entry === "string")
           : [];
-        if (timedOut) attention.push(snapshot.phase === "review_open" ? REVIEW_OPEN_ATTENTION : APPLYING_ATTENTION);
+        if ((timedOut || snapshot.phase === "idle") && snapshot.attention) attention.push(snapshot.attention);
         return {
           content: [{ type: "text", text: `Here is saved request ${id}.` }],
           structuredContent: {

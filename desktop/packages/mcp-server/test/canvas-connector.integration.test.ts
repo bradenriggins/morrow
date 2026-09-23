@@ -95,6 +95,22 @@ async function approveBatch(server: LoopbackApprovalServer, url: string): Promis
   expect(response.status).toBe(200);
 }
 
+/** Calls morrow_operation_wait the way an assistant does, through the full MCP server. */
+async function waitThroughServer(runtime: MorrowRuntime, args: JsonObject): Promise<JsonObject> {
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = serveStdio(() => createFullMorrowServer(runtime), { transport: serverTransport });
+  const client = new Client({ name: "morrow-wait", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
+  try {
+    await client.connect(clientTransport);
+    const result = await client.callTool({ name: "morrow_operation_wait", arguments: args });
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    return result.structuredContent as JsonObject;
+  } finally {
+    await client.close();
+    await server.close();
+  }
+}
+
 describe("Canvas connector gateway path", () => {
   /**
    * One connector process, one bridge connection and one course connection
@@ -844,6 +860,11 @@ describe("Canvas connector gateway path", () => {
       expect(JSON.stringify(pagePlan)).not.toContain(lesson.body);
       pagePlanOperationId = savedPagePlan.operationId;
       pageContentGuard = savedPagePlan.plan.arguments._morrow.canvas_content_guard;
+      // Edit allows this change without a review, and nothing sends it until the assistant does.
+      const waited = await waitThroughServer(morrow, { operation_id: pagePlanOperationId, max_wait_seconds: 5 });
+      expect(waited).toMatchObject({ state: "approved", waited: { timedOut: false } });
+      expect(waited.attention).toEqual(["Edit already allows this change, and nothing has sent it yet. Send it with morrow_operation_dispatch. If it belongs to a group, run the group with morrow_batch_run instead."]);
+      expect(writeCommands).toBe(0);
     }, CASE_TIMEOUT_MS);
 
     it("plans image-alt repairs for a page, an assignment, a discussion and a New Quiz item", async () => {
@@ -1816,7 +1837,18 @@ describe("Canvas connector gateway path", () => {
       });
       expect(editBatch).not.toHaveProperty("approvalUrl");
       const editBatchId = String((editBatch.batch as JsonObject).batchId);
-      await runtime.batchRun({ batchId: editBatchId, maxChildren: 2 });
+      // No person reviewed these changes, and nothing sends them until the assistant runs the batch,
+      // so the wait ends at once and names that call instead of saying a person approved them.
+      expect(runtime.batchApprovalStatus(editBatchId)).toMatchObject({ batch: { state: "planned" }, approval: "edit", applying: false });
+      const unstarted = await waitThroughServer(runtime, { batch_id: editBatchId, max_wait_seconds: 5 });
+      expect(unstarted).toMatchObject({ waited: { timedOut: false } });
+      expect(unstarted.attention).toEqual(["Edit already allows these changes, and nothing has sent them yet. Run them with morrow_batch_run."]);
+      await runtime.batchRun({ batchId: editBatchId, maxChildren: 1 });
+      expect(runtime.batchApprovalStatus(editBatchId)).toMatchObject({ batch: { state: "running", pendingChildren: 1 }, approval: "edit", applying: false });
+      const betweenWindows = await waitThroughServer(runtime, { batch_id: editBatchId, max_wait_seconds: 5 });
+      expect(betweenWindows).toMatchObject({ waited: { timedOut: false } });
+      expect(betweenWindows.attention).toEqual(["Nothing is running this group now. Run its remaining requests with morrow_batch_run."]);
+      await runtime.batchRun({ batchId: editBatchId, maxChildren: 1 });
       expect(runtime.batchGet({ batchId: editBatchId }).batch).toMatchObject({ state: "completed" });
       expect(writeCommands).toBe(4);
 
@@ -1834,6 +1866,7 @@ describe("Canvas connector gateway path", () => {
       const mixedId = String((mixed.batch as JsonObject).batchId);
       expect(mixed.approvalUrl).toBeTruthy();
       expect(runtime.batchGet({ batchId: mixedId }).batch).toMatchObject({ state: "planned", pendingChildren: 2 });
+      expect(runtime.batchApprovalStatus(mixedId)).toMatchObject({ approval: "awaiting_approval", applying: false });
       expect(writeCommands).toBe(4);
 
       confirmed = false;
@@ -1865,6 +1898,7 @@ describe("Canvas connector gateway path", () => {
       });
       const queuedId = String((queued.batch as JsonObject).batchId);
       runtime.approveBatch(queuedId);
+      expect(runtime.batchApprovalStatus(queuedId)).toMatchObject({ batch: { state: "planned" }, approval: "approved", applying: false });
       let releaseWindow!: () => void;
       const heldWindow = runtime.batchScheduler.run("hold-window", () => new Promise<void>((resolve) => {
         releaseWindow = resolve;
@@ -1873,6 +1907,11 @@ describe("Canvas connector gateway path", () => {
       const shutdown = new AbortController();
       const queuedWork = runtime.runApprovedBatch(queuedId, shutdown.signal);
       await expect.poll(() => runtime.batchScheduler.health().waitingWindows).toBe(1);
+      // Approved work that waits for its window is still Morrow's to apply, so the wait keeps going.
+      expect(runtime.batchApprovalStatus(queuedId)).toMatchObject({ batch: { state: "planned" }, approval: "approved", applying: true });
+      const queuedWait = await waitThroughServer(runtime, { batch_id: queuedId, max_wait_seconds: 1 });
+      expect(queuedWait).toMatchObject({ waited: { timedOut: true } });
+      expect(queuedWait.attention).toEqual(["The person approved. Morrow is still applying what they approved. Call morrow_operation_wait again to wait for the result."]);
       shutdown.abort();
       releaseWindow();
       await Promise.all([heldWindow, queuedWork]);

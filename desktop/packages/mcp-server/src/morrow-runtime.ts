@@ -1539,18 +1539,27 @@ export class MorrowRuntime {
     const states: Record<string, string> = {};
     const tools = new Set<string>();
     let confirmedChildren = 0;
-    // A planned batch of staged writes is either still in review or approved and waiting for its batch
-    // window. Only the children's own operations say which, so they are read only in that state.
-    const reviewed = batch.state === "planned" && batch.mode === "stage_writes";
+    // Unfinished staged writes are still in the person's review, approved by the person on the
+    // review page, or allowed by Edit with no review. Only the children's own operations say which,
+    // so they are read only while the batch is planned or running.
+    const unfinishedWrites = batch.mode === "stage_writes" && (batch.state === "planned" || batch.state === "running");
     let reviewOpen = false;
+    let editAllowed: boolean | null = null;
     let offset = 0;
     for (;;) {
       const page = this.batches.listChildren(batchId, offset, 500);
       for (const child of page.children) {
         tools.add(child.publicToolName);
         if (child.gatewayOperationState === "verified") confirmedChildren += 1;
-        if (reviewed && !reviewOpen && child.state === "pending" && child.gatewayOperationId
-          && this.gateway.operationGet(child.gatewayOperationId).state === "awaiting_approval") reviewOpen = true;
+        const readOperation = unfinishedWrites && child.gatewayOperationId && (editAllowed === null
+          || (batch.state === "planned" && !reviewOpen && child.state === "pending"));
+        if (readOperation) {
+          const operation = this.gateway.operationGet(child.gatewayOperationId!);
+          const authorization = isJsonObject(operation.plan) && isJsonObject(operation.plan.authorization)
+            ? operation.plan.authorization : {};
+          editAllowed ??= authorization.kind === "edit_scope";
+          if (batch.state === "planned" && child.state === "pending" && operation.state === "awaiting_approval") reviewOpen = true;
+        }
         states[String(child.ordinal - 1)] = operationStatus(
           child.state === "pending" ? "awaiting_approval"
             : child.state === "running" ? "dispatching"
@@ -1567,7 +1576,10 @@ export class MorrowRuntime {
       schema: "morrow.batch-approval-status.v1",
       platform: reviewPlatform([...tools]),
       batch,
-      ...(reviewed ? { approval: reviewOpen ? "awaiting_approval" : "approved" } : {}),
+      ...(unfinishedWrites && (reviewOpen || editAllowed !== null)
+        ? { approval: reviewOpen ? "awaiting_approval" : editAllowed ? "edit" : "approved" }
+        : {}),
+      applying: this.batchScheduler.holds(batchId),
       totalChildren: batch.totalChildren,
       confirmedChildren,
       states,
