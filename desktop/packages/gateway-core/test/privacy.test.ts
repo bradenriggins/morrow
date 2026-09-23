@@ -1228,6 +1228,62 @@ describe("bidirectional roster dictionary", () => {
     // A script with no capital letters cannot mark a name, so a lone name part in it always matches.
     expect(redactKnownLearnerText("민준 replied. 하늘 agreed.", ctx)).toBe(`${minjun} replied. ${minjun} agreed.`);
   });
+  it("replaces a name inside running text of a script that writes no spaces or attaches a particle or prefix to it", () => {
+    const roster = new LearnerRoster();
+    roster.register(scope, [
+      { id: "721", name: "王小明" },
+      { id: "722", name: "佐藤 花子" },
+      { id: "723", name: "김민준" },
+      { id: "724", name: "محمد علي" },
+      { id: "725", name: "דוד כהן" },
+      { id: "726", name: "สมชาย ใจดี" },
+      { id: "727", name: "Ada Lovelace" },
+    ]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [wang, sato, kim, ali, cohen, somchai, ada] = ["王小明", "佐藤 花子", "김민준", "محمد علي", "דוד כהן", "สมชาย ใจดี", "Ada Lovelace"]
+      .map((name) => redactKnownLearnerText(name, ctx));
+    expect(new Set([wang, sato, kim, ali, cohen, somchai, ada]).size).toBe(7);
+    expect(redactKnownLearnerText("我同意王小明的看法", ctx)).toBe(`我同意${wang}的看法`);
+    expect(redactKnownLearnerText("请看王小明的作业。", ctx)).toBe(`请看${wang}的作业。`);
+    expect(redactKnownLearnerText("佐藤花子さんの課題を見てください。", ctx)).toBe(`${sato}さんの課題を見てください。`);
+    expect(redactKnownLearnerText("花子さんの課題を確認して。", ctx)).toBe(`${sato}さんの課題を確認して。`);
+    expect(redactKnownLearnerText("김민준의 과제를 확인해 주세요.", ctx)).toBe(`${kim}의 과제를 확인해 주세요.`);
+    expect(redactKnownLearnerText("김 민준 학생", ctx)).toBe(`${kim} 학생`);
+    expect(redactKnownLearnerText("أرسل ملاحظة لمحمد علي اليوم.", ctx)).toBe(`أرسل ملاحظة ل${ali} اليوم.`);
+    expect(redactKnownLearnerText("שלח הודעה לדוד כהן היום.", ctx)).toBe(`שלח הודעה ל${cohen} היום.`);
+    expect(redactKnownLearnerText("ช่วยตรวจงานของสมชายหน่อย", ctx)).toBe(`ช่วยตรวจงานของ${somchai}หน่อย`);
+    // A name in a spaced script still ends where a word of an unspaced script begins.
+    expect(redactKnownLearnerText("请看Ada Lovelace的作业。", ctx)).toBe(`请看${ada}的作业。`);
+    expect(redactKnownLearnerText("Ada의 과제", ctx)).toBe(`${ada}의 과제`);
+    // A script that separates words with spaces keeps its word edges.
+    expect(redactKnownLearnerText("Please review Ada Lovelace's essay.", ctx)).toBe(`Please review ${ada}'s essay.`);
+    expect(redactKnownLearnerText("Adalovelace and Adas stay as written.", ctx)).toBe("Adalovelace and Adas stay as written.");
+  });
+  it("replaces a name written with a curly apostrophe, another hyphen, a capital dotted I, or without its accents", () => {
+    const roster = new LearnerRoster();
+    roster.register(scope, [
+      { id: "731", name: "Sean O'Brien" },
+      { id: "732", name: "Maria D'Angelo" },
+      { id: "733", name: "Ana Smith-Jones" },
+      { id: "734", name: "İlkay Yıldız" },
+      { id: "735", name: "José García" },
+      { id: "736", name: "Liam O’Neil" },
+    ]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [obrien, dangelo, smithJones, ilkay, garcia, oneil] = ["Sean O'Brien", "Maria D'Angelo", "Ana Smith-Jones", "İlkay Yıldız", "José García", "Liam O’Neil"]
+      .map((name) => redactKnownLearnerText(name, ctx));
+    expect(new Set([obrien, dangelo, smithJones, ilkay, garcia, oneil]).size).toBe(6);
+    expect(redactKnownLearnerText("Sean O’Brien submitted the lab.", ctx)).toBe(`${obrien} submitted the lab.`);
+    expect(redactKnownLearnerText("Please check O’Brien’s draft.", ctx)).toBe(`Please check ${obrien}’s draft.`);
+    expect(redactKnownLearnerText("<p>Sean O&#8217;Brien asked.</p>", ctx)).toBe(`<p>${obrien} asked.</p>`);
+    expect(redactKnownLearnerText("Maria DʼAngelo and D＇Angelo and D`Angelo and D´Angelo asked.", ctx))
+      .toBe(`${dangelo} and ${dangelo} and ${dangelo} and ${dangelo} asked.`);
+    expect(redactKnownLearnerText("Ana Smith‑Jones wrote this. Smith–Jones replied. Smith‐Jones agreed.", ctx))
+      .toBe(`${smithJones} wrote this. ${smithJones} replied. ${smithJones} agreed.`);
+    expect(redactKnownLearnerText("İlkay Yıldız submitted late. İlkay asked.", ctx)).toBe(`${ilkay} submitted late. ${ilkay} asked.`);
+    expect(redactKnownLearnerText("Jose Garcia submitted late. Garcia asked.", ctx)).toBe(`${garcia} submitted late. ${garcia} asked.`);
+    expect(redactKnownLearnerText("Liam O'Neil asked.", ctx)).toBe(`${oneil} asked.`);
+  });
   it("neutralizes a pasted label outside the roster and refuses it only in the strict projection", () => {
     const roster = new LearnerRoster(); roster.register(scope, [{ id: "17", name: "Ada Lovelace" }]);
     const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };

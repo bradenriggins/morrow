@@ -117,8 +117,17 @@ describe("GET /recent", () => {
   });
 
   it("offers an undo request only for a change that may have reached the platform", async () => {
-    const reachable = ["verified", "applied_or_unknown", "closed_by_person"].map((state) =>
-      finishedOperation({ operationId: `op:recent-${state}`, state }));
+    const reachable = [
+      ...["verified", "applied_or_unknown", "closed_by_person"].map((state) =>
+        finishedOperation({ operationId: `op:recent-${state}`, state })),
+      // A read proved the platform saved something other than the approved change, so it was sent.
+      finishedOperation({
+        operationId: "op:recent-mismatch-1234",
+        state: "failed",
+        verificationStatus: "mismatch",
+        attention: ["readback_did_not_match_frozen_comparator"],
+      }),
+    ];
     const unsent = [
       finishedOperation({ operationId: "op:recent-cancel-1234", state: "cancelled", attention: ["cancelled_by_person"] }),
       finishedOperation({ operationId: "op:recent-failed-1234", state: "failed", attention: ["dispatch_failed_before_send"] }),
@@ -132,12 +141,13 @@ describe("GET /recent", () => {
       const cookie = exchanged.headers.get("set-cookie")!.split(";", 1)[0];
       const body = await (await fetch(`${baseUrl}/recent`, { headers: { cookie } })).text();
       const rows = body.split('<li class="recent-row">').slice(1);
-      expect(rows).toHaveLength(6);
+      expect(rows).toHaveLength(7);
       for (const operation of reachable) {
         const row = rows.find((entry) => entry.includes(`/operations/${encodeURIComponent(String(operation.operationId))}"`))!;
         expect(row).toContain(`Reverse change ${operation.operationId}.`);
         expect(row).not.toContain("Nothing was sent");
       }
+      expect(rows.find((entry) => entry.includes("op%3Arecent-mismatch-1234"))).toContain("Did not save as approved");
       for (const operation of unsent) {
         const row = rows.find((entry) => entry.includes(`/operations/${encodeURIComponent(String(operation.operationId))}"`))!;
         expect(row).toContain("Nothing was sent");

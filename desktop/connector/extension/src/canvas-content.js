@@ -2920,14 +2920,18 @@
   function verifyNewQuizAccommodation(data, request) {
     const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-accommodation-response" };
     if (!plainObject(data) || !Array.isArray(data.successful) || !Array.isArray(data.failed)) {
-      return { ...base, status: "mismatch", reason: "new_quiz_accommodation_response_invalid" };
+      return { ...base, status: "unconfirmed", reason: "new_quiz_accommodation_response_invalid" };
     }
     const successful = data.successful.filter((row) => plainObject(row) && pageId(row.user_id) === request.user_id);
     const failed = data.failed.filter((row) => plainObject(row) && pageId(row.user_id) === request.user_id);
     if (successful.length === 1 && failed.length === 0) {
       return { ...base, status: "verified", evidence: "authoritative_per_user_accommodation_success" };
     }
-    return { ...base, status: "mismatch", reason: failed.length > 0 ? "new_quiz_accommodation_provider_failed" : "new_quiz_accommodation_user_result_missing" };
+    // Only a failure row for this student proves the change did not apply. An answer with no row
+    // for the student proves nothing either way.
+    return failed.length > 0
+      ? { ...base, status: "mismatch", reason: "new_quiz_accommodation_provider_failed" }
+      : { ...base, status: "unconfirmed", reason: "new_quiz_accommodation_user_result_missing" };
   }
 
   function verifyNewQuizReport(answer, args) {
@@ -2941,14 +2945,14 @@
     if (!id || contextId !== pageId(args.assignment_id) || data.context_type !== "Assignment"
       || !["queued", "running", "completed", "failed"].includes(String(data.workflow_state))
       || !progressUrl || progressUrl.origin !== location.origin || progressUrl.pathname !== `/api/v1/progress/${id}`) {
-      return { ...base, status: "mismatch", reason: "new_quiz_report_progress_invalid" };
+      return { ...base, status: "unconfirmed", reason: "new_quiz_report_progress_invalid" };
     }
     if (data.workflow_state === "failed") return { ...base, status: "mismatch", reason: "new_quiz_report_failed" };
     if (data.workflow_state === "completed") {
       let artifact;
       try { artifact = new URL(String(data.results?.url || ""), location.origin); } catch { artifact = null; }
       if (!artifact || artifact.origin !== location.origin || !/^\/api\//.test(artifact.pathname)) {
-        return { ...base, status: "mismatch", reason: "new_quiz_report_artifact_invalid" };
+        return { ...base, status: "unconfirmed", reason: "new_quiz_report_artifact_invalid" };
       }
       return { ...base, status: "verified", evidence: "completed_progress_and_same_origin_report_artifact" };
     }

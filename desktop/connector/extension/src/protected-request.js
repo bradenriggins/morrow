@@ -19,9 +19,22 @@ function optionalText(value, code) {
   return text(value, code);
 }
 
-// Accents fold away on both sides, so "Jose Garcia" matches the rostered "José García".
+// Accents fold away on both sides, so "Jose Garcia" matches the rostered "José García". Rich-text
+// editors and phones write a name's apostrophe or hyphen as another character, so O’Brien matches
+// the rostered O'Brien. packages/gateway-core/src/privacy.ts folds the same way, so Morrow Bridge
+// and the gateway replace the same names.
+const APOSTROPHE_VARIANTS = /[\u2018\u2019\u02bc\uff07\u0060\u00b4]/gu;
+const HYPHEN_VARIANTS = /[\u2010-\u2013\ufe63\uff0d]/gu;
+
 function fold(value) {
-  return String(value).normalize("NFKD").replace(/\p{M}/gu, "").normalize("NFKC");
+  return String(value).replace(APOSTROPHE_VARIANTS, "'").replace(HYPHEN_VARIANTS, "-")
+    .normalize("NFKD").replace(/\p{M}/gu, "").normalize("NFKC");
+}
+
+// NFKC splits a spacing accent written as an apostrophe, as in D´Angelo, into a space and a mark,
+// so it becomes an apostrophe first.
+function composed(value) {
+  return value.replace(/\u00b4/gu, "'").normalize("NFKC");
 }
 
 function normalize(value) {
@@ -162,12 +175,81 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-function aliasPattern(alias) {
-  return escapeRegExp(alias).replace(/ /gu, "\\s+");
+// Scripts that write words with no space between them, or that attach a particle to a name, as
+// Korean does in 김민준의. A name written in one has no word edge. A name written in any other
+// script still ends where a word of one of these begins, as in 请看Ada Lovelace的作业.
+const UNSPACED_SCRIPT = "\\p{scx=Han}\\p{scx=Hiragana}\\p{scx=Katakana}\\p{scx=Hangul}\\p{scx=Thai}\\p{scx=Lao}\\p{scx=Khmer}\\p{scx=Myanmar}";
+const UNSPACED_LETTER = new RegExp(`^[${UNSPACED_SCRIPT}]$`, "u");
+const SPACED_WORD_CHARACTER = `(?![${UNSPACED_SCRIPT}])[\\p{L}\\p{N}_]`;
+const UNSPACED_GAP = new RegExp(`(?<=[${UNSPACED_SCRIPT}]) (?=[${UNSPACED_SCRIPT}])`, "gu");
+// Arabic and Hebrew attach a one-letter prefix, such as "to" or "and", to the name that follows.
+const PROCLITIC_LETTERS = [
+  [/^\p{scx=Arabic}$/u, "وفبكل"],
+  [/^\p{scx=Hebrew}$/u, "ובכלמשה"],
+];
+
+/**
+ * The lookup key of an alias. A space between two letters of an unspaced script is dropped,
+ * because people write 佐藤花子 and 佐藤 花子 for one name.
+ */
+function aliasKey(value) {
+  return normalize(value).replace(UNSPACED_GAP, "");
 }
 
-function boundaryPattern(alias, flags = "giu") {
-  return new RegExp(`(?<![\\p{L}\\p{N}_])(?:${aliasPattern(alias)})(?![\\p{L}\\p{N}_])`, flags);
+function aliasBody(key) {
+  const points = [...key];
+  let body = "";
+  for (const [index, point] of points.entries()) {
+    const previous = points[index - 1];
+    if (previous !== undefined && UNSPACED_LETTER.test(previous) && UNSPACED_LETTER.test(point)) body += "\\s*";
+    body += point === " " ? "\\s+" : escapeRegExp(point);
+  }
+  return body;
+}
+
+/** The word edges an alias key needs on each side to be a whole name. */
+function aliasEdges(key) {
+  const points = [...key];
+  const first = points[0] ?? "";
+  const last = points.at(-1) ?? "";
+  const edge = `(?<!${SPACED_WORD_CHARACTER})`;
+  const proclitic = PROCLITIC_LETTERS.find(([script]) => script.test(first))?.[1];
+  const before = UNSPACED_LETTER.test(first) ? "" : proclitic ? `(?:${edge}|(?<=${edge}[${proclitic}]))` : edge;
+  const after = UNSPACED_LETTER.test(last) ? "" : `(?!${SPACED_WORD_CHARACTER})`;
+  return [before, after];
+}
+
+/**
+ * One matcher for each kind of word edge, so each edge is tested once at a position rather than
+ * once for every alias. Within a matcher the longest alias is tried first.
+ */
+function aliasMatchers(keys) {
+  const groups = new Map();
+  for (const key of keys) {
+    if (!key) continue;
+    const edges = aliasEdges(key);
+    const group = groups.get(edges.join("\u0000")) ?? { edges, keys: [] };
+    group.keys.push(key);
+    groups.set(edges.join("\u0000"), group);
+  }
+  return [...groups.values()].map(({ edges: [before, after], keys: grouped }) => new RegExp(
+    `${before}(?:${grouped.sort((left, right) => right.length - left.length).map(aliasBody).join("|")})${after}`,
+    "giu",
+  ));
+}
+
+/** Every alias the matchers find, leftmost first and the longest where two start together. */
+function matchedAliases(text, matchers) {
+  const found = matchers.flatMap((matcher) => [...text.matchAll(matcher)].map((match) => ({ index: match.index, text: match[0] })))
+    .sort((left, right) => left.index - right.index || right.text.length - left.text.length);
+  const output = [];
+  let cursor = 0;
+  for (const match of found) {
+    if (match.index < cursor) continue;
+    output.push(match);
+    cursor = match.index + match.text.length;
+  }
+  return output;
 }
 
 /** A folded copy of the text whose every UTF-16 unit remembers its source range. */
@@ -217,32 +299,30 @@ function aliasKind(value, identity) {
 function aliasMatches(value, index, asserted, flagged) {
   const view = foldedView(value);
   const candidates = [...index.aliases.keys()]
-    .filter((alias) => index.kinds.get(alias) !== "number" || asserted.has(alias))
-    .sort((left, right) => right.length - left.length);
+    .filter((alias) => index.kinds.get(alias) !== "number" || asserted.has(alias));
   if (!candidates.length) return [];
-  const matcher = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${candidates.map(aliasPattern).join("|")})(?![\\p{L}\\p{N}_])`, "giu");
   const output = [];
-  for (const match of view.text.matchAll(matcher)) {
-    const key = normalize(match[0]);
+  for (const match of matchedAliases(view.text, aliasMatchers(candidates))) {
+    const key = aliasKey(match.text);
     const kind = index.kinds.get(key);
     const common = (kind === "part" || kind === "name") && key.split(/[\s,]+/u).filter(Boolean).every((word) => COMMON_NAME_WORDS.has(word));
     if (common && !asserted.has(key)) {
-      if (!capitalizedWords(match[0])) continue;
+      if (!capitalizedWords(match.text)) continue;
       if (kind === "part" && sentenceStart(view.text, match.index)) {
-        flagged.push({ at: sourceRange(view, match.index, match.index + match[0].length)[0], text: value.slice(...sourceRange(view, match.index, match.index + match[0].length)) });
+        flagged.push({ at: sourceRange(view, match.index, match.index + match.text.length)[0], text: value.slice(...sourceRange(view, match.index, match.index + match.text.length)) });
         continue;
       }
     }
     const matches = index.aliases.get(key) || [];
     if (matches.length !== 1) fail("protected_request_identifier_ambiguous");
-    const [start, end] = sourceRange(view, match.index, match.index + match[0].length);
+    const [start, end] = sourceRange(view, match.index, match.index + match.text.length);
     output.push({ start, end, entry: matches[0] });
   }
   return output;
 }
 
 function replaceAliases(value, index, usedIds, asserted, flagged = []) {
-  const text = value.normalize("NFKC");
+  const text = composed(value);
   let output = "";
   let cursor = 0;
   for (const { start, end, entry } of aliasMatches(text, index, asserted, flagged)) {
@@ -292,7 +372,7 @@ function aliasIndex(roster, priorLabels, assignedLabels) {
     const values = [label, identity.id, identity.name, identity.email, identity.loginId, identity.sisUserId,
       ...identity.aliases, ...learnerNameAliases(identity)].filter(Boolean);
     for (const value of values) {
-      const key = normalize(value);
+      const key = aliasKey(value);
       if (!key) continue;
       const matches = aliases.get(key) || [];
       if (!matches.some((candidate) => candidate.identity.id === identity.id)) matches.push(entry);
@@ -320,14 +400,14 @@ function numberEntry(numbers, value) {
 }
 
 function exactAlias(value, aliases) {
-  const matches = aliases.get(normalize(value)) || [];
+  const matches = aliases.get(aliasKey(value)) || [];
   if (matches.length > 1) fail("protected_request_identifier_ambiguous");
   if (matches.length === 0) fail("protected_request_identifier_unknown");
   return matches[0];
 }
 
 function containsAlias(value, alias) {
-  return boundaryPattern(alias).test(fold(value.normalize("NFKC")));
+  return matchedAliases(fold(composed(value)), aliasMatchers([alias])).length > 0;
 }
 
 // A number this long in a request is a platform id, not a count or a score. A word
@@ -363,7 +443,7 @@ function replaceContextualIds(value, numbers, usedIds) {
 /** Capitalized words that look like a name and matched nobody on the roster. */
 function unmatchedNameWords(value) {
   const text = value.replace(/\bStudent A[1-9][0-9]*\b/gu, (label) => "x".padEnd(label.length, " "));
-  const word = /\p{Lu}[\p{Ll}\p{M}]+(?:['’-]\p{Lu}?[\p{Ll}\p{M}]+)*/u;
+  const word = /(?:\p{Lu}['\u2019\u02bc])?\p{Lu}[\p{Ll}\p{M}]+(?:['\u2019\u02bc\u2010-]\p{Lu}?[\p{Ll}\p{M}]+)*/u;
   const found = [];
   for (const run of text.matchAll(new RegExp(`${word.source}(?:[ \\t]+${word.source})*`, "gu"))) {
     const words = run[0].split(/[ \t]+/u);
@@ -451,10 +531,10 @@ export function protectLocalRequest(input) {
     return !number || !allowedLabels.has(`Student A${number}`);
   })) fail("protected_request_existing_label_refused");
   const asserted = input.assertedIdentifiers.map((identifier) => text(identifier, "protected_request_identifier_invalid"));
-  const assertedAliases = new Set(asserted.map(normalize));
+  const assertedAliases = new Set(asserted.map(aliasKey));
   for (const identifier of asserted) {
     exactAlias(identifier, aliases);
-    if (!containsAlias(input.text, normalize(identifier))) fail("protected_request_assertion_missing");
+    if (!containsAlias(input.text, aliasKey(identifier))) fail("protected_request_assertion_missing");
   }
   let protectedText;
   if (/^\s*[\[{]/u.test(input.text)) {

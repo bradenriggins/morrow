@@ -787,6 +787,8 @@ export class MorrowRuntime {
         setApprovalPresence: (presence) => gateway.setApprovalPresence(presence),
         announceApprovalPresence: () => gateway.announceApprovalPresence(),
         setReviewLearnerNames: (reviewPath, names) => gateway.setReviewLearnerNames(reviewPath, names),
+        personCloseAvailable: (operationId) => gateway.personCloseAvailable(operationId),
+        confirmPersonClose: (operationId) => gateway.confirmPersonClose(operationId),
         batchApprovalGet: (batchId) => runtime!.batchApprovalGet(batchId),
         batchApprovalStatus: (batchId) => runtime!.batchApprovalStatus(batchId),
         approveBatch: (batchId) => runtime!.approveBatch(batchId),
@@ -1564,14 +1566,17 @@ export class MorrowRuntime {
           editAllowed ??= authorization.kind === "edit_scope";
           if (batch.state === "planned" && child.state === "pending" && operation.state === "awaiting_approval") reviewOpen = true;
         }
-        states[String(child.ordinal - 1)] = operationStatus(
-          child.state === "pending" ? "awaiting_approval"
-            : child.state === "running" ? "dispatching"
-              : child.state === "cancelled" ? "cancelled"
-                : child.state === "failed" ? "failed"
-                  : child.gatewayOperationState || child.state,
-          reviewPlatform([child.publicToolName]),
-        );
+        const shownState = child.state === "pending" ? "awaiting_approval"
+          : child.state === "running" ? "dispatching"
+            : child.state === "cancelled" ? "cancelled"
+              : child.state === "failed" ? "failed"
+                : child.gatewayOperationState || child.state;
+        // A failed change says whether it failed before it was sent or after a read proved the
+        // platform saved something else, as the page's first render does.
+        const verification = shownState === "failed" && child.gatewayOperationId?.startsWith("op:")
+          ? this.gateway.operationGet(child.gatewayOperationId).verificationStatus
+          : undefined;
+        states[String(child.ordinal - 1)] = operationStatus(shownState, reviewPlatform([child.publicToolName]), verification);
       }
       if (page.nextOffset === null) break;
       offset = page.nextOffset;

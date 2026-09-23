@@ -66,7 +66,7 @@ export function canvasConnectorSummary(value: JsonObject): string {
     return `Morrow confirmed the ${platform} change with a fresh ${platform} check.`;
   }
   if (verification?.status === "mismatch") {
-    return `Morrow could not confirm this change because ${platform} returned a different result. Ask your assistant to check the existing request. Do not repeat this change.`;
+    return `Morrow read ${platform} again after this change, and ${platform} does not hold the approved result. The change failed. Do not repeat this change.`;
   }
   return "Morrow could not confirm this change. Ask your assistant to check the existing request. Do not repeat this change.";
 }

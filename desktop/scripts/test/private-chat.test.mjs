@@ -193,6 +193,84 @@ test("local protection matches a rostered name written without its accents, on b
   assert.equal(accented, asserted);
 });
 
+// Both learner boundaries read one roster the same way: the Bridge for what the educator types,
+// the gateway for what a tool result carries.
+const SCRIPT_ROSTER = [
+  { id: 721, name: "王小明" },
+  { id: 722, name: "佐藤 花子" },
+  { id: 723, name: "김민준" },
+  { id: 724, name: "محمد علي" },
+  { id: 725, name: "דוד כהן" },
+  { id: 726, name: "สมชาย ใจดี" },
+  { id: 727, name: "Ada Lovelace" },
+  { id: 731, name: "Sean O'Brien" },
+  { id: 732, name: "Maria D'Angelo" },
+  { id: 733, name: "Ana Smith-Jones" },
+  { id: 734, name: "İlkay Yıldız" },
+  { id: 735, name: "José García" },
+  { id: 736, name: "Liam O’Neil" },
+];
+const SCRIPT_CASES = [
+  ["我同意王小明的看法", "我同意<721>的看法"],
+  ["请看王小明的作业。", "请看<721>的作业。"],
+  ["佐藤花子さんの課題を見てください。", "<722>さんの課題を見てください。"],
+  ["花子さんの課題を確認して。", "<722>さんの課題を確認して。"],
+  ["김민준의 과제를 확인해 주세요.", "<723>의 과제를 확인해 주세요."],
+  ["김 민준 학생", "<723> 학생"],
+  ["أرسل ملاحظة لمحمد علي اليوم.", "أرسل ملاحظة ل<724> اليوم."],
+  ["שלח הודעה לדוד כהן היום.", "שלח הודעה ל<725> היום."],
+  ["ช่วยตรวจงานของสมชายหน่อย", "ช่วยตรวจงานของ<726>หน่อย"],
+  ["请看Ada Lovelace的作业。", "请看<727>的作业。"],
+  ["Please review Ada Lovelace's essay.", "Please review <727>'s essay."],
+  ["ADALOVELACE and ADAS stay as written.", "ADALOVELACE and ADAS stay as written."],
+  ["Sean O’Brien submitted the lab.", "<731> submitted the lab."],
+  ["Please check O’Brien’s draft.", "Please check <731>’s draft."],
+  ["Maria DʼAngelo and D＇Angelo and D`Angelo and D´Angelo asked.", "<732> and <732> and <732> and <732> asked."],
+  ["Ana Smith‑Jones wrote this. Smith–Jones replied.", "<733> wrote this. <733> replied."],
+  ["İlkay Yıldız submitted late. İlkay asked.", "<734> submitted late. <734> asked."],
+  ["Jose Garcia submitted late. Garcia asked.", "<735> submitted late. <735> asked."],
+  ["Liam O'Neil asked.", "<736> asked."],
+];
+
+function protectScripts(text, assertedIdentifiers = []) {
+  return protectLocalRequest({
+    sourceBindingId: "canvas:course-1", courseId: "1", text, assertedIdentifiers,
+    roster: sourceProtectedRoster(SCRIPT_ROSTER), rosterComplete: true, rosterFreshAt: NOW, now: NOW,
+  });
+}
+
+function byStudent(text, labels) {
+  const ids = new Map(Object.entries(labels).map(([id, label]) => [label, id]));
+  // Private Chat sends NFKC text, so the gateway result is compared in that form too.
+  return text.normalize("NFKC").replace(/Student A[1-9][0-9]*/gu, (label) => `<${ids.get(label) ?? "?"}>`);
+}
+
+test("local protection replaces a name in every script and spelling a person writes it in", () => {
+  for (const [text, expected] of SCRIPT_CASES) {
+    const result = protectScripts(text);
+    assert.equal(byStudent(result.protectedText, result.labelsById), expected.normalize("NFKC"), text);
+    assert.deepEqual(result.unmatchedNames, [], text);
+  }
+  // The educator lists the students the message names, in the script the roster writes them.
+  assert.equal(byStudent(protectScripts("请看王小明的作业。", ["王小明"]).protectedText, protectScripts("请看王小明的作业。", ["王小明"]).labelsById), "请看<721>的作业。");
+  const korean = protectScripts("김민준의 과제를 확인해 주세요.", ["김민준"]);
+  assert.equal(byStudent(korean.protectedText, korean.labelsById), "<723>의 과제를 확인해 주세요.");
+  const curly = protectScripts("Please check O’Brien’s draft.", ["O'Brien"]);
+  assert.equal(byStudent(curly.protectedText, curly.labelsById), "Please check <731>’s draft.");
+});
+
+test("the gateway and Morrow Bridge replace the same names in the same places", async () => {
+  const { LearnerRoster, LearnerVault, redactKnownLearnerText } = await import("../../packages/gateway-core/dist/privacy.js");
+  const scope = { canvasOrigin: "https://canvas.example.test", account: "1", course: "1", principal: "instructor:7", profile: "private-full" };
+  const learnerRoster = new LearnerRoster();
+  learnerRoster.register(scope, SCRIPT_ROSTER.map(({ id, name }) => ({ id: String(id), name })));
+  const context = { learnerRoster, learnerVault: new LearnerVault(":memory:"), learnerScope: scope };
+  const labels = Object.fromEntries(SCRIPT_ROSTER.map(({ id, name }) => [String(id), redactKnownLearnerText(name, context)]));
+  for (const [text, expected] of SCRIPT_CASES) {
+    assert.equal(byStudent(redactKnownLearnerText(text, context), labels), expected.normalize("NFKC"), text);
+  }
+});
+
 // A follow-up such as "Make it shorter" names no student, so it needs no list. The roster still
 // protects every student detail the text holds, listed or not.
 test("a message that lists no student is protected by the class list alone", () => {
@@ -282,6 +360,8 @@ test("local protection reports name-like words it could not match instead of pas
   assert.deepEqual(nickname.unmatchedNames, ["Janey", "Bobby Smith"]);
   const typo = protectCourse("Jane Doe and Mia Chenn", ["Jane Doe"]);
   assert.deepEqual(typo.unmatchedNames, ["Chenn"]);
+  // The educator confirms the whole name, not the part after its apostrophe or hyphen.
+  assert.deepEqual(protectCourse("Jane Doe, Liam O’Neil, and Ana Smith‑Lopez", ["Jane Doe"]).unmatchedNames, ["Liam O’Neil", "Ana Smith\u2010Lopez"]);
   const sentenceStart = protectCourse("Will you check Jane Doe? Grant needs one too.", ["Jane Doe"]);
   assert.deepEqual(sentenceStart.unmatchedNames, ["Will", "Grant"]);
   assert.deepEqual(protectCourse("\"Will you check Jane Doe?\"\nGrant asked.", ["Jane Doe"]).unmatchedNames, ["Will", "Grant"]);

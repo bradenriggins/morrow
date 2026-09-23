@@ -100,6 +100,13 @@ test("accommodation failure row is a mismatch and a lost response is never retri
   const failed = await send("canvas_set_quiz_level_accommodations", args, { successful: [], failed: [{ user_id: USER_ID, message: "refused" }] });
   assert.equal(failed.result.verification.status, "mismatch");
   assert.equal(failed.result.verification.reason, "new_quiz_accommodation_provider_failed");
+  // An answer that names no result for this student, or no rows at all, proves nothing either way.
+  const missing = await send("canvas_set_quiz_level_accommodations", args, { successful: [], failed: [] });
+  assert.equal(missing.result.verification.status, "unconfirmed");
+  assert.equal(missing.result.verification.reason, "new_quiz_accommodation_user_result_missing");
+  const invalid = await send("canvas_set_quiz_level_accommodations", args, { ok: true });
+  assert.equal(invalid.result.verification.status, "unconfirmed");
+  assert.equal(invalid.result.verification.reason, "new_quiz_accommodation_response_invalid");
   const unknown = await send("canvas_set_quiz_level_accommodations", args, null, { throwAfterSend: true });
   assert.equal(unknown.writes.length, 1);
   assert.deepEqual(unknown.result.verification, { schema: "morrow.browser-verification.v1", status: "unconfirmed",
@@ -118,7 +125,9 @@ test("report accepts only an assignment-bound Progress receipt", async () => {
   const wrong = await send("canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post", args, {
     id: "501", context_id: "78", context_type: "Assignment", workflow_state: "queued", url: "/api/v1/progress/501",
   });
-  assert.equal(wrong.result.verification.status, "mismatch");
+  // A receipt for another assignment does not describe this request, so it proves nothing.
+  assert.equal(wrong.result.verification.status, "unconfirmed");
+  assert.equal(wrong.result.verification.reason, "new_quiz_report_progress_invalid");
   const completed = await send("canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post", args, {
     id: "501", context_id: QUIZ_ID, context_type: "Assignment", workflow_state: "completed", url: "/api/v1/progress/501",
     results: { url: "/api/quiz/v1/reports/501.csv" },
@@ -131,7 +140,7 @@ test("report accepts only an assignment-bound Progress receipt", async () => {
   assert.equal(live.result.verification.status, "verified", JSON.stringify(live.result.verification));
   const liveWrong = await send("canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post", args, { progress: {
     id: "1620559", context_id: "78", context_type: "Assignment", workflow_state: "queued", url: "https://school.instructure.com/api/v1/progress/1620559" } });
-  assert.equal(liveWrong.result.verification.status, "mismatch");
+  assert.equal(liveWrong.result.verification.status, "unconfirmed");
   const unknown =await send("canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post", args, null, { throwAfterSend: true });
   assert.equal(unknown.writes.length, 1);
   assert.equal(unknown.result.verification.reason, "progress_id_response_lost");

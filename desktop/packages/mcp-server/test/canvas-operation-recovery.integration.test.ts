@@ -4,11 +4,15 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import type { BridgeCommand } from "@morrow/bridge-protocol";
 import { loadCanvasApiCatalog, planCanvasRecoveryDescriptor } from "@morrow/canvas-api-catalog";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
+import { createFullMorrowServer } from "../src/full-server.js";
+import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
 import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
 
@@ -17,6 +21,7 @@ const CATALOG_PATH = resolve(ROOT, "artifacts/canvas-api/canvas-api-catalog.json
 const SOURCE_BINDING_ID = "canvas:recovery-account";
 const EXTENSION_ID = "a".repeat(32);
 const TOKEN = "gateway-connector-secret-".repeat(3);
+const CONNECTOR_RECOVERY_UNRESOLVED = "The Canvas read did not prove this change. The saved request stays open and Morrow will not send it again. Open the item in Canvas and check it yourself, then ask Morrow for a new review if it still needs the change.";
 
 async function availablePort(): Promise<number> {
   const server = createServer();
@@ -234,33 +239,37 @@ describe("Canvas unresolved-operation recovery", () => {
       expect(runtime.effects.get(second)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
       expect(writeCommands).toBe(1);
 
-      // 3. Canvas does not hold the requested result: the record stays unresolved.
+      // 3. Canvas holds a different result than the approved change: the read proves the change
+      //    did not save as approved, so the record says it failed and is not left as unchecked.
       const mismatched = await runtime.reconcileOperation(first);
+      expect(mismatched.isError).not.toBe(true);
       expect(structured(mismatched)).toMatchObject({
-        phase: "readback_unconfirmed",
-        effectState: "applied_or_unknown",
+        status: "failed",
+        phase: "readback_mismatch",
+        effectState: "failed",
+        verification: { status: "mismatch" },
+        attention: ["readback_did_not_match_frozen_comparator"],
         data: { verification: { status: "mismatch", evidence: "requested_field_mismatch:assignment_name" } },
       });
-      expect(runtime.effects.get(first).state).toBe("applied_or_unknown");
+      expect(structured(mismatched).limitations).toContain(
+        "Morrow read Canvas again after this change, and Canvas does not hold the approved result. The request is closed as failed and Morrow will not send it again. Open the item in Canvas, then ask Morrow for a new review if it still needs the change.",
+      );
+      expect(structured(mismatched).limitations).not.toContain(CONNECTOR_RECOVERY_UNRESOLVED);
+      expect(runtime.effects.get(first)).toMatchObject({ state: "failed", verificationStatus: "mismatch" });
       expect(writeCommands).toBe(1);
 
-      // 4. Canvas holds the requested result: the record settles to verified.
+      // 4. A settled change is not checked again, and it still says what the read proved.
       assignments["88"] = { ...assignments["88"]!, name: "Cell transport reflection v2" };
       const settled = await runtime.reconcileOperation(first);
       expect(structured(settled)).toMatchObject({
-        phase: "verified_readback",
-        effectState: "verified",
-        verification: { status: "verified" },
-        data: {
-          schema: "morrow.canvas-operation-recovery.v1",
-          resentWrite: false,
-          verification: { status: "verified", readTool: "canvas_get_single_assignment" },
-        },
+        phase: "readback_mismatch",
+        effectState: "failed",
+        verification: { status: "mismatch" },
       });
-      expect(runtime.effects.get(first)).toMatchObject({ state: "verified", verificationStatus: "verified" });
+      expect(runtime.effects.get(first)).toMatchObject({ state: "failed", verificationStatus: "mismatch" });
       expect(writeCommands).toBe(1);
 
-      // 5. Only a verified settlement releases the target lock.
+      // 5. A settled readback, verified or proved different, releases the target lock.
       const released = await runtime.dispatchOperation(second);
       expect(released.isError).not.toBe(true);
       expect(structured(released)).toMatchObject({ effectState: "verified" });
@@ -458,7 +467,8 @@ describe("Canvas unresolved-operation recovery", () => {
       // The check only reads. It never sends the deletion again.
       expect(writeCommands).toBe(1);
 
-      // A record the collection still holds is never called deleted.
+      // A record the collection still holds is never called deleted: the read proves the deletion
+      // did not happen, so the change failed.
       listedQuizzes = [quiz];
       const other = await runtime.call("canvas_delete_quiz", {
         course_id: "42",
@@ -469,8 +479,10 @@ describe("Canvas unresolved-operation recovery", () => {
       runtime.approveOperation(openId);
       await runtime.dispatchOperation(openId);
       listedQuizzes = [quiz];
-      await runtime.reconcileOperation(openId);
-      expect(runtime.effects.get(openId).state).toBe("applied_or_unknown");
+      expect(structured(await runtime.reconcileOperation(openId) as JsonObject)).toMatchObject({
+        phase: "readback_mismatch", effectState: "failed", verification: { status: "mismatch" },
+      });
+      expect(runtime.effects.get(openId)).toMatchObject({ state: "failed", verificationStatus: "mismatch" });
     } finally {
       await bridge?.close();
       await morrow.close();
@@ -553,8 +565,10 @@ describe("Canvas unresolved-operation recovery", () => {
       runtime.approveOperation(openId);
       await runtime.dispatchOperation(openId);
       unread = [{ id: "5", subject: "unread" }];
-      await runtime.reconcileOperation(openId);
-      expect(runtime.effects.get(openId).state).toBe("applied_or_unknown");
+      expect(structured(await runtime.reconcileOperation(openId) as JsonObject)).toMatchObject({
+        phase: "readback_mismatch", effectState: "failed", verification: { status: "mismatch" },
+      });
+      expect(runtime.effects.get(openId)).toMatchObject({ state: "failed", verificationStatus: "mismatch" });
     } finally {
       await bridge?.close();
       await morrow.close();
@@ -687,15 +701,77 @@ describe("Canvas unresolved-operation recovery", () => {
       expect(runtime.effects.get(blockedId)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
       expect(writeCommands).toBe(0);
 
+      // The assistant cannot close it. The tool only prepares the close-out and names the page
+      // where the person confirms it, and a person-confirmation argument closes nothing.
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const served = serveStdio(() => createFullMorrowServer(morrow), { transport: serverTransport });
+      const client = new Client({ name: "morrow-close-request", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
+      let statusUrl: string;
+      try {
+        await client.connect(clientTransport);
+        const tools = await client.listTools();
+        const tool = tools.tools.find((entry) => entry.name === "morrow_operation_close_unresolved")!;
+        expect(Object.keys((tool.inputSchema as JsonObject).properties as JsonObject)).not.toContain("confirmed_by_person");
+        const asked = await client.callTool({
+          name: "morrow_operation_close_unresolved",
+          arguments: { operation_id: retired.operationId, observed_state: "a".repeat(64), confirmed_by_person: true },
+        }) as JsonObject;
+        expect(asked.isError).not.toBe(true);
+        expect(structured(asked)).toMatchObject({
+          phase: "person_close_requested",
+          effectState: "applied_or_unknown",
+          data: { schema: "morrow.operation-person-close-request.v1" },
+        });
+        statusUrl = String((structured(asked).data as JsonObject).statusUrl);
+        expect(statusUrl).toBe(`${morrow.approval.baseUrl}/operations/${encodeURIComponent(retired.operationId)}`);
+      } finally {
+        await client.close();
+        await served.close();
+      }
+      expect(runtime.effects.get(retired.operationId).state).toBe("applied_or_unknown");
+      expect((await runtime.dispatchOperation(blockedId)).isError).toBe(true);
+      expect(writeCommands).toBe(0);
+
+      // The person's page offers the close-out. A post without Morrow Bridge's signature over the
+      // form, which it adds only after a real click in Chrome, closes nothing.
+      const page = await fetch(statusUrl);
+      const body = await page.text();
+      expect(body).toContain("I checked it in Canvas: close this change");
+      const nonce = /action="\/operations\/[^"]+\/close"><input type="hidden" name="nonce" value="([^"]+)"/.exec(body)?.[1];
+      const cookie = page.headers.get("set-cookie")?.split(";", 1)[0];
+      expect(nonce).toBeTruthy();
+      expect(cookie).toBeTruthy();
+      const post = (presence?: string) => fetch(`${statusUrl}/close`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          accept: "application/json",
+          cookie: cookie!,
+          origin: new URL(statusUrl).origin,
+          referer: statusUrl,
+        },
+        body: new URLSearchParams({ nonce: nonce!, ...(presence ? { presence } : {}) }),
+        redirect: "manual",
+      });
+      const unsigned = await post();
+      expect(unsigned.status).toBe(403);
+      expect(await unsigned.json()).toMatchObject({ code: "approval_presence_required" });
+      // A signature made for the approve form does not close.
+      const approveSigned = await post(bridgeSignedPresence(morrow.approval, `${statusUrl}/approve`, nonce!));
+      expect(approveSigned.status).toBe(403);
+      expect(runtime.effects.get(retired.operationId).state).toBe("applied_or_unknown");
+
       // The person checked the item themselves. Morrow has no reading of its
       // own for a route it no longer carries, so their check closes it.
-      const closed = await runtime.closeUnresolvedOperation(retired.operationId, "a".repeat(64), true);
-      expect(closed.isError).not.toBe(true);
-      expect(structured(closed)).toMatchObject({
-        phase: "closed_by_person",
-        effectState: "closed_by_person",
+      const signed = await post(bridgeSignedPresence(morrow.approval, `${statusUrl}/close`, nonce!));
+      expect(signed.status).toBe(303);
+      expect(runtime.effects.get(retired.operationId)).toMatchObject({
+        state: "closed_by_person",
+        attention: ["closed_after_person_checked_saved_state", "no_readable_provider_result"],
       });
-      expect(runtime.effects.get(retired.operationId).state).toBe("closed_by_person");
+      const closedPage = await (await fetch(statusUrl)).text();
+      expect(closedPage).toContain("Closed after your check");
+      expect(closedPage).not.toContain("I checked it in Canvas: close this change");
 
       // The hold is released, and the held change is sent.
       const sent = await runtime.dispatchOperation(blockedId);

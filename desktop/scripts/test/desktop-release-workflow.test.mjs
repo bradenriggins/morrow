@@ -21,12 +21,15 @@ const boundedRunner = readFileSync(join(root, boundedRunnerPath), "utf8");
 const macSmoke = readFileSync(join(root, macSmokePath), "utf8");
 const versioningPath = "docs/versioning.md";
 const versioning = readFileSync(join(repositoryRoot, versioningPath), "utf8");
+// The build's own version names the installed application. A literal here broke the upgrade
+// harness on every version bump while this file stayed green.
+const DESKTOP_VERSION = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 const WINDOWS_APPLICATION_METADATA = Object.freeze({
   companyName: "Braden Riggins",
   productName: "Morrow",
   fileDescription: "Morrow",
-  fileVersion: "1.0.4",
-  productVersion: "1.0.4.0"
+  fileVersion: DESKTOP_VERSION,
+  productVersion: `${DESKTOP_VERSION}.0`
 });
 
 function metadataMismatches(value) {
@@ -203,7 +206,9 @@ test("the Windows job upgrades the exact published 3720 artifact before its fina
   assert.match(job, /\$stateDir = Join-Path \$env:LOCALAPPDATA "MorrowUpgradeTest-\$runId"/);
   assert.doesNotMatch(job, /\$stateDir = Join-Path \$env:RUNNER_TEMP/);
   assert.match(job, /& scripts\/test\/desktop-windows-upgrade\.ps1/);
-  for (const parameter of ["OldInstaller", "OldSha256", "OldSourceHead", "NewInstaller", "NewSha256", "NewSourceHead", "InstallDirectory", "StateDirectory", "Receipt"]) {
+  // The new build's version comes from the package receipt of the installer this job built.
+  assert.match(job, /\$newVersion = \(Get-Content -LiteralPath \(Join-Path \$env:MORROW_WINDOWS_ARTIFACT_ROOT 'package-receipt\.json'\) -Raw \| ConvertFrom-Json\)\.version/);
+  for (const parameter of ["OldInstaller", "OldSha256", "OldSourceHead", "NewInstaller", "NewSha256", "NewSourceHead", "NewVersion", "InstallDirectory", "StateDirectory", "Receipt"]) {
     assert.match(job, new RegExp(`-${parameter}\\s`), `the Windows upgrade invocation must pass -${parameter}`);
   }
   assert.match(job, /\$receipt = Join-Path \$env:MORROW_WINDOWS_ARTIFACT_ROOT 'upgrade\.json'/);
@@ -213,9 +218,25 @@ test("the Windows job upgrades the exact published 3720 artifact before its fina
   assert.doesNotMatch(job, /"receipt\.json"/);
   assert.ok(job.indexOf(upgradeHarness) < job.indexOf("desktop-windows-smoke.mjs"), "the pinned upgrade must finish before the final isolated smoke");
   assert.match(upgrade, /\$ExpectedWindowsApplicationMetadata = \[ordered\]@\{/);
-  for (const [field, value] of Object.entries(WINDOWS_APPLICATION_METADATA)) {
+  // The fixed identity fields stay literal; the version fields follow the build's own version.
+  for (const field of ["companyName", "productName", "fileDescription"]) {
+    const value = WINDOWS_APPLICATION_METADATA[field];
     assert.match(upgrade, new RegExp(`^  ${field} = '${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'$`, "m"));
   }
+  assert.match(upgrade, /\[Parameter\(Mandatory = \$true\)\]\[string\] \$NewVersion/);
+  assert.match(upgrade, /if \(\$NewVersion -notmatch '\^\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$'\) \{ throw/);
+  assert.match(upgrade, /^  fileVersion = \$NewVersion$/m);
+  assert.match(upgrade, /^  productVersion = "\$NewVersion\.0"$/m);
+  assert.doesNotMatch(upgrade, /'[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?'/, "the harness must not pin any Morrow version");
+  assert.match(upgrade, /displayName -ne "Morrow \$NewVersion"/);
+  assert.match(upgrade, /displayVersion -ne \$NewVersion/);
+  // The pinned 3720 build wrote the first package manifest; this build writes the current one.
+  assert.match(upgrade, /function Package-Source\(\[string\] \$ExpectedSchema\)/);
+  assert.match(upgrade, /\$manifest\.schema -ne \$ExpectedSchema/);
+  assert.match(upgrade, /\$oldSource = Package-Source 'morrow\.desktop-package-input\.v1'/);
+  assert.match(upgrade, /\$newSource = Package-Source 'morrow\.desktop-package-input\.v2'/);
+  const packager = readFileSync(join(root, "scripts/package-mcp-bundle.mjs"), "utf8");
+  assert.match(packager, /schema: "morrow\.desktop-package-input\.v2"/, "the new build must write the schema the harness expects of it");
   assert.match(upgrade, /function Assert-AppMetadata\(\$Value\)/);
   assert.match(upgrade, /Assert-AppMetadata \$newApp/);
   assert.ok(upgrade.includes(`$PinnedOldSha256 = '${oldSha256}'`));
@@ -326,7 +347,7 @@ test("the smoke command the macOS job runs is accepted by the smoke harness", (t
   const harness = "scripts/test/desktop-mac-smoke.mjs";
   const options = invocationOptions(job, harness);
   const argv = argumentVector(options, {
-    "--disk-image": join(directory, "Morrow-1.0.4-mac-arm64.dmg"),
+    "--disk-image": join(directory, `Morrow-${DESKTOP_VERSION}-mac-arm64.dmg`),
     "--package-receipt": join(directory, "package-receipt.json"),
     "--receipt": join(directory, "receipt.json"),
     "--source": "a".repeat(40),

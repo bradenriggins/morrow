@@ -299,22 +299,17 @@ export function registerOperationTools(
   server.registerTool(
     "morrow_operation_close_unresolved",
     {
-      title: "Close a request you checked yourself",
-      description: "Close one unresolved change after a person has read the item and confirmed its saved state. It requires the exact result digest of a fresh Morrow read of that item and an explicit person confirmation. Morrow does not check the change itself here and never sends anything.",
+      title: "Ask the person to close a request they checked",
+      description: "Prepare the close-out of one unresolved change that a person checked in the learning platform. This closes nothing. It returns the change's status page (statusUrl), where the person confirms with their own click that they checked the item, and only that click closes the request. For a change Morrow can read back, first read the item with Morrow and pass the exact result digest that read returned as observed_state. Morrow does not check the change itself here and never sends anything.",
       inputSchema: z.object({
         operation_id: z.string().min(8).max(160),
-        observed_state: z.string().regex(/^[0-9a-f]{64}$/, "observed_state must be the SHA-256 digest a fresh Morrow read returned"),
-        confirmed_by_person: z.literal(true),
+        observed_state: z.string().regex(/^[0-9a-f]{64}$/, "observed_state must be the SHA-256 digest a fresh Morrow read returned").optional(),
       }),
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ operation_id, observed_state, confirmed_by_person }) => {
+    async ({ operation_id, observed_state }) => {
       try {
-        return await runtime.closeUnresolvedOperation(
-          operation_id,
-          observed_state,
-          confirmed_by_person,
-        ) as unknown as CallToolResult;
+        return await runtime.requestPersonClose(operation_id, observed_state) as unknown as CallToolResult;
       } catch (error) {
         return failure(operation_id, "close", error);
       }

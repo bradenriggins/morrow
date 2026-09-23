@@ -188,7 +188,11 @@ describe("WI-2.4: the reviews that wait, pushed to the Bridge popup", () => {
     const id = operationId(planned);
     const review = { url: `http://127.0.0.1:4317/operations/${id}`, label: expect.stringContaining("course 42") };
     await received(connection.uiStates, (command) => command.uiState?.reviews.length === 1);
+    runtime.setReviewLearnerNames(`/operations/${id}`, { "Student A1": "Jane Doe" });
+    await received(connection.uiStates, (command) => Boolean(command.uiState?.learnerNames));
 
+    // The Bridge forgets names when it disconnects, and a reconnect does not bring them back:
+    // the review page sends them again when it next shows them.
     await bridge.close();
     connection = await connect();
     bridge = connection.client;
@@ -291,6 +295,72 @@ describe("WI-2.4: the reviews that wait, pushed to the Bridge popup", () => {
     expect(ended.uiState?.learnerNames).toBeUndefined();
     expect(uiStates.at(-1)?.uiState?.learnerNames).toBeUndefined();
     expect(JSON.stringify(uiStates.map((command) => command.uiState?.learnerNames ?? []))).not.toContain("/recent");
+  }, CASE_TIMEOUT_MS);
+
+  // The names a review page showed live 15 minutes. When they end, the Bridge is told so even if
+  // nothing else changes, so it does not keep showing them.
+  it("drops a review's names from the Bridge 15 minutes after the review page last showed them", async () => {
+    directory = mkdtempSync(join(tmpdir(), "morrow-ui-state-"));
+    const port = await reserveLoopbackPort();
+    runtime = await GatewayRuntime.connect(connectorConfig(directory, port));
+    runtime.setApprovalBaseUrl("http://127.0.0.1:4317");
+    const root = resolve("../..");
+    const browserDigest = bridgeCatalogDigestForTests(root);
+    const sourceBindingId = "canvas:ui-state-names-expiry-test";
+    bridge = await connectBridgeTestClient({
+      port,
+      token: "gateway-connector-secret-".repeat(3),
+      extensionId: "a".repeat(32),
+      catalogDigest: browserDigest,
+      bindings: [{
+        sourceBindingId, provider: "canvas", origin: "https://school.instructure.com",
+        courseId: "42", principalFingerprint: "c".repeat(64), sessionGeneration: 1,
+        catalogDigest: browserDigest, runtimeVerified: true, editPolicyRevision: 0, editOptionsAvailable: true,
+      }],
+    });
+    const uiStates: BridgeCommand[] = [];
+    bridge.onCommand((command) => {
+      if (command.kind === "ui_state") {
+        uiStates.push(command);
+        bridge!.respond(command, {});
+        return;
+      }
+      bridge!.respondProblem(command, { schema: "morrow.bridge.problem.v1", code: "unexpected_command", message: "unexpected command in this case", recoverable: false });
+    });
+    await assertPortListening(port);
+    const planned = await runtime.call("canvas_edit_assignment", {
+      course_id: "42", id: "88", assignment_due_at: "2026-09-10T17:00:00Z",
+      _morrow: { source_binding_id: sourceBindingId },
+    });
+    const id = operationId(planned);
+    const pushed = (predicate: (command: BridgeCommand) => boolean) => vi.waitFor(() => {
+      const found = uiStates.find(predicate);
+      if (!found) throw new Error("no matching ui_state yet");
+      return found;
+    }, { timeout: 10_000, interval: 20 });
+    await pushed((command) => command.uiState?.reviews.length === 1);
+
+    // Only this process's clock moves; the connector and the Bridge keep real time.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    try {
+      runtime.setReviewLearnerNames(`/operations/${id}`, { "Student A1": "Jane Doe" });
+      await pushed((command) => Boolean(command.uiState?.learnerNames));
+      const before = uiStates.length;
+      vi.advanceTimersByTime(15 * 60_000 - 1_000);
+      await new Promise<void>((settled) => setImmediate(settled));
+      expect(uiStates.length).toBe(before);
+      vi.advanceTimersByTime(1_000);
+      const expired = await vi.waitFor(() => {
+        const found = uiStates.slice(before).find((command) => !command.uiState?.learnerNames);
+        if (!found) throw new Error("no names-free ui_state yet");
+        return found;
+      }, { timeout: 10_000, interval: 20 });
+      // The review still waits; only its names are gone.
+      expect(expired.uiState?.reviews).toHaveLength(1);
+      expect(runtime.operationGet(id)).toMatchObject({ state: "awaiting_approval" });
+    } finally {
+      vi.useRealTimers();
+    }
   }, CASE_TIMEOUT_MS);
 
   it("never sends a key that belongs to another review origin", async () => {

@@ -532,9 +532,11 @@ export class CanvasConnectorRuntime {
    * popup (D1b). The Bridge never opens one of these by itself.
    */
   /**
-   * The newest review list, approval key and learner names Morrow asked this
-   * connector to show. It is kept even when no Bridge is connected, so the next
-   * connection receives the present state rather than none.
+   * The newest review list and approval key Morrow asked this connector to
+   * show. It is kept even when no Bridge is connected, so the next connection
+   * receives the present state rather than none. Learner names are not kept:
+   * a Bridge forgets them when it disconnects, and Morrow sends them again
+   * only when a review page shows them again.
    */
   private latestUiState: BridgeUiState | null = null;
 
@@ -548,7 +550,8 @@ export class CanvasConnectorRuntime {
     let uiState: BridgeUiState;
     try {
       uiState = normalizeBridgeUiState(input);
-      this.latestUiState = uiState;
+      const { learnerNames: _learnerNames, ...withoutNames } = uiState;
+      this.latestUiState = withoutNames;
     } catch {
       return {
         schema: "morrow.browser-ui-state.v1",

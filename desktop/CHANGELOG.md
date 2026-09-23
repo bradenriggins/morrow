@@ -14,6 +14,8 @@ This release fixes the problems a full review of Morrow found before release. Te
 - Morrow Bridge pairs with Morrow only when you select Connect Morrow, and only with a proof from the Bridge folder Morrow set up. Another program on your computer can no longer connect itself to Morrow in place of Morrow Bridge and then approve changes. The Chrome page that asked you to allow the connection is gone.
 - Edit access has no time limit. Old timed grants fall back to Plan and are never extended.
 - A review that is waiting ends when its Morrow connection ends.
+- A change Morrow could not check is closed only by you, on its page in Chrome, with "I checked it in Canvas: close this change". Morrow Bridge confirms your own click, as for an approval. Your assistant can no longer close it for you.
+- When Morrow reads the learning platform after a change and the platform does not hold the approved result, the change shows Did not save as approved and the assistant is told it failed. Before, it showed Needs checking, as if Morrow could not read the result. A change Morrow could not compare still shows Needs checking.
 - Routine Edit and the publish choice no longer create a Canvas page, or publish a new front page, without your review. When the page is not there, or Morrow cannot read it, the change waits for your review.
 - The Routine edits description names every change the routine set makes with no review, including making Canvas folders, moving files between folders, and moving module items. It describes only the platforms you selected.
 - The date choice is named Change due dates and availability dates, and says what it changes on each platform.
@@ -84,9 +86,12 @@ This release fixes the problems a full review of Morrow found before release. Te
 - Student IDs inside grade, submission, and profile links are replaced with labels.
 - Each student has one label everywhere. Real names appear only in Morrow Bridge in your own Chrome tab (Private Chat and the review tab). Any other program on your computer that asks Morrow for course information gets labels only.
 - Private Chat reads a sentence start correctly through quotes and line breaks.
+- Morrow Bridge forgets the student names a review page showed 15 minutes after the page last showed them, even when nothing else changes, and a Bridge that reconnects no longer gets old names back.
 - A first name used alone, such as Will or Grace, is replaced only where it is written with a capital letter, as a family name already was. In small letters it is usually an ordinary word, and replacing it put the student's full name into text the assistant saved. A name part in a script with no capital letters, such as Korean, is now replaced wherever it appears.
 - A student's family name written alone, such as "Adams replied.", is replaced with the student's label in Private Chat and in course text the assistant reads, where it is written with a capital letter. A suffix such as Jr. is not taken for the family name.
 - Private Chat replaces a student's ID number or a login made only of numbers, and refuses a message that still holds one.
+- A student's name is replaced inside running text in Chinese, Japanese, and Thai, with a Korean particle attached, and after a one-letter Arabic or Hebrew prefix, in Private Chat and in course text the assistant reads. Before, it reached the assistant as written.
+- A student's name is replaced when it is written with a curly apostrophe or another hyphen, as in O’Brien or Smith‑Jones, with a capital İ, or without its accents. Private Chat and course text the assistant reads now replace the same names.
 
 ### Interface
 

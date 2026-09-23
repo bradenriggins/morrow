@@ -184,7 +184,7 @@ export function registerPrivateChatTool(
 ): void {
   server.registerTool("morrow_private_chat", {
     title: "Start Morrow Private Chat",
-    description: "Open the Morrow Bridge Private Chat drawer and relay a conversation about one connected course through client sampling. Before each message reaches the assistant, the Bridge checks it against a fresh, complete course roster and replaces each student name, email, login, and platform id it matches with that student's course label, the same label Morrow tool results use. Name-like words that match no student are sent only after the person confirms them. The person sees student names in the drawer; the assistant receives labels only. The person closes the drawer to end and clear the session.",
+    description: "Open the Morrow Bridge Private Chat drawer and relay a conversation about one connected course through client sampling. Before each message reaches the assistant, the Bridge checks it against a fresh, complete course roster and replaces each student name, email, login, and platform id it matches with that student's course label, the same label Morrow tool results use. Capitalized name-like words that match no student are sent only after the person confirms them; a name that matches no student in a script with no capital letters, such as Chinese or Korean, is sent as written. The person sees student names in the drawer; the assistant receives labels only. The person closes the drawer to end and clear the session.",
     inputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, async (_input, context): Promise<CallToolResult | InputRequiredResult> => {
