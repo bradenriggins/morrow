@@ -55,10 +55,11 @@ read/write class, mechanism, proof status, and evidence notes. Only
 rows marked `live-proven` dispatch; a row marked `pending` also runs
 with an educator-signed `--allow-unproven` override, and rows marked
 `failed`, `unsupported`, or `excluded` never run. The admission policy
-(`dispatch/admission_policy.json`) can hold even a live-proven row
-when the integrated product pipeline has no live runs yet (the
-`canvas_create_new_quiz` case: provider path proven, product pipeline
-not, so the policy holds it on evidence-hold).
+(`dispatch/admission_policy.json`) can hold even a live-proven row;
+its `evidence_holds` list names each held row and why. Its
+`admitted_on_proof` list records the rows a live battery released
+through the whole product pipeline, such as New Quiz create (C-286)
+on 2026-09-22.
 
 Status counts, Canvas rows: live-proven 195, pending 210, failed 12,
 unsupported 11, excluded 8, evidence-hold 1. Item Bank rows:
@@ -90,14 +91,12 @@ Quizzes (classic): CRUD, question groups CRUD plus reorder, questions
 CRUD. Delete receipt is index removal: a direct member GET may still
 serve the deleted quiz (D-002, provider soft-delete).
 
-New Quiz: object update/delete live-proven at the provider
-path level through the Chromium lane; object create
-(`canvas_create_new_quiz`) is catalog live-proven but the admission
-policy holds it on evidence-hold, so dispatch refuses it on every
-tenant: not a v1 claim. Question items C-287/C-290/
-C-293/C-295/C-298 are live-proven rows but the v1 claim set withholds
-question items (SCOPE.md): treat them as not-a-v1-claim, disclose
-before touching. Publish never tested. The in-place item edit hazard
+New Quiz: object create, update, and delete (C-286, C-299,
+C-289) are proven through the full governed product pipeline
+(2026-09-22, disposable quizzes 4049059 and 4049060) and ship in v1
+(SCOPE.md). Question items (C-287 create, C-293 read, C-295 list,
+C-298 update, C-290 delete) are proven through the same pipeline
+(items 11057310, 11057311) and ship too. Publish never tested. The in-place item edit hazard
 (ghost-stub choices) and the quiz_settings merge rule are documented
 in `knowledge/new-quizzes-contract.md`; they are
 **NOT IMPLEMENTED** in the for-muse executor, so a New Quiz item

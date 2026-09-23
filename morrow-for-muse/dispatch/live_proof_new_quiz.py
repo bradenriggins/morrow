@@ -287,7 +287,7 @@ def main():
     except EvidenceHold as exc:
         tr = translate("lane7 probe", exc)
         note("P2", "evidence hold refuses create",
-             tr.mode_id == "new-quiz-create-evidence-hold",
+             tr.mode_id == "evidence-hold",
              "refused; translates to %s" % tr.mode_id)
 
     # --- Phase 3: plan-mode write refusal without approval (expected) ------

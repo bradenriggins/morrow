@@ -38,11 +38,10 @@ promise them.
 - Create quiz (`POST /api/quiz/v1/courses/{course_id}/quizzes`,
   body `{"quiz": {"title", ...}}`; title required): live-proven at
   the provider path through the Chromium lane (quizzes 4045401,
-  4045406, 4045410, 4045411). **BUT the admission policy holds
-  `canvas_create_new_quiz` on evidence-hold** because the governed
-  product pipeline has no live runs yet. Dispatch refuses it on every
-  tenant. Do not offer New Quiz creation until a disposable live
-  battery proves the integrated path.
+  4045406, 4045410, 4045411), and on 2026-09-22 through the full
+  governed product pipeline (disposable quizzes 4049059 and 4049060,
+  read back, updated, and deleted with terminal GET 404). It ships in
+  v1 (SCOPE.md).
 - Read quiz / list quizzes: live-proven reads.
 - Update: PATCH only (no PUT on New Quiz paths; the executor guards
   this). **quiz_settings merge rule (IMPLEMENTED as explicit helpers,

@@ -19,11 +19,20 @@ sweep 2026-09-22):
      in the distribution"; they ship and run. The educator's deletion
      commands are privacy.executor_wire purge, purge-course, and
      purge-all.
+  6. SKILL.md, the knowledge pages, and the failure catalog said New
+     Quiz create (C-286) is on evidence hold and refused, so the agent
+     told an educator it could not create a New Quiz. The admission
+     policy admitted it on proof on 2026-09-22, and SCOPE.md ships it.
+     An evidence hold on any other task was also described to the
+     educator as "I tried to create a New Quiz".
 """
 
 import contextlib
+import glob
 import io
+import json
 import os
+import re
 import sys
 
 import pytest
@@ -88,3 +97,48 @@ def test_skill_names_the_educator_deletion_commands_truthfully():
     for command in ("python3 -m privacy.executor_wire purge",
                     "purge-course", "purge-all"):
         assert command in text, command
+
+
+def _sentences(rel):
+    """Each table row, and each sentence of the prose, of one page."""
+    with open(os.path.join(TREE, rel), encoding="utf-8") as fh:
+        blocks = re.split(r"\n\s*\n", fh.read())
+    out = []
+    for block in blocks:
+        lines = block.splitlines()
+        if lines and all(line.lstrip().startswith("|") for line in lines):
+            out.extend(lines)
+        else:
+            out.extend(re.split(r"(?<=[.;])\s", " ".join(block.split())))
+    return out
+
+
+_NEW_QUIZ_CREATE = re.compile(
+    r"canvas_create_new_quiz|New Quiz creat|C-286", re.IGNORECASE)
+_HELD = re.compile(r"\bheld\b|\bhold", re.IGNORECASE)
+
+
+def test_no_agent_page_says_new_quiz_create_is_held():
+    from dispatch import admission
+    policy = admission.load_policy()
+    assert "canvas_create_new_quiz" in policy["admitted_on_proof"]
+    assert "canvas_create_new_quiz" not in \
+        policy["evidence_holds"]["tool_names"]
+    pages = ["SKILL.md", "FIRST_RUN.md", "INSTALL.md"] + sorted(
+        os.path.relpath(p, TREE)
+        for p in glob.glob(os.path.join(TREE, "knowledge", "*.md")))
+    stale = [(rel, sentence[:160]) for rel in pages
+             for sentence in _sentences(rel)
+             if _NEW_QUIZ_CREATE.search(sentence) and _HELD.search(sentence)]
+    assert stale == [], stale
+
+
+def test_an_evidence_hold_is_told_as_the_task_that_was_asked():
+    with open(os.path.join(TREE, "failures", "catalog.json"),
+              encoding="utf-8") as fh:
+        entries = json.load(fh)["entries"]
+    holds = [e for e in entries
+             if "EvidenceHold" in json.dumps(e.get("signature"))]
+    assert [e["id"] for e in holds] == ["evidence-hold"]
+    text = json.dumps(holds[0])
+    assert "New Quiz" not in text and "{operation}" in text

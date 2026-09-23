@@ -453,7 +453,7 @@ MODE_CASES = {
         "provider": "canvas", "operation_kind": "grade",
         "enrollment_count": 0,
     },
-    "new-quiz-create-evidence-hold": lambda: EvidenceHold("held by gate"),
+    "evidence-hold": lambda: EvidenceHold("held by gate"),
     # New Quiz safety-guard refusals (Lane 7): every NewQuizRefused text
     # below is the exact message raised by dispatch/executor.py.
     "new-quiz-put-refused": lambda: NewQuizRefused(

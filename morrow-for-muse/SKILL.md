@@ -537,7 +537,8 @@ marked live-proven does not dispatch. Absolutely refused on every
 tenant, with no override flag: never-dispatch routes (the standing
 exclusions: announcements, messages to people, support tickets,
 subaccount-affecting operations), catalog-unsupported rows, failed
-rows, evidence-hold rows (including New Quiz create, C-286), and
+rows, evidence-hold rows (course delete or conclude, C-108, and the
+four Item Bank quiz-entry routes), and
 learner-data rows on any lane that cannot de-identify them (the raw
 HTTPS lane, or no `cryptography`); on the Chromium lane with the
 encrypted vault, live-proven learner-data rows dispatch de-identified

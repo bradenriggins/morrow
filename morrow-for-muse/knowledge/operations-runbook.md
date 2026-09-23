@@ -59,15 +59,10 @@ feature flags, the quiz submission-users message), `unsupported`,
 `/ai_conversations`, `/ai_experiences`; `/users/self` excepted).
 
 **Important caveat:** a catalog row marked live-proven can still be
-held by the admission policy. Example: `canvas_create_new_quiz` is
-live-proven in the catalog at the provider-path level, but
-`dispatch/admission_policy.json` holds it on evidence-hold because the
-2026-09-21 write battery proved the provider path only and the governed
-product pipeline has no live runs yet (the 2026-09-21 gap audit's
-finding: executor pipeline proven at the provider path, zero live
-runs through the governed pipeline). The catalog is the
-provenance record; the policy is the dispatch authority. When they
-disagree, the policy wins.
+held by the admission policy: `evidence_holds` in
+`dispatch/admission_policy.json` names each held row and why. The
+catalog is the provenance record; the policy is the dispatch
+authority. When they disagree, the policy wins.
 
 ## What is live-proven (v1 working set)
 
@@ -91,20 +86,14 @@ readback and cleanup:
   questions CRUD. Provider soft-delete disclosure (D-002): after a
   delete, the quiz leaves the course quiz index but a direct member GET
   may still serve it. Index removal is the delete receipt.
-- **New Quizzes**: update/delete of the quiz object through the
-  Chromium lane (quizzes 4045401, 4045406, 4045410, 4045411; update
-  readback-verified; deletes verified with terminal GET 404).
-  **Admission still holds `canvas_create_new_quiz` on evidence-hold:**
-  the 2026-09-21 battery proved the provider path only and the governed
-  product pipeline has no live runs yet, so dispatch refuses it on
-  every tenant until a disposable live battery proves the integrated
-  path (D-007; the governed product pipeline has no live runs yet, so
-  it stays held until a disposable live battery proves the integrated
-  path). Excluded: publish (never tested). Question
-  items (catalog C-287/C-290/C-293/C-295/C-298): the gate currently
-  admits them as live-proven, but SCOPE.md withholds them from the v1
-  claim set (proven at the provider-path level only); treat them as
-  not-a-v1-claim and disclose that before touching them.
+- **New Quizzes**: create, update, and delete of the quiz object
+  through the Chromium lane (quizzes 4045401, 4045406, 4045410,
+  4045411; update readback-verified; deletes verified with terminal
+  GET 404), and on 2026-09-22 through the full governed product
+  pipeline (disposable quizzes 4049059 and 4049060). Question items
+  (C-287 create, C-293 read, C-295 list, C-298 update, C-290 delete)
+  are proven through the same pipeline (items 11057310, 11057311).
+  Excluded: publish (never tested).
 - **Item Banks**: bank-level operations only (IB-1 archive, IB-5
   create, IB-9 get, IB-12 list, IB-13 list entries, IB-10 get entry,
   IB-15 list shares, IB-16 rename, IB-17 share, IB-20 unshare). Item create/read/update
@@ -199,14 +188,13 @@ and confirm the fields anyway.
   or group. Delete: removal from the course quiz index is the
   receipt (D-002: a direct member GET may still serve a deleted
   quiz, so 404 is not the receipt here).
-- **New Quiz** (C-299 update, C-289 delete; items C-287/C-290/
-  C-298/C-293/C-295). Shape: PATCH only on `/api/quiz/v1` paths;
-  the executor guards this (no PUT). Item fields nest under
-  `item.entry`. Readback: NQ GET, items GET with the expected
-  count, points mirror (parent `points_possible` equals the item
-  sum), parent assignment dates/overrides read. Caveats: create
-  (`canvas_create_new_quiz`) is evidence-held by the admission
-  policy and refuses on every tenant; the `quiz_settings` merge
+- **New Quiz** (C-286 create, C-299 update, C-289 delete; items
+  C-287/C-290/C-298/C-293/C-295). Shape: PATCH only on
+  `/api/quiz/v1` paths; the executor guards this (no PUT). Item
+  fields nest under `item.entry`. Readback: NQ GET, items GET with
+  the expected count, points mirror (parent `points_possible` equals
+  the item sum), parent assignment dates/overrides read. Caveats: the
+  `quiz_settings` merge
   rule is NOT IMPLEMENTED in this package (a partial PATCH can
   replace the whole settings block: read, merge locally, then
   PATCH); ghost-stub choice hazards are in

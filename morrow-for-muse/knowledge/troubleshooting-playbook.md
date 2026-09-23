@@ -249,9 +249,8 @@ criterion.)
 **Symptom.** Options read "A. ..." but the stem's answer key points
 at the wrong letter once students see it. **Cause.** Canvas shuffles
 answers; literal letter prefixes in option text do not move with
-them. **Do.** Strip `A. `/`B. `/`C. `/`D. ` from option text.
-PENDING: question items are not a v1 claim in this package, so this
-is doctrine for the day they are, not an active operation.
+them. **Do.** Strip `A. `/`B. `/`C. `/`D. ` from option text
+before a New Quiz item create or update.
 
 (MindTap/Cengage-specific quirks are deliberately not ported. That
 platform is out of scope for this package.)

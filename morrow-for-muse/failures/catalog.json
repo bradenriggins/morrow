@@ -568,30 +568,29 @@
       ]
     },
     {
-      "id": "new-quiz-create-evidence-hold",
-      "title": "New Quiz create refused on every tenant (evidence hold)",
-      "surface": "new-quizzes",
+      "id": "evidence-hold",
+      "title": "Task on hold until a live test proves it (evidence hold)",
+      "surface": "canvas",
       "severity_hint": "high",
-      "root_cause": "Policy, verified in code: New Quiz create is held until a disposable, isolated, fully cleaned-up live battery proves the complete integrated path. It is refused on every tenant regardless of approvals.",
+      "root_cause": "Policy, verified in code: dispatch/admission.py check_evidence_holds refuses every operation on the admission policy's evidence_holds list, on every tenant and lane, before any approval or override path. The policy's reasons name why each one is held (for example, discussion writes proven only through the retired form lane, or a destructive whole-course operation).",
       "is_not": "This is not a session problem and not a provider refusal. No approval or sign-in can admit it today.",
-      "agent_message": "What was attempted: I tried to create a New Quiz on {tenant} and the admission gate refused before anything reached Canvas. What the evidence showed: the evidence-hold on this specific operation: it is deliberately blocked on every tenant until a fully disposable live battery proves the complete path with cleanup. What this means: the refusal is working as designed, protecting you from an unproven write. What happens next: I am not dispatching this; quiz updates and deletes through the proven paths are still available. If New Quiz creation is something you need, I can scope a proof battery for it, but that needs your explicit approval first.",
-      "auto_action": "Refuse with the hold reason; offer the proven New Quiz update/delete paths instead.",
-      "escalate_when": "Surface to the educator whenever they ask for New Quiz creation, with the hold stated plainly and the proof-battery option offered.",
+      "agent_message": "What was attempted: I tried {operation}, and Morrow stopped before anything reached Canvas. What the evidence showed: this task is on hold in this version: Morrow has not yet proven it on a live Canvas course, so it refuses it for every school until a live test does. What this means: nothing was sent to Canvas and nothing changed, and no approval can allow it today. What happens next: I will not try it another way. You can do it yourself in Canvas, and I can help with the rest of the course.",
+      "auto_action": "Refuse with the hold reason; never route around it with another operation that has the same effect.",
+      "escalate_when": "Surface to the educator whenever they ask for a held task, with the hold stated plainly.",
       "signature": {
         "__any_of": [
           {
-            "gate": "EvidenceHold",
-            "tool": "canvas_create_new_quiz"
+            "gate": "EvidenceHold"
           },
           {
             "error_class": "EvidenceHold"
           }
         ]
       },
-      "signature_notes": "evidence: \"dispatch/admission.py check_evidence_holds raises unconditionally before any override path; knowledge docs disclose the hold\"; gate: \"EvidenceHold\"; tool: \"canvas_create_new_quiz (C-286)\"",
+      "signature_notes": "evidence: \"dispatch/admission.py check_evidence_holds raises before any override path; dispatch/admission_policy.json evidence_holds names each held row and its reason\"; gate: \"EvidenceHold\"",
       "severity_hint_inventory": "engineering",
       "placeholders": [
-        "tenant"
+        "operation"
       ]
     },
     {
