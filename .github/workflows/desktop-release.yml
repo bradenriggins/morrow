@@ -97,12 +97,13 @@ jobs:
           if ($downloadedHash -ne $oldSha256) { throw "The published installer hash is $downloadedHash, not the pinned value." }
           $newSha256 = (Get-FileHash -LiteralPath $env:MORROW_WINDOWS_INSTALLER -Algorithm SHA256).Hash.ToLowerInvariant()
           $newSourceHead = $env:GITHUB_SHA.ToLowerInvariant()
+          $newVersion = (Get-Content -LiteralPath (Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT 'package-receipt.json') -Raw | ConvertFrom-Json).version
           $installDir = Join-Path $env:RUNNER_TEMP "morrow-upgrade-install-$runId"
           $stateDir = Join-Path $env:LOCALAPPDATA "MorrowUpgradeTest-$runId"
           $receipt = Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT 'upgrade.json'
           & scripts/test/desktop-windows-upgrade.ps1 `
             -OldInstaller $oldInstaller -OldSha256 $oldSha256 -OldSourceHead $oldSourceHead `
-            -NewInstaller $env:MORROW_WINDOWS_INSTALLER -NewSha256 $newSha256 -NewSourceHead $newSourceHead `
+            -NewInstaller $env:MORROW_WINDOWS_INSTALLER -NewSha256 $newSha256 -NewSourceHead $newSourceHead -NewVersion $newVersion `
             -InstallDirectory $installDir -StateDirectory $stateDir -Receipt $receipt
 
       - name: Install, start, damage and repair the sealed payload, uninstall, and check retained data
