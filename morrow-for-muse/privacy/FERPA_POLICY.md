@@ -158,10 +158,8 @@ their own Canvas session; there is no separate staging tenant):
    "documented de-identification review" step: the journal records
    every op, and the review is against the journal plus the
    projected receipt.
-3. Real-course use. Learner-data operations run de-identified by
-   default. The educator reveal (a sealed record for one course, see
-   below) exists for documented instructional purposes only; each
-   reveal is journaled with the educator's own words.
+3. Real-course use. Learner-data operations always run
+   de-identified; nothing turns that off (see below).
 4. No enterprise rollout. This connector is a per-educator tool.
    Institutional rollout (shared VMs, other staff, production
    student systems) requires the institution's own FERPA/privacy
@@ -194,29 +192,21 @@ institutional signoffs above have been performed or claimed here.
   id is relabeled in every journal record, result, and error before
   anyone sees it. No agent output path returns a real identity.
 
-## Default-on, educator reveal
+## Always on, no reveal
 
-De-identification is ON by default for every learner-data read. The
-only way to see real names from an LMS read is an educator reveal: a
-record sealed with the machine-held HMAC key
-(`dispatch/admission.mint_pii_reveal`) carrying the educator's
-verbatim request (any non-empty request), the `educator-chat`
-channel, ONE course on ONE tenant, and an expiry of at most 30
-minutes. It is passed to the executor (`--pii-reveal <file>`), checked
-at projection time (a tampered, expired, over-long, or driver-channel
-record fails closed; a record for another course leaves that read
-de-identified), and journaled twice: when it is minted
-(`privacy.pii_reveal_issued`, with the educator's words) and on every
-op it reveals (`pii_reveal` on the journal record, `revealed_by:
-"educator-sealed-record"`). Honest trust statement, same as write
-approvals: the record is minted in the agent's process, so a
-fabricated `educator-chat` citation is a detectable lie in the
-journal, not a prevented one. Nothing else reveals names: the old
-`<tree-state-dir>` consent file is retired (an agent can write a
-file), and the environment variable
-`MORROW_REVEAL_STUDENT_PII_REASON` is ignored (an agent can set its
-own environment). The desktop boundary has no reveal at all; this one
-is a deliberate, audited, short-lived local extension.
+De-identification is ON for every learner-data read, and nothing turns
+it off: no record, no executor flag, no file, no environment variable,
+no setting. The model sees course-scoped labels, and a name only when
+the educator typed it (the name echo). Real names appear only on
+Morrow's own local surfaces for the educator; Morrow for Muse has no
+local surface that lists a roster, so the educator works by name: they
+name a student, and `morrow students find` returns that student's
+label. The sealed educator reveal record that earlier releases offered
+was removed in the final sweep of 2026-09-22: it handed every real name
+in a course read to the agent, and so to the model. The old `<tree-state-dir>` consent file and the
+environment variable `MORROW_REVEAL_STUDENT_PII_REASON` reveal nothing
+either (an agent can write a file and set its own environment). The
+desktop boundary has no reveal at all, and neither does this one.
 
 ## Retention and deletion
 

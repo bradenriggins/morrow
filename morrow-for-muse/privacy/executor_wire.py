@@ -21,7 +21,6 @@ import os
 import re
 import sys
 import urllib.parse
-from datetime import datetime, timezone
 
 # W4-P1-17: config.paths is the single source of truth for the morrow
 # state root. executor_wire can be imported before dispatch.executor
@@ -35,13 +34,9 @@ from dispatch import admission as _admission
 from privacy import boundary as _boundary
 from privacy import core as _privacy_core
 
-# Round-4 privacy audit H2: a file is not a consent channel (an agent
-# can write a file). Real names from an LMS read are shown only under a
-# sealed educator reveal record (dispatch/admission.mint_pii_reveal):
-# the educator's verbatim words, the educator-chat channel, one course,
-# a short expiry, journaled. It reaches the projection through
-# lane_context["pii_reveal"]; there is no environment or file switch.
-REVEALED_BY = "educator-sealed-record"
+# De-identification has no off switch: no record, flag, file, or
+# environment variable shows real names to the agent (final sweep
+# 2026-09-22 removed the educator reveal record, which did).
 SOURCE_VAULT_ENV_VAR = "MORROW_SOURCE_VAULT_PATH"
 SOURCE_VAULT_BASENAME = "morrow_source_vault.json"
 _COURSE_ID_RE = re.compile(r"/courses/(\d+)", re.IGNORECASE)
@@ -239,7 +234,7 @@ def learner_scope(tenant_base, course_id, provider=None, principal=None):
 
 
 def _label_editor_records(entry, result, tenant_base, lane_context,
-                          error_cls, reveal=None):
+                          error_cls):
     """Replace person records under editor keys.
 
     A learner the vault already labeled in this course becomes
@@ -247,12 +242,9 @@ def _label_editor_records(entry, result, tenant_base, lane_context,
     {"person": UNLABELED_PERSON}. Nothing else in the receipt changes.
     Runs on non-learner reads, and on learner reads before the boundary
     (round-4 audit L2: a teacher editor carrying an html_url made a
-    whole page-revision read fail closed). A sealed educator reveal for
-    this course leaves them raw."""
+    whole page-revision read fail closed)."""
     receipt = result.get("receipt") if isinstance(result, dict) else None
     if not _editor_slots(receipt, []):
-        return result
-    if reveal is not None:
         return result
     import copy
     receipt = copy.deepcopy(receipt)
@@ -359,37 +351,6 @@ def _lane_generation(lane_state, provider="canvas"):
         return 0
 
 
-def pii_reveal_audit(error_cls, reveal=None, tenant_base=None,
-                     course_id=None):
-    """The educator's sealed reveal for this course read, or None.
-
-    Returns None (de-identification applies) when no reveal record was
-    supplied, or when a valid record names a different course or
-    tenant. Returns an audit dict {"revealed_by":
-    "educator-sealed-record", "reveal_id", "course_id", "channel",
-    "authorization", "expires_at", "at"} when a valid educator-chat
-    reveal names this course. A record that is tampered, expired, from
-    the driver channel, or longer than the maximum fails closed: the op
-    is refused rather than run half-consented.
-    """
-    if reveal is None:
-        return None
-    try:
-        applies = _admission.check_pii_reveal(reveal, tenant_base,
-                                              course_id)
-    except _admission.AdmissionRefused as exc:
-        raise error_cls("PII reveal refused: %s" % exc)
-    if not applies:
-        return None
-    return {"revealed_by": REVEALED_BY,
-            "reveal_id": reveal.get("reveal_id"),
-            "course_id": str(course_id),
-            "channel": reveal.get("channel"),
-            "authorization": reveal.get("authorization"),
-            "expires_at": reveal.get("expires_at"),
-            "at": datetime.now(timezone.utc).isoformat()}
-
-
 def _tree_state_dir():
     """Per-tree runtime state dir, mirroring dispatch/executor.
 
@@ -416,14 +377,6 @@ def _legacy_tree_slug(tree_root):
     return slug or "tree"
 
 
-def without_pii_reveal(lane_context):
-    """lane_context with any educator reveal removed: the view every
-    journal record is projected with."""
-    out = dict(lane_context or {})
-    out.pop("pii_reveal", None)
-    return out
-
-
 def project_learner_result(entry, result, tenant_base, lane_context=None,
                            error_cls=Exception):
     """Project one applied result's receipt through the source privacy
@@ -442,42 +395,14 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
     exact tenant origin, or a roster the boundary rejects (ambiguous
     identities) refuses the op rather than surfacing raw learner PII.
 
-    Educator reveal (round-4 audit H2): lane_context["pii_reveal"] may
-    carry a sealed educator reveal record (dispatch/admission
-    mint_pii_reveal). A valid one for THIS course skips projection and
-    is journaled as revealed_by "educator-sealed-record" with the
-    educator's verbatim words; a record for another course leaves the
-    read de-identified; an invalid record fails closed. Nothing else (no
-    file, no environment variable) reveals names. Returns
-    (projected_result, reveal_audit_or_None).
+    There is no reveal: every learner read is projected, for the agent
+    and for the journal alike. Returns the projected result.
     """
     lane_context = lane_context or {}
     course_id = _entry_course_id(entry)
-    reveal = pii_reveal_audit(error_cls, lane_context.get("pii_reveal"),
-                              tenant_base, course_id)
-    if reveal is not None:
-        # Final muse audit H1: the journal is sealed and append-only, so
-        # purge can never take a name back out of it. Project twice:
-        # the revealed result for the agent, and the de-identified
-        # projection (exactly what an unrevealed read yields) as
-        # "journal_receipt", which is all the journal ever records.
-        deidentified, _none = project_learner_result(
-            entry, result, tenant_base,
-            lane_context=without_pii_reveal(lane_context),
-            error_cls=error_cls)
-        if _admission.touches_learner_data(entry):
-            revealed = dict(result)
-        else:
-            revealed = _label_editor_records(entry, result, tenant_base,
-                                             lane_context, error_cls,
-                                             reveal=reveal)
-            revealed = dict(revealed)
-        revealed["pii_reveal"] = reveal
-        revealed["journal_receipt"] = deidentified.get("receipt")
-        return revealed, reveal
     if not _admission.touches_learner_data(entry):
         return _label_editor_records(entry, result, tenant_base,
-                                     lane_context, error_cls), None
+                                     lane_context, error_cls)
     provider = entry.get("provider") or "canvas"
     if not course_id:
         raise error_cls(
@@ -575,7 +500,7 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
             "learner privacy boundary returned an unexpected shape for "
             "entry %r; refusing rather than surfacing raw learner PII"
             % entry.get("name"))
-    return out, None
+    return out
 
 
 # ---------------------------------------------------------------------------

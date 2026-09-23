@@ -41,13 +41,10 @@ structural egress redaction) plus privacy/boundary.py
   ~/.morrow/privacy_map.jsonl (0600). Neither ever ships in the
   package; both live only on the educator's VM. See the module header.
 
-De-identification is ON by default for learner-data reads. The only
-reveal is a sealed educator record for one course
-(dispatch/admission.mint_pii_reveal: verbatim educator words, the
-educator-chat channel, at most 30 minutes), journaled as
-`revealed_by: "educator-sealed-record"`. No file and no environment
-variable (`MORROW_REVEAL_STUDENT_PII_REASON` is ignored) reveals
-names. See privacy/FERPA_POLICY.md.
+De-identification is ON for learner-data reads, and nothing turns it
+off: no record, flag, file, or environment variable
+(`MORROW_REVEAL_STUDENT_PII_REASON` is ignored) reveals names. See
+privacy/FERPA_POLICY.md.
 """
 
 from privacy.core import (

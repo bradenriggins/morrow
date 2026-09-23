@@ -87,10 +87,10 @@ the model, with two limits you should know:
   discussion post, or file names a student, the agent reads that name
   as written.
 
-To see real names from a Canvas read for one course, ask the agent in
-your own words. It records your request, sealed, for that one course
-only, for at most 30 minutes, and your words are kept in the journal.
-There is no other way to lift de-identification.
+The assistant never sees the names of students you did not name, and
+this cannot be turned off. To check who a label is, tell the assistant
+the name of the student you have in mind: it looks that name up and
+tells you whether it is the same label.
 
 ## Where your sign-in lives
 

@@ -713,17 +713,12 @@ The educator names students; you never guess which one they mean.
    the educator named, labels for everyone else). Never try to learn
    or state the real name behind a label the educator did not name.
 
-Names the educator did not type are never shown to you. The only other
-way to see real names is an educator reveal: a sealed record
-(`dispatch.admission.mint_pii_reveal(tenant, course_id,
-"<educator's verbatim words>", channel="educator-chat")`), for ONE
-course, lasting at most 30 minutes, journaled with the educator's
-words, passed to the executor with `--pii-reveal <file>`. Mint it only
-when the educator asks, in their own words, to see real student names
-for that course; never on your own initiative and never for a driver
-channel. A file, an environment variable, or a setting reveals nothing
-(the old consent file is retired). Never call
-`vault.lookup()` or `Deidentifier.lookup()` from an agent path.
+Names the educator did not type are never shown to you, and nothing
+turns de-identification off: no record, flag, file, environment
+variable, or setting. When the educator asks who a label is, ask which
+student they have in mind and run `students find` with that name: the
+label that comes back tells them whether it is the same student. Never
+call `vault.lookup()` or `Deidentifier.lookup()` from an agent path.
 
 Deletion is the educator's, and it is complete: `python3 -c "from
 privacy import executor_wire; print(executor_wire.purge_tenant('<tenant

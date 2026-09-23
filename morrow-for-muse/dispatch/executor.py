@@ -5665,9 +5665,8 @@ def _project_verification_detail(entry: dict, verification: dict,
     those values can be learner names or identifiers. The journal is a
     learner-PII-free surface, so the detail is projected through the same
     privacy boundary as the receipt (privacy/executor_wire), with the
-    same gate (touches_learner_data), the same reveal decision, and a
-    roster harvested from the same raw provider payload the receipt
-    projection uses. Entries that do not touch learner data pass through
+    same gate (touches_learner_data) and a roster harvested from the
+    same raw provider payload the receipt projection uses. Entries that do not touch learner data pass through
     untouched. The input verification dict is never mutated; the (possibly
     new) dict is returned. Raises ExecutorError (fail closed) when the
     boundary itself fails.
@@ -5677,7 +5676,7 @@ def _project_verification_detail(entry: dict, verification: dict,
         return verification
     from privacy import executor_wire as _wire
     try:
-        projected, reveal = _wire.project_learner_result(
+        projected = _wire.project_learner_result(
             entry,
             {"receipt": {"verification_detail": detail,
                         "provider_payload": raw_payload}},
@@ -5688,19 +5687,6 @@ def _project_verification_detail(entry: dict, verification: dict,
         raise ExecutorError(
             "learner privacy boundary failed for verification detail of "
             "entry %r: %s" % (entry_name, exc))
-    if reveal is not None:
-        # Round-4 H2: a sealed educator reveal for this course, so the
-        # detail passes through raw for the agent. The reveal audit
-        # rides with the verification dict so the journal records who
-        # revealed and why. Final muse audit H1: the journal gets the
-        # de-identified detail ("journal_detail"), never the raw one.
-        out = dict(verification)
-        out["pii_reveal"] = reveal
-        out["journal_detail"] = _project_verification_detail(
-            entry, verification, raw_payload, tenant_base, entry_name,
-            lane_context=_wire.without_pii_reveal(lane_context)).get(
-                "detail")
-        return out
     projected_detail = (projected.get("receipt") or {}).get(
         "verification_detail")
     if not isinstance(projected_detail, str):
@@ -7610,11 +7596,9 @@ def _journalable_result(projection_entry: dict, result: dict, tenant_base,
     the receipt, the journal keeps a withheld marker instead."""
     from privacy import executor_wire as _wire
     try:
-        projected, _reveal = _wire.project_learner_result(
+        return _wire.project_learner_result(
             projection_entry, result, tenant_base,
-            lane_context=_wire.without_pii_reveal(lane_context),
-            error_cls=ExecutorError)
-        return projected
+            lane_context=lane_context, error_cls=ExecutorError)
     except Exception:
         out = dict(result)
         out["receipt"] = {"withheld": "the receipt could not be "
@@ -7688,7 +7672,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                    kind: str = "dispatch", approval: dict = None,
                    unproven_override=None, catalog_status=None,
                    dry_run=False, require_educator_channel: bool = True,
-                   mode_ctx: dict = None, pii_reveal: dict = None) -> dict:
+                   mode_ctx: dict = None) -> dict:
     """Execute one manifest entry; see _dispatch_entry_inner.
 
     Working by name (round-4 privacy audit H3): learner labels in params
@@ -7699,10 +7683,6 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
     raised error are relabeled before the agent sees them, and labels
     the educator introduced by name in this conversation are echoed as
     "<typed name> (label)" (privacy/name_echo).
-
-    pii_reveal: a sealed educator reveal record
-    (dispatch/admission.mint_pii_reveal) for one course; see
-    privacy/executor_wire.pii_reveal_audit.
     """
     holder = {}
     token = _ACTIVE_ID_LABELS.set(holder)
@@ -7712,7 +7692,7 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
             approval=approval, unproven_override=unproven_override,
             catalog_status=catalog_status, dry_run=dry_run,
             require_educator_channel=require_educator_channel,
-            mode_ctx=mode_ctx, pii_reveal=pii_reveal, _labels=holder)
+            mode_ctx=mode_ctx, _labels=holder)
     except Exception as exc:
         _relabel_exception(exc, holder.get("map"))
         raise
@@ -7790,7 +7770,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                           approval: dict = None, unproven_override=None,
                           catalog_status=None, dry_run=False,
                           require_educator_channel: bool = True,
-                          mode_ctx: dict = None, pii_reveal: dict = None,
+                          mode_ctx: dict = None,
                           _labels: dict = None) -> dict:
     """Execute one manifest entry through the full pipeline and journal it.
 
@@ -7865,7 +7845,6 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
     # label params; provider calls get the resolved ones.
     wire_entry, wire_params, id_labels, label_tokens = \
         _resolve_dispatch_labels(entry, params, tenant_base, mode_ctx)
-    lane_context = {"pii_reveal": pii_reveal} if pii_reveal else None
     # Learner-data decision 2026-09-20: the raw lane passes no vault_ready,
     # so learner-bearing entries are refused here (LearnerDataGated) rather
     # than projected. Projection runs in dispatch_entry's success path
@@ -8099,7 +8078,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         verification = _project_verification_detail(
             _projection_entry(entry, url, getattr(exc, "readback_payload", None)),
             verification, getattr(exc, "readback_payload", None),
-            tenant_base, entry_name, lane_context=lane_context)
+            tenant_base, entry_name)
         record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                  op_id, None, verification,
                                  failed_result, 0, uncertain=False,
@@ -8216,13 +8195,13 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
             # journaled, same as the success path below.
             verification = _project_verification_detail(
                 projection_entry, verification, result.get("payload"), tenant_base,
-                entry_name, lane_context=lane_context)
+                entry_name)
             after_digest = digest_of(result["receipt"])
             record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                      op_id, after_digest, verification,
                                      _journalable_result(
                                          projection_entry, result,
-                                         tenant_base, lane_context),
+                                         tenant_base),
                                      attempts, uncertain=False,
                                                                   approval_audit=approval_audit,
                                                                   unproven_override=override_audit,
@@ -8244,13 +8223,13 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                             "detail": _provider_detail(exc)}
             verification = _project_verification_detail(
                 projection_entry, verification, result.get("payload"),
-                tenant_base, entry_name, lane_context=lane_context)
+                tenant_base, entry_name)
             after_digest = digest_of(result["receipt"])
             record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                      op_id, after_digest, verification,
                                      _journalable_result(
                                          projection_entry, result,
-                                         tenant_base, lane_context),
+                                         tenant_base),
                                      attempts, uncertain=True,
                                      approval_audit=approval_audit,
                                      unproven_override=override_audit,
@@ -8281,13 +8260,13 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
             # project it through the learner boundary before journaling.
             verification = _project_verification_detail(
                 projection_entry, verification, result.get("payload"), tenant_base,
-                entry_name, lane_context=lane_context)
+                entry_name)
             after_digest = digest_of(result["receipt"])
             record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                      op_id, after_digest, verification,
                                      _journalable_result(
                                          projection_entry, result,
-                                         tenant_base, lane_context),
+                                         tenant_base),
                                      attempts, uncertain=not proven,
                                      approval_audit=approval_audit,
                                      unproven_override=override_audit,
@@ -8337,19 +8316,17 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
     #
     # W3-P2-5: the success-path verification detail (a write readback
     # mismatch narrative, or a declared-verify detail) formats raw
-    # provider values with %r. Project it first, with the same gate, the
-    # same reveal decision, and the same raw-payload roster the receipt
-    # projection uses, so the journal never carries learner names or
-    # identifiers in verification_detail.
+    # provider values with %r. Project it first, with the same gate and
+    # the same raw-payload roster the receipt projection uses, so the
+    # journal never carries learner names or identifiers in
+    # verification_detail.
     verification = _project_verification_detail(
         projection_entry, verification, result.get("payload"), tenant_base,
-        entry_name, lane_context=lane_context)
-    pii_reveal = None
+        entry_name)
     try:
         from privacy import executor_wire as _wire
-        result, pii_reveal = _wire.project_learner_result(
-            projection_entry, result, tenant_base, lane_context=lane_context,
-            error_cls=ExecutorError)
+        result = _wire.project_learner_result(
+            projection_entry, result, tenant_base, error_cls=ExecutorError)
     except ExecutorError:
         raise
     except Exception as exc:
@@ -8363,7 +8340,6 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                                                           approval_audit=approval_audit,
                                                           unproven_override=override_audit,
                                                           catalog_status=catalog_status,
-                                                          pii_reveal=pii_reveal,
                                                           pagination=(
                                                               {"note": pagination.get("note"),
                                                                "partial": pagination.get("partial")}
@@ -8399,8 +8375,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # uncertain write raises instead of returning.
         "outcome": outcome,
         "verified": outcome == "verified",
-        "verification": {k: v for k, v in verification.items()
-                         if k != "journal_detail"},
+        "verification": dict(verification),
         "receipt": result["receipt"],
         "truncated": truncation is not None,
         "truncation": truncation,
@@ -8451,7 +8426,7 @@ def _link_next_url(link_header):
 def _journal_record(entry_name, kind, effects, params, plan, op_id,
                     after_digest, verification, result, attempts, uncertain=False,
                     approval_audit=None, unproven_override=None,
-                    catalog_status=None, pii_reveal=None, pagination=None,
+                    catalog_status=None, pagination=None,
                     target=None, before_state=None, undo_available=None):
     """Canonical journal record for dispatch/undo completion.
 
@@ -8473,14 +8448,9 @@ def _journal_record(entry_name, kind, effects, params, plan, op_id,
         "before_state_digest": plan.before_state_digest if plan else None,
         "after_state_digest": after_digest,
         "verification": verification["status"],
-        # Final muse audit H1: under an educator reveal the agent gets
-        # real names, the journal only ever the de-identified projection.
         "verification_detail": redact_payload(
-            verification.get("journal_detail", verification.get("detail")),
-            DEFAULT_REDACT_PATTERNS),
-        "receipt": redact_payload(result.get("journal_receipt",
-                                             result["receipt"]),
-                                  DEFAULT_REDACT_PATTERNS),
+            verification.get("detail"), DEFAULT_REDACT_PATTERNS),
+        "receipt": redact_payload(result["receipt"], DEFAULT_REDACT_PATTERNS),
         "truncated": result["truncated"],
         "bytes_received": result["bytes_received"],
         "attempts": attempts,
@@ -8493,18 +8463,6 @@ def _journal_record(entry_name, kind, effects, params, plan, op_id,
         # was used (None for manifest entries and live-proven catalog ops).
         "unproven_override": unproven_override,
         "catalog_status": catalog_status,
-        # Learner-data reveal audit: None when de-identification applied
-        # (the default); the sealed educator reveal audit (revealed_by
-        # "educator-sealed-record" plus the educator's verbatim words)
-        # when a reveal record for this course showed real names.
-        # The verification dict carries the reveal audit for the
-        # verification detail itself (W3-P2-5): when the record-level
-        # audit was not supplied (verification failure paths journal
-        # before the receipt projection runs), fall back to it so a
-        # revealed detail is never journaled without its audit.
-        "pii_reveal": (pii_reveal if pii_reveal is not None
-                       else (verification.get("pii_reveal")
-                             if isinstance(verification, dict) else None)),
         # W4-P0-11: the provider-verified write target identity
         # (course_id, course_name, term, tenant), None for reads and
         # non-course writes.
@@ -8571,7 +8529,6 @@ def _journal_write_failure_audit(entry_name, kind, effects, params, plan,
         "approval": approval_audit,
         "unproven_override": override_audit,
         "catalog_status": catalog_status,
-        "pii_reveal": None,
     }
     journal_append(record)
 
@@ -8964,12 +8921,10 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
                         approval: dict = None, session=None,
                         allow_unproven: bool = False, dry_run=False,
                         require_educator_channel: bool = True,
-                        mode_ctx: dict = None,
-                        pii_reveal: dict = None) -> dict:
+                        mode_ctx: dict = None) -> dict:
     """Dispatch one generated-catalog operation through the full pipeline.
 
-    mode_ctx and pii_reveal are passed through to dispatch_entry: see its
-    docstring. People-bearing rows (learner data) dispatch only on the
+    mode_ctx is passed through to dispatch_entry: see its docstring. People-bearing rows (learner data) dispatch only on the
     Chromium lane with the encrypted learner vault, where every receipt
     is de-identified; elsewhere they are refused (LearnerDataGated).
 
@@ -9000,7 +8955,7 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
                           unproven_override=unproven_override,
                           catalog_status=status, dry_run=dry_run,
                           require_educator_channel=require_educator_channel,
-                          mode_ctx=mode_ctx, pii_reveal=pii_reveal)
+                          mode_ctx=mode_ctx)
 
 
 # --------------------------------------------------------------------------
@@ -9363,21 +9318,6 @@ def _load_params(text: str) -> dict:
     if not isinstance(obj, dict):
         raise ExecutorError("params must be a JSON object")
     return obj
-
-
-def _load_reveal(path: str | None) -> dict | None:
-    """Load a sealed educator reveal record (the seal, channel, course,
-    and expiry are checked at projection time)."""
-    if not path:
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            record = json.load(fh)
-    except (OSError, ValueError) as exc:
-        raise ExecutorError("reveal file is not readable JSON") from exc
-    if not isinstance(record, dict):
-        raise ExecutorError("reveal file must contain a JSON object")
-    return record
 
 
 def _load_approval(path: str | None) -> dict | None:
@@ -9935,11 +9875,6 @@ def main(argv=None):
                        help="mode gate: the educator's verbatim yes for "
                             "this destructive write (required in edit mode "
                             "while confirm_destructive_writes is on)")
-        p.add_argument("--pii-reveal", default=None,
-                       help="path to a sealed educator reveal record "
-                            "(dispatch/admission.mint_pii_reveal): real "
-                            "student names for ONE course, educator-chat "
-                            "channel, expires within 30 minutes")
 
     p_exec = sub.add_parser("execute", help="execute one manifest entry")
     p_exec.add_argument("--entry", required=True, help="path to the manifest entry JSON")
@@ -10177,8 +10112,7 @@ def main(argv=None):
                                      approval=approval,
                                      dry_run=args.dry_run,
                                      require_educator_channel=not args.allow_driver_channel,
-                                     mode_ctx=mode_ctx,
-                                     pii_reveal=_load_reveal(args.pii_reveal))
+                                     mode_ctx=mode_ctx)
             finally:
                 close_chromium_session(session)
         else:
@@ -10187,8 +10121,7 @@ def main(argv=None):
                                  op_id=args.op_id, approval=approval,
                                  dry_run=args.dry_run,
                                  require_educator_channel=not args.allow_driver_channel,
-                                 mode_ctx=mode_ctx,
-                                 pii_reveal=_load_reveal(args.pii_reveal))
+                                 mode_ctx=mode_ctx)
         print(canonical(out))
     elif args.command == "catalog":
         params = _load_params(args.params)
@@ -10216,9 +10149,7 @@ def main(argv=None):
                                           session=session,
                                           dry_run=args.dry_run,
                                           require_educator_channel=not args.allow_driver_channel,
-                                          mode_ctx=mode_ctx,
-                                          pii_reveal=_load_reveal(
-                                              args.pii_reveal))
+                                          mode_ctx=mode_ctx)
             finally:
                 close_chromium_session(session)
         else:
@@ -10230,8 +10161,7 @@ def main(argv=None):
                                       allow_unproven=args.allow_unproven,
                                       dry_run=args.dry_run,
                                       require_educator_channel=not args.allow_driver_channel,
-                                      mode_ctx=mode_ctx,
-                                      pii_reveal=_load_reveal(args.pii_reveal))
+                                      mode_ctx=mode_ctx)
         print(canonical(out))
     elif args.command in ("plan-write", "approve-write"):
         session = need_chromium_session() if args.backend == "chromium" \

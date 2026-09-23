@@ -144,7 +144,7 @@ def _project(name, path, payload, params):
                              params)
     view = ex._projection_entry(entry, url, payload)
     assert ex.admission_touches_learner_data(view), name
-    out, _reveal = wire.project_learner_result(
+    out = wire.project_learner_result(
         view, {"receipt": payload, "truncated": False, "bytes_received": 0},
         BASE, error_cls=RuntimeError)
     return json.dumps(out["receipt"])
@@ -258,7 +258,7 @@ def _page(payload):
     url = ex.render_template(entry["request"]["url"], {"canvas_base": BASE},
                              {"course_id": 1, "url_or_id": "p"})
     view = ex._projection_entry(entry, url, payload)
-    out, _ = wire.project_learner_result(
+    out = wire.project_learner_result(
         view, {"receipt": payload, "truncated": False, "bytes_received": 0},
         BASE, error_cls=RuntimeError)
     return out["receipt"]

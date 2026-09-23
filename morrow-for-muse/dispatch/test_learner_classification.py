@@ -190,9 +190,8 @@ def test_potential_collaborators_receipt_never_reaches_agent_raw(
             executor_wire.project_learner_result(
                 entry, result, "https://school.instructure.com")
         return
-    out, reveal = executor_wire.project_learner_result(
+    out = executor_wire.project_learner_result(
         entry, result, "https://school.instructure.com")
-    assert reveal is None
     text = repr(out)
     for raw in ("Jane Doe", "Doe, Jane", "Omar Haddad", "5550101"):
         assert raw not in text, raw

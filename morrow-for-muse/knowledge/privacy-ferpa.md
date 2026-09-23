@@ -100,14 +100,13 @@ Practical consequences for agents:
 - Never mint a persistent API token from a session, and never exceed
   the educator's own account permissions.
 
-## Educator reveal rule
+## No reveal
 
 **Owned by the FERPA policy (`privacy/FERPA_POLICY.md`).**
-De-id applies by default to all learner-bearing results. The only
-reveal is a sealed educator record (`dispatch.admission.mint_pii_reveal`):
-the educator's verbatim request, the educator-chat channel, ONE
-course, at most 30 minutes, journaled. A file, an environment
-variable, or a setting reveals nothing. Consult
+De-id applies to all learner-bearing results, always. Nothing reveals
+real names to the agent: no record, flag, file, environment variable,
+or setting. To tell the educator who a label is, ask which student they
+have in mind and run `students find` with that name. Consult
 `privacy/FERPA_POLICY.md`; do not invent another rule.
 
 ## Related reading
@@ -117,7 +116,6 @@ variable, or a setting reveals nothing. Consult
 - `privacy/boundary.py` (the boundary contract; docstring first)
 - `privacy/core.py` (the engine and the encrypted vault)
 - `dispatch/admission.py` (`LearnerDataGated`, the refusal side of
-  the gate; `mint_pii_reveal` / `check_pii_reveal`, the educator
-  reveal)
+  the gate)
 - `learners/find.py` (`morrow students find`) and
   `privacy/name_echo.py` (working by name)

@@ -8,8 +8,7 @@ agent-visible: each student is a stable "Student A<n>" label
 (deterministic per course scope, persisted in the educator-local source
 vault). A student the educator named in this conversation (resolved with
 `morrow students find`) shows as "<name as the educator typed it>
-(Student A<n>)" (privacy/name_echo). This read takes no reveal record,
-so no other name is ever shown.
+(Student A<n>)" (privacy/name_echo). No other name is ever shown.
 
 Synthetic fixtures are fake people: they render with their fixture
 names under a loud SYNTHETIC banner and never touch the vault.
@@ -33,8 +32,7 @@ def project_live(course_id, rows, tenant_base, conversation_id=None):
     """Project live learner rows through the privacy boundary.
 
     rows: list of {"user_id", "name", ...} harvested from submissions,
-    in a stable order. Returns (projected_rows, reveal_audit_or_None);
-    the reveal audit is always None here (no reveal record is taken).
+    in a stable order. Returns the projected rows.
     Each projected row carries "display_name": the stable "Student
     A<n>" label, echoed as "<typed name> (Student A<n>)" when the
     educator introduced that student in this conversation
@@ -56,7 +54,7 @@ def project_live(course_id, rows, tenant_base, conversation_id=None):
     receipt = []
     for i, row in enumerate(rows):
         receipt.append(dict(row, qord=i))
-    projected, reveal = _wire.project_learner_result(
+    projected = _wire.project_learner_result(
         entry, {"receipt": receipt}, tenant_base, error_cls=RuntimeError)
     out = []
     for prow in projected.get("receipt", []):
@@ -65,7 +63,7 @@ def project_live(course_id, rows, tenant_base, conversation_id=None):
     out = _wire.apply_name_echo(out, tenant_base, course_id,
                                 conversation_id)
     out.sort(key=lambda r: (r["qord"] is None, r["qord"]))
-    return out, reveal
+    return out
 
 
 def render(report, synthetic=False):
@@ -74,7 +72,7 @@ def render(report, synthetic=False):
     report: {"quiz_title", "quiz_id", "window", "effective_date",
              "threshold_source", "fail_below_points", "points_possible",
              "failed": [...], "passed_count", "excused_count",
-             "ungraded_count", "reveal_audit", "data_provenance"}
+             "ungraded_count", "data_provenance"}
     Each failed row: {"display_name", "score", "percent", "missing",
                       "late", "detail"}.
     """

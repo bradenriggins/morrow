@@ -24,8 +24,8 @@ read-only sources; nothing was modified there.
   private and multi-course tool refusal, stable failure envelopes,
   metadata-only internal capability.
 - `source_privacy_selftest.py`: the test suite (see below).
-- `executor_wire.py`: the executor's projection point, the educator
-  reveal check, working-by-name helpers (`issue_labels`,
+- `executor_wire.py`: the executor's projection point (every learner
+  read, no reveal), working-by-name helpers (`issue_labels`,
   `apply_name_echo`, `resolve_learner_labels`, `relabel_learner_ids`),
   and the shipped purge commands.
 - `name_echo.py`: the encrypted per-conversation record of students

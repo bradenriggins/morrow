@@ -389,7 +389,6 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                     "score": cls["score"], "percent": cls["percent"],
                     "missing": cls["missing"], "late": cls["late"],
                     "detail": cls["detail"]})
-            reveal_audit = None
         else:
             learner_rows = []
             for sub, _cls in failed_rows:
@@ -400,7 +399,7 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                     "sortable_name": user.get("sortable_name"),
                     "short_name": user.get("short_name"),
                 })
-            projected, reveal_audit = _present.project_live(
+            projected = _present.project_live(
                 str(course_id), learner_rows, tenant_base)
             label_by_qord = {p["qord"]: p["display_name"] for p in projected}
             display_rows = []
@@ -433,7 +432,6 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
             "passed_count": passed_n,
             "excused_count": excused_n,
             "ungraded_count": ungraded_n,
-            "reveal_audit": reveal_audit,
             "data_provenance": provenance,
         }
         text_out = _present.render(

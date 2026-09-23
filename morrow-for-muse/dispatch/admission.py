@@ -72,7 +72,6 @@ import secrets
 import stat
 import sys
 import unicodedata
-import uuid
 
 # W4-P1-17: the morrow state root has ONE source of truth
 # (config/paths.morrow_home, honoring MORROW_HOME). Every hardcoded
@@ -1099,114 +1098,6 @@ def sign_approval(record: dict, authorization: str,
     record["resolution_authority"] = (
         "approval:%s" % record["op_digest"] if schedule else None)
     return _seal_record(record)
-
-
-# ---------------------------------------------------------------------------
-# Educator PII reveal (round-4 privacy audit H2)
-#
-# The reveal record is the ONLY way to see real student names from an LMS
-# read. It rides the same educator channel as write approvals: the
-# educator's verbatim words, the ceremony channel, and the machine-held
-# HMAC seal. It is scoped to one course on one tenant and expires within
-# PII_REVEAL_MAX_MINUTES. A consent file is not a consent channel: an
-# agent can write a file.
-# ---------------------------------------------------------------------------
-
-PII_REVEAL_MAX_MINUTES = 30
-
-
-def _journal_reveal(record: dict) -> None:
-    try:
-        from dispatch.executor import journal_append
-    except ImportError:  # run with dispatch/ itself on sys.path
-        from executor import journal_append
-    journal_append(record)
-
-
-def mint_pii_reveal(tenant_base: str, course_id, authorization: str,
-                    channel: str, minutes: int = 15) -> dict:
-    """Seal an educator reveal for ONE course on ONE tenant.
-
-    authorization is the educator's verbatim request (any non-empty
-    reply); channel is "educator-chat" when
-    it was captured from the educator's own reply, "driver" otherwise
-    (driver records are refused at use). minutes is 1 to
-    PII_REVEAL_MAX_MINUTES. The mint is journaled (who, which course,
-    the verbatim words, the expiry). Same honest trust statement as
-    sign_approval: this runs in the agent's process, so a fabricated
-    educator-chat citation is a detectable lie in the journal, not a
-    prevented one.
-    """
-    if not isinstance(authorization, str) or \
-            len(authorization.strip()) < APPROVAL_AUTH_MIN_LEN:
-        raise ValueError(
-            "a PII reveal needs the educator's verbatim request (any "
-            "non-empty request)")
-    if channel not in ("educator-chat", "driver"):
-        raise ValueError("reveal channel must be 'educator-chat' or "
-                         "'driver', got %r" % (channel,))
-    if isinstance(minutes, bool) or not isinstance(minutes, int) or \
-            not 1 <= minutes <= PII_REVEAL_MAX_MINUTES:
-        raise ValueError("a PII reveal lasts 1 to %d minutes, got %r"
-                         % (PII_REVEAL_MAX_MINUTES, minutes))
-    course = str(course_id or "").strip()
-    if not course:
-        raise ValueError("a PII reveal names exactly one course")
-    now = datetime.datetime.now(datetime.timezone.utc)
-    record = {
-        "kind": "pii_reveal",
-        "reveal_id": uuid.uuid4().hex,
-        "by": "educator",
-        "authorization": authorization.strip(),
-        "channel": channel,
-        "tenant": _normalize_target_tenant(tenant_base),
-        "course_id": course,
-        "issued_at": now.isoformat(),
-        "expires_at": (now + datetime.timedelta(minutes=minutes))
-        .isoformat(),
-    }
-    sealed = _seal_record(record)
-    _journal_reveal({"wal": "audit", "event": "privacy.pii_reveal_issued",
-                     "reveal_id": record["reveal_id"],
-                     "tenant": record["tenant"],
-                     "course_id": course, "channel": channel,
-                     "authorization": record["authorization"],
-                     "issued_at": record["issued_at"],
-                     "expires_at": record["expires_at"]})
-    return sealed
-
-
-def check_pii_reveal(record, tenant_base: str, course_id) -> bool:
-    """True when a sealed educator reveal applies to this course read.
-
-    Raises ApprovalMismatch for a record that is not a valid, unexpired,
-    educator-chat reveal (tampered, driver channel, expired, too long).
-    Returns False for a valid reveal of a different course or tenant:
-    that read stays de-identified.
-    """
-    if not isinstance(record, dict) or record.get("kind") != "pii_reveal":
-        raise ApprovalMismatch("the PII reveal is not a reveal record")
-    _verify_seal(record)
-    if record.get("by") != "educator":
-        raise ApprovalMismatch("the PII reveal was not issued by the "
-                               "educator")
-    if record.get("channel") != "educator-chat":
-        raise ApprovalMismatch(
-            "the PII reveal was not captured in the educator's own chat "
-            "(channel %r); only an educator-chat reveal shows names"
-            % (record.get("channel"),))
-    issued = _parse_time(record.get("issued_at"), "issued_at")
-    expires = _parse_time(record.get("expires_at"), "expires_at")
-    now = datetime.datetime.now(datetime.timezone.utc)
-    if expires - issued > datetime.timedelta(
-            minutes=PII_REVEAL_MAX_MINUTES):
-        raise ApprovalMismatch("the PII reveal lasts longer than %d "
-                               "minutes" % PII_REVEAL_MAX_MINUTES)
-    if not issued - datetime.timedelta(minutes=5) <= now < expires:
-        raise ApprovalMismatch("the PII reveal has expired; the educator "
-                               "must ask again")
-    return (record.get("tenant") == _normalize_target_tenant(tenant_base)
-            and str(record.get("course_id")) == str(course_id))
 
 
 def _parse_time(value, field: str) -> datetime.datetime:

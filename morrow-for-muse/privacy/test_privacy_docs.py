@@ -53,7 +53,8 @@ def test_docs_state_the_by_name_limits_honestly():
     type" was not true. A lookup with a guessed name confirms that a
     student with that name is enrolled, and course content (a page
     body) is not de-identified. FERPA_POLICY.md said a reveal needs 20
-    characters; any non-empty request is accepted."""
+    characters; since the final sweep of 2026-09-22 there is no reveal
+    at all, and the policy says so."""
     skill = _flat("SKILL.md")
     consent = _flat("content/consent.md")
     policy = _flat("privacy/FERPA_POLICY.md")
@@ -67,7 +68,7 @@ def test_docs_state_the_by_name_limits_honestly():
     assert "page body" in limits
     assert "confirms that a student with that name is enrolled" in limits
     assert "at least 20 characters" not in policy
-    assert "any non-empty request" in policy
+    assert "nothing turns it off" in policy
 
 
 def test_approval_display_describes_what_the_reply_approves():
