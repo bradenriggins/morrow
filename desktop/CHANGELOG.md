@@ -57,6 +57,7 @@ This release fixes the problems a full review of Morrow found before release. Te
 - ChatGPT and Codex now start even when Morrow cannot. Morrow finds, repairs, and removes its own entry in their settings file and leaves the rest of the file as it was. When it cannot change the file, it says why.
 - A "Quit and reopen" step checks that the assistant really connected.
 - On a Mac, Morrow offers to move itself to Applications when it runs from somewhere else.
+- The start, repair, Bridge update, and move steps use plain words. Update Bridge says that Morrow asks Chrome to reload Morrow Bridge, and the move step says Morrow is not in your Applications folder. It used to say Morrow ran from a disk image or a download folder.
 - The exact Bridge folder is shown with a Copy button. Long folder paths wrap.
 - Morrow really checks whether Claude Desktop is installed, including Claude Desktop from the Microsoft Store on Windows.
 - Removal keeps a settings file's own permissions and refuses a read-only file.
