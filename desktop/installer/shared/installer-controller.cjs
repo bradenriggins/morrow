@@ -2601,7 +2601,7 @@ class InstallerController {
     }
     const active = await this.acquireRestartLease();
     if (active?.status !== "granted" || typeof active.leaseId !== "string") {
-      throw errorDetails("active_or_uncertain_operations");
+      throw errorDetails(restartRefusalCode(active?.reason));
     }
     const activeWorkspace = this.runtimeWorkspace ? await canonicalDirectory(this.runtimeWorkspace) : workspaceRoot;
     return { kind: "owner", leaseId: active.leaseId, journalPath, workspaceRoot: activeWorkspace, module };
@@ -2689,7 +2689,9 @@ class InstallerController {
     }
     const lease = module.acquireStoppedLocalOwnerMaintenanceLease(journalPath, { holderPid: process.pid, workspaceRoot });
     if (!lease || typeof lease.leaseId !== "string" || typeof lease.leaseToken !== "string") {
-      throw errorDetails("active_or_uncertain_operations");
+      // A live owner that refused names the condition it holds; waiting never
+      // ends an open assistant, so the person is told what to close instead.
+      throw errorDetails(restartRefusalCode(active?.reason));
     }
     return { kind: "stopped", leaseId: lease.leaseId, leaseToken: lease.leaseToken, journalPath, workspaceRoot, module };
   }

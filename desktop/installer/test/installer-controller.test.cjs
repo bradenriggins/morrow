@@ -2320,6 +2320,75 @@ test("a data removal refuses an owner that will not grant authoritative maintena
   assert.deepEqual(await treeDigest(paths.userData), before);
 });
 
+// The runtime names the condition that held its lease. Waiting never ends an
+// open assistant, so the removal says to quit it, as every other step does.
+test("a data removal an open assistant refuses says to quit the assistant, not to wait", async () => {
+  const root = await temporaryRoot();
+  const maintenance = [
+    "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+    "export function readLocalOwnerMaintenanceLease() { return null; }",
+    "export function requestLocalOwnerMaintenance() { return null; }",
+    "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
+    "export function acquireStoppedLocalOwnerMaintenanceLease() { return null; }",
+    "export function replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard() { return null; }",
+    "export function removeExactLocalOwnerMaintenanceLease() { return false; }",
+    ""
+  ].join("\n");
+  const runtimeMonitor = [
+    OBSERVED_MONITOR_SNAPSHOTS,
+    "const live = { ...ready, health: { ...ready.health, canRestart: 'unknown' } };",
+    "globalThis.__morrowRefusalReason ??= 'local_owner_other_client_connected';",
+    "export function createRuntimeMonitor() {",
+    "  return {",
+    "    start: async () => live,",
+    "    snapshot: () => live,",
+    "    maintenance: async () => ({ status: 'refused', reason: globalThis.__morrowRefusalReason }),",
+    "    close: async () => {}",
+    "  };",
+    "}",
+    ""
+  ].join("\n");
+  const { installer, messageBoxes, paths } = await installationWithData(root, 1, { maintenance, runtimeMonitor });
+  const before = await treeDigest(paths.userData);
+
+  for (const [reason, code] of [
+    ["local_owner_other_client_connected", "runtime_other_client_connected"],
+    ["local_owner_request_in_flight", "runtime_request_in_flight"],
+    ["local_owner_approval_running", "runtime_change_running"],
+    ["local_owner_unexplained", "active_or_uncertain_operations"]
+  ]) {
+    globalThis.__morrowRefusalReason = reason;
+    await assert.rejects(() => installer.removeData(null), (error) => {
+      assert.deepEqual(error, errorDetails(code));
+      return true;
+    });
+  }
+  delete globalThis.__morrowRefusalReason;
+  assert.deepEqual(messageBoxes, [], "a refused removal never asks for a confirmation");
+  assert.deepEqual(await treeDigest(paths.userData), before);
+
+  const open = errorDetails("runtime_other_client_connected");
+  assert.equal(open.message, "An assistant is using Morrow right now.");
+  assert.equal(open.recovery, "Quit each assistant that uses Morrow, then start this step again. Morrow changed nothing.");
+  assert.doesNotMatch(`${open.message} ${open.recovery}`, /other assistant|[Ww]ait/, "the only open assistant can be the one this step removes");
+});
+
+test("a desktop change with no runtime monitor names the condition a live owner refused with", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  installer.desktopMutationWorkspace = async () => root;
+  installer.canonicalStateDirectory = async () => root;
+  installer.localOwnerMaintenanceModule = async () => ({ acquireStoppedLocalOwnerMaintenanceLease: () => null });
+  assert.equal(installer.runtimeMonitor, null);
+  installer.acquireRestartLease = async () => ({ status: "uncertain", reason: "local_owner_other_client_connected" });
+  await assert.rejects(() => installer.withDesktopMutation(async () => { throw new Error("must not run"); }),
+    (error) => { assert.deepEqual(error, errorDetails("runtime_other_client_connected")); return true; });
+  installer.acquireRestartLease = async () => ({ status: "uncertain" });
+  await assert.rejects(() => installer.withDesktopMutation(async () => { throw new Error("must not run"); }),
+    (error) => { assert.deepEqual(error, errorDetails("active_or_uncertain_operations")); return true; });
+  assert.equal(installer.desktopMutationInProgress, null);
+});
+
 test("a confirmed removal waits for an open SQLite owner to close before deleting State", async (t) => {
   const root = await temporaryRoot();
   const maintenance = [

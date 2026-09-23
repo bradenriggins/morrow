@@ -115,8 +115,8 @@ const PUBLIC_ERRORS = Object.freeze({
     recovery: "Wait for that change to finish, then start this step again."
   },
   runtime_other_client_connected: {
-    message: "Another assistant is connected to Morrow.",
-    recovery: "Close the other assistant, then start this step again. Morrow changed nothing."
+    message: "An assistant is using Morrow right now.",
+    recovery: "Quit each assistant that uses Morrow, then start this step again. Morrow changed nothing."
   },
   bridge_delivery_unavailable: {
     message: "Morrow Bridge is not available from the Chrome Web Store yet.",

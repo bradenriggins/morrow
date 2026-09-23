@@ -34,6 +34,7 @@ This release fixes every Critical and High defect found in the adversarial audit
 - Morrow starts faster on Windows: it checks each private file once per start instead of once per read.
 - A newer Morrow Bridge in the app no longer stops setup when Chrome has not loaded the Bridge or is closed. Update Bridge appears only while Morrow Bridge is connected. With no Bridge connected, Check Bridge replaces the Bridge folder with the newer files. A failed update names only the steps on the Update screen.
 - When an open assistant or a running change keeps Morrow busy, saving, choosing, or removing a Blackboard connection says so. It no longer blames the web address, key, or secret.
+- Remove Morrow's data, and any other step an open assistant blocks, says to quit the assistant. It no longer says to wait for work that never ends.
 - The app says where unsigned builds get updates. The Mac note now says that moving Morrow to Applications can ask for an administrator password.
 
 ### Privacy
