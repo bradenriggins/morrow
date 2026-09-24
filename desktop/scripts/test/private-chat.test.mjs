@@ -857,3 +857,28 @@ test("the drawer sends a message that lists no student, and still asks for a cou
   }]);
   assert.match(page.text('label[for="private-chat-identifiers"] small'), /leave this empty/u);
 });
+
+// Rich-text editors and word processors write a name as character references or
+// with invisible format characters, and a student with two family names is
+// addressed by either surname. Morrow Bridge replaces the same names the
+// gateway replaces, so both boundaries read alike.
+test("local protection replaces a name written with references, invisible characters, or as a compound family name", () => {
+  const ada = { id: 3, name: "Ada Lovelace" };
+  const jose = { id: 9, name: "José García López", sortable_name: "García López, José" };
+  const combined = roster([jose, ada]);
+
+  // Invisible format characters a word processor leaves in pasted text. The
+  // gateway decodes character references; the drawer text is typed, not HTML.
+  assert.equal(protect("Ada Love\u00adlace presented.", [], { roster: combined }), "Student A1 presented.");
+  assert.equal(protect("Ada Love\u200blace presented.", [], { roster: combined }), "Student A1 presented.");
+
+  // Either surname alone, and both surnames without the given name, name the student.
+  assert.equal(protect("García submitted late.", [], { roster: combined }), "Student A2 submitted late.");
+  assert.equal(protect("López submitted late.", [], { roster: combined }), "Student A2 submitted late.");
+  assert.equal(protect("García López submitted late.", [], { roster: combined }), "Student A2 submitted late.");
+  // A name joined by an underscore or a hyphen, as a page address or a file name is.
+  assert.equal(protect("ada-lovelace-reflection", [], { roster: combined }), "Student A1-reflection");
+  assert.equal(protect("Lovelace_Ada_feedback.docx", [], { roster: combined }), "Student A1_feedback.docx");
+  // The educator can list a bare surname.
+  assert.equal(protect("Please remind García to submit.", ["García"], { roster: combined }), "Please remind Student A2 to submit.");
+});

@@ -134,6 +134,9 @@ importers:
       '@morrow/contracts':
         specifier: workspace:*
         version: link:../contracts
+      entities:
+        specifier: 8.0.0
+        version: 8.0.0
 
   packages/legacy-bridge-mcp:
     dependencies:
