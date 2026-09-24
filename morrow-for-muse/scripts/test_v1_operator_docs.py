@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""INSTALL.md and SKILL.md describe the Canvas-only v1 that ships.
+"""INSTALL.md and SKILL.md describe the Canvas and Moodle package that ships.
 
 Failure modes this suite pins down (written before the fix; final
 sweep 2026-09-22):
@@ -7,9 +7,8 @@ sweep 2026-09-22):
      an approval file (`--approval`), and its troubleshooting called a
      refusal without them "expected". The shipped flow is `plan-write`
      and `approve-write` in plan mode, and no approval in edit mode.
-  2. INSTALL.md kept a "Moodle lane: HTTPS is mandatory" section, and
-     SKILL.md's session lifecycle named a Moodle lane. v1 is Canvas
-     only, and the carve leaves moodle/ out.
+  2. The Moodle session lane and its operator instructions ship beside
+     the Canvas connector, with a hash-locked requests dependency.
   3. INSTALL.md stated one developer tenant's /users/self shape ("This
      tenant's `/users/self` response carries no `login_id` field") as
      fact for every school.
@@ -70,11 +69,16 @@ def test_install_points_writes_to_the_typed_flow():
         assert current in text, current
 
 
-def test_no_moodle_lane_in_the_canvas_only_docs():
-    assert any(p.startswith("moodle/") for p in carve.DEV_ONLY)
-    assert "Moodle lane" not in _flat("INSTALL.md")
-    assert "MOODLE_BASE_ALLOW_HTTP" not in _flat("INSTALL.md")
-    assert "Moodle lane" not in _flat("SKILL.md")
+def test_moodle_lane_and_its_dependency_are_shipped_and_documented():
+    assert "moodle/" not in carve.DEV_ONLY
+    assert "moodle/session_selftest.py" in carve.DEV_ONLY
+    assert "moodle/session.py" in carve.shipped_files()
+    assert "Moodle lane" in _flat("INSTALL.md")
+    assert "requirements-optional.txt" in _flat("INSTALL.md")
+    assert "MOODLE_BASE_ALLOW_HTTP" in _flat("INSTALL.md")
+    skill = _flat("SKILL.md")
+    assert "Canvas-only" not in skill
+    assert "moodle/SKILL.md" in skill
 
 
 def test_install_states_no_one_tenants_profile_shape():

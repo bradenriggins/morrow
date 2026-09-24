@@ -1,6 +1,7 @@
 # Morrow for Muse: Operation Catalog (authoritative)
 
-Date: 2026-09-20. Product: Morrow for Muse (no-PAT Canvas-only connector, no MCP).
+Date: 2026-09-20. Product: Morrow for Muse (Canvas connector and separate Moodle session lane, no MCP).
+Package note (0.4.2): Moodle runtime and agent instructions ship in the release. Moodle claims remain limited to the live-proven rows and lane-level evidence below; catalog status is provider-specific.
 This file is the authoritative operation catalog for the proof battery. It supersedes the older proof ledger (proof-battery/LEDGER.md), which the source repository keeps as-is for history; it is not in the release.
 
 Path convention: the desktop catalog records paths without the /api prefix; every Canvas REST path below is shown with the real /api prefix added.
@@ -30,7 +31,7 @@ Do not go looking for these files in the tree.
 ## Transport mechanisms
 - canvas-batch: transport/batch.py browser-task transport. Mechanism proven live 2026-09-20 (assignment lifecycle 4045368, course read, users/self). Per-operation proof still required. Integrated behind dispatch/executor.py as the default --backend chromium lane (transport/local_chromium.py over CDP on 127.0.0.1:19223); canvas-batch remains the proof-battery reference transport.
 - quiz-api-token: provision/provision.py LTI chain plus dispatch/executor.py. Proven for the banks.build scope (bank lifecycle 4040/4041/4037).
-- moodle-ajax: moodle/session.py AJAX envelope (lib/ajax/service.php). Proven for allowed_from_ajax functions. Moodle is out for v1 (SCOPE.md): the Moodle code is in the source repository only, not in the release.
+- moodle-ajax: moodle/session.py AJAX envelope (lib/ajax/service.php). Proven for allowed_from_ajax functions. The Moodle code ships as a separate session lane; use its site-level capability probe and do not infer capability from the Canvas catalog.
 - moodle-form: moodle/session.py form-path fallback. Proven for forum discussion create/delete.
 - executor-plain: dispatch/executor.py plain HTTPS. Works with PAT; session-cookie replay is OTP-walled on the CHCP tenant class, so no-PAT proof goes through canvas-batch.
 
@@ -1419,4 +1420,3 @@ educator decisions)
 Canvas course-scoped ops in reference catalog: 436, plus 20 Item Bank quiz-api ops.
 Moodle ops in reference catalog: 250, plus 10 lane-level rows.
 Learner-data flagged: 146 Canvas, 26 Moodle.
-

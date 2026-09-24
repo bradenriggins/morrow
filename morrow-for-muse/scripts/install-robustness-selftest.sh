@@ -772,7 +772,7 @@ fake_live_browser() {
   cat > "${s}/stub_server.py" <<PYEOF
 import json, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 18901
 class H(BaseHTTPRequestHandler):
     def _json(self, obj, code=200):
@@ -829,4 +829,3 @@ fake_live_browser_stop() {
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   main "$@"
 fi
-

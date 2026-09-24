@@ -8,8 +8,8 @@ Failure modes pinned down (written before the fix):
      or install.sh's integrity walk fails (or passes a tampered file).
   3. The carved tree must pass the secrets gate with no exclusions:
      no tenant hosts in code, no scratch, no session material.
-  4. Dev-only surface (live drivers, proof evidence, Moodle research)
-     must not ship.
+  4. Dev-only surface (live drivers, proof evidence, and lane tests)
+     must not ship; the maintained Moodle session lane must ship.
   5. Test scratch (vault keys, a Cookies file) was committed under
      privacy/.selftest-work/. No scratch may be tracked, and git must
      ignore it so it cannot be committed again.
@@ -284,7 +284,7 @@ def test_carved_tree_passes_secrets_gate_without_exclusions(carved):
 
 
 def test_dev_only_surface_does_not_ship(carved):
-    for rel in ("moodle", "lanes", "qr-proof", "learners/evidence",
+    for rel in ("lanes", "qr-proof", "learners/evidence",
                 "proof-battery/evidence", "dispatch/live_proof_modes.py",
                 "session/capture.py", "requirements-dev.txt",
                 # CI's hash-locked pytest; the install suites need none
@@ -293,6 +293,7 @@ def test_dev_only_surface_does_not_ship(carved):
                 "bin/keepalive-canvas.sh", "bin/scheduler.py", "DEPLOY.md",
                 # pytest-only: the suite's HOME isolation and its check
                 "conftest.py", "test_suite_isolation.py",
+                "moodle/session_selftest.py",
                 # pytest-only: the conftest warning check, and the doc
                 # count check (it reads DEPLOY.md, which does not ship)
                 "test_optional_dependency_warning.py",
@@ -307,6 +308,14 @@ def test_dev_only_surface_does_not_ship(carved):
                 "scripts/uninstall.sh", "dispatch/executor.py",
                 "SKILL.md", "INSTALL.md"):
         assert os.path.exists(os.path.join(carved, rel)), rel
+
+
+def test_moodle_runtime_and_operator_instructions_ship(carved):
+    for rel in ("moodle/README.md", "moodle/SKILL.md", "moodle/login.py",
+                "moodle/probe.py", "moodle/reauth.py", "moodle/session.py",
+                "requirements-optional.txt"):
+        assert os.path.isfile(os.path.join(carved, rel)), rel
+    assert not os.path.exists(os.path.join(carved, "moodle/session_selftest.py"))
 
 
 def test_no_pytest_only_module_ships(carved):
@@ -349,7 +358,7 @@ def test_carve_refuses_output_inside_source():
 
 
 def test_shipped_docs_name_no_missing_file_as_shipped(carved):
-    # A shipped doc may mention dev-only code (moodle/, session/capture.py)
+    # A shipped doc may mention dev-only code (session/capture.py)
     # only while saying it is not shipped; otherwise the educator (or the
     # agent) is sent to a file the release does not contain.
     import re

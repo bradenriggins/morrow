@@ -1,14 +1,15 @@
 # v1 capability scope
 
-The Morrow for Muse connector v1 is a Canvas-only connector. This file is the
-exact, complete statement of what v1 ships and what it does not. Do not
-imply capabilities beyond it.
+The Morrow for Muse connector v1 ships the Canvas connector and a separate
+Moodle session lane. This file is the exact statement of what each lane ships
+and what it does not. Do not imply capabilities beyond it.
 
-The standing rule for every bullet below: ships in v1 means the operation
-is marked `live-proven` in `proof-battery/OPERATION_CATALOG.md`, proven
-live through the Chromium lane (in-page `fetch()` inside the educator's
-authenticated Chromium session via CDP on 127.0.0.1:19223). Anything not
-marked `live-proven` is not a v1 claim.
+Canvas catalog claims below require `live-proven` evidence in
+`proof-battery/OPERATION_CATALOG.md` through the Chromium lane. Moodle uses
+the separate session lane in `moodle/`; site-level capabilities are probed
+before a Moodle operation runs. Moodle operation statuses are recorded in
+`proof-battery/OPERATION_CATALOG.md` and the Moodle lane notes. Do not treat one
+provider's proof as proof for the other.
 
 ## Ships in v1
 
@@ -114,6 +115,14 @@ marked `live-proven` is not a v1 claim.
   educator asks and even with a signed approval.
 - The Canvas Login Helper (`helper/`): educator self-sign-in,
   SSO/MFA-capable, with keepalive.
+- The Moodle session lane (`moodle/`): HTTPS session bootstrap, per-site
+  capability probe, AJAX and form-path dispatch, session-expiry handling,
+  frozen write plans, verified readback, bounded receipts, and an
+  append-only journal. Live proof on the official Moodle 5.2 sandbox covers
+  listing courses and a forum-discussion create, verification, and delete
+  lifecycle. Moodle is separate from the Canvas catalog executor; the
+  available methods depend on the school's Moodle deployment. Follow
+  `moodle/SKILL.md` for the lane rules.
 
 ### In scope but pending live proof (not shipped v1 claims)
 
@@ -139,12 +148,6 @@ live battery marks them live-proven in
 
 ## Out for v1
 
-- Moodle. The catalog records a few Moodle operations proven on a
-  public Moodle sandbox (sandbox.moodledemo.net, 2026-09-20), such as
-  M-9 list my courses and forum discussion create/delete. The executor
-  does not dispatch Moodle rows, the Moodle code (`moodle/`) is not in
-  the release, and production SSO and session lifetime are unproven.
-  No Moodle read or write is a v1 claim. v1 connects to Canvas only.
 - Blackboard. No implementation exists: no auth, no lane, no transport,
   no catalog, no proof. An honestly-disclosed roadmap item, not a v1
   ship criterion.

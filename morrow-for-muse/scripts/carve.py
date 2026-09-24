@@ -8,7 +8,7 @@ Builds the installable tree install.sh expects (default
 morrow-for-muse/, then:
 
   1. drops the dev-only surface (see DEV_ONLY): live-test drivers,
-     proof evidence with real tenant hosts, the Moodle/lanes research
+     proof evidence with real tenant hosts, lane research and tests
      code, dev test harnesses that are not install suites, and every
      test_*.py that is not an install suite (scripts/install-suites.sh);
   2. normalizes tenant hosts in Markdown ONLY (docs carry provenance
@@ -56,7 +56,7 @@ DIST_NAME = "morrow-muse-connector"
 
 # Prefixes (directories end with "/") and exact paths never shipped.
 DEV_ONLY = (
-    "moodle/", "lanes/", "qr-proof/", "platform-asks/", "learners/evidence/",
+    "lanes/", "qr-proof/", "platform-asks/", "learners/evidence/",
     "requirements-dev.txt", "requirements-test.txt",
     "scripts/install-robustness-selftest.sh", "scripts/carve.py",
     "scripts/install-e2e.sh",
@@ -65,9 +65,11 @@ DEV_ONLY = (
     # the 2026-09-20 VM deployment record and its userspace scheduler
     # (no cron on that VM); the product's keepalive is helper/keepalive.sh,
     # supervised by cron or, without cron, by helper/supervisor.py's
-    # background loop; Moodle is out for v1 (SCOPE.md)
+    # background loop. Moodle is a separate session lane and has no
+    # keepalive bundle capture in this release (SCOPE.md).
     "DEPLOY.md", "bin/scheduler.py", "bin/scheduler_selftest.py",
     "bin/keepalive-canvas.sh", "bin/keepalive-moodle.sh",
+    "moodle/session_selftest.py",
     # live-test drivers: they need a real tenant and name it
     "dispatch/live_proof_modes.py", "dispatch/live_proof_new_quiz.py",
     "dispatch/live_proof_write_hardening.py", "failures/live_verify.py",

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.2 (2026-09-24)
+
+The release package is `morrow-muse-connector-0.4.2.zip` from the
+`muse/v0.4.2` GitHub release.
+
+- Restore the maintained Moodle session lane to the installable package.
+- Include the hash-locked Requests runtime and its dependencies for Moodle.
+- Route Muse's Moodle setup and operation instructions to `moodle/SKILL.md`.
+- Keep Canvas operations on the existing Chromium lane and keep the two
+  providers' proof records separate.
+
 ## 0.4.1 (2026-09-24)
 
 The release package is `morrow-muse-connector-0.4.1.zip` from the `muse/v0.4.1` GitHub release.
