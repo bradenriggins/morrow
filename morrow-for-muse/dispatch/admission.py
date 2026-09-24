@@ -301,6 +301,12 @@ _QUERY_BODY_LEARNER_TOKENS = ("enrollments", "students", "users",
 _LEARNER_KEY_TOKENS = ("user", "users", "student", "students",
                        "enrollment", "enrollments", "user_id", "user_ids",
                        "student_id", "student_ids", "assignment_visibility")
+# A compound identifier parameter is one form key that ENDS in a person
+# id (observed_user_id, previous_user_id, last_attended_user_id), and a
+# leading setting word does not make it a setting ("hide_student_ids"
+# is a person id list; "hide_from_students" is not a person key).
+_COMPOUND_LEARNER_ID_KEY_RE = re.compile(
+    r"(?:^|_)(?:user|student)_ids?$", re.IGNORECASE)
 
 
 # A JSON object key naming a learner record or learner identifier is
@@ -339,11 +345,13 @@ def _learner_key_hit(value) -> str | None:
     """First learner-data signal in a query or body block, or None.
 
     Matches the learner tokens against the block's KEYS (form keys such
-    as assignment_override[student_ids][] included) and against the
-    VALUES of include / include[] only. Free-text values (a title,
-    body, description, message, or name) are course content, never a
-    learner signal. A string block is read as JSON or as form-encoded
-    pairs.
+    as assignment_override[student_ids][] and compound identifier keys
+    such as observed_user_id included) and against the VALUES of
+    include / include[] only. Free-text values (a title, body,
+    description, message, or name) are course content, never a learner
+    signal. A string block is read as JSON or as form-encoded pairs; a
+    nested string value that is itself pre-encoded JSON is parsed and
+    scanned the same way (its keys are keys, never educator copy).
     """
     if isinstance(value, str):
         text = value.strip()
@@ -366,6 +374,11 @@ def _learner_key_hit(value) -> str | None:
     for key, child in value.items():
         parts = _FORM_KEY_PART_RE.findall(str(key))
         hit = next((p for p in parts if p in _LEARNER_KEY_TOKENS), None)
+        if not hit and _COMPOUND_LEARNER_ID_KEY_RE.search(str(key)):
+            # A compound identifier parameter (observed_user_id, the
+            # Canvas planner and missing-submissions reads) is a whole
+            # form key, not a bracketed part.
+            hit = "compound learner id key"
         if hit:
             return "learner key %r" % key
         if "include" in parts:
@@ -378,6 +391,14 @@ def _learner_key_hit(value) -> str | None:
                     if token in lowered:
                         return "learner token %r in include[]" % token
         if isinstance(child, (dict, list)):
+            hit = _learner_key_hit(child)
+            if hit:
+                return hit
+        if isinstance(child, str) and child.lstrip()[:1] in ("{", "["):
+            # A pre-encoded JSON value (a step that carries a JSON string
+            # for the next call) holds keys, not free text: parse it and
+            # scan the parsed keys the same way. Plain prose never starts
+            # with a brace or bracket, so educator copy is never scanned.
             hit = _learner_key_hit(child)
             if hit:
                 return hit

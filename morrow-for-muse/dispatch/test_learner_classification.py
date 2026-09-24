@@ -297,3 +297,40 @@ def test_a_content_write_that_says_students_or_users_is_admitted(row_id,
     # boundary.
     admission.check_learner_data(entry, admission.load_policy(),
                                  vault_ready=False)
+
+
+# Security-review finding 1 on lane/muse-s3-1 (2026-09-24, written before
+# the fix): the key-token scan matches a whole form key only, so a
+# compound learner-key parameter (observed_user_id, the Canvas planner
+# and missing-submissions reads) escaped it, and a learner key encoded
+# inside a nested pre-encoded JSON string value was never re-parsed.
+# A raw write with a bare compound learner-id key must still be gated;
+# plain prose must still pass.
+@pytest.mark.parametrize("block", [
+    {"query": {"observed_user_id": "98765"}},
+    {"body": {"observed_user_id": "98765"}},
+    {"body": {"previous_user_id": "98765"}},
+    {"body": [{"course_id": 101, "user_id": 98765}]},
+])
+def test_a_compound_learner_id_key_still_gates_a_raw_write(block):
+    entry = {"name": "probe", "request": dict(
+        {"method": "PUT", "url": "{canvas_base}/api/v1/courses/"
+                                 "{course_id}/things"}, **block)}
+    assert admission.touches_learner_data(entry), block
+
+
+def test_a_learner_key_inside_a_pre_encoded_json_string_gates():
+    entry = {"name": "probe", "request": {
+        "method": "PUT",
+        "url": "{canvas_base}/api/v1/courses/{course_id}/things",
+        "body": {"step": "bulk", "key": "anyVal",
+                 "json": '{"assignment_override": {"student_ids": [123]}}'}}}
+    assert admission.touches_learner_data(entry)
+
+
+def test_a_nested_prose_value_is_never_a_learner_signal():
+    entry = {"name": "probe", "request": {
+        "method": "PUT",
+        "url": "{canvas_base}/api/v1/courses/{course_id}/things",
+        "body": {"body": "<p>Welcome, students, to week 3.</p>"}}}
+    assert not admission.touches_learner_data(entry)
