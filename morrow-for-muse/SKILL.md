@@ -892,9 +892,13 @@ Honest limitations (not defects, but know them):
   use it as `url_or_id` to read or change that page; Morrow puts back
   the real address. A first or last name alone in lowercase there
   (`janes-reading-log`) is not labeled.
-- A course's own name is shown as Canvas has it wherever Morrow names
-  the course (the course list, approvals, messages), so a course named
-  for a student (an independent study) shows that name.
+- A course's own name is labeled with that course's roster wherever
+  Morrow names the course (a course read, the course list, approvals,
+  messages), so a course named for a student (an independent study)
+  shows the student's label. On the course list, a course whose student
+  list Morrow could not read is listed by its number with the name
+  `(name not shown: Morrow could not check it for student names)`.
+  Name that course to the educator by its number.
 - A name lookup confirms enrollment: when `students find` returns a
   label for a name, it confirms that a student with that name is
   enrolled in the course, even if the educator never typed that name

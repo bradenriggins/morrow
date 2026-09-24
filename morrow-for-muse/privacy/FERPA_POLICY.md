@@ -356,11 +356,14 @@ the wired vault file above.
   l or ss, and German ae, oe, ue match ä, ö, ü. A spelling the roster
   has goes back exactly as the roster spells it; another spelling goes
   back as the roster's.
-- A course's own name is shown as Canvas has it wherever Morrow names
-  the course (the course list, the approval display, operation labels
-  in messages), so a course named for a student (an independent study)
-  shows that name. The course list spans courses and has no single
-  roster to label it with.
+- A course's own name is labeled with that course's roster wherever
+  Morrow names the course (a course read, the course list, the approval
+  display, operation labels in messages, the journal's write target),
+  so a course named for a student (an independent study) shows the
+  student's label. The course list spans courses, so Morrow reads each
+  listed course's roster (at most 30 per list read); a course whose
+  roster cannot be read, or past that bound, is listed by its number
+  with its name withheld.
 - Bare numeric ids in arbitrary prose or CSV text are not always
   recognized. Contextual forms are redacted: `user_id=912345`, any
   URL path segment or query value equal to a rostered learner id
