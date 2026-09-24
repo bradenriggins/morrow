@@ -551,7 +551,7 @@ def parse_setting_value(key, raw):
 
 def _parser():
     p = argparse.ArgumentParser(
-        prog="morrow",
+        prog="bin/morrow",
         description="Typed Plan/Edit mode and settings commands. The agent "
                     "decides what the educator means and calls these.")
     sub = p.add_subparsers(dest="group", required=True)

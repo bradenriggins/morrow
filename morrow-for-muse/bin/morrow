@@ -65,7 +65,7 @@ def _helper_status_url():
 
 
 def _print_help():
-    lines = ["usage: morrow <command> [args...]",
+    lines = ["usage: bin/morrow <command> [args...]",
              "",
              "Morrow for Muse operator front door.",
              "",
@@ -90,7 +90,7 @@ def _print_help():
                                   "the sign-in); --yes to skip the prompt"))
     lines.append("")
     lines.append("Each command passes its arguments through to the underlying")
-    lines.append("entry point; run `morrow <command> --help` for details.")
+    lines.append("entry point; run `bin/morrow <command> --help` for details.")
     print("\n".join(lines))
 
 
@@ -136,7 +136,8 @@ def _failure(argv):
     from failures.catalog import load_catalog
 
     if not argv or argv[0] in ("-h", "--help", "help"):
-        print("usage: morrow failure <id-or-text-fragment> | morrow failure --list")
+        print("usage: bin/morrow failure <id-or-text-fragment> | "
+              "bin/morrow failure --list")
         print("")
         print("Look up one failure-catalog entry. Read-only: the catalog")
         print("file is loaded and validated, nothing is written.")
@@ -166,7 +167,7 @@ def _failure(argv):
     if not hits:
         print("morrow failure: no catalog entry matches %r" % needle,
               file=sys.stderr)
-        print("hint: run `morrow failure --list` for every entry id.",
+        print("hint: run `bin/morrow failure --list` for every entry id.",
               file=sys.stderr)
         return 1
     print("morrow failure: %r matches %d entries:" % (needle, len(hits)),
@@ -308,19 +309,19 @@ def main(argv=None):
     rest = argv[1:]
     if name == "start":
         if rest:
-            print("usage: morrow start", file=sys.stderr)
+            print("usage: bin/morrow start", file=sys.stderr)
             return 2
         return _start()
     if name != "disconnect":
         _resume_supervision()
     if name == "doctor":
         if rest and rest != ["--json"]:
-            print("usage: morrow doctor [--json]", file=sys.stderr)
+            print("usage: bin/morrow doctor [--json]", file=sys.stderr)
             return 2
         return _doctor(json_mode=(rest == ["--json"]))
     if name == "version":
         if rest:
-            print("usage: morrow version", file=sys.stderr)
+            print("usage: bin/morrow version", file=sys.stderr)
             return 2
         return _version()
     if name == "failure":
@@ -330,14 +331,15 @@ def main(argv=None):
         return _settings_commands.main([name] + rest)
     if name == "students":
         if not rest or rest[0] != "find":
-            print("usage: morrow students find --course C [--choose LABEL] "
-                  "\"<name as the educator typed it>\"", file=sys.stderr)
+            print("usage: bin/morrow students find --course C "
+                  "[--choose LABEL] \"<name as the educator typed it>\"",
+                  file=sys.stderr)
             return 2
         from learners import find as _find
         return _find.main(rest[1:])
     if name == "disconnect":
         if rest not in ([], ["--yes"]):
-            print("usage: morrow disconnect [--yes]", file=sys.stderr)
+            print("usage: bin/morrow disconnect [--yes]", file=sys.stderr)
             return 2
         script = os.path.join(DEPLOY_DIR, "scripts", "uninstall.sh")
         try:

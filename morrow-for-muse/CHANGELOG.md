@@ -403,7 +403,8 @@ Installing and the docs:
 - The assistant's instructions give Morrow's commands as
   `bin/morrow ...`, run from the installed folder. A bare `morrow` is
   not on the computer's command path, so those commands failed with
-  "command not found".
+  "command not found". Morrow's own help, usage lines, and hints name
+  them the same way.
 
 Technical notes:
 
