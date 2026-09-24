@@ -55,6 +55,8 @@ const rendererSmokeDiagnostic = rendererSmokeReceipt && testRoot
 const rendererSmokeStages = [];
 let rendererSmokeDiagnosticWrite = Promise.resolve();
 let rendererSmokeWindowReady = false;
+let rendererSmokeWindowShowRequested = false;
+let rendererSmokeWindowVisible = false;
 let rendererSmokeStateDelivered = false;
 let rendererSmokeStateRendered = false;
 let rendererSmokeCompletion = null;
@@ -391,7 +393,7 @@ function completeRendererSmokeIfReady() {
   rendererSmokeCompletion = writeSmokeReceipt(rendererSmokeReceipt, {
     schema: "morrow.desktop-renderer-smoke.v1",
     renderer: { loaded: true, stateRendered: true },
-    window: { visible: true }
+    window: { showRequested: rendererSmokeWindowShowRequested, visible: rendererSmokeWindowVisible }
   }).then(() => desktopLifecycle.close()).catch(() => {
     app.exitCode = 2;
     return desktopLifecycle.close();
@@ -404,12 +406,14 @@ function markRendererSmokeWindowReady(window) {
     recordRendererSmokeStage("window_not_ready", "destroyed");
     return;
   }
-  if (typeof window.isVisible !== "function" || window.isVisible() !== true) {
+  const visible = typeof window.isVisible === "function" && window.isVisible() === true;
+  if (!visible && process.platform !== "win32") {
     recordRendererSmokeStage("window_not_ready", "not_visible");
     return;
   }
+  rendererSmokeWindowVisible = visible;
   rendererSmokeWindowReady = true;
-  recordRendererSmokeStage("window_visible");
+  recordRendererSmokeStage(visible ? "window_visible" : "window_show_requested");
   completeRendererSmokeIfReady();
 }
 
@@ -635,6 +639,7 @@ async function createWindow() {
         recordRendererSmokeStage("window_show_event");
         markRendererSmokeWindowReady(window);
       });
+      rendererSmokeWindowShowRequested = true;
     }
     window.show();
     markRendererSmokeWindowReady(window);

@@ -82,7 +82,7 @@ function writeFixture({ installer = Buffer.from("native Windows installer"), run
       rendererReceipt: {
         schema: "morrow.desktop-renderer-smoke.v1",
         renderer: { loaded: true, stateRendered: true },
-        window: { visible: true },
+        window: { showRequested: true, visible: true },
       },
       installedPackage: { sourceCommit: COMMIT, releaseGraphSha256: "c".repeat(64) },
     },

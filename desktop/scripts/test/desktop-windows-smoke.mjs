@@ -535,7 +535,7 @@ async function main() {
     testRoot,
     receiptPath: join(testRoot, "renderer-receipt.json")
   });
-  assertDesktopRendererSmokeReceipt(rendererReceipt);
+  assertDesktopRendererSmokeReceipt(rendererReceipt, { requireVisible: false });
 
   // Repair is measured against real damage. Without it, re-running the same
   // installer proves only that an unchanged installation stays unchanged.

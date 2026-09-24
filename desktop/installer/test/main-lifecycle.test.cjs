@@ -470,7 +470,7 @@ test("renderer smoke waits for a visible loaded window and an acknowledged first
     assert.deepEqual(JSON.parse(await fs.readFile(receipt, "utf8")), {
       schema: "morrow.desktop-renderer-smoke.v1",
       renderer: { loaded: true, stateRendered: true },
-      window: { visible: true }
+      window: { showRequested: true, visible: true }
     });
   } finally {
     delete require.cache[mainPath];
