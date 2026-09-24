@@ -1284,6 +1284,39 @@ describe("bidirectional roster dictionary", () => {
     expect(redactKnownLearnerText("Jose Garcia submitted late. Garcia asked.", ctx)).toBe(`${garcia} submitted late. ${garcia} asked.`);
     expect(redactKnownLearnerText("Liam O'Neil asked.", ctx)).toBe(`${oneil} asked.`);
   });
+  it("replaces a name whose letters carry a stroke or are written as two letters, with or without them", () => {
+    const roster = new LearnerRoster();
+    const names = ["Łukasz Wałęsa", "Søren Kierkegaard", "Đorđe Jovanović", "Ilkay Yıldız", "Đặng Thu Hà", "Guðrún Þórsdóttir", "Lætitia Cœur", "Jürgen Weiß"];
+    roster.register(scope, names.map((name, index) => ({ id: String(741 + index), name })));
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [walesa, soren, dorde, yildiz, dang, gudrun, laetitia, weiss] = names.map((name) => redactKnownLearnerText(name, ctx));
+    expect(new Set([walesa, soren, dorde, yildiz, dang, gudrun, laetitia, weiss]).size).toBe(8);
+    expect(redactKnownLearnerText("Łukasz Wałęsa submitted late.", ctx)).toBe(`${walesa} submitted late.`);
+    expect(redactKnownLearnerText("Lukasz Walesa submitted late. Walesa asked.", ctx)).toBe(`${walesa} submitted late. ${walesa} asked.`);
+    expect(redactKnownLearnerText("Soren Kierkegaard asked. Soren replied.", ctx)).toBe(`${soren} asked. ${soren} replied.`);
+    expect(redactKnownLearnerText("Dorde Jovanovic asked. Dorde replied.", ctx)).toBe(`${dorde} asked. ${dorde} replied.`);
+    expect(redactKnownLearnerText("Ilkay Yildiz submitted late. Please ask Yildiz.", ctx)).toBe(`${yildiz} submitted late. Please ask ${yildiz}.`);
+    expect(redactKnownLearnerText("Dang Thu Ha asked.", ctx)).toBe(`${dang} asked.`);
+    expect(redactKnownLearnerText("Gudrun Thorsdottir asked.", ctx)).toBe(`${gudrun} asked.`);
+    expect(redactKnownLearnerText("Laetitia Coeur asked.", ctx)).toBe(`${laetitia} asked.`);
+    expect(redactKnownLearnerText("Jurgen Weiss asked. Weiss replied.", ctx)).toBe(`${weiss} asked. ${weiss} replied.`);
+    expect(redactKnownLearnerText("<p>S&#248;ren and So&#x308;ren asked.</p>", ctx)).toBe(`<p>${soren} and ${soren} asked.</p>`);
+  });
+  it("replaces a given or family name used alone from a Chinese, Japanese, or Korean roster name written with no space", () => {
+    const roster = new LearnerRoster();
+    const names = ["王小明", "김민준", "欧阳小红", "남궁민수", "田中太郎"];
+    roster.register(scope, names.map((name, index) => ({ id: String(751 + index), name })));
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [wang, kim, ouyang, namgung, tanaka] = names.map((name) => redactKnownLearnerText(name, ctx));
+    expect(new Set([wang, kim, ouyang, namgung, tanaka]).size).toBe(5);
+    expect(redactKnownLearnerText("请提醒小明交作业。", ctx)).toBe(`请提醒${wang}交作业。`);
+    expect(redactKnownLearnerText("민준에게 과제를 알려 주세요.", ctx)).toBe(`${kim}에게 과제를 알려 주세요.`);
+    expect(redactKnownLearnerText("小红交了作业，欧阳也交了。", ctx)).toBe(`${ouyang}交了作业，${ouyang}也交了。`);
+    expect(redactKnownLearnerText("민수 학생", ctx)).toBe(`${namgung} 학생`);
+    expect(redactKnownLearnerText("太郎さんと田中さん", ctx)).toBe(`${tanaka}さんと${tanaka}さん`);
+    // A one-letter family name alone is a common word, such as 王 or 김, and stays as written.
+    expect(redactKnownLearnerText("王老师和김 선생님", ctx)).toBe("王老师和김 선생님");
+  });
   it("neutralizes a pasted label outside the roster and refuses it only in the strict projection", () => {
     const roster = new LearnerRoster(); roster.register(scope, [{ id: "17", name: "Ada Lovelace" }]);
     const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
