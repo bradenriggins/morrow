@@ -319,7 +319,48 @@ DEVELOPER_WORDS = (
 CASED = ("API", "PUT", "PATCH", "CDP")
 FALLBACK_VALUES = ("(unknown", "(no plan id)", "(unnamed", "(no ")
 UNDONE_PROMISES = ("resending", "re-harvest", "fresh token", "under a fresh "
-                   "claim", "engineering review", "parking the operation")
+                   "claim", "engineering review", "parking the operation",
+                   "retrying automatically")
+
+
+def _template_words(text):
+    """Developer words in a raw catalog template.
+
+    Placeholders are stripped first: the brace names are template
+    machinery, and the values they render come from evidence, not from
+    the catalog text.
+    """
+    stripped = re.sub(r"\{[a-z_][a-z0-9_]*\}", "", text)
+    lowered = stripped.lower()
+    found = [w for w in DEVELOPER_WORDS
+             if re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(w), lowered)]
+    found += [w for w in CASED if re.search(r"\b%s\b" % w, stripped)]
+    found += re.findall(r"\b[A-Z][a-z]+[A-Z][A-Za-z]*\b", stripped)
+    return found
+
+
+def test_every_catalog_entry_message_is_plain_and_true():
+    # bin/morrow failure shows every catalog entry to the agent ("What
+    # to tell the educator" / "What to do"), reachable or not (muse UX
+    # audit 3, muse-ux3/dormant-catalog-entries-false-text, written
+    # before the fix): dormant entries promised automatic retries
+    # Morrow never does and used developer words (HTTP 422,
+    # X-CSRF-Token, page-context, journal, provider, readback).
+    for entry in load_catalog().entries:
+        for field, check_words in (("agent_message", True),
+                                   ("auto_action", False)):
+            text = entry.get(field, "")
+            lowered = text.lower()
+            found = _template_words(text) if check_words else []
+            assert found == [], (entry["id"], field, found, text)
+            assert "—" not in text, (entry["id"], field)
+            assert [p for p in UNDONE_PROMISES if p in lowered] == [], \
+                (entry["id"], field, text)
+        msg = entry.get("agent_message", "")
+        lowered = msg.lower()
+        for anchor in ("what was attempted", "what the evidence showed",
+                       "what this means", "what happens next"):
+            assert anchor in lowered, (entry["id"], anchor)
 
 
 def _render(mode_id):

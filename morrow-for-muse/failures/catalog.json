@@ -7,8 +7,8 @@
       "severity_hint": "medium",
       "root_cause": "Verified live 2026-09-22: Canvas returns exactly this generic body when a non-GET request arrives without a valid X-CSRF-Token. Reproduced on demand with absent header and with deliberately wrong token, byte-identical bodies. The most likely probe-side cause is harvesting the token from the csrf-token meta tag, which the tenant homepage currently does not have (verified live), so the header is never sent.",
       "is_not": "This is not Canvas blocking writes, not rate limiting (rate-limit headers showed a full bucket, no 429s, no Retry-After), not session death (a dead session 302s API calls instead of 422), not a write halt (write_halt_active was false), and not a tenant-side change (tenant changes return 401 or 403 with specific messages, and writes work again with zero config changes once the token is sent).",
-      "agent_message": "What was attempted: I tried {operation} on {tenant}, and every write came back with an HTTP 422 (unprocessable_content) while reads kept working fine. What the evidence showed: your sign-in is healthy and the rate limit is untouched, so this is not a broken session. Canvas is asking for a security token (X-CSRF-Token) that the request did not carry, which is the standard missing-or-invalid-token response, reproduced exactly with absent and wrong tokens. What this means: your Canvas session is fine and nothing on your side changed; the request just needs to carry a fresh token, which the normal write path fetches automatically on each call. What happens next: I am resending through the normal page-context path, which fetches a fresh token per call, and verifying with a readback.",
-      "auto_action": "Retry the write through the canonical page-context path with a fresh _csrf_token cookie harvest per call, then run a terminal readback to confirm the write landed.",
+      "agent_message": "What was attempted: I tried {operation}, and Canvas refused every change it was asked to save while reads kept working (reference {correlation_id}). What the evidence showed: your sign-in is healthy, and Canvas answered each change with the refusal it gives when a request does not carry the one-use security value Canvas puts on its own pages. What this means: nothing changed in Canvas; the changes were refused before Canvas looked at them. What happens next: I will check that you are still signed in on the helper page, and I will not send the same request again on my own. Say the word and I will prepare the change again; if Canvas refuses it again, I will tell you and we can change what we send.",
+      "auto_action": "Probe the helper /status; if it reports logged_in false, guide a fresh sign-in on the helper page. Nothing was saved and Morrow never sends the same request again on its own: prepare the change again (plan-write, or catalog in edit mode) only after the educator says so.",
       "escalate_when": "Escalate only if the canonical path also 422s with a confirmed token harvest, and include the x-request-context-id so it can go to Instructure; that combination was never observed in the audit.",
       "signature": {
         "provider": "canvas",
@@ -131,8 +131,8 @@
       "severity_hint": "low",
       "root_cause": "Verified mechanism: Canvas's rate limiter answered 429 with the bucket exhausted. Distinguishing evidence from the 422-CSRF failure: the 429 carries x-rate-limit-remaining at 0.0 and a Retry-After header, while the CSRF 422 carries a full bucket (700.0) and no Retry-After.",
       "is_not": "This is not a write block, not a CSRF problem, and not session death. The tiebreaker against the 422 CSRF mode: check x-rate-limit-remaining and the presence of Retry-After before classifying.",
-      "agent_message": "What was attempted: I tried {operation} on {tenant} and Canvas answered 429, its polite way of saying too many requests at once. What the evidence showed: the rate-limit bucket at zero and a Retry-After instruction, so this is confirmed throttling, not a broken session or a blocked write. What this means: the request is valid but needs to wait its turn. What happens next: I am honoring Canvas's Retry-After and retrying automatically; writes that were in flight are recorded as uncertain and I will verify with a readback before reporting success.",
-      "auto_action": "Backoff for the Retry-After duration and retry. Reads retry up to 4 times; writes convert to UncertainWrite and get reconciled by readback.",
+      "agent_message": "What was attempted: I tried {operation}, and Canvas answered that it is receiving too many requests right now (reference {correlation_id}). What the evidence showed: Canvas refused the request and told Morrow to wait. What this means: nothing changed in Canvas; nothing is broken, the school's Canvas server is just busy. What happens next: I will not send anything again on my own. Ask me to try again in a few minutes and I will first check that you are still signed in.",
+      "auto_action": "Do not retry on your own. When the educator asks, check the helper /status and the session health, then run the request once more; if Canvas refuses again, report it and stop.",
       "escalate_when": "Escalate if 429s persist across several backoff cycles on low-volume traffic, which would suggest a tenant-side policy change rather than normal throttling.",
       "signature": {
         "provider": "canvas",
@@ -342,8 +342,8 @@
       "severity_hint": "high",
       "root_cause": "Verified mechanism: the session died between dispatch and the provider's answer, so the transport cannot prove whether Canvas applied the write. The write-integrity hardening (wave 2) classifies this as UncertainWrite rather than retrying blindly, which would risk a double-apply.",
       "is_not": "This is not a confirmed failure and not a confirmed success. Treating it as either is how silent double-applies happened before the hardening.",
-      "agent_message": "What was attempted: I tried {operation} on {tenant} and the session died right in the middle of the write, so I cannot tell from the transport alone whether Canvas applied it. What the evidence showed: an UncertainWrite record in the journal with the attempt details kept, which is the honest classification the system uses instead of guessing. What this means: the write may or may not have landed, and retrying blindly could create a duplicate. What happens next: I am running a terminal readback against Canvas to see whether the object exists as written; if it did not land, I will re-dispatch under a fresh claim, and if it did, I will report it done with the evidence.",
-      "auto_action": "Reconcile via terminal readback (member GET, list readback). If the write did not land, re-dispatch only after the session is healthy; never retry the ambiguous write blindly.",
+      "agent_message": "What was attempted: I tried {operation}, and your Canvas sign-in stopped working while the change was being sent, so I cannot tell from what came back whether Canvas saved it (reference {correlation_id}). What the evidence showed: the change is in the state Morrow keeps for exactly this case, where the answer is unknown. What this means: the change may or may not be in Canvas. Sending it again could make a duplicate, so Morrow did not. What happens next: once your sign-in works again, I will read the item back from Canvas to see whether the change is there. If it is not there, I will ask you before sending it again.",
+      "auto_action": "After the educator signs in again and the account check passes, read the target object back with a live-proven read to learn whether the change is there; prepare the change again only when that read proves it did not apply and the educator says so.",
       "escalate_when": "Escalate if the readback cannot decide the state (provider gives no listable signal), so the educator can check the object in the Canvas UI before any re-dispatch.",
       "signature": {
         "session_dead_signal": {
@@ -419,8 +419,8 @@
       "severity_hint": "medium",
       "root_cause": "Verified live: provider read replicas served a stale object immediately after deletion; the delete was effective.",
       "is_not": "This is not a failed delete and not soft-delete. Waiting or re-reading settles it.",
-      "agent_message": "What was attempted: I deleted {object} on {tenant} and the immediate verification fetch still returned it. What the evidence showed: its read replicas can serve the old copy for a short window after a real delete: on the live battery the same pattern resolved to 404 minutes later. What this means: the delete is very likely fine and the verification read raced the provider's consistency. What happens next: I am re-inspecting after a short delay rather than re-deleting; if it resolves to 404, the delete is proven.",
-      "auto_action": "Wait and re-read once after a short delay. Only re-issue the delete if the object remains present after the delay.",
+      "agent_message": "What was attempted: I deleted {object}, and the check right after the delete still found it (reference {correlation_id}). What the evidence showed: Canvas's copies can be out of date for a short time after a real delete; on the live battery the same read showed the object gone a few minutes later. What this means: the delete most likely worked; the check simply ran too soon. What happens next: I will look again after a short delay instead of deleting again. If the object is still there after that, I will tell you before doing anything more.",
+      "auto_action": "Wait, then read the object once more; send the delete again only if the object is still there after the delay, and only when the educator says so.",
       "escalate_when": "Escalate if the object is still present after several minutes, which would suggest a genuine delete failure rather than replica lag.",
       "signature": {
         "provider": "canvas",
@@ -442,8 +442,8 @@
       "severity_hint": "medium",
       "root_cause": "Verified live 2026-09-22 on this tenant: the include param does not embed questions here; the dedicated questions endpoint is the working read path.",
       "is_not": "This is not a read failure and does not mean the quiz has no questions.",
-      "agent_message": "What was attempted: I read {object} on {tenant} asking Canvas to embed its questions, and it came back with none. What the evidence showed: the request succeeded (200) but this tenant simply does not embed questions on that route; the dedicated questions endpoint for the same quiz returned all of them. What this means: the quiz is intact and the embed parameter is the wrong tool here. What happens next: I am fetching questions through the dedicated endpoint and treating that as the read path.",
-      "auto_action": "Fall back to the dedicated questions endpoint; do not treat the empty embed as a failed read.",
+      "agent_message": "What was attempted: I read {object} and asked Canvas to include its questions in the same answer, and the answer came back without any (reference {correlation_id}). What the evidence showed: the read itself worked; the school's Canvas just does not return questions that way, and the questions list for the same quiz returned all of them. What this means: the quiz is fine; that one shortcut does not work here. What happens next: I will use the questions list instead, which is the way that works here.",
+      "auto_action": "Read the questions through the quiz's questions list; do not treat the empty embedded section as a failed read.",
       "escalate_when": "No escalation; this is a routine tenant-shape quirk, handled automatically.",
       "signature": {
         "provider": "canvas",
@@ -495,8 +495,8 @@
       "severity_hint": "medium",
       "root_cause": "Hypothesis, documented as the investigated alternative in the 2026-09-22 write-block investigation: tenant admin actions such as course locking or enrollment loss return 401 or 403 with specific messages. Ruled out in that incident because writes work now with zero config changes; kept as a live mode because the signature is distinct.",
       "is_not": "This is not the CSRF 422 (different status and body), not throttling, and not session death.",
-      "agent_message": "What was attempted: I tried {operation} on {tenant} and Canvas refused with a {status_code} and a specific message rather than its generic error body. What the evidence showed: it points at a change on the tenant side, such as the course being locked or your enrollment changing, not at anything wrong with the request. What this means: the provider is enforcing a policy that a retry cannot satisfy. What happens next: I am not retrying; I need you to check the course's lock or enrollment state with your Canvas admin, and I will re-attempt once that is resolved.",
-      "auto_action": "Do not retry; record the provider message verbatim and park the op.",
+      "agent_message": "What was attempted: I tried {operation}, and Canvas refused it with its own explanation rather than its usual short refusal (reference {correlation_id}). What the evidence showed: the refusal describes a condition on the school's side, such as the course being locked or your part in the course having changed. What this means: nothing changed in Canvas, and sending the same request again cannot fix it. What happens next: I will not try again on my own. Please check the course's state in Canvas, or ask your Canvas admin; once that is settled, I can try again if you want.",
+      "auto_action": "Do not retry; tell the educator exactly what Canvas said, and check the course's state in Canvas with them before preparing the change again.",
       "escalate_when": "Always: resolving a course lock or enrollment change needs the educator or their Canvas admin.",
       "signature": {
         "provider": "canvas",
@@ -531,8 +531,8 @@
       "severity_hint": "medium",
       "root_cause": "Verified live: the provider returns 404 on the canonical direct-item GET for this scope. The working read path is the entry GET (IB-10) and the bank entries list. Classified provider-unserved, consistent with the 2026-09-21 battery.",
       "is_not": "This is not an authentication problem and not a product defect. The route simply is not served for this scope.",
-      "agent_message": "What was attempted: I tried to read the item directly on {tenant} and Canvas answered 404. What the evidence showed: the bank itself is reachable and the session is fine; the provider just does not serve direct item fetches for this route and scope. What this means: reading an item requires the entries-list path instead. What happens next: I am reading the item through the bank entries list, which is the proven path, and noting this route as unserved so we do not try it again.",
-      "auto_action": "Fall back to the bank entries list read path; keep IB-11 marked pending/provider-unserved.",
+      "agent_message": "What was attempted: I tried to read a quiz item straight from its bank's item address, and Canvas answered that nothing is there (reference {correlation_id}). What the evidence showed: the bank itself is reachable and your sign-in is fine; Canvas simply does not serve items one by one from that address. What this means: nothing is broken; items are read a different way. What happens next: I will read the item through the bank's entry list, which is the way that works, and I will not try the direct address again.",
+      "auto_action": "Read the item through the bank entries list (IB-10); leave the direct item read (IB-11) alone.",
       "escalate_when": "No escalation; handled automatically unless the educator explicitly needs the direct route, in which case the limitation is stated.",
       "signature": {
         "provider": "item-banks",
@@ -553,8 +553,8 @@
       "severity_hint": "medium",
       "root_cause": "Verified live: the provider refuses the literal /api/items/{id} route with a banks.build scope-policy refusal. This is a provider scope policy, not a credential failure.",
       "is_not": "This is not session death and not a sign-in problem; re-authenticating will not change the provider's scope policy.",
-      "agent_message": "What was attempted: I tried {operation} on the literal items route and Canvas answered 401 citing its banks.build scope policy. What the evidence showed: a provider scope-policy refusal, not an invalid session: the same credentials work fine on the bank-scoped routes. What this means: this literal route is not available to this session's scope, so we cannot use it. What happens next: I am using the bank-scoped routes instead and marking the literal route as provider-unserved.",
-      "auto_action": "Use bank-scoped routes only; mark literal routes provider-unserved in the catalog.",
+      "agent_message": "What was attempted: I tried {operation} on the direct item route, and Canvas refused it with a permissions message (reference {correlation_id}). What the evidence showed: Canvas allows this sign-in on the bank's own routes but not on the item-wide route. What this means: nothing is broken; that route is simply not open to this sign-in. What happens next: I will use the bank's own routes instead, and I will not try the item-wide route again.",
+      "auto_action": "Use the bank's own routes only; leave the direct item routes alone.",
       "escalate_when": "No escalation; handled automatically. Surface to the educator only if they need item-level operations the served routes cannot express.",
       "signature": {
         "provider": "item-banks",
@@ -574,8 +574,8 @@
       "severity_hint": "medium",
       "root_cause": "Verified live: the provider 404s the canonical direct item DELETE. Entry-level delete (IB-7, entry DELETE 204 with terminal list readback) is the proven removal path; deleting entries and archiving the bank is the terminal pattern.",
       "is_not": "This is not a permissions failure and not a product bug; the route is unserved.",
-      "agent_message": "What was attempted: I tried to delete the item through the direct item route and Canvas answered 404. What the evidence showed: the provider does not serve item-level deletes on this route, while entry-level deletes and bank archiving work and are the proven cleanup pattern. What this means: the item cannot be deleted that way, but the working alternative achieves the same end. What happens next: I am deleting at the entry level (with a terminal list readback proving the absence) and archiving the bank if that was the intent.",
-      "auto_action": "Delete via the entry DELETE route with list-absence proof, then archive the bank; keep IB-19 pending.",
+      "agent_message": "What was attempted: I tried to remove a quiz item through its direct item address, and Canvas answered that there is nothing to remove there (reference {correlation_id}). What the evidence showed: Canvas removes bank items at the entry level, or by archiving the whole bank; the direct item route is not served. What this means: nothing was removed yet, and nothing was broken. What happens next: I will ask you first, then remove the item at the entry level (or archive the bank if that was the goal), and check the list afterwards to confirm the item is gone.",
+      "auto_action": "Remove the item through the bank entry route with a list check to prove it is gone, or archive the bank; do not use the direct item delete route (IB-19).",
       "escalate_when": "Surface to the educator only when disposable items genuinely cannot be cleaned up any other way and would remain in an active bank.",
       "signature": {
         "provider": "item-banks",
@@ -594,8 +594,8 @@
       "severity_hint": "medium",
       "root_cause": "Verified live: the provider refuses the bank-link call with 401. Documented as provider-unserved, consistent with the Item Bank scope-policy pattern.",
       "is_not": "This is not a session or credential problem.",
-      "agent_message": "What was attempted: I tried to link the quiz to the item bank and Canvas answered 401. What the evidence showed: the provider's refusal on this specific call while the quiz create, update, and delete calls around it all succeeded, so the session is healthy and this route is simply unserved. What this means: the link cannot be made through this route today. What happens next: I am marking the step as provider-unserved and continuing the lifecycle without the link; the quiz itself is fully functional.",
-      "auto_action": "Record provider-unserved, continue the quiz lifecycle without the link.",
+      "agent_message": "What was attempted: I tried to connect a quiz to its item bank, and Canvas refused that one call with a permissions message while the quiz itself worked fine (reference {correlation_id}). What the evidence showed: your sign-in is healthy; Canvas just does not open that connection step today. What this means: the quiz works normally; it is simply not connected to the bank through Morrow. What happens next: I will leave the connection out, keep using the quiz as it is, and tell you what is missing.",
+      "auto_action": "Record the gap, continue the quiz work without the link, and tell the educator the quiz is fully usable without it.",
       "escalate_when": "Surface to the educator only if the bank link was the point of the operation; otherwise handle silently.",
       "signature": {
         "provider": "item-banks",
@@ -613,8 +613,8 @@
       "severity_hint": "medium",
       "root_cause": "Verified live: New Quiz item deletes soft-delete. Terminal proof is the items list, not the direct GET.",
       "is_not": "This is not a failed delete. Re-issuing DELETEs does not help and risks confusion.",
-      "agent_message": "What was attempted: I deleted the quiz item and Canvas answered 200, but a direct fetch of it still returns 200. What the evidence showed: the provider soft-deletes these items: the items list now shows zero, which is the real proof of deletion. What this means: the delete worked and the direct-fetch result is the provider's soft-delete quirk. What happens next: I am treating the empty items list as the terminal proof and closing out the lifecycle.",
-      "auto_action": "Verify deletion through the items list (count 0); do not use the direct GET as terminal proof.",
+      "agent_message": "What was attempted: I removed a quiz item, and Canvas confirmed it, but asking for that item on its own still returns it (reference {correlation_id}). What the evidence showed: the items list for the quiz is now empty, which is the real proof that the item is gone; Canvas keeps answering the direct address for a while. What this means: the removal worked. What happens next: nothing more is needed; I will treat the empty list as the proof and move on.",
+      "auto_action": "Treat the empty items list as the proof of deletion; do not use the direct item read as the proof.",
       "escalate_when": "No escalation; handled automatically.",
       "signature": {
         "provider": "item-banks",
@@ -1071,8 +1071,8 @@
       "severity_hint": "low",
       "root_cause": "Verified live 2026-09-21 (W3-P0-13) and again mid-battery 2026-09-22: the forwarder died (asyncio 'Task was destroyed' observed) while supervision watched only the old 18080 port, so /status kept reporting healthy while no new network request could leave the browser. The 2026-09-22 incident fix derives the forwarder port from the CDP port and launches restarts with MORROW_FORWARDER_LAUNCHER_PID set.",
       "is_not": "This is not session death (the session cookie is intact) and not a provider outage. The misleading logged_in=true is a stale health signal.",
-      "agent_message": "What was attempted: I tried {operation} and fresh navigations are failing even though the health check says the session is fine. What the evidence showed: the browser's old tab still renders (so /status reports logged_in=true) but nothing is listening on the egress forwarder's port, so no new network request can leave the browser. What this means: the session itself is healthy; the local egress path died. What happens next: I am repairing the forwarder through the keepalive recovery path (which now derives the correct port and sets the launcher identity) and verifying with a fresh authenticated navigation before resuming.",
-      "auto_action": "Restart the forwarder via keepalive.sh's repaired restart_forwarder(), then verify with a live GET through the forwarder before resuming dispatch.",
+      "agent_message": "What was attempted: I tried {operation}, and new page loads are failing even though the helper says you are signed in (reference {correlation_id}). What the evidence showed: the helper's browser still shows the old page, but new requests cannot leave the browser, so the private connection Morrow uses is not carrying traffic. What this means: your sign-in is fine; Morrow's own connection needs a restart. What happens next: I will restart that connection the way the helper's supervision does, then check once more that you are still signed in before trying again.",
+      "auto_action": "Restart the helper's connection with helper/keepalive.sh, then check the helper /status and run one read before anything else.",
       "escalate_when": "Escalate if the forwarder dies repeatedly within the hour, since that pattern points at a deeper transport problem needing engineering attention.",
       "signature": {
         "chromium_alive": {
@@ -1124,8 +1124,8 @@
       "severity_hint": "high",
       "root_cause": "Verified gap: no code consumes the rig session capture's captured_at (session/capture.py, dev tree only, not shipped) for horizon math or reads cookie expires for warnings. The docs are honest that expiry happens; they just promise no warning.",
       "is_not": "This is not a monitoring failure on a specific day; the capability was never built.",
-      "agent_message": "What was attempted: I tried {operation} and found the session had expired, with no warning beforehand. What the evidence showed: the system watches the helper's process health but never tracks the session's expiry horizon, so the first sign of expiry is always a failed operation. What this means: surprises at expiry time are expected, not a one-off glitch. What happens next: I am treating this as the standard re-sign-in flow: halt writes, quarantine in-flight ops, and ask you to sign in once through the helper page.",
-      "auto_action": "Same as session-dead: halt, quarantine, require re-sign-in with principal re-verification.",
+      "agent_message": "What was attempted: I tried {operation} and found your Canvas sign-in had ended, with no warning beforehand (reference {correlation_id}). What the evidence showed: Canvas ended the sign-in on its own schedule; the first sign is always a task that failed, never a warning. What this means: nothing went wrong with the task; the sign-in simply reached its end. What happens next: I have paused everything that changes your course and set aside what was under way. Please sign in again on the helper page; I will check that it is you, then ask you before anything set aside runs again.",
+      "auto_action": "Pause writes, set aside the in-flight change, and ask the educator to sign in again on the helper page; verify the account before anything resumes.",
       "escalate_when": "Always, like any session death: only the educator can re-sign in.",
       "signature": {
         "session_dead_signal": {
@@ -1603,8 +1603,8 @@
       "severity_hint": "medium",
       "root_cause": "Verified: the digest binding detects mint-A/dispatch-B, but cannot detect that A itself is wrong. If CANVAS_BASE is misconfigured to a typo'd tenant the educator then signs into, every write is approved for the wrong tenant.",
       "is_not": "This is not a session problem; the session can be perfectly valid on the wrong tenant.",
-      "agent_message": "What was attempted: I noticed the configured tenant is {tenant} and I want to verify it is really your school before I do anything write-class. What the evidence showed: the system's tenant checks only confirm internal consistency: if the configured address was wrong from the start, every check would still pass. What this means: a misconfigured tenant would let me work on the wrong school's courses without any gate firing. What happens next: I am running the users/self readback so you can confirm the signed-in identity, and I need you to confirm the tenant address itself matches your school.",
-      "auto_action": "Run users/self readback; require the educator to confirm the tenant base matches their school before write-class dispatch.",
+      "agent_message": "What was attempted: before Morrow makes any change, it checks the Canvas address it was set up with, and this check is asking you to confirm that address (reference {correlation_id}). What the evidence showed: the address on file is {tenant}, and Morrow's own checks cannot tell whether that address is really your school's Canvas. What this means: if the address were wrong, Morrow could end up working in another school's courses. What happens next: please confirm that {tenant} is your school's Canvas address. Once you confirm it, I will also check that the account signed in on the helper page is yours.",
+      "auto_action": "Read the signed-in account through the helper and ask the educator to confirm that the Canvas address on file matches their school before any write runs.",
       "escalate_when": "Always confirm the tenant with the educator on first setup and whenever the tenant config changes.",
       "signature": {
         "operation_kind": "write",
@@ -1691,8 +1691,8 @@
       "severity_hint": "high",
       "root_cause": "Verified: the live store predated principal capture, so reauth's exact-count and direct principal lookups failed (KeyError on canvas.principal, 6/10 drill failures). Fixed with first-seen principal pinning and subset ledger checks.",
       "is_not": "This is not a session problem and not an account mismatch; it is a store-schema gap.",
-      "agent_message": "What was attempted: I ran the re-auth verification and found the stored session has no recorded identity from when it was first captured. What the evidence showed: the missing principal field in the live store, which is why the strict comparison failed rather than anything about your account. What this means: the first resume has nothing to compare against, so it pins your freshly verified identity going forward. What happens next: I am completing this resume with the live-verified principal pinned, and future resumes will compare against it normally.",
-      "auto_action": "Pin the fresh capture's live-verified principal on first resume; keep mismatch-refuses-and-escalates behavior thereafter.",
+      "agent_message": "What was attempted: Morrow checked the Canvas account recorded for this computer and found the record from the first sign-in has no name in it (reference {correlation_id}). What the evidence showed: the name is missing from Morrow's own record, not from Canvas; your sign-in itself is fine. What this means: Morrow has nothing saved to compare against yet, so this first check is what saves it. What happens next: I will check the account signed in on the helper page now, save it as the account Morrow expects from here on, and tell you who it is.",
+      "auto_action": "Save the live-verified account name on this first check; from then on, refuse and ask the educator whenever the signed-in account differs from it.",
       "escalate_when": "Surface to the educator the first time the pin is established, so they know the identity being pinned is theirs.",
       "signature": {
         "operation_kind": "reauth",
@@ -1979,8 +1979,8 @@
       "severity_hint": "medium",
       "root_cause": "Verified mechanism: after a write, the executor reads the object back to confirm it. When there is no readback route for the object, or Canvas does not echo the fields that were sent, the result is reported as \"unverified\": Canvas said success, and nothing independent confirmed it.",
       "is_not": "This is not a failure and not a confirmed success. It is never reported as done-and-verified.",
-      "agent_message": "What was attempted: I tried {operation}, and Canvas answered with success. What the evidence showed: I could not confirm the change with an independent readback (reference {correlation_id}); either Canvas offers no way to read this object back, or it does not return the fields I set. What this means: the change most likely landed, but I have not proven it, so I am not calling it verified. What happens next: please check it once in Canvas, or tell me how you would like to confirm it; I will not repeat the write, because a repeat could apply it twice.",
-      "auto_action": "Report as unverified, never as verified; do not re-dispatch; offer a manual check in Canvas.",
+      "agent_message": "What was attempted: I tried {operation}, and Canvas answered that it saved the change (reference {correlation_id}). What the evidence showed: I could not confirm the change by reading it back; either Canvas offers no way to read this kind of item back, or it does not return the fields that were set. What this means: the change most likely landed, but I have not proven it, so I am not calling it confirmed. What happens next: please check it once in Canvas, or tell me how you would like to confirm it. I will not repeat the change, because a repeat could apply it twice.",
+      "auto_action": "Report the change as unconfirmed, never as confirmed; do not repeat it; offer a manual check in Canvas.",
       "escalate_when": "Surface every unverified write to the educator in the work summary.",
       "signature": {
         "__any_of": [
@@ -2022,8 +2022,8 @@
       ]
     },
     {
-      "agent_message": "What was attempted: {operation}. What the evidence showed: no provider-served route exists for this Item Bank capability on this provider build (reference {correlation_id}). What this means: this capability cannot be reached right now, however we try. What happens next: {auto_action}.",
-      "auto_action": "I am refusing loudly instead of retrying, and recording the capability gap for engineering.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Canvas does not offer a way to do this with item banks in the version Morrow works with (reference {correlation_id}). What this means: this cannot be reached right now, however it is tried. What happens next: I am not sending anything and not trying variations on my own; I will tell you what is missing and what the nearest working alternative is.",
+      "auto_action": "Refuse clearly instead of retrying, and tell the educator what is missing and what works instead.",
       "escalate_when": "always escalate to engineering: this is a capability gap, not a transient failure, and it may need a provider route addition",
       "id": "ib-provider-unserved",
       "is_not": "This is not something a retry will fix, and it is not an auth problem.",
