@@ -65,6 +65,9 @@ SKILL.md "Working by name"; policy: `privacy/FERPA_POLICY.md`.
   re-identifiable by the data holder.
 - Nicknames: aliases derive from roster fields only. A nickname the
   roster never mentions survives redaction in free text.
+- A name written with a grammatical ending that changes the word is
+  not labeled: a name matches only as a whole word, so "Annas" for
+  Anna in German or "Марии" for Мария in Russian passes through.
 - Course content is labeled through the course roster, so a name the
   roster does not know (a nickname, someone never enrolled) is not.
 - A lowercase first or last name alone is not labeled (it is often an

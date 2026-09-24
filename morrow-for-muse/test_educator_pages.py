@@ -33,6 +33,10 @@ Failure modes this suite pins down (written before the fix; final sweep
      0.4.1 release notes repeated the short list (final sweep
      2026-09-23). Every limitation the policy records is either named on
      the consent page or lets no student detail reach the assistant.
+  6. A name written with a grammatical ending, such as "Annas" for Anna
+     or "Марии" for Мария, reaches the assistant as written, and neither
+     the policy, the consent page, nor the 0.4.1 notes said so (final
+     sweep 2026-09-23).
 """
 
 import os
@@ -177,6 +181,7 @@ POLICY_LIMITS = {
     # labels only: matching a label to a student takes the roster
     "Small cohorts": None,
     "Nicknames": "such as a nickname",
+    "A name written with a grammatical ending": "grammatical ending",
     "The course roster bounds what can be labeled":
         "someone who was never a student in that course",
     # hides more than it must, and saves the word back as written
@@ -243,6 +248,7 @@ def test_the_0_4_1_notes_name_the_limits_the_consent_page_lists():
     notes = " ".join(text.split("\n## 0.4.1 (", 1)[1]
                      .split("\n## ", 1)[0].split())
     for words in ("such as a nickname",
+                  "grammatical ending",
                   "used alone and written in small letters",
                   "someone who was never a student in that course",
                   "an ID number written as plain text",

@@ -878,6 +878,10 @@ Honest limitations (not defects, but know them):
 - Nicknames: aliases derive from roster fields only, so a nickname
   the roster never mentions (for example "Bobby" for rostered
   "Robert J. Smith") survives redaction in free text.
+- A name written with a grammatical ending that changes the word is
+  not labeled: a name matches only as a whole word, so "Annas" for
+  Anna in German, "Марии" for Мария in Russian, and "Łukasza" for
+  Łukasz in Polish reach you as written.
 - Course content is labeled through the course roster, so a name the
   roster does not know is not labeled: a nickname (above), or someone
   who was never a student in the course.

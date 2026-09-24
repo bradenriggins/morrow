@@ -329,6 +329,11 @@ the wired vault file above.
 - Nicknames: aliases derive from roster fields only. A nickname the
   roster never mentions (for example "Bobby" for rostered "Robert J.
   Smith") survives redaction in free text.
+- A name written with a grammatical ending that changes the word
+  survives redaction in free text: a name matches only as a whole word,
+  so "Annas" for Anna in German, "Марии" for Мария in Russian, and
+  "Łukasza" for Łukasz in Polish pass through as written. The name as
+  the roster writes it is labeled.
 - The course roster bounds what can be labeled: on the Chromium
   lane every current student and every student whose enrollment was
   deleted is known, so any of them named in free text is labeled.
