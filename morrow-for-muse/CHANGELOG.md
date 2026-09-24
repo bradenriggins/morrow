@@ -21,8 +21,7 @@ Student privacy:
 - Privacy fix: student names in course content are hidden too. In
   0.4.0, a page, an assignment description, or a quiz question that
   named a student reached the assistant as written. Now the assistant
-  sees the student's label there and in quiz titles, including the
-  quiz titles in the answer to "who failed last week's quiz". To do
+  sees the student's label there and in quiz titles. To do
   that, Morrow first reads the course's student list, and if it
   cannot, it reads and changes nothing in the course. When the
   assistant saves the content back, Morrow puts the real text back in:
@@ -105,6 +104,11 @@ Changes to your courses:
 - Discussion changes are refused until they are tested through the
   browser Morrow uses today; they were tested only through an older,
   retired route.
+- The question "who failed last week's quiz" is not in this version.
+  Reading quiz scores has not been tested on a real Canvas course, so
+  Morrow now says so at once. In 0.4.0 the docs offered it, and Morrow
+  read the course's students and quizzes, and could ask for your time
+  zone, before it refused. You can see scores in Canvas's Gradebook.
 - Morrow does only tasks we have tested on a real Canvas course, with
   no exception. In 0.4.0, the assistant could offer to run a task we
   had not tested if you approved it, although the consent page said
@@ -319,13 +323,13 @@ Installing and the docs:
   release files. Logs now live in `~/.morrow/trees/<tree id>/`, never
   in the installed folder, and a fresh install records the folder's
   stable id.
-- The failed-students question, sign-in recovery, and finding a
-  student by name read your Canvas address and the helper's port from
-  `helper/env`, where the installer asks you to put them.
+- Sign-in recovery and finding a student by name read your Canvas
+  address and the helper's port from `helper/env`, where the installer
+  asks you to put them.
 - The installer warns when the `cryptography` package is missing.
   Without it, Morrow refuses everything that touches student data
-  (working by name, the failed-students question, rosters, grades), so
-  the warning names the one command that fixes it.
+  (working by name and the course roster), so the warning names the
+  one command that fixes it.
 - The consent, setup, and disconnect pages use plain words. To sign
   out, open the helper page and use Canvas's own menu: Account, then
   Logout.

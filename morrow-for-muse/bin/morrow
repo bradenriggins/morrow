@@ -11,7 +11,8 @@ Subcommands:
   dispatch  run dispatch/executor.py (manifest entries, catalog ops, journal)
   audit     run the a11y audit mode (catalog/a11y/runner.py audit ...)
   plan      run the a11y planner mode (catalog/a11y/runner.py plan ...)
-  query     run the failed-students query chain (query/chain.py)
+  query     the failed-students question: not in this version, so it
+            refuses before any read (query/chain.py)
   doctor    read-only health check: helper status, tree sanity
   version   read-only: print the tree version and command inventory
   failure   read-only: look up one failure-catalog entry by id or fragment
@@ -50,7 +51,8 @@ _COMMANDS = {
     "plan": ("catalog/a11y/runner.py",
              "accessibility repair planning (validates, never writes)"),
     "query": ("query/chain.py",
-              "failed-students query (typed: --course, --quiz, one threshold)"),
+              "the failed-students question: not in this version "
+              "(Morrow refuses it)"),
 }
 
 # audit/plan need their runner subcommand prepended.

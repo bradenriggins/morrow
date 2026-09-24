@@ -140,8 +140,8 @@ def _require_aesgcm():
 def learner_vault_problem():
     """Why the encrypted learner vault cannot run with this Python, or
     None when it can. All student-data work needs the vault (working by
-    name, the failed-students question, rosters, grades); install.sh
-    reports the problem at install time."""
+    name, the course roster); install.sh reports the problem at install
+    time."""
     try:
         _require_aesgcm()
     except PrivacyError as exc:

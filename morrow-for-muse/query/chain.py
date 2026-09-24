@@ -16,7 +16,10 @@ Links:
   3. submissions fetch: paginated GET
      /api/v1/courses/{id}/assignments/{aid}/submissions with
      include[]=user, following Link rel="next" (never a silent
-     partial collection).
+     partial collection). That read is a learner-data catalog row
+     (C-419); until the catalog marks it live-proven, a live run is
+     refused right after link 1, before any read or time zone
+     question, because the answer needs it.
   4. thresholds.classify: per-submission failed/passed/excused/
      ungraded with a named threshold source.
   5. present: de-identified educator result through the privacy
@@ -393,6 +396,11 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                     "timezone must be an IANA name like America/Denver, "
                     "got %r" % (timezone,)))
         parsed = {"quiz_ref": quiz_ref, "threshold": threshold}
+        if synthetic_rows is None:
+            try:
+                _require_live_proven(_SUBMISSIONS_READ)
+            except Exception as exc:  # CatalogNotProven or unreadable catalog
+                raise _translate(operation, exc)
         _prog("arguments_checked", str(quiz_ref))
 
         if reader is None:
@@ -468,13 +476,6 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
             provenance = "SYNTHETIC fixtures (clearly labeled; no live " \
                 "learner data read)"
         else:
-            # Only live-proven catalog operations may run: the
-            # submissions list (a learner-data row) must be proven
-            # through the catalog before this chain reads it live.
-            try:
-                _require_live_proven(_SUBMISSIONS_READ)
-            except Exception as exc:  # CatalogNotProven or unreadable catalog
-                raise _translate(operation, exc)
             status, submissions, note = reader.get_paginated(
                 "/api/v1/courses/%s/assignments/%s/submissions"
                 "?per_page=100&include[]=user" % (course_id, aid))

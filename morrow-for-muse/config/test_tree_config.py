@@ -188,6 +188,9 @@ def test_query_chain_takes_the_tenant_from_helper_env(tree_env,
         def close(self):
             pass
     monkeypatch.setattr(live_read, "LiveReader", _Reader)
+    # As on the day the submissions row is live-proven: until then the
+    # query is refused before any tenant is read.
+    monkeypatch.setattr(chain, "_require_live_proven", lambda *a: None)
     with pytest.raises(chain.ChainFailure) as exc:
         chain.run_query("101", "last_week")
     assert seen["tenant"] == TENANT
