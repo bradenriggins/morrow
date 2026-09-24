@@ -61,8 +61,17 @@ Failure modes this suite pins down (written before the code):
      course file named "Jane_Doe_essay.pdf" kept the name in its
      display name and file name. The joined name is labeled now, and a
      page the agent names by its labeled address is read, prepared, and
-     changed at its real address. (Muse engine audit, 2026-09-23,
-     written before the fix.)
+    changed at its real address. (Muse engine audit, 2026-09-23,
+    written before the fix.)
+ 13. A read on a learner-signal route (a page revision, C-331; the
+     C-328 revert response behaves the same) carried course text with
+     bare labels and no form markers, and a page write whose body says
+     "students" took that route too. Saving that text back put a real
+     student's name where the educator wrote "Student A7" and expanded
+     a bare first name to the full name. Learner-path receipts now get
+     the same reversible course-content projection the plain path
+     gives, so every reference saves back as it was written. (Final
+     sweep 2026-09-23, written before the fix.)
 
 The run writes a repeatable artifact of the flow to
 .selftest-work/course-content-e2e-artifact.json (labels only).
@@ -677,3 +686,92 @@ def _artifact(record):
     assert _leaks(text) == [], text
     with open(ARTIFACT, "w", encoding="utf-8") as fh:
         fh.write(text + "\n")
+
+
+# -- 13 -----------------------------------------------------------------------
+
+# The revision's text: the same names as the page, the literal label
+# spelled by the educator, and a bare first name. The page PUT case
+# writes it back with one word changed.
+REVISION_BODY = ("<p>Great work this week, Jane Doe. Mia Chen will lead "
+                 "Friday, Priya Patel sends notes, ask Robert. Student A7 "
+                 "is the rubric's example name.</p>")
+
+
+class RevisionCanvas(Canvas):
+    """The course also has a page revision history: the latest revision
+    holds the revision body, and reverting to it returns that body."""
+
+    def raw_request(self, method, url, headers, body, is_write=False,
+                    max_bytes=None):
+        path = urllib.parse.urlsplit(url).path
+        if method == "GET" and path == \
+                "/api/v1/courses/1/pages/week-1/revisions/latest":
+            self.calls.append((method, url, None))
+            return self._ok({"revision_id": 3, "latest": True,
+                             "title": "Week 1", "body": REVISION_BODY})
+        if method == "POST" and path == \
+                "/api/v1/courses/1/pages/week-1/revisions/3":
+            self.calls.append((method, url, None))
+            return self._ok({"revision_id": 2, "latest": False,
+                             "title": "Week 1", "body": REVISION_BODY})
+        return super().raw_request(method, url, headers, body, is_write,
+                                   max_bytes)
+
+
+def _revision_read(session):
+    return ex.dispatch_catalog_op(
+        "canvas_show_revision_courses_latest", "GET",
+        "/api/v1/courses/{course_id}/pages/{url_or_id}/revisions/latest",
+        "read", dict(PAGE_PARAMS), pack=_pack(), session=session)
+
+
+def _revert(session):
+    return ex.dispatch_catalog_op(
+        "canvas_revert_to_revision_courses", "POST",
+        "/api/v1/courses/{course_id}/pages/{url_or_id}/revisions/"
+        "{revision_id}", "write",
+        {"course_id": COURSE, "url_or_id": "week-1", "revision_id": 3},
+        pack=_pack(), session=session, mode_ctx=_ctx())
+
+
+def test_a_revision_read_is_saved_back_as_it_was_written():
+    _edit_mode()
+    session = RevisionCanvas()
+    rev = _revision_read(session)
+    body = rev["receipt"]["body"]
+    assert _leaks(rev) == [], json.dumps(rev)[:2000]
+    assert _leaks(_journal_text()) == [], _journal_text()[-2000:]
+    assert "Student A7 (as written)" in body, body
+    assert "(first name)" in body, body
+    _update(session, {"body": body.replace("Friday", "Monday")})
+    puts = [b for m, _u, b in session.calls if m == "PUT"]
+    assert puts[0]["wiki_page"]["body"] \
+        == REVISION_BODY.replace("Friday", "Monday"), puts
+
+
+def test_a_revert_receipt_is_saved_back_as_it_was_written():
+    _edit_mode()
+    session = RevisionCanvas()
+    out = _revert(session)
+    body = out["receipt"]["body"]
+    assert _leaks(out) == [], json.dumps(out)[:2000]
+    assert "Student A7 (as written)" in body, body
+    assert "(first name)" in body, body
+    _update(session, {"body": body.replace("Friday", "Monday")})
+    puts = [b for m, _u, b in session.calls if m == "PUT"]
+    assert puts[0]["wiki_page"]["body"] \
+        == REVISION_BODY.replace("Friday", "Monday"), puts
+
+
+def test_a_page_put_whose_body_says_students_shows_marked_text():
+    _edit_mode()
+    session = RevisionCanvas()
+    shown = _show(session)["receipt"]["body"]
+    out = _update(session, {"body": shown.replace("Friday",
+                                                  "Monday, students")})
+    assert _leaks(out) == [], json.dumps(out)[:2000]
+    assert "Student A7 (as written)" in out["receipt"]["body"], \
+        out["receipt"]["body"]
+    assert "(first name)" in out["receipt"]["body"], \
+        out["receipt"]["body"]
