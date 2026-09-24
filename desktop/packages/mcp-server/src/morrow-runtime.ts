@@ -812,6 +812,10 @@ export class MorrowRuntime {
         setReviewLearnerNames: (reviewPath, names) => gateway.setReviewLearnerNames(reviewPath, names),
         personCloseAvailable: (operationId) => gateway.personCloseAvailable(operationId),
         confirmPersonClose: (operationId) => gateway.confirmPersonClose(operationId),
+        // The projected course name the course list already computed for each connection, the
+        // same lookup the recent-changes list uses. The page and that list never serve the
+        // Bridge's raw courseName.
+        connectionName: (sourceBindingId) => gateway.connectionCourseName(sourceBindingId),
         batchApprovalGet: (batchId) => runtime!.batchApprovalGet(batchId),
         batchApprovalStatus: (batchId) => runtime!.batchApprovalStatus(batchId),
         approveBatch: (batchId) => runtime!.approveBatch(batchId),

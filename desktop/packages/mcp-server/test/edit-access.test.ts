@@ -71,7 +71,10 @@ function operationStub(): JsonObject {
  * The owner side of an Edit request: the MCP tools, the review server, and one review store,
  * wired the way MorrowRuntime wires them. Only the Bridge's save is a stand-in.
  */
-async function owner(expiresAt: number | undefined = undefined) {
+async function owner(expiresAt: number | undefined = undefined, connectionNames: Record<string, string | null> = {
+  "canvas-bio": "Biology",
+  "moodle-chem": "Chemistry",
+}) {
   const prepare = vi.fn().mockResolvedValue(prepared);
   const apply = vi.fn().mockImplementation(async (scope: BrowserEditAccessPrepared) => grantedResult(scope, expiresAt));
   const reviews = new EditAccessReviews((scope, options) => apply(scope, options));
@@ -85,6 +88,10 @@ async function owner(expiresAt: number | undefined = undefined) {
     cancelOperation: operationStub,
     setApprovalBaseUrl: (url) => { baseUrl = url; },
     setApprovalPresence: (value) => { presence.push(value); },
+    // The projected course name the course list already computed for each connection, the
+    // same lookup the recent-changes list uses. The page and that list never serve the
+    // Bridge's raw courseName.
+    connectionName: (sourceBindingId) => connectionNames[sourceBindingId ?? ""] ?? null,
     editAccessGet: (id) => reviews.page(id),
     approveEditAccess: (id) => reviews.approve(id),
     runApprovedEditAccess: (id) => reviews.run(id),
@@ -382,8 +389,7 @@ describe("Edit asked for in a conversation", () => {
     }
   });
 
-  it("never offers an action that removes content", async () => {
-    const test = await owner();
+  it("never offers an action that removes content", async () => {    const test = await owner();
     try {
       test.prepare.mockRejectedValueOnce(new EditCategoryUnavailableError(
         "action:canvas:canvas_delete_assignment",
@@ -469,6 +475,57 @@ describe("untimed Edit grants", () => {
       expect(await turnOnEdit(lapsed, await requestEdit(lapsed))).toMatchObject({ ok: false, state: "unconfirmed" });
     } finally {
       await lapsed.close();
+    }
+  });
+});
+
+// The MCP egress boundary keeps ordinary strings in this result, so the raw
+// Bridge courseName cannot ride along: a course named for its student would
+// reach the model, although the course list labels the same name. Every
+// assistant-facing answer names the connection and the course id only, and the
+// review page serves the projected name the course list serves.
+describe("Edit access results never carry a raw course name", () => {
+  it("answers the tool and the wait with the connection and course id, and no course name", async () => {
+    const test = await owner();
+    try {
+      const requested = await requestEdit(test);
+      expect(JSON.stringify(requested)).not.toContain("Biology");
+      expect((Array.isArray(requested.selections) ? requested.selections : [])[0]).toMatchObject(
+        { sourceBindingId: "canvas-bio", provider: "canvas", courseId: "42", site: "https://canvas.example.edu", requestedMode: "edit" },
+      );
+      const waited = await turnOnEdit(test, requested);
+      expect(JSON.stringify(waited)).not.toContain("Biology");
+      expect((Array.isArray(waited.selections) ? waited.selections : [])[0]).toMatchObject(
+        { sourceBindingId: "canvas-bio", courseId: "42", confirmed: true },
+      );
+      expect(JSON.stringify(waited)).not.toContain("Biology");
+    } finally {
+      await test.close();
+    }
+  });
+
+  it("serves the projected course name on the page, and never the raw one", async () => {
+    const namedForStudent = "Independent Study: Ada Lovelace";
+    const projected = "Independent Study: Student A1";
+    const test = await owner(undefined, { "canvas-bio": projected });
+    try {
+      test.prepare.mockResolvedValueOnce({
+        mode: "edit",
+        selections: [{
+          ...prepared.selections[0]!,
+          courseName: namedForStudent,
+        }],
+      } satisfies BrowserEditAccessPrepared);
+      // The page asks the controller for each connection's projected name, the
+      // lookup the recent-changes list uses; the raw Bridge courseName never
+      // reaches it.
+      const requested = await requestEdit(test);
+      const { body } = await reviewForm(test, new URL(String(requested.approvalUrl)).pathname);
+      expect(body).toContain(`>${projected}</dd>`);
+      expect(body).not.toContain(namedForStudent);
+      expect(body).toContain("https://canvas.example.edu");
+    } finally {
+      await test.close();
     }
   });
 });
