@@ -108,6 +108,25 @@ try:
         check("w6 educator surface: /status carries %r" % field,
               ('"%s"' % field) in src)
 
+    # --- the badge names the connected (pinned) account -------------------
+    # (muse UX audit 3, muse-ux3/helper-badge-shows-pinned-not-signed-in-
+    # account, written before the fix): the badge said "signed in as
+    # <name>" where the name is the account pinned at first sign-in
+    # (browser_lane.json), never the account signed in to the tab, and
+    # the banner told the educator to use it to detect an SSO account
+    # switch. After a switch the badge still showed the pinned name, so
+    # the check always passed.
+    html_src = open(os.path.join(HERE, "index.html"),
+                    encoding="utf-8").read()
+    check("badge does not claim the pinned name is the signed-in account",
+          '"signed in as " + st.principal_name' not in html_src)
+    check("banner does not use the badge to detect an account switch",
+          "Check the signed-in name above matches your Canvas account"
+          not in html_src)
+    check("badge names the connected account",
+          "Morrow is connected to " in html_src
+          and "st.principal_name" in html_src)
+
     # --- W6-P2-S4: failed tab protection warns loudly --------------------
     # A failed set_tab_protected used to vanish silently (bare except:
     # pass). The HelperBrowser._protect_primary_tab method must print
