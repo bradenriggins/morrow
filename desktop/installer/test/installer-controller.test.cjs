@@ -13,6 +13,7 @@ const { bridgeDeliveryMode, createInstallerController, readCommandOutput, readMa
 const { freshRecord } = require("../shared/state-policy.cjs");
 const { claudeDesktopLauncherPath } = require("../shared/claude-desktop.cjs");
 const { errorDetails } = require("../shared/contract.cjs");
+const { blackboardPaths } = require("../shared/blackboard.cjs");
 
 const installerRoot = path.resolve(__dirname, "..");
 // ensureRuntime() hardens the state directory through the real gateway-core
@@ -3011,6 +3012,47 @@ test("Choose folder refuses Morrow's own data folders and any folder that holds 
 
   // Morrow's own default Materials folder, and a folder inside it, are course materials.
   choice = path.join(installer.paths.defaultMaterials, "Week 1");
+  await fs.mkdir(choice, { recursive: true });
+  assert.equal(await installer.configureWorkspace(null), true);
+  assert.equal((await installer.record()).materialsFolder, choice);
+});
+
+// Morrow keeps the Blackboard application secret and connection file in the
+// home folder, outside its user-data folder. Those files are not course
+// materials either: the assistant could read the secret through a file the
+// materials folder names.
+test("Choose folder refuses the Blackboard data folders in the home folder", async (t) => {
+  const root = await fs.realpath(await temporaryRoot());
+  const home = path.join(root, "Home");
+  useHome(t, home);
+  const manifestSha256 = await completePayload(root, { maintenance: REAL_MAINTENANCE_MODULE, runtimeMonitor: WORKSPACE_ADMISSION_MONITOR });
+  let choice = null;
+  const installer = controller(root, {
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [choice] }) },
+    trustedMcpRuntimeManifestSha256: () => manifestSha256,
+  });
+  await installer.ensureRuntime();
+  const blackboard = blackboardPaths(installer.home, "default");
+  await fs.mkdir(blackboard.credentialDirectory, { recursive: true });
+  await fs.mkdir(path.join(blackboard.credentialDirectory, "winter"), { recursive: true });
+  const before = await installer.record();
+
+  for (const folder of [
+    path.join(home, ".morrow"),
+    blackboard.configDirectory,
+    blackboard.credentialDirectory,
+    path.join(blackboard.credentialDirectory, "winter"),
+  ]) {
+    choice = folder;
+    await assert.rejects(() => installer.configureWorkspace(null), (error) => {
+      assert.deepEqual(error, errorDetails("materials_folder_morrow_data"));
+      return true;
+    }, folder);
+  }
+  assert.deepEqual(await installer.record(), before, "nothing was recorded");
+
+  // A folder beside the Blackboard data is still course materials.
+  choice = path.join(home, "Documents");
   await fs.mkdir(choice, { recursive: true });
   assert.equal(await installer.configureWorkspace(null), true);
   assert.equal((await installer.record()).materialsFolder, choice);

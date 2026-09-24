@@ -1203,7 +1203,15 @@ class InstallerController {
     if (await this.workspaceRefusedByRuntime(materials)) throw errorDetails("materials_folder_too_broad");
     const userData = this.paths.userData;
     const realUserData = await fs.realpath(userData).catch(() => userData);
-    const owned = [this.paths.state, this.paths.bridgeDirectory, this.paths.assistantBackups, this.paths.windowData];
+    // The Blackboard connection file and its credential folder live in the home
+    // folder, outside the user-data folder. The connection file names its
+    // secret files, so a materials folder that holds them makes the secret a
+    // file the assistant could name.
+    const blackboard = blackboardPaths(this.home, "default");
+    const owned = [
+      this.paths.state, this.paths.bridgeDirectory, this.paths.assistantBackups, this.paths.windowData,
+      blackboard.configDirectory, blackboard.credentialDirectory
+    ];
     for (const folder of owned) {
       const places = [...await this.pathForms(folder), path.join(realUserData, path.relative(userData, folder))];
       if (places.some((place) => insideDirectory(place, materials) || insideDirectory(materials, place))) {
