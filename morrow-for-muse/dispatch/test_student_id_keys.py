@@ -126,6 +126,24 @@ def test_bulk_user_tags_label_the_student_keys():
                                      for k in receipt), receipt
 
 
+def test_bulk_user_tags_asked_by_label_answer_by_label():
+    jane = _find("Jane Doe")["student"]
+    name, method, path = BULK_USER_TAGS
+    session = Canvas({"/api/v1/courses/1/bulk_user_tags": {
+        "98765": [{"id": 4, "name": "Extra time"}]}})
+    out = ex.dispatch_catalog_op(name, method, path, "read",
+                                 {"course_id": COURSE}, pack=_pack(),
+                                 session=session, mode_ctx=_ctx(),
+                                 extra={"body": {"user_ids[]": [jane]}})
+    sent = [(url, body) for m, url, body in session.calls
+            if "/bulk_user_tags" in url]
+    assert sent and "98765" in str(sent[0]), sent
+    assert jane not in str(sent[0]), sent
+    assert _no_ids(out), out["receipt"]
+    assert _no_ids(_journal_text())
+    assert list(out["receipt"]) == [jane], out["receipt"]
+
+
 @pytest.mark.parametrize("ids", [[98765, 55123], ["98765", "55123"]],
                          ids=["numbers", "strings"])
 def test_assignment_visibility_is_labeled(ids):
