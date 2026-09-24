@@ -309,6 +309,7 @@ async function completePayload(root, options = {}) {
     ["dist/index.js", "gateway entrypoint"],
     ["dist/local-owner-maintenance.js", [
       "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+      "export function workspaceRootTooBroad() { return false; }",
       "export function acquireStoppedLocalOwnerMaintenanceLease() { return { leaseId: '00000000-0000-4000-8000-000000000001', leaseToken: 'morrow-stopped-maintenance-token-1234567890123456' }; }",
       "export function replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard() { return null; }",
       "export function removeExactLocalOwnerMaintenanceLease() { return true; }",
