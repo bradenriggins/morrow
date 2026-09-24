@@ -250,9 +250,8 @@ export function bridgeReleaseManifest(extensionRoot) {
   };
 }
 
-function assertCurrentBridgeRelease(extensionRoot, manifest) {
-  if (resolve(extensionRoot) !== resolve(ROOT, "connector", "extension")) return;
-  const ledgerPath = resolve(ROOT, "connector", "release-ledger.json");
+function assertCurrentBridgeRelease(extensionRoot, manifest, ledgerRoot = resolve(ROOT, "connector")) {
+  const ledgerPath = resolve(ledgerRoot, "release-ledger.json");
   const ledger = JSON.parse(readFileSync(ledgerPath, "utf8"));
   const releases = ledger?.schema === "morrow.bridge-release-ledger.v1" && Array.isArray(ledger.releases)
     ? ledger.releases
@@ -262,15 +261,16 @@ function assertCurrentBridgeRelease(extensionRoot, manifest) {
   if (!current || current.version !== manifest.version || current.releaseManifestSha256 !== digest) {
     throw new Error("Morrow Bridge source changed without a new sealed release ledger entry.");
   }
+  return digest;
 }
 
-function copyBridgeRelease(appRoot, extensionRoot) {
+function copyBridgeRelease(appRoot, extensionRoot, ledgerRoot = resolve(ROOT, "connector")) {
   const releaseRoot = resolve(appRoot, "bridge-release");
   const manifest = bridgeReleaseManifest(extensionRoot);
-  assertCurrentBridgeRelease(extensionRoot, manifest);
+  const sealedDigest = assertCurrentBridgeRelease(extensionRoot, manifest, ledgerRoot);
   copy(extensionRoot, resolve(releaseRoot, "extension"));
   writeFileSync(resolve(releaseRoot, "manifest.json"), json(manifest), { mode: 0o600, flag: "wx" });
-  return { manifestSha256: digest(resolve(releaseRoot, "manifest.json")), version: manifest.version, extensionId: manifest.extensionId };
+  return { manifestSha256: digest(resolve(releaseRoot, "manifest.json")), version: manifest.version, extensionId: manifest.extensionId, sealedDigest };
 }
 
 /** The program and arguments that start `command` with no shell on this platform. */
@@ -867,6 +867,13 @@ async function preparePayload(target, destination, replace) {
     if (!sameSourceCheckpoint(beforeBuild, checkpoint)) {
       throw new Error("Tracked source changed while Morrow rebuilt desktop release outputs.");
     }
+    // The packager stages connector/extension under a temporary path, so the ledger guard below
+    // would not see the real source. Check the checkout itself first, then require the staged
+    // copy to carry exactly those sealed bytes.
+    const sealedBridgeDigest = assertCurrentBridgeRelease(
+      resolve(ROOT, "connector", "extension"),
+      bridgeReleaseManifest(resolve(ROOT, "connector", "extension"))
+    );
     materialization = materializeRuntimeDependencies(packages, staging);
     const dependencies = materialization.dependencies;
     const archive = await nodeArchive(target, resolve(ROOT, "artifacts", "desktop-runtime-cache"));
@@ -882,6 +889,9 @@ async function preparePayload(target, destination, replace) {
     copy(resolve(input.stage, "artifacts/canvas-api/canvas-api-catalog.json"), resolve(appRoot, "artifacts/canvas-api/canvas-api-catalog.json"));
     copy(resolve(input.stage, "connector/extension"), resolve(appRoot, "connector/extension"));
     const bridgeRelease = copyBridgeRelease(appRoot, resolve(input.stage, "connector/extension"));
+    if (bridgeRelease.sealedDigest !== sealedBridgeDigest) {
+      throw new Error("Morrow Bridge source changed without a new sealed release ledger entry.");
+    }
     copy(resolve(input.stage, "installer"), resolve(appRoot, "installer"));
     writeFileSync(resolve(appRoot, "package-input-manifest.json"), input.manifestBytes, { mode: 0o600, flag: "wx" });
     writeFileSync(resolve(appRoot, "mcp-runtime-manifest.json"), input.mcpRuntime.bytes, { mode: 0o600, flag: "wx" });
@@ -1131,4 +1141,4 @@ async function main() {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
 
-export { BRIDGE_SOURCE_FILES, WORKSPACE_PACKAGE_DIRECTORIES, RUNTIME_DEPENDENCY_NAMES, assertPayloadSnapshot, assertUnsignedWindowsExecutable, cacheVerifiedArchive, desktopInstallerReceipt, desktopTargetEnvironment, materializeRuntimeDependencies, rebuildWorkspaceReleaseOutputs, unsignedBuilderEnvironment, windowsAuthenticodeCertificateTable, workspacePackages };
+export { BRIDGE_SOURCE_FILES, WORKSPACE_PACKAGE_DIRECTORIES, RUNTIME_DEPENDENCY_NAMES, assertPayloadSnapshot, assertUnsignedWindowsExecutable, cacheVerifiedArchive, copyBridgeRelease, desktopInstallerReceipt, desktopTargetEnvironment, materializeRuntimeDependencies, rebuildWorkspaceReleaseOutputs, unsignedBuilderEnvironment, windowsAuthenticodeCertificateTable, workspacePackages };
