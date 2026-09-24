@@ -5,7 +5,8 @@
 disconnect in the marker file `disconnected` in this tree's state dir
 (<MORROW_HOME>/trees/<tree id>/, as transport.local_chromium resolves
 it) before it stops the helper and deletes the Canvas sign-in.
-install.sh removes the marker when it finishes, which is how the
+install.sh clears the marker only after its helper-launch step
+succeeds (and re-marks it if a later step fails), which is how the
 educator reconnects. While the marker is there, students find, the
 failed-students chain, and every Chromium-lane command refuse with
 CanvasDisconnected before they reach the helper, and `bin/morrow start`

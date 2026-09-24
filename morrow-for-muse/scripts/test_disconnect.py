@@ -296,8 +296,84 @@ def test_disconnect_writes_the_marker_install_clears_it(rig):
     with open(os.path.join(TREE, "install.sh")) as fh:
         install = fh.read()
     assert 'disconnect marker' in install
-    assert install.index('disconnect marker') < \
-        install.index('"${TREE}/helper/keepalive.sh" >/dev/null 2>&1')
+    # Security review 2026-09-24: the marker is cleared only AFTER the
+    # step-10 helper-launch branch succeeds. Clearing it earlier let a
+    # later install failure (selftest, helper down) leave the marker
+    # gone while the keepalive cron was already installed: the helper
+    # relaunches within five minutes and silently undoes the recorded
+    # disconnect.
+    launch = install.index('"${TREE}/helper/keepalive.sh" >/dev/null 2>&1')
+    assert install.index('rm -f "${_disconnect_marker}"') > launch, install
+    # and fail() re-records the disconnect when the marker was cleared
+    # this run, so a later failure (install record, rollback) restores it.
+    fail_def = install[install.index("fail() {"):install.index(
+        "\nstep()", install.index("fail() {"))]
+    assert "_disconnect_marker_cleared" in fail_def, fail_def
+    assert 'disconnect.py" mark' in fail_def, fail_def
+
+
+def test_a_failed_install_after_the_marker_clear_remarks_the_disconnect():
+    """Security review 2026-09-24: once install.sh has cleared the
+    disconnect marker and a later step fails, fail() must re-record the
+    disconnect (config/disconnect.py mark into the same state dir);
+    otherwise the keepalive cron relaunches the helper within five
+    minutes and silently undoes the educator's disconnect. fail() is
+    run in isolation with the tree's config/ and transport/ copies, the
+    state dir pointed at scratch, and everything fail() may touch
+    empty, so only the re-mark path executes."""
+    import re
+    import tempfile
+    work = os.path.join(HERE, ".selftest-work",
+                        "fail-remark-%d" % os.getpid())
+    shutil.rmtree(work, ignore_errors=True)
+    os.makedirs(work)
+    try:
+        tree = os.path.join(work, "tree")
+        for part in ("config", "transport"):
+            shutil.copytree(os.path.join(TREE, part),
+                            os.path.join(tree, part),
+                            ignore=shutil.ignore_patterns(
+                                "__pycache__", "*.pyc"))
+        state = os.path.join(work, "state")
+        os.makedirs(state)
+        with open(os.path.join(TREE, "install.sh")) as fh:
+            install = fh.read()
+        fail_def = install[install.index("fail() {"):install.index(
+            "\nstep()", install.index("fail() {"))]
+        script = (
+            "TREE=%s\nTREE_STATE_DIR=%s\n_CREATED=''\nUPGRADE_BACKUP=''\n"
+            % (tree, state))
+        marker = os.path.join(state, "disconnected")
+        # With the flag set, fail() re-marks the disconnect.
+        proc = subprocess.run(
+            ["bash", "-c", script + fail_def
+             + "\n_disconnect_marker_cleared=1\nfail test \"boom\""],
+            capture_output=True, text=True, env=dict(os.environ),
+            timeout=60)
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert os.path.isfile(marker), proc.stdout + proc.stderr
+        with open(marker, encoding="utf-8") as fh:
+            body = fh.read()
+        assert "disconnected_at" in body, body
+        assert "the disconnect record is restored" in \
+            proc.stdout + proc.stderr, proc.stdout + proc.stderr
+        # Without the flag (a failure before the clear), fail() must not
+        # create a marker (a fresh state dir: the first run re-marked
+        # the one above).
+        state2 = os.path.join(work, "state2")
+        os.makedirs(state2)
+        marker2 = os.path.join(state2, "disconnected")
+        script2 = (
+            "TREE=%s\nTREE_STATE_DIR=%s\n_CREATED=''\nUPGRADE_BACKUP=''\n"
+            % (tree, state2))
+        proc = subprocess.run(
+            ["bash", "-c", script2 + fail_def + "\nfail test \"no\""],
+            capture_output=True, text=True, env=dict(os.environ),
+            timeout=60)
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert not os.path.exists(marker2), proc.stdout + proc.stderr
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def test_disconnect_without_crontab_still_disconnects(rig):

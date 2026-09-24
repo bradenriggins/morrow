@@ -263,6 +263,18 @@ _RB_EOF
 
 fail() {
   printf 'INSTALL FAIL [%s]: %s\n' "$1" "$2" >&2
+  if [ "${_disconnect_marker_cleared:-0}" = "1" ]; then
+    # Security review 2026-09-24: this run already cleared the
+    # disconnect marker, and the reconnect did not finish. Re-record
+    # the disconnect (config/disconnect.py resolves the same state dir)
+    # so a supervisor relaunch cannot silently undo it.
+    if MORROW_TREE_STATE_DIR="${TREE_STATE_DIR}" \
+      python3 "${TREE}/config/disconnect.py" mark >/dev/null 2>&1; then
+      printf 'rollback: the disconnect record is restored (the reconnect did not finish)\n' >&2
+    else
+      printf 'rollback WARNING: could not restore the disconnect record; run MORROW_TREE_STATE_DIR=%s python3 %s config/disconnect.py mark\n' "${TREE_STATE_DIR}" "${TREE}" >&2
+    fi
+  fi
   if [ -n "${UPGRADE_BACKUP}" ] && [ -d "${UPGRADE_BACKUP}" ]; then
     # W4-P0-7: the backup is restorable ONLY when its completeness
     # marker verifies. A partial backup (e.g. ENOSPC mid-write) is
@@ -669,16 +681,6 @@ fi
 # secrets gate (step 8) and the integrity walk read the tree as release
 # content. Same resolution as helper/keepalive.sh and the transport.
 TREE_STATE_DIR="${MORROW_TREE_STATE_DIR:-${MORROW_HOME}/trees/${TREE_ID}}"
-# A completed install reconnects: clear the disconnect marker
-# scripts/uninstall.sh --disconnect wrote (config/disconnect.py), so
-# agent-side commands stop refusing with canvas-disconnected.
-_disconnect_marker="${TREE_STATE_DIR}/disconnected"
-if [ -f "${_disconnect_marker}" ]; then
-  rm -f "${_disconnect_marker}" \
-    || fail "disconnect" "could not remove the disconnect marker ${_disconnect_marker}"
-  note "reconnected: the disconnect record is cleared (the educator asked for this)"
-fi
-unset _disconnect_marker
 # An older release wrote keepalive's and the helper's logs (with their
 # rotated archives) and the keepalive loop's state into helper/. Move
 # them to the state dir, loudly, and stop a loop recorded there.
@@ -1188,6 +1190,21 @@ else:
       fail "helper" "the helper did not come up (keepalive exit ${KEEP_RC}). Check ${TREE_STATE_DIR}/keepalive.log and ${TREE_STATE_DIR}/server.log for the helper's reason, fix it, and rerun this installer. Do not tell the educator the install succeeded."
       ;;
   esac
+  # Security review 2026-09-24: a completed install reconnects, and the
+  # marker is cleared only here, after the helper-launch branch has
+  # succeeded. Clearing it earlier let any later install failure
+  # (selftest, helper down) leave the marker gone while the keepalive
+  # cron was already installed: within five minutes the helper relaunched
+  # and silently undid the educator's recorded disconnect. fail() re-marks
+  # the disconnect when a failure happens after this clear.
+  _disconnect_marker="${TREE_STATE_DIR}/disconnected"
+  if [ -f "${_disconnect_marker}" ]; then
+    rm -f "${_disconnect_marker}" \
+      || fail "disconnect" "could not remove the disconnect marker ${_disconnect_marker}"
+    _disconnect_marker_cleared=1
+    note "reconnected: the disconnect record is cleared (the educator asked for this)"
+  fi
+  unset _disconnect_marker
 fi
 
 # Record this install: version + manifest under MORROW_HOME (outside the
