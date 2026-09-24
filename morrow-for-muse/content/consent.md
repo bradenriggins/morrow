@@ -34,8 +34,9 @@ more permissions. If you ask for something it cannot confirm is within
 your permissions and among the tasks we have tested, it refuses rather
 than guessing.
 
-Whether it asks before changing things depends on your mode, and only
-the mode decides. In plan mode (the default), Morrow asks your
+Whether it asks before changing things depends on your mode. In edit
+mode, you can also turn on "always confirm deletions" so deletions
+still ask first. In plan mode (the default), Morrow asks your
 permission before every change in Canvas. The request can look
 different on your screen from time to time; asking first is the
 promise. In edit mode, you have told Morrow it may make changes

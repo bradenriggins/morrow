@@ -383,7 +383,7 @@ vault_warning() {
     "Morrow keeps student names and ids in an encrypted learner vault," \
     "and the vault needs the Python package 'cryptography'. Without it," \
     "Morrow refuses everything that touches student data: finding a" \
-    "student by name and reading the course roster." \
+"student by name and reading the course roster." \
     "Student names in course pages are hidden without labels, so a" \
     "change that would save one back is refused." \
     "Everything else works." \

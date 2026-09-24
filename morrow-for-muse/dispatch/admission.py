@@ -283,50 +283,44 @@ def _url_hits_any(url: str, substrings: list) -> str | None:
     return None
 
 
-# W3-P1-45: bare learner tokens scanned in query/body signal texts (and in
-# the query-augmented URL templates). URL-shaped policy substrings cannot
-# see include[]=enrollments because no "/" precedes the value; these
-# tokens close that hole. The plural resource nouns are the Canvas
-# collection names; the singular _id forms catch identifier parameters
-# (student_ids, user_id) that carry learner references in bodies.
-# include[]=assignment_visibility makes an assignment read list the ids
-# of the students who can see each assignment.
+# W3-P1-45: bare learner tokens scanned in query/body blocks. The plural
+# resource nouns are the Canvas collection names; the singular _id forms
+# catch identifier parameters (student_ids, user_id) that carry learner
+# references. include[]=assignment_visibility makes an assignment read
+# list the ids of the students who can see each assignment.
+# Final-sweep finding (2026-09-23): the tokens are matched against
+# query/body KEYS and the VALUES of include[] only, never against free
+# text values (a title, body, description, message, or name), and the
+# /users/self exception applies to URLs only.
 _QUERY_BODY_LEARNER_TOKENS = ("enrollments", "students", "users",
                               "student_id", "user_id",
                               "assignment_visibility")
+# A query or body key naming a learner record or learner identifier.
+# The singular forms are key-only: as values they are Canvas include[]=
+# names or prose words, not identifiers.
+_LEARNER_KEY_TOKENS = ("user", "users", "student", "students",
+                       "enrollment", "enrollments", "user_id", "user_ids",
+                       "student_id", "student_ids", "assignment_visibility")
+# A compound identifier parameter is one form key that ENDS in a person
+# id (observed_user_id, previous_user_id, last_attended_user_id), and a
+# leading setting word does not make it a setting ("hide_student_ids"
+# is a person id list; "hide_from_students" is not a person key).
+_COMPOUND_LEARNER_ID_KEY_RE = re.compile(
+    r"(?:^|_)(?:user|student)_ids?$", re.IGNORECASE)
 
 
-# A JSON object key naming a learner record or learner identifier
-# ("user", "student", "enrollment", with optional _id/_ids suffix). The
-# substring tokens above catch learner tokens in VALUES (include[]=...);
-# this catches them as KEYS, so a body like {"user": {...}} is gated
-# without gating prose that merely mentions the word "user".
-_LEARNER_KEY_RE = re.compile(
-    r'"(?:user|users|student|students|enrollment|enrollments)'
-    r'(?:_ids?)?"\s*:')
+# A JSON object key naming a learner record or learner identifier is
+# caught by the key-token scan in _learner_key_hit (above).
 
 
-def _canonical_signal(obj) -> str:
-    """Canonical text form of a query/body block for substring scanning."""
-    if obj is None:
-        return ""
-    if isinstance(obj, str):
-        return obj
-    try:
-        return json.dumps(obj, sort_keys=True, default=str,
-                          ensure_ascii=True)
-    except (TypeError, ValueError):
-        return str(obj)
-
-
-def _payload_signal_texts(entry: dict) -> list:
-    """Canonical JSON of the request and multi-step query/body blocks.
+def _payload_signal_values(entry: dict) -> list:
+    """The raw request and multi-step query/body values.
 
     W3-P1-45: query/body content is merged into synthetic catalog entries
     (executor catalog_descriptor_to_entry) but was never scanned by the
-    learner-data gate. These texts close that hole.
+    learner-data gate. These values close that hole.
     """
-    texts = []
+    values = []
     try:
         blocks = [entry.get("request") or {}]
     except AttributeError:
@@ -341,8 +335,74 @@ def _payload_signal_texts(entry: dict) -> list:
         if not isinstance(block, dict):
             continue
         for key in ("query", "body"):
-            texts.append(_canonical_signal(block.get(key)))
-    return [t for t in texts if t]
+            value = block.get(key)
+            if value:
+                values.append(value)
+    return values
+
+
+def _learner_key_hit(value) -> str | None:
+    """First learner-data signal in a query or body block, or None.
+
+    Matches the learner tokens against the block's KEYS (form keys such
+    as assignment_override[student_ids][] and compound identifier keys
+    such as observed_user_id included) and against the VALUES of
+    include / include[] only. Free-text values (a title, body,
+    description, message, or name) are course content, never a learner
+    signal. A string block is read as JSON or as form-encoded pairs; a
+    nested string value that is itself pre-encoded JSON is parsed and
+    scanned the same way (its keys are keys, never educator copy).
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if text[:1] in ("{", "["):
+            try:
+                return _learner_key_hit(json.loads(text))
+            except ValueError:
+                pass
+        pairs = urllib.parse.parse_qsl(text.lstrip("?"),
+                                       keep_blank_values=True)
+        return _learner_key_hit([{k: v} for k, v in pairs])
+    if isinstance(value, list):
+        for item in value:
+            hit = _learner_key_hit(item)
+            if hit:
+                return hit
+        return None
+    if not isinstance(value, dict):
+        return None
+    for key, child in value.items():
+        parts = _FORM_KEY_PART_RE.findall(str(key))
+        hit = next((p for p in parts if p in _LEARNER_KEY_TOKENS), None)
+        if not hit and _COMPOUND_LEARNER_ID_KEY_RE.search(str(key)):
+            # A compound identifier parameter (observed_user_id, the
+            # Canvas planner and missing-submissions reads) is a whole
+            # form key, not a bracketed part.
+            hit = "compound learner id key"
+        if hit:
+            return "learner key %r" % key
+        if "include" in parts:
+            named = child if isinstance(child, list) else [child]
+            for item in named:
+                if not isinstance(item, str):
+                    continue
+                lowered = item.lower()
+                for token in _QUERY_BODY_LEARNER_TOKENS:
+                    if token in lowered:
+                        return "learner token %r in include[]" % token
+        if isinstance(child, (dict, list)):
+            hit = _learner_key_hit(child)
+            if hit:
+                return hit
+        if isinstance(child, str) and child.lstrip()[:1] in ("{", "["):
+            # A pre-encoded JSON value (a step that carries a JSON string
+            # for the next call) holds keys, not free text: parse it and
+            # scan the parsed keys the same way. Plain prose never starts
+            # with a brace or bracket, so educator copy is never scanned.
+            hit = _learner_key_hit(child)
+            if hit:
+                return hit
+    return None
 
 
 def _url_segment_hit(url: str, segments: list, suffixes: list) -> str | None:
@@ -369,11 +429,12 @@ def _learner_signal_hit(entry: dict, policy: dict) -> str | None:
 
     Scans, in order: the catalog row's own [LEARNER-DATA] flag
     (W3-P0-5/W3-P0-9: authoritative per-row classification, fires even
-    when no URL substring matches); the URL templates with their query
-    templates appended (whole path segments naming a people resource
-    first, then the substring net); and the canonical request/multi-step query/body
-    texts (W3-P1-45). The /users/self educator exception still exempts
-    the educator's own record from URL-derived signals.
+    when no URL substring matches); the URL templates (whole path
+    segments naming a people resource first, then the substring net,
+    then the learner tokens, with the /users/self educator exception
+    applying to URLs only); and the request/multi-step query/body
+    blocks, keys and include[] values only (W3-P1-45, final sweep
+    2026-09-23).
     """
     # The catalog flag is authoritative for the row: a flagged row touches
     # learner data no matter what its URL template looks like.
@@ -385,30 +446,21 @@ def _learner_signal_hit(entry: dict, policy: dict) -> str | None:
     segments = ld.get("url_segments", [])
     suffixes = ld.get("url_segment_suffixes", [])
 
-    def scan(text, is_url=False):
-        lowered = (text or "").lower()
+    for url in extract_urls(entry):
+        lowered = (url or "").lower()
         if any(exc.lower() in lowered for exc in exceptions):
-            return None
-        if is_url:
-            hit = _url_segment_hit(text, segments, suffixes)
-            if hit:
-                return hit
-        hit = _url_hits_any(text, substrings)
+            continue
+        hit = _url_segment_hit(url, segments, suffixes)
+        if hit:
+            return hit
+        hit = _url_hits_any(url, substrings)
         if hit:
             return hit
         for token in _QUERY_BODY_LEARNER_TOKENS:
             if token in lowered:
                 return "learner token %r" % token
-        if _LEARNER_KEY_RE.search(text or ""):
-            return "learner key"
-        return None
-
-    for url in extract_urls(entry):
-        hit = scan(url, is_url=True)
-        if hit:
-            return hit
-    for text in _payload_signal_texts(entry):
-        hit = scan(text)
+    for value in _payload_signal_values(entry):
+        hit = _learner_key_hit(value)
         if hit:
             return hit
     return None

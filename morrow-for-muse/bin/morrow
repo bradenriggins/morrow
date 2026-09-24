@@ -51,7 +51,7 @@ _COMMANDS = {
     "plan": ("catalog/a11y/runner.py",
              "accessibility repair planning (validates, never writes)"),
     "query": ("query/chain.py",
-              "the failed-students question: not in this version "
+"the failed-students question: not in this version "
               "(Morrow refuses it)"),
 }
 

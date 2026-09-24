@@ -565,15 +565,16 @@ both modes.
   - If a result has `settings_untrusted: true`, the settings file failed
     its integrity check: tell the educator they are in plan mode and
     relay the repair steps in `message`.
-- Failed-students question ("who failed last week's quiz"): not in this
-  version. Reading quiz scores (the submissions and grades rows) has not
-  been tested on a real Canvas course, so those rows are not
-  live-proven and Morrow refuses them. `bin/morrow query` refuses the
-  question at once (mode `catalog-not-proven`), before it reads
-  anything or asks for a time zone. Tell the educator plainly that
-  this version cannot answer it, and do not try to answer it another
-  way: the submissions and gradebook catalog rows are refused too. They
-  can see scores in Canvas's own Gradebook.
+- Failed-students question ("who failed last week's quiz", "which
+  students scored under 70%"): not in this version. Reading quiz
+  scores (the submissions and grades rows) has not been tested on a
+  real Canvas course, so those rows are not live-proven and Morrow
+  refuses them. `bin/morrow query` refuses the question at once (mode
+  `catalog-not-proven`), before it reads anything or asks for a time
+  zone. Tell the educator plainly that this version cannot answer it,
+  and do not try to answer it another way: the submissions and
+  gradebook catalog rows are refused too. They can see scores in
+  Canvas's own Gradebook.
 - Where the two ids come from. The user id is the educator's
   signed-in Canvas account: every command uses the account pinned at
   first sign-in (`canvas:<account id>@<Canvas host>`), so the educator
@@ -640,8 +641,8 @@ relay, and every row not marked live-proven. Full declaration:
 - `install.sh`: the idempotent installer (Chromium locate, egress probe,
   `~/.morrow` layout, `helper/profile/` creation without ever wiping it,
   keepalive supervision (cron, or the background loop without cron),
-  helper launch, one-time onboarding notice, all 23
-  selftests, the secrets gate).
+  helper launch, the sign-in notice (repeats until sign-in completes),
+  all 23 selftests, the secrets gate).
 - `transport/`: the Chromium lane (`local_chromium.py`, `chromium_session.py`,
   `egress.py`, `proxy_forwarder.py`) and its selftests.
 - `dispatch/`: the governed executor, the admission gate, the policy, selftests.
@@ -693,7 +694,7 @@ beyond the examples above:
   memory-only rule); marks every unproven surface as NOT IMPLEMENTED
   or PENDING.
 - `knowledge/privacy-ferpa.md`: index of the privacy layer (learner
-  vault tokenization, when de-id applies, the opt-out override rule);
+  vault tokenization, when de-id applies, and why nothing turns it off);
   it indexes, never duplicates, the layer under `privacy/`.
 - `knowledge/api-catalog-guide.md`: the two catalogs (the 1137-op
   desktop research catalog vs the 457-row dispatch catalog), the

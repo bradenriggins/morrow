@@ -258,7 +258,7 @@ note "  2. stop the keepalive background loop and remove the keepalive cron entr
 note "  3. delete: ${TREE}"
 note "          ${MORROW_HOME}"
 note "          ${PROFILE_DIR}"
-note "          ${VAULT_PATH} (+ .key; the learner source vault, honoring MORROW_SOURCE_VAULT_PATH)"
+note "          ${VAULT_PATH} with its key, echo store, and lock files (the learner source vault, honoring MORROW_SOURCE_VAULT_PATH)"
 note "          upgrade backups ${TREE}.bak-* (incl. .PARTIAL) and failed trees ${TREE}.failed-*"
 # W6-P2-D3: the open-file-descriptor caveat must be acted on BEFORE the
 # destructive step, so it prints here (ahead of confirmation, and
@@ -509,6 +509,26 @@ fi
 # -- 3. delete the paths ---------------------------------------------------
 step_n=3
 note "--- ${step_n}. deleting install paths"
+# The vault's files are more than the vault itself: privacy/core.py locks
+# "<path>.lock", privacy/name_echo.py stores the echo store (the names the
+# educator typed) beside the vault as "<vault>.echo" with its own ".lock",
+# and an interrupted write leaves the staged temp: ".<basename>.tmp-<pid>-<hex>"
+# for the vault, and ".<basename>.key.tmp-<pid>-<hex>" / ".<basename>.echo.tmp-<pid>-<hex>"
+# for the key and the echo store (privacy/core.py _replace_exact_file). A
+# "<vault>*" glob would also match unrelated files in the vault's directory
+# (vault.jsonl, vault.json-old), so the known siblings and the whole
+# ".<basename>.*.tmp-*" family are enumerated explicitly. Everything in the
+# family must be deleted and verified, or "Gone: the learner source vault" is false.
+_VAULT_FAMILY=("${VAULT_PATH}" "${VAULT_PATH}.key" "${VAULT_PATH}.lock" \
+  "${VAULT_PATH}.echo" "${VAULT_PATH}.echo.lock")
+_VAULT_BASE="$(basename "${VAULT_PATH}")"
+while IFS= read -r -d '' _t; do
+  _VAULT_FAMILY+=("${_t}")
+done < <(find "$(dirname "${VAULT_PATH}")" -maxdepth 1 \
+  \( -name ".${_VAULT_BASE}.tmp-*" \
+     -o -name ".${_VAULT_BASE}.*.tmp-*" \) \
+  -print0 2>/dev/null)
+unset _t _VAULT_BASE
 # W4-P0-4/W4-P0-5/W4-P2-11: purge browser transient state (pending
 # envelopes holding raw provider payloads, brief files) through the
 # package's own purge_transient_state() before the blunt rm, so
@@ -529,7 +549,7 @@ if [ -d "${MORROW_HOME}/browser-pending" ] || [ -d "${MORROW_HOME}/browser-brief
     note "${_purge_out}"
   fi
 fi
-for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${VAULT_PATH}" "${VAULT_PATH}.key" "${_TRANSIENT_DIRS[@]}"; do
+for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${_VAULT_FAMILY[@]}" "${_TRANSIENT_DIRS[@]}"; do
   case "${_p}" in
     ""|"/"|"${HOME}"|"${HOME}/.") die "refusing to delete unsafe path: ${_p}" ;;
   esac
@@ -554,7 +574,7 @@ _delete_path() {
   fi
 }
 _REMOVED=""; _DELETE_FAILED=0
-for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${VAULT_PATH}" "${VAULT_PATH}.key" "${_TRANSIENT_DIRS[@]}"; do
+for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${_VAULT_FAMILY[@]}" "${_TRANSIENT_DIRS[@]}"; do
   _delete_path "${_p}"
 done
 # W4-P1-6: the installer leaves upgrade backups behind
@@ -574,7 +594,7 @@ unset _b _p
 step_n=4
 note "--- ${step_n}. verifying removal"
 _FAILED=0
-for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${VAULT_PATH}" "${VAULT_PATH}.key" "${_TRANSIENT_DIRS[@]}"; do
+for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${_VAULT_FAMILY[@]}" "${_TRANSIENT_DIRS[@]}"; do
   if [ -e "${_p}" ] || [ -L "${_p}" ]; then
     printf 'STILL PRESENT: %s\n' "${_p}" >&2
     _FAILED=1
@@ -602,7 +622,7 @@ note ""
 # W4-P1-6: the final summary enumerates what was ACTUALLY removed.
 note "Uninstall complete. Removed:"
 printf '%s' "${_REMOVED}" | sed 's/^/  /'
-note "Gone: the tree, ${MORROW_HOME}, the browser profile, the learner source vault (${VAULT_PATH} + .key), browser transient state (pending envelopes, briefs), upgrade backups, failed trees, the cron entries, and the running processes."
+note "Gone: the tree, ${MORROW_HOME}, the browser profile, every file of the learner source vault (${VAULT_PATH} with its key, echo store, and lock files), browser transient state (pending envelopes, briefs), upgrade backups, failed trees, the cron entries, and the running processes."
 note ""
 note "(The W4-P2-12 open-file-descriptor caveat printed before confirmation"
 note "still applies: the 'verified gone' checks above cover the filesystem,"

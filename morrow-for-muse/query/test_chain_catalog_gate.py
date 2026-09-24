@@ -94,6 +94,21 @@ def test_the_cli_refuses_before_the_helper_is_reached(monkeypatch, capsys):
     assert "helper" not in out.lower()
 
 
+def test_the_refusal_comes_before_any_canvas_read():
+    # The chain documents the failed-students question as a working
+    # capability while C-419 is pending [LEARNER-DATA]. The refusal must
+    # come before the reader, the time zone, and the roster, quizzes,
+    # assignments, and course reads, or Morrow reads six endpoints and
+    # then tells the educator the task is not tested (final sweep
+    # 2026-09-23, written before the fix).
+    reader = _Reader()
+    with pytest.raises(C.ChainFailure):
+        C.run_query("89585", "last_week", reader=reader, now_utc=NOW,
+                    tenant_base="https://school.example.edu",
+                    timezone="America/Chicago")
+    assert reader.paths == [], reader.paths
+
+
 def test_cli_requires_course():
     with pytest.raises(SystemExit):
         C.main(["show me all the students that failed last week's quiz"])
@@ -152,4 +167,4 @@ def test_no_doc_offers_the_question_while_it_is_refused(capsys):
     assert found == []
     assert "not in this version" in shown["bin/morrow --help"]
     skill = " ".join(shown["SKILL.md"].split())
-    assert "who failed last week's quiz\"): not in this version" in skill
+    assert 'students scored under 70%"): not in this version' in skill

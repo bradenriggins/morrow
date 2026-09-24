@@ -741,6 +741,18 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
             "'pip install -r requirements-optional.txt', then retry. "
             "Nothing was read and nothing was surfaced."
             % entry.get("name"))
+    # Give every string in the raw receipt the same reversible
+    # course-content projection the plain path gives first: form
+    # markers, and "(as written)" for text that already reads like a
+    # label. The boundary's own redaction then finds no raw identity
+    # form in free text (it leaves a known label, and a label marked
+    # "(as written)", unchanged) and labels person records only. Without
+    # this the boundary labeled free text with bare labels and no form
+    # markers, so saving that text back put a real student's name where
+    # the educator had written a label.
+    receipt = _project_course_content(
+        entry, {"receipt": receipt}, tenant_base, lane_context, error_cls,
+        protect_literals=True)["receipt"]
     boundary = _boundary.SourceMcpPrivacyBoundary({
         "bindings": lambda: [build_binding()],
         "load_roster": lambda _b: _boundary.source_privacy_roster(

@@ -18,6 +18,10 @@ Failure modes this suite pins down (written before the doc fix):
      written, because a name matches only as a whole word. The limits
      the agent and the educator read did not say so (final sweep
      2026-09-23).
+  7. SKILL.md said knowledge/privacy-ferpa.md covers "the opt-out
+     override rule", while SKILL.md and the privacy index say nothing
+     turns de-identification off. An agent could tell the educator a
+     student-name opt-out exists (final sweep 2026-09-23).
 """
 
 import os
@@ -49,6 +53,10 @@ def test_docs_do_not_make_the_false_claims():
         assert "69/69" not in text
         assert "has not landed" not in text
     assert "Two halves" not in policy
+    for text in (skill, kb):
+        assert "opt-out" not in text
+        assert "override rule" not in text
+    assert "why nothing turns it off" in skill
     assert "students find" in skill
     assert "names the educator types reach" in skill
     policy_json = _read("dispatch/admission_policy.json")

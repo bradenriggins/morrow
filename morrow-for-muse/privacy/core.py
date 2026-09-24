@@ -1759,6 +1759,10 @@ def redact_known_learner_text(value, context):
 _MOODLE_CAPABILITY_RE = re.compile(r"^(?:moodle|mod|block|enrol|report)/[a-z_]+:[a-z_]+$")
 _TOKEN_LABEL_RE = re.compile(
     r"\b(?:Student A[1-9][0-9]*|learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b")
+# The "(as written)" course-content marker, plain or percent-encoded in a
+# URL: a label followed by it is literal text, already projected.
+_AS_WRITTEN_REF_RE = re.compile(
+    r" ?\((?:as|As) written\)|%20%28(?:as|As)%20written%29")
 _WHOLE_ID_RE = re.compile(r"^[0-9]+$")
 
 
@@ -1780,6 +1784,12 @@ def _redact_known_learner_text_prepared(value, exact_context,
         reference = match.group(0)
         label = exact_context["referenceLabels"].get(reference)
         if not label:
+            # Text course_content.py already projected: "(as written)"
+            # marks a label the educator wrote as literal text, not a
+            # person reference. Leave it for the course-content restore;
+            # an unmarked unknown label still refuses (fail closed).
+            if _AS_WRITTEN_REF_RE.match(value, match.end()):
+                return reference
             raise PrivacyError("learner_roster_identity_unavailable")
         return label
 
@@ -2110,12 +2120,22 @@ def _normalized_identity_fields(value):
             for key, candidate in value.items()}
 
 
+# A projected reference (the stable label, its marker form, or the
+# one-time token) carries no identity information: a record field that
+# already holds one was projected by an outer pass, and treating it as
+# a fresh name made the identity merge refuse the record as a conflict.
+_PROJECTED_REFERENCE_RE = re.compile(
+    r"^(?:(?:Student A[1-9][0-9]*)(?: or Student A[1-9][0-9]*)*"
+    r"|learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+    r"(?: \([^()]{1,60}\))?$")
+
+
 def _identity_value(fields, keys):
     for key in keys:
         candidate = fields.get(_normalize_privacy_key(key))
         if isinstance(candidate, (str, int)) and not isinstance(candidate, bool):
             normalized = str(candidate).strip()
-            if normalized:
+            if normalized and not _PROJECTED_REFERENCE_RE.match(normalized):
                 return normalized
     return None
 

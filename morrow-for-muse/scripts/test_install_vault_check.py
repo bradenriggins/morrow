@@ -120,7 +120,9 @@ def test_install_warns_when_cryptography_is_missing(carved):
     for feature in ("by name", "course roster",
                     "names in course pages are hidden"):
         assert feature in head, (feature, head)
-    # Tasks this version refuses anyway are not listed as needing it.
+    # The failed-students question is not in this version (its
+    # submissions read is not live-proven), so the warning no longer
+    # offers it as what cryptography enables.
     for refused in ("failed-students", "grades", "submissions"):
         assert refused not in head, (refused, head)
 

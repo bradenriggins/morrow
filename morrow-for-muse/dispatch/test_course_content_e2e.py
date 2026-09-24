@@ -63,6 +63,23 @@ Failure modes this suite pins down (written before the code):
      page the agent names by its labeled address is read, prepared, and
      changed at its real address. (Muse engine audit, 2026-09-23,
      written before the fix.)
+ 13. A read on a learner-signal route (a page revision, C-331; the
+     C-328 revert response behaves the same) carried course text with
+     bare labels and no form markers, and a page write whose body says
+     "students" took that route too. Saving that text back put a real
+     student's name where the educator wrote "Student A7" and expanded
+     a bare first name to the full name. Learner-path receipts now get
+     the same reversible course-content projection the plain path
+     gives, so every reference saves back as it was written. (Final
+     sweep 2026-09-23, written before the fix.)
+ 14. A Canvas sign-in that died during a read's roster read (the
+     educator asked to show a page) was quarantined as a paused change
+     with op id None, and the helper page and `state_machine.py notify`
+     told the educator a change was stopped and waited for their OK.
+     Only a write that has an op id is parked as a paused change; a
+     read records a session_death record, the notice says nothing was
+     paused, and the agent is not asked to have the educator approve a
+     read. (Final sweep 2026-09-23, written before the fix.)
 
 The run writes a repeatable artifact of the flow to
 .selftest-work/course-content-e2e-artifact.json (labels only).
@@ -387,12 +404,20 @@ class ChromiumSessionDead(ex.ExecutorError):
     as dispatch/executor.py _is_session_dead does)."""
 
 
+class DeadAtAttach(Canvas):
+    """A session that dies at attach/probe time: even base_for fails,
+    so the death surfaces inside the dispatch's own try (post-claim)."""
+
+    def base_for(self, provider):
+        raise ChromiumSessionDead("Canvas session died")
+
+
 def test_a_sign_in_that_died_at_the_roster_read_arms_the_resign_in_flow(
         monkeypatch):
     armed = []
     monkeypatch.setattr(ex, "_on_session_death",
-                        lambda op_id, name, evidence, write_sent=False:
-                        armed.append((name, write_sent)))
+                        lambda op_id, name, evidence, write_sent=False,
+                        is_write=True: armed.append((name, write_sent)))
 
     class Dead(Canvas):
         def raw_request(self, method, url, headers, body, is_write=False,
@@ -677,3 +702,162 @@ def _artifact(record):
     assert _leaks(text) == [], text
     with open(ARTIFACT, "w", encoding="utf-8") as fh:
         fh.write(text + "\n")
+
+
+# -- 13 -----------------------------------------------------------------------
+
+# The revision's text: the same names as the page, the literal label
+# spelled by the educator, and a bare first name. The page PUT case
+# writes it back with one word changed.
+REVISION_BODY = ("<p>Great work this week, Jane Doe. Mia Chen will lead "
+                 "Friday, Priya Patel sends notes, ask Robert. Student A7 "
+                 "is the rubric's example name.</p>")
+
+
+class RevisionCanvas(Canvas):
+    """The course also has a page revision history: the latest revision
+    holds the revision body, and reverting to it returns that body."""
+
+    def raw_request(self, method, url, headers, body, is_write=False,
+                    max_bytes=None):
+        path = urllib.parse.urlsplit(url).path
+        if method == "GET" and path == \
+                "/api/v1/courses/1/pages/week-1/revisions/latest":
+            self.calls.append((method, url, None))
+            return self._ok({"revision_id": 3, "latest": True,
+                             "title": "Week 1", "body": REVISION_BODY})
+        if method == "POST" and path == \
+                "/api/v1/courses/1/pages/week-1/revisions/3":
+            self.calls.append((method, url, None))
+            return self._ok({"revision_id": 2, "latest": False,
+                             "title": "Week 1", "body": REVISION_BODY})
+        return super().raw_request(method, url, headers, body, is_write,
+                                   max_bytes)
+
+
+def _revision_read(session):
+    return ex.dispatch_catalog_op(
+        "canvas_show_revision_courses_latest", "GET",
+        "/api/v1/courses/{course_id}/pages/{url_or_id}/revisions/latest",
+        "read", dict(PAGE_PARAMS), pack=_pack(), session=session)
+
+
+def _revert(session):
+    return ex.dispatch_catalog_op(
+        "canvas_revert_to_revision_courses", "POST",
+        "/api/v1/courses/{course_id}/pages/{url_or_id}/revisions/"
+        "{revision_id}", "write",
+        {"course_id": COURSE, "url_or_id": "week-1", "revision_id": 3},
+        pack=_pack(), session=session, mode_ctx=_ctx())
+
+
+def test_a_revision_read_is_saved_back_as_it_was_written():
+    _edit_mode()
+    session = RevisionCanvas()
+    rev = _revision_read(session)
+    body = rev["receipt"]["body"]
+    assert _leaks(rev) == [], json.dumps(rev)[:2000]
+    assert _leaks(_journal_text()) == [], _journal_text()[-2000:]
+    assert "Student A7 (as written)" in body, body
+    assert "(first name)" in body, body
+    _update(session, {"body": body.replace("Friday", "Monday")})
+    puts = [b for m, _u, b in session.calls if m == "PUT"]
+    assert puts[0]["wiki_page"]["body"] \
+        == REVISION_BODY.replace("Friday", "Monday"), puts
+
+
+def test_a_revert_receipt_is_saved_back_as_it_was_written():
+    _edit_mode()
+    session = RevisionCanvas()
+    out = _revert(session)
+    body = out["receipt"]["body"]
+    assert _leaks(out) == [], json.dumps(out)[:2000]
+    assert "Student A7 (as written)" in body, body
+    assert "(first name)" in body, body
+    _update(session, {"body": body.replace("Friday", "Monday")})
+    puts = [b for m, _u, b in session.calls if m == "PUT"]
+    assert puts[0]["wiki_page"]["body"] \
+        == REVISION_BODY.replace("Friday", "Monday"), puts
+
+
+def test_a_page_put_whose_body_says_students_shows_marked_text():
+    _edit_mode()
+    session = RevisionCanvas()
+    shown = _show(session)["receipt"]["body"]
+    out = _update(session, {"body": shown.replace("Friday",
+                                                  "Monday, students")})
+    assert _leaks(out) == [], json.dumps(out)[:2000]
+    assert "Student A7 (as written)" in out["receipt"]["body"], \
+        out["receipt"]["body"]
+    assert "(first name)" in out["receipt"]["body"], \
+        out["receipt"]["body"]
+
+
+# -- 14 -----------------------------------------------------------------------
+
+def test_a_read_that_dies_at_the_roster_read_is_not_a_paused_change():
+    # The real _on_session_death runs (no stub): a read quarantined as a
+    # paused change made the helper page and `state_machine.py notify`
+    # say a change was stopped and waited for the educator's OK, and
+    # SKILL.md step 5 would have the agent ask them to approve a read.
+    from reauth import state_machine as rsm
+
+    class Dead(Canvas):
+        def raw_request(self, method, url, headers, body, is_write=False,
+                        max_bytes=None):
+            self.calls.append((method, url, None))
+            raise ChromiumSessionDead("Canvas session died")
+
+    before = len(rsm.paused_ops())
+    with pytest.raises(ChromiumSessionDead):
+        _show(Dead())
+    assert len(rsm.paused_ops()) == before
+    with open(rsm.NOTIFY_PATH, encoding="utf-8") as fh:
+        notice = fh.read()
+    assert "No change was in progress, so nothing was paused." in notice, \
+        notice
+    assert "waits for your OK" not in notice
+    rsm.lift_halt()
+
+
+def test_a_read_that_dies_at_attach_or_probe_time_is_not_a_paused_change():
+    # Security-review finding 2 on lane/muse-s3-1 (2026-09-24, written
+    # before the fix): the attach/probe-time death branch called
+    # _on_session_death without is_write, so a READ that died there was
+    # still parked as a paused change the educator is asked to approve.
+    from reauth import state_machine as rsm
+
+    before = len(rsm.paused_ops())
+    with pytest.raises(ChromiumSessionDead):
+        _show(DeadAtAttach())
+    assert len(rsm.paused_ops()) == before
+    with open(rsm.NOTIFY_PATH, encoding="utf-8") as fh:
+        notice = fh.read()
+    assert "No change was in progress, so nothing was paused." in notice, \
+        notice
+    assert "waits for your OK" not in notice
+    rsm.lift_halt()
+
+
+def test_a_write_that_dies_at_attach_or_probe_time_is_still_parked():
+    # The write keeps the parking the lane relies on for recovery. The
+    # death is at attach/probe time, after the roster read and the
+    # target read, on the write's own provider call.
+    from reauth import state_machine as rsm
+
+    class DeadWrite(Canvas):
+        def raw_request(self, method, url, headers, body, is_write=False,
+                        max_bytes=None):
+            self.calls.append((method, url, None))
+            if is_write:
+                raise ChromiumSessionDead("Canvas session died")
+            return super().raw_request(method, url, headers, body,
+                                       is_write, max_bytes)
+
+    _edit_mode()
+    session = DeadWrite()
+    with pytest.raises(ChromiumSessionDead):
+        _update(session, {"body": "<p>Signed, your users.</p>"})
+    paused = rsm.paused_ops()
+    assert any(p.get("op_id") for p in paused), paused
+    rsm.lift_halt()

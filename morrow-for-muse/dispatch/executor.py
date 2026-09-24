@@ -382,13 +382,23 @@ def _uncertain_write_from_session_death(exc) -> bool:
     return False
 
 
-def _on_session_death(op_id, entry_name, evidence, write_sent=False):
+def _on_session_death(op_id, entry_name, evidence, write_sent=False,
+                      is_write=True):
     """W4-P2-1: run the re-auth state machine when session death is
     detected: impose the write halt, quarantine the op, and write the
     educator notification. Runs after detection and before the original
     exception is re-raised, so the run stops loudly instead of writing
     through a half-dead session. write_sent is True when the write was
     already sent, so Canvas may hold the change.
+
+    is_write is False for a read, and for a plan-write's own reads: only
+    a write that has an op id is parked as a paused change. A read, and
+    a write whose op id does not exist yet, still halt and notify, but
+    the death is recorded as a session_death record (as
+    ChromiumSession._notify_reauth_machine records it), never as an op
+    the educator is asked to approve. (Final sweep 2026-09-23: a read
+    was quarantined as a paused change, so the notice said a change was
+    stopped while nothing was being changed.)
 
     Lazy-imports reauth.state_machine: the state machine never imports
     the executor, so there is no import cycle. Best effort by design:
@@ -407,13 +417,26 @@ def _on_session_death(op_id, entry_name, evidence, write_sent=False):
         print("MORROW WARNING: re-auth halt could not be imposed for op "
               "%s (%s); the original session-death error is still raised "
               "below" % (op_id, type(exc).__name__), file=sys.stderr)
-    try:
-        _rsm.quarantine_op(op_id, entry_name, str(evidence)[:200],
-                           write_sent=write_sent)
-    except Exception as exc:
-        print("MORROW WARNING: op %s could not be quarantined after "
-              "session death (%s); the original error is still raised "
-              "below" % (op_id, type(exc).__name__), file=sys.stderr)
+    if is_write and op_id is not None:
+        try:
+            _rsm.quarantine_op(op_id, entry_name, str(evidence)[:200],
+                               write_sent=write_sent)
+        except Exception as exc:
+            print("MORROW WARNING: op %s could not be quarantined after "
+                  "session death (%s); the original error is still raised "
+                  "below" % (op_id, type(exc).__name__), file=sys.stderr)
+    else:
+        # A read, or a write that has no op id yet: record the death the
+        # same way the lane's session death is recorded. paused_ops()
+        # never counts it, so the notice asks the educator to re-sign
+        # in, not to approve a read.
+        try:
+            _rsm.quarantine_session("session_dead", detection)
+        except Exception as exc:
+            print("MORROW WARNING: the session death of op %s could not "
+                  "be recorded after session death (%s); the original "
+                  "error is still raised below"
+                  % (op_id, type(exc).__name__), file=sys.stderr)
     # W4-P2-1: on_expiry_detected wrote the educator notification BEFORE
     # this op was quarantined, so its "N op(s) paused" count is stale.
     # Detection and quarantine still run before the raise; refresh the
@@ -8256,7 +8279,8 @@ def _read_course_roster_first(entry, params, session, tenant_base,
         if _is_session_dead(exc):
             _on_session_death(op_id, entry.get("name"),
                               "session dead while reading the course "
-                              "roster: %s" % str(exc)[:200])
+                              "roster: %s" % str(exc)[:200],
+                              is_write=entry.get("effects") == "write")
         raise
 
 
@@ -8346,7 +8370,8 @@ def _label_course_list(entry, result, session, tenant_base, op_id):
                 if _is_session_dead(exc):
                     _on_session_death(op_id, entry.get("name"),
                                       "session dead while reading a listed "
-                                      "course's roster: %s" % str(exc)[:200])
+                                      "course's roster: %s" % str(exc)[:200],
+                                      is_write=False)
                 raise
         try:
             shown.append(_wire.project_course_text(
@@ -8805,7 +8830,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                 # and recovery needs explicit re-approval.
                 _on_session_death(op_id, entry_name,
                                   "session dead at attach/probe time: %s"
-                                  % str(exc)[:200])
+                                  % str(exc)[:200], is_write=is_write)
             # W5-P2-1: claim released; a pending shutdown stops here.
             _raise_if_shutdown_requested()
             raise

@@ -397,6 +397,14 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                     "got %r" % (timezone,)))
         parsed = {"quiz_ref": quiz_ref, "threshold": threshold}
         if synthetic_rows is None:
+            # The submissions read (C-419) is pending [LEARNER-DATA],
+            # not live-proven, so a live failed-students run refuses
+            # here, before the time zone, the reader health check, and
+            # the roster, quizzes, assignments, and course reads: the
+            # task is not tested on a live Canvas course in this
+            # version, and Morrow must not read a single endpoint
+            # before it says so. Synthetic fixtures (the self-tests)
+            # never touch Canvas and keep the chain runnable.
             try:
                 _require_live_proven(_SUBMISSIONS_READ)
             except Exception as exc:  # CatalogNotProven or unreadable catalog
@@ -481,6 +489,8 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
             provenance = "SYNTHETIC fixtures (clearly labeled; no live " \
                 "learner data read)"
         else:
+            # The live-proven gate for the submissions list already ran
+            # right after the argument check, before any Canvas read.
             status, submissions, note = reader.get_paginated(
                 "/api/v1/courses/%s/assignments/%s/submissions"
                 "?per_page=100&include[]=user" % (course_id, aid))

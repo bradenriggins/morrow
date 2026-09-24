@@ -172,7 +172,7 @@ If CDP attach fails:
    cmdline proves it belongs to this tree. A foreign tree's processes
    are refused, never killed.
 
-## Install, onboarding sentinel, and the one-time sign-in notice
+## Install, onboarding sentinel, and the sign-in notice
 
 `install.sh` is idempotent (safe to run twice) and never writes
 secrets. What it does: checks python3 >= 3.11 (3.10 is refused),

@@ -22,12 +22,19 @@ finding, 2026-09-23):
      it. (Round-2 finding muse-ux-r2-expiry-notice-uncertain-paused,
      2026-09-23, written before the fix.)
   4. The notices said "operation(s)". They say "change" or "changes".
+  5. The educator walkthrough (content/setup-guide.md), the agent's
+     first-run table (FIRST_RUN.md), and the lane's re-sign-in steps
+     (transport/onboarding_reauth.md) still said that on expiry nothing
+     was lost and paused work resumes, while the notice says a change
+     may already be in Canvas and is never sent again (final sweep
+     2026-09-23, written before the fix).
 
 Hermetic: the re-auth store and the pin record live in pytest's
 tmp_path; the helper browser is a fake transport.
 """
 
 import os
+import re
 import sys
 import uuid
 
@@ -213,3 +220,35 @@ def test_skill_says_to_check_the_course_before_preparing_a_sent_change_again():
         skill = " ".join(fh.read().split())
     assert "may already be in Canvas" in skill
     assert "write_sent=True" in skill
+
+
+def _passage(rel, start, stop):
+    """The lines of one page from the line holding start up to the next
+    line that begins with stop (the start line alone when stop is None),
+    whitespace collapsed."""
+    with open(os.path.join(_TREE, rel), encoding="utf-8") as fh:
+        lines = fh.read().splitlines()
+    first = next(n for n, line in enumerate(lines) if start in line)
+    last = first + 1
+    while stop is not None and last < len(lines) \
+            and not lines[last].startswith(stop):
+        last += 1
+    return " ".join(" ".join(lines[first:last]).split())
+
+
+# Where each page tells what happens when the sign-in expires.
+_EXPIRY_PASSAGES = (
+    ("content/setup-guide.md", "what session expiry looks like", "## "),
+    ("FIRST_RUN.md", "| Signed out / session expired |", None),
+    ("transport/onboarding_reauth.md", "On detection the agent", "## "),
+)
+
+
+@pytest.mark.parametrize("rel,start,stop", _EXPIRY_PASSAGES)
+def test_the_expiry_docs_match_the_notice(rel, start, stop):
+    passage = _passage(rel, start, stop).lower()
+    assert "nothing was lost" not in passage, (rel, passage)
+    assert "resum" not in passage, (rel, passage)
+    assert "may already be in canvas" in passage, (rel, passage)
+    assert re.search(r"checks? the course first", passage), (rel, passage)
+    assert "waits for" in passage, (rel, passage)
