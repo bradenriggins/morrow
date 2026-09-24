@@ -36,6 +36,19 @@ audit round 4, H3a/H3b, 2026-09-22):
      educator in again. Every error now carries a mode and a reference
      and names the real remedy: helper-down, the roster read failed,
      or the learner vault is missing.
+ 13. (round-2 finding muse-ux-r2-wrong-course-never-not-found) every
+     roster read failure, a 404 for a course number that does not exist
+     included, gave the failed-students query's message ("no students
+     were sorted"), so the agent retried a course number that cannot
+     work. Canvas's answer for the course now reaches the educator: 404
+     says the course number may be wrong, 401 and 403 say the account
+     may not open it, and any other failure is the course's student
+     list that could not be read.
+ 14. (round-2 finding muse-ux-r2-students-find-skips-account-pin) the
+     roster was read as whatever Canvas account was signed in to the
+     helper. With an account pinned, students find first reads which
+     account is signed in; a different account is refused before the
+     roster is read, and writes are paused, as on every other read path.
 
 Needs the optional 'cryptography' package (labels come from the
 encrypted vault); skips without it except the routing test.
@@ -114,6 +127,8 @@ def fake_canvas(roster=ROSTER, sections=SECTIONS):
 
     def fetch(url):
         calls.append(url)
+        if url.endswith("/api/v1/users/self"):
+            return 200, {}, json.dumps({"id": 4242, "name": "Pat Teacher"})
         if "/sections" in url:
             return 200, {}, json.dumps(sections)
         if "/users" in url:
@@ -457,12 +472,98 @@ def test_signed_out_helper_asks_for_a_sign_in(home, helper_env, capsys):
     assert rc == 1
 
 
-def test_roster_read_failure_is_a_live_read_failure(home):
+def test_roster_read_failure_is_the_course_student_list(home):
     def fetch(url):
         return 500, {}, "<html>Internal error</html>"
     out = _funneled(_find("Jane Doe", fetcher=fetch),
-                    "query-live-read-failed")
-    assert "not an empty class" in out["message"]
+                    "course-roster-unavailable")
+    assert "student list" in out["message"]
+    assert "not an empty class" not in out["message"]
+
+
+def _roster_answers(status, body):
+    def fetch(url):
+        fetch.calls.append(url)
+        if "/users?" in url:
+            return status, {}, body
+        return fake_canvas()(url)
+    fetch.calls = []
+    return fetch
+
+
+def test_a_course_canvas_does_not_know_says_the_course_number_is_wrong(
+        home):
+    out = _funneled(_find("Jane Doe", fetcher=_roster_answers(
+        404, '{"errors": [{"message": "The specified resource does not '
+             'exist."}]}')), "canvas-not-found")
+    assert "course number" in out["message"], out["message"]
+    assert "try once more" not in out["message"]
+    assert "sorted" not in out["message"]
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_course_the_account_may_not_open_is_not_permitted(home, status):
+    out = _funneled(_find("Jane Doe", fetcher=_roster_answers(
+        status, '{"status": "unauthorized", "errors": [{"message": "user '
+                'not authorized to perform that action"}]}')),
+        "canvas-not-permitted")
+    assert "permission" in out["message"], out["message"]
+
+
+@pytest.fixture
+def pinned(home, monkeypatch):
+    """Account 4242 pinned, with the pin and the write halt in this
+    test's home."""
+    from reauth import state_machine as rsm
+    from transport import state as lane_state
+    monkeypatch.setattr(rsm, "STORE_DIR", home)
+    for name in ("STATE_PATH", "HALT_PATH", "QUAR_PATH", "NOTIFY_PATH",
+                 "APPROVAL_PATH", "SESSION_PATH", "SESSION_PREV",
+                 "LAST_DEATH_PATH", "SESSION_PREV_MONO"):
+        monkeypatch.setattr(rsm, name, os.path.join(
+            home, os.path.basename(getattr(rsm, name))))
+    monkeypatch.setattr(lane_state, "STATE_PATH",
+                        os.path.join(home, "browser_lane.json"))
+    lane_state.save(BASE, 4242, "Pat Teacher")
+    return rsm
+
+
+def _signed_in_as(account_id, status=200):
+    fake = fake_canvas()
+
+    def fetch(url):
+        fetch.calls.append(url)
+        if url.endswith("/api/v1/users/self"):
+            return status, {}, json.dumps({"id": account_id})
+        return fake(url)
+    fetch.calls = []
+    return fetch
+
+
+def test_another_signed_in_account_is_refused_before_the_roster(pinned):
+    fetch = _signed_in_as(9999)
+    out = _find("Jane Doe", fetcher=fetch)
+    assert out["ok"] is False and out["status"] == "refused", out
+    assert out["mode_id"] == "canvas-account-mismatch", out
+    assert [u for u in fetch.calls if "/users?" in u] == [], fetch.calls
+    assert pinned.is_write_halted()
+    assert _no_secrets(out) == [], out
+
+
+def test_the_pinned_account_reads_the_roster(pinned):
+    fetch = _signed_in_as(4242)
+    out = _find("Jane Doe", fetcher=fetch)
+    assert out["status"] == "resolved", out
+    assert fetch.calls[0].endswith("/api/v1/users/self"), fetch.calls
+    assert not pinned.is_write_halted()
+
+
+def test_an_account_check_that_fails_reads_nothing(pinned):
+    fetch = _signed_in_as(None, status=500)
+    out = _find("Jane Doe", fetcher=fetch)
+    assert out["ok"] is False, out
+    assert out["mode_id"] == "canvas-account-check-failed", out
+    assert [u for u in fetch.calls if "/users?" in u] == [], fetch.calls
 
 
 def test_missing_vault_is_learner_data_gated(home, monkeypatch):
@@ -483,3 +584,11 @@ def test_unrecorded_lookup_is_funneled(home, monkeypatch):
     assert out["ok"] is False and out["status"] == "error", out
     assert out["correlation_id"] and "student" not in out
     assert _CLASS_NAME_RE.findall(out["message"]) == [], out["message"]
+
+
+def test_skill_says_the_lookup_checks_the_account_and_the_course():
+    with open(os.path.join(TREE, "SKILL.md"), encoding="utf-8") as fh:
+        skill = " ".join(fh.read().split())
+    flow = skill[skill.index("### Working by name"):]
+    assert "a different account is refused before anything is read" in flow
+    assert "canvas-not-found" in flow

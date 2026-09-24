@@ -8237,6 +8237,17 @@ def _read_course_roster_first(entry, params, session, tenant_base,
         _wire.remember_course_roster(tenant_base, course_id, identities)
     except (ProviderHttpError, CourseRosterUnavailable, ValueError,
             TypeError) as exc:
+        if isinstance(exc, ProviderHttpError) and exc.status in (401, 403,
+                                                                 404):
+            # Canvas's answer for the course itself: no such course for
+            # this account (the number is wrong), or not allowed to open
+            # it. Trying again cannot help, so the educator hears which.
+            refused = ProviderHttpError(
+                exc.status, "the student list of course %s" % course_id,
+                body=exc.body)
+            refused.provider = "canvas"
+            refused.operation_kind = "read"
+            raise refused from None
         detail = exc.status if isinstance(exc, ProviderHttpError) \
             else type(exc).__name__
         raise CourseRosterUnavailable(

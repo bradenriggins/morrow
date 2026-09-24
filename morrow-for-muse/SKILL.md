@@ -811,8 +811,10 @@ The educator names students; you never guess which one they mean.
 
 1. The educator names a student. Run `bin/morrow students find --course C
    --conversation-id <this conversation's id> "<the name exactly as the
-   educator typed it>"`. It reads the course roster through the login
-   helper and prints one JSON object.
+   educator typed it>"`. It checks that the helper is signed in to the
+   Canvas account pinned at first sign-in (a different account is
+   refused before anything is read, and writes pause), then reads the
+   course roster through the login helper and prints one JSON object.
 2. `status: resolved`: one student matched. Use `student` (the
    label) or `shown_as` ("Jane Doe (Student A3)") wherever a write
    needs that student. From now on in this conversation, outputs show
@@ -828,6 +830,9 @@ The educator names students; you never guess which one they mean.
    concluded enrollments (`--include-inactive`, `--include-concluded`).
    `status: refused` or `error`: nothing was looked up. Relay
    `message` and follow `next_step`; `correlation_id` is the reference.
+   A course Canvas cannot find (mode `canvas-not-found`) has the wrong
+   number: find the course by name and run the lookup again with its
+   number.
    `--course` takes only the course's Canvas number, never its SIS
    form: find the course by name (canvas_list_courses) first.
 5. Write by label: put the label (or the `shown_as` form) where the

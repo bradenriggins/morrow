@@ -23,6 +23,10 @@ Failure modes this suite pins down (written before the fix):
   3. A session that ends during the write left the op unpaused, and the
      notice said "No change was in progress". The op must be paused
      (quarantined) and the notice must not say nothing was in progress.
+  4. (finding muse-ux-r2-wrong-course-never-not-found) a read in a
+     course Canvas does not know reached unknown-nothing-sent in script
+     mode (course-roster-unavailable in process). It must say Canvas
+     could not find it and that the course number may be wrong.
 
 Only the browser transport is replaced (a sitecustomize on PYTHONPATH
 wraps the Chromium lane's session with a scripted Canvas). The command
@@ -87,6 +91,10 @@ FAKE_CANVAS = textwrap.dedent('''
             if route == "/api/v1/users/self":
                 return 200, {}, json.dumps({"id": 4242,
                                             "name": "Pat Teacher"})
+            if route.startswith("/api/v1/courses/") and not (
+                    route + "/").startswith("/api/v1/courses/%(course)s/"):
+                return 404, {}, json.dumps({"errors": [
+                    {"message": "The specified resource does not exist."}]})
             if route == "/api/v1/courses/%(course)s":
                 return 200, {}, json.dumps({"id": %(course)s,
                                             "name": "Biology 101"})
@@ -265,3 +273,18 @@ def test_a_session_that_ends_during_the_write_pauses_the_change(world):
     assert "resume" not in notice
     _record("session ended during the write", mode_id=payload["mode_id"],
             quarantined=True, notice_says_may_be_in_canvas=True)
+
+
+def test_a_course_number_canvas_does_not_know_is_reported_not_found(world):
+    """Finding muse-ux-r2-wrong-course-never-not-found: the course's
+    student list answers 404, so the course number is wrong."""
+    proc = _run(world, [
+        "catalog", "--name", "canvas_get_course_settings", "--method", "GET",
+        "--path", "/api/v1/courses/{course_id}/settings", "--class", "read",
+        "--params", json.dumps({"course_id": "12345"}),
+        "--backend", "chromium"])
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    payload = _payload(proc)
+    assert payload["mode_id"] == "canvas-not-found", payload
+    assert "course number" in payload["message"]
+    _record("unknown course number", mode_id=payload["mode_id"])
