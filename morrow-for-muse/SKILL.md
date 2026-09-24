@@ -955,9 +955,9 @@ mark and writes a restore marker; the journal stays fail-closed until
 **Journal secret lost (W6-P1-3):** Reconcile in-flight ops against the
 provider FIRST, then `python3 -m dispatch.executor
 journal-recover-secret --yes --reason "secret lost; in-flight ops
-checked in Canvas"`. The reason is at least 20 characters and says
-what you checked. This re-keys under a new secret, preserving op_id replay protection with
-provenance downgraded to operator attestation.
+checked in Canvas"`: the reason says what you checked, in 20
+characters or more. This re-keys under a new secret, preserving op_id
+replay protection with provenance downgraded to operator attestation.
 
 **Missing archives (W6-P1-4):** The executor fails closed naming the
 missing archives. Restore from backup, then `python3 -m
