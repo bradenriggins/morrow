@@ -205,8 +205,10 @@ Before any archive dispatch:
   lookup from a bank to every quiz drawing from it. A bank can be in
   use by a course nobody opened. The educator approves with that
   understood.
-- The admission ceremony applies in full (frozen plan, educator-signed
-  approval, no write halt).
+- The admission ceremony applies in plan mode (frozen plan,
+  educator-signed approval, no write halt); in edit mode the archive
+  runs directly (a deletion: the executor asks first while
+  `confirm_destructive_writes` is on).
 - A disposable test bank archived in a lifecycle battery follows the
   same ceremony; "it is only a test bank" is not a bypass.
 

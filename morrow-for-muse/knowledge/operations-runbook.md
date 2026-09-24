@@ -57,9 +57,12 @@ The same gate also runs the absolute refusals: `never_dispatch` rows
 (blueprint, SIS, conversations, feature flags, the quiz
 submission-users message, and any change to CSP settings; reading a
 course's CSP settings, C-94, is a live-proven read), `unsupported`,
-`evidence-hold`, and `learner-data` (URL substrings `/users/`,
+and `evidence-hold`. Learner-data (URL substrings `/users/`,
 `/enrollments`, `/submissions`, `/gradebook`, `/grades`, `/analytics`,
-`/ai_conversations`, `/ai_experiences`; `/users/self` excepted).
+`/ai_conversations`, `/ai_experiences`; `/users/self` excepted) is a
+contingent refusal: it dispatches de-identified on the Chromium lane
+with the encrypted vault and is refused anywhere else (see
+Dispatching below).
 
 **Important caveat:** a catalog row marked live-proven can still be
 held by the admission policy: `evidence_holds` in
@@ -273,9 +276,13 @@ runs it (`plan-write`, then `approve-write`).
 
 ## Dispatching
 
-Reads need no approval (except learner-data reads, which the admission
-gate refuses on every tenant regardless). Example (tool name must be a
-real catalog row):
+Reads need no approval. A learner-data read (roster rows, anything the
+policy's learner-data signals hit) runs on the Chromium lane only when
+the optional `cryptography` package is installed: every receipt is
+de-identified to labels (Student A1 and friends) before anyone sees
+it, so no name, email, or login ever reaches the assistant. Without
+that package the same read is refused (nothing was sent). Example
+(tool name must be a real catalog row):
 
 ```
 PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py catalog \
@@ -287,10 +294,11 @@ PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py catalog \
 
 `--params` is a JSON object that fills the `{slots}` in the path
 template. Through the CLI it fills path slots only; there is no CLI
-flag for query args like `per_page`. To send a body or query block,
+flag for query args like `per_page`. `--body` takes the request body
+as a JSON object string (the write's intent; the readback compares
+against it). There is no `--query` flag: to page deliberately,
 dispatch programmatically through `dispatch_catalog_op(...)` in
-`dispatch/executor.py` with `extra={"body": {...}}` or
-`extra={"query": {...}}`.
+`dispatch/executor.py` with `extra={"query": {...}}`.
 
 For writes, use the typed `plan-write` and `approve-write` commands
 (SKILL.md): they build the frozen plan, the approval, and the course
@@ -338,11 +346,12 @@ use them: the standing rule is Chromium-only, no-PAT auth through
 the educator's browser session. A "faster" backend that asks you for
 a token, cookie, or PAT is a refusal, not a shortcut.
 
-**Approval rule:** never mint or sign an approval yourself. Approvals
-are educator-signed through `dispatch/admission.py` (the educator
-states the exact action in their own words); your job is to present
-the exact action in plain language and hand them the record to sign.
-A self-minted approval is a ceremony violation: stop and report it.
+**Approval rule:** never mint or sign an approval yourself, and never
+gate on the educator's wording: any non-empty educator reply approves
+(plan-write prints the exact approve-write command). Your job is to
+present the change in plain language, run approve-write with the
+educator's reply as the authorization text, and say what happened. A
+self-minted approval is a ceremony violation: stop and report it.
 
 Destructive operations that are evidence-held (course
 conclude/delete, anything on the policy's evidence-hold list) are

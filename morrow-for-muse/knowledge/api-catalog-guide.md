@@ -148,9 +148,9 @@ exclusion). So is any request, on any route, that sets
 `as_user_id` (Canvas acts as that person).
 
 Grades/submissions/gradebook: no live-proven grades or submissions
-rows (all pending or excluded). Learner-data gated. The admission
-gate refuses them on every tenant, and nothing overrides that. See
-`knowledge/privacy-ferpa.md`.
+rows (all pending or excluded), so the catalog gate refuses them.
+Learner-data gated: the family would dispatch only on the Chromium
+lane with the encrypted vault. See `knowledge/privacy-ferpa.md`.
 
 Moodle: proven in a sandbox, not packaged. **NOT IMPLEMENTED** here.
 Blackboard: no implementation exists. **NOT IMPLEMENTED** here (see
