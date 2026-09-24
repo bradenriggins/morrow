@@ -1161,6 +1161,7 @@ class InstallerController {
     });
     if (result.canceled || result.filePaths.length !== 1) return false;
     const materials = await canonicalDirectory(result.filePaths[0]);
+    await this.admitMaterialsFolder(materials);
     return this.withDesktopMutation(async (transaction) => {
       const record = await this.record();
       // Read what the change has to write before it writes anything, so a record
@@ -1190,6 +1191,61 @@ class InstallerController {
       for (const change of staged) await change.commit?.().catch(() => {});
       return true;
     });
+  }
+
+  /**
+   * Refuses a materials folder Morrow cannot work in, before anything is
+   * written: a folder the runtime refuses as its workspace, which no assistant
+   * could start Morrow in, and a folder that is, holds, or sits inside one of
+   * Morrow's own folders. Morrow's own default Materials folder is allowed.
+   */
+  async admitMaterialsFolder(materials) {
+    if (await this.workspaceRefusedByRuntime(materials)) throw errorDetails("materials_folder_too_broad");
+    const userData = this.paths.userData;
+    const realUserData = await fs.realpath(userData).catch(() => userData);
+    // The Blackboard connection file and its credential folder live in the home
+    // folder, outside the user-data folder. The connection file names its
+    // secret files, so a materials folder that holds them makes the secret a
+    // file the assistant could name.
+    const blackboard = blackboardPaths(this.home, "default");
+    const owned = [
+      this.paths.state, this.paths.bridgeDirectory, this.paths.assistantBackups, this.paths.windowData,
+      blackboard.configDirectory, blackboard.credentialDirectory
+    ];
+    for (const folder of owned) {
+      const places = [...await this.pathForms(folder), path.join(realUserData, path.relative(userData, folder))];
+      if (places.some((place) => insideDirectory(place, materials) || insideDirectory(materials, place))) {
+        throw errorDetails("materials_folder_morrow_data");
+      }
+    }
+  }
+
+  /**
+   * Whether the runtime refuses `folder` as its workspace, by the runtime's own
+   * rule: a whole drive, the home folder, or a folder that holds the home folder.
+   */
+  async workspaceRefusedByRuntime(folder) {
+    await this.ensureRuntime();
+    const module = await import(pathToFileURL(path.join(path.dirname(this.paths.server), "local-owner-maintenance.js")).href);
+    if (typeof module.workspaceRootTooBroad !== "function") throw errorDetails("runtime_repair_required");
+    return module.workspaceRootTooBroad(folder) === true;
+  }
+
+  /**
+   * The folder a maintenance guard fences: the materials folder, or Morrow's
+   * own folder when there is none or the runtime refuses the one recorded. No
+   * runtime can run in a folder the runtime refuses, and a guard on that folder
+   * is never granted, so fencing it would refuse every later step.
+   */
+  async fencedWorkspace(materials) {
+    if (materials && !await this.workspaceRefusedByRuntime(materials)) return materials;
+    return canonicalDirectory(this.paths.userData);
+  }
+
+  /** A path as written and, when it exists, as the disk resolves it. */
+  async pathForms(value) {
+    const real = await fs.realpath(value).catch(() => null);
+    return real && real !== path.resolve(value) ? [path.resolve(value), real] : [path.resolve(value)];
   }
 
   /**
@@ -1621,6 +1677,7 @@ class InstallerController {
       const record = await this.record();
       const materials = await this.workspaceForAssistantSetup(record);
       if (!materials) throw errorDetails("workspace_required");
+      if (await this.workspaceRefusedByRuntime(materials)) throw errorDetails("materials_folder_too_broad");
       await transaction.stopRuntime();
       try {
         await this.ensureRuntime();
@@ -2503,6 +2560,7 @@ class InstallerController {
       if (located.project && !await projectFolderPresent(located.project)) continue;
       const materials = await this.effectiveWorkspace(record);
       if (!materials) throw errorDetails("workspace_required");
+      if (await this.workspaceRefusedByRuntime(materials)) throw errorDetails("materials_folder_too_broad");
       await this.installClientConfiguration(assistant, entry.target, located.project, materials, {
         rebind: await exists(entry.target),
         keepSelection: true
@@ -2529,6 +2587,7 @@ class InstallerController {
       userData: this.paths.userData,
       state: this.paths.state,
       backups: this.paths.assistantBackups,
+      windowData: this.paths.windowData,
       bridge: this.paths.bridgeDirectory,
       // The materials folder this installation uses, named without creating it.
       materials,
@@ -2627,9 +2686,17 @@ class InstallerController {
       // State contains the durable maintenance guard. Removing it last keeps
       // every runtime start fenced throughout all earlier mutations.
       const blackboard = blackboardPaths(this.home, "default");
-      const ordered = removable
-        .filter((location) => location.path !== blackboard.config && location.path !== blackboard.credentialDirectory)
-        .sort((left, right) => Number(left.path === this.paths.state) - Number(right.path === this.paths.state));
+      // A place that holds one Morrow keeps is left where it is and reported as
+      // still there, so removing it never deletes what the list says stays.
+      const keptPlaces = (await Promise.all(keptPaths.map((kept) => this.pathForms(kept)))).flat();
+      const holdsKept = async (location) => (await this.pathForms(location.path))
+        .some((place) => keptPlaces.some((kept) => insideDirectory(place, kept)));
+      const ordered = [];
+      for (const location of removable) {
+        if (location.path === blackboard.config || location.path === blackboard.credentialDirectory) continue;
+        if (!await holdsKept(location)) ordered.push(location);
+      }
+      ordered.sort((left, right) => Number(left.path === this.paths.state) - Number(right.path === this.paths.state));
       for (const location of ordered) {
         // A path Morrow cannot remove must not stop the rest. The readback below
         // reports the result; this call does not.
@@ -2687,10 +2754,11 @@ class InstallerController {
     let record = null;
     try { record = await this.record(); } catch {}
     const candidate = this.workspace || record?.materialsFolder || this.paths.defaultMaterials;
+    let materials = null;
     if (await exists(candidate)) {
-      try { return await canonicalDirectory(candidate); } catch {}
+      try { materials = await canonicalDirectory(candidate); } catch {}
     }
-    return canonicalDirectory(this.paths.userData);
+    return this.fencedWorkspace(materials);
   }
 
   /** Acquires authority from a live owner, or proves that no owner is running. */
@@ -2801,7 +2869,7 @@ class InstallerController {
 
   async acquireDataRemovalGuard() {
     const record = await this.record();
-    const workspaceRoot = await this.effectiveWorkspace(record) || await canonicalDirectory(this.paths.userData);
+    const workspaceRoot = await this.fencedWorkspace(await this.effectiveWorkspace(record));
     const stateDirectory = await this.canonicalStateDirectory();
     const journalPath = path.join(stateDirectory, "morrow.sqlite3");
     const module = await this.localOwnerMaintenanceModule();
@@ -2948,6 +3016,13 @@ class InstallerController {
     return this.runRuntimeLifecycle(async () => {
       if (!materials || !await exists(this.paths.upstreams)) return null;
       try { await this.ensureRuntime(); } catch { return null; }
+      // A runtime started in a folder its own rule refuses exits before it answers.
+      let refused = true;
+      try { refused = await this.workspaceRefusedByRuntime(materials); } catch {}
+      if (refused) {
+        await this.closeRuntimeMonitorNow();
+        return null;
+      }
       const mcpRuntime = await this.mcpRuntimeVerification;
       if (!this.runtimeMonitor || this.runtimeWorkspace !== materials) {
         await this.closeRuntimeMonitorNow();

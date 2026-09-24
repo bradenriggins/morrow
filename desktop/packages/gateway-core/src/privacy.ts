@@ -5,6 +5,7 @@ import {
   randomBytes,
   randomUUID,
 } from "node:crypto";
+import { decodeHTML as decodeEntity } from "entities";
 import {
   canonicalJson,
   isJsonObject,
@@ -539,10 +540,16 @@ const LETTER_FOLDS: ReadonlyMap<string, string> = new Map([
   ["œ", "oe"], ["Œ", "OE"], ["ß", "ss"], ["ẞ", "SS"],
 ]);
 const FOLDED_LETTERS = /[łŁøØđĐıħĦŧŦðÐþÞæÆœŒßẞ]/gu;
+// Invisible format characters that rich-text editors and word processors put
+// inside a name: a soft hyphen, a zero-width space or joiner, a bidirectional
+// mark, or a byte-order mark. They carry no word, so the match view on the
+// roster side and the text side drops them.
+const INVISIBLE_FORMAT_CHARACTERS = /[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]/gu;
 
 function foldIdentityText(value: string): string {
   return value.replace(APOSTROPHE_VARIANTS, "'").replace(HYPHEN_VARIANTS, "-")
     .replace(FOLDED_LETTERS, (letter) => LETTER_FOLDS.get(letter) ?? letter)
+    .replace(INVISIBLE_FORMAT_CHARACTERS, "")
     .normalize("NFKD").replace(/\p{M}/gu, "").normalize("NFKC");
 }
 
@@ -553,9 +560,11 @@ function normalizeAlias(value: string): string {
 // Scripts that write words with no space between them, or that attach a particle to a name, as
 // Korean does in 김민준의. A name written in one has no word edge. A name written in any other
 // script still ends where a word of one of these begins, as in 请看Ada Lovelace的作业.
+// An underscore is a word edge too, because Canvas builds page addresses and
+// teachers name files from a name with its words joined by an underscore.
 const UNSPACED_SCRIPT = "\\p{scx=Han}\\p{scx=Hiragana}\\p{scx=Katakana}\\p{scx=Hangul}\\p{scx=Thai}\\p{scx=Lao}\\p{scx=Khmer}\\p{scx=Myanmar}";
 const UNSPACED_LETTER = new RegExp(`^[${UNSPACED_SCRIPT}]$`, "u");
-const SPACED_WORD_CHARACTER = `(?![${UNSPACED_SCRIPT}])[\\p{L}\\p{N}_]`;
+const SPACED_WORD_CHARACTER = `(?![${UNSPACED_SCRIPT}])[\\p{L}\\p{N}]`;
 const UNSPACED_GAP = new RegExp(`(?<=[${UNSPACED_SCRIPT}]) (?=[${UNSPACED_SCRIPT}])`, "gu");
 // Arabic and Hebrew attach a one-letter prefix, such as "to" or "and", to the name that follows.
 const PROCLITIC_LETTERS: ReadonlyArray<readonly [RegExp, string]> = [
@@ -577,7 +586,11 @@ function aliasBody(key: string): string {
   for (const [index, point] of points.entries()) {
     const previous = points[index - 1];
     if (previous !== undefined && UNSPACED_LETTER.test(previous) && UNSPACED_LETTER.test(point)) body += "\\s*";
-    body += point === " " ? "\\s+" : escapeRegExp(point);
+    // A space in an alias also matches the joined spellings a title or a file
+    // name carries, as Canvas's ada-lovelace-reflection for "Ada Lovelace
+    // Reflection". One separator character, never a run, so "Ada. Lovelace"
+    // across a sentence end does not match.
+    body += point === " " ? "(?:\\s+|\\.|-|_)" : escapeRegExp(point);
   }
   return body;
 }
@@ -630,6 +643,16 @@ function aliasMatches(text: string, matchers: readonly RegExp[]): Array<{ readon
 // A generational suffix ends a name but is never the family name.
 const NAME_SUFFIX = /^(?:jr|sr|ii|iii|iv|v)\.?$/u;
 
+// A title leads a roster name but is never a word of it. Alone in prose it
+// names the person it addresses, such as the course's teacher, so it never
+// starts the given name and never stands for a student on its own.
+const NAME_TITLE = /^(?:mr|mrs|ms|mx|miss|madam|sir|dr|doctor|prof|professor|rev|hon)\.?$/u;
+
+// A family-name particle sits inside a name, as van in "Ana van der Berg".
+// Alone in prose it is an ordinary word, so it never stands for a student
+// on its own either.
+const NAME_PARTICLE = /^(?:van|von|der|den|del|della|dos|ter|ten|zur|vom|bin|ibn|bint|abu)\.?$/u;
+
 // A Korean or Chinese roster name is often stored with no space, as 김민준 or 王小明, and a
 // Japanese one as 田中太郎. Its family name comes first: one syllable or character, or one of these
 // two-letter family names. A Japanese four-character name is two and two.
@@ -674,32 +697,102 @@ interface LearnerNameAliases {
   readonly capitalized: ReadonlySet<string>;
 }
 
+/** A roster field that reads like a person's name, not an id, an address, or a username. */
+function nameLikeForm(value: string): boolean {
+  return /^[\p{L}][\p{L}\p{M}\p{N}\u00ad\u200b-\u200f\u2060-\u2064\ufeff' ,.\u2019-]{0,499}$/u.test(value.trim());
+}
+
+/** The one parsed name form: the given name, every family word it names, and whether the form names the family part. */
+function parsedNameForm(form: string): {
+  readonly words: readonly string[];
+  readonly familyWords: readonly string[];
+  readonly given: string;
+  readonly familyFirst: boolean;
+} | null {
+  const name = normalizeAlias(form);
+  if (!name || name.length > 500) return null;
+  const comma = /^([^,]+),\s*(.+)$/u.exec(name);
+  const familyFirst = comma && !NAME_SUFFIX.test(comma[2]!) ? comma : null;
+  const words = givenWords(familyFirst ? familyFirst[2]! : name);
+  if (words.length === 0) return null;
+  // A comma form, and a Moodle lastname field, name the family part. A name
+  // the roster gives with no such field says nothing about its family part, so
+  // only its last word is taken, and each word after the given name still
+  // names this student on its own.
+  const familyWords = familyFirst
+    ? givenWords(familyFirst[1]!)
+    : words.length > 1
+      ? [words.at(-1)!]
+      : [];
+  return { words, familyWords, given: words[0]!, familyFirst: familyFirst !== null };
+}
+
+/** The words of a name, without any title that leads them. */
+function givenWords(value: string): string[] {
+  const words = nameWords(value);
+  while (words.length > 1 && NAME_TITLE.test(words[0]!)) words.shift();
+  return words;
+}
+
 function learnerNameAliases(identity: LearnerIdentity): LearnerNameAliases {
   const none = { aliases: [], capitalized: new Set<string>() };
   if (!identity.name) return none;
+  // Every name form the roster gives, as Canvas's sortable_name or Moodle's
+  // lastname, can name the family part. Only forms that read like a name are
+  // parsed; ids and usernames are matched whole instead.
+  const forms = [identity.name, ...(identity.aliases ?? [])].filter(
+    (form): form is string => typeof form === "string" && nameLikeForm(form),
+  );
+  if (!forms.length) return none;
   const name = normalizeAlias(identity.name);
-  if (!name || name.length > 500) return none;
-  const comma = /^([^,]+),\s*(.+)$/u.exec(name);
-  const familyFirst = comma && !NAME_SUFFIX.test(comma[2]!) ? comma : null;
-  const words = nameWords(familyFirst ? familyFirst[2]! : name);
-  const familyWords = familyFirst ? nameWords(familyFirst[1]!) : words.length > 1 ? words.slice(-1) : [];
-  const given = words[0] ?? "";
-  const family = familyWords.join(" ");
-  const aliases = new Set([name]);
-  for (const part of [given, family, familyWords.at(-1) ?? ""]) {
-    if ((part.match(/\p{L}/gu)?.length ?? 0) >= 2) aliases.add(part);
+  const aliases = new Set<string>();
+  const capitalized = new Set<string>();
+  const addPart = (part: string): void => {
+    // A title or a particle alone is prose, not a reference to one student.
+    if (part.includes(" ") || !(NAME_TITLE.test(part) || NAME_PARTICLE.test(part))) {
+      if ((part.match(/\p{L}/gu)?.length ?? 0) >= 2 && part !== name) aliases.add(part);
+    }
+  };
+  for (const form of forms) {
+    // An invisible character can sit where the roster meant a space, as a word
+    // processor does. Parse the words from the form with those characters as
+    // spaces, and record the form both as it is written and spaced.
+    const wording = form.replace(INVISIBLE_FORMAT_CHARACTERS, " ");
+    const parsed = parsedNameForm(wording);
+    if (!parsed) continue;
+    aliases.add(normalizeAlias(form));
+    if (wording !== form) aliases.add(normalizeAlias(wording));
+    const { words, familyWords, given } = parsed;
+    const family = familyWords.join(" ");
+    // A one-word given or family name used alone. Written in small letters it
+    // is usually an ordinary word, so it is replaced only where it is written
+    // as a name.
+    for (const part of [given, family, ...familyWords]) {
+      addPart(part);
+      if (aliases.has(part) && !part.includes(" ")) capitalized.add(part);
+    }
+    // A name of three or more words with no family-name field: each word after
+    // the given name, which also covers a middle name.
+    if (form === identity.name && words.length >= 3) {
+      for (const word of words.slice(1)) {
+        addPart(word);
+        if (aliases.has(word)) capitalized.add(word);
+      }
+    }
+    const unspaced = !parsed.familyFirst && nameWords(name).length === 1 ? unspacedNameParts(name) : null;
+    for (const part of unspaced ?? []) {
+      if ([...part].length >= 2) aliases.add(part);
+    }
+    if (parsed.familyFirst) aliases.add(`${parsed.words.join(" ")} ${parsed.familyWords.join(" ")}`);
+    if (!parsed.familyFirst && parsed.words.length >= 2 && parsed.familyWords.length === 1) {
+      // "Jane Alexandra Doe" is addressed as "Jane Doe" too: the first and last
+      // name without a middle name.
+      aliases.add(`${given} ${family}`);
+      if (parsed.words.length === 2) aliases.add(`${parsed.words[1]!} ${given}`);
+    }
   }
-  // A script with no capital letters marks no name part, so these match in any case.
-  const unspaced = !familyFirst && words.length === 1 ? unspacedNameParts(name) : null;
-  for (const part of unspaced ?? []) {
-    if ([...part].length >= 2) aliases.add(part);
-  }
-  if (familyFirst) aliases.add(`${familyFirst[2]} ${familyFirst[1]}`);
-  else if (words.length === 2) aliases.add(`${words[1]} ${words[0]}`);
-  if (given && family) aliases.add(`${given} ${family}`);
-  const capitalized = new Set([given, family, familyWords.at(-1) ?? ""]
-    .filter((part) => aliases.has(part) && !part.includes(" ") && part !== name));
-  return { aliases: [...aliases], capitalized };
+  capitalized.delete(name);
+  return { aliases: [...aliases], capitalized: new Set([...capitalized].filter((part) => aliases.has(part))) };
 }
 
 function escapeRegExp(value: string): string {
@@ -724,12 +817,20 @@ interface SourceReplacement extends SourceSpan {
   readonly replacement: string;
 }
 
-const IDENTITY_NAMED_ENTITIES = new Map<string, string>([
-  ["nbsp", " "],
-  ["amp", "&"],
-  ["quot", "\""],
-  ["apos", "'"],
-]);
+// Every HTML5 named character reference decodes with the same rules a browser
+// uses, with case-sensitive names such as &Eacute; beside &eacute;, so a name
+// written as references matches the name as it is written.
+const NAMED_ENTITY = /^&([a-z0-9]+);/iu;
+
+function decodedNamedEntity(source: string): string | null {
+  let decoded: string;
+  try {
+    decoded = decodeEntity(source);
+  } catch {
+    return null;
+  }
+  return decoded === source ? null : decoded;
+}
 
 function appendCodePoints(atoms: SourceAtom[], text: string, start: number, end: number): void {
   for (const point of text) atoms.push({ text: point, start, end });
@@ -810,9 +911,9 @@ function normalizedIdentityTextView(value: string): NormalizedTextView {
         }
       }
     }
-    const named = /^&([a-z]+);/iu.exec(value.slice(cursor));
+    const named = NAMED_ENTITY.exec(value.slice(cursor));
     if (named) {
-      const decoded = IDENTITY_NAMED_ENTITIES.get(named[1]!.toLocaleLowerCase("en-US"));
+      const decoded = decodedNamedEntity(named[0]);
       if (decoded) {
         appendCodePoints(atoms, decoded, cursor, cursor + named[0].length);
         cursor += named[0].length;
@@ -901,7 +1002,11 @@ function replaceKnownAliases(
   const references = [...view.text.matchAll(/\bStudent A[1-9][0-9]*\b/gu)];
   for (const match of aliasMatches(view.text, matchers)) {
     if (references.some((reference) => match.index >= reference.index! && match.index < reference.index! + reference[0].length)) continue;
-    const alias = aliases.get(aliasKey(match.text));
+    const key = aliasKey(match.text);
+    // The match may carry the joined spelling a page address or a file name
+    // uses, as ada-lovelace for "Ada Lovelace". The alias is recorded under
+    // its spaced key, so the lookup folds the separator back to the space.
+    const alias = aliases.get(key) ?? (/[._-]/u.test(key) ? aliases.get(key.replace(/[._-]+/gu, " ")) : undefined);
     // A script with no capital letters cannot mark a name, so only a match written in small
     // letters of a cased script is left as the ordinary word it usually is.
     if (alias?.capitalized === true && !/[\p{Lu}\p{Lt}]/u.test(match.text) && /\p{Ll}/u.test(match.text)) continue;
@@ -1869,6 +1974,14 @@ export function resolveLearnerTokens(
     if (!current) throw new Error("learner_roster_identity_unavailable");
     return current;
   };
+  // A page address Morrow redacted keeps its joined spelling, as
+  // ada-lovelace-reflection for a page titled "Ada Lovelace Reflection". The
+  // label comes back inside that address, so the person's name is restored in
+  // the same spelling the address carries and the address still resolves.
+  const slugOf = (name: string): string => name.normalize("NFKD").replace(/\p{M}/gu, "")
+    .replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/gu, "").toLowerCase();
+  const isAddressField = (key: string): boolean =>
+    /^url_or_id$/iu.test(key) || /(?:^|_)(?:url|urls|href|link)$/iu.test(key);
   const resolveValue = (candidate: unknown, key = "", depth = 0): unknown => {
     if (depth > MAX_PRIVACY_OUTPUT_DEPTH) throw new Error("privacy_output_depth_exceeded");
     if (typeof candidate === "string") {
@@ -1878,7 +1991,7 @@ export function resolveLearnerTokens(
         const identity = resolveIdentity(token);
         if (identifier && candidate === token) return identity.id;
         if (!identity.name) throw new Error("learner_roster_name_unavailable");
-        return identity.name;
+        return isAddressField(key) ? slugOf(identity.name) : identity.name;
       });
     }
     if (Array.isArray(candidate)) return candidate.map((entry) => resolveValue(entry, key, depth + 1));

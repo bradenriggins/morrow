@@ -76,7 +76,9 @@ The action is **Remove Morrow's data**, in the *What stays on this computer*
 section of the app. That section names the exact path of every place this
 installation keeps data: `State`, the materials folder, the `Materials` folder
 Morrow made first when a different materials folder was chosen later, the
-`Assistant settings backups` folder, the Bridge folder Chrome loads, the Blackboard credential
+`Assistant settings backups` folder, the `Window data` folder where Morrow's
+window keeps its caches and site data while Morrow is open, the Bridge folder
+Chrome loads, the Blackboard credential
 folder, the Blackboard configuration file, and each assistant configuration file
 Morrow wrote.
 
@@ -86,7 +88,8 @@ assistant configuration file Morrow wrote and leaves the rest of that file; if i
 cannot, it stops, names the file, and removes nothing. It then removes only paths
 inside Morrow's own user-data folder, the Blackboard credential folder, and the
 Blackboard configuration file.
-It keeps the `Assistant settings backups` folder. It never removes an
+It keeps the `Assistant settings backups` folder and the `Window data`
+folder; delete `Window data` after you remove the application. It never removes an
 assistant's own configuration file. After the removal it reads each path again
 and reports which are gone and which are still on the computer.
 

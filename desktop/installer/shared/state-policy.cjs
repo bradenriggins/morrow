@@ -7,7 +7,7 @@ const STATE_VERSION = 1;
 const RETENTION_SCHEMA = "morrow.installer-retention.v1";
 const DATA_REMOVAL_SCHEMA = "morrow.installer-data-removal.v1";
 const UNINSTALL_STEPS = new Set(["move_to_trash", "windows_settings_apps", "unknown"]);
-const KEPT_REASONS = new Set(["assistant_configuration", "assistant_backup", "outside_morrow_data", "claude_desktop_extension"]);
+const KEPT_REASONS = new Set(["assistant_configuration", "assistant_backup", "outside_morrow_data", "claude_desktop_extension", "window_data"]);
 const REMOVAL_STATUSES = new Set(["cancelled", "removed", "incomplete"]);
 const CONFIGURED_ASSISTANT_IDS = new Set(["codex", "claude-desktop", "claude-code", "gemini-cli"]);
 const RECORD_KEYS = new Set(["schema", "version", "selectedAssistantId", "materialsFolder", "configured"]);
@@ -264,6 +264,10 @@ function retentionSnapshot(input = {}) {
   };
   add("state", "Morrow's setup record and local journal", input.state);
   add("backups", "Copies of assistant settings Morrow changed", input.backups, "assistant_backup");
+  // Morrow sends the window's own caches and site storage here, so they are one
+  // named folder. Morrow's window uses it while Morrow is open, and the
+  // application removal leaves it for the person.
+  add("window_data", "The caches and site data Morrow's window keeps", input.windowData, "window_data");
   add("bridge", "The Morrow Bridge folder Chrome loads", input.bridge);
   add("materials", "Your Morrow materials folder", input.materials);
   add("previous_materials", "Morrow's earlier Materials folder", input.previousMaterials);

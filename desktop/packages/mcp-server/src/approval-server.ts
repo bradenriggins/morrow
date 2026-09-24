@@ -1321,7 +1321,7 @@ function editAccessStatusContent(view: JsonObject): string {
 }
 
 /** Each course, its site, and the kinds of change the review names for it. */
-function editAccessCourses(view: JsonObject): string {
+function editAccessCourses(view: JsonObject, controller: ApprovalOperationController): string {
   const label = view.state === "awaiting_approval" ? "Changes Morrow can make without asking"
     : view.state === "enabled" ? "Changes Morrow now makes without asking"
       : "Changes your assistant asked for";
@@ -1334,13 +1334,23 @@ function editAccessCourses(view: JsonObject): string {
     const ending = endsAt
       ? `<p class="warning">This course has Edit access from an earlier version of Morrow that ends ${escapeHtml(endsAt)}. These changes end with it, and the course returns to Plan.</p>`
       : "";
-    return `<section class="section"><dl class="destination"><div><dt>Course</dt><dd>${escapeHtml(String(selection.courseName ?? ""))}</dd></div><div><dt>Site</dt><dd>${escapeHtml(String(selection.site ?? ""))}</dd></div></dl><p class="preview-label">${label}</p><div class="formatted-preview"><ul>${actions.map((action) => `<li>${escapeHtml(String(action.label ?? ""))}</li>`).join("")}</ul></div>${ending}</section>`;
+    // The course name comes from the connection lookup, the same projected
+    // name the course list serves; the page never serves the Bridge's raw
+    // courseName. Without a name the row names the platform, and the site
+    // still names the connection.
+    const courseName = controller.connectionName?.(typeof selection.sourceBindingId === "string" ? selection.sourceBindingId : null);
+    const platform = providerPlatform(String(selection.provider ?? ""));
+    return `<section class="section"><dl class="destination"><div><dt>Course</dt><dd>${escapeHtml(courseName || platform)}</dd></div><div><dt>Site</dt><dd>${escapeHtml(String(selection.site ?? ""))}</dd></div></dl><p class="preview-label">${label}</p><div class="formatted-preview"><ul>${actions.map((action) => `<li>${escapeHtml(String(action.label ?? ""))}</li>`).join("")}</ul></div>${ending}</section>`;
   }).join("");
 }
 
+function providerPlatform(provider: string): string {
+  return provider === "canvas" ? "Canvas" : provider === "moodle" ? "Moodle" : provider;
+}
+
 // The nonce is issued only for a page that shows the form, as for an operation review.
-function editAccessPage(target: ApprovalTarget, view: JsonObject, grant: () => string, active: boolean): string {
-  const courses = editAccessCourses(view);
+function editAccessPage(target: ApprovalTarget, view: JsonObject, controller: ApprovalOperationController, grant: () => string, active: boolean): string {
+  const courses = editAccessCourses(view, controller);
   if (view.state !== "awaiting_approval") {
     return pageShell("Edit access", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${editAccessStatusContent(view)}</div>${courses}`, active);
   }
@@ -1671,7 +1681,7 @@ export class LoopbackApprovalServer {
           return;
         }
         let nonce: string | null = null;
-        const body = editAccessPage(target, view, () => (nonce = this.issueNonce(nonceKey, true)), active);
+        const body = editAccessPage(target, view, this.controller, () => (nonce = this.issueNonce(nonceKey, true)), active);
         if (nonce) {
           try {
             this.controller.announceApprovalPresence?.();

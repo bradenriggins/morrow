@@ -219,6 +219,18 @@ test("a materials folder a person chose outside Morrow's own folder is named but
 // Claude Desktop keeps its own copy of the Morrow extension in its own folder
 // and starts it on every launch. Morrow never removes it: it belongs to Claude
 // Desktop, and only Claude Desktop's own Extensions setting takes it out.
+// Electron keeps the window's own caches and site storage in the user-data
+// folder unless Morrow sends them to one named folder. What stays on this
+// computer must name that folder and say why Morrow leaves it.
+test("the window data folder Morrow's window keeps is named, with the reason Morrow leaves it", () => {
+  const windowData = path.join(USER_DATA, "Window data");
+  const current = snapshot({ windowData });
+  assert.equal(location(current, "window_data").path, windowData);
+  assert.equal(location(current, "window_data").removable, false);
+  assert.equal(location(current, "window_data").keptReason, "window_data");
+  assert.equal(snapshot().locations.some((entry) => entry.id === "window_data"), false, "no place is named without a path");
+});
+
 test("the Morrow extension Claude Desktop keeps is named, with the reason Morrow leaves it", () => {
   const extension = path.join(HOME, "Library", "Application Support", "Claude", "Claude Extensions", "local.mcpb.morrow.morrow");
   const current = snapshot({ claudeDesktopExtension: extension });

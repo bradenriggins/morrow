@@ -205,6 +205,15 @@ async function verifyMcpRuntime(payloadRoot, expectedManifestSha256, expectedNod
   });
 }
 
+/**
+ * Where Morrow's own window keeps its browser data: caches, local storage, and
+ * the rest Electron writes. It sits inside the user-data folder, as one folder
+ * Morrow can name, instead of loose beside Morrow's own folders.
+ */
+function windowDataDirectory(userData) {
+  return path.join(path.resolve(userData), "Window data");
+}
+
 function payloadLayout(payloadRoot, userData) {
   const payload = path.resolve(payloadRoot);
   const root = path.resolve(userData);
@@ -215,6 +224,7 @@ function payloadLayout(payloadRoot, userData) {
     // Copies of assistant settings files taken before Morrow changed them. They
     // stay out of State so removing Morrow's data keeps them for the person.
     assistantBackups: path.join(root, "Assistant settings backups"),
+    windowData: windowDataDirectory(root),
     defaultMaterials: path.join(root, "Materials"),
     appRoot: path.join(payload, "app"),
     node: process.platform === "win32"
@@ -316,4 +326,4 @@ async function restoreConfiguration(snapshot, expectedCurrentSha256) {
   return true;
 }
 
-module.exports = { payloadLayout, exists, isComplete, runtimeStatus, mkdirPrivate, canonicalDirectory, captureConfiguration, restoreConfiguration, verifyMcpRuntime };
+module.exports = { payloadLayout, windowDataDirectory, exists, isComplete, runtimeStatus, mkdirPrivate, canonicalDirectory, captureConfiguration, restoreConfiguration, verifyMcpRuntime };

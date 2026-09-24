@@ -33,10 +33,16 @@ const LETTER_FOLDS = new Map([
   ["œ", "oe"], ["Œ", "OE"], ["ß", "ss"], ["ẞ", "SS"],
 ]);
 const FOLDED_LETTERS = /[łŁøØđĐıħĦŧŦðÐþÞæÆœŒßẞ]/gu;
+// Invisible format characters that rich-text editors and word processors put
+// inside a name: a soft hyphen, a zero-width space or joiner, a bidirectional
+// mark, or a byte-order mark. They carry no word, so the match view on the
+// roster side and the text side drops them.
+const INVISIBLE_FORMAT_CHARACTERS = /[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]/gu;
 
 function fold(value) {
   return String(value).replace(APOSTROPHE_VARIANTS, "'").replace(HYPHEN_VARIANTS, "-")
     .replace(FOLDED_LETTERS, (letter) => LETTER_FOLDS.get(letter) ?? letter)
+    .replace(INVISIBLE_FORMAT_CHARACTERS, "")
     .normalize("NFKD").replace(/\p{M}/gu, "").normalize("NFKC");
 }
 
@@ -79,6 +85,17 @@ const NOT_NAME_WORDS = new Set(("monday tuesday wednesday thursday friday saturd
 // A generational suffix ends a name but is never the family name.
 const NAME_SUFFIX = /^(?:jr|sr|ii|iii|iv|v)\.?$/u;
 
+// A title leads a roster name but is never a word of it. Alone in prose it
+// names the person it addresses, such as the course's teacher, so it never
+// starts the given name and never stands for a student on its own.
+// packages/gateway-core/src/privacy.ts splits the same way.
+const NAME_TITLE = /^(?:mr|mrs|ms|mx|miss|madam|sir|dr|doctor|prof|professor|rev|hon)\.?$/u;
+
+// A family-name particle sits inside a name, as van in "Ana van der Berg".
+// Alone in prose it is an ordinary word, so it never stands for a student
+// on its own either.
+const NAME_PARTICLE = /^(?:van|von|der|den|del|della|dos|ter|ten|zur|vom|bin|ibn|bint|abu)\.?$/u;
+
 // A Korean or Chinese roster name is often stored with no space, as 김민준 or 王小明, and a
 // Japanese one as 田中太郎. Its family name comes first: one syllable or character, or one of these
 // two-letter family names. A Japanese four-character name is two and two.
@@ -106,23 +123,83 @@ function unspacedNameParts(name) {
   return [points.slice(0, familyLength).join(""), points.slice(familyLength).join("")];
 }
 
-function learnerNameAliases(identity) {
-  const name = normalize(identity.name);
-  const aliases = new Set([name]);
+function nameWords(value) {
+  const words = value.replace(/,/gu, " ").split(" ").filter(Boolean);
+  while (words.length > 1 && NAME_SUFFIX.test(words.at(-1))) words.pop();
+  return words;
+}
+
+/** A roster field that reads like a person's name, not an id, an address, or a username. */
+function nameLikeForm(value) {
+  return /^[\p{L}][\p{L}\p{M}\p{N}\u00ad\u200b-\u200f\u2060-\u2064\ufeff' ,.\u2019-]{0,499}$/u.test(String(value).trim());
+}
+
+/** The one parsed name form: the given name, every family word it names, and whether the form names the family part. */
+function parsedNameForm(form) {
+  const name = normalize(form);
+  if (!name || name.length > 500) return null;
   const comma = /^([^,]+),\s*(.+)$/u.exec(name);
-  if (comma && !NAME_SUFFIX.test(comma[2])) {
-    aliases.add(`${comma[2]} ${comma[1]}`);
-    aliases.add(comma[1]);
-    aliases.add(comma[2].split(/\s+/u)[0]);
-  } else {
-    const parts = name.replace(/,/gu, " ").split(" ").filter(Boolean);
-    while (parts.length > 1 && NAME_SUFFIX.test(parts.at(-1))) parts.pop();
-    if (parts.length > 1) {
-      aliases.add(`${parts.at(-1)} ${parts.slice(0, -1).join(" ")}`);
-      aliases.add(parts[0]);
-      aliases.add(parts.at(-1));
+  const familyFirst = comma && !NAME_SUFFIX.test(comma[2]) ? comma : null;
+  const words = titlelessWords(familyFirst ? familyFirst[2] : name);
+  if (!words.length) return null;
+  // A comma form, and a Moodle lastname field, name the family part. A name
+  // the roster gives with no such field says nothing about its family part, so
+  // only its last word is taken, and each word after the given name still
+  // names this student on its own.
+  const familyWords = familyFirst
+    ? titlelessWords(familyFirst[1])
+    : words.length > 1 ? [words.at(-1)] : [];
+  return { words, familyWords, given: words[0], familyFirst: familyFirst !== null };
+}
+
+/** The words of a name, without any title that leads them. */
+function titlelessWords(value) {
+  const words = nameWords(value);
+  while (words.length > 1 && NAME_TITLE.test(words[0])) words.shift();
+  return words;
+}
+
+/** A title or a particle alone is prose, not a reference to one student. */
+function isStandaloneNameWord(part) {
+  return !part.includes(" ") && (NAME_TITLE.test(part) || NAME_PARTICLE.test(part));
+}
+
+function learnerNameAliases(identity) {
+  const aliases = new Set();
+  if (!identity.name) return [];
+  // Every name form the roster gives, as Canvas's sortable_name or Moodle's
+  // lastname, can name the family part. Only forms that read like a name are
+  // parsed; ids and usernames are matched whole instead.
+  const forms = [identity.name, ...(identity.aliases || [])].filter((form) => nameLikeForm(form));
+  if (!forms.length) return [];
+  for (const form of forms) {
+    // An invisible character can sit where the roster meant a space, as a word
+    // processor does. Parse the words from the form with those characters as
+    // spaces, and record the form both as it is written and spaced.
+    const wording = form.replace(INVISIBLE_FORMAT_CHARACTERS, " ");
+    const parsed = parsedNameForm(wording);
+    if (!parsed) continue;
+    aliases.add(normalize(form));
+    if (wording !== form) aliases.add(normalize(wording));
+    const family = parsed.familyWords.join(" ");
+    for (const part of [parsed.given, family, ...parsed.familyWords]) {
+      if (!isStandaloneNameWord(part)) aliases.add(part);
     }
-    if (parts.length === 1) for (const part of unspacedNameParts(parts[0]) || []) aliases.add(part);
+    if (form === identity.name && parsed.words.length >= 3) {
+      for (const word of parsed.words.slice(1)) {
+        if (!isStandaloneNameWord(word)) aliases.add(word);
+      }
+    }
+    const name = normalize(identity.name);
+    const unspaced = !parsed.familyFirst && nameWords(name).length === 1 ? unspacedNameParts(name) : null;
+    for (const part of unspaced || []) aliases.add(part);
+    if (parsed.familyFirst) aliases.add(`${parsed.words.join(" ")} ${parsed.familyWords.join(" ")}`);
+    if (!parsed.familyFirst && parsed.words.length >= 2 && parsed.familyWords.length === 1) {
+      // "Jane Alexandra Doe" is addressed as "Jane Doe" too: the first and last
+      // name without a middle name.
+      aliases.add(`${parsed.given} ${family}`);
+      if (parsed.words.length === 2) aliases.add(`${parsed.words[1]} ${parsed.given}`);
+    }
   }
   return [...aliases].filter((alias) => (alias.match(/\p{L}/gu)?.length || 0) >= 2);
 }
@@ -215,9 +292,11 @@ function escapeRegExp(value) {
 // Scripts that write words with no space between them, or that attach a particle to a name, as
 // Korean does in 김민준의. A name written in one has no word edge. A name written in any other
 // script still ends where a word of one of these begins, as in 请看Ada Lovelace的作业.
+// An underscore is a word edge too, because Canvas builds page addresses and
+// teachers name files from a name with its words joined by an underscore.
 const UNSPACED_SCRIPT = "\\p{scx=Han}\\p{scx=Hiragana}\\p{scx=Katakana}\\p{scx=Hangul}\\p{scx=Thai}\\p{scx=Lao}\\p{scx=Khmer}\\p{scx=Myanmar}";
 const UNSPACED_LETTER = new RegExp(`^[${UNSPACED_SCRIPT}]$`, "u");
-const SPACED_WORD_CHARACTER = `(?![${UNSPACED_SCRIPT}])[\\p{L}\\p{N}_]`;
+const SPACED_WORD_CHARACTER = `(?![${UNSPACED_SCRIPT}])[\\p{L}\\p{N}]`;
 const UNSPACED_GAP = new RegExp(`(?<=[${UNSPACED_SCRIPT}]) (?=[${UNSPACED_SCRIPT}])`, "gu");
 // Arabic and Hebrew attach a one-letter prefix, such as "to" or "and", to the name that follows.
 const PROCLITIC_LETTERS = [
@@ -239,7 +318,11 @@ function aliasBody(key) {
   for (const [index, point] of points.entries()) {
     const previous = points[index - 1];
     if (previous !== undefined && UNSPACED_LETTER.test(previous) && UNSPACED_LETTER.test(point)) body += "\\s*";
-    body += point === " " ? "\\s+" : escapeRegExp(point);
+    // A space in an alias also matches the joined spellings a title or a file
+    // name carries, as Canvas's ada-lovelace-reflection for "Ada Lovelace
+    // Reflection". One separator character, never a run, so "Ada. Lovelace"
+    // across a sentence end does not match.
+    body += point === " " ? "(?:\\s+|\\.|-|_)" : escapeRegExp(point);
   }
   return body;
 }
@@ -341,16 +424,21 @@ function aliasMatches(value, index, asserted, flagged) {
   const output = [];
   for (const match of matchedAliases(view.text, aliasMatchers(candidates))) {
     const key = aliasKey(match.text);
-    const kind = index.kinds.get(key);
-    const common = (kind === "part" || kind === "name") && key.split(/[\s,]+/u).filter(Boolean).every((word) => COMMON_NAME_WORDS.has(word));
-    if (common && !asserted.has(key)) {
+    // The match may carry the joined spelling a page address or a file name
+    // uses, as ada-lovelace for "Ada Lovelace". The alias is recorded under
+    // its spaced key, so the lookup folds the separator back to the space.
+    const lookupKey = index.aliases.has(key) ? key
+      : /[._-]/u.test(key) ? key.replace(/[._-]+/gu, " ") : key;
+    const kind = index.kinds.get(lookupKey);
+    const common = (kind === "part" || kind === "name") && lookupKey.split(/[\s,]+/u).filter(Boolean).every((word) => COMMON_NAME_WORDS.has(word));
+    if (common && !asserted.has(lookupKey)) {
       if (!capitalizedWords(match.text)) continue;
       if (kind === "part" && sentenceStart(view.text, match.index)) {
         flagged.push({ at: sourceRange(view, match.index, match.index + match.text.length)[0], text: value.slice(...sourceRange(view, match.index, match.index + match.text.length)) });
         continue;
       }
     }
-    const matches = index.aliases.get(key) || [];
+    const matches = index.aliases.get(lookupKey) || [];
     if (matches.length !== 1) fail("protected_request_identifier_ambiguous");
     const [start, end] = sourceRange(view, match.index, match.index + match.text.length);
     output.push({ start, end, entry: matches[0] });

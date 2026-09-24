@@ -90,7 +90,6 @@ function actualSelection(selection: BrowserEditAccessSelection, result: BrowserE
     sourceBindingId: selection.sourceBindingId,
     provider: selection.provider,
     courseId: selection.courseId,
-    courseName: selection.courseName,
     site: selection.site,
     requestedMode: selection.enabledCategories.length ? "edit" : "plan",
     actualMode,
@@ -138,10 +137,13 @@ function savedGrant(selection: BrowserEditAccessSelection, result: BrowserEditAc
 
 function requestedSelections(prepared: BrowserEditAccessPrepared): JsonObject[] {
   return prepared.selections.map((selection) => ({
+    // sourceBindingId and courseId name the course, and the course list tool
+    // labels it against the course roster, so the raw Bridge courseName never
+    // rides along in an assistant-facing answer: a course named for its student
+    // would otherwise reach the model here.
     sourceBindingId: selection.sourceBindingId,
     provider: selection.provider,
     courseId: selection.courseId,
-    courseName: selection.courseName,
     site: selection.site,
     requestedMode: "edit",
     enabledCategories: selection.enabledCategories.map((category) => category.id),
@@ -231,7 +233,10 @@ export class EditAccessReviews {
       selections: review.prepared.selections.map((selection) => {
         const saved = review.state === "enabled" ? savedGrant(selection, review.result) : null;
         return {
-          courseName: selection.courseName,
+          // The page names the course through the connection's projected name,
+          // the lookup the review server holds; the raw Bridge courseName
+          // never reaches the server's pages or JSON answers.
+          sourceBindingId: selection.sourceBindingId,
           site: selection.site,
           provider: selection.provider,
           actions: saved?.actions

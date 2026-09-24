@@ -6845,6 +6845,28 @@ export class GatewayRuntime {
     return candidate;
   }
 
+  /** The course names the course list already projected for its connections, oldest dropped past this bound. */
+  private projectedCourseNames = new Map<string, string>();
+
+  private noteProjectedCourseName(sourceBindingId: string, courseName: string): void {
+    this.projectedCourseNames.delete(sourceBindingId);
+    this.projectedCourseNames.set(sourceBindingId, courseName);
+    while (this.projectedCourseNames.size > 500) {
+      this.projectedCourseNames.delete(this.projectedCourseNames.keys().next().value!);
+    }
+  }
+
+  /**
+   * The projected course name the course list tool already computed for one
+   * connection, keyed by its `sourceBindingId`. A miss names nothing: the
+   * caller shows the connection without a course name rather than serving the
+   * Bridge's raw courseName.
+   */
+  connectionCourseName(sourceBindingId: string | null): string | null {
+    if (!sourceBindingId) return null;
+    return this.projectedCourseNames.get(sourceBindingId) ?? null;
+  }
+
   private async publicBrowserBindingMetadata(
     mapping: CatalogTool,
     binding: BridgeBinding,
@@ -6865,6 +6887,10 @@ export class GatewayRuntime {
       const courseName = redactLearnerEgress(binding.courseName, context);
       if (typeof courseName !== "string") throw new Error("privacy_browser_bindings_invalid");
       output.courseName = courseName;
+      // A course name the course list already projected is what the review
+      // server's pages may name this connection by: a cheap, already-known
+      // lookup of the connections a person has open now, never a fresh read.
+      if (sourceBindingId) this.noteProjectedCourseName(sourceBindingId, courseName);
     } catch (error) {
       if (options.signal?.aborted) throw error;
       // A connection id remains usable without free-text metadata. Do not

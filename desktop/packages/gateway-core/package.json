@@ -11,13 +11,16 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist",
     "test": "vitest run"
   },
   "dependencies": {
-    "@morrow/contracts": "workspace:*"
+    "@morrow/contracts": "workspace:*",
+    "entities": "8.0.0"
   }
 }
