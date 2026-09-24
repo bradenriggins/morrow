@@ -3,7 +3,7 @@
 #
 # Idempotent: safe to run twice. A second run converges to the same state
 # without duplicating or destroying anything: the cron entry is never
-# duplicated (stale entries from a previous tree are migrated, loudly),
+# duplicated (other trees' entries are kept, loudly),
 # ~/.morrow/env is never overwritten, helper/profile/ is never wiped,
 # and the installer writes no bytecode or residue into the tree
 # (PYTHONDONTWRITEBYTECODE=1; the import probes run with cwd outside the
@@ -69,8 +69,8 @@
 #      morrow command after a reboot, restarts it). With cron: the
 #      keepalive cron install (serialized across concurrent installers
 #      with a lock file; the entry shell-quotes the tree path so trees
-#      under paths with spaces work; deduped by marker comment; stale
-#      entries from a previous tree are migrated, loudly; orphaned
+#      under paths with spaces work; deduped by marker comment; other
+#      trees' entries are kept, loudly; orphaned
 #      entries whose keepalive.sh no longer exists warn loudly (the
 #      tree was probably moved/renamed: rerun install.sh from the new
 #      location); MORROW_CRON=0 skips this if you arrange your own
@@ -259,9 +259,6 @@ _RB_EOF
   if [ -n "${_rb_failed}" ]; then
     printf 'rollback INCOMPLETE; could not remove (remove by hand):\n' >&2
     printf '%s' "${_rb_failed}" | sed 's/^/  /' >&2
-  fi
-  if [ -n "${_MIGRATED_STALE:-}" ]; then
-    printf 'note: this run had already migrated stale keepalive entries from other tree(s) away; restore them by rerunning the other tree'"'"'s installer if needed.\n' >&2
   fi
 }
 
@@ -855,14 +852,6 @@ elif [ "${_SUPERVISION}" = "cron" ]; then
   done
   unset _lock_tries
   _cron_now="$(crontab -l 2>/dev/null || true)"
-  # P0-15: migrate supervision from a previous tree. Any morrow keepalive
-  # entry pointing at a DIFFERENT tree is stale: the old tree's keepalive
-  # would keep running and can SIGKILL this tree's server every 5
-  # minutes. Stale entries are removed loudly; this tree's entry is
-  # (re)installed below. (Multi-tree supervision on one machine is not
-  # supported: entries are per-machine, not per-tree. Use MORROW_CRON=0
-  # and schedule keepalive.sh yourself if you run two trees.)
-  #
   # W3-P2-11: classify each line honestly. A line is one of OURS only
   # when it is an actual schedule entry (never a comment, never blank)
   # naming this tree's keepalive.sh. Comment lines that merely MENTION

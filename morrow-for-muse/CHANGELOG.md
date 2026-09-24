@@ -400,6 +400,10 @@ Installing and the docs:
   proxy to reach your school passed the check.
 - Installing no longer leaves an empty test folder
   (`helper/.selftest-warn-profile`) in the installed folder.
+- The install guide says what a reinstall does with the keepalive
+  schedule of another installed copy of Morrow for Muse: it keeps it,
+  and changes only this copy's entry. The guide said the reinstall
+  removed it, and contradicted its own step 7.
 - The assistant's instructions give Morrow's commands as
   `bin/morrow ...`, run from the installed folder. A bare `morrow` is
   not on the computer's command path, so those commands failed with
