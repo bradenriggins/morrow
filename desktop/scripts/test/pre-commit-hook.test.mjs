@@ -10,19 +10,73 @@ import { ROOT_FILE_READERS, pathFilters, productsFor } from "./lib/ci-path-filte
 const hook = fileURLToPath(new URL("../../.githooks/pre-commit", import.meta.url));
 const ci = readFileSync(new URL("../../../.github/workflows/ci.yml", import.meta.url), "utf8");
 
-/** The `run:` commands of one ci.yml job, in step order. */
+/**
+ * The `run:` commands of one ci.yml job, in step order. A run step the parser
+ * cannot recognize (an unexpected indentation, a shell form it has not seen)
+ * must fail loudly here rather than silently vanish from the expectation, so
+ * every line that carries a run step must either be read or throw.
+ */
 function jobRuns(workflow, job) {
   const lines = workflow.split("\n");
   const start = lines.findIndex((line) => line === `  ${job}:`);
   if (start === -1) throw new Error(`ci.yml has no ${job} job`);
+  const end = lines.findIndex((line, index) => index > start && /^ {2}\S/.test(line));
+  const body = lines.slice(start + 1, end === -1 ? lines.length : end);
+  let blockScalar = null;
+  let blockIndent = 0;
+  let skipScalar = null;
   const runs = [];
-  for (const line of lines.slice(start + 1)) {
-    if (/^ {2}\S/.test(line)) break;
-    const run = /^(?: {6}| {8})(?:- )?run: (.+)$/.exec(line);
-    if (run && run[1] !== "|") runs.push(run[1]);
+  for (const line of body) {
+    if (skipScalar !== null) {
+      if (/^\s*$/.test(line) || /^ {11}/.test(line)) continue;
+      skipScalar = null;
+    }
+    if (blockScalar !== null) {
+      if (/^\s*$/.test(line) || new RegExp(`^ {${blockIndent}}`).test(line)) {
+        blockScalar.push(line.slice(blockIndent));
+        continue;
+      }
+      runs.push(blockScalar.join("\n"));
+      blockScalar = null;
+    }
+    const run = /^(?: {6}| {8})- run: (.+)$/.exec(line) ?? /^ {8}run: (.+)$/.exec(line) ?? /^ {10}run: (.+)$/.exec(line);
+    if (run) {
+      if (run[1] === "|" || run[1] === ">" || run[1] === "|-" || run[1] === ">-") {
+        blockScalar = [];
+        blockIndent = (line.match(/^ */) ?? [""])[0].length + 2;
+        continue;
+      }
+      runs.push(run[1]);
+      continue;
+    }
+    const otherScalar = /^ {10}([\w-]+): ([|>][-+]?)$/.exec(line);
+    if (otherScalar) {
+      skipScalar = 10;
+      continue;
+    }
+    if (skipScalar !== null && (/^\s*$/.test(line) || /^ {11}/.test(line))) continue;
+    skipScalar = null;
+    if (/^ {6}run:$/.test(line)) continue;
+    if (/^(?: {6}| {8})(?:- )?(?:name|uses|with|if|timeout-minutes|env|working-directory|version|node-version|python-version):/.test(line)) continue;
+    if (/^ {4}\S/.test(line)) continue;
+    if (/^- /.test(line.trim()) || /run:/.test(line)) {
+      throw new Error(`ci.yml ${job} has a run step this test does not recognize, so the pre-commit hook may stop mirroring it: ${JSON.stringify(line)}`);
+    }
   }
+  if (blockScalar !== null) runs.push(blockScalar.join("\n"));
   return runs;
 }
+
+/** Every job of the workflow, so a canary can sweep each one for unread run steps. */
+function jobNames(workflow) {
+  const names = [];
+  for (const [index, line] of workflow.split("\n").entries()) {
+    if (/^ {2}[a-z-]+:$/.test(line)) names.push([index, line.trim().replace(/:$/, "")]);
+  }
+  return names;
+}
+
+const allJobs = jobNames(ci);
 
 /** The one run of `job` that `predicate` names, for the hook to mirror. */
 function exactlyOne(runs, job, predicate, what) {
@@ -156,6 +210,65 @@ test("each change runs exactly the steps CI runs for it, derived from ci.yml", (
       : [`${path}: the hook ran [${result.calls.join("; ")}] (exit ${result.status}), CI runs [${expected.join("; ")}]`];
   });
   assert.deepEqual(wrong, []);
+});
+
+// The mirror is only as good as jobRuns' reading of ci.yml. A suite step the
+// parser overlooks would vanish from the expectation and from these tests with
+// no failure anywhere, so the parser must read every run step and refuse one it
+// cannot recognize.
+test("jobRuns reads a suite step written as a block scalar", () => {
+  const scratch = [
+    "  job:",
+    "    steps:",
+    "      - run: pip install stub",
+    "      - name: The suite",
+    "        run: |",
+    "          node --test one.test.mjs",
+    "          node --test two.test.mjs",
+  ].join("\n");
+  assert.deepEqual(jobRuns(scratch, "job"), ["pip install stub", "node --test one.test.mjs\nnode --test two.test.mjs"]);
+  const dashed = [
+    "  job:",
+    "    steps:",
+    "      - run: |",
+    "        pnpm check",
+  ].join("\n");
+  assert.deepEqual(jobRuns(dashed, "job"), ["pnpm check"]);
+});
+
+test("jobRuns refuses a run step it does not recognize", () => {
+  const scratch = [
+    "  job:",
+    "    steps:",
+    "      - run: echo recognized",
+    "      - name: Odd indent",
+    "            run: echo unrecognized",
+  ].join("\n");
+  assert.throws(() => jobRuns(scratch, "job"), /unrecognized/);
+});
+
+// The parser must read every run step in ci.yml, not only the jobs the hook
+// mirrors. The count canary makes an unrecognized form anywhere in the
+// workflow fail loudly instead of silently dropping that step from the
+// expectation.
+test("the parser recognizes every run step in ci.yml", () => {
+  let recognized = 0;
+  for (const [, job] of allJobs) {
+    try {
+      recognized += jobRuns(ci, job).length;
+    } catch (error) {
+      assert.fail(`${error.message} (job ${job})`);
+    }
+  }
+  // A step's run key sits at 6 spaces with a dash, 8 as a step's second key,
+  // or 10 as a key of a named step. The bare 6-space `run:` of `defaults:` is
+  // not a step, so it counts neither way.
+  const total = ci.split("\n").filter((line) => /^(?: {6}- run:| {8}run:| {10}run:)/.test(line)).length;
+  assert.equal(
+    recognized,
+    total,
+    `jobRuns recognized ${recognized} of ci.yml's ${total} run steps; an unrecognized step form hides a suite from the hook's expectation`,
+  );
 });
 
 test("a failing suite refuses the commit", (t) => {
