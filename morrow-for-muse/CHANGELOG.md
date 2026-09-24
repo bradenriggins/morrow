@@ -49,6 +49,9 @@ Student privacy:
   "José Álvarez" when Canvas lists "Jose Alvarez", "Zoe Mueller" for
   "Zoë Müller", and "O’Brien" with a curly apostrophe. These reached
   the assistant as written.
+- A name with ð, ħ, ŧ, or a capital ẞ is hidden when it is written
+  without them too, as "Gudrun" for "Guðrún" or "Hili" for "Ħili".
+  These reached the assistant as written.
 - Some student details are still not hidden, and the consent page
   lists them: a name Canvas does not list for the student, such as a
   nickname; a first or last name used alone and written in small

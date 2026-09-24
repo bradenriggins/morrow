@@ -352,8 +352,8 @@ the wired vault file above.
   address made from a title with only the first or the last name can
   still carry that name in lowercase.
 - Matching compares base letters: accents are dropped, every
-  apostrophe reads as a straight one, a letter such as ł or ß folds to
-  l or ss, and German ae, oe, ue match ä, ö, ü. A spelling the roster
+  apostrophe reads as a straight one, a letter such as ł, ð, or ß folds
+  to l, d, or ss, and German ae, oe, ue match ä, ö, ü. A spelling the roster
   has goes back exactly as the roster spells it; another spelling goes
   back as the roster's.
 - A course's own name is shown as Canvas has it wherever Morrow names
