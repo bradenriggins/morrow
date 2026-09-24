@@ -246,7 +246,7 @@ def test_docs_say_the_installer_keeps_other_trees_cron_entries():
     install = _read("install.sh")
     # The installer's own behavior (W4-P1-12): other trees' entries stay.
     assert "keeping keepalive cron entries for other tree(s)" in install
-    for rel in ("INSTALL.md", "install.sh"):
+    for rel in ("INSTALL.md", "install.sh", "FIRST_RUN.md"):
         text = " ".join(_read(rel).split())
         assert "exactly one entry" not in text, rel
         assert "can no longer SIGKILL" not in text, rel
@@ -256,3 +256,12 @@ def test_docs_say_the_installer_keeps_other_trees_cron_entries():
     guide = " ".join(_read("INSTALL.md").split())
     assert "keeps the entries that belong to other installed trees" \
         in guide
+    first_run = " ".join(_read("FIRST_RUN.md").split())
+    assert "keeps keepalive entries for other installed trees" in first_run
+
+
+def test_candidate_changelog_does_not_claim_a_published_release():
+    changelog = _read("CHANGELOG.md")
+    assert "## 0.4.1 (unreleased)" in changelog
+    assert "not published yet" in changelog[:500]
+    assert "from the `muse/v0.4.1` GitHub release" not in changelog

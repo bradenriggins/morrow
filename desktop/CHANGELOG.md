@@ -1,10 +1,10 @@
 # Changelog
 
-Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
+Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). The 1.0.5 section is an unreleased candidate. Releases before 1.0.5 have no entry here.
 
-## 1.0.5 (2026-09-23)
+## 1.0.5 (unreleased)
 
-Unsigned installers: `Morrow-1.0.5-mac-arm64.dmg`, `Morrow-1.0.5-mac-arm64.zip`, and `Morrow-1.0.5-win-x64.exe`. Ships with Morrow Bridge 1.0.123.
+Planned unsigned installers: `Morrow-1.0.5-mac-arm64.dmg`, `Morrow-1.0.5-mac-arm64.zip`, and `Morrow-1.0.5-win-x64.exe`. It will ship with Morrow Bridge 1.0.123.
 
 This release fixes the problems a full review of Morrow found before release. Technical notes for developers are at the end.
 

@@ -155,10 +155,18 @@ def test_prerequisites_name_every_host_install_reaches():
     step1 = "\n".join(_blocks(_section(_read("INSTALL.md"), "## Step 1:")))
     step2 = "\n".join(_blocks(_section(_read("INSTALL.md"), "## Step 2:")))
     hosts = set(re.findall(r"curl [^\n]*https://([^/\s]+)/", step1))
-    assert hosts == {"github.com"}, hosts
-    # GitHub answers a release download with a redirect to this host
-    # (checked 2026-09-23 with curl -I on the muse/v0.4.0 zip).
-    hosts.add("release-assets.githubusercontent.com")
+    changelog = _read("CHANGELOG.md")
+    unpublished = re.search(r"^## %s \(unreleased\)$" % re.escape(_version()),
+                            changelog, re.MULTILINE)
+    if unpublished:
+        assert hosts == set(), hosts
+        assert "source repository" in _section(_read("INSTALL.md"), "## Step 1:").lower()
+        assert "`github.com`" not in network
+        assert "`release-assets.githubusercontent.com`" not in network
+    else:
+        assert hosts == {"github.com"}, hosts
+        # GitHub release downloads redirect to this host.
+        hosts.add("release-assets.githubusercontent.com")
     assert "pip install" in step2
     hosts |= {"pypi.org", "files.pythonhosted.org"}
     assert "Canvas tenant" in network

@@ -549,8 +549,8 @@ def test_the_failed_students_query_is_documented_as_not_in_this_version():
         assert "rosters, grades" not in text, doc
         assert "and submissions" not in text, doc
     changelog = read("CHANGELOG.md")
-    release_041 = changelog.split("## 0.4.1 (2026-09-23)")[1] \
-        .split("## 0.4.0")[0]
+    release_041 = changelog.split("## 0.4.1", 1)[1] \
+        .split("## 0.4.0", 1)[0]
     assert "who failed last week's quiz" not in release_041, (
         "CHANGELOG 0.4.1 still claims the failed-students answer")
     morrow = read("bin", "morrow")

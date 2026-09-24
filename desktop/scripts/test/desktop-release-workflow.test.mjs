@@ -26,8 +26,8 @@ const versioning = readFileSync(join(repositoryRoot, versioningPath), "utf8");
 const DESKTOP_VERSION = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 const WINDOWS_APPLICATION_METADATA = Object.freeze({
   companyName: "Braden Riggins",
-  productName: "Morrow",
-  fileDescription: "Morrow",
+  productName: "Morrow Desktop",
+  fileDescription: "Morrow Desktop",
   fileVersion: DESKTOP_VERSION,
   productVersion: `${DESKTOP_VERSION}.0`
 });
@@ -263,7 +263,7 @@ test("the Windows job upgrades the exact published 3720 artifact before its fina
   assert.match(upgrade, /^  fileVersion = \$NewVersion$/m);
   assert.match(upgrade, /^  productVersion = "\$NewVersion\.0"$/m);
   assert.doesNotMatch(upgrade, /'[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?'/, "the harness must not pin any Morrow version");
-  assert.match(upgrade, /displayName -ne "Morrow \$NewVersion"/);
+  assert.match(upgrade, /displayName -ne "Morrow Desktop \$NewVersion"/);
   assert.match(upgrade, /displayVersion -ne \$NewVersion/);
   // The pinned 3720 build wrote the first package manifest; this build writes the current one.
   assert.match(upgrade, /function Package-Source\(\[string\] \$ExpectedSchema\)/);

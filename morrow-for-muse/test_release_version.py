@@ -51,13 +51,25 @@ def test_skill_names_the_tree_version():
 def test_install_guide_downloads_the_tree_version():
     version = _version()
     text = _read("INSTALL.md")
+    changelog = _read("CHANGELOG.md")
     url = ("https://github.com/bradenriggins/morrow/releases/download/"
            "muse/v%s/morrow-muse-connector-%s.zip" % (version, version))
-    assert url in text
+    if re.search(r"^## %s \(unreleased\)$" % re.escape(version),
+                 changelog, re.MULTILINE):
+        assert "not published yet" in text
+        assert url not in text
+        assert "python3 scripts/carve.py --zip" in text
+    else:
+        assert url in text
     zips = set(re.findall(r"morrow-muse-connector-(%s)\.zip" % _VER, text))
     tags = set(re.findall(r"muse/v(%s)" % _VER, text))
-    assert zips == {version}
-    assert tags == {version}
+    if re.search(r"^## %s \(unreleased\)$" % re.escape(version),
+                 changelog, re.MULTILINE):
+        assert zips == {version}  # source carve output only
+        assert tags == set()
+    else:
+        assert zips == {version}
+        assert tags == {version}
 
 
 def test_install_selftest_stub_reports_the_tree_version():
@@ -67,18 +79,22 @@ def test_install_selftest_stub_reports_the_tree_version():
     assert stated == [_version()]
 
 
-def test_changelog_opens_with_a_dated_section_for_the_tree_version():
+def test_changelog_opens_with_the_tree_version_and_release_state():
     version = _version()
-    headings = re.findall(r"^## (%s) \(\d{4}-\d\d-\d\d\)$" % _VER,
+    headings = re.findall(r"^## (%s) \((unreleased|\d{4}-\d\d-\d\d)\)$" % _VER,
                           _read("CHANGELOG.md"), re.MULTILINE)
     assert headings, "no dated version section"
-    assert headings[0] == version
-    assert all(_key(older) < _key(version) for older in headings[1:])
+    assert headings[0][0] == version
+    assert all(_key(older) < _key(version) for older, _ in headings[1:])
 
 
 def test_changelog_section_names_its_release_zip():
     version = _version()
     text = _read("CHANGELOG.md")
     section = text.split("## %s (" % version, 1)[1].split("\n## ", 1)[0]
-    assert ("`morrow-muse-connector-%s.zip` from the `muse/v%s`"
-            % (version, version)) in " ".join(section.split())
+    if section.startswith("unreleased)"):
+        assert "morrow-muse-connector-%s.zip` package is not published yet" % version in section
+        assert "from the `muse/v%s`" % version not in section
+    else:
+        assert ("`morrow-muse-connector-%s.zip` from the `muse/v%s`"
+                % (version, version)) in " ".join(section.split())

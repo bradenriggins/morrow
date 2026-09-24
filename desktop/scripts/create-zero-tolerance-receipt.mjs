@@ -150,12 +150,12 @@ function isWindowsUpgradeReceipt(value, { commit, installerSha256 }) {
     && /^[a-f0-9]{64}$/.test(value.newApplication?.sha256)
     && value.newApplication?.fileVersion === RELEASE_VERSION
     && value.newApplication?.productVersion === `${RELEASE_VERSION}.0`
-    && value.newApplication?.productName === "Morrow"
+    && value.newApplication?.productName === "Morrow Desktop"
     && value.newApplication?.companyName === "Braden Riggins"
-    && value.newApplication?.fileDescription === "Morrow"
+    && value.newApplication?.fileDescription === "Morrow Desktop"
     && value.newApplication?.signatureStatus === "NotSigned"
     && value.newApplication?.signerCertificate === null
-    && value.registration?.displayName === `Morrow ${RELEASE_VERSION}`
+    && value.registration?.displayName === `Morrow Desktop ${RELEASE_VERSION}`
     && value.registration?.displayVersion === RELEASE_VERSION
     && value.registration?.publisher === "Braden Riggins"
     && value.uninstall?.completed === true

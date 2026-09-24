@@ -32,6 +32,7 @@ function loadMain() {
         isPackaged: false,
         getVersion: () => "1.0.0-rc.0",
         getPath: () => installerRoot,
+        setName() {},
         setPath() {},
         requestSingleInstanceLock: () => true,
         whenReady: () => new Promise(() => {}),
@@ -85,6 +86,7 @@ async function startedMorrow(controller = {}, updateController = null) {
         isPackaged: false,
         getVersion: () => "1.0.0-rc.0",
         getPath: () => path.join(os.tmpdir(), "morrow-start-user-data"),
+        setName() {},
         setPath() {},
         requestSingleInstanceLock: () => true,
         // main.cjs starts Morrow from app.whenReady().then(startMorrow) and

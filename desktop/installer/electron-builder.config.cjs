@@ -79,7 +79,8 @@ async function verifyPayloadAndAdHocSign(context) {
 module.exports = {
   afterPack: verifyPayloadAndAdHocSign,
   appId: "app.meetmorrow.installer",
-  productName: "Morrow",
+  productName: "Morrow Desktop",
+  executableName: "Morrow",
   copyright: "Copyright © 2026 Braden Riggins",
   artifactName: "Morrow-${version}-${os}-${arch}.${ext}",
   directories: {
@@ -111,7 +112,7 @@ module.exports = {
   publish: signedRelease ? [electronBuilderPublish()] : [],
   mac,
   dmg: {
-    title: "Morrow",
+    title: "Morrow Desktop",
     background: "assets/dmg-background.png",
     icon: "assets/morrow.icns",
     iconSize: 128,

@@ -91,8 +91,8 @@ every setup state above has a classified mode with a regression test.
 
 ## 7. Reinstall and idempotence
 
-- Rerunning `install.sh` revalidates everything, migrates keepalive
-  entries, and never wipes an existing helper profile.
+- Rerunning `install.sh` revalidates the installation, keeps keepalive
+  entries for other installed trees, and never wipes the helper profile.
 - Revocation: signing out in the helper browser ends the session.
   `bin/morrow disconnect --yes` disconnects fully: it stops the helper,
   stops the keepalive background loop and removes the keepalive cron

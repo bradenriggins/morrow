@@ -35,6 +35,7 @@ const IS_TEST_MODE = process.env.MORROW_INSTALLER_TEST_MODE === "1";
 const testRoot = IS_TEST_MODE && TEST_ROOT_ARGUMENT
   ? path.resolve(TEST_ROOT_ARGUMENT.slice("--morrow-test-root=".length))
   : null;
+app.setName("Morrow");
 if (testRoot && !path.isAbsolute(testRoot)) throw new Error("Morrow test root must be absolute.");
 if (testRoot) app.setPath("userData", path.join(testRoot, "UserData"));
 // Electron writes the window's caches and storage loose in the user-data
@@ -553,7 +554,7 @@ async function createWindow() {
     minWidth: 320,
     minHeight: 640,
     show: false,
-    title: "Morrow",
+    title: "Morrow Desktop",
     backgroundColor: "#F5F4EE",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),

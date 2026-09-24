@@ -46,26 +46,19 @@ prior knowledge of the project.
 - Network egress from the VM, direct or via the VM's
   `https_proxy`/`HTTPS_PROXY` (authenticated or not). To use Morrow:
   your Canvas tenant. The installer probes this and tells you which
-  mode it found. To install and upgrade: `github.com` and
-  `release-assets.githubusercontent.com` (step 1 downloads the release
-  from GitHub, which sends the download to that host), and `pypi.org`
-  and `files.pythonhosted.org` (step 2's `pip` finds the student-data
-  package on pypi.org and downloads it from files.pythonhosted.org).
+  mode it found. To install this unpublished candidate, the source
+  repository must already be on the VM; step 1 builds the package from
+  that checkout. Step 2's `pip` needs `pypi.org` and
+  `files.pythonhosted.org` to find and download the student-data
+  package.
 - Your Canvas tenant URL (e.g. `https://myschool.instructure.com`) and
   the ability to sign in to it yourself (your SSO/MFA, on your phone).
 
-## Step 1: get the release and unzip it
+## Step 1: get the package and unzip it
 
-The release is `morrow-muse-connector-<version>.zip` (this version:
-`morrow-muse-connector-0.4.1.zip`). Download it from the `muse/v0.4.1`
-GitHub release:
-
-```
-curl -fLO https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.1/morrow-muse-connector-0.4.1.zip
-```
-
-If you have the source repository instead of a release zip, build the
-zip from it (Python 3, git):
+Morrow for Muse 0.4.1 is not published yet, so its GitHub release file
+is not available. If you have the source repository, build the zip from
+it (Python 3, git):
 
 ```
 cd <repo>/morrow-for-muse

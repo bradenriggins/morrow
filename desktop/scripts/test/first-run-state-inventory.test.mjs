@@ -332,7 +332,9 @@ test("a citation that only matches an identifier, a longer word, or a comment fa
     ["Where to get help", "  return { title: `Where to get help`, body };"],
   ];
   for (const [name, line] of rendered) assert.equal(renderedOnLine(line, name), true, `${JSON.stringify(line)} renders ${name}`);
-  assert.equal(renderedOnLine('<h1 id="setup-title">Set up Morrow on this computer</h1>', "Set up Morrow on this computer", { html: true }), true);
+  assert.equal(renderedOnLine('<title>Morrow Desktop setup</title>', "Morrow Desktop setup", { html: true }), true);
+  assert.equal(renderedOnLine('    title: "Morrow Desktop",', "Morrow Desktop"), true);
+  assert.equal(renderedOnLine('<h1 id="setup-title">Set up Morrow Desktop on this computer</h1>', "Set up Morrow Desktop on this computer", { html: true }), true);
   assert.equal(renderedOnLine('<button aria-label="Remove connection">Remove</button>', "Remove connection", { html: true }), true);
   assert.equal(renderedOnLine('<button data-action="remove-connection">Forget</button>', "Remove connection", { html: true }), false);
 });

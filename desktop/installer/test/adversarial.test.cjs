@@ -131,6 +131,7 @@ async function startedMorrow(options = {}) {
         isPackaged: false,
         getVersion: () => "1.0.0-rc.0",
         getPath: () => path.join(os.tmpdir(), "morrow-adversarial-start"),
+        setName() {},
         setPath() {},
         requestSingleInstanceLock: () => true,
         // main.cjs starts Morrow from app.whenReady().then(startMorrow) and
@@ -182,6 +183,7 @@ function loadMain() {
       isPackaged: false,
       getVersion: () => "1.0.0-rc.0",
       getPath: () => installerRoot,
+      setName() {},
       setPath() {},
       requestSingleInstanceLock: () => true,
       whenReady: () => new Promise(() => {}),
@@ -531,6 +533,7 @@ test("a duplicate start registers no setup action at all", async (t) => {
         isPackaged: false,
         getVersion: () => "1.0.0-rc.0",
         getPath: () => path.join(root, "UserData"),
+        setName() {},
         setPath() {},
         requestSingleInstanceLock: () => false,
         whenReady: () => new Promise(() => {}),

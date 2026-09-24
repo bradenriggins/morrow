@@ -155,8 +155,8 @@ const RELEASE_FILE = /^Morrow-\d+\.\d+\.\d+-(?:mac-arm64\.(?:dmg|zip)|win-x64\.e
 
 test("the newest release notes speak to educators, with technical notes last and apart", () => {
   const changelog = read("CHANGELOG.md");
-  const heading = /^## \d+\.\d+\.\d+ \(\d{4}-\d\d-\d\d\)$/m.exec(changelog);
-  assert.ok(heading, "CHANGELOG.md must open its newest release with a dated version heading");
+  const heading = /^## \d+\.\d+\.\d+ \((?:unreleased|\d{4}-\d\d-\d\d)\)$/m.exec(changelog);
+  assert.ok(heading, "CHANGELOG.md must open its newest section with an unreleased or dated version heading");
   const next = changelog.indexOf("\n## ", heading.index + 1);
   const section = changelog.slice(heading.index, next === -1 ? changelog.length : next);
   const parts = section.split(/^(?=### )/m);
@@ -187,7 +187,7 @@ test("the newest release notes say how Edit is turned on from a conversation", (
   const refusal = /export const DESTRUCTIVE_EDIT_REFUSAL = "([^"]+)";/.exec(read(EDIT_ACCESS_REVIEW))?.[1];
   assert.ok(refusal, `${EDIT_ACCESS_REVIEW} must export the removal refusal`);
   const changelog = read("CHANGELOG.md");
-  const heading = /^## \d+\.\d+\.\d+ \(\d{4}-\d\d-\d\d\)$/m.exec(changelog);
+  const heading = /^## \d+\.\d+\.\d+ \((?:unreleased|\d{4}-\d\d-\d\d)\)$/m.exec(changelog);
   const next = changelog.indexOf("\n## ", heading.index + 1);
   const section = changelog.slice(heading.index, next === -1 ? changelog.length : next);
   const approvals = section.split(/^(?=### )/m).find((part) => part.startsWith("### Approvals and Edit access\n"));

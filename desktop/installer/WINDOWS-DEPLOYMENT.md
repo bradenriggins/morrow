@@ -15,9 +15,10 @@ node scripts/package-mcp-bundle.mjs --target win32-x64 --unsigned-release --outp
 It writes `Morrow-<version>-win-x64.exe` and `receipt.json` into that folder.
 The receipt ties the installer to the commit it was built from. The same step 4
 installs, starts, repairs, and removes that exact installer in a test run.
-Every Morrow Desktop release so far, including 1.0.5, is unsigned. Automatic
-updates remain disabled. Use the complete NSIS installer; do not deploy an
-unpacked app or a separately copied `MorrowPayload` directory.
+Morrow Desktop 1.0.5 is an unreleased candidate. Every published Windows
+artifact so far is unsigned. Automatic updates remain disabled. Use the
+complete NSIS installer; do not deploy an unpacked app or a separately copied
+`MorrowPayload` directory.
 
 ## The Morrow Bridge delivery route
 

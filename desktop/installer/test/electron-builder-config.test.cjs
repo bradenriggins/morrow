@@ -256,12 +256,14 @@ test("the packaged application is the installer source, sealed, with a fixed fil
   });
 });
 
-test("the build is identified as Morrow and its artifacts name the version, platform and architecture", async (t) => {
+test("the build identifies as Morrow Desktop while keeping its internal executable and artifact names stable", async (t) => {
   const { payload } = await preparedPayload(t);
   const config = loadConfig({ payload });
   const manifest = require(manifestPath);
   assert.equal(config.appId, "app.meetmorrow.installer");
-  assert.equal(config.productName, "Morrow");
+  assert.equal(config.productName, "Morrow Desktop");
+  assert.equal(config.executableName, "Morrow");
+  assert.equal(config.dmg.title, "Morrow Desktop");
   assert.deepEqual(manifest.author, { name: "Braden Riggins" });
   assert.equal(config.copyright, "Copyright © 2026 Braden Riggins");
   assert.equal(config.artifactName, "Morrow-${version}-${os}-${arch}.${ext}");

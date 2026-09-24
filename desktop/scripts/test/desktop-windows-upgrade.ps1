@@ -26,8 +26,8 @@ if ($NewVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw 'The new build ver
 # The new build's own version names the installed application, so a version bump cannot break this check.
 $ExpectedWindowsApplicationMetadata = [ordered]@{
   companyName = 'Braden Riggins'
-  productName = 'Morrow'
-  fileDescription = 'Morrow'
+  productName = 'Morrow Desktop'
+  fileDescription = 'Morrow Desktop'
   fileVersion = $NewVersion
   productVersion = "$NewVersion.0"
 }
@@ -278,7 +278,7 @@ $stateAfterUpgrade = Capture-Files $stateTargets
 Assert-Present $stateAfterUpgrade 'Application state after upgrade'
 $registryAfterUpgrade = @(Registry-Matches)
 if ($registryAfterUpgrade.Count -ne 1) { throw "Expected one current-user Morrow registration after upgrade; found $($registryAfterUpgrade.Count)." }
-if ($registryAfterUpgrade[0].publisher -ne 'Braden Riggins' -or $registryAfterUpgrade[0].displayName -ne "Morrow $NewVersion" -or $registryAfterUpgrade[0].displayVersion -ne $NewVersion) {
+if ($registryAfterUpgrade[0].publisher -ne 'Braden Riggins' -or $registryAfterUpgrade[0].displayName -ne "Morrow Desktop $NewVersion" -or $registryAfterUpgrade[0].displayVersion -ne $NewVersion) {
   throw 'The uninstall registration metadata is wrong.'
 }
 

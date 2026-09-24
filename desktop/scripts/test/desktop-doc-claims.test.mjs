@@ -312,13 +312,21 @@ test("the README names the desktop artifacts the build configuration actually pr
   for (const doc of ["README.md", "LIMITATIONS.md"]) {
     assert.match(read(doc), /unsigned/i, `${doc} must state that the desktop build is unsigned`);
   }
-  // The Windows build note names the version this checkout builds, not an older release.
-  const desktopVersion = JSON.parse(read("installer/package.json")).version;
-  assert.match(flat("installer/WINDOWS-DEPLOYMENT.md"), new RegExp(`Every Morrow Desktop release so far, including ${desktopVersion.replaceAll(".", "\\.")}, is unsigned\\.`),
-    "installer/WINDOWS-DEPLOYMENT.md must name the current version in its unsigned build note");
+  const windowsGuide = flat("installer/WINDOWS-DEPLOYMENT.md");
+  assert.match(windowsGuide, /Morrow Desktop 1\.0\.5 is an unreleased candidate/);
+  assert.match(windowsGuide, /Every published Windows artifact so far is unsigned/);
+  assert.doesNotMatch(windowsGuide, /Every Morrow Desktop release so far, including 1\.0\.5/);
   assert.match(readme, /Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature/,
     "README.md must state that nothing carries an Apple identity and that the macOS app is ad-hoc signed");
   assert.equal(typeof config.afterPack, "function", "the unsigned macOS bundle must be ad-hoc sealed after packing");
+});
+
+test("the unreleased 1.0.5 candidate is not described as a published release", () => {
+  assert.match(flat("README.md"), /Morrow Desktop 1\.0\.5 is an unreleased candidate/);
+  assert.match(flat("LIMITATIONS.md"), /Morrow Desktop `1\.0\.5` is an unreleased candidate/);
+  assert.match(flat("CHANGELOG.md"), /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.5 \(unreleased\)/);
+  assert.doesNotMatch(flat("README.md"), /public `desktop\/v1\.0\.5` release .* provides unsigned/);
+  assert.match(flat("installer/WINDOWS-DEPLOYMENT.md"), /Morrow Desktop 1\.0\.5 is an unreleased candidate/);
 });
 
 // electron-builder.config.cjs takes its target platform from MORROW_TARGET_PLATFORM

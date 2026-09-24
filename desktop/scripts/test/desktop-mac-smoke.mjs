@@ -143,7 +143,7 @@ function ensureSuccess(result, label) {
 
 /**
  * The single executable inside the application bundle. macOS names it after
- * productName, so a bundle that carries no `Contents/MacOS/Morrow` and no
+ * executableName, so a bundle that carries no `Contents/MacOS/Morrow` and no
  * `Contents/Resources/MorrowPayload` is not the application this harness
  * measures, and saying so is more useful than a later failure to launch.
  */

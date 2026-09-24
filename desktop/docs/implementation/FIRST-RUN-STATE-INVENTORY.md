@@ -616,7 +616,7 @@ Names a person reads as landmarks rather than presses:
 
 | Name | Surface | Source |
 | --- | --- | --- |
-| `Set up Morrow on this computer` | Morrow app | `installer/renderer/index.html:28` |
+| `Set up Morrow Desktop on this computer` | Morrow app | `installer/renderer/index.html:28` |
 | `Setup you can change` | Morrow app | `installer/shared/setup-view.mjs:275` |
 | `Materials folder` | Morrow app | `installer/shared/setup-view.mjs:220` |
 | `Where to get help` | Morrow app | `installer/shared/setup-view.mjs:700` |
