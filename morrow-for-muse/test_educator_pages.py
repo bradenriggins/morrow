@@ -190,7 +190,9 @@ POLICY_LIMITS = {
         "used alone and written in small letters",
     # hides more: every accent and apostrophe spelling is labeled
     "Matching compares base letters": None,
-    "A course's own name": "a course's own name",
+    # labeled like course content; the course list withholds a name it
+    # cannot check, never shows it
+    "A course's own name": None,
     "Bare numeric ids": "an ID number written as plain text",
     "\"canvas id <id>\"": "an ID number written as plain text",
     # refused, never passed on in part

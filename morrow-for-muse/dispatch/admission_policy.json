@@ -257,9 +257,11 @@
   ],
   "write_url_substrings_note": "These URL patterns refuse changes only: any request that is not a GET or HEAD, and every request of an operation that is not a read. Changing CSP settings affects account security (C-93 is also named in tool_names); reading a course's CSP settings changes nothing, and C-94 is a live-proven read.",
   "request_flags": {
-   "is_announcement": "posts an announcement and notifies every student in the course; Morrow for Muse never posts announcements, even when asked"
+   "is_announcement": "posts an announcement and notifies every student in the course; Morrow for Muse never posts announcements, even when asked",
+   "notify_of_update": "sends every student in the course a notice about the change; Morrow for Muse never sends messages to people, even when asked",
+   "as_user_id": "makes Canvas act as another person (masquerading); Morrow for Muse never acts as anyone other than you, even when asked"
   },
-  "request_flags_note": "A request whose query, body, or URL query sets one of these keys to anything Canvas does not read as false is refused on every route and every lane, before approval, with no override. The catalog's excluded set names the announcement variants of discussion create; the flag rule covers every route that accepts it, the topic update included."
+  "request_flags_note": "A request whose query, body, or URL query sets one of these keys to anything Canvas does not read as false is refused on every route and every lane, before approval, with no override. The catalog's excluded set names the announcement variants of discussion create; the flag rule covers every route that accepts it, the topic update included. notify_of_update rides on assignment, page, and classic quiz create and edit; as_user_id (masquerading) rides on any route, a read included. The consent page lists all three under what Morrow will not do in this version, even if you ask."
  },
  "source": "proof-battery/OPERATION_CATALOG.md plus the standing proof-directive exclusions. Parity law 2026-09-21: no tenant allowlists anywhere; nothing is gated by tenant.",
  "tenant_restricted_removed": {

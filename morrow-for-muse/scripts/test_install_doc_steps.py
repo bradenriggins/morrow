@@ -18,6 +18,13 @@ Failure modes this suite pins down (written before the fix; final sweep
      installer's Canvas address check (a placeholder, an address that
      does not load, a Canvas error page). SKILL.md said the same.
   4. `unzip` was missing from the prerequisites.
+  5. The network prerequisite named only the Canvas tenant (muse
+     round 2, 2026-09-23). Step 1 downloads from github.com, which
+     redirects the download to release-assets.githubusercontent.com,
+     and step 2's pip resolves on pypi.org and downloads from
+     files.pythonhosted.org. A VM whose egress proxy allows only the
+     named hosts failed both, and without cryptography Morrow refuses
+     all student data.
 
 The step 1 commands run for real, twice, against stand-in releases in
 a scratch home under .selftest-work/.
@@ -138,6 +145,24 @@ def test_step1_installs_and_upgrades_in_place(scratch):
 def test_prerequisites_name_unzip():
     prereq = _section(_read("INSTALL.md"), "## Prerequisites")
     assert "`unzip`" in prereq
+
+
+def test_prerequisites_name_every_host_install_reaches():
+    prereq = _section(_read("INSTALL.md"), "## Prerequisites")
+    network = " ".join(next(
+        item for item in prereq.split("\n- ")
+        if item.startswith("Network egress")).split())
+    step1 = "\n".join(_blocks(_section(_read("INSTALL.md"), "## Step 1:")))
+    step2 = "\n".join(_blocks(_section(_read("INSTALL.md"), "## Step 2:")))
+    hosts = set(re.findall(r"curl [^\n]*https://([^/\s]+)/", step1))
+    assert hosts == {"github.com"}, hosts
+    # GitHub answers a release download with a redirect to this host
+    # (checked 2026-09-23 with curl -I on the muse/v0.4.0 zip).
+    hosts.add("release-assets.githubusercontent.com")
+    assert "pip install" in step2
+    hosts |= {"pypi.org", "files.pythonhosted.org"}
+    assert "Canvas tenant" in network
+    assert [h for h in sorted(hosts) if "`%s`" % h not in network] == []
 
 
 def test_the_steps_install_the_student_data_package_before_install_sh():

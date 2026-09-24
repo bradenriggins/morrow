@@ -88,11 +88,11 @@ It has limits you should know:
   Anna in German or "Марии" for Мария in Russian; a first or last
   name used alone and written in small letters ("rose" or "adams" for
   Rose Adams, or "jane" in a page's web address), because in small
-  letters it is usually an ordinary word; the name of someone who was
-  never a student in that course, such as a student from another
-  course; and a course's own name, such as an independent study named
-  for its student. A full name in a web address or a file name is
-  hidden, and so is a name written with or without accents.
+  letters it is usually an ordinary word; and the name of someone who
+  was never a student in that course, such as a student from another
+  course. A full name in a web address or a file name is hidden, and
+  so is a name written with or without accents. A course named for its
+  student, such as an independent study, shows the student's label.
 - Some numbers are not hidden: an ID number written as plain text,
   such as "Canvas ID 912345" in a page, because in plain text Morrow
   cannot tell a student's number from any other number. ID numbers in

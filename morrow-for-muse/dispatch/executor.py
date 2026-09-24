@@ -6148,6 +6148,13 @@ def verify_write_target_identity(entry, params, plan, session, pack, config,
     # mixed-script confusables before comparing anything.
     if isinstance(provider_name, str):
         assert_no_spoof_identifier(provider_name, "provider course name")
+    term = course.get("term")
+    term_name = term.get("name") if isinstance(term, dict) else term
+    # What the agent and the journal see: the name and term labeled with
+    # the course's roster, never a student's name in them.
+    shown = _shown_course_text(entry, write_cid, config.get("canvas_base"),
+                               {"name": provider_name, "term": term_name})
+    shown_name, shown_term = shown.get("name"), shown.get("term")
     declared_cid = declared.get("course_id")
     declared_name = declared.get("course_name")
     if declared_cid is not None and str(declared_cid) != write_cid:
@@ -6156,22 +6163,19 @@ def verify_write_target_identity(entry, params, plan, session, pack, config,
             "(%r): refusing." % (write_cid, declared_cid, declared_name))
     if declared_name is not None:
         assert_no_spoof_identifier(declared_name, "declared course name")
-        if not isinstance(provider_name, str) or \
-                norm_identifier(provider_name) != \
-                norm_identifier(declared_name):
+        if not _same_course_text(provider_name, shown_name, declared_name,
+                                 declared.get("course_name_digest")):
             raise TargetIdentityMismatch(
                 "course %s on this tenant is named %r, but the reviewed "
                 "target declares %r: this is a different course than the "
                 "educator reviewed (possible typo'd course_id). Refusing."
-                % (write_cid, provider_name, declared_name))
-    term = course.get("term")
-    term_name = term.get("name") if isinstance(term, dict) else term
+                % (write_cid, shown_name, declared_name))
     declared_term = declared.get("term")
     if declared_term is not None and term_name is not None:
-        if norm_identifier(term_name) != norm_identifier(declared_term):
+        if not _same_course_text(term_name, shown_term, declared_term):
             raise TargetIdentityMismatch(
                 "course %s is in term %r, but the reviewed target declares "
-                "term %r. Refusing." % (write_cid, term_name, declared_term))
+                "term %r. Refusing." % (write_cid, shown_term, declared_term))
     # W4-P0-11(3): the approval's target block must name the same course
     # the plan declared and the provider confirmed. A record reviewed
     # for "Intended Course" cannot authorize a write whose frozen plan
@@ -6181,14 +6185,12 @@ def verify_write_target_identity(entry, params, plan, session, pack, config,
         # W5-P1-1: the signed approval's name gets the same spoof screen;
         # a twin name reviewed from a search result must not authorize.
         assert_no_spoof_identifier(approval_name, "approval course name")
-        if not isinstance(provider_name, str) or \
-                norm_identifier(provider_name) != \
-                norm_identifier(approval_name):
+        if not _same_course_text(provider_name, shown_name, approval_name):
             raise TargetIdentityMismatch(
                 "the signed approval was reviewed for course %r, but the "
                 "provider-verified target of course %s is %r: the approval "
                 "does not cover this course. Refusing."
-                % (approval_name, write_cid, provider_name))
+                % (approval_name, write_cid, shown_name))
         if declared_name is not None and \
                 norm_identifier(declared_name) != \
                 norm_identifier(approval_name):
@@ -6199,14 +6201,14 @@ def verify_write_target_identity(entry, params, plan, session, pack, config,
                 % (approval_name, declared_name))
     approval_term = approval_target.get("term")
     if approval_term is not None and term_name is not None:
-        if norm_identifier(term_name) != norm_identifier(approval_term):
+        if not _same_course_text(term_name, shown_term, approval_term):
             raise TargetIdentityMismatch(
                 "the signed approval was reviewed for term %r, but course "
                 "%s is in term %r. Refusing."
-                % (approval_term, write_cid, term_name))
+                % (approval_term, write_cid, shown_term))
     return {"course_id": write_cid,
-            "course_name": provider_name,
-            "term": term_name,
+            "course_name": shown_name,
+            "term": shown_term,
             "tenant": config.get("canvas_base")}
 
 
@@ -8229,21 +8231,9 @@ def _read_course_roster_first(entry, params, session, tenant_base,
         return
     _require_numbered_course(entry, params)
     from privacy import executor_wire as _wire
-    base = session.base_for("canvas").rstrip("/")
-    users_url = "%s/api/v1/courses/%s/users?%s" % (
-        base, course_id, urllib.parse.urlencode(
-            [("enrollment_type[]", "student")]
-            + [("enrollment_state[]", s) for s in _ROSTER_ENROLLMENT_STATES]
-            + [("include[]", "email"), ("per_page", "100")]))
-    deleted_url = "%s/api/v1/courses/%s/enrollments?%s" % (
-        base, course_id, urllib.parse.urlencode(
-            [("type[]", "StudentEnrollment"), ("state[]", "deleted"),
-             ("per_page", "100")]))
     try:
-        identities = _wire.roster_identities(
-            _read_all_pages(session, users_url),
-            _read_all_pages(session, deleted_url))
-        _wire.remember_course_roster(tenant_base, course_id, identities)
+        _wire.remember_course_roster(
+            tenant_base, course_id, _course_roster(session, course_id))
     except (ProviderHttpError, CourseRosterUnavailable, ValueError,
             TypeError) as exc:
         if isinstance(exc, ProviderHttpError) and exc.status in (401, 403,
@@ -8257,19 +8247,162 @@ def _read_course_roster_first(entry, params, session, tenant_base,
             refused.provider = "canvas"
             refused.operation_kind = "read"
             raise refused from None
-        detail = exc.status if isinstance(exc, ProviderHttpError) \
-            else type(exc).__name__
         raise CourseRosterUnavailable(
             "The student list of course %s could not be read (%s), so "
             "nothing in the course was read or changed: without it, "
             "Morrow cannot hide student names in course content. Nothing "
-            "was sent." % (course_id, detail)) from None
+            "was sent." % (course_id, _roster_failure(exc))) from None
     except Exception as exc:
         if _is_session_dead(exc):
             _on_session_death(op_id, entry.get("name"),
                               "session dead while reading the course "
                               "roster: %s" % str(exc)[:200])
         raise
+
+
+def _course_roster(session, course_id):
+    """One course's whole student roster as vault identities: the users
+    list (every enrollment state) and the students whose enrollment was
+    deleted, whose names can still be in older content. Raises
+    ProviderHttpError, CourseRosterUnavailable, or ValueError when it
+    cannot be read whole."""
+    from privacy import executor_wire as _wire
+    base = session.base_for("canvas").rstrip("/")
+    users_url = "%s/api/v1/courses/%s/users?%s" % (
+        base, course_id, urllib.parse.urlencode(
+            [("enrollment_type[]", "student")]
+            + [("enrollment_state[]", s) for s in _ROSTER_ENROLLMENT_STATES]
+            + [("include[]", "email"), ("per_page", "100")]))
+    deleted_url = "%s/api/v1/courses/%s/enrollments?%s" % (
+        base, course_id, urllib.parse.urlencode(
+            [("type[]", "StudentEnrollment"), ("state[]", "deleted"),
+             ("per_page", "100")]))
+    return _wire.roster_identities(_read_all_pages(session, users_url),
+                                   _read_all_pages(session, deleted_url))
+
+
+def _roster_failure(exc):
+    return exc.status if isinstance(exc, ProviderHttpError) \
+        else type(exc).__name__
+
+
+# The educator's course list (C-437) spans courses, so no one roster
+# covers it: each listed course is labeled with its own. Rosters are
+# read for at most COURSE_LIST_ROSTER_MAX courses of one list (two or
+# more reads each); any other course keeps its number and a withheld
+# name.
+_COURSE_LIST_ROUTE = ("GET", "/api/v1/courses")
+COURSE_LIST_ROSTER_MAX = 30
+COURSE_NAME_WITHHELD = ("(name not shown: Morrow could not check it for "
+                        "student names)")
+
+
+def _is_course_list(entry):
+    request = (entry or {}).get("request") or {}
+    return not (entry or {}).get("multi_step") and \
+        _block_catalog_key(request) == \
+        _normalized_catalog_key(*_COURSE_LIST_ROUTE)
+
+
+def _label_course_list(entry, result, session, tenant_base, op_id):
+    """The course list with each course's own text labeled with that
+    course's roster, as a course read (C-114) labels it, so a course
+    named for its student shows the student's label. On the Chromium
+    lane each listed course's roster is read; elsewhere the labels the
+    vault already issued in each course apply, as they do for a course
+    read there. A course whose roster cannot be read, or past
+    COURSE_LIST_ROSTER_MAX, is listed as {"id", "name":
+    COURSE_NAME_WITHHELD}: Morrow never returns a course's text it could
+    not check. Refuses a list it cannot read as courses."""
+    from privacy import executor_wire as _wire
+    courses = result.get("receipt")
+    if not isinstance(courses, list) or not all(
+            isinstance(course, dict) and not isinstance(course.get("id"),
+                                                        bool)
+            and _COURSE_NUMBER_RE.fullmatch(str(course.get("id")))
+            for course in courses):
+        raise ExecutorError(
+            "the course list could not be read as a list of courses (it "
+            "may have been cut short), so Morrow could not check each "
+            "course's name for student names and shows none of them. Ask "
+            "for fewer courses at a time (per_page).")
+    reads_rosters = bool(getattr(session, "browser_owned_auth", False))
+    shown = []
+    for n, course in enumerate(courses):
+        course_id = str(course["id"])
+        withheld = {"id": course["id"], "name": COURSE_NAME_WITHHELD}
+        identities = []
+        if reads_rosters:
+            if n >= COURSE_LIST_ROSTER_MAX:
+                shown.append(withheld)
+                continue
+            try:
+                identities = _course_roster(session, course_id)
+            except (ProviderHttpError, CourseRosterUnavailable, ValueError,
+                    TypeError):
+                shown.append(withheld)
+                continue
+            except Exception as exc:
+                if _is_session_dead(exc):
+                    _on_session_death(op_id, entry.get("name"),
+                                      "session dead while reading a listed "
+                                      "course's roster: %s" % str(exc)[:200])
+                raise
+        try:
+            shown.append(_wire.project_course_text(
+                tenant_base, course_id, course, identities,
+                provider=entry.get("provider") or "canvas"))
+        except Exception as exc:
+            raise ExecutorError(
+                "course %s in the course list could not be de-identified "
+                "(%s); refusing rather than showing student names"
+                % (course_id, type(exc).__name__))
+    return dict(result, receipt=shown)
+
+
+def _course_text_view(entry, course_id, tenant_base):
+    """The course read (C-114) a course's own text is labeled as."""
+    return {"name": (entry or {}).get("name"),
+            "provider": (entry or {}).get("provider") or "canvas",
+            "effects": "read",
+            "request": {"method": "GET",
+                        "url": "%s/api/v1/courses/%s" % (
+                            str(tenant_base or "").rstrip("/"),
+                            urllib.parse.quote(str(course_id), safe=""))}}
+
+
+def _shown_course_text(entry, course_id, tenant_base, texts):
+    """texts (a course's name and term as Canvas has them) as the agent
+    sees them: labeled with the course's roster exactly as a course read
+    (C-114) labels them, so a course named for its student shows the
+    student's label. The roster is the one this dispatch read; without
+    one, the labels the vault already issued in the course apply."""
+    from privacy import executor_wire as _wire
+    return _wire.project_learner_result(
+        _course_text_view(entry, course_id, tenant_base),
+        {"receipt": dict(texts)}, tenant_base,
+        error_cls=ExecutorError)["receipt"]
+
+
+def _course_text_digest(text):
+    """The digest a reviewed course name is compared by: the name as
+    Canvas has it, which the plan never stores."""
+    return hashlib.sha256(norm_identifier(text).encode("utf-8")).hexdigest()
+
+
+def _same_course_text(raw, shown, reviewed, digest=None):
+    """True when a course's name (or term) as Canvas has it now, raw, and
+    as the agent sees it, shown, is the one the educator reviewed. A
+    reviewed digest compares the Canvas name itself, so a rename to the
+    labeled text is still a rename; without one (an older plan, the
+    journaled target an undo reviews), the reviewed text may be either
+    form."""
+    if not isinstance(raw, str):
+        return False
+    if digest:
+        return _course_text_digest(raw) == digest
+    return norm_identifier(reviewed) in (norm_identifier(raw),
+                                         norm_identifier(shown))
 
 
 def _resolve_dispatch_labels(entry, params, tenant_base, mode_ctx):
@@ -8875,6 +9008,9 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
     verification = _project_verification_detail(
         projection_entry, verification, result.get("payload"), tenant_base,
         entry_name)
+    if not is_write and _is_course_list(entry):
+        result = _label_course_list(entry, result, session, tenant_base,
+                                    op_id)
     try:
         from privacy import executor_wire as _wire
         result = _wire.project_learner_result(
@@ -10008,42 +10144,59 @@ def _write_private_json(path: str, doc: dict) -> None:
 
 
 def _read_course_identity(entry: dict, params: dict, session, pack: dict,
-                          course_id: str) -> dict:
-    """The course as Canvas names it: {"course_id", "course_name",
-    "term"}. Refuses a missing course, an id mismatch, or a spoofed
-    name; the educator must see the real name of the course the write
-    targets."""
+                          course_id: str, tenant_base=None) -> dict:
+    """The course as the educator reviews it: {"course_id",
+    "course_name", "course_name_digest", "term", "time_zone"}. The name
+    and term are labeled with the course's roster, as a course read
+    labels them, so a course named for its student shows the student's
+    label; course_name_digest binds the name as Canvas has it for the
+    check before the send. Refuses a missing course, an id mismatch, a
+    spoofed name, or a course whose roster cannot be read."""
+    from privacy import executor_wire as _wire
+    tenant_base = tenant_base or session.base_for("canvas")
     config = {"canvas_base": session.base_for("canvas")}
     block = {"method": "GET",
              "url": "{canvas_base}/api/v1/courses/%s"
                     % urllib.parse.quote(str(course_id), safe=""),
              "headers": {}}
+    rosters = _wire.begin_course_rosters()
     try:
-        rmethod, rurl, rheaders, rbody = build_request(
-            entry, block, params, session, pack, config, {})
-        _status, _hdrs, raw, _attempts = session.raw_request(
-            rmethod, rurl, rheaders, rbody, is_write=False)
-    except ProviderHttpError as exc:
-        raise TargetIdentityMismatch(
-            "course %s could not be read (HTTP %s); nothing was prepared. "
-            "Check the course id with the educator." % (course_id,
-                                                       exc.status))
-    course = _parse_provider_json(raw, "course %s read" % course_id)
-    if str(course.get("id")) != str(course_id):
-        raise TargetIdentityMismatch(
-            "Canvas returned course id %r for requested course %s; "
-            "nothing was prepared." % (course.get("id"), course_id))
-    name = course.get("name")
-    if not isinstance(name, str) or not name.strip():
-        raise TargetIdentityMismatch(
-            "course %s has no name to show the educator; nothing was "
-            "prepared." % course_id)
-    assert_no_spoof_identifier(name, "course name")
-    identity = {"course_id": str(course_id), "course_name": name}
-    term = course.get("term")
-    term_name = term.get("name") if isinstance(term, dict) else term
-    if isinstance(term_name, str) and term_name.strip():
-        identity["term"] = term_name
+        _read_course_roster_first(dict(entry, effects="read", request=block),
+                                  params, session, tenant_base,
+                                  dry_run=False)
+        try:
+            rmethod, rurl, rheaders, rbody = build_request(
+                entry, block, params, session, pack, config, {})
+            _status, _hdrs, raw, _attempts = session.raw_request(
+                rmethod, rurl, rheaders, rbody, is_write=False)
+        except ProviderHttpError as exc:
+            raise TargetIdentityMismatch(
+                "course %s could not be read (HTTP %s); nothing was "
+                "prepared. Check the course id with the educator."
+                % (course_id, exc.status))
+        course = _parse_provider_json(raw, "course %s read" % course_id)
+        if str(course.get("id")) != str(course_id):
+            raise TargetIdentityMismatch(
+                "Canvas returned course id %r for requested course %s; "
+                "nothing was prepared." % (course.get("id"), course_id))
+        name = course.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise TargetIdentityMismatch(
+                "course %s has no name to show the educator; nothing was "
+                "prepared." % course_id)
+        assert_no_spoof_identifier(name, "course name")
+        term = course.get("term")
+        term_name = term.get("name") if isinstance(term, dict) else term
+        texts = {"name": name}
+        if isinstance(term_name, str) and term_name.strip():
+            texts["term"] = term_name
+        shown = _shown_course_text(entry, course_id, tenant_base, texts)
+    finally:
+        _wire.end_course_rosters(rosters)
+    identity = {"course_id": str(course_id), "course_name": shown["name"],
+                "course_name_digest": _course_text_digest(name)}
+    if "term" in shown:
+        identity["term"] = shown["term"]
     zone = course.get("time_zone")
     if isinstance(zone, str) and zone.strip():
         identity["time_zone"] = zone.strip()
@@ -10346,7 +10499,7 @@ def prepare_plan_write(name: str, method: str, path_template: str,
     target = None
     if course_id is not None:
         target = _read_course_identity(entry, params, session, pack,
-                                       course_id)
+                                       course_id, tenant_base)
     time_zone = _educator_time_zone(user_id, (target or {}).get("time_zone"))
     named = _read_named_object(entry, params, session, pack, tenant_base)
     if named is not None:

@@ -75,8 +75,10 @@ SKILL.md "Working by name"; policy: `privacy/FERPA_POLICY.md`.
   a title with only one of them can carry it. The full name joined as
   one token (`jane-doe`, `Jane_Doe`, `JaneDoe`, `doe.jane`) is labeled
   as `(joined name N)` and goes back exactly as written.
-- A course's own name shows as Canvas has it wherever Morrow names the
-  course, so an independent study named for its student shows it.
+- A course's own name is labeled with that course's roster wherever
+  Morrow names the course, so an independent study named for its
+  student shows the student's label. On the course list, a course whose
+  roster cannot be read is listed by its number with its name withheld.
 
 ## When de-id applies
 

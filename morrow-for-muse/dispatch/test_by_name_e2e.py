@@ -23,6 +23,11 @@ audit round 4, H3c/H3d and M2, 2026-09-22):
   5. Plan mode still stops the write before any label is resolved.
   6. A WriteFieldMismatch's engineering_detail carried raw readback
      values (name, email, raw ids) to the agent through the funnel.
+  7. as_user_id (Canvas masquerading) counted as a learner-id position,
+     so a student label there became the student's real id and Canvas
+     acted as the student (muse engine round 2, 2026-09-23). It is
+     refused before anything is sent, and a label there is never
+     turned into an id.
 
 The run writes a repeatable artifact of the flow to
 .selftest-work/by-name-e2e-artifact.json (labels only).
@@ -318,6 +323,40 @@ def test_plan_mode_refuses_before_any_label_is_resolved(monkeypatch):
     with pytest.raises(mode_errors.PlanModeWriteWithoutApproval):
         _override(BrowserFake(), label)
     assert called == []
+
+
+PAGE_UPDATE = ("canvas_update_create_page_courses", "PUT",
+               "/api/v1/courses/{course_id}/pages/{url_or_id}")
+
+
+def test_acting_as_a_student_by_label_is_refused_before_anything_is_sent():
+    # The consent page: Morrow will not act as anyone other than you.
+    _edit_mode()
+    label = _find("Jane Doe")["student"]
+    session = BrowserFake()
+    name, method, path = PAGE_UPDATE
+    with pytest.raises(admission_mod.NeverDispatch) as info:
+        ex.dispatch_catalog_op(
+            name, method, path, "write",
+            {"course_id": COURSE, "url_or_id": "week-1"}, pack=_pack(),
+            session=session, mode_ctx=_ctx(),
+            extra={"body": {"as_user_id": label,
+                            "wiki_page": {"title": "Week 1"}}})
+    assert session.calls == []
+    assert _leaks(str(info.value)) == []
+
+
+def test_a_label_is_never_turned_into_someone_to_act_as():
+    label = _find("Jane Doe")["student"]
+    from privacy import executor_wire as wire
+    try:
+        resolved, _mapping = wire.resolve_learner_labels(
+            {"as_user_id": label, "student_ids": [label]}, BASE, COURSE,
+            CONV, error_cls=ex.LearnerLabelUnresolved)
+    except ex.LearnerLabelUnresolved:
+        return
+    assert resolved["student_ids"] == [JANE_ID]
+    assert str(JANE_ID) not in json.dumps(resolved["as_user_id"])
 
 
 def _lift_hold(monkeypatch, name):

@@ -189,6 +189,12 @@ live battery marks them live-proven in
   the query) and creating an announcement external feed (C-25) are
   never-dispatch in the admission policy. Posting an announcement
   notifies every student in the course.
+- Messages to people and acting as someone else: never done, even when
+  the educator asks. Any request that sets `notify_of_update` (Canvas
+  then notifies every student in the course of the change) or
+  `as_user_id` (Canvas then acts as that person), on any route, in the
+  body or the query, is never-dispatch in the admission policy.
+  `notify_of_update` set to false sends nothing and is not refused.
 - Classic question banks: never tested. Not a v1 claim. A question
   group that draws from one (`assessment_question_bank_id` on C-347 or
   C-352) is refused.

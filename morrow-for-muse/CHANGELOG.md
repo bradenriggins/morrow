@@ -58,10 +58,17 @@ Student privacy:
   for Anna in German; a first or last name used alone and written in
   small letters, such as "jane" in a page's web address, because in
   small letters it is usually an ordinary word; the name of someone
-  who was never a student in that course; a course named for its
-  student, such as an independent study; an ID number written as plain
-  text, such as "Canvas ID 912345" in a page; and other details written
-  about a student, such as a birth date.
+  who was never a student in that course; an ID number written as
+  plain text, such as "Canvas ID 912345" in a page; and other details
+  written about a student, such as a birth date.
+- Privacy fix: the name of a course named for its student, such as an
+  independent study, reached the assistant as written in the course
+  list, in the approval the assistant shows you, and in messages about
+  a change, and Morrow's record of each change held it too. Now the
+  assistant sees the student's label wherever Morrow names the course.
+  For the course list, Morrow reads each listed course's student list
+  to do that; a course whose list it cannot read is listed by its
+  number, with its name not shown.
 - The consent page says that on some Muse computers, the network that
   carries traffic out of the computer can read that traffic, including
   your Canvas sign-in and the course pages Morrow loads.
@@ -85,6 +92,16 @@ Changes to your courses:
   notifies every student in the course. A request that would post one,
   or add a feed that posts them, is refused before anything is sent,
   and the assistant is told why in plain words.
+- Morrow never has Canvas send students a notice about a change, and
+  never acts as another person in Canvas, even when asked. A change
+  that asked Canvas to notify every student, or to act as someone
+  else, ran after your approval or in Edit mode. It is now refused
+  before anything is sent. Changing an assignment, page, or quiz
+  without a notice still works.
+- A read that asks Canvas for several extra details at once, such as
+  an assignment's due date overrides and all its dates, gets all of
+  them. Morrow sent them to Canvas as one value it did not recognize,
+  so the read came back without them and still reported success.
 - Discussion changes are refused until they are tested through the
   browser Morrow uses today; they were tested only through an older,
   retired route.
@@ -315,8 +332,10 @@ Installing and the docs:
 - The first-run checklist starts with your install; the test-only
   steps moved to the install test.
 - The release no longer ships old code that nothing uses (the retired
-  form relay) or internal review notes, and the docs no longer mention
-  Moodle or ask for a Canvas token.
+  form relay) or internal review notes. The install guide no longer
+  describes a Moodle connection, and the assistant's instructions no
+  longer describe one or ask for a Canvas token. Both name Moodle only
+  as not in this version.
 - The release no longer includes the developer tests. Run from an
   installed copy, they wrote to Morrow's own records, and Morrow then
   refused to make changes until the records were restored. The
@@ -389,10 +408,10 @@ Installing and the docs:
 - The documented `python3 dispatch/executor.py` runs even when the
   computer's Python has another package named `dispatch` (on a Mac,
   PyObjC ships one). Every executor command failed there.
-- The browser test `transport/local_chromium_selftest.py` is no longer
-  in the release. It runs in the source repository's checks
-  (`scripts/dev-suites.sh`) instead, and its allowlist check no longer
-  opens a file the release leaves out.
+- The release no longer includes 15 test scripts that no install step
+  ran, among them `transport/local_chromium_selftest.py`, which failed
+  in the release. They run in the source repository's automated checks
+  (`scripts/dev-suites.sh`) instead.
 - The installer's own notes match the install guide: upgrade by
   copying the new release over the installed folder (a new folder
   loses your Canvas address and sign-in), and 3 backups are kept.
@@ -593,6 +612,25 @@ Technical notes:
   `never-dispatch-read`, `paused-change-not-resumed`,
   `paused-change-already-approved`, `paused-change-not-waiting`, and
   `unknown-nothing-sent`.
+- `dispatch/admission_policy.json` `never_dispatch.request_flags` adds
+  `notify_of_update` and `as_user_id` (Canvas masquerading), refused on
+  every route and lane before approval like `is_announcement`;
+  `privacy/executor_wire.is_learner_id_key` no longer treats
+  `as_user_id` as a learner-id position.
+- `dispatch/executor.py`: `_read_course_identity` reads the course
+  roster and labels the course name and term (`_shown_course_text`, the
+  C-114 projection); the plan's `target_identity` keeps
+  `course_name_digest` of the Canvas name, which
+  `verify_write_target_identity` compares, and the journaled write
+  target holds the labeled name. `_label_course_list` labels each
+  C-437 course with its own roster (`COURSE_LIST_ROSTER_MAX` 30 per
+  read; a course past it, or whose roster fails, becomes
+  `{"id", "name": COURSE_NAME_WITHHELD}`).
+- `transport/chromium_session.py` builds a GET or DELETE's query itself
+  (one pair per list item) and refuses a value with no query form
+  (`RequestNotSendable`); a form body decodes to ordered pairs. The
+  page program in `transport/local_chromium.py` encodes list values
+  and pairs one pair per item.
 
 ## 0.4.0 (2026-09-22)
 
