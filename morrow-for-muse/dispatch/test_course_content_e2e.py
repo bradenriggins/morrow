@@ -404,6 +404,14 @@ class ChromiumSessionDead(ex.ExecutorError):
     as dispatch/executor.py _is_session_dead does)."""
 
 
+class DeadAtAttach(Canvas):
+    """A session that dies at attach/probe time: even base_for fails,
+    so the death surfaces inside the dispatch's own try (post-claim)."""
+
+    def base_for(self, provider):
+        raise ChromiumSessionDead("Canvas session died")
+
+
 def test_a_sign_in_that_died_at_the_roster_read_arms_the_resign_in_flow(
         monkeypatch):
     armed = []
@@ -809,4 +817,47 @@ def test_a_read_that_dies_at_the_roster_read_is_not_a_paused_change():
     assert "No change was in progress, so nothing was paused." in notice, \
         notice
     assert "waits for your OK" not in notice
+    rsm.lift_halt()
+
+
+def test_a_read_that_dies_at_attach_or_probe_time_is_not_a_paused_change():
+    # Security-review finding 2 on lane/muse-s3-1 (2026-09-24, written
+    # before the fix): the attach/probe-time death branch called
+    # _on_session_death without is_write, so a READ that died there was
+    # still parked as a paused change the educator is asked to approve.
+    from reauth import state_machine as rsm
+
+    before = len(rsm.paused_ops())
+    with pytest.raises(ChromiumSessionDead):
+        _show(DeadAtAttach())
+    assert len(rsm.paused_ops()) == before
+    with open(rsm.NOTIFY_PATH, encoding="utf-8") as fh:
+        notice = fh.read()
+    assert "No change was in progress, so nothing was paused." in notice, \
+        notice
+    assert "waits for your OK" not in notice
+    rsm.lift_halt()
+
+
+def test_a_write_that_dies_at_attach_or_probe_time_is_still_parked():
+    # The write keeps the parking the lane relies on for recovery. The
+    # death is at attach/probe time, after the roster read and the
+    # target read, on the write's own provider call.
+    from reauth import state_machine as rsm
+
+    class DeadWrite(Canvas):
+        def raw_request(self, method, url, headers, body, is_write=False,
+                        max_bytes=None):
+            self.calls.append((method, url, None))
+            if is_write:
+                raise ChromiumSessionDead("Canvas session died")
+            return super().raw_request(method, url, headers, body,
+                                       is_write, max_bytes)
+
+    _edit_mode()
+    session = DeadWrite()
+    with pytest.raises(ChromiumSessionDead):
+        _update(session, {"body": "<p>Signed, your users.</p>"})
+    paused = rsm.paused_ops()
+    assert any(p.get("op_id") for p in paused), paused
     rsm.lift_halt()

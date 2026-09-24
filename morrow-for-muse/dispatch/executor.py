@@ -8830,7 +8830,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                 # and recovery needs explicit re-approval.
                 _on_session_death(op_id, entry_name,
                                   "session dead at attach/probe time: %s"
-                                  % str(exc)[:200])
+                                  % str(exc)[:200], is_write=is_write)
             # W5-P2-1: claim released; a pending shutdown stops here.
             _raise_if_shutdown_requested()
             raise
