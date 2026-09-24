@@ -40,6 +40,13 @@ Failure modes this suite pins down (written before the fix):
      helper is stopped" while the helper kept running on the pinned
      port. The port resolves as keepalive resolves it: the environment,
      then helper/env, then 8901.
+ 11. (final sweep 2026-09-23, muse-ux3) with the learner vault moved
+     outside MORROW_HOME (MORROW_SOURCE_VAULT_PATH), uninstall deleted
+     and checked only <vault> and <vault>.key. The name-echo store of
+     the names the educator typed (<vault>.echo), the lock files, and
+     the temporary file an interrupted vault write leaves survived,
+     while uninstall said the learner vault was gone. Every file of the
+     vault is deleted and checked; an unrelated file beside it is kept.
 
 The real crontab is never touched: a fake `crontab` on PATH stores the
 table in a scratch file, and a fake `ss` reports no listeners. The
@@ -321,6 +328,30 @@ def test_uninstall_with_spaces_in_the_paths(spaced_rig):
     for path in rig["siblings"]:
         assert os.path.exists(path), (path, out)
     assert os.listdir(rig["cwd"]) == [], out
+
+
+def test_uninstall_deletes_every_file_of_a_relocated_vault(rig):
+    elsewhere = os.path.join(rig["root"], "vault dir")
+    os.makedirs(elsewhere)
+    vault = os.path.join(elsewhere, "vault.json")
+    vault_files = [vault + suffix for suffix in
+                   ("", ".key", ".lock", ".echo", ".echo.lock")]
+    vault_files.append(os.path.join(elsewhere, ".vault.json.tmp-7-ab12"))
+    unrelated = [os.path.join(elsewhere, name) for name in
+                 ("educator-notes.txt", "vault.jsonl", "vault.json-old")]
+    for path in vault_files + unrelated:
+        with open(path, "w") as fh:
+            fh.write("x\n")
+    rig["env"]["MORROW_SOURCE_VAULT_PATH"] = vault
+    proc = _run_uninstall(rig, "--yes")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    for path in vault_files:
+        assert not os.path.exists(path), (path, out)
+        assert "verified gone: %s" % path in out, (path, out)
+    for path in unrelated:
+        assert os.path.exists(path), (path, out)
+    assert "+ .key" not in out, out
 
 
 # A listener on the pinned port whose PID is not this install's process:
