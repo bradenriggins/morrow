@@ -53,7 +53,8 @@ async function main() {
   assertPassed(await runNode([path.join("test", "require-dependencies.cjs")], "installer dependency check", DEPENDENCY_TIMEOUT_MS), DEPENDENCY_TIMEOUT_MS);
   const files = testFiles();
   if (mode === "--suite") {
-    assertPassed(await runNode(["--test", "--test-concurrency=2", ...files], "full installer test suite", SUITE_TIMEOUT_MS), SUITE_TIMEOUT_MS);
+    const concurrency = process.platform === "win32" ? 1 : 2;
+    assertPassed(await runNode(["--test", `--test-concurrency=${concurrency}`, ...files], "full installer test suite", SUITE_TIMEOUT_MS), SUITE_TIMEOUT_MS);
     return;
   }
   for (const file of files) {
