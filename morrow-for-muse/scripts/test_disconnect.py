@@ -47,6 +47,13 @@ Failure modes this suite pins down (written before the fix):
      the temporary file an interrupted vault write leaves survived,
      while uninstall said the learner vault was gone. Every file of the
      vault is deleted and checked; an unrelated file beside it is kept.
+ 12. (security-review finding on lane/muse-s3-1, 2026-09-24) the tmp
+     find was anchored to ".<basename>.tmp-*" only, but the writer
+     stages ".<basename>.key.tmp-<pid>-<hex>" (the base64 AES vault
+     key) and ".<basename>.echo.tmp-<pid>-<hex>" (ciphertext of the
+     educator-typed names), so an interrupted write of the key or the
+     echo store survived a relocated-vault uninstall too. The whole
+     ".<basename>.*.tmp-*" family is deleted and verified.
 
 The real crontab is never touched: a fake `crontab` on PATH stores the
 table in a scratch file, and a fake `ss` reports no listeners. The
@@ -352,6 +359,40 @@ def test_uninstall_deletes_every_file_of_a_relocated_vault(rig):
     for path in unrelated:
         assert os.path.exists(path), (path, out)
     assert "+ .key" not in out, out
+
+
+def test_uninstall_deletes_the_interruption_tmp_files_of_a_relocated_vault(rig):
+    # Security-review finding 3 on lane/muse-s3-1 (2026-09-24, written
+    # before the fix): the tmp find was anchored to ".<basename>.tmp-*",
+    # but privacy/core.py _replace_exact_file writes
+    # ".<basename>.key.tmp-<pid>-<hex>" (the base64 AES vault key) and
+    # name_echo.py's _save leaves ".<basename>.echo.tmp-<pid>-<hex>"
+    # (ciphertext of the educator-typed names) behind an interrupted
+    # write. With the vault relocated outside MORROW_HOME none of those
+    # were removed or verified, and uninstall still said the learner
+    # vault was gone.
+    elsewhere = os.path.join(rig["root"], "vault tmp dir")
+    os.makedirs(elsewhere)
+    vault = os.path.join(elsewhere, "vault.json")
+    residue = [
+        os.path.join(elsewhere, ".vault.json.key.tmp-123-abcdef"),
+        os.path.join(elsewhere, ".vault.json.echo.tmp-456-deadbeef"),
+        os.path.join(elsewhere, ".vault.json.tmp-7-ab12"),
+    ]
+    unrelated = [os.path.join(elsewhere, name) for name in
+                 ("educator-notes.txt", "vault.jsonl")]
+    for path in residue + unrelated:
+        with open(path, "w") as fh:
+            fh.write("x\n")
+    rig["env"]["MORROW_SOURCE_VAULT_PATH"] = vault
+    proc = _run_uninstall(rig, "--yes")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    for path in residue:
+        assert not os.path.exists(path), (path, out)
+        assert "verified gone: %s" % path in out, (path, out)
+    for path in unrelated:
+        assert os.path.exists(path), (path, out)
 
 
 # A listener on the pinned port whose PID is not this install's process:
