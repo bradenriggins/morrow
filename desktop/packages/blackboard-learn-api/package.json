@@ -18,13 +18,13 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/server": "2.1.0",
     "@morrow/contracts": "workspace:*",
     "@morrow/gateway-core": "workspace:*",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.0.0"
+    "@modelcontextprotocol/client": "2.1.0"
   },
   "exports": {
     ".": {

@@ -34,7 +34,7 @@ jobs:
         run: pnpm --dir installer --ignore-workspace install --frozen-lockfile
 
       # Reports whether a signed release could be built here. With no signing
-      # secrets it says so and this unsigned QA build continues; a partial
+      # secrets it says so and this unsigned release build continues; a partial
       # signing configuration fails the job.
       - name: Preflight the signed release configuration
         env:
@@ -74,7 +74,7 @@ jobs:
           Remove-Item Env:WIN_CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
           Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
           Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
-          node scripts/package-mcp-bundle.mjs --target win32-x64 --unsigned-qa --output $env:MORROW_WINDOWS_PACKAGE_OUTPUT
+          node scripts/package-mcp-bundle.mjs --target win32-x64 --unsigned-release --output $env:MORROW_WINDOWS_PACKAGE_OUTPUT
           $installers = @(Get-ChildItem $env:MORROW_WINDOWS_PACKAGE_OUTPUT -File | Where-Object { $_.Name -match '^Morrow-.+-win-x64\.exe$' })
           if ($installers.Count -ne 1) { throw "Expected exactly one Windows NSIS installer; found $($installers.Count)." }
           $artifactInstaller = Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT $installers[0].Name
@@ -115,7 +115,7 @@ jobs:
           $receipt = Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT "smoke.json"
           node scripts/test/desktop-windows-smoke.mjs --installer $env:MORROW_WINDOWS_INSTALLER --package-receipt (Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT 'package-receipt.json') --install-dir $installDir --receipt $receipt --source $env:GITHUB_SHA --run-id $runId
 
-      - name: Upload private QA installer and sanitized smoke receipts
+      - name: Upload release installer and sanitized smoke receipts
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -162,7 +162,7 @@ jobs:
         run: pnpm --dir installer --ignore-workspace install --frozen-lockfile
 
       # Reports whether a signed and notarized release could be built here. With
-      # no signing secrets it says so and this unsigned QA build continues; a
+      # no signing secrets it says so and this unsigned release build continues; a
       # partial signing configuration fails the job.
       - name: Preflight the signed release configuration
         env:
@@ -196,12 +196,12 @@ jobs:
           unset GH_TOKEN GITHUB_TOKEN
           artifactRoot="$PWD/artifacts/desktop-macos-private-qa"
           if [ -e "$artifactRoot" ]; then
-            echo "Private QA artifact directory already exists: $artifactRoot" >&2
+            echo "Private release artifact directory already exists: $artifactRoot" >&2
             exit 1
           fi
           mkdir -p "$artifactRoot"
           packageOutput="$RUNNER_TEMP/morrow-desktop-package-$(uuidgen)"
-          node scripts/package-mcp-bundle.mjs --target darwin-arm64 --unsigned-qa --output "$packageOutput"
+          node scripts/package-mcp-bundle.mjs --target darwin-arm64 --unsigned-release --output "$packageOutput"
           images=("$packageOutput"/Morrow-*-mac-arm64.dmg)
           archives=("$packageOutput"/Morrow-*-mac-arm64.zip)
           if [ "${#images[@]}" -ne 1 ] || [ "${#archives[@]}" -ne 1 ]; then
@@ -222,7 +222,7 @@ jobs:
           set -euo pipefail
           node scripts/test/desktop-mac-smoke.mjs --disk-image "$MORROW_MAC_DISK_IMAGE" --package-receipt "$MORROW_MAC_ARTIFACT_ROOT/package-receipt.json" --receipt "$MORROW_MAC_ARTIFACT_ROOT/receipt.json" --source "$GITHUB_SHA" --run-id "$MORROW_MAC_RUN_ID"
 
-      - name: Upload private QA disk image and sanitized smoke receipts
+      - name: Upload release disk image and sanitized smoke receipts
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

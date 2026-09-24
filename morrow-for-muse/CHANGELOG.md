@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.4.1 (unreleased)
+## 0.4.1 (2026-09-24)
 
-The `morrow-muse-connector-0.4.1.zip` package is not published yet.
-This candidate fixes what a final review of 0.4.0 found, including two
+The release package is `morrow-muse-connector-0.4.1.zip` from the `muse/v0.4.1` GitHub release.
+
+This release fixes what a final review of 0.4.0 found, including two
 privacy fixes.
 
 In plain words:

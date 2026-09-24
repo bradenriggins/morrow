@@ -260,8 +260,11 @@ def test_docs_say_the_installer_keeps_other_trees_cron_entries():
     assert "keeps keepalive entries for other installed trees" in first_run
 
 
-def test_candidate_changelog_does_not_claim_a_published_release():
+def test_changelog_release_state_matches_its_package_reference():
     changelog = _read("CHANGELOG.md")
-    assert "## 0.4.1 (unreleased)" in changelog
-    assert "not published yet" in changelog[:500]
-    assert "from the `muse/v0.4.1` GitHub release" not in changelog
+    if "## 0.4.1 (unreleased)" in changelog:
+        assert "not published yet" in changelog[:500]
+        assert "from the `muse/v0.4.1` GitHub release" not in changelog
+    else:
+        assert "## 0.4.1 (2026-09-24)" in changelog
+        assert "`morrow-muse-connector-0.4.1.zip` from the `muse/v0.4.1`" in changelog

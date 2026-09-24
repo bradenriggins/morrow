@@ -213,7 +213,7 @@ test("the Windows job runs bounded tests and packages through one retained relea
   assert.match(job, /Test the complete installer contract suite with a process limit\n {8}timeout-minutes: 17/);
   assert.match(job, /Upgrade the exact published 3720 build and preserve its state\n {8}timeout-minutes: 32/);
   assert.match(job, /Install, start, damage and repair the sealed payload, uninstall, and check retained data\n {8}timeout-minutes: 30/);
-  assert.match(job, /node scripts\/package-mcp-bundle\.mjs --target win32-x64 --unsigned-qa --output \$env:MORROW_WINDOWS_PACKAGE_OUTPUT/);
+  assert.match(job, /node scripts\/package-mcp-bundle\.mjs --target win32-x64 --unsigned-release --output \$env:MORROW_WINDOWS_PACKAGE_OUTPUT/);
   assert.match(job, /Copy-Item -LiteralPath \(Join-Path \$env:MORROW_WINDOWS_PACKAGE_OUTPUT 'receipt\.json'\) -Destination \(Join-Path \$env:MORROW_WINDOWS_ARTIFACT_ROOT 'package-receipt\.json'\)/);
   assert.match(job, /desktop-windows-smoke\.mjs --installer \$env:MORROW_WINDOWS_INSTALLER --package-receipt/);
   assert.doesNotMatch(job, /pnpm --dir installer --ignore-workspace package:win/);
@@ -341,7 +341,7 @@ test("the macOS job installs, builds, tests the built runtime, and keeps the art
   assert.match(job, /^ {10}MORROW_SIGNED_RELEASE: "0"$/m);
   assert.match(job, /^ {10}CSC_IDENTITY_AUTO_DISCOVERY: "false"$/m);
   assert.match(job, /^\s+unset CSC_LINK /m, "the job must not inherit a signing certificate from the runner");
-  assert.doesNotMatch(job, /--publish(?!\s+never)/, "a QA dispatch publishes nothing");
+  assert.doesNotMatch(job, /--publish(?!\s+never)/, "a release-candidate dispatch publishes nothing");
   assert.match(job, /uses: actions\/upload-artifact@/, "the receipts have to leave the runner to be read");
 });
 
@@ -361,10 +361,10 @@ test("the packaging command the macOS job runs is accepted by the packaging scri
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const job = jobs(release).get("macos-installer");
   const options = invocationOptions(job, "scripts/package-mcp-bundle.mjs");
-  assert.ok(options.includes("--unsigned-qa"), "packaging without a signing proof requires --unsigned-qa");
+  assert.ok(options.includes("--unsigned-release"), "the native artifact uses the public unsigned release mode");
   assert.match(job, /--target darwin-arm64\b/, "the macOS job must package the Apple silicon target");
 
-  const argv = argumentVector(options, { "--target": "darwin-arm64", "--unsigned-qa": null, "--output": directory });
+  const argv = argumentVector(options, { "--target": "darwin-arm64", "--unsigned-release": null, "--output": directory });
   const accepted = node(["scripts/package-mcp-bundle.mjs", ...argv]);
   assert.equal(accepted.status, 1, accepted.stderr);
   assert.match(accepted.stderr, /Destination already exists/, "the packaging script must reach its work with these options");
@@ -400,40 +400,27 @@ test("the smoke command the macOS job runs is accepted by the smoke harness", (t
 });
 
 /**
- * docs/versioning.md step 4 builds the files educators download with --unsigned-release on the
- * maintainer's computers. The QA workflow tests other bytes, so step 4 must start the exact files
- * it publishes, with the same harness options the workflow passes (the tests above prove the
- * harnesses accept them), before `gh release create`.
- *
- * Failure mode pinned down (written before the fix; final sweep 2026-09-23): step 4 went from the
- * packaging command straight to SHA256SUMS and `gh release create`, and the macOS harness refused
- * the --unsigned-release receipt, so no published installer had ever been started by a smoke test.
+ * The native workflow builds --unsigned-release files, starts those exact files, and uploads them
+ * only after the smoke receipts pass. Release instructions must retrieve those artifacts instead
+ * of creating different installers on a maintainer's machine.
  */
-test("the release procedure smoke-tests the exact installers it publishes, before it publishes them", () => {
+test("the release procedure publishes the exact native-runner files it smoke-tested", () => {
   const start = versioning.indexOf("4. **");
   const end = versioning.indexOf("\n5. **", start);
   assert.ok(start >= 0 && end > start, `${versioningPath} must keep the Desktop publishing step as step 4`);
   const step = versioning.slice(start, end);
   const publish = step.indexOf("gh release create desktop/vX.Y.Z");
   assert.ok(publish > 0, `${versioningPath} step 4 must publish with gh release create`);
-  const published = step.slice(publish).split("`")[0];
-
-  for (const [id, harness, fileOption, file] of [
-    ["macos-installer", "scripts/test/desktop-mac-smoke.mjs", "--disk-image", "Morrow-X.Y.Z-mac-arm64.dmg"],
-    ["windows-installer", "scripts/test/desktop-windows-smoke.mjs", "--installer", "Morrow-X.Y.Z-win-x64.exe"],
+  for (const [artifact, file] of [
+    ["morrow-macos-desktop-<run id>", "Morrow-X.Y.Z-mac-arm64.dmg"],
+    ["morrow-macos-desktop-<run id>", "Morrow-X.Y.Z-mac-arm64.zip"],
+    ["morrow-windows-desktop-<run id>", "Morrow-X.Y.Z-win-x64.exe"],
   ]) {
-    const command = step.match(new RegExp(`\`(node ${harness.replaceAll(".", "\\.")} [^\`]+)\``));
-    assert.ok(command, `${versioningPath} step 4 must run ${harness}`);
-    assert.ok(command.index < publish, `${versioningPath} step 4 must run ${harness} before gh release create`);
-    const documented = [...command[1].matchAll(/(?<=\s)--[a-z][a-z0-9-]*/g)].map((match) => match[0]);
-    assert.deepEqual(documented, invocationOptions(jobs(release).get(id), harness),
-      `${versioningPath} must pass ${harness} the options ${releasePath} passes it`);
-    // A placeholder such as <mac folder> holds a space, so a value runs to the next option.
-    const value = (option) => new RegExp(`${option} (.+?)(?= --|$)`).exec(command[1])?.[1] ?? "";
-    assert.ok(value(fileOption).endsWith(file), `the ${harness} run must start ${file}`);
-    assert.ok(published.includes(` ${file} `), `the file ${harness} starts must be the ${file} that step 4 publishes`);
-    assert.equal(value("--source"), "<tag commit>", `the ${harness} run must bind the commit the tag names`);
+    assert.ok(step.indexOf(`--name ${artifact}`) >= 0, `${versioningPath} must download ${artifact}`);
+    assert.ok(step.indexOf(file) >= 0, `${versioningPath} must copy ${file} from the smoke-tested artifacts`);
+    assert.ok(step.slice(publish).includes(file), `${versioningPath} must publish the same ${file}`);
   }
+  assert.match(versioning.slice(0, versioning.indexOf("\n3. **")), /unsigned public-release installers/);
 });
 
 /**

@@ -321,10 +321,10 @@ test("the README names the desktop artifacts the build configuration actually pr
   assert.equal(typeof config.afterPack, "function", "the unsigned macOS bundle must be ad-hoc sealed after packing");
 });
 
-test("the unreleased 1.0.5 candidate is not described as a published release", () => {
+test("the 1.0.5 tag date is prepared without claiming the release is published", () => {
   assert.match(flat("README.md"), /Morrow Desktop 1\.0\.5 is an unreleased candidate/);
   assert.match(flat("LIMITATIONS.md"), /Morrow Desktop `1\.0\.5` is an unreleased candidate/);
-  assert.match(flat("CHANGELOG.md"), /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.5 \(unreleased\)/);
+  assert.match(flat("CHANGELOG.md"), /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.5 \(2026-09-24\)/);
   assert.doesNotMatch(flat("README.md"), /public `desktop\/v1\.0\.5` release .* provides unsigned/);
   assert.match(flat("installer/WINDOWS-DEPLOYMENT.md"), /Morrow Desktop 1\.0\.5 is an unreleased candidate/);
 });

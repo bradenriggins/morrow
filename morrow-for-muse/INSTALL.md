@@ -44,39 +44,24 @@ prior knowledge of the project.
   Muse VM image runs no cron daemon), keepalive runs as a supervised
   background loop instead (step 7).
 - Network egress from the VM, direct or via the VM's
-  `https_proxy`/`HTTPS_PROXY` (authenticated or not). To use Morrow:
-  your Canvas tenant. The installer probes this and tells you which
-  mode it found. To install this unpublished candidate, the source
-  repository must already be on the VM; step 1 builds the package from
-  that checkout. Step 2's `pip` needs `pypi.org` and
-  `files.pythonhosted.org` to find and download the student-data
-  package.
+  `https_proxy`/`HTTPS_PROXY` (authenticated or not). The installer
+  needs `github.com` and `release-assets.githubusercontent.com` to
+  download the connector, your Canvas tenant, and `pypi.org` and
+  `files.pythonhosted.org` to install the student-data package. It
+  probes the Canvas tenant and tells you which mode it found.
 - Your Canvas tenant URL (e.g. `https://myschool.instructure.com`) and
   the ability to sign in to it yourself (your SSO/MFA, on your phone).
 
 ## Step 1: get the package and unzip it
 
-Morrow for Muse 0.4.1 is not published yet, so its GitHub release file
-is not available. If you have the source repository, build the zip from
-it (Python 3, git):
+Download the Morrow for Muse 0.4.1 package:
 
 ```
-cd <repo>/morrow-for-muse
-python3 scripts/carve.py --zip
-# -> <repo>/dist/morrow-muse-connector-0.4.1.zip
+curl -fL -o morrow-muse-connector-0.4.1.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.1/morrow-muse-connector-0.4.1.zip
 ```
 
-`scripts/carve.py` (in the source repository only, not shipped in the
-release) builds the installable tree from the files git tracks:
-it leaves out the dev-only surface (live-test drivers, proof evidence,
-Moodle research code), writes `pack/carve-manifest.json` (the SHA-256
-of every shipped file, which install step 2 verifies, and the commit
-the files came from), and refuses to publish unless the secrets gate
-passes on the result. With `--zip` it also refuses to start while a
-file under `morrow-for-muse/` or the repository's `LICENSE` has a
-change that is not committed, so the zip always matches one commit.
-Do not run `install.sh` directly in a repository checkout: it has no
-carve manifest and step 2 refuses it on purpose.
+The `muse/v0.4.1` release page lists the same package. Do not install
+Morrow from another source.
 
 Unzip the release into the skills directory. Run these commands from
 the folder that holds the zip. Running them again is safe: they update
