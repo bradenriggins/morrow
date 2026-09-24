@@ -269,6 +269,37 @@ def test_documented_agent_path_uses_yes(doc, names_command):
         "bin/morrow disconnect --yes`", ""), doc
 
 
+# muse UX audit 3 (2026-09-23): nothing used to record that the educator
+# disconnected, so the next Canvas command read helper-down ("your
+# Canvas sign-in is not affected") and its next step relaunches the
+# helper and re-arms supervision. A disconnect records the marker in the
+# tree's state dir (config/disconnect.py), and a reconnecting install
+# clears it.
+def test_disconnect_writes_the_marker_install_clears_it(rig):
+    marker = os.path.join(rig["env"]["MORROW_HOME"], "trees", "t1-tree",
+                          "disconnected")
+    # Same resolution config/disconnect.py runs with (the rig's MORROW_HOME
+    # and the scratch tree's path-slug id).
+    sys.path.insert(0, os.path.join(rig["tree"], "transport"))
+    from transport import local_chromium
+    rig_tree_id = local_chromium.tree_id(rig["tree"])
+    marker = os.path.join(rig["env"]["MORROW_HOME"], "trees", rig_tree_id,
+                          "disconnected")
+    assert not os.path.exists(marker)
+    proc = _run(rig, "--yes")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert os.path.isfile(marker), out
+    # The full installer is too heavy for this suite (it runs all 23
+    # selftest suites); assert the clearing step and its placement
+    # directly.
+    with open(os.path.join(TREE, "install.sh")) as fh:
+        install = fh.read()
+    assert 'disconnect marker' in install
+    assert install.index('disconnect marker') < \
+        install.index('"${TREE}/helper/keepalive.sh" >/dev/null 2>&1')
+
+
 def test_disconnect_without_crontab_still_disconnects(rig):
     nocron = os.path.join(rig["root"], "bin-nocron")
     os.makedirs(nocron, exist_ok=True)

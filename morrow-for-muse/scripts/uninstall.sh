@@ -292,6 +292,18 @@ fi
 # -- 1. stop the processes -------------------------------------------------
 step_n=1
 note "--- ${step_n}. stopping processes"
+if [ "${MODE}" = "disconnect" ]; then
+  # W-muse-ux3 (2026-09-23): record the disconnect before anything is
+  # deleted, so agent-side commands (students find, the failed-students
+  # chain, every Chromium-lane dispatch) refuse with canvas-disconnected
+  # instead of helper-down ("your Canvas sign-in is not affected", false
+  # here) whose next step would relaunch the helper. install.sh clears
+  # this marker when it reconnects. Same resolution as the transport:
+  # MORROW_HOME, then the install-time tree id in .morrow-tree-id.
+  PYTHONDONTWRITEBYTECODE=1 python3 "${TREE}/config/disconnect.py" mark \
+    || die "could not record the disconnect in the tree state dir"
+  note "disconnect recorded: nothing reconnects until install.sh runs again"
+fi
 # The keepalive background loop goes first, so it cannot relaunch the
 # helper while the helper is being stopped.
 if [ -f "${TREE}/helper/supervisor.py" ]; then
@@ -489,6 +501,7 @@ _CRON_EOF
   note ""
   note "Disconnected. The helper is stopped, keepalive will not restart it, and the"
   note "Canvas sign-in on this machine is deleted. Morrow can no longer reach Canvas."
+  note "Every Canvas command will say you disconnected it until you reconnect."
   note "To reconnect: run 'bash install.sh' from ${TREE}, then sign in on the helper page."
   exit 0
 fi

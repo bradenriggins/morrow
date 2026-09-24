@@ -917,6 +917,29 @@
       ]
     },
     {
+      "id": "canvas-disconnected",
+      "title": "The educator disconnected Morrow from Canvas (CanvasDisconnected)",
+      "surface": "helper",
+      "severity_hint": "low",
+      "root_cause": "Verified mechanism: bin/morrow disconnect (scripts/uninstall.sh --disconnect) records the disconnect in the marker file `disconnected` in the tree's state dir (config/disconnect.py), then stops the helper, removes keepalive supervision, and deletes the Canvas sign-in. Until install.sh finishes again and removes the marker, students find, the failed-students chain, and every Chromium-lane command refuse before they reach the helper, and bin/morrow start starts nothing.",
+      "is_not": "This is not a stopped helper, an expired sign-in, or a broken install. The educator chose to disconnect, and the sign-in on this computer is gone.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: you disconnected Morrow from Canvas on this computer, so Morrow has no Canvas sign-in here (reference {correlation_id}). What this means: nothing was sent to Canvas, and Morrow will not reconnect on its own. What happens next: if you want Morrow to work in your Canvas courses again, say \"Connect my Canvas account\", and then sign in to Canvas yourself on the helper page.",
+      "auto_action": "The educator disconnected: never relaunch the helper or start its supervision on your own. Only when the educator asks to reconnect, confirm it with them, then run bash install.sh from this tree (it removes the disconnect record and starts the helper), and guide them to sign in on the helper page themselves (SKILL.md onboarding steps 3 and 4).",
+      "escalate_when": "Never on its own: the educator chose to disconnect. Escalate only if install.sh cannot reconnect.",
+      "signature": {
+        "error_class": "CanvasDisconnected",
+        "nothing_sent": {
+          "truthy": true
+        }
+      },
+      "signature_notes": "evidence: muse UX audit 3 (2026-09-23): after bin/morrow disconnect --yes, students find returned helper-down ('your Canvas sign-in is not affected'), whose next step relaunched the helper and ran bin/morrow start, which re-armed the keepalive loop. config/disconnect.py CanvasDisconnected carries nothing_sent=True, so this entry outranks unknown-nothing-sent.",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
       "id": "helper-browser-not-reached",
       "title": "The helper browser could not be reached, so nothing was sent",
       "surface": "helper",

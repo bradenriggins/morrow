@@ -273,14 +273,34 @@ def _doctor(json_mode=False):
 def _start():
     """Keep this tree's helper supervised. With cron, install.sh's
     per-tree cron entry does it; without cron, start the keepalive
-    background loop (a no-op when it already runs)."""
+    background loop (a no-op when it already runs). After bin/morrow
+    disconnect it starts nothing: only install.sh reconnects."""
+    from config import disconnect
     from helper import supervisor as _sup
+    if disconnect.is_disconnected():
+        print(json.dumps({
+            "started": False, "disconnected": True,
+            "message": "the educator disconnected Morrow from Canvas "
+                       "(bin/morrow disconnect), so nothing was started. "
+                       "Reconnect only when they ask: confirm it, then run "
+                       "bash install.sh from %s, and they sign in on the "
+                       "helper page" % DEPLOY_DIR}))
+        return 1
     method = _sup.detect()
     if method == "cron":
+        if not _sup.cron_entry_installed(DEPLOY_DIR):
+            print(json.dumps({
+                "method": "cron", "started": False, "installed": False,
+                "message": "this machine has cron, but the crontab has no "
+                           "keepalive entry for this tree, so nothing keeps "
+                           "the helper up. Run bash install.sh from %s to "
+                           "add it" % DEPLOY_DIR}))
+            return 1
         print(json.dumps({"method": "cron", "started": False,
+                          "installed": True,
                           "message": "cron runs this tree's keepalive "
-                                     "every 5 minutes (install.sh "
-                                     "installed the entry)"}))
+                                     "every 5 minutes (its crontab entry "
+                                     "is in place)"}))
         return 0
     out = _sup.ensure(DEPLOY_DIR)
     out["message"] = ("the keepalive background loop %s (pid %s); it runs "

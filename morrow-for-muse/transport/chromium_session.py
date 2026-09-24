@@ -467,8 +467,12 @@ class ChromiumSession:
         state records the tenant the browser is actually signed into and
         the resolved base differs from it, the load is refused loudly
         (TenantBindingMismatch naming both tenants).
+
+        After bin/morrow disconnect it refuses (CanvasDisconnected)
+        before the browser, the helper, or Canvas is touched.
         """
-        from config import tree_config
+        from config import disconnect, tree_config
+        disconnect.refuse_if_disconnected()
         base = (base_url or tree_config.canvas_base()
                 or _lane_state_base())
         if not base:

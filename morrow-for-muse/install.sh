@@ -669,6 +669,16 @@ fi
 # secrets gate (step 8) and the integrity walk read the tree as release
 # content. Same resolution as helper/keepalive.sh and the transport.
 TREE_STATE_DIR="${MORROW_TREE_STATE_DIR:-${MORROW_HOME}/trees/${TREE_ID}}"
+# A completed install reconnects: clear the disconnect marker
+# scripts/uninstall.sh --disconnect wrote (config/disconnect.py), so
+# agent-side commands stop refusing with canvas-disconnected.
+_disconnect_marker="${TREE_STATE_DIR}/disconnected"
+if [ -f "${_disconnect_marker}" ]; then
+  rm -f "${_disconnect_marker}" \
+    || fail "disconnect" "could not remove the disconnect marker ${_disconnect_marker}"
+  note "reconnected: the disconnect record is cleared (the educator asked for this)"
+fi
+unset _disconnect_marker
 # An older release wrote keepalive's and the helper's logs (with their
 # rotated archives) and the keepalive loop's state into helper/. Move
 # them to the state dir, loudly, and stop a loop recorded there.

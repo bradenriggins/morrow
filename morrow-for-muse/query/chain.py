@@ -402,6 +402,11 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
             except Exception as exc:  # CatalogNotProven or unreadable catalog
                 raise _translate(operation, exc)
         _prog("arguments_checked", str(quiz_ref))
+        from config import disconnect as _disconnect
+        try:
+            _disconnect.refuse_if_disconnected()
+        except _disconnect.CanvasDisconnected as exc:
+            raise _translate(operation, exc)
 
         if reader is None:
             tenant_base = tenant_base or _live_read.tenant_base()

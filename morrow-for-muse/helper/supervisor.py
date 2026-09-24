@@ -113,6 +113,30 @@ def detect(path=None):
     return "loop"
 
 
+def cron_entry_installed(tree, path=None):
+    """True when the crontab holds a schedule line (never a comment)
+    that runs this tree's keepalive.sh, as install.sh step 7 writes it.
+    False when there is no crontab or it cannot be read."""
+    crontab = shutil.which("crontab", path=path)
+    if not crontab:
+        return False
+    try:
+        out = subprocess.run([crontab, "-l"], capture_output=True,
+                             text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if out.returncode != 0:
+        return False
+    targets = {os.path.join(tree, "helper", "keepalive.sh"),
+               _keepalive(tree)}
+    for line in out.stdout.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") \
+                and any(target in line for target in targets):
+            return True
+    return False
+
+
 def _read_json(path):
     try:
         with open(path, "r", encoding="utf-8") as fh:
