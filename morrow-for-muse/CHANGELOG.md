@@ -284,6 +284,11 @@ Messages:
 - After a change is prepared, the assistant is given the whole command
   that sends it once you approve, with this conversation's id. It was
   given only part of the command, which does not run as written.
+- The step to recover Morrow's log after its key is lost runs as the
+  assistant's instructions show it: they give a real reason of at
+  least 20 characters. A shorter reason is refused as a reason that is
+  too short, naming that step. It was reported as a failure Morrow
+  could not explain, with a note to email support.
 
 Installing and the docs:
 

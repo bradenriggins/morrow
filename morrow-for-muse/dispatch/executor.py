@@ -289,9 +289,10 @@ class LocalProcedureRefused(ExecutorError):
 
 
 class CallerInputError(ExecutorError):
-    """A command's own JSON argument (--params, --body,
-    --course-resolution) was refused before anything was sent. The text
-    is Morrow's own check, never provider data."""
+    """A command's own argument (--params, --body, --course-resolution,
+    a maintenance command's --reason) was refused before anything was
+    sent or changed. The text is Morrow's own check, never provider
+    data."""
 
 
 class ConfirmationRequired(ExecutorError):
@@ -10688,14 +10689,14 @@ def _chromium_session_mod():
     return chromium_session
 
 
-def _check_claim_release_reason(reason):
+def _check_operator_reason(command, reason):
     # W6-P2-D2: "OPERATOR ONLY" is enforced as far as code can: the
     # reason must be a real reconciliation note, not a stub.
     if len((reason or "").strip()) < 20:
-        raise ExecutorError(
-            "claim-release --reason must be at least 20 characters: "
-            "state what you reconciled against the provider "
-            "('fixed it' is not a reconciliation)")
+        raise CallerInputError(
+            "%s --reason must be at least 20 characters: state what you "
+            "reconciled against the provider ('fixed it' is not a "
+            "reconciliation). Nothing was changed." % command)
 
 
 def _require_destructive_confirm(command, warning, yes):
@@ -11167,7 +11168,7 @@ def _run_cli(argv=None):
             args.yes)
         print(canonical(journal_reconcile()))
     elif args.command == "journal-recover-secret":
-        _check_claim_release_reason(args.reason)
+        _check_operator_reason("journal-recover-secret", args.reason)
         _require_destructive_confirm(
             "journal-recover-secret",
             "this re-keys the journal under a NEW secret and re-seals "
@@ -11193,7 +11194,7 @@ def _run_cli(argv=None):
         # needs the same explicit confirmation as the other destructive
         # commands. There is no separate operator identity on this
         # machine; the journaled forced=true record is the audit trail.
-        _check_claim_release_reason(args.reason)
+        _check_operator_reason("claim-release", args.reason)
         _require_destructive_confirm(
             "claim-release",
             "this forcibly releases a live journal claim WITHOUT the "

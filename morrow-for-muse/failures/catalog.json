@@ -847,7 +847,7 @@
       "title": "A command argument was refused before sending (CallerInputError)",
       "surface": "canvas",
       "severity_hint": "low",
-      "root_cause": "Verified mechanism: the executor checks each JSON argument of a command (--params, --body, --course-resolution) before it builds a request. An argument that is not valid JSON, or not the shape the command takes, is refused before anything is sent. --body takes a JSON object, or a JSON array of objects for the bulk date update.",
+      "root_cause": "Verified mechanism: the executor checks each JSON argument of a command (--params, --body, --course-resolution) before it builds a request. An argument that is not valid JSON, or not the shape the command takes, is refused before anything is sent. --body takes a JSON object, or a JSON array of objects for the bulk date update. A maintenance command's --reason (journal-recover-secret, claim-release) must be at least 20 characters, and one that is shorter changes nothing.",
       "is_not": "This is not a Canvas failure and nothing was sent. The detail is Morrow's own check, not text from Canvas.",
       "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow checked the request before sending it, and part of it was not in a form Morrow accepts, so it stopped before sending anything to Canvas (reference {correlation_id}). What this means: nothing was sent and nothing changed. What happens next: I will correct the request and run it again.",
       "auto_action": "Read engineering_detail for the argument that was refused, correct it, and run the command again. Nothing was sent, so the retry is safe.",
@@ -860,7 +860,7 @@
           ]
         }
       },
-      "signature_notes": "evidence: 2026-09-22 final sweep: 'catalog --name canvas_bulk_update_assignment_dates ... --body [{\"id\":1}]' raised ExecutorError '--body must be a JSON object' and fell through to the unknown fallback, labeled as untrusted provider data, although nothing was sent.; RequestNotSendable: transport/chromium_session.py cannot encode the request body, refused before anything is sent",
+      "signature_notes": "evidence: 2026-09-22 final sweep: 'catalog --name canvas_bulk_update_assignment_dates ... --body [{\"id\":1}]' raised ExecutorError '--body must be a JSON object' and fell through to the unknown fallback, labeled as untrusted provider data, although nothing was sent. 2026-09-23 muse UX audit round 2: 'journal-recover-secret --yes --reason \"short\"' (SKILL.md showed a 3-character reason) reached unknown-nothing-sent, and its detail named claim-release.; RequestNotSendable: transport/chromium_session.py cannot encode the request body, refused before anything is sent",
       "severity_hint_inventory": "user-action",
       "placeholders": [
         "operation",
