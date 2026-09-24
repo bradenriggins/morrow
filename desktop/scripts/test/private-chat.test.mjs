@@ -193,6 +193,34 @@ test("local protection matches a rostered name written without its accents, on b
   assert.equal(accented, asserted);
 });
 
+// A leading title or a family-name particle is prose, not a reference to one student: "Dr."
+// in the educator's words names the course's teacher, so neither word may be replaced with a
+// student's label and come back as that student's name on the write path.
+test("a leading title or a family-name particle never stands for a rostered student", () => {
+  const honorifics = [
+    { id: 771, name: "Dr. Jane Doe", sortable_name: "Doe, Jane" },
+    { id: 772, name: "Ms. Ada Frizzle" },
+    { id: 773, name: "Ana van der Berg" },
+    { id: 774, name: "Van Nguyen" },
+  ];
+  const protectTitles = (text, assertedIdentifiers = []) => protectLocalRequest({
+    sourceBindingId: "canvas:course-89585", courseId: "89585", text, assertedIdentifiers,
+    roster: sourceProtectedRoster(honorifics), rosterComplete: true, rosterFreshAt: NOW, now: NOW,
+  });
+  const teacher = "Dr. Smith will collect the homework. Ms. Brown graded it.";
+  assert.equal(protectTitles(teacher).protectedText, teacher);
+  assert.equal(protectTitles("Van and Der asked a question.").protectedText, "Van and Der asked a question.");
+  // A capitalized word that matched nobody inside a sentence still asks, as "Der" here;
+  // the title itself is not a name question.
+  assert.deepEqual(protectTitles("Van and Der asked a question.").unmatchedNames, ["Der"]);
+  assert.doesNotMatch(protectTitles("Ask Dr. Smith to send it.").protectedText, /Student A/u);
+  // The students' own names still replace, with or without the title or particle.
+  assert.doesNotMatch(protectTitles("Ask Dr. Jane Doe to submit.").protectedText, /Jane|Doe/u);
+  assert.doesNotMatch(protectTitles("Ask Ms. Ada Frizzle to submit.").protectedText, /Frizzle/u);
+  assert.doesNotMatch(protectTitles("Ask Ana van der Berg and Berg to submit.").protectedText, /Berg/u);
+  assert.doesNotMatch(protectTitles("Ask Nguyen and Van Nguyen to submit.").protectedText, /Nguyen/u);
+});
+
 // Both learner boundaries read one roster the same way: the Bridge for what the educator types,
 // the gateway for what a tool result carries.
 const SCRIPT_ROSTER = [

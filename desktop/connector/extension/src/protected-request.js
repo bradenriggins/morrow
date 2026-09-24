@@ -85,6 +85,17 @@ const NOT_NAME_WORDS = new Set(("monday tuesday wednesday thursday friday saturd
 // A generational suffix ends a name but is never the family name.
 const NAME_SUFFIX = /^(?:jr|sr|ii|iii|iv|v)\.?$/u;
 
+// A title leads a roster name but is never a word of it. Alone in prose it
+// names the person it addresses, such as the course's teacher, so it never
+// starts the given name and never stands for a student on its own.
+// packages/gateway-core/src/privacy.ts splits the same way.
+const NAME_TITLE = /^(?:mr|mrs|ms|mx|miss|madam|sir|dr|doctor|prof|professor|rev|hon)\.?$/u;
+
+// A family-name particle sits inside a name, as van in "Ana van der Berg".
+// Alone in prose it is an ordinary word, so it never stands for a student
+// on its own either.
+const NAME_PARTICLE = /^(?:van|von|der|den|del|della|dos|ter|ten|zur|vom|bin|ibn|bint|abu)\.?$/u;
+
 // A Korean or Chinese roster name is often stored with no space, as 김민준 or 王小明, and a
 // Japanese one as 田中太郎. Its family name comes first: one syllable or character, or one of these
 // two-letter family names. A Japanese four-character name is two and two.
@@ -129,16 +140,28 @@ function parsedNameForm(form) {
   if (!name || name.length > 500) return null;
   const comma = /^([^,]+),\s*(.+)$/u.exec(name);
   const familyFirst = comma && !NAME_SUFFIX.test(comma[2]) ? comma : null;
-  const words = nameWords(familyFirst ? familyFirst[2] : name);
+  const words = titlelessWords(familyFirst ? familyFirst[2] : name);
   if (!words.length) return null;
   // A comma form, and a Moodle lastname field, name the family part. A name
   // the roster gives with no such field says nothing about its family part, so
   // only its last word is taken, and each word after the given name still
   // names this student on its own.
   const familyWords = familyFirst
-    ? nameWords(familyFirst[1])
+    ? titlelessWords(familyFirst[1])
     : words.length > 1 ? [words.at(-1)] : [];
   return { words, familyWords, given: words[0], familyFirst: familyFirst !== null };
+}
+
+/** The words of a name, without any title that leads them. */
+function titlelessWords(value) {
+  const words = nameWords(value);
+  while (words.length > 1 && NAME_TITLE.test(words[0])) words.shift();
+  return words;
+}
+
+/** A title or a particle alone is prose, not a reference to one student. */
+function isStandaloneNameWord(part) {
+  return !part.includes(" ") && (NAME_TITLE.test(part) || NAME_PARTICLE.test(part));
 }
 
 function learnerNameAliases(identity) {
@@ -159,9 +182,13 @@ function learnerNameAliases(identity) {
     aliases.add(normalize(form));
     if (wording !== form) aliases.add(normalize(wording));
     const family = parsed.familyWords.join(" ");
-    for (const part of [parsed.given, family, ...parsed.familyWords]) aliases.add(part);
+    for (const part of [parsed.given, family, ...parsed.familyWords]) {
+      if (!isStandaloneNameWord(part)) aliases.add(part);
+    }
     if (form === identity.name && parsed.words.length >= 3) {
-      for (const word of parsed.words.slice(1)) aliases.add(word);
+      for (const word of parsed.words.slice(1)) {
+        if (!isStandaloneNameWord(word)) aliases.add(word);
+      }
     }
     const name = normalize(identity.name);
     const unspaced = !parsed.familyFirst && nameWords(name).length === 1 ? unspacedNameParts(name) : null;

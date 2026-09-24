@@ -1189,6 +1189,31 @@ describe("bidirectional roster dictionary", () => {
     expect(redactKnownLearnerText("Taylor spoke to Reed. Sam listened.", ctx)).toBe(`[learner] spoke to ${label("Taylor Reed")}. ${label("Sam Taylor")} listened.`);
     expect(redactKnownLearnerText("Mary chose option X.", ctx)).toBe(`${label("Mary X")} chose option X.`);
   });
+  it("never replaces a leading title or a family-name particle as a student's name, and never restores one", () => {
+    const roster = new LearnerRoster();
+    roster.register(scope, [
+      { id: "771", name: "Dr. Jane Doe" },
+      { id: "772", name: "Ms. Ada Frizzle" },
+      { id: "773", name: "Ana van der Berg" },
+      { id: "774", name: "Van Nguyen" },
+    ]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [jane, frizzle, berg, nguyen] = ["Dr. Jane Doe", "Ms. Ada Frizzle", "Ana van der Berg", "Van Nguyen"].map((name) => redactKnownLearnerText(name, ctx));
+    expect(new Set([jane, frizzle, berg, nguyen]).size).toBe(4);
+    // A title in prose names the course's teacher, and a particle is an ordinary
+    // word: neither stands for a rostered student, so the write path never
+    // restores a student's name where one stood.
+    const teacher = "Dr. Smith will collect the homework. Ms. Brown graded it.";
+    expect(redactKnownLearnerText(teacher, ctx)).toBe(teacher);
+    expect(redactKnownLearnerText("Van and Der asked a question.", ctx)).toBe("Van and Der asked a question.");
+    expect(resolveLearnerTokens({ body: redactKnownLearnerText(teacher, ctx) }, ctx.learnerVault, scope, roster))
+      .toEqual({ body: teacher });
+    // The student's own names still replace, with or without the title or particle.
+    expect(redactKnownLearnerText("Jane Doe and Doe asked. Dr. Jane Doe replied.", ctx)).toBe(`${jane} and ${jane} asked. ${jane} replied.`);
+    expect(redactKnownLearnerText("Ada Frizzle and Frizzle asked. Ms. Ada Frizzle replied.", ctx)).toBe(`${frizzle} and ${frizzle} asked. ${frizzle} replied.`);
+    expect(redactKnownLearnerText("van der Berg and Berg asked.", ctx)).toBe(`van der ${berg} and ${berg} asked.`);
+    expect(redactKnownLearnerText("Nguyen asked, and Van Nguyen too.", ctx)).toBe(`${nguyen} asked, and ${nguyen} too.`);
+  });
   it("replaces a lone family name only where it is written with a capital letter", () => {
     const roster = new LearnerRoster();
     roster.register(scope, [

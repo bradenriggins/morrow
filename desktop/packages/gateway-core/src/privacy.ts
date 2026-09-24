@@ -643,6 +643,16 @@ function aliasMatches(text: string, matchers: readonly RegExp[]): Array<{ readon
 // A generational suffix ends a name but is never the family name.
 const NAME_SUFFIX = /^(?:jr|sr|ii|iii|iv|v)\.?$/u;
 
+// A title leads a roster name but is never a word of it. Alone in prose it
+// names the person it addresses, such as the course's teacher, so it never
+// starts the given name and never stands for a student on its own.
+const NAME_TITLE = /^(?:mr|mrs|ms|mx|miss|madam|sir|dr|doctor|prof|professor|rev|hon)\.?$/u;
+
+// A family-name particle sits inside a name, as van in "Ana van der Berg".
+// Alone in prose it is an ordinary word, so it never stands for a student
+// on its own either.
+const NAME_PARTICLE = /^(?:van|von|der|den|del|della|dos|ter|ten|zur|vom|bin|ibn|bint|abu)\.?$/u;
+
 // A Korean or Chinese roster name is often stored with no space, as 김민준 or 王小明, and a
 // Japanese one as 田中太郎. Its family name comes first: one syllable or character, or one of these
 // two-letter family names. A Japanese four-character name is two and two.
@@ -703,18 +713,25 @@ function parsedNameForm(form: string): {
   if (!name || name.length > 500) return null;
   const comma = /^([^,]+),\s*(.+)$/u.exec(name);
   const familyFirst = comma && !NAME_SUFFIX.test(comma[2]!) ? comma : null;
-  const words = nameWords(familyFirst ? familyFirst[2]! : name);
+  const words = givenWords(familyFirst ? familyFirst[2]! : name);
   if (words.length === 0) return null;
   // A comma form, and a Moodle lastname field, name the family part. A name
   // the roster gives with no such field says nothing about its family part, so
   // only its last word is taken, and each word after the given name still
   // names this student on its own.
   const familyWords = familyFirst
-    ? nameWords(familyFirst[1]!)
+    ? givenWords(familyFirst[1]!)
     : words.length > 1
       ? [words.at(-1)!]
       : [];
   return { words, familyWords, given: words[0]!, familyFirst: familyFirst !== null };
+}
+
+/** The words of a name, without any title that leads them. */
+function givenWords(value: string): string[] {
+  const words = nameWords(value);
+  while (words.length > 1 && NAME_TITLE.test(words[0]!)) words.shift();
+  return words;
 }
 
 function learnerNameAliases(identity: LearnerIdentity): LearnerNameAliases {
@@ -731,7 +748,10 @@ function learnerNameAliases(identity: LearnerIdentity): LearnerNameAliases {
   const aliases = new Set<string>();
   const capitalized = new Set<string>();
   const addPart = (part: string): void => {
-    if ((part.match(/\p{L}/gu)?.length ?? 0) >= 2 && part !== name) aliases.add(part);
+    // A title or a particle alone is prose, not a reference to one student.
+    if (part.includes(" ") || !(NAME_TITLE.test(part) || NAME_PARTICLE.test(part))) {
+      if ((part.match(/\p{L}/gu)?.length ?? 0) >= 2 && part !== name) aliases.add(part);
+    }
   };
   for (const form of forms) {
     // An invisible character can sit where the roster meant a space, as a word
