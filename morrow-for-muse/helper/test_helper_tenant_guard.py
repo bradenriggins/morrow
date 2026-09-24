@@ -18,6 +18,13 @@ no address box. POST /navigate refuses any URL outside the configured
 tenant base (same origin), and HelperBrowser.navigate refuses it too
 (the handler path and any future caller), before the CDP navigate
 runs. Hermetic: a stub CDP records the URL; no Chromium starts.
+
+Security review 2026-09-24: the same rules cover the CDP proxy routes
+(the /cdp/* token is one bearer secret, so /cdp/new-tab and
+/cdp/navigate cannot be weaker than /navigate), a target with no host
+("https:evil.com" is scheme https, host none, and CDP Page.navigate
+normalizes it to https://evil.com/), and a sibling host whose name
+makes the target string start with the base URL.
 """
 
 import importlib.util
@@ -44,9 +51,14 @@ def _server_module():
 class _StubCdp:
     def __init__(self):
         self.navigated = []
+        self.opened = []
 
     def navigate(self, tab, url, timeout=30):
         self.navigated.append(url)
+
+    def new_tab(self, url, timeout=30):
+        self.opened.append(url)
+        return {"id": "NEW", "type": "page", "url": url}
 
     def evaluate(self, tab, expression, timeout=15, await_promise=False):
         return '{"href": "about:blank"}'
@@ -99,6 +111,88 @@ def test_navigate_still_refuses_non_https():
         else:
             raise AssertionError("accepted %r" % bad)
     assert browser.cdp.navigated == []
+
+
+def test_navigate_refuses_a_target_with_no_host():
+    # "https:evil.com" is scheme https with an empty netloc; CDP
+    # Page.navigate normalizes it to https://evil.com/, so the old
+    # netloc-presence gate let the session browser leave the tenant.
+    server = _server_module()
+    browser = _browser(server, BASE)
+    for bad in ("https:attacker.example/", "https:lincolnhs.instructure.com",
+                "https:/attacker.example/"):
+        try:
+            browser.navigate(bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("accepted %r" % bad)
+    assert browser.cdp.navigated == []
+
+
+def test_navigate_refuses_a_sibling_host_the_base_is_a_prefix_of():
+    # The old startswith() gate accepted this: the target string starts
+    # with the base URL, but the origin is a different host.
+    server = _server_module()
+    browser = _browser(server, BASE)
+    try:
+        browser.navigate(BASE + ".evil.example/courses/1")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("accepted a sibling host")
+    assert browser.cdp.navigated == []
+
+
+def _proxy_browser(server):
+    browser = _browser(server, BASE)
+    browser._proxy_resolve = lambda target_id: (
+        {"id": target_id, "type": "page", "url": "about:blank"}
+        if target_id else None)
+    return browser
+
+
+def test_cdp_proxy_new_tab_refuses_an_off_tenant_target():
+    server = _server_module()
+    browser = _proxy_browser(server)
+    try:
+        browser.cdp_proxy_new_tab("https://canvas.lincolnhs.edu/")
+    except server._HttpError as exc:
+        assert exc.code == 400, exc.code
+    else:
+        raise AssertionError("off-tenant new-tab accepted")
+    assert browser.cdp.opened == [], browser.cdp.opened
+    assert browser.cdp.navigated == [], browser.cdp.navigated
+
+
+def test_cdp_proxy_new_tab_still_allows_blank_and_the_tenant():
+    server = _server_module()
+    browser = _proxy_browser(server)
+    browser.cdp_proxy_new_tab("about:blank")
+    browser.cdp_proxy_new_tab(BASE + "/courses/1")
+    assert browser.cdp.opened == ["about:blank", BASE + "/courses/1"]
+
+
+def test_cdp_proxy_navigate_refuses_an_off_tenant_target():
+    server = _server_module()
+    browser = _proxy_browser(server)
+    for bad in ("https://canvas.lincolnhs.edu/",
+                "https:attacker.example/",
+                BASE + ".evil.example/courses/1"):
+        try:
+            browser.cdp_proxy_navigate("STUB", bad, 30)
+        except server._HttpError as exc:
+            assert exc.code == 400, (bad, exc.code)
+        else:
+            raise AssertionError("off-tenant proxy navigate accepted %r" % bad)
+    assert browser.cdp.navigated == [], browser.cdp.navigated
+
+
+def test_cdp_proxy_navigate_still_allows_the_tenant():
+    server = _server_module()
+    browser = _proxy_browser(server)
+    browser.cdp_proxy_navigate("STUB", BASE + "/courses/1", 30)
+    assert browser.cdp.navigated == [BASE + "/courses/1"]
 
 
 def test_a_tenant_origin_with_another_scheme_or_port_is_refused():

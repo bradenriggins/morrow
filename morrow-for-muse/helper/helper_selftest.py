@@ -445,6 +445,10 @@ def main():
         hb = helper_srv.HelperBrowser.__new__(helper_srv.HelperBrowser)
         hb.cdp = _ProxyStubCDP()
         hb._lock = threading.Lock()
+        # Security review 2026-09-24: the proxy navigation routes are
+        # tenant-bound like /navigate; the stub browser's tenant is the
+        # stub targets' host.
+        hb.base_url = "https://t"
         return hb
 
     def _expect_http(fn, code):
@@ -520,6 +524,16 @@ def main():
               _expect_http(lambda b=bad: pb.cdp_proxy_new_tab(b), 400))
     for bad in ("http://t/", "file:///etc/passwd"):
         check("proxy refuses non-https navigate target %r (400)" % bad,
+              _expect_http(
+                  lambda b=bad: pb.cdp_proxy_navigate("T1", b, 30), 400))
+    # Security review 2026-09-24: an https:// target on another origin
+    # is refused on both proxy navigation routes (same X-Helper-Token
+    # as the helper page; the session browser never leaves the tenant).
+    for bad in ("https://evil.example/", "https://t.evil.example/",
+                "https:evil.com"):
+        check("proxy refuses an off-tenant new-tab target %r (400)" % bad,
+              _expect_http(lambda b=bad: pb.cdp_proxy_new_tab(b), 400))
+        check("proxy refuses an off-tenant navigate target %r (400)" % bad,
               _expect_http(
                   lambda b=bad: pb.cdp_proxy_navigate("T1", b, 30), 400))
     check("proxy navigate 404s an unknown target",

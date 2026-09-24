@@ -69,7 +69,7 @@ Endpoints (all on 127.0.0.1):
                            (HTTPS targets only, W4-P2-8)
   POST /cdp/tabs         -> PROTECTED: {}  list live targets
   POST /cdp/new-tab      -> PROTECTED: {"url"}  open a tab (about:blank or
-                           https only); returns the tab
+                           this tenant's https only); returns the tab
   POST /cdp/call         -> PROTECTED: {"target_id", "method", "params"}
                            one allowlisted CDP method on a live target
                            (no target_id = browser-level); returns
@@ -79,7 +79,8 @@ Endpoints (all on 127.0.0.1):
                            on a live target; returns {"ok", "value"} or
                            {"ok": false, "error"}
   POST /cdp/navigate     -> PROTECTED: {"target_id", "url"}  Page.navigate
-                           on a live target (https only); {"ok": true}
+                           on a live target (this tenant's https only);
+                           {"ok": true}
   POST /cdp/close-tab    -> PROTECTED: {"target_id"}  close the tab;
                            {"ok": true}
   GET  /cdp/events       -> PROTECTED: ?target_id=&timeout_s=  drain
@@ -1110,6 +1111,13 @@ class HelperBrowser:
         # navigation to any other HTTPS host (a vanity address, a
         # lookalike domain) leaves the session uncountable by status()
         # and lets the page drive the browser off the tenant playbook.
+        # Security review 2026-09-24: a target with no host
+        # ("https:evil.com" is scheme https, netloc none) slipped past
+        # the old gate and CDP Page.navigate normalized it to
+        # https://evil.com/; and a string-prefix gate accepted sibling
+        # hosts the base URL is a prefix of. The host must be present,
+        # and the tenant question is decided with the exact origin
+        # comparison the API egress uses (local_chromium.is_tenant_url).
         if not isinstance(url, str) or not url:
             raise ValueError("refusing empty navigation target")
         try:
@@ -1121,8 +1129,11 @@ class HelperBrowser:
             raise ValueError(
                 "refusing non-HTTPS navigation target: only https:// "
                 "targets are allowed")
-        if self.base_url and split.netloc \
-                and not url.startswith(self.base_url):
+        if not split.netloc:
+            raise ValueError(
+                "refusing navigation target with no host; the helper's "
+                "browser goes to your Canvas sign-in only")
+        if self.base_url and not lc.is_tenant_url(url, self.base_url):
             raise ValueError(
                 "refusing navigation off the Canvas tenant %s; the "
                 "helper's browser goes to your Canvas sign-in only" %
@@ -1359,12 +1370,23 @@ class HelperBrowser:
             return self._proxy_live_tabs()
 
     def cdp_proxy_new_tab(self, url):
-        if not _cdp_proxy_nav_ok(url):
+        if not _cdp_proxy_nav_ok(url) or not self._proxy_tenant_ok(url):
             raise _HttpError(
                 400, "refusing new-tab target: only about:blank and "
-                "https:// URLs are allowed")
+                "this tenant's https:// URLs are allowed")
         with self._lock:
             return self.cdp.new_tab(url)
+
+    def _proxy_tenant_ok(self, url):
+        """Security review 2026-09-24: the /cdp/* routes carry the same
+        X-Helper-Token the helper page holds, so their https:// targets
+        must be on the tenant origin, exactly like /navigate (the
+        transport's is_tenant_url, not a string prefix). about:blank
+        stays allowed: the transport opens scratch tabs there.
+        Fails closed when no tenant is configured."""
+        if url == "about:blank":
+            return True
+        return bool(self.base_url) and lc.is_tenant_url(url, self.base_url)
 
     def cdp_proxy_call(self, target_id, method, params, timeout):
         if method not in _CDP_PROXY_ALLOWLIST:
@@ -1425,10 +1447,10 @@ class HelperBrowser:
             return {"ok": True, "value": value}
 
     def cdp_proxy_navigate(self, target_id, url, timeout):
-        if not _cdp_proxy_nav_ok(url):
+        if not _cdp_proxy_nav_ok(url) or not self._proxy_tenant_ok(url):
             raise _HttpError(
-                400, "refusing navigation target: only https:// URLs "
-                "are allowed")
+                400, "refusing navigation target: only this tenant's "
+                "https:// URLs are allowed")
         if len(url.encode("utf-8")) > _CDP_PROXY_MAX_URL_BYTES:
             raise _HttpError(413, "url too long")
         with self._lock:
