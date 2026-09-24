@@ -36,12 +36,16 @@ function registerWait(runtime: GatewayRuntime, composition?: OperationToolCompos
  * never reach past its own durable local read to ask a source provider anything while it polls; a
  * property read this double does not expect is exactly that reach, caught at the point it happens.
  */
-function operationOnlyRuntime(states: readonly string[], calls: { count: number }): GatewayRuntime {
+function operationOnlyRuntime(
+  states: readonly string[],
+  calls: { count: number },
+  authorization: "review" | "edit_scope" = "review",
+): GatewayRuntime {
   const base = {
     operationGet(operationId: string): JsonObject {
       calls.count += 1;
       const state = states[Math.min(calls.count - 1, states.length - 1)]!;
-      return { schema: "morrow.operation.v1", operationId, state, attention: [] };
+      return { schema: "morrow.operation.v1", operationId, state, plan: { authorization: { kind: authorization } }, attention: [] };
     },
   };
   return new Proxy(base, {
@@ -126,6 +130,121 @@ describe("morrow_operation_wait", () => {
     const result = await handler({ batch_id: "bat:wait-1234", max_wait_seconds: 1 }, context(new AbortController().signal));
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({ batch: { batchId: "bat:wait-1234", state: "completed" } });
+  });
+
+  it("keeps waiting while a batch waits for review, and returns once it is answered", async () => {
+    let polls = 0;
+    const { handler } = registerWait(operationOnlyRuntime(["verified"], { count: 0 }), {
+      batchApprovalStatus: (batchId) => {
+        polls += 1;
+        return polls < 3
+          ? { batch: { batchId, state: "planned" }, approval: "awaiting_approval" }
+          : { batch: { batchId, state: "completed" } };
+      },
+    });
+    const result = await handler({ batch_id: "bat:review-1234", max_wait_seconds: 5 }, context(new AbortController().signal));
+    expect(result.isError).not.toBe(true);
+    expect(polls).toBe(3);
+    expect(result.structuredContent).toMatchObject({ batch: { state: "completed" }, waited: { timedOut: false } });
+  });
+
+  it("says the review is still open when a batch review times out", async () => {
+    const { handler } = registerWait(operationOnlyRuntime(["verified"], { count: 0 }), {
+      batchApprovalStatus: (batchId) => ({ batch: { batchId, state: "planned" }, approval: "awaiting_approval" }),
+    });
+    const result = await handler({ batch_id: "bat:open-1234", max_wait_seconds: 1 }, context(new AbortController().signal));
+    const structured = result.structuredContent as JsonObject;
+    expect(structured.waited).toMatchObject({ timedOut: true });
+    expect(structured.attention).toEqual([
+      "The person has not approved yet. Say that the review is still open. Call morrow_operation_wait again when they are ready. Do not call it more than 6 times in a row.",
+    ]);
+  });
+
+  // Approved work can wait for a batch window and can run for longer than one wait. The person
+  // already approved it, so the wait keeps going and never says the review is still open.
+  it("says the person approved while an approved change or batch is still being applied", async () => {
+    const applying = "The person approved. Morrow is still applying what they approved. Call morrow_operation_wait again to wait for the result.";
+    const cases: [WaitInput, OperationToolComposition | undefined, readonly string[]][] = [
+      [{ batch_id: "bat:approved-1234" }, { batchApprovalStatus: (batchId) => ({ batch: { batchId, state: "planned" }, approval: "approved", applying: true }) }, ["verified"]],
+      [{ batch_id: "bat:running-1234" }, { batchApprovalStatus: (batchId) => ({ batch: { batchId, state: "running" }, approval: "approved", applying: true }) }, ["verified"]],
+      [{ operation_id: "op:approved-1" }, undefined, ["approved"]],
+      [{ operation_id: "op:dispatching-1" }, undefined, ["dispatching"]],
+    ];
+    for (const [input, composition, states] of cases) {
+      const { handler } = registerWait(operationOnlyRuntime(states, { count: 0 }), composition);
+      const result = await handler({ ...input, max_wait_seconds: 1 }, context(new AbortController().signal));
+      const structured = result.structuredContent as JsonObject;
+      expect(structured.waited, JSON.stringify(input)).toMatchObject({ timedOut: true });
+      expect(structured.attention, JSON.stringify(input)).toEqual([applying]);
+    }
+  });
+
+  // No person reviewed work that Edit allows, and a read group has nothing to review, so while
+  // Morrow runs it the wait never says a person approved it.
+  it("says Morrow is still working, not that a person approved, while it runs work no one reviewed", async () => {
+    const working = "Morrow is still working on this. Call morrow_operation_wait again to wait for the result.";
+    const cases: [WaitInput, OperationToolComposition | undefined, readonly string[]][] = [
+      [{ batch_id: "bat:edit-running-1234" }, { batchApprovalStatus: (batchId) => ({ batch: { batchId, state: "running" }, approval: "edit", applying: true }) }, ["verified"]],
+      [{ batch_id: "bat:read-running-1234" }, { batchApprovalStatus: (batchId) => ({ batch: { batchId, state: "running" }, applying: true }) }, ["verified"]],
+      [{ batch_id: "bat:edit-queued-1234" }, { batchApprovalStatus: (batchId) => ({ batch: { batchId, state: "planned" }, approval: "edit", applying: true }) }, ["verified"]],
+    ];
+    for (const [input, composition, states] of cases) {
+      const { handler } = registerWait(operationOnlyRuntime(states, { count: 0 }), composition);
+      const result = await handler({ ...input, max_wait_seconds: 1 }, context(new AbortController().signal));
+      const structured = result.structuredContent as JsonObject;
+      expect(structured.waited, JSON.stringify(input)).toMatchObject({ timedOut: true });
+      expect(structured.attention, JSON.stringify(input)).toEqual([working]);
+    }
+    const { handler } = registerWait(operationOnlyRuntime(["dispatching"], { count: 0 }, "edit_scope"));
+    const result = await handler({ operation_id: "op:edit-sending-1", max_wait_seconds: 1 }, context(new AbortController().signal));
+    expect((result.structuredContent as JsonObject).attention).toEqual([working]);
+  });
+
+  // Nothing changes while nothing runs the work, so the wait ends at once and names the one call
+  // that starts it. Edit allows a change without a review, so no person approved it.
+  it("ends at once and names the call that starts work nothing is running", async () => {
+    const cases: [WaitInput, OperationToolComposition | undefined, GatewayRuntime, string][] = [
+      [
+        { batch_id: "bat:edit-planned-1234" },
+        { batchApprovalStatus: (batchId) => ({ batch: { batchId, state: "planned" }, approval: "edit", applying: false }) },
+        operationOnlyRuntime(["verified"], { count: 0 }),
+        "Edit already allows these changes, and nothing has sent them yet. Run them with morrow_batch_run.",
+      ],
+      [
+        { batch_id: "bat:approved-idle-1234" },
+        { batchApprovalStatus: (batchId) => ({ batch: { batchId, state: "planned" }, approval: "approved", applying: false }) },
+        operationOnlyRuntime(["verified"], { count: 0 }),
+        "The person approved these changes, and nothing is sending them now. Run them with morrow_batch_run.",
+      ],
+      [
+        { batch_id: "bat:between-windows-1234" },
+        { batchApprovalStatus: (batchId) => ({ batch: { batchId, state: "running" }, approval: "edit", applying: false }) },
+        operationOnlyRuntime(["verified"], { count: 0 }),
+        "Nothing is running this group now. Run its remaining requests with morrow_batch_run.",
+      ],
+      [
+        { batch_id: "bat:read-planned-1234" },
+        { batchApprovalStatus: (batchId) => ({ batch: { batchId, state: "planned" }, applying: false }) },
+        operationOnlyRuntime(["verified"], { count: 0 }),
+        "Nothing is running this group now. Run its remaining requests with morrow_batch_run.",
+      ],
+      [
+        { operation_id: "op:edit-prepared-1" },
+        undefined,
+        operationOnlyRuntime(["approved"], { count: 0 }, "edit_scope"),
+        "Edit already allows this change, and nothing has sent it yet. Send it with morrow_operation_dispatch. If it belongs to a group, run the group with morrow_batch_run instead.",
+      ],
+    ];
+    for (const [input, composition, runtime, next] of cases) {
+      const { handler } = registerWait(runtime, composition);
+      const startedAt = Date.now();
+      const result = await handler({ ...input, max_wait_seconds: 5 }, context(new AbortController().signal));
+      expect(Date.now() - startedAt, JSON.stringify(input)).toBeLessThan(400);
+      const structured = result.structuredContent as JsonObject;
+      expect(result.isError, JSON.stringify(input)).not.toBe(true);
+      expect(structured.waited, JSON.stringify(input)).toMatchObject({ timedOut: false });
+      expect(structured.attention, JSON.stringify(input)).toEqual([next]);
+    }
   });
 
   it("requires exactly one of operation_id or batch_id", () => {

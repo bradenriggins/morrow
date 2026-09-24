@@ -1,4 +1,4 @@
-import { problemCode } from "../src/bridge-problem-copy.js";
+import { problemCode, VERSION_MISMATCH_RECOVERY } from "../src/bridge-problem-copy.js";
 import { CURATED_CATEGORY_SPECS } from "../src/edit-policy.js";
 
 const NOT_CHECKED = "Not checked";
@@ -24,7 +24,7 @@ function permissionLapsed(permission) {
  * D7: one connection's own state text, read only from its editPermission summary. A permission
  * present in morrow_edit_policy_status's bindings is already fresh (the service worker filters out
  * a lapsed or catalog-stale one), so the popup needs no separate staleness check to show it (see
- * settings.js's isStale for the fuller check the Courses and access page keeps for other reasons).
+ * settings.js's isStale for the fuller check Plan and Edit settings keeps for other reasons).
  */
 export function courseStateText(binding) {
   const permission = binding?.editPermission;
@@ -89,8 +89,10 @@ export function currentPlatform(status, detectedProvider = null) {
   return providerName(currentBinding(status)?.provider || currentSiteAnchor(status)?.provider);
 }
 
+// Morrow refused this Bridge build (versionMismatch), or a connection is open but Morrow's answer
+// does not match this extension. An update and a reload fix both, not connecting again.
 export function runtimeNeedsReload(status) {
-  return status?.connected === true && status.runtimeHealthy !== true;
+  return status?.versionMismatch === true || (status?.connected === true && status.runtimeHealthy !== true);
 }
 
 export function canChooseCourses(status, binding = currentBinding(status), anchor = currentSiteAnchor(status)) {
@@ -103,7 +105,7 @@ export function statusValue(status) {
   if (!status) return NOT_CHECKED;
   if (runtimeNeedsReload(status)) return "Reload needed";
   if (status.authenticationFailed === true) return "Reconnect needed";
-  return status.connected ? "Connected" : status.pairing ? "Waiting for approval" : status.connecting ? "Connecting…" : status.paired ? "Not available" : "Not connected";
+  return status.connected ? "Connected" : status.connecting ? "Connecting…" : status.paired ? "Not available" : "Not connected";
 }
 
 export function courseValue(status) {
@@ -164,17 +166,20 @@ export function statusAnnouncement(status) {
 // platform: the person already knows what course the active tab shows (D1a). popup.js hides this
 // control instead, whenever the saved course's own tab needs reopening (platformClosed) or nothing
 // is detected here, so "Connect this course", "Open Canvas"/"Open Moodle", or no primary action at
-// all are the only three outcomes.
+// all are the only three outcomes. The label and the step a click takes come from this one
+// decision, so the button can never say one thing and do another.
+export function primaryAction(status, detectedProvider = null) {
+  if (!status) return { id: "retry", label: "Try again" };
+  if (runtimeNeedsReload(status)) return { id: "open_setup", label: "Open setup guide" };
+  if (status.authenticationFailed === true) return { id: "pair", label: "Reconnect Morrow" };
+  if (!status.paired) return { id: "pair", label: "Connect Morrow" };
+  if (canChooseCourses(status)) return { id: "choose_courses", label: "Choose courses" };
+  if (!status.connected) return { id: "wait", label: "Waiting for your assistant" };
+  return currentPlatform(status, detectedProvider) ? { id: "connect_course", label: "Connect this course" } : { id: "none", label: "" };
+}
+
 export function primaryLabel(status, detectedProvider = null) {
-  if (!status) return "Try again";
-  if (runtimeNeedsReload(status)) return "Open setup guide";
-  if (status.pairing) return "Waiting for approval";
-  if (status.authenticationFailed === true) return "Reconnect Morrow";
-  if (!status.paired) return "Connect Morrow";
-  if (canChooseCourses(status)) return "Choose courses";
-  if (!status.connected) return "Waiting for your assistant";
-  const platform = currentPlatform(status, detectedProvider);
-  return platform ? "Connect this course" : "";
+  return primaryAction(status, detectedProvider).label;
 }
 
 function courseTabName(platform) {
@@ -194,17 +199,15 @@ function staleAnchorDetail(platform) {
 
 export function detailText(status, detectedProvider = null) {
   if (!status) return "Morrow could not read this connection state. Select Try again. If the state does not change, close this popup and open it again.";
-  if (runtimeNeedsReload(status)) return "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome.";
+  if (runtimeNeedsReload(status)) return `The Morrow app and Morrow Bridge versions do not match. ${VERSION_MISMATCH_RECOVERY}`;
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
   const platform = currentPlatform(status, detectedProvider);
   const savedPlatform = currentPlatform(status);
-  return status.pairing
-    ? "Confirm this connection on the Morrow page that opens. Then return to this popup."
-    : status.authenticationFailed === true
-      ? "Morrow Bridge refused the saved local connection. Select Reconnect Morrow, then approve the new connection in Morrow. Your selected courses stay saved."
+  return status.authenticationFailed === true
+    ? "Morrow refused the connection Morrow Bridge saved. Select Reconnect Morrow to connect again. Your selected courses stay saved."
     : !status.paired
-      ? "Add Morrow to your assistant, then open it. Select Connect Morrow to continue."
+      ? "Add Morrow to your assistant, then open it. Select Connect Morrow to connect this extension to Morrow. Connecting does not approve changes to your courses."
       : status.connecting
         ? "Connecting to Morrow. Keep this popup open or return in a moment."
         : !status.connected
@@ -224,12 +227,12 @@ export function detailText(status, detectedProvider = null) {
 
 export function controlState(status, { actionInFlight = false, detectedProvider = null } = {}) {
   if (!status) return { primaryDisabled: actionInFlight, primaryBusy: actionInFlight, secondaryDisabled: true };
-  const waiting = Boolean(status.pairing || (status.authenticationFailed !== true && !canChooseCourses(status) && status.paired && !status.connected));
+  const waiting = Boolean(status.authenticationFailed !== true && !runtimeNeedsReload(status) && !canChooseCourses(status) && status.paired && !status.connected);
   const needsDetectedCourse = status.paired === true && status.connected === true
     && !canChooseCourses(status) && currentBinding(status)?.runtimeVerified !== true;
   return {
     primaryDisabled: actionInFlight || waiting || (needsDetectedCourse && !currentPlatform(status, detectedProvider)),
-    primaryBusy: actionInFlight || status.pairing === true || status.connecting === true,
+    primaryBusy: actionInFlight || status.connecting === true,
     secondaryDisabled: actionInFlight,
   };
 }

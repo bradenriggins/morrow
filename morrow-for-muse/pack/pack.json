@@ -36,16 +36,16 @@
     "policy": "dispatch/admission_policy.json",
     "rules": [
       "Frozen plans: every write dispatches under a frozen plan digest; plan/action mismatch refuses.",
-      "Catalog enforcement: only operations marked live-proven in proof-battery/OPERATION_CATALOG.md dispatch. The only override is an educator-signed --allow-unproven flag for edge cases, signed by the educator as part of the approval.",
+      "Catalog enforcement: only operations marked live-proven in proof-battery/OPERATION_CATALOG.md dispatch. Nothing overrides that, not even the educator asking.",
       "Approvals: writes require an educator-signed approval record, digest-bound to the exact action, unexpired, category-scoped, and unused. An approval is consumed before the network call.",
       "Journaling: every dispatch appends one record; consumed op ids are never reused.",
       "Session death: nothing is journaled; unjournaled op ids (never consumed) stay reusable. A retry needs a freshly signed approval and re-sign-in through the login helper.",
       "Write halt: if ~/.morrow/write_halt exists, all writes refuse.",
       "Fail closed: 4xx fails fast; uncertain writes are never retried.",
-      "Evidence hold: learner-data operations refuse until the learner tokenization boundary is proven; nothing is gated or restricted by tenant (parity law).",
+      "Learner data: operations whose responses carry people dispatch only on the Chromium lane with the encrypted learner vault, de-identified before the agent or the journal sees them; every other lane refuses them. Nothing is gated or restricted by tenant (parity law).",
       "Scope: v1 is Canvas-only. Blackboard is an honestly-disclosed roadmap item, not a ship criterion."
     ]
   },
   "name": "morrow-for-muse-product",
-  "version": "0.4.0"
+  "version": "0.4.1"
 }

@@ -69,7 +69,7 @@ Endpoints (all on 127.0.0.1):
                            (HTTPS targets only, W4-P2-8)
   POST /cdp/tabs         -> PROTECTED: {}  list live targets
   POST /cdp/new-tab      -> PROTECTED: {"url"}  open a tab (about:blank or
-                           https only); returns the tab
+                           this tenant's https only); returns the tab
   POST /cdp/call         -> PROTECTED: {"target_id", "method", "params"}
                            one allowlisted CDP method on a live target
                            (no target_id = browser-level); returns
@@ -79,7 +79,8 @@ Endpoints (all on 127.0.0.1):
                            on a live target; returns {"ok", "value"} or
                            {"ok": false, "error"}
   POST /cdp/navigate     -> PROTECTED: {"target_id", "url"}  Page.navigate
-                           on a live target (https only); {"ok": true}
+                           on a live target (this tenant's https only);
+                           {"ok": true}
   POST /cdp/close-tab    -> PROTECTED: {"target_id"}  close the tab;
                            {"ok": true}
   GET  /cdp/events       -> PROTECTED: ?target_id=&timeout_s=  drain
@@ -174,33 +175,6 @@ _TREE_ENV_VARS_IGNORED_FROM_GLOBAL = (
 )
 
 
-def _parse_env_file(path):
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            lines = fh.read().splitlines()
-    except OSError:
-        return {}
-    out = {}
-    for raw in lines:
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line[len("export "):].lstrip()
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip()
-        if (len(value) >= 2 and value[0] == value[-1]
-                and value[0] in ("'", '"')):
-            value = value[1:-1]
-        # Shell-identifier keys only (letters/digits/underscore, not
-        # digit-first): anything else cannot be a real env assignment.
-        if (key and (key[0].isalpha() or key[0] == "_")
-                and all(c.isalnum() or c == "_" for c in key)):
-            out[key] = value
-    return out
-
-
 def _tighten_env_perms(path):
     """W4-P1-2: helper env files may hold deployment config and, in the
     legacy global file, CANVAS_BASE. They must not be readable by other
@@ -236,6 +210,8 @@ def _source_morrow_env():
     if _root not in sys.path:
         sys.path.insert(0, _root)
     from config.paths import morrow_home  # noqa: E402
+    # The same parser every agent-side reader uses (config/tree_config).
+    from config.tree_config import parse_env_file as _parse_env_file  # noqa: E402
     # W4-P1-18: test seam. MORROW_HELPER_ENV_FILE overrides the tree env
     # file location (default <tree>/helper/env). The selftests point it
     # at an empty scratch file so they never mutate, move, or depend on
@@ -644,84 +620,20 @@ if os.environ.get("LOGIN_HELPER_PRODUCTION") == "1":
 # launch, so count rows best-effort (immutable read, no locks taken on
 # the live DB). An unreadable file falls back to True: a Cookies file is
 # still evidence of a used profile.
+
+
 def _normalize_tenant_base(base_url):
-    # P0-7: normalize the tenant base to EXACTLY scheme://netloc/ (with a
-    # trailing slash). Paths, queries, fragments, and any deep link hiding
-    # in CANVAS_BASE are discarded: the helper always lands on the tenant
-    # origin root, and status() keeps a direct href.startswith(base_url)
-    # prefix check against that root, so sibling hostnames like
-    # tenant.instructure.com.evil.com can never match (the trailing slash
-    # makes the prefix check origin-exact).
-    #
-    # W2-P0-11: CANVAS_BASE is a server-side request primitive (the helper
-    # drives Chromium at it), so validation is strict:
-    # - absolute http(s) URL with a host (unchanged);
-    # - https required, unless CANVAS_BASE_ALLOW_HTTP=1 documents an
-    #   explicit local-dev override;
-    # - no userinfo (a URL carrying user:pass credentials is rejected);
-    # - no non-routable IP literals (loopback, link-local, RFC1918,
-    #   multicast, reserved, unspecified);
-    # - a Canvas-shaped tenant: *.instructure.com, or a self-hosted
-    #   Canvas domain the educator explicitly confirms with
-    #   CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=<that exact host>.
-    parsed = urllib.parse.urlsplit(base_url)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError(
-            "CANVAS_BASE must be an absolute http(s) URL with a host, "
-            "got %r" % (base_url,))
-    if parsed.username or parsed.password:
-        raise ValueError(
-            "CANVAS_BASE must not embed credentials (userinfo); got %r"
-            % (base_url,))
-    if parsed.scheme != "https" \
-            and os.environ.get("CANVAS_BASE_ALLOW_HTTP") != "1":
-        raise ValueError(
-            "CANVAS_BASE must be https (got %r); set "
-            "CANVAS_BASE_ALLOW_HTTP=1 for a documented local-dev override"
-            % (base_url,))
-    host = (parsed.hostname or "").lower()
-    # Placeholder rejection (first-run audit 2026-09-22): FIRST_RUN.md
-    # promises placeholder hosts fail loudly at the tenant gate. The
-    # install.sh probe rejects the doc placeholders, but the helper is
-    # the runtime gate (CANVAS_BASE can be set or changed after
-    # install), so it must reject them too. Bare instructure.com is
-    # the corporate site, never a Canvas tenant.
-    _PLACEHOLDER_HOSTS = frozenset({
-        "instructure.com",
-        "example.com",
-        "example.instructure.com",
-        "myschool.instructure.com",
-        "canvas.instructure.com",
-    })
-    _PLACEHOLDER_LABELS = frozenset({
-        "your-school", "yourschool", "your_school", "example", "myschool",
-    })
-    labels = host.split(".")
-    if host in _PLACEHOLDER_HOSTS or any(
-            lab in _PLACEHOLDER_LABELS for lab in labels):
-        raise ValueError(
-            "CANVAS_BASE looks like a placeholder (%r); set your school's "
-            "real Canvas URL, e.g. https://<your-school>.instructure.com "
-            "(got %r)" % (host, base_url))
-    try:
-        literal = ipaddress.ip_address(host)
-    except ValueError:
-        literal = None
-    if literal is not None and not literal.is_global:
-        raise ValueError(
-            "CANVAS_BASE must not point at a non-routable address "
-            "(loopback, link-local, or private); got %r" % (base_url,))
-    confirmed = os.environ.get(
-        "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", "").strip().lower()
-    if not (host == "instructure.com"
-            or host.endswith(".instructure.com")
-            or (confirmed and host == confirmed)):
-        raise ValueError(
-            "CANVAS_BASE must be a Canvas tenant (*.instructure.com); for "
-            "a self-hosted Canvas domain set "
-            "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=%s (got %r)"
-            % (host, base_url))
-    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "/", "", ""))
+    """The tenant rule, shared with install.sh (config/tree_config.py).
+
+    Moved 2026-09-23 (muse UX audit 3): install.sh validates CANVAS_BASE
+    with the same function before its curl probe, so the installer and
+    the helper cannot drift apart.
+    """
+    _troot = os.path.normpath(os.path.join(_HERE, ".."))
+    if _troot not in sys.path:
+        sys.path.insert(0, _troot)
+    from config.tree_config import normalize_tenant_base  # noqa: E402
+    return normalize_tenant_base(base_url)
 
 
 def _profile_has_cookies():
@@ -972,7 +884,8 @@ _ensure_stdout_append()
 
 def _stdout_log_path():
     """Best-effort path of the regular file stdout is appended to (the
-    keepalive launch redirects stdout to <helper dir>/server.log).
+    keepalive launch redirects stdout to server.log in the tree's state
+    dir, <MORROW_HOME>/trees/<tree id>/).
     Returns None when stdout is not a regular file (console, pipe: dev
     runs), in which case rotation is skipped."""
     try:
@@ -1148,9 +1061,9 @@ class HelperBrowser:
         except RuntimeError as exc:
             if "no Chromium binary found" in str(exc):
                 raise RuntimeError(
-                    "Chromium was not found at the probed locations; "
-                    "install Chromium or set CHROMIUM_BIN ... see "
-                    "INSTALL.md") from exc
+                    "no Chromium binary found; add CHROMIUM_BIN=<its "
+                    "path> to this tree's helper/env (INSTALL.md, "
+                    "Prerequisites)") from exc
             raise
         self.cdp = self.launcher.cdp
         self.tab = self.cdp.new_tab("about:blank")
@@ -1193,16 +1106,38 @@ class HelperBrowser:
         # educator's session to network interception; file:, data:,
         # javascript:, and other exotic schemes are never legitimate
         # helper navigation targets. Raises ValueError otherwise.
+        # Muse UX audit 3 (2026-09-23): the URL must also be this
+        # tenant. The session browser holds the Canvas sign-in, so a
+        # navigation to any other HTTPS host (a vanity address, a
+        # lookalike domain) leaves the session uncountable by status()
+        # and lets the page drive the browser off the tenant playbook.
+        # Security review 2026-09-24: a target with no host
+        # ("https:evil.com" is scheme https, netloc none) slipped past
+        # the old gate and CDP Page.navigate normalized it to
+        # https://evil.com/; and a string-prefix gate accepted sibling
+        # hosts the base URL is a prefix of. The host must be present,
+        # and the tenant question is decided with the exact origin
+        # comparison the API egress uses (local_chromium.is_tenant_url).
         if not isinstance(url, str) or not url:
             raise ValueError("refusing empty navigation target")
         try:
-            scheme = urllib.parse.urlsplit(url).scheme.lower()
+            split = urllib.parse.urlsplit(url)
+            scheme = split.scheme.lower()
         except ValueError:
             raise ValueError("refusing malformed navigation target")
         if scheme != "https":
             raise ValueError(
                 "refusing non-HTTPS navigation target: only https:// "
                 "targets are allowed")
+        if not split.netloc:
+            raise ValueError(
+                "refusing navigation target with no host; the helper's "
+                "browser goes to your Canvas sign-in only")
+        if self.base_url and not lc.is_tenant_url(url, self.base_url):
+            raise ValueError(
+                "refusing navigation off the Canvas tenant %s; the "
+                "helper's browser goes to your Canvas sign-in only" %
+                self.base_url.rstrip("/"))
         with self._lock:
             self.cdp.navigate(self.tab, url)
 
@@ -1435,12 +1370,23 @@ class HelperBrowser:
             return self._proxy_live_tabs()
 
     def cdp_proxy_new_tab(self, url):
-        if not _cdp_proxy_nav_ok(url):
+        if not _cdp_proxy_nav_ok(url) or not self._proxy_tenant_ok(url):
             raise _HttpError(
                 400, "refusing new-tab target: only about:blank and "
-                "https:// URLs are allowed")
+                "this tenant's https:// URLs are allowed")
         with self._lock:
             return self.cdp.new_tab(url)
+
+    def _proxy_tenant_ok(self, url):
+        """Security review 2026-09-24: the /cdp/* routes carry the same
+        X-Helper-Token the helper page holds, so their https:// targets
+        must be on the tenant origin, exactly like /navigate (the
+        transport's is_tenant_url, not a string prefix). about:blank
+        stays allowed: the transport opens scratch tabs there.
+        Fails closed when no tenant is configured."""
+        if url == "about:blank":
+            return True
+        return bool(self.base_url) and lc.is_tenant_url(url, self.base_url)
 
     def cdp_proxy_call(self, target_id, method, params, timeout):
         if method not in _CDP_PROXY_ALLOWLIST:
@@ -1501,10 +1447,10 @@ class HelperBrowser:
             return {"ok": True, "value": value}
 
     def cdp_proxy_navigate(self, target_id, url, timeout):
-        if not _cdp_proxy_nav_ok(url):
+        if not _cdp_proxy_nav_ok(url) or not self._proxy_tenant_ok(url):
             raise _HttpError(
-                400, "refusing navigation target: only https:// URLs "
-                "are allowed")
+                400, "refusing navigation target: only this tenant's "
+                "https:// URLs are allowed")
         if len(url.encode("utf-8")) > _CDP_PROXY_MAX_URL_BYTES:
             raise _HttpError(413, "url too long")
         with self._lock:
@@ -2183,10 +2129,11 @@ def main():
         # HelperBrowser.start covers the same class from the other side.)
         if (isinstance(exc, RuntimeError)
                 and "no Chromium binary found" in str(exc)):
-            print("FATAL: Chromium was not found at the probed locations; "
-                  "install Chromium (see INSTALL.md: place a binary at "
-                  "transport/chromium/chrome, or ensure "
-                  "/opt/meta-chromium/chrome exists) or set CHROMIUM_BIN.",
+            print("FATAL: Chromium was not found at the probed locations. "
+                  "The Muse VM image has it at /opt/meta-chromium/chrome; "
+                  "to use another Chromium (152.0.7977.82 or newer), add "
+                  "CHROMIUM_BIN=<its path> to this tree's helper/env "
+                  "(INSTALL.md, Prerequisites).",
                   file=sys.stderr)
             _cleanup_startup(srv)
             sys.exit(1)

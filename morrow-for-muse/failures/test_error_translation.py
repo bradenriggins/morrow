@@ -2,7 +2,7 @@
 """Full test suite for the Morrow error translation layer.
 
 Covers failures/translator.py + failures/catalog.py + failures/catalog.json:
-  1. per-mode tests: every one of the 86 catalog modes gets a synthetic
+  1. per-mode tests: every catalog mode gets a synthetic
      raw error; asserts the right mode_id, the four message anchors, all
      placeholders filled, no em dashes, no shrug language, and the
      escalate flag matching the catalog.
@@ -50,6 +50,21 @@ from query import quiz_resolve as _qresolve  # noqa: E402
 from query import thresholds as _qthresholds  # noqa: E402
 from query import live_read as _qliveread  # noqa: E402
 from query import chain as _qchain  # noqa: E402
+
+
+def _a11y_target_not_covered():
+    from catalog.a11y.runner import A11yTargetNotCovered
+    return A11yTargetNotCovered(
+        "learner_data_gated: discussion reads are learner-data flagged "
+        "and gated by the admission policy; the audit does not run them")
+
+
+def _canvas_disconnected():
+    from config.disconnect import CanvasDisconnected
+    return CanvasDisconnected(
+        "the educator disconnected Morrow from Canvas on this computer "
+        "(bin/morrow disconnect deleted the sign-in); nothing was sent. "
+        "Rerun install.sh only when the educator asks to reconnect.")
 
 
 def _student_ambiguous_case():
@@ -113,7 +128,6 @@ SESSION_DEAD_FAMILY = {
     "canvas-session-dead",
     "canvas-session-dead-mid-write-uncertain",
     "session-expiry-no-warning",
-    "browser-task-session-dead-transient",
     "session-flapping-multi-uncertain",
 }
 
@@ -166,6 +180,18 @@ class PrincipalNotPinned(Exception):
     pass
 
 
+class AccountCheckFailed(Exception):
+    pass
+
+
+class HelperNotReached(Exception):
+    pass
+
+
+class ItemBanksNotReached(Exception):
+    pass
+
+
 class BrowserStaleCommand(Exception):
     pass
 
@@ -182,6 +208,15 @@ class WriteNotAttempted(Exception):
     pass
 
 
+class PreparedWriteMissing(Exception):
+    """dispatch/executor.py: approve-write found no prepared write
+    waiting; already_used says whether the journal holds the op."""
+
+    def __init__(self, message, already_used):
+        super().__init__(message)
+        self.already_used = already_used
+
+
 class VerificationFailed(Exception):
     """dispatch/executor.py: a declared verify block's readback
     completed and proved the write's result differs (journaled as
@@ -190,6 +225,50 @@ class VerificationFailed(Exception):
 
 class EvidenceHold(Exception):
     pass
+
+
+class NeverDispatch(Exception):
+    pass
+
+
+class NeverDispatchRead(Exception):
+    """dispatch/admission.py check_never_dispatch on a read: the refusal
+    carries operation_kind "read"."""
+    operation_kind = "read"
+
+
+NeverDispatchRead.__name__ = "NeverDispatch"
+
+
+class CatalogNameMismatch(Exception):
+    """dispatch/executor.py: the task name and the request are not one
+    tested row; the refusal names the row to use."""
+
+    def __init__(self, message, catalog_name, catalog_method,
+                 catalog_path):
+        super().__init__(message)
+        self.catalog_name = catalog_name
+        self.catalog_method = catalog_method
+        self.catalog_path = catalog_path
+
+
+class CourseRosterUnavailable(Exception):
+    pass
+
+
+class ManifestPinMismatch(Exception):
+    """dispatch/executor.py: a saved task (execute --entry) or its undo
+    whose entry the pack does not pin."""
+
+
+class CallerInputError(Exception):
+    """dispatch/executor.py: a command's own JSON argument refused before
+    anything was sent."""
+
+
+class ConfirmationRequired(Exception):
+    """dispatch/executor.py: a maintenance command run without --yes and
+    without a terminal, refused before it did anything."""
 
 
 class NewQuizRefused(Exception):
@@ -331,7 +410,7 @@ def _quiz_no_match_case():
         214, 9, 157,
         [("Mid-Term Exam", 4045392, "2026-02-23T05:59:00+00:00",
           "assignment.due_at")],
-        query="last week's quiz")
+        "America/Chicago", query="last week's quiz")
 
 
 def _quiz_ambiguous_case():
@@ -344,7 +423,22 @@ def _quiz_ambiguous_case():
           "assignment.due_at", 50.0),
          ("Pop Quiz #2", 2, "2026-09-18T05:00:00+00:00",
           "assignment.due_at", 50.0)],
-        query="last week's quiz")
+        "America/Chicago", query="last week's quiz")
+
+
+def _session_expired_halt():
+    """The halt the re-auth machinery imposes after a session death."""
+    exc = WriteHaltActive("write halt is active: session_expiry")
+    exc.halt_cause = "session_expired"
+    return exc
+
+
+def _account_mismatch_halt():
+    """The halt the Chromium lane imposes when another account signed in."""
+    exc = WriteHaltActive("write halt is active: a different Canvas "
+                          "account is signed in to the helper")
+    exc.halt_cause = "account_mismatch"
+    return exc
 
 
 MODE_CASES = {
@@ -353,6 +447,9 @@ MODE_CASES = {
             "quiz must be one of last_week, this_week, got 'yesterday'"),
     "query-threshold-undefined":
         lambda: _qthresholds.ThresholdUndefined("points_possible is None"),
+    "query-timezone-unknown":
+        lambda: _qchain.TimezoneUnknown(
+            "no time zone is set for the educator"),
     "quiz-reference-unsupported":
         lambda: _qresolve.UnsupportedQuizRef("yesterday"),
     "query-live-read-failed":
@@ -360,9 +457,27 @@ MODE_CASES = {
     "quiz-resolution-ambiguous": _quiz_ambiguous_case,
     "quiz-resolution-no-match": _quiz_no_match_case,
     "canvas-csrf-422-writes-only": _csrf_422_dict,
+    "canvas-write-refused-invalid": lambda: {
+        "http_status": 422, "provider": "canvas", "operation_kind": "write",
+        "body_text": '{"errors":{"title":[{"message":"is too long"}]}}',
+    },
     "canvas-rate-limit-429": lambda: {
         "provider": "canvas", "http_status": 429,
         "rate_limit_remaining": 0.0, "retry_after_present": True,
+    },
+    "canvas-not-permitted": lambda: {
+        "http_status": 401, "provider": "canvas", "operation_kind": "write",
+        "body_text": '{"status":"unauthorized","errors":[{"message":'
+                     '"user not authorized to perform that action"}]}',
+    },
+    "canvas-not-found": lambda: {
+        "http_status": 404, "provider": "canvas", "operation_kind": "read",
+        "body_text": '{"errors":[{"message":"The specified resource does '
+                     'not exist."}]}',
+    },
+    "canvas-refused-request": lambda: {
+        "http_status": 409, "provider": "canvas", "operation_kind": "write",
+        "body_text": '{"errors":[{"message":"conflict"}]}',
     },
     "canvas-session-dead": lambda: ChromiumSessionDead("browser gone"),
     "canvas-session-dead-mid-write-uncertain": lambda: {
@@ -396,14 +511,6 @@ MODE_CASES = {
         "body_text": "policy refusal: writes disabled by tenant config",
         "body_has_specific_message": True, "lane": "browser",
     },
-    "https-lane-pat-revoked": lambda: {
-        "provider": "canvas", "http_status": 401, "lane": "https",
-        "session_logged_in": True,
-    },
-    "password-changed-mid-op": lambda: {
-        "provider": "canvas", "http_status": 401, "lane": "https",
-        "session_logged_in": False, "attempt_count": 1,
-    },
     "ib-canonical-item-get-404": lambda: {
         "provider": "item-banks", "http_status": 404,
         "route_kind": "canonical", "operation_kind": "read",
@@ -429,7 +536,13 @@ MODE_CASES = {
         "provider": "canvas", "operation_kind": "grade",
         "enrollment_count": 0,
     },
-    "new-quiz-create-evidence-hold": lambda: EvidenceHold("held by gate"),
+    "evidence-hold": lambda: EvidenceHold("held by gate"),
+    "course-roster-unavailable": lambda: CourseRosterUnavailable(
+        "The student list of course 101 could not be read (403), so "
+        "nothing in the course was read or changed."),
+    "never-dispatch": lambda: NeverDispatch(
+        "operation 'canvas_create_new_discussion_topic_courses' sets "
+        "is_announcement, which posts an announcement. Nothing was sent."),
     # New Quiz safety-guard refusals (Lane 7): every NewQuizRefused text
     # below is the exact message raised by dispatch/executor.py.
     "new-quiz-put-refused": lambda: NewQuizRefused(
@@ -455,6 +568,46 @@ MODE_CASES = {
     "new-quiz-guard-refused": lambda: NewQuizRefused(
         "draw update requires a positive whole question count; got 0"),
     "catalog-not-proven": lambda: {"gate": "CatalogNotProven"},
+    "catalog-name-mismatch": lambda: CatalogNameMismatch(
+        "operation 'get_settings' is not a catalog row; the live-proven "
+        "row for GET /api/v1/courses/{course_id}/settings is "
+        "'canvas_get_course_settings'", "canvas_get_course_settings",
+        "GET", "/api/v1/courses/{course_id}/settings"),
+    "never-dispatch-read": lambda: NeverDispatchRead(
+        "operation 'canvas_get_blueprint_information' targets a "
+        "never-dispatch URL pattern '/blueprint_templates'. Nothing was "
+        "sent."),
+    # reauth/state_machine.py cmd_approve: an op that is not awaiting
+    # approval, by its newest ledger status.
+    "paused-change-not-resumed": lambda: {
+        "error": "ApprovalRefused", "quarantine_status": "quarantined",
+        "nothing_sent": True,
+        "detail": "op_id=op-1 is not awaiting_approval (status=quarantined)"},
+    "paused-change-already-approved": lambda: {
+        "error": "ApprovalRefused", "quarantine_status": "approved",
+        "nothing_sent": True,
+        "detail": "op_id=op-1 is not awaiting_approval (status=approved)"},
+    "paused-change-not-waiting": lambda: {
+        "error": "ApprovalRefused", "quarantine_status": "none",
+        "nothing_sent": True,
+        "detail": "op_id=op-1 is not awaiting_approval (status=None)"},
+    # A failure no mode names, raised before the executor claimed a
+    # write (dispatch/executor.py main sets nothing_sent).
+    "unknown-nothing-sent": lambda: {
+        "error": "RuntimeError", "nothing_sent": True,
+        "detail": "the course read broke in a new way"},
+    "manifest-entry-not-pinned": lambda: ManifestPinMismatch(
+        "entry name 'morrow_plan_page_image_alt_repair' is not pinned in "
+        "the pack; refusing to run"),
+    "caller-input-refused": lambda: CallerInputError(
+        "--body must be a JSON object, or a JSON array of objects (the "
+        "bulk date update takes an array)"),
+    "a11y-target-not-covered": _a11y_target_not_covered,
+    "canvas-disconnected": _canvas_disconnected,
+    "maintenance-confirmation-required": lambda: ConfirmationRequired(
+        "journal-reconcile is destructive: this re-anchors the journal. "
+        "Re-run with --yes to confirm, or run this command interactively "
+        "to be prompted."),
     "helper-down": lambda: {
         "error_class": "ExecutorError",
         "error_text": "chromium backend: browser unavailable (boom); "
@@ -466,6 +619,14 @@ MODE_CASES = {
         "account this connector is pinned to (Edu T. Or)."),
     "canvas-account-not-pinned": lambda: PrincipalNotPinned(
         "chromium backend: no Canvas account is pinned yet"),
+    "canvas-account-check-failed": lambda: AccountCheckFailed(
+        "chromium backend: GET /api/v1/users/self did not return the "
+        "signed-in account (HTTP 500); nothing was sent"),
+    "helper-browser-not-reached": lambda: HelperNotReached(
+        "no Chromium binary found; nothing was sent"),
+    "item-banks-not-reached": lambda: ItemBanksNotReached(
+        "Item Banks SDK lane failed (refusing ambiguous Item Banks "
+        "launch); no provider call was attempted"),
     "setup-tenant-not-configured": lambda: {
         "error_class": "SessionMissing", "provider": "canvas",
         "error_text": "chromium backend needs a Canvas base URL: pass "
@@ -487,6 +648,99 @@ MODE_CASES = {
     "session-expiry-no-warning": lambda: {
         "session_dead_signal": True, "expiry_surprise": True,
         "first_failure_signal": True,
+    },
+    "write-halt-active": lambda: WriteHaltActive("halt engaged"),
+    "write-halt-session-expired": _session_expired_halt,
+    "write-halt-account-mismatch": _account_mismatch_halt,
+    "write-approval-missing": lambda: {"gate": "WriteApprovalMissing"},
+    "learner-data-gated": lambda: {"gate": "LearnerDataGated"},
+    "catalog-effect-mismatch": lambda: {"gate": "CatalogEffectMismatch"},
+    "quarantine-op-id-collision": lambda: {"quarantine_id_collision": True},
+    "journal-torn-fail-closed": lambda: {"journal_torn": True},
+    "uncertain-write-ambiguous": lambda: UncertainWrite("ambiguous"),
+    "query-course-id-invalid": lambda: _qchain.InvalidCourseId(
+        "course id '1/../2' is not a Canvas course number"),
+    "write-readback-unconfirmed": lambda: UncertainWrite(
+        "write op x returned success, but the readback could not confirm "
+        "it: write readback GET /x failed HTTP 503"),
+    "write-readback-mismatch": lambda: VerificationFailed(
+        "verify block failed for op x: readback title is 'A', expected "
+        "'B' (journaled as failed)"),
+    "write-not-attempted": lambda: WriteNotAttempted("never dispatched"),
+    "prepared-write-already-used": lambda: PreparedWriteMissing(
+        "no prepared write is waiting for approval", True),
+    "prepared-write-not-waiting": lambda: PreparedWriteMissing(
+        "no prepared write is waiting for approval", False),
+    "session-flapping-multi-uncertain": lambda: {
+        "session_dead_signal": True, "uncertain_count": 3,
+        "single_dead_session": True,
+    },
+    "wrong-course-typo": lambda: {
+        "operation_kind": "write", "course_identity_confirmed": False,
+    },
+    "wrong-tenant-global": lambda: {
+        "operation_kind": "write", "tenant_identity_confirmed": False,
+    },
+    "helper-restart-loop": lambda: {
+        "provider": "helper", "helper_reachable": True,
+        "helper_restart_count": 5,
+    },
+    "keepalive-diagnostics-lost": lambda: {
+        "provider": "helper", "keepalive_failed": True,
+        "keepalive_output_bytes": 0,
+    },
+    "disk-full-upgrade-destroy": lambda: {
+        "enospc": True, "installer_claimed_restore": True,
+    },
+    "session-principal-less-store": lambda: {
+        "operation_kind": "reauth", "session_store_principal": False,
+    },
+    "ib-provider-unserved": lambda: {
+        "provider": "item-banks", "provider_served": False,
+    },
+    "student-resolution-ambiguous": _student_ambiguous_case,
+    "student-resolution-no-match": _student_not_found_case,
+    # Workstream C: edit/plan-mode admission refusals. Synthetic doubles
+    # carry the exact workstream-A/B exception names and documented attrs
+    # (see MODE_EVIDENCE_NOTES); the per-mode test proves each matches.
+    "edit_self_grant_refused":
+        lambda: ModeSelfGrantRefused("agent tried to self-promote"),
+    "plan_mode_write_without_approval":
+        lambda: PlanModeWriteWithoutApproval(
+            "write attempted in plan mode, no approved plan"),
+    "ambiguous_course_write_refused": _ambiguous_course_case,
+    "settings_tamper_refused": _mode_settings_tamper_case,
+    "destructive_write_confirmation_required": _destructive_confirmation_case,
+    # CSRF/422 tier: fail-closed missing-token exception, and the broad
+    # 422 with unprocessable_content when the full CSRF evidence
+    # (reads_ok, session health) is not available.
+    "canvas-csrf-token-missing":
+        lambda: {"error_class": "CsrfTokenMissing"},
+    "canvas-422-unprocessable":
+        lambda: {"http_status": 422,
+                 "body_text": '{"error_code":"unprocessable_content"}'},
+    "course_resolution_required":
+        lambda: CourseResolutionRequired("write to course 1 has no course "
+                                         "resolution"),
+    "effect_class_mismatch":
+        lambda: EffectClassMismatch("entry declares read but has a PUT"),
+    "write_field_mismatch":
+        lambda: WriteFieldMismatch("readback title differs"),
+    "write_unverified":
+        lambda: {"write_outcome": "unverified"},
+    "unknown": lambda: {"some": "weird", "unmatched": 1},
+}
+# Evidence shapes of the modes retired on 2026-09-23 because their lanes
+# do not ship in v1 (the raw HTTPS lane's access token, the retired form
+# and browser-task lanes, Moodle). None of them may come back.
+RETIRED_LANE_CASES = {
+    "https-lane-pat-revoked": lambda: {
+        "provider": "canvas", "http_status": 401, "lane": "https",
+        "session_logged_in": True,
+    },
+    "password-changed-mid-op": lambda: {
+        "provider": "canvas", "http_status": 401, "lane": "https",
+        "session_logged_in": False, "attempt_count": 1,
     },
     "reauth-principal-pin-vacuous": lambda: {
         "provider": "moodle", "principal_match": True,
@@ -525,84 +779,10 @@ MODE_CASES = {
         "operation_kind": "write",
     },
     "form-lane-fail-closed": lambda: {"gate": "FormTransportUnavailable"},
-    "write-halt-active": lambda: WriteHaltActive("halt engaged"),
-    "write-approval-missing": lambda: {"gate": "WriteApprovalMissing"},
-    "learner-data-gated": lambda: {"gate": "LearnerDataGated"},
-    "catalog-effect-mismatch": lambda: {"gate": "CatalogEffectMismatch"},
-    "quarantine-op-id-collision": lambda: {"quarantine_id_collision": True},
-    "journal-torn-fail-closed": lambda: {"journal_torn": True},
-    "uncertain-write-ambiguous": lambda: UncertainWrite("ambiguous"),
-    "query-course-id-invalid": lambda: _qchain.InvalidCourseId(
-        "course id '1/../2' is not a Canvas course number"),
-    "write-readback-unconfirmed": lambda: UncertainWrite(
-        "write op x returned success, but the readback could not confirm "
-        "it: write readback GET /x failed HTTP 503"),
-    "write-readback-mismatch": lambda: VerificationFailed(
-        "verify block failed for op x: readback title is 'A', expected "
-        "'B' (journaled as failed)"),
-    "write-not-attempted": lambda: WriteNotAttempted("never dispatched"),
-    "session-flapping-multi-uncertain": lambda: {
-        "session_dead_signal": True, "uncertain_count": 3,
-        "single_dead_session": True,
-    },
-    "wrong-course-typo": lambda: {
-        "operation_kind": "write", "course_identity_confirmed": False,
-    },
-    "wrong-tenant-global": lambda: {
-        "operation_kind": "write", "tenant_identity_confirmed": False,
-    },
-    "helper-restart-loop": lambda: {
-        "provider": "helper", "helper_reachable": True,
-        "helper_restart_count": 5,
-    },
-    "keepalive-diagnostics-lost": lambda: {
-        "provider": "helper", "keepalive_failed": True,
-        "keepalive_output_bytes": 0,
-    },
-    "disk-full-upgrade-destroy": lambda: {
-        "enospc": True, "installer_claimed_restore": True,
-    },
-    "session-principal-less-store": lambda: {
-        "operation_kind": "reauth", "session_store_principal": False,
-    },
     "browser-task-dead": lambda: {"task_state": "died"},
-    "ib-provider-unserved": lambda: {
-        "provider": "item-banks", "provider_served": False,
-    },
     "moodle-route-changed": lambda: {
         "moodle_route_shape": "dead", "provider": "moodle",
     },
-    "student-resolution-ambiguous": _student_ambiguous_case,
-    "student-resolution-no-match": _student_not_found_case,
-    # Workstream C: edit/plan-mode admission refusals. Synthetic doubles
-    # carry the exact workstream-A/B exception names and documented attrs
-    # (see MODE_EVIDENCE_NOTES); the per-mode test proves each matches.
-    "edit_self_grant_refused":
-        lambda: ModeSelfGrantRefused("agent tried to self-promote"),
-    "plan_mode_write_without_approval":
-        lambda: PlanModeWriteWithoutApproval(
-            "write attempted in plan mode, no approved plan"),
-    "ambiguous_course_write_refused": _ambiguous_course_case,
-    "settings_tamper_refused": _mode_settings_tamper_case,
-    "destructive_write_confirmation_required": _destructive_confirmation_case,
-    # CSRF/422 tier: fail-closed missing-token exception, and the broad
-    # 422 with unprocessable_content when the full CSRF evidence
-    # (reads_ok, session health) is not available.
-    "canvas-csrf-token-missing":
-        lambda: {"error_class": "CsrfTokenMissing"},
-    "canvas-422-unprocessable":
-        lambda: {"http_status": 422,
-                 "body_text": '{"error_code":"unprocessable_content"}'},
-    "course_resolution_required":
-        lambda: CourseResolutionRequired("write to course 1 has no course "
-                                         "resolution"),
-    "effect_class_mismatch":
-        lambda: EffectClassMismatch("entry declares read but has a PUT"),
-    "write_field_mismatch":
-        lambda: WriteFieldMismatch("readback title differs"),
-    "write_unverified":
-        lambda: {"write_outcome": "unverified"},
-    "unknown": lambda: {"some": "weird", "unmatched": 1},
 }
 
 
@@ -612,8 +792,16 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_86_modes(self):
-        self.assertEqual(86, len(CATALOG.entries))
+    def test_catalog_has_97_modes(self):
+        self.assertEqual(97, len(CATALOG.entries))
+
+    def test_retired_lane_modes_stay_retired(self):
+        for mode_id, factory in sorted(RETIRED_LANE_CASES.items()):
+            with self.subTest(mode_id=mode_id):
+                self.assertIsNone(CATALOG.get(mode_id))
+                tr = translate("retired lane probe", factory())
+                self.assertNotIn(tr.mode_id, RETIRED_LANE_CASES)
+                assert_message_quality(self, tr, CATALOG.get(tr.mode_id))
 
     def test_each_mode_matches(self):
         for mode_id, factory in sorted(MODE_CASES.items()):
@@ -805,7 +993,7 @@ class ModeSystemMappingTests(unittest.TestCase):
     def test_exception_attrs_fill_placeholders(self):
         tr = translate("publish quiz", _ambiguous_course_case())
         self.assertEqual("ambiguous_course_write_refused", tr.mode_id)
-        self.assertIn("Bio 101", tr.agent_message)
+        self.assertEqual("Bio 101", tr.evidence["query"])
         self.assertIn("Biology 101 (Fall 2026)", tr.agent_message)
 
         tr = translate("change a setting", _mode_settings_tamper_case())
@@ -818,8 +1006,9 @@ class ModeSystemMappingTests(unittest.TestCase):
         self.assertEqual("write-halt-active", tr.mode_id)
         tr = translate("write op", {"gate": "WriteApprovalMissing"})
         self.assertEqual("write-approval-missing", tr.mode_id)
+        # The form lane is retired: its refusal is no longer a mode.
         tr = translate("write op", {"gate": "FormTransportUnavailable"})
-        self.assertEqual("form-lane-fail-closed", tr.mode_id)
+        self.assertEqual("unknown", tr.mode_id)
 
 
 # ---------------------------------------------------------------------------

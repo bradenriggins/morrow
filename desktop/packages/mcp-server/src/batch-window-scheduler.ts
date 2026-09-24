@@ -490,6 +490,11 @@ export class BatchWindowScheduler {
     }
   }
 
+  /** Whether a window runs this batch now or a run of it waits for one. */
+  holds(batchIdValue: string): boolean {
+    return this.tails.has(exactBatchKey(batchIdValue));
+  }
+
   health(): BatchWindowSchedulerHealth {
     return {
       schema: "morrow.batch-window-scheduler.health.v1",

@@ -17,7 +17,8 @@ const MAX_LEARNER_NAMES = 300;
 const PROOF_CONTEXT = "morrow.review-approval.v1";
 const PRESENCE_ORIGIN = /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/;
 const PRESENCE_KEY = /^[A-Za-z0-9_-]{43}$/;
-const REVIEW_PATH = /^\/(?:operations|batches)\/[A-Za-z0-9_.%-]{1,480}$/;
+// A change review, a group review, or an Edit access review (Turn on Edit from a conversation).
+const REVIEW_PATH = /^\/(?:operations|batches|edit-access)\/[A-Za-z0-9_.%-]{1,480}$/;
 const NONCE = /^[A-Za-z0-9_-]{43}$/;
 
 /** The same rule as `normalizeBridgeUiState` in packages/bridge-protocol applies to `presence`. */
@@ -90,15 +91,18 @@ export function reviewPagePath(url, presence) {
 }
 
 /**
- * Signs one approval for the content script in a review tab. Refuses a sender that is not this
- * extension's own content script in the top frame of a review page at the presence origin, and an
- * approve path that is not that same page's.
+ * Signs one approval, or one close-out of a change Morrow could not settle, for the content
+ * script in a review tab. Refuses a sender that is not this extension's own content script in the
+ * top frame of a review page at the presence origin, and a path that is not that same page's
+ * approve form or, on a single change's page, its close form.
  */
 export async function signReviewApproval(message, sender, presence, extensionId) {
   if (!presence) return { ok: false, code: "review_approval_key_missing" };
   const pagePath = contentScriptReviewPath(sender, presence, extensionId);
   if (!pagePath) return { ok: false, code: "review_approval_sender_refused" };
-  if (message?.approvePath !== `${pagePath}/approve` || typeof message.nonce !== "string" || !NONCE.test(message.nonce)) {
+  const signable = message?.approvePath === `${pagePath}/approve`
+    || (pagePath.startsWith("/operations/") && message?.approvePath === `${pagePath}/close`);
+  if (!signable || typeof message.nonce !== "string" || !NONCE.test(message.nonce)) {
     return { ok: false, code: "review_approval_request_invalid" };
   }
   return { ok: true, presence: await reviewApprovalProof(presence.key, message.approvePath, message.nonce) };

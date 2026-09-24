@@ -216,6 +216,31 @@ test("a materials folder a person chose outside Morrow's own folder is named but
   assert.equal(location(current, "materials").keptReason, "outside_morrow_data");
 });
 
+// Claude Desktop keeps its own copy of the Morrow extension in its own folder
+// and starts it on every launch. Morrow never removes it: it belongs to Claude
+// Desktop, and only Claude Desktop's own Extensions setting takes it out.
+// Electron keeps the window's own caches and site storage in the user-data
+// folder unless Morrow sends them to one named folder. What stays on this
+// computer must name that folder and say why Morrow leaves it.
+test("the window data folder Morrow's window keeps is named, with the reason Morrow leaves it", () => {
+  const windowData = path.join(USER_DATA, "Window data");
+  const current = snapshot({ windowData });
+  assert.equal(location(current, "window_data").path, windowData);
+  assert.equal(location(current, "window_data").removable, false);
+  assert.equal(location(current, "window_data").keptReason, "window_data");
+  assert.equal(snapshot().locations.some((entry) => entry.id === "window_data"), false, "no place is named without a path");
+});
+
+test("the Morrow extension Claude Desktop keeps is named, with the reason Morrow leaves it", () => {
+  const extension = path.join(HOME, "Library", "Application Support", "Claude", "Claude Extensions", "local.mcpb.morrow.morrow");
+  const current = snapshot({ claudeDesktopExtension: extension });
+  assert.equal(location(current, "claude_desktop_extension").path, extension);
+  assert.equal(location(current, "claude_desktop_extension").label, "The Morrow extension in Claude Desktop");
+  assert.equal(location(current, "claude_desktop_extension").removable, false);
+  assert.equal(location(current, "claude_desktop_extension").keptReason, "claude_desktop_extension");
+  assert.equal(snapshot().locations.some((entry) => entry.id === "claude_desktop_extension"), false, "no place is named without a path");
+});
+
 test("the snapshot names the uninstall step of the computer it runs on and skips a place it has no path for", () => {
   assert.equal(uninstallStep("darwin"), "move_to_trash");
   assert.equal(uninstallStep("win32"), "windows_settings_apps");

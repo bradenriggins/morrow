@@ -69,7 +69,7 @@ const limits = Object.freeze([
   "Canvas Item Bank share pagination is not established. Morrow records rows from one unpaged response as observations, never as a complete share list.",
   "A bank entry names an item, not a course, so bank entries add no course to this record. They are walked to show that the bank itself was read to its end.",
   "This record is an incomplete observation for the moment it was read. It does not claim complete Canvas authority. A write plan can use only the exact observed record, its process-local receipt, and acknowledgement of every course it names.",
-  "Item Bank reads run inside the signed-in New Quizzes Item Banks browser frame. Morrow has no retained live Canvas receipt for this frame contract, so the Morrow route stays live-unverified until attended proof is recorded.",
+  "Item Bank reads run inside the signed-in New Quizzes Item Banks browser frame. That frame contract was confirmed on a live Canvas test course, not on every Canvas tenant.",
 ]);
 
 function exactId(value: unknown): string {

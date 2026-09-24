@@ -113,6 +113,26 @@ describe("normalizeUpstreamResult", () => {
     });
     expect(JSON.stringify(unconfirmed)).not.toContain("completed the Canvas connector request");
 
+    // A read that proved the saved result differs is a failure, named as one.
+    const mismatch = canonicalMorrowResult({
+      tool: "moodle_update_page",
+      phase: "readback_mismatch",
+      provider: "moodle",
+      effectState: "failed",
+      verificationStatus: "mismatch",
+      result: {
+        content: [{ type: "text", text: "Morrow completed the Moodle connector request." }],
+        structuredContent: { ok: true },
+      },
+    });
+    expect(mismatch).toMatchObject({
+      content: [{
+        text: "Morrow read Moodle again after this change, and Moodle does not hold the approved result. The change failed. Do not repeat this change. Ask the person to open the item before a new review.",
+      }],
+      structuredContent: { status: "failed", effectState: "failed", verification: { status: "mismatch" } },
+    });
+    expect(mismatch.isError).toBeUndefined();
+
     const awaitingApproval = canonicalMorrowResult({
       tool: "canvas_page_update",
       phase: "planned",

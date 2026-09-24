@@ -537,6 +537,78 @@ test("New Quiz writes preserve IP ranges, null resets and empty instructions", a
   assert.deepEqual(requests, []);
 });
 
+// The fresh course quiz list proves a mismatch only when it lacks the approved result. A list that
+// holds it and also changed in another way, a second copy Chrome sent on its own or a colleague's
+// change at the same moment, proves nothing about this one change and leaves it unconfirmed.
+test("a New Quiz create or delete the fresh course list does not prove absent is unconfirmed, never a mismatch", async () => {
+  const CREATED_ID = "90";
+  const listPath = `/api/quiz/v1/courses/${COURSE_ID}/quizzes`;
+  const createPayload = { title: "Cell check" };
+  const createdQuiz = { id: CREATED_ID, ...createPayload };
+  const create = (afterIds, options = {}) => sendCanvas("canvas_create_new_quiz", {
+    course_id: COURSE_ID, quiz_title: "Cell check", ...lifecycleGuard([QUIZ_ID], createPayload),
+  }, {
+    routes: {
+      [listPath]: (afterWrite) => (afterWrite ? afterIds : [QUIZ_ID]).map((id) => ({ id })),
+      [`${listPath}/${CREATED_ID}`]: options.saved ?? createdQuiz,
+    },
+    writeData: options.writeData ?? createdQuiz,
+    writeError: options.writeError ?? null,
+  });
+  const createCases = [
+    { name: "a second new quiz", afterIds: [QUIZ_ID, CREATED_ID, "91"], ok: true, status: "unconfirmed", reason: "new_quiz_duplicate_effect_suspected" },
+    { name: "another quiz removed", afterIds: [CREATED_ID], ok: true, status: "unconfirmed", reason: "new_quiz_list_changed_concurrently" },
+    { name: "a lost answer and two new quizzes", afterIds: [QUIZ_ID, CREATED_ID, "91"], writeError: new Error("connection lost after send"), ok: false, status: "unconfirmed", reason: "new_quiz_duplicate_effect_suspected" },
+    { name: "an answer naming a quiz already listed", afterIds: [QUIZ_ID, CREATED_ID], writeData: { id: QUIZ_ID }, ok: true, status: "unconfirmed", reason: "new_quiz_create_answer_not_new" },
+    { name: "no new quiz", afterIds: [QUIZ_ID], ok: true, status: "mismatch", reason: "new_quiz_create_membership_mismatch" },
+    { name: "the answered quiz is not listed", afterIds: [QUIZ_ID, "91"], ok: true, status: "mismatch", reason: "new_quiz_create_id_mismatch" },
+    { name: "the answered quiz holds another title next to a second new quiz", afterIds: [QUIZ_ID, CREATED_ID, "91"], saved: { id: CREATED_ID, title: "Other" }, ok: true, status: "mismatch", reason: "new_quiz_create_readback_mismatch" },
+  ];
+  for (const entry of createCases) {
+    const { result, requests } = await create(entry.afterIds, entry);
+    assert.equal(result.ok, entry.ok, `${entry.name}: ${JSON.stringify(result)}`);
+    assert.equal(result.verification.status, entry.status, entry.name);
+    assert.equal(result.verification.reason, entry.reason, entry.name);
+    assert.equal(requests.filter((request) => request.method === "POST").length, 1, entry.name);
+  }
+
+  const quiz = { id: QUIZ_ID, title: "Cell structures check" };
+  const items = [{ id: "88", position: 1, entry_type: "Item" }];
+  const assignment = { id: QUIZ_ID, course_id: COURSE_ID, has_submitted_submissions: false, graded_submissions_exist: false };
+  const deleteGuard = {
+    morrow_new_quiz_lifecycle_guard: {
+      kind: "delete",
+      before_quiz_ids: [QUIZ_ID],
+      before_quiz_ids_sha256: digest([QUIZ_ID]),
+      target_quiz_sha256: digest(quiz),
+      target_items_sha256: digest(items),
+      target_assignment_sha256: digest(assignment),
+      quiz_id: QUIZ_ID,
+    },
+  };
+  const deleteCases = [
+    { name: "exactly the target removed", afterIds: [], status: "verified" },
+    { name: "another quiz added", afterIds: ["91"], status: "unconfirmed", reason: "new_quiz_list_changed_concurrently" },
+    { name: "the target still listed next to a new quiz", afterIds: [QUIZ_ID, "91"], status: "mismatch", reason: "new_quiz_delete_readback_mismatch" },
+  ];
+  for (const entry of deleteCases) {
+    const { result, requests } = await sendCanvas("canvas_delete_new_quiz", {
+      course_id: COURSE_ID, assignment_id: QUIZ_ID, ...deleteGuard,
+    }, {
+      routes: {
+        [listPath]: (afterWrite) => (afterWrite ? entry.afterIds : [QUIZ_ID]).map((id) => ({ id })),
+        [QUIZ_PATH]: quiz,
+        [`${QUIZ_PATH}/items`]: items,
+        [`/api/v1/courses/${COURSE_ID}/assignments/${QUIZ_ID}`]: assignment,
+      },
+      writeData: {},
+    });
+    assert.equal(result.verification.status, entry.status, `${entry.name}: ${JSON.stringify(result)}`);
+    assert.equal(result.verification.reason, entry.reason, entry.name);
+    assert.equal(requests.filter((request) => request.method === "DELETE").length, 1, entry.name);
+  }
+});
+
 test("the settings check rejects changed protected settings and cannot confirm an unread saved quiz", async () => {
   const args = { course_id: COURSE_ID, assignment_id: QUIZ_ID, quiz_quiz_settings_shuffle_answers: true, ...guard() };
   const savedSettings = mergeQuizSettings(CURRENT_SETTINGS, { shuffle_answers: true }).merged;

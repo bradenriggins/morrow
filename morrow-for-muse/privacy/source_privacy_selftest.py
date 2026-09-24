@@ -998,6 +998,32 @@ def test_w2_zero_width_reversed_name_redacted():
     assert "Student A1" in text(result)
 
 
+def test_accented_spelling_of_a_roster_name_redacted():
+    # Muse engine audit 2026-09-23: the roster spells "Alice B.
+    # Thornton"; text written with accents ("Álice B. Thörnton") or a
+    # word processor's apostrophe must still match.
+    result = alice_setup().invoke(
+        "canvas_read", ALICE_REQUEST, None,
+        lambda args: envelope("Álice B. Thörnton submitted; Thörnton "
+                              "agreed"))
+    assert result.get("isError") is not True, text(result)[:200]
+    assert "Thörnton" not in text(result), text(result)[:200]
+    assert "Álice" not in text(result), text(result)[:200]
+    assert "Student A1" in text(result)
+
+
+def test_curly_apostrophe_spelling_of_a_roster_name_redacted():
+    learners = source_privacy_roster([{"id": 777002,
+                                       "name": "Liam O'Brien"}])
+    result = alice_setup(load_roster=lambda binding: learners).invoke(
+        "canvas_read", ALICE_REQUEST, None,
+        lambda args: envelope("Liam O\u2019Brien wrote; O\u2019Brien "
+                              "agreed"))
+    assert result.get("isError") is not True, text(result)[:200]
+    assert "Brien" not in text(result), text(result)[:200]
+    assert "Student A1" in text(result)
+
+
 def test_w2_bare_surname_redacted():
     # W2-P1-2: the surname alone is identifying within a course roster.
     result = alice_setup().invoke(

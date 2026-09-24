@@ -114,6 +114,57 @@ describe("batch MCP controls", () => {
     }
   });
 
+  // Moodle and Blackboard batches pass through the same controls, so no batch reply names Canvas
+  // as the platform that did not change.
+  it("names no platform it did not touch when it prepares or recovers a Moodle group", async () => {
+    const scheduler = new BatchWindowScheduler({ maxConcurrentReadWindows: 1 });
+    const runtime = {
+      batchScheduler: scheduler,
+      batchCreate: async () => ({ schema: "morrow.batch-created.v1" }),
+      batches: {
+        recover: () => ({ schema: "morrow.batch-recovery.v1" }),
+        getBatch: () => ({ mode: "read_only", concurrency: 1 }),
+      },
+      sourceSettlements: { summary: () => ({ total: 0 }) },
+    } as unknown as MorrowRuntime;
+    const client = new Client({ name: "batch-platform-test", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const server = serveStdio(() => {
+      const mcp = new McpServer({ name: "batch-platform-test", version: "1" });
+      registerBatchTools(mcp, runtime);
+      return mcp;
+    }, { transport: b });
+    await client.connect(a);
+    const text = (result: Awaited<ReturnType<Client["callTool"]>>) => (result.content as readonly { readonly text?: string }[])[0]?.text ?? "";
+    try {
+      const created = await client.callTool({
+        name: "morrow_batch_create",
+        arguments: {
+          name: "Read Moodle pages",
+          mode: "read_only",
+          concurrency: 1,
+          operation_family: "moodle_course_read",
+          profile_digest: digests.profile,
+          expires_at: "2030-01-01T00:00:00.000Z",
+          operations: [{ child_id: "page", course_id: "7", tool: "moodle_get_page", source_binding_id: "moodle:school:7", arguments: { course_id: "7" } }],
+        },
+      });
+      expect(created.isError, JSON.stringify(created)).not.toBe(true);
+      expect(text(created)).toBe("Prepared a group of requests. The selected learning platform has not changed.");
+
+      const recovered = await client.callTool({ name: "morrow_batch_recover", arguments: { batch_id: "batch-moodle-1", mode: "apply_safe" } });
+      expect(recovered.isError, JSON.stringify(recovered)).not.toBe(true);
+      expect(text(recovered)).toBe("Updated the saved records for group batch-moodle-1. This action sent no changes to the learning platform.");
+
+      const tools = (await client.listTools()).tools;
+      for (const tool of tools) expect(tool.description, tool.name).not.toMatch(/(?:read or change|to|Direct) Canvas\b/u);
+    } finally {
+      await client.close();
+      await server.close();
+      scheduler.close();
+    }
+  });
+
   it("forwards client cancellation and applies pause or cancel while a same-batch window is running", async () => {
     const runStarted = deferred();
     const runGate = deferred();

@@ -5,7 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildChecklist, capabilitiesIn, writeClass } from "../moodle-live-proof.mjs";
+import {
+  HARNESS_BRIDGE,
+  buildChecklist,
+  capabilitiesIn,
+  closeHarnessResources,
+  connectHarnessConnector,
+  writeClass,
+} from "../moodle-live-proof.mjs";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const HARNESS = join(root, "scripts/moodle-live-proof.mjs");
@@ -69,7 +76,10 @@ test("the harness proves one Moodle write against the local fixture and reaches 
     assert.equal(receipt.requestReview.frozenArguments.content, content);
     assert.equal(receipt.requestReview.frozenArguments.expected_digest, receipt.exactTargetBeforeChange.snapshotDigest);
 
-    assert.deepEqual(receipt.dispatch, { state: "verified", dispatchAttempt: 1, bridgeWriteCommands: 1, providerPosts: 1 });
+    assert.deepEqual(receipt.dispatch, {
+      state: "verified", dispatchAttempt: 1, bridgeWriteCommands: 1,
+      providerPosts: 1, distinctProviderPostBodies: 1, providerPostConnections: 1, browserResends: 0,
+    });
     assert.equal(receipt.replay.refused, true);
     assert.equal(receipt.replay.dispatchAttemptAfterReplay, 1);
     assert.deepEqual(receipt.operationJournal.writeEffects, [{ publicToolName: "moodle_update_label", state: "verified", dispatchAttempt: 1 }]);
@@ -115,6 +125,11 @@ test("a saved change with no answer is recorded as unknown, never as a passed pr
     assert.equal(receipt.dispatch.dispatchAttempt, 1, "an unknown outcome is never dispatched again");
     assert.equal(receipt.dispatch.bridgeWriteCommands, 1, "an unknown outcome is never sent again");
     assert.ok(receipt.dispatch.providerPosts >= 1, "the fixture must record the POST the change sent");
+    // Chrome sends a request again on its own when a reused connection closes before any answer.
+    // That copy is byte for byte the one form Morrow sent once, and it arrives on a new connection.
+    assert.equal(receipt.dispatch.distinctProviderPostBodies, 1, "Morrow sent one form, whatever Chrome repeated");
+    assert.equal(receipt.dispatch.browserResends, receipt.dispatch.providerPosts - 1);
+    assert.equal(receipt.dispatch.providerPostConnections, receipt.dispatch.providerPosts, "each copy Chrome sent arrived on its own connection");
     assert.equal(receipt.replay.refused, true);
     assert.equal(receipt.replay.dispatchAttemptAfterReplay, 1);
     const write = receipt.bridgeCommands.find((command) => command.kind === "invoke_write");
@@ -123,6 +138,55 @@ test("a saved change with no answer is recorded as unknown, never as a passed pr
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("the harness Bridge answers Morrow's heartbeat, so a slow step keeps the course connection", async (t) => {
+  const { LoopbackBridgeServer } = await import("../../packages/bridge-loopback/dist/index.js");
+  const catalogDigest = "c".repeat(64);
+  // Long enough that a busy test runner cannot delay one heartbeat answer past two periods.
+  const heartbeatMs = 1_000;
+  const bridge = new LoopbackBridgeServer({
+    token: HARNESS_BRIDGE.token,
+    expectedRuntimeRevision: HARNESS_BRIDGE.runtimeRevision,
+    expectedCatalogDigest: catalogDigest,
+    allowedExtensionIds: [HARNESS_BRIDGE.extensionId],
+    heartbeatMs,
+  });
+  const { port } = await bridge.start();
+  t.after(() => bridge.close());
+  const connector = await connectHarnessConnector({
+    port,
+    page: null,
+    commands: [],
+    operations: [],
+    expiresAt: () => Date.now() + 59_000,
+    binding: {
+      sourceBindingId: "moodle:heartbeat:2", provider: "moodle", origin: "https://127.0.0.1:9", siteUrl: "https://127.0.0.1:9/",
+      courseId: "2", courseName: "Heartbeat course", principalId: "3", principalFingerprint: "d".repeat(64), sessionGeneration: 1,
+      catalogDigest, editPolicyRevision: 0, editOptionsAvailable: true, runtimeVerified: true,
+    },
+  });
+  t.after(() => connector.close());
+  // Morrow drops a Bridge that is silent for two heartbeat periods. The harness sends nothing
+  // while Chrome opens or closes the review page, so only its heartbeat answer keeps it paired.
+  await new Promise((done) => setTimeout(done, heartbeatMs * 5));
+  assert.equal(bridge.health().connected, true, "Morrow dropped the harness Bridge for not answering its heartbeat");
+  assert.deepEqual(connector.connection(), { open: true, closeCode: null, closeReason: null });
+});
+
+test("a harness resource that never finishes closing is given up after its deadline, and the rest still close", { timeout: 5_000 }, async () => {
+  const closed = [];
+  const started = Date.now();
+  const abandoned = await closeHarnessResources([
+    ["bridge connection", { close: async () => { closed.push("bridge connection"); } }],
+    ["gateway", null],
+    ["review browser context", { close: () => new Promise(() => {}) }],
+    ["assistant client", { close: async () => { throw new Error("already closed"); } }],
+    ["fixture site", { close: async () => { closed.push("fixture site"); } }],
+  ], { deadlineMs: 200 });
+  assert.deepEqual(abandoned, ["review browser context"]);
+  assert.deepEqual(closed, ["bridge connection", "fixture site"], "a stuck or failed close must not skip the resources after it");
+  assert.ok(Date.now() - started < 2_000, "the stuck close must be given up at its deadline");
 });
 
 test("the harness refuses a proof it cannot run here, and writes no receipt", () => {

@@ -23,6 +23,11 @@ audit round 4, H3c/H3d and M2, 2026-09-22):
   5. Plan mode still stops the write before any label is resolved.
   6. A WriteFieldMismatch's engineering_detail carried raw readback
      values (name, email, raw ids) to the agent through the funnel.
+  7. as_user_id (Canvas masquerading) counted as a learner-id position,
+     so a student label there became the student's real id and Canvas
+     acted as the student (muse engine round 2, 2026-09-23). It is
+     refused before anything is sent, and a label there is never
+     turned into an id.
 
 The run writes a repeatable artifact of the flow to
 .selftest-work/by-name-e2e-artifact.json (labels only).
@@ -46,7 +51,8 @@ from dispatch import executor as ex  # noqa: E402
 import dispatch.admission as admission_mod  # noqa: E402
 from dispatch.test_direct_lane_hardening import (  # noqa: E402,F401
     BASE, _pack, hermetic)
-from learners.test_students_find import ROSTER, fake_canvas  # noqa: E402
+from learners.test_students_find import (  # noqa: E402
+    ROSTER, fake_canvas, found_in)
 from modes import errors as mode_errors  # noqa: E402
 
 USER = "byname-educator"
@@ -90,6 +96,14 @@ class BrowserFake:
         path = url.split("?", 1)[0][len(BASE):]
         if method == "GET" and path == "/api/v1/courses/1":
             return self._ok({"id": 1, "name": "Biology 101"})
+        # The course roster the executor reads before it touches a
+        # course (every course here has the same students).
+        if method == "GET" and path.startswith("/api/v1/courses/") \
+                and path.endswith("/users"):
+            return self._ok(ROSTER)
+        if method == "GET" and path.startswith("/api/v1/courses/") \
+                and path.endswith("/enrollments"):
+            return self._ok([])
         if method == "POST" and path.endswith("/assignments/3/overrides"):
             body = data["assignment_override"]
             rec = {"id": 5, "assignment_id": 3,
@@ -105,6 +119,11 @@ class BrowserFake:
                      "user_name": "Jane Doe",
                      "author": {"id": 98765, "display_name": "Jane Doe"}}
             return self._ok(topic)
+        if path == "/api/v1/courses/1/pages/week-1":
+            page = {"url": "week-1", "page_id": 7,
+                    "title": "Week 1 by Jane Doe (jane.doe@school.edu)",
+                    "body": "<p>Jane Doe will lead Friday.</p>"}
+            return self._ok(page)
         if method == "GET" and path == "/api/v1/users/98765/courses/1/" \
                                        "assignments":
             return self._ok([{"id": 3, "name": "Essay",
@@ -154,7 +173,7 @@ def _leaks(value, introduced=("Jane Doe",)):
     text = value if isinstance(value, str) else json.dumps(value)
     for name in introduced:
         text = text.replace(name, "")
-    return [s for s in NOT_INTRODUCED + ("Jane", "Doe") if s in text]
+    return found_in(text, NOT_INTRODUCED + ("Jane", "Doe"))
 
 
 def _find(query, conversation=CONV, **kw):
@@ -306,7 +325,55 @@ def test_plan_mode_refuses_before_any_label_is_resolved(monkeypatch):
     assert called == []
 
 
-def test_mismatch_detail_reaches_the_agent_projected():
+PAGE_UPDATE = ("canvas_update_create_page_courses", "PUT",
+               "/api/v1/courses/{course_id}/pages/{url_or_id}")
+
+
+def test_acting_as_a_student_by_label_is_refused_before_anything_is_sent():
+    # The consent page: Morrow will not act as anyone other than you.
+    _edit_mode()
+    label = _find("Jane Doe")["student"]
+    session = BrowserFake()
+    name, method, path = PAGE_UPDATE
+    with pytest.raises(admission_mod.NeverDispatch) as info:
+        ex.dispatch_catalog_op(
+            name, method, path, "write",
+            {"course_id": COURSE, "url_or_id": "week-1"}, pack=_pack(),
+            session=session, mode_ctx=_ctx(),
+            extra={"body": {"as_user_id": label,
+                            "wiki_page": {"title": "Week 1"}}})
+    assert session.calls == []
+    assert _leaks(str(info.value)) == []
+
+
+def test_a_label_is_never_turned_into_someone_to_act_as():
+    label = _find("Jane Doe")["student"]
+    from privacy import executor_wire as wire
+    try:
+        resolved, _mapping = wire.resolve_learner_labels(
+            {"as_user_id": label, "student_ids": [label]}, BASE, COURSE,
+            CONV, error_cls=ex.LearnerLabelUnresolved)
+    except ex.LearnerLabelUnresolved:
+        return
+    assert resolved["student_ids"] == [JANE_ID]
+    assert str(JANE_ID) not in json.dumps(resolved["as_user_id"])
+
+
+def _lift_hold(monkeypatch, name):
+    """Admit one held operation for this test only (the policy file is
+    unchanged)."""
+    import copy
+    policy = copy.deepcopy(admission_mod.load_policy())
+    policy["evidence_holds"]["tool_names"].remove(name)
+    monkeypatch.setattr(admission_mod, "_policy_cache", policy)
+
+
+def test_mismatch_detail_reaches_the_agent_projected(monkeypatch):
+    # Discussion writes are held until a Chromium-lane battery proves
+    # them, and the discussion update is the one learner-data write
+    # with a readback. The projection pinned here runs the same way on
+    # any such write, so the hold is lifted for this test only.
+    _lift_hold(monkeypatch, "canvas_update_topic_courses")
     _edit_mode()
     _find("Jane Doe")
     session = BrowserFake()

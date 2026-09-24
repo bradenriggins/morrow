@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { clearExtensionGlobals, loadExtensionPage } from "./lib/extension-dom.mjs";
 import { problemCode, problemCopy, problemText } from "../../connector/extension/src/bridge-problem-copy.js";
 import {
   SETUP_CHECK_IDS,
@@ -8,6 +9,7 @@ import {
   setupGuideState,
   shouldRefreshForStorageChange,
 } from "../../connector/extension/onboarding/onboarding-state.js";
+import { detailText as popupDetailText, primaryLabel as popupPrimaryLabel, statusValue as popupStatusValue } from "../../connector/extension/popup/popup-view.js";
 
 // One durable read receipt is exposed only through the exact current binding it matches.
 const FIRST_READ = Object.freeze({
@@ -29,7 +31,6 @@ const READ_BINDING = Object.freeze({
 
 const READY_STATUS = Object.freeze({
   paired: true,
-  pairing: false,
   connecting: false,
   connected: true,
   runtimeHealthy: true,
@@ -40,16 +41,24 @@ const READY_STATUS = Object.freeze({
 
 const textOf = (state, id) => state.checks.find((check) => check.id === id).text;
 
-test("setup guide prioritizes a live pairing approval over an unpaired state", () => {
-  const state = setupGuideState({ pairing: true, paired: false, connected: false, bindings: [], siteAnchors: [] });
-  assert.equal(state.title, "Allow connection");
-  assert.equal(textOf(state, "assistant"), "An assistant approval is waiting on the Morrow page that opened");
-  assert.equal(textOf(state, "connection"), "Morrow Bridge connects after you allow this connection");
+// Connect Morrow pairs in the popup in one step, so the guide has no approval step or page to reopen.
+test("setup guide has no approval step: Connect Morrow pairs in the popup", () => {
+  const state = setupGuideState({ paired: false, connected: false, bindings: [], siteAnchors: [] });
+  assert.equal(state.title, "Open Morrow");
+  assert.equal(Object.hasOwn(state, "canOpenApproval"), false);
+  assert.equal(textOf(state, "assistant"), "Morrow Bridge is not set up to work with Morrow yet");
+  assert.equal(textOf(state, "connection"), "Morrow Bridge is not connected to Morrow");
+  for (const line of [state.heading, state.summary, state.title, state.detail, ...state.checks.map((check) => check.text)]) {
+    assert.doesNotMatch(line, /approv|Allow connection|page that opened/i, line);
+  }
+  const html = readFileSync(new URL("../../connector/extension/onboarding/onboarding.html", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /open-approval|approval page|allow only the connection/i);
 });
 
 test("setup guide directs an unpaired Bridge to the graphical Morrow app", () => {
-  const state = setupGuideState({ pairing: false, paired: false, connecting: false, connected: false, bindings: [], siteAnchors: [] });
+  const state = setupGuideState({ paired: false, connecting: false, connected: false, bindings: [], siteAnchors: [] });
   assert.equal(state.title, "Open Morrow");
+  assert.equal(state.detail, "Open Morrow and choose your assistant. Then return to Morrow Bridge and select Connect Morrow.");
   assert.match(state.detail, /choose your assistant/i);
   assert.match(state.detail, /select Connect Morrow/i);
 });
@@ -64,6 +73,32 @@ test("setup guide distinguishes a closed assistant, signed-out course, Plan sele
   const ready = setupGuideState(READY_STATUS);
   assert.equal(ready.ready, true);
   assert.equal(ready.title, "Plan your first change");
+  // The status this guide reads carries no Edit permission, so the ready text must be true whether
+  // or not the educator has turned on Edit for a kind of change in that course.
+  assert.equal(ready.detail, "Ask your assistant for a change in your selected course. Each change waits for your review unless you turned on Edit for that kind of change in that course.");
+  assert.doesNotMatch(ready.detail, /every change/i);
+});
+
+// Morrow refused the Bridge's saved connection (it was reinstalled, or its data was removed), so the
+// saved approval no longer counts. The guide says what the popup says and offers the same Reconnect
+// Morrow, because opening Morrow again cannot fix a refused connection.
+test("a saved connection Morrow refused asks for Reconnect Morrow, as the popup does", () => {
+  const refused = { paired: true, authenticationFailed: true, connecting: false, connected: false, bindings: [], siteAnchors: [] };
+  for (const status of [refused, { ...refused, connecting: true }]) {
+    const state = setupGuideState(status);
+    assert.equal(state.open, "assistant");
+    assert.equal(state.checks.find((check) => check.id === "assistant").done, false);
+    assert.equal(textOf(state, "assistant"), "Morrow no longer accepts this saved connection, so it needs to connect again");
+    assert.equal(state.title, popupPrimaryLabel(status));
+    assert.equal(state.title, "Reconnect Morrow");
+    assert.equal(state.detail, popupDetailText(status));
+    assert.equal(state.heading, popupStatusValue(status));
+    assert.equal(state.tone, "attention");
+    assert.equal(state.canReconnect, true);
+    assert.doesNotMatch(state.detail, /Open Morrow again|choose your assistant again/);
+  }
+  // Once Reconnect Morrow has connected again, Morrow accepts the connection and the step is gone.
+  assert.equal(setupGuideState({ paired: true, connected: false, bindings: [], siteAnchors: [] }).canReconnect, false);
 });
 
 // Each next step names a control the popup or Plan and Edit settings really shows: Connect this
@@ -107,7 +142,7 @@ test("the guide reports five checks, and each one is the step it asks for while 
   }
   const ready = setupGuideState(READY_STATUS);
   assert.deepEqual(ready.checks.map((check) => check.text), [
-    "An assistant approved this connection in Morrow. Morrow Bridge sees the connection, not the assistant itself.",
+    "Morrow Bridge is set up to work with Morrow on this computer. Morrow Bridge sees the connection, not your assistant itself.",
     "Morrow Bridge is connected to Morrow",
     "Morrow matches this Morrow Bridge version and its list of course actions",
     "1 selected course is ready",
@@ -115,14 +150,14 @@ test("the guide reports five checks, and each one is the step it asks for while 
   ]);
 });
 
-// Morrow Bridge cannot see the assistant window. It sees the connection an assistant approved, and
-// the line says exactly that rather than reporting a running assistant it never checked.
+// Morrow Bridge cannot see the assistant window. It sees the connection the person made with Connect
+// Morrow, and the line says exactly that rather than reporting a running assistant it never checked.
 test("the assistant check states that it reports this connection, not the assistant itself", () => {
   const paired = textOf(setupGuideState({ paired: true, connected: false, bindings: [], siteAnchors: [] }), "assistant");
-  assert.match(paired, /approved this connection in Morrow/);
-  assert.match(paired, /sees the connection, not the assistant itself/);
+  assert.match(paired, /set up to work with Morrow on this computer/);
+  assert.match(paired, /sees the connection, not your assistant itself/);
   assert.equal(textOf(setupGuideState({ paired: false, connected: false, bindings: [], siteAnchors: [] }), "assistant"),
-    "No assistant has approved this connection yet");
+    "Morrow Bridge is not set up to work with Morrow yet");
 });
 
 // A connection is not a version match. Morrow names the connector identity it accepted, and an
@@ -131,10 +166,10 @@ test("the version check separates a matching Morrow from one this connection can
   const connected = { paired: true, connected: true, bindings: [{ runtimeVerified: true }], siteAnchors: [{ runtimeVerified: true }], firstCourseRead: FIRST_READ };
   const mismatch = setupGuideState({ ...connected, runtimeHealthy: false });
   assert.equal(mismatch.ready, false);
-  assert.equal(mismatch.heading, "Morrow needs a reload");
+  assert.equal(mismatch.heading, "Morrow Bridge needs a reload");
   assert.equal(mismatch.title, "Reload Morrow Bridge");
   assert.equal(textOf(mismatch, "runtime"), "Morrow reports a different version from this Morrow Bridge");
-  assert.match(mismatch.detail, /reload Morrow Bridge on the Chrome extensions page/);
+  assert.match(mismatch.detail, /Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup/);
   // Before the connection there is no version result to report, and none is invented.
   assert.equal(textOf(setupGuideState({ paired: true, connected: false, bindings: [], siteAnchors: [] }), "runtime"),
     "Morrow version is checked when Morrow Bridge connects");
@@ -142,6 +177,34 @@ test("the version check separates a matching Morrow from one this connection can
     "Morrow matches this Morrow Bridge version and its list of course actions");
   // A status with no version answer at all is not treated as a match.
   assert.equal(setupGuideState({ ...connected }).ready, false);
+  // A saved connection reconnects by itself after the reload, so no step asks for Connect Morrow.
+  assert.doesNotMatch(mismatch.detail, /Connect Morrow/);
+});
+
+// After a Morrow update Chrome still runs the old Morrow Bridge. Every surface gives the one real
+// step, a reload of Morrow Bridge, and the Morrow app's own Bridge step when a reload is not enough.
+test("the setup guide, the popup and the Connect Morrow error give the same version recovery", () => {
+  const recovery = "Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.";
+  const guide = setupGuideState({ paired: true, connected: false, versionMismatch: true, runtimeHealthy: false, bindings: [], siteAnchors: [] });
+  assert.equal(guide.heading, "Morrow Bridge needs a reload");
+  assert.equal(guide.detail, `Morrow and Morrow Bridge report different versions. ${recovery}`);
+  const popup = popupDetailText({ paired: true, connected: false, versionMismatch: true, runtimeHealthy: false, bindings: [], siteAnchors: [] });
+  assert.equal(popup, `The Morrow app and Morrow Bridge versions do not match. ${recovery}`);
+  assert.equal(problemCopy("bridge_version_mismatch").action, recovery);
+  for (const text of [guide.heading, guide.detail, popup, problemText("bridge_version_mismatch")]) {
+    assert.doesNotMatch(text, /Update Morrow|repair|Morrow needs a reload/u, text);
+  }
+});
+
+test("a Morrow that refused this Bridge version asks for a reload, not for Morrow to be opened again", () => {
+  const state = setupGuideState({ paired: true, connected: false, versionMismatch: true, runtimeHealthy: false, bindings: [], siteAnchors: [] });
+  assert.equal(state.open, "runtime");
+  assert.equal(state.heading, "Morrow Bridge needs a reload");
+  assert.equal(state.title, "Reload Morrow Bridge");
+  assert.equal(textOf(state, "connection"), "Morrow Bridge reached Morrow, and Morrow expects a different version");
+  assert.equal(textOf(state, "runtime"), "Morrow reports a different version from this Morrow Bridge");
+  assert.match(state.detail, /Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup/);
+  assert.doesNotMatch(state.detail, /Connect Morrow/);
 });
 
 // "Ready to use" is the claim a person acts on, so only a read that happened can raise it, and the
@@ -190,7 +253,7 @@ test("a status the guide could not read states that, instead of keeping the last
   assert.equal(unread.heading, "Setup state not checked");
   assert.deepEqual(unread.checks.map((check) => check.id), [...SETUP_CHECK_IDS]);
   assert.deepEqual(unread.checks.map((check) => check.text), [
-    "Assistant approval is not checked",
+    "Connection to Morrow is not checked",
     "Morrow Bridge connection is not checked",
     "Morrow version is not checked",
     "Course connection is not checked",
@@ -214,18 +277,17 @@ test("each readiness state carries its own words, so the coloured dot is never t
   const of = (status) => setupGuideState(status);
   const unread = of(null);
   const pending = of({ paired: false, connected: false, bindings: [], siteAnchors: [] });
-  const pairing = of({ pairing: true, paired: false, connected: false, bindings: [], siteAnchors: [] });
   const connecting = of({ paired: true, connecting: true, connected: false, bindings: [], siteAnchors: [] });
   const mismatch = of({ paired: true, connected: true, runtimeHealthy: false, bindings: [], siteAnchors: [] });
   const oneLeft = of({ paired: true, connected: true, runtimeHealthy: true, bindings: [{ runtimeVerified: true }], siteAnchors: [{ runtimeVerified: true }] });
   const ready = of(READY_STATUS);
-  const states = [unread, pending, pairing, connecting, mismatch, oneLeft, ready];
-  assert.deepEqual(states.map((state) => state.tone), ["unread", "pending", "waiting", "waiting", "attention", "pending", "ready"]);
+  const refused = of({ paired: true, authenticationFailed: true, connected: false, bindings: [], siteAnchors: [] });
+  const states = [unread, pending, connecting, mismatch, oneLeft, ready, refused];
+  assert.deepEqual(states.map((state) => state.tone), ["unread", "pending", "waiting", "attention", "pending", "ready", "attention"]);
   const headings = states.map((state) => state.heading);
   assert.equal(new Set(headings).size, headings.length, headings.join(" | "));
-  assert.equal(pairing.heading, "Waiting for approval");
   assert.equal(connecting.heading, "Connecting Morrow");
-  assert.equal(mismatch.heading, "Morrow needs a reload");
+  assert.equal(mismatch.heading, "Morrow Bridge needs a reload");
   assert.equal(oneLeft.heading, "One step left");
   assert.equal(ready.heading, "Ready to use");
   assert.equal(ready.summary, "1 selected course is ready in this Chrome session. Morrow completed a first read in Biology 101.");
@@ -241,7 +303,6 @@ test("every heading this guide can render is short enough to stay on one line", 
   const titles = [
     setupGuideState(null),
     setupGuideState({ paired: false, connected: false, bindings: [], siteAnchors: [] }),
-    setupGuideState({ pairing: true, paired: false, connected: false, bindings: [], siteAnchors: [] }),
     setupGuideState({ paired: true, connecting: true, connected: false, bindings: [], siteAnchors: [] }),
     setupGuideState({ paired: true, connected: false, bindings: [], siteAnchors: [] }),
     setupGuideState({ paired: true, connected: true, runtimeHealthy: false, bindings: [], siteAnchors: [] }),
@@ -250,6 +311,7 @@ test("every heading this guide can render is short enough to stay on one line", 
     setupGuideState({ paired: true, connected: true, runtimeHealthy: true, bindings: [], siteAnchors: [{ runtimeVerified: true }] }),
     setupGuideState({ paired: true, connected: true, runtimeHealthy: true, bindings: [{ runtimeVerified: true }], siteAnchors: [{ runtimeVerified: true }] }),
     setupGuideState(READY_STATUS),
+    setupGuideState({ paired: true, authenticationFailed: true, connected: false, bindings: [], siteAnchors: [] }),
   ].flatMap((state) => [state.heading, state.title]);
   const markup = readFileSync(new URL("../../connector/extension/onboarding/onboarding.html", import.meta.url), "utf8");
   for (const [, heading] of markup.matchAll(/<h2[^>]*>([^<]*)<\/h2>/g)) titles.push(heading);
@@ -329,7 +391,7 @@ test("the setup guide answers a failed status read with an unknown checklist, th
     "#quick-panel": stubElement("", true),
     "#readiness-title": stubElement("Checking setup"),
     "#readiness-detail": stubElement("Morrow is checking this connection."),
-    "#assistant-check": stubElement("Assistant approval is not checked"),
+    "#assistant-check": stubElement("Connection to Morrow is not checked"),
     "#connection-check": stubElement("Morrow Bridge connection is not checked"),
     "#runtime-check": stubElement("Morrow version is not checked"),
     "#course-check": stubElement("Course connection is not checked"),
@@ -338,6 +400,7 @@ test("the setup guide answers a failed status read with an unknown checklist, th
     "#next-title": stubElement("Open Morrow"),
     "#next-detail": stubElement("Open Morrow, choose your assistant, then return to Morrow Bridge."),
     "#open-settings": stubElement("Open Plan and Edit settings", true),
+    "#reconnect-morrow": stubElement("Reconnect Morrow", true),
     "#data-disclosure": stubElement(),
     "#quick-open-settings": stubElement("Open Plan and Edit settings"),
     "#error": stubElement("", true),
@@ -365,7 +428,7 @@ test("the setup guide answers a failed status read with an unknown checklist, th
     await import("../../connector/extension/onboarding/onboarding.js");
     assert.deepEqual(requests, ["morrow_status"]);
     assert.equal(nodes["#readiness-title"].textContent, "Setup state not checked");
-    assert.equal(nodes["#assistant-check"].textContent, "Assistant approval is not checked");
+    assert.equal(nodes["#assistant-check"].textContent, "Connection to Morrow is not checked");
     assert.equal(nodes["#connection-check"].textContent, "Morrow Bridge connection is not checked");
     assert.equal(nodes["#runtime-check"].textContent, "Morrow version is not checked");
     assert.equal(nodes["#course-check"].textContent, "Course connection is not checked");
@@ -385,7 +448,7 @@ test("the setup guide answers a failed status read with an unknown checklist, th
     // A connected Morrow with a ready course is still one read short of "Ready to use".
     respond = async () => ({
       ok: true,
-      result: { paired: true, pairing: false, connecting: false, connected: true, runtimeHealthy: true, bindings: [{ runtimeVerified: true }], siteAnchors: [{ runtimeVerified: true }] },
+      result: { paired: true, connecting: false, connected: true, runtimeHealthy: true, bindings: [{ runtimeVerified: true }], siteAnchors: [{ runtimeVerified: true }] },
     });
     for (let index = 0; index < 4; index += 1) storageListeners[0]({ bindings: { newValue: [] } }, "local");
     await settle();
@@ -402,7 +465,7 @@ test("the setup guide answers a failed status read with an unknown checklist, th
     assert.deepEqual(requests, ["morrow_status", "morrow_status", "morrow_status"]);
     assert.equal(nodes["#readiness-title"].textContent, "Ready to use");
     assert.equal(nodes["#readiness-detail"].textContent, "1 selected course is ready in this Chrome session. Morrow completed a first read in Biology 101.");
-    assert.equal(nodes["#assistant-check"].textContent, "An assistant approved this connection in Morrow. Morrow Bridge sees the connection, not the assistant itself.");
+    assert.equal(nodes["#assistant-check"].textContent, "Morrow Bridge is set up to work with Morrow on this computer. Morrow Bridge sees the connection, not your assistant itself.");
     assert.equal(nodes["#connection-check"].textContent, "Morrow Bridge is connected to Morrow");
     assert.equal(nodes["#runtime-check"].textContent, "Morrow matches this Morrow Bridge version and its list of course actions");
     assert.equal(nodes["#course-check"].textContent, "1 selected course is ready");
@@ -451,5 +514,35 @@ test("the setup guide answers a failed status read with an unknown checklist, th
     delete globalThis.document;
     delete globalThis.window;
     delete globalThis.chrome;
+  }
+});
+
+// The guide's own Reconnect Morrow connects again in one step, the same message the popup's sends.
+test("the guide's Reconnect Morrow connects again, and shows only while Morrow refuses the saved connection", async () => {
+  let status = { consentRequired: false, paired: true, authenticationFailed: true, connected: false, bindings: [], siteAnchors: [] };
+  try {
+    const page = await loadExtensionPage("onboarding/onboarding.html", {
+      handlers: {
+        morrow_status: () => status,
+        morrow_pair: () => {
+          status = { ...status, authenticationFailed: false, connecting: true };
+          return { paired: true };
+        },
+      },
+    });
+    assert.equal(page.text("#next-title"), "Reconnect Morrow");
+    assert.equal(page.hidden("#reconnect-morrow"), false);
+    assert.equal(page.text("#reconnect-morrow"), "Reconnect Morrow");
+    await page.click("#reconnect-morrow");
+    assert.deepEqual(page.messages("morrow_pair"), [{ type: "morrow_pair" }]);
+    await page.waitFor(() => page.text("#next-title") === "Connecting Morrow", "the guide never moved on after connecting again");
+    assert.equal(page.hidden("#reconnect-morrow"), true);
+    assert.equal(page.hidden("#error"), true);
+
+    status = { consentRequired: false, paired: true, connected: false, bindings: [], siteAnchors: [] };
+    const closed = await loadExtensionPage("onboarding/onboarding.html", { handlers: { morrow_status: () => status } });
+    assert.equal(closed.hidden("#reconnect-morrow"), true);
+  } finally {
+    clearExtensionGlobals();
   }
 });

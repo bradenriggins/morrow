@@ -13,9 +13,10 @@ Pins the fixes for the worker-A findings from the 2026-09-21 wave-3 audit:
            a gap.
   W3-P0-15 users_self (C-436): the educator's own profile read, exempt
            from the learner-data gate, pending a live proof battery.
-  W3-P1-44 reveal consent provenance: the bare
-           MORROW_REVEAL_STUDENT_PII_REASON env var is ignored; consent
-           comes only from the educator's hand-created consent file.
+  W3-P1-44 no reveal: the bare MORROW_REVEAL_STUDENT_PII_REASON env
+           var, the retired consent file, and a reveal-shaped record all
+           reveal nothing (final sweep 2026-09-22 removed the sealed
+           educator reveal, which handed names to the model).
   W3-P1-45 query/body blindness: request query/body (and multi-step
            blocks) are scanned for learner tokens, not just the URL.
   W3-P2-5  raw verification detail: verify details go through the same
@@ -485,85 +486,103 @@ def _write_consent(reason_bytes, mode=0o600):
     return path
 
 
-_REVEAL_WORDS = "please show me the real names for course 1 for grading"
+def _learner_entry():
+    return {"name": "t_students", "provider": "canvas",
+            "request": {"method": "GET",
+                        "url": TENANT + "/api/v1/courses/1/students"}}
 
 
-def _sealed_reveal(course_id="1", channel="educator-chat"):
-    _admission_mod._journal_reveal = lambda record: None  # hermetic
-    return _admission_mod.mint_pii_reveal(TENANT, course_id, _REVEAL_WORDS,
-                                          channel)
+# A record shaped like the retired sealed reveal: nothing honors it.
+_REVEAL_SHAPED = {"kind": "pii_reveal", "by": "educator",
+                  "channel": "educator-chat", "tenant": TENANT,
+                  "course_id": "1",
+                  "authorization": "please show me the real names"}
+
+
+def _name_stays_hidden(project=None, lane_context=None):
+    """A learner-bearing verification detail is projected to labels
+    whatever the caller set up. Without 'cryptography' the projection
+    refuses loudly, which reveals nothing either."""
+    project = project or ex._project_verification_detail
+    detail = "provider returned 'Ada Lovelace'"
+    try:
+        out = project(_learner_entry(), {"ok": False, "detail": detail},
+                      {"user_id": 1, "name": "Ada Lovelace"}, TENANT,
+                      "t_students", lane_context=lane_context)
+    except Exception as exc:  # either lane's ExecutorError class
+        if type(exc).__name__ != "ExecutorError":
+            raise
+        from privacy import core as _pc
+        assert _pc.AESGCM is None, exc
+        assert "cryptography" in str(exc), str(exc)[:200]
+        return
+    assert "Ada Lovelace" not in out["detail"], out["detail"]
+    assert "pii_reveal" not in out and "journal_detail" not in out, out
 
 
 def t_env_var_ignored_by_wire():
-    from privacy import executor_wire as _wire
     saved = _isolate_env()
     os.environ["MORROW_REVEAL_STUDENT_PII_REASON"] = \
         "grading review with the course TA before posting finals"
     try:
-        assert _wire.pii_reveal_audit(Exception) is None, \
-            "bare env var must be ignored"
+        _name_stays_hidden()
     finally:
         _restore_env(saved)
 check("P1-44: bare env var is ignored by the wire", t_env_var_ignored_by_wire)
 
 
 def t_consent_stub_refused():
-    from privacy import executor_wire as _wire
     saved = _isolate_env()
     try:
         _write_consent(b"test")
-        assert _wire.pii_reveal_audit(Exception) is None
+        _name_stays_hidden()
     finally:
         _restore_env(saved)
 check("P1-44/H2: a stub consent file reveals nothing", t_consent_stub_refused)
 
 
 def t_consent_wrong_mode_refused():
-    from privacy import executor_wire as _wire
     saved = _isolate_env()
     try:
         _write_consent(b"a documented instructional purpose here", mode=0o644)
-        assert _wire.pii_reveal_audit(Exception) is None
+        _name_stays_hidden()
     finally:
         _restore_env(saved)
 check("P1-44/H2: a world-readable consent file reveals nothing",
       t_consent_wrong_mode_refused)
 
 
-def t_consent_valid_reveals():
+def t_no_record_reveals():
     from privacy import executor_wire as _wire
+    for mod, name in ((_admission_mod, "mint_pii_reveal"),
+                      (_admission_mod, "check_pii_reveal"),
+                      (_wire, "pii_reveal_audit")):
+        assert not hasattr(mod, name), name
     saved = _isolate_env()
-    reason = "grading review with the course TA before posting finals"
     try:
-        _write_consent(reason.encode())
-        assert _wire.pii_reveal_audit(Exception) is None, \
-            "an agent-writable 0600 consent file must not reveal"
-        audit = _wire.pii_reveal_audit(Exception, _sealed_reveal("1"),
-                                       TENANT, "1")
-        other = _wire.pii_reveal_audit(Exception, _sealed_reveal("1"),
-                                       TENANT, "2")
-        expect_raises(Exception, lambda: _wire.pii_reveal_audit(
-            Exception, _sealed_reveal("1", "driver"), TENANT, "1"))
+        _write_consent(b"grading review with the course TA before posting")
+        _name_stays_hidden(lane_context={"pii_reveal":
+                                         dict(_REVEAL_SHAPED)})
     finally:
         _restore_env(saved)
-    assert audit["revealed_by"] == "educator-sealed-record", audit
-    assert audit["authorization"] == _REVEAL_WORDS, audit
-    assert audit["at"], "audit carries a timestamp"
-    assert other is None, "a reveal names one course only"
-check("P1-44/H2: only a sealed educator record reveals, one course",
-      t_consent_valid_reveals)
+check("P1-44/H2: no record reveals names, not even one shaped like the "
+      "retired educator reveal", t_no_record_reveals)
 
 
 def t_browser_delegates_consent():
     sys.path.insert(0, os.path.join(_HERE, "..", "transport"))
     import browser_backend as bb
+    assert not hasattr(bb, "_pii_reveal_audit")
+
+    def project(entry, verification, raw, tenant, _name, lane_context=None):
+        return bb._project_verification_detail(entry, verification, raw,
+                                               tenant, lane_context)
     saved = _isolate_env()
     os.environ["MORROW_REVEAL_STUDENT_PII_REASON"] = \
         "grading review with the course TA before posting finals"
     try:
-        assert bb._pii_reveal_audit() is None, "env-only must not reveal"
         _write_consent(b"documented instructional purpose for review")
-        assert bb._pii_reveal_audit() is None, "a file must not reveal"
+        _name_stays_hidden(project)
     finally:
         _restore_env(saved)
 check("P1-44/H2: browser backend never reveals", t_browser_delegates_consent)
@@ -572,12 +591,6 @@ check("P1-44/H2: browser backend never reveals", t_browser_delegates_consent)
 # ---------------------------------------------------------------------------
 # W3-P2-5: raw verification detail through the learner privacy boundary
 # ---------------------------------------------------------------------------
-
-def _learner_entry():
-    return {"name": "t_students", "provider": "canvas",
-            "request": {"method": "GET",
-                        "url": TENANT + "/api/v1/courses/1/students"}}
-
 
 def t_verification_detail_projected():
     # A synthetic readback mismatch carrying a learner name, id, and
@@ -608,13 +621,11 @@ check("P2-5: verification detail projected, no learner PII survives",
 def t_consent_nonregular_fails_closed():
     # A FIFO (or any nonregular file) at the retired consent path is not
     # consent: nothing is read and nothing is revealed.
-    from privacy import executor_wire as _wire
     saved = _isolate_env()
     path = _legacy_consent_path()
     try:
         os.mkfifo(path)
-        assert _wire.pii_reveal_audit(ex.ExecutorError) is None, \
-            "nonregular consent must never audit"
+        _name_stays_hidden()
     finally:
         try:
             os.unlink(path)
@@ -627,7 +638,6 @@ check("P1-44/H2: nonregular consent file reveals nothing",
 
 def t_consent_symlink_rejected():
     # A symlink at the retired consent path reveals nothing either.
-    from privacy import executor_wire as _wire
     saved = _isolate_env()
     path = _legacy_consent_path()
     try:
@@ -637,8 +647,7 @@ def t_consent_symlink_rejected():
             fh.write(b"documented instructional purpose for review")
         os.chmod(target, 0o600)
         os.symlink(target, path)
-        assert _wire.pii_reveal_audit(ex.ExecutorError) is None, \
-            "symlink consent must never audit"
+        _name_stays_hidden()
     finally:
         try:
             os.unlink(path)
@@ -674,47 +683,18 @@ check("P0-6: omitted-class catalog write reaches WriteApprovalMissing",
       t_write_omitted_class_reaches_approval_gate)
 
 
-def t_verification_detail_consent_reveals():
-    # With a sealed educator reveal for the course, the detail passes
-    # through raw and the reveal audit rides with the verification so
-    # the journal records it. A consent file does nothing.
+def t_verification_detail_reveal_record_ignored():
+    # A reveal-shaped record and a consent file change nothing: the
+    # verification detail the agent and the journal get is projected.
     saved = _isolate_env()
     try:
         _write_consent(b"documented instructional purpose for review")
-        detail = "provider returned 'Ada Lovelace'"
-        from privacy import core as _pc
-        if _pc.AESGCM is None:
-            # Final muse audit H1: the journal gets the de-identified
-            # detail even under a reveal, which needs the vault; without
-            # 'cryptography' the reveal refuses loudly.
-            try:
-                ex._project_verification_detail(
-                    _learner_entry(), {"ok": False, "detail": detail},
-                    {"user_id": 1, "name": "Ada Lovelace"}, TENANT,
-                    "t_students",
-                    lane_context={"pii_reveal": _sealed_reveal("1")})
-            except ex.ExecutorError as exc:
-                assert "cryptography" in str(exc), str(exc)[:200]
-                return
-            raise AssertionError("expected a loud refusal without "
-                                 "cryptography")
-        plain = ex._project_verification_detail(
-            _learner_entry(), {"ok": False, "detail": detail},
-            {"user_id": 1, "name": "Ada Lovelace"}, TENANT, "t_students")
-        out = ex._project_verification_detail(
-            _learner_entry(), {"ok": False, "detail": detail},
-            {"user_id": 1, "name": "Ada Lovelace"}, TENANT, "t_students",
-            lane_context={"pii_reveal": _sealed_reveal("1")})
+        _name_stays_hidden(lane_context={"pii_reveal":
+                                         dict(_REVEAL_SHAPED)})
     finally:
         _restore_env(saved)
-    assert "Ada Lovelace" not in plain["detail"], plain["detail"]
-    assert out["detail"] == detail, "the reveal passes the detail through"
-    assert "Ada Lovelace" not in out["journal_detail"], \
-        "the journal view of a revealed detail must be de-identified"
-    assert out["pii_reveal"]["revealed_by"] == "educator-sealed-record", \
-        "the reveal must be journaled with the verification"
-check("P2-5/H2: a sealed educator reveal passes verification detail through",
-      t_verification_detail_consent_reveals)
+check("P2-5/H2: a reveal-shaped record does not pass verification detail "
+      "through", t_verification_detail_reveal_record_ignored)
 def t_verification_detail_inplace_label_shape():
     # List payloads are labeled in place (id/name replaced with
     # "Student A<n>"), not collapsed to learnerToken: the scrub must

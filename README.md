@@ -2,7 +2,9 @@
 
 You should not have to wait for your institution to buy and roll out a separate course assistant.
 
-Morrow connects the AI assistant you already use to your courses in Canvas, Moodle, or Blackboard, so you can build and review real course work: plan courses and create approved lessons, activities, discussions, assignments, and modules; build, review, and improve New Quizzes and Item Banks down to each question and setting; audit and remediate accessibility at scale, map curriculum, and prepare accreditation evidence; compare and update dozens of courses, then verify each approved change against what the LMS saved.
+Morrow connects the AI assistant you already use to your Canvas and Moodle courses, so you can build and review real course work: plan courses and create approved lessons, activities, discussions, assignments, and modules; build, review, and improve New Quizzes and Item Banks down to each question and setting; check course items for accessibility problems and fix them, map curriculum, and prepare accreditation evidence. After each approved change, Morrow checks what your course site saved.
+
+Selected Canvas tasks have been checked on live test courses, and part of the Moodle catalog on a Moodle test course. Morrow Desktop can also connect to Blackboard, but no live Blackboard site has been tested yet. Working with several connected courses at once has not been tested on live courses yet.
 
 Morrow is and always will be free and open source.
 
@@ -12,8 +14,8 @@ This is a monorepo. Each product lives in its own directory, ships on its own ve
 
 | Product | Directory | What it is |
 |---|---|---|
-| Morrow Desktop | `desktop/` | The desktop app plus Morrow Bridge, the Manifest V3 Chrome extension. Download for Mac or Windows, connect ChatGPT, Claude, or Gemini, and work with the courses your account can open. Start at [`desktop/README.md`](desktop/README.md). |
-| Morrow for Muse | `morrow-for-muse/` | The VM-native connector for Muse. The educator signs into Canvas once on their Muse VM; every lane after that is pure API. Version 1 supports Canvas only. Includes Morrow Direct, our open manifest standard for direct LMS REST with zero MCP. Start at [`morrow-for-muse/SKILL.md`](morrow-for-muse/SKILL.md). |
+| Morrow Desktop | `desktop/` | The desktop app plus Morrow Bridge, its Chrome extension. Download it for a Mac with Apple silicon and macOS 13 or later, or for Windows 10 or Windows 11, connect the ChatGPT desktop app, Claude Desktop, Claude Code, or Gemini CLI, and work with the courses your account can open. So far, only OpenAI's Codex CLI, which uses Morrow's ChatGPT setup, has been checked on a live Canvas test course. The ChatGPT desktop app, Claude Desktop, Claude Code, and Gemini CLI setups have passed Morrow's own tests only. Start at [`desktop/README.md`](desktop/README.md). |
+| Morrow for Muse | `morrow-for-muse/` | The connector that runs Morrow on your Muse computer. You sign in to Canvas on your Muse computer, and sign in again if Canvas ends the session. Version 1 supports Canvas only. Includes Morrow Direct, our open format that describes each course-site action Morrow can take and how it runs. Start at [`morrow-for-muse/SKILL.md`](morrow-for-muse/SKILL.md). |
 
 ## How Morrow works, in every product
 
@@ -21,7 +23,9 @@ This is a monorepo. Each product lives in its own directory, ships on its own ve
 
 **Plan first.** Morrow starts each course in Plan, so you review proposed changes before they are saved. Edit lets your assistant save changes without asking each time: in Morrow Desktop you grant it per course and per type of change, and in Morrow for Muse you turn it on for your account or for one conversation. After each approved change, Morrow checks what the LMS saved, and your assistant tells you what happened.
 
-**Your sign-in stays yours.** Passwords, cookies, and sign-in details never go to the Morrow app or your assistant. Course access should not expose student identities to your assistant: before course information reaches it, Morrow replaces names, email addresses, usernames, and school or course account IDs with labels such as Student A1, and it stops if it cannot protect every student in those records.
+**Your sign-in stays yours.** Morrow never sees or saves your password, and your assistant never receives your password, cookies, or other sign-in details. In Morrow Desktop, your Canvas or Moodle sign-in stays in Chrome, and Morrow Bridge uses it there. Blackboard works differently: your administrator gives you an application key and secret, and the Morrow app keeps them in a file on your computer that only your user account can open. In Morrow for Muse, you sign in to Canvas in Morrow's own browser on your Muse computer, and that browser keeps your sign-in there. If Canvas ends the session, you sign in again.
+
+**Student identities stay out of your assistant.** Before course information reaches your assistant, Morrow replaces student names, email addresses, usernames, and school or course account IDs with labels such as Student A1, and it stops if it cannot protect every student in those records. Names you type to your assistant reach it as you typed them. Each product lists what it cannot replace, such as a nickname the course roster does not hold: see the [Morrow Desktop limits](desktop/LIMITATIONS.md#learner-privacy) and the [Morrow for Muse privacy limits](morrow-for-muse/privacy/FERPA_POLICY.md#known-limitations-honest-scope).
 
 **Start with the course access you already have.** Morrow gives educators direct tools for the courses they already manage. It never gives anyone new access.
 
@@ -30,9 +34,9 @@ This is a monorepo. Each product lives in its own directory, ships on its own ve
 - `desktop/`: Morrow Desktop. The app, the Bridge extension, the MCP server, the installer, and product docs.
 - `morrow-for-muse/`: Morrow for Muse. The connector, Morrow Direct, the dispatch engine, the privacy boundary, and the proof battery.
 - `docs/`: family-level docs, the [product overview](docs/products.md) and [versioning](docs/versioning.md).
-- `.github/workflows/`: CI with path filters. Changes under `desktop/**` run the desktop suite. Changes under `morrow-for-muse/**` run the Muse suite. The required `check` job aggregates both.
+- `.github/workflows/`: CI with path filters. Changes under `desktop/**` run the desktop suite on Linux, and its installer suites and every desktop test Linux skips on Windows and on macOS. Changes under `morrow-for-muse/**` run the Muse suite. A change to a root file a product reads, such as `.gitattributes` or `LICENSE`, runs that product's suites; [versioning](docs/versioning.md#ci-path-filters) lists them. The repository text gates (no em dash, no retired phrase, the platform facts in this README and `docs/products.md`, the security policy and issue templates, and the path filters for root files) run on every change. The required `check` job aggregates the gates and every suite.
 
-To run the same suites before each commit, install the pre-commit hook once from the repository root: `git config core.hooksPath desktop/.githooks`. It runs the desktop gate when a commit changes `desktop/` or `.github/`, and the Muse suite when a commit changes `morrow-for-muse/`.
+To run what CI runs before each commit, install the pre-commit hook once from the repository root: `git config core.hooksPath desktop/.githooks`. Every commit runs the repository text gates; a commit that changes `desktop/` also runs the desktop gate (`pnpm check`); a commit that changes `morrow-for-muse/` also runs the Muse suite (`pytest`, then the dev selftest suites, then the install suites on a carved tree). A commit that changes `.github/` runs both products' steps, and a commit that changes a root file a product reads runs that product's steps the same way.
 
 ## Versioning
 
@@ -42,6 +46,10 @@ Each product versions and tags independently:
 - `muse/vX.Y.Z` for Morrow for Muse
 
 See [`docs/versioning.md`](docs/versioning.md).
+
+## Security
+
+To report a security problem, email [hello@meetmorrow.app](mailto:hello@meetmorrow.app). Do not open a public issue for it. See [`SECURITY.md`](SECURITY.md).
 
 ## License
 

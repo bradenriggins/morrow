@@ -6,7 +6,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import { executeMoodleBackupInPage } from "../../connector/extension/src/moodle-backup-executor.js";
 import { executeMoodleCourseSettingsInPage } from "../../connector/extension/src/moodle-course-settings-executor.js";
 import { executeMoodleInPage } from "../../connector/extension/src/moodle-executor.js";
@@ -474,7 +474,7 @@ test("Moodle backup executor runs each native course-reuse step once and never r
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("backup test server did not bind");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const pageHandle = await context.newPage();
     await pageHandle.goto(`${origin}/course/view.php?id=2`);

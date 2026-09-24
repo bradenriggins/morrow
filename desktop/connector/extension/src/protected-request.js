@@ -19,9 +19,37 @@ function optionalText(value, code) {
   return text(value, code);
 }
 
-// Accents fold away on both sides, so "Jose Garcia" matches the rostered "José García".
+// Accents fold away on both sides, so "Jose Garcia" matches the rostered "José García". Rich-text
+// editors and phones write a name's apostrophe or hyphen as another character, so O’Brien matches
+// the rostered O'Brien. packages/gateway-core/src/privacy.ts folds the same way, so Morrow Bridge
+// and the gateway replace the same names.
+const APOSTROPHE_VARIANTS = /[\u2018\u2019\u02bc\uff07\u0060\u00b4]/gu;
+const HYPHEN_VARIANTS = /[\u2010-\u2013\ufe63\uff0d]/gu;
+// Letters whose stroke or ligature is not a combining mark, so NFKD keeps them: Łukasz, Søren,
+// Đorđe, Yıldız, Guðrún, Þór, Lætitia, Cœur, Weiß. People write these names without them.
+const LETTER_FOLDS = new Map([
+  ["ł", "l"], ["Ł", "L"], ["ø", "o"], ["Ø", "O"], ["đ", "d"], ["Đ", "D"], ["ı", "i"], ["ħ", "h"], ["Ħ", "H"],
+  ["ŧ", "t"], ["Ŧ", "T"], ["ð", "d"], ["Ð", "D"], ["þ", "th"], ["Þ", "Th"], ["æ", "ae"], ["Æ", "AE"],
+  ["œ", "oe"], ["Œ", "OE"], ["ß", "ss"], ["ẞ", "SS"],
+]);
+const FOLDED_LETTERS = /[łŁøØđĐıħĦŧŦðÐþÞæÆœŒßẞ]/gu;
+// Invisible format characters that rich-text editors and word processors put
+// inside a name: a soft hyphen, a zero-width space or joiner, a bidirectional
+// mark, or a byte-order mark. They carry no word, so the match view on the
+// roster side and the text side drops them.
+const INVISIBLE_FORMAT_CHARACTERS = /[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]/gu;
+
 function fold(value) {
-  return String(value).normalize("NFKD").replace(/\p{M}/gu, "").normalize("NFKC");
+  return String(value).replace(APOSTROPHE_VARIANTS, "'").replace(HYPHEN_VARIANTS, "-")
+    .replace(FOLDED_LETTERS, (letter) => LETTER_FOLDS.get(letter) ?? letter)
+    .replace(INVISIBLE_FORMAT_CHARACTERS, "")
+    .normalize("NFKD").replace(/\p{M}/gu, "").normalize("NFKC");
+}
+
+// NFKC splits a spacing accent written as an apostrophe, as in D´Angelo, into a space and a mark,
+// so it becomes an apostrophe first.
+function composed(value) {
+  return value.replace(/\u00b4/gu, "'").normalize("NFKC");
 }
 
 function normalize(value) {
@@ -54,20 +82,123 @@ const NOT_NAME_WORDS = new Set(("monday tuesday wednesday thursday friday saturd
   + "part question questions answer answers extra credit late due draft group groups team teams for on in at by to from "
   + "with about after before during all any each every some most more less first second third last next").split(" "));
 
-function learnerNameAliases(identity) {
-  const name = normalize(identity.name);
-  const aliases = new Set([name]);
-  const comma = /^([^,]+),\s*(.+)$/u.exec(name);
-  if (comma) {
-    aliases.add(`${comma[2]} ${comma[1]}`);
-    aliases.add(comma[1]);
-    aliases.add(comma[2].split(/\s+/u)[0]);
+// A generational suffix ends a name but is never the family name.
+const NAME_SUFFIX = /^(?:jr|sr|ii|iii|iv|v)\.?$/u;
+
+// A title leads a roster name but is never a word of it. Alone in prose it
+// names the person it addresses, such as the course's teacher, so it never
+// starts the given name and never stands for a student on its own.
+// packages/gateway-core/src/privacy.ts splits the same way.
+const NAME_TITLE = /^(?:mr|mrs|ms|mx|miss|madam|sir|dr|doctor|prof|professor|rev|hon)\.?$/u;
+
+// A family-name particle sits inside a name, as van in "Ana van der Berg".
+// Alone in prose it is an ordinary word, so it never stands for a student
+// on its own either.
+const NAME_PARTICLE = /^(?:van|von|der|den|del|della|dos|ter|ten|zur|vom|bin|ibn|bint|abu)\.?$/u;
+
+// A Korean or Chinese roster name is often stored with no space, as 김민준 or 王小明, and a
+// Japanese one as 田中太郎. Its family name comes first: one syllable or character, or one of these
+// two-letter family names. A Japanese four-character name is two and two.
+// packages/gateway-core/src/privacy.ts splits the same way.
+const KOREAN_TWO_SYLLABLE_FAMILY_NAMES = new Set(["남궁", "황보", "제갈", "선우", "독고", "사공", "서문", "동방"]);
+const HAN_TWO_CHARACTER_FAMILY_NAMES = new Set([
+  "欧阳", "歐陽", "司马", "司馬", "上官", "诸葛", "諸葛", "东方", "東方", "皇甫", "尉迟", "尉遲", "公孙", "公孫",
+  "慕容", "令狐", "长孙", "長孫", "宇文", "司徒", "夏侯", "轩辕", "軒轅", "端木", "独孤", "獨孤", "南宫", "南宮",
+  "西门", "西門", "钟离", "鍾離", "澹台", "澹臺", "呼延", "赫连", "赫連", "百里", "闻人", "聞人", "申屠", "拓跋",
+  "单于", "單于",
+]);
+
+/** The family name and the given name of a one-word Hangul or Han name, or null for any other name. */
+function unspacedNameParts(name) {
+  const points = [...name];
+  const firstTwo = points.slice(0, 2).join("");
+  let familyLength;
+  if (/^\p{Script=Hangul}{2,4}$/u.test(name)) {
+    familyLength = points.length >= 3 && KOREAN_TWO_SYLLABLE_FAMILY_NAMES.has(firstTwo) ? 2 : 1;
+  } else if (/^\p{Script=Han}{3,4}$/u.test(name)) {
+    familyLength = points.length === 4 || HAN_TWO_CHARACTER_FAMILY_NAMES.has(firstTwo) ? 2 : 1;
   } else {
-    const parts = name.split(" ");
-    if (parts.length > 1) {
-      aliases.add(`${parts.at(-1)} ${parts.slice(0, -1).join(" ")}`);
-      aliases.add(parts[0]);
-      aliases.add(parts.at(-1));
+    return null;
+  }
+  return [points.slice(0, familyLength).join(""), points.slice(familyLength).join("")];
+}
+
+function nameWords(value) {
+  const words = value.replace(/,/gu, " ").split(" ").filter(Boolean);
+  while (words.length > 1 && NAME_SUFFIX.test(words.at(-1))) words.pop();
+  return words;
+}
+
+/** A roster field that reads like a person's name, not an id, an address, or a username. */
+function nameLikeForm(value) {
+  return /^[\p{L}][\p{L}\p{M}\p{N}\u00ad\u200b-\u200f\u2060-\u2064\ufeff' ,.\u2019-]{0,499}$/u.test(String(value).trim());
+}
+
+/** The one parsed name form: the given name, every family word it names, and whether the form names the family part. */
+function parsedNameForm(form) {
+  const name = normalize(form);
+  if (!name || name.length > 500) return null;
+  const comma = /^([^,]+),\s*(.+)$/u.exec(name);
+  const familyFirst = comma && !NAME_SUFFIX.test(comma[2]) ? comma : null;
+  const words = titlelessWords(familyFirst ? familyFirst[2] : name);
+  if (!words.length) return null;
+  // A comma form, and a Moodle lastname field, name the family part. A name
+  // the roster gives with no such field says nothing about its family part, so
+  // only its last word is taken, and each word after the given name still
+  // names this student on its own.
+  const familyWords = familyFirst
+    ? titlelessWords(familyFirst[1])
+    : words.length > 1 ? [words.at(-1)] : [];
+  return { words, familyWords, given: words[0], familyFirst: familyFirst !== null };
+}
+
+/** The words of a name, without any title that leads them. */
+function titlelessWords(value) {
+  const words = nameWords(value);
+  while (words.length > 1 && NAME_TITLE.test(words[0])) words.shift();
+  return words;
+}
+
+/** A title or a particle alone is prose, not a reference to one student. */
+function isStandaloneNameWord(part) {
+  return !part.includes(" ") && (NAME_TITLE.test(part) || NAME_PARTICLE.test(part));
+}
+
+function learnerNameAliases(identity) {
+  const aliases = new Set();
+  if (!identity.name) return [];
+  // Every name form the roster gives, as Canvas's sortable_name or Moodle's
+  // lastname, can name the family part. Only forms that read like a name are
+  // parsed; ids and usernames are matched whole instead.
+  const forms = [identity.name, ...(identity.aliases || [])].filter((form) => nameLikeForm(form));
+  if (!forms.length) return [];
+  for (const form of forms) {
+    // An invisible character can sit where the roster meant a space, as a word
+    // processor does. Parse the words from the form with those characters as
+    // spaces, and record the form both as it is written and spaced.
+    const wording = form.replace(INVISIBLE_FORMAT_CHARACTERS, " ");
+    const parsed = parsedNameForm(wording);
+    if (!parsed) continue;
+    aliases.add(normalize(form));
+    if (wording !== form) aliases.add(normalize(wording));
+    const family = parsed.familyWords.join(" ");
+    for (const part of [parsed.given, family, ...parsed.familyWords]) {
+      if (!isStandaloneNameWord(part)) aliases.add(part);
+    }
+    if (form === identity.name && parsed.words.length >= 3) {
+      for (const word of parsed.words.slice(1)) {
+        if (!isStandaloneNameWord(word)) aliases.add(word);
+      }
+    }
+    const name = normalize(identity.name);
+    const unspaced = !parsed.familyFirst && nameWords(name).length === 1 ? unspacedNameParts(name) : null;
+    for (const part of unspaced || []) aliases.add(part);
+    if (parsed.familyFirst) aliases.add(`${parsed.words.join(" ")} ${parsed.familyWords.join(" ")}`);
+    if (!parsed.familyFirst && parsed.words.length >= 2 && parsed.familyWords.length === 1) {
+      // "Jane Alexandra Doe" is addressed as "Jane Doe" too: the first and last
+      // name without a middle name.
+      aliases.add(`${parsed.given} ${family}`);
+      if (parsed.words.length === 2) aliases.add(`${parsed.words[1]} ${parsed.given}`);
     }
   }
   return [...aliases].filter((alias) => (alias.match(/\p{L}/gu)?.length || 0) >= 2);
@@ -158,12 +289,87 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-function aliasPattern(alias) {
-  return escapeRegExp(alias).replace(/ /gu, "\\s+");
+// Scripts that write words with no space between them, or that attach a particle to a name, as
+// Korean does in 김민준의. A name written in one has no word edge. A name written in any other
+// script still ends where a word of one of these begins, as in 请看Ada Lovelace的作业.
+// An underscore is a word edge too, because Canvas builds page addresses and
+// teachers name files from a name with its words joined by an underscore.
+const UNSPACED_SCRIPT = "\\p{scx=Han}\\p{scx=Hiragana}\\p{scx=Katakana}\\p{scx=Hangul}\\p{scx=Thai}\\p{scx=Lao}\\p{scx=Khmer}\\p{scx=Myanmar}";
+const UNSPACED_LETTER = new RegExp(`^[${UNSPACED_SCRIPT}]$`, "u");
+const SPACED_WORD_CHARACTER = `(?![${UNSPACED_SCRIPT}])[\\p{L}\\p{N}]`;
+const UNSPACED_GAP = new RegExp(`(?<=[${UNSPACED_SCRIPT}]) (?=[${UNSPACED_SCRIPT}])`, "gu");
+// Arabic and Hebrew attach a one-letter prefix, such as "to" or "and", to the name that follows.
+const PROCLITIC_LETTERS = [
+  [/^\p{scx=Arabic}$/u, "وفبكل"],
+  [/^\p{scx=Hebrew}$/u, "ובכלמשה"],
+];
+
+/**
+ * The lookup key of an alias. A space between two letters of an unspaced script is dropped,
+ * because people write 佐藤花子 and 佐藤 花子 for one name.
+ */
+function aliasKey(value) {
+  return normalize(value).replace(UNSPACED_GAP, "");
 }
 
-function boundaryPattern(alias, flags = "giu") {
-  return new RegExp(`(?<![\\p{L}\\p{N}_])(?:${aliasPattern(alias)})(?![\\p{L}\\p{N}_])`, flags);
+function aliasBody(key) {
+  const points = [...key];
+  let body = "";
+  for (const [index, point] of points.entries()) {
+    const previous = points[index - 1];
+    if (previous !== undefined && UNSPACED_LETTER.test(previous) && UNSPACED_LETTER.test(point)) body += "\\s*";
+    // A space in an alias also matches the joined spellings a title or a file
+    // name carries, as Canvas's ada-lovelace-reflection for "Ada Lovelace
+    // Reflection". One separator character, never a run, so "Ada. Lovelace"
+    // across a sentence end does not match.
+    body += point === " " ? "(?:\\s+|\\.|-|_)" : escapeRegExp(point);
+  }
+  return body;
+}
+
+/** The word edges an alias key needs on each side to be a whole name. */
+function aliasEdges(key) {
+  const points = [...key];
+  const first = points[0] ?? "";
+  const last = points.at(-1) ?? "";
+  const edge = `(?<!${SPACED_WORD_CHARACTER})`;
+  const proclitic = PROCLITIC_LETTERS.find(([script]) => script.test(first))?.[1];
+  const before = UNSPACED_LETTER.test(first) ? "" : proclitic ? `(?:${edge}|(?<=${edge}[${proclitic}]))` : edge;
+  const after = UNSPACED_LETTER.test(last) ? "" : `(?!${SPACED_WORD_CHARACTER})`;
+  return [before, after];
+}
+
+/**
+ * One matcher for each kind of word edge, so each edge is tested once at a position rather than
+ * once for every alias. Within a matcher the longest alias is tried first.
+ */
+function aliasMatchers(keys) {
+  const groups = new Map();
+  for (const key of keys) {
+    if (!key) continue;
+    const edges = aliasEdges(key);
+    const group = groups.get(edges.join("\u0000")) ?? { edges, keys: [] };
+    group.keys.push(key);
+    groups.set(edges.join("\u0000"), group);
+  }
+  return [...groups.values()].map(({ edges: [before, after], keys: grouped }) => new RegExp(
+    `${before}(?:${grouped.sort((left, right) => right.length - left.length).map(aliasBody).join("|")})${after}`,
+    "giu",
+  ));
+}
+
+/** Every alias the matchers find, leftmost first and the longest where two start together. */
+function matchedAliases(text, matchers) {
+  const found = matchers.flatMap((matcher) => [...text.matchAll(matcher)].map((match) => ({ index: match.index, text: match[0] })))
+    .sort((left, right) => left.index - right.index || right.text.length - left.text.length);
+  const output = [];
+  let cursor = 0;
+  for (const match of found) {
+    if (match.index < cursor) continue;
+    output.push(match);
+    cursor = match.index + match.text.length;
+  }
+  return output;
 }
 
 /** A folded copy of the text whose every UTF-16 unit remembers its source range. */
@@ -213,32 +419,35 @@ function aliasKind(value, identity) {
 function aliasMatches(value, index, asserted, flagged) {
   const view = foldedView(value);
   const candidates = [...index.aliases.keys()]
-    .filter((alias) => index.kinds.get(alias) !== "number" || asserted.has(alias))
-    .sort((left, right) => right.length - left.length);
+    .filter((alias) => index.kinds.get(alias) !== "number" || asserted.has(alias));
   if (!candidates.length) return [];
-  const matcher = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${candidates.map(aliasPattern).join("|")})(?![\\p{L}\\p{N}_])`, "giu");
   const output = [];
-  for (const match of view.text.matchAll(matcher)) {
-    const key = normalize(match[0]);
-    const kind = index.kinds.get(key);
-    const common = (kind === "part" || kind === "name") && key.split(/[\s,]+/u).filter(Boolean).every((word) => COMMON_NAME_WORDS.has(word));
-    if (common && !asserted.has(key)) {
-      if (!capitalizedWords(match[0])) continue;
+  for (const match of matchedAliases(view.text, aliasMatchers(candidates))) {
+    const key = aliasKey(match.text);
+    // The match may carry the joined spelling a page address or a file name
+    // uses, as ada-lovelace for "Ada Lovelace". The alias is recorded under
+    // its spaced key, so the lookup folds the separator back to the space.
+    const lookupKey = index.aliases.has(key) ? key
+      : /[._-]/u.test(key) ? key.replace(/[._-]+/gu, " ") : key;
+    const kind = index.kinds.get(lookupKey);
+    const common = (kind === "part" || kind === "name") && lookupKey.split(/[\s,]+/u).filter(Boolean).every((word) => COMMON_NAME_WORDS.has(word));
+    if (common && !asserted.has(lookupKey)) {
+      if (!capitalizedWords(match.text)) continue;
       if (kind === "part" && sentenceStart(view.text, match.index)) {
-        flagged.push({ at: sourceRange(view, match.index, match.index + match[0].length)[0], text: value.slice(...sourceRange(view, match.index, match.index + match[0].length)) });
+        flagged.push({ at: sourceRange(view, match.index, match.index + match.text.length)[0], text: value.slice(...sourceRange(view, match.index, match.index + match.text.length)) });
         continue;
       }
     }
-    const matches = index.aliases.get(key) || [];
+    const matches = index.aliases.get(lookupKey) || [];
     if (matches.length !== 1) fail("protected_request_identifier_ambiguous");
-    const [start, end] = sourceRange(view, match.index, match.index + match[0].length);
+    const [start, end] = sourceRange(view, match.index, match.index + match.text.length);
     output.push({ start, end, entry: matches[0] });
   }
   return output;
 }
 
 function replaceAliases(value, index, usedIds, asserted, flagged = []) {
-  const text = value.normalize("NFKC");
+  const text = composed(value);
   let output = "";
   let cursor = 0;
   for (const { start, end, entry } of aliasMatches(text, index, asserted, flagged)) {
@@ -270,6 +479,7 @@ function aliasIndex(roster, priorLabels, assignedLabels) {
   const aliases = new Map();
   const kinds = new Map();
   const byId = new Map();
+  const numbers = new Map();
   const labelsById = { ...priorLabels };
   let nextLabel = Math.max(0, ...Object.values(labelsById).map((label) => Number(label.slice("Student A".length)))) + 1;
   roster.forEach((raw) => {
@@ -287,34 +497,51 @@ function aliasIndex(roster, priorLabels, assignedLabels) {
     const values = [label, identity.id, identity.name, identity.email, identity.loginId, identity.sisUserId,
       ...identity.aliases, ...learnerNameAliases(identity)].filter(Boolean);
     for (const value of values) {
-      const key = normalize(value);
+      const key = aliasKey(value);
       if (!key) continue;
       const matches = aliases.get(key) || [];
       if (!matches.some((candidate) => candidate.identity.id === identity.id)) matches.push(entry);
       aliases.set(key, matches);
       if (!kinds.has(key)) kinds.set(key, aliasKind(value, identity));
     }
+    // A student number or a numeric login names a student as surely as the platform id does, so a
+    // bare one is replaced whether or not the educator listed it.
+    for (const value of [identity.id, identity.loginId, identity.sisUserId, ...identity.aliases]) {
+      const key = normalize(value || "");
+      if (!/^[0-9]+$/u.test(key)) continue;
+      const matches = numbers.get(key) || [];
+      if (!matches.some((candidate) => candidate.identity.id === identity.id)) matches.push(entry);
+      numbers.set(key, matches);
+    }
   });
-  return { aliases, kinds, byId, labelsById };
+  return { aliases, kinds, byId, numbers, labelsById };
+}
+
+/** The one student a number names, or null. A number that names two students is refused. */
+function numberEntry(numbers, value) {
+  const matches = numbers.get(value) || [];
+  if (matches.length > 1) fail("protected_request_identifier_ambiguous");
+  return matches[0] || null;
 }
 
 function exactAlias(value, aliases) {
-  const matches = aliases.get(normalize(value)) || [];
+  const matches = aliases.get(aliasKey(value)) || [];
   if (matches.length > 1) fail("protected_request_identifier_ambiguous");
   if (matches.length === 0) fail("protected_request_identifier_unknown");
   return matches[0];
 }
 
 function containsAlias(value, alias) {
-  return boundaryPattern(alias).test(fold(value.normalize("NFKC")));
+  return matchedAliases(fold(composed(value)), aliasMatchers([alias])).length > 0;
 }
 
 // A number this long in a request is a platform id, not a count or a score. A word
-// before it that names a course object says whose id it is.
-const BARE_ID = /(?<![\p{L}\p{N}_/=.#:%&-])([0-9]{5,500})(?![\p{L}\p{N}_/.%])/gu;
+// before it that names a course object says whose id it is. A period that ends the
+// sentence still ends the number; one inside a decimal or a file name does not.
+const BARE_ID = /(?<![\p{L}\p{N}_/=.#:%&-])([0-9]{5,500})(?![\p{L}\p{N}_/%]|\.[\p{L}\p{N}_])/gu;
 const OBJECT_WORD = /\b(?:course|courses|assignment|assignments|quiz|quizzes|module|modules|page|pages|file|files|section|sections|group|groups|item|items|question|questions|rubric|outcome|term|account|attempt|version|order|room|zip|phone|ext)\s*$/iu;
 
-function replaceContextualIds(value, byId, usedIds) {
+function replaceContextualIds(value, numbers, usedIds) {
   const patterns = [
     /((?:["']?(?:learner|student|user|recipient|enrollment|submission)[_-]?id["']?)\s*[:=]\s*["']?)([0-9]{1,500})/giu,
     /((?:\b(?:learner|student|user|recipient|enrollment|submission|grade)\b\s*(?:id\b\s*)?[#:=]\s*))([0-9]{1,500})\b/giu,
@@ -324,14 +551,15 @@ function replaceContextualIds(value, byId, usedIds) {
   let output = value;
   for (const pattern of patterns) {
     output = output.replace(pattern, (whole, prefix, id) => {
-      const entry = byId.get(id);
+      const entry = numberEntry(numbers, id);
       if (entry) usedIds.add(entry.identity.id);
       return entry ? `${prefix}${entry.label}` : whole;
     });
   }
   return output.replace(BARE_ID, (whole, id, offset, text) => {
-    const entry = byId.get(id);
-    if (!entry || OBJECT_WORD.test(text.slice(Math.max(0, offset - 40), offset))) return whole;
+    if (OBJECT_WORD.test(text.slice(Math.max(0, offset - 40), offset))) return whole;
+    const entry = numberEntry(numbers, id);
+    if (!entry) return whole;
     usedIds.add(entry.identity.id);
     return entry.label;
   });
@@ -340,7 +568,7 @@ function replaceContextualIds(value, byId, usedIds) {
 /** Capitalized words that look like a name and matched nobody on the roster. */
 function unmatchedNameWords(value) {
   const text = value.replace(/\bStudent A[1-9][0-9]*\b/gu, (label) => "x".padEnd(label.length, " "));
-  const word = /\p{Lu}[\p{Ll}\p{M}]+(?:['’-]\p{Lu}?[\p{Ll}\p{M}]+)*/u;
+  const word = /(?:\p{Lu}['\u2019\u02bc])?\p{Lu}[\p{Ll}\p{M}]+(?:['\u2019\u02bc\u2010-]\p{Lu}?[\p{Ll}\p{M}]+)*/u;
   const found = [];
   for (const run of text.matchAll(new RegExp(`${word.source}(?:[ \\t]+${word.source})*`, "gu"))) {
     const words = run[0].split(/[ \t]+/u);
@@ -370,7 +598,7 @@ function transformStructured(value, index, byId, usedIds, asserted, flagged, key
       usedIds.add(entry.identity.id);
       return entry.label;
     }
-    return replaceContextualIds(replaceAliases(value, index, usedIds, asserted, flagged), byId, usedIds);
+    return replaceContextualIds(replaceAliases(value, index, usedIds, asserted, flagged), index.numbers, usedIds);
   }
   if (typeof value === "number" && Number.isSafeInteger(value) && IDENTITY_KEY.test(key)) {
     const entry = byId.get(String(value));
@@ -411,12 +639,14 @@ export function protectLocalRequest(input) {
   if (typeof input.text !== "string" || !input.text.trim() || input.text.length > MAX_REQUEST_CHARS) {
     fail("protected_request_text_invalid");
   }
-  if (!Array.isArray(input.assertedIdentifiers) || input.assertedIdentifiers.length === 0 || input.assertedIdentifiers.length > 100) {
+  // The list names the students the educator wrote. A message that names none, such as a follow-up,
+  // lists none; the class list still protects every student detail in its text.
+  if (!Array.isArray(input.assertedIdentifiers) || input.assertedIdentifiers.length > 100) {
     fail("protected_request_identifiers_required");
   }
   const roster = input.roster.map(exactIdentity).sort((left, right) => left.id.localeCompare(right.id, "en", { numeric: true }));
   const index = aliasIndex(roster, input.labelsById, input.assignedLabelsById);
-  const { aliases, byId, labelsById } = index;
+  const { aliases, byId, numbers, labelsById } = index;
   const usedIds = new Set();
   const flagged = [];
   const allowedLabels = new Set(Object.values(input.labelsById || {}));
@@ -426,10 +656,10 @@ export function protectLocalRequest(input) {
     return !number || !allowedLabels.has(`Student A${number}`);
   })) fail("protected_request_existing_label_refused");
   const asserted = input.assertedIdentifiers.map((identifier) => text(identifier, "protected_request_identifier_invalid"));
-  const assertedAliases = new Set(asserted.map(normalize));
+  const assertedAliases = new Set(asserted.map(aliasKey));
   for (const identifier of asserted) {
     exactAlias(identifier, aliases);
-    if (!containsAlias(input.text, normalize(identifier))) fail("protected_request_assertion_missing");
+    if (!containsAlias(input.text, aliasKey(identifier))) fail("protected_request_assertion_missing");
   }
   let protectedText;
   if (/^\s*[\[{]/u.test(input.text)) {
@@ -437,13 +667,13 @@ export function protectLocalRequest(input) {
     try { parsed = JSON.parse(input.text); } catch { fail("protected_request_structured_invalid"); }
     protectedText = JSON.stringify(transformStructured(parsed, index, byId, usedIds, assertedAliases, flagged));
   } else {
-    protectedText = replaceContextualIds(replaceAliases(input.text, index, usedIds, assertedAliases, flagged), byId, usedIds);
+    protectedText = replaceContextualIds(replaceAliases(input.text, index, usedIds, assertedAliases, flagged), numbers, usedIds);
   }
   if ([...usedIds].some((id) => !byId.get(id)?.label)) fail("protected_request_label_unavailable");
   if (remainingUnknownIdentifier(protectedText)) fail("protected_request_identifier_unknown");
   const leaks = aliasMatches(protectedText, index, assertedAliases, [])
     .some(({ start, end }) => !/^Student A[1-9][0-9]*$/u.test(protectedText.slice(start, end)));
-  if (leaks || [...protectedText.matchAll(BARE_ID)].some((match) => byId.has(match[1])
+  if (leaks || [...protectedText.matchAll(BARE_ID)].some((match) => numbers.has(match[1])
     && !OBJECT_WORD.test(protectedText.slice(Math.max(0, match.index - 40), match.index)))) {
     fail("protected_request_identity_leak_refused");
   }

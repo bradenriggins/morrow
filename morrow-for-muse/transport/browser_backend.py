@@ -111,12 +111,13 @@ from config.paths import morrow_home  # noqa: E402
 from item_bank_sdk import _is_quiz_api_host  # noqa: E402
 
 
-def _on_browser_session_death(op_id, entry_name, evidence):
+def _on_browser_session_death(op_id, entry_name, evidence, write_sent=False):
     """W4-P2-1: run the re-auth state machine when the browser lane
     detects session death: impose the write halt, quarantine the op,
     write the educator notification. Called after detection and before
     the BrowserSessionDead raise, so the run stops instead of writing
     through a half-dead session. Best effort: never masks the raise.
+    write_sent is True when the write already reached Canvas.
     """
     try:
         from reauth import state_machine as _rsm
@@ -129,7 +130,8 @@ def _on_browser_session_death(op_id, entry_name, evidence):
     except Exception:
         pass
     try:
-        _rsm.quarantine_op(op_id, entry_name, str(evidence)[:200])
+        _rsm.quarantine_op(op_id, entry_name, str(evidence)[:200],
+                           write_sent=write_sent)
     except Exception:
         pass
 from privacy import learner_vault as _vault  # noqa: E402
@@ -263,9 +265,8 @@ def _project_learner_result(entry, result, tenant_base, lane_context=None):
     in lockstep.
     """
     from privacy import executor_wire as _wire
-    projected, _reveal = _wire.project_learner_result(
+    return _wire.project_learner_result(
         entry, result, tenant_base, lane_context, error_cls=ex.ExecutorError)
-    return projected
 
 
 def _project_verification_detail(entry, verification, raw_payload,
@@ -281,19 +282,6 @@ def _project_verification_detail(entry, verification, raw_payload,
     return ex._project_verification_detail(
         entry, verification, raw_payload, tenant_base, entry.get("name"),
         lane_context=lane_context)
-
-
-def _pii_reveal_audit():
-    """The educator reveal for this lane: always None.
-
-    Round-4 privacy audit H2: real names are shown only under a sealed
-    educator reveal record for one course (dispatch/admission
-    mint_pii_reveal), passed to the executor lane. The proof-battery
-    browser lane takes no reveal record, so it always de-identifies. No
-    file and no environment variable reveals names.
-    """
-    from privacy import executor_wire as _wire
-    return _wire.pii_reveal_audit(ex.ExecutorError, None)
 
 
 def _admission_hard_checks(entry, params, tenant_base):
@@ -836,8 +824,9 @@ def _confine_fetch_url(url, canvas_base):
     tparts = urllib.parse.urlsplit(canvas_base or "")
     if _same_https_origin(parts, tparts):
         return
-    # The tenant's own quiz-api host (<first-label>.quiz-api[-.]...<parent>):
-    # the Item Banks SDK lane's API origin. Tenant binding is mandatory:
+    # The tenant's own quiz-api host
+    # (<first-label>.quiz-api[-<region>].instructure.com): the Item Banks
+    # SDK lane's API origin. Tenant binding is mandatory:
     # without it any quiz-api-shaped host (including an attacker's) would
     # pass the structural check, so a missing tenant base fails closed.
     thost = (tparts.hostname or "").lower()
@@ -2431,9 +2420,6 @@ def complete_browser_request(op_id, entry, params, plan, report_text,
     else:
         approval_audit = _admission.reverify_approval(entry, params, base,
                                                       op_id)
-    # De-id override: this lane takes no educator reveal record, so the
-    # audit is always None (journaled as such with the op).
-    reveal_audit = _pii_reveal_audit()
     # W2-P0-18: the complete phase never claims twice. With the
     # dispatch envelope's claim token it re-validates ownership
     # (resume=True); without one (complete invoked without a prior
@@ -2685,7 +2671,6 @@ def complete_browser_request(op_id, entry, params, plan, report_text,
                         verification,
                         last_result, 1, uncertain=True,
                         approval_audit=approval_audit,
-                        pii_reveal=reveal_audit,
                         undo_available=bool(entry.get("undo"))),
                     claim_token)
                 _delete_pending_file(pending_file)
@@ -2706,7 +2691,6 @@ def complete_browser_request(op_id, entry, params, plan, report_text,
                     entry_name, kind, effects, params, plan, op_id, after,
                     verification, last_result, 1,
                     approval_audit=approval_audit,
-                    pii_reveal=reveal_audit,
                     undo_available=bool(entry.get("undo"))),
                 claim_token)
             release_conflict_lock(op_id, pending_dir)
@@ -2772,7 +2756,6 @@ def complete_browser_request(op_id, entry, params, plan, report_text,
             "attempts": 1,
             "uncertain": False,
             "approval": approval_audit,
-            "pii_reveal": reveal_audit,
         }
         # W5-P1-4: atomic claim-recheck-and-journal (single journal-lock
         # hold): the request-phase claim is consumed by this undo
@@ -2797,7 +2780,6 @@ def complete_browser_request(op_id, entry, params, plan, report_text,
             entry_name, kind, effects, params, plan, op_id, after,
             verification, last_result, 1,
             approval_audit=approval_audit,
-            pii_reveal=reveal_audit,
             undo_available=bool(entry.get("undo"))),
         claim_token)
     release_conflict_lock(op_id, pending_dir)
@@ -2912,8 +2894,6 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
     # entry/params/tenant before anything is journaled.
     approval_audit = _admission.reverify_approval(
         entry, params, pending.get("lane", {}).get("base"), op_id)
-    # De-id override: none on this lane (same rule as the request phase).
-    reveal_audit = _pii_reveal_audit()
     # P0-5: guarded write stage. The verify phase also requires the pinned
     # principal, refuses a lane that reconnected since dispatch, and fails
     # closed on a mismatched principal attestation.
@@ -2939,7 +2919,8 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
         _on_browser_session_death(
             op_id, (entry or {}).get("name", "browser_verify"),
             "browser session died during the verify phase; the write "
-            "itself already returned 2xx (see the pending file)")
+            "itself already returned 2xx (see the pending file)",
+            write_sent=True)
         raise BrowserSessionDead(
             "browser session died during the verify phase; the write itself "
             "already returned 2xx (see the pending file), re-run verify with "
@@ -2993,7 +2974,6 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
                 entry_name, kind, effects, params, plan, op_id, after,
                 verification, last_result, 1, uncertain=True,
                 approval_audit=approval_audit,
-                pii_reveal=reveal_audit,
                 undo_available=bool(entry.get("undo"))),
             _vtoken)
         _delete_pending_file(pending_file)
@@ -3025,7 +3005,6 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
                 entry_name, kind, effects, params, plan, op_id, after,
                 verification, last_result, 1, uncertain=True,
                 approval_audit=approval_audit,
-                pii_reveal=reveal_audit,
                 undo_available=bool(entry.get("undo"))),
             _vtoken)
         _delete_pending_file(pending_file)
@@ -3059,7 +3038,6 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
                      "provider": _verify_lane.get("provider")}),
                 last_result, 1,
                 approval_audit=approval_audit,
-                pii_reveal=reveal_audit,
                 undo_available=bool(entry.get("undo"))),
             _vtoken)
         _delete_pending_file(pending_file)
@@ -3082,7 +3060,6 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
             entry_name, kind, effects, params, plan, op_id, after,
             verification, last_result, 1,
             approval_audit=approval_audit,
-            pii_reveal=reveal_audit,
             undo_available=bool(entry.get("undo"))),
         _vtoken)
     release_conflict_lock(op_id, pending_dir)

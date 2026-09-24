@@ -38,11 +38,10 @@ promise them.
 - Create quiz (`POST /api/quiz/v1/courses/{course_id}/quizzes`,
   body `{"quiz": {"title", ...}}`; title required): live-proven at
   the provider path through the Chromium lane (quizzes 4045401,
-  4045406, 4045410, 4045411). **BUT the admission policy holds
-  `canvas_create_new_quiz` on evidence-hold** because the governed
-  product pipeline has no live runs yet. Dispatch refuses it on every
-  tenant. Do not offer New Quiz creation until a disposable live
-  battery proves the integrated path.
+  4045406, 4045410, 4045411), and on 2026-09-22 through the full
+  governed product pipeline (disposable quizzes 4049059 and 4049060,
+  read back, updated, and deleted with terminal GET 404). It ships in
+  v1 (SCOPE.md).
 - Read quiz / list quizzes: live-proven reads.
 - Update: PATCH only (no PUT on New Quiz paths; the executor guards
   this). **quiz_settings merge rule (IMPLEMENTED as explicit helpers,
@@ -257,8 +256,9 @@ SDK lane or not at all):
 - Item delete (IB-19): the lane implements the route but no
   delete_item flow was ever proven (Meridian has no delete_item
   flow). **PENDING: never dispatch against a real item.**
-- Item create (IB-6) and update (IB-18): implemented, pending live
-  proof. Entry GET (IB-10) is the proven read path meanwhile.
+- Item create (IB-6) and update (IB-18): live-proven through the
+  Chromium SDK lane (2026-09-21, item 11244176). Entry GET (IB-10) is
+  the proven item read path; the direct item GET (IB-11) is pending.
 - Unshare (bank shares): no unshare via DELETE (404s). Unshare is
   PATCH /api/banks/{bank}/shared_banks/{id} with
   {shared_bank:{permission:"removed_access"}} (proven 2026-09-21,

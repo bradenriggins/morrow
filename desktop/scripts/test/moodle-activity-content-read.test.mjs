@@ -5,7 +5,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import { executeMoodleActivityContentReadInPage } from "../../connector/extension/src/moodle-activity-content-read.js";
 
 const READS = Object.freeze([
@@ -230,7 +230,7 @@ ${item("textarea", "0", 502, "What would you change?", "changes", "30|5", "501",
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("test server did not bind");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(`${origin}/course/view.php?id=2`);
     const invoke = (read, args) => page.evaluate(

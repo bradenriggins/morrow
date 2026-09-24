@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { readExactTrustFile } from "./exact-trust-file.mjs";
+import { isUnsignedPackageSigning } from "./unsigned-desktop-signing.mjs";
 
 export const WINDOWS_SMOKE_OBSERVATION_SCHEMA = "morrow.desktop-windows-smoke.v1";
 export const WINDOWS_SMOKE_EVIDENCE_SCHEMA = "morrow.desktop-windows-smoke-evidence.v1";
@@ -12,12 +13,24 @@ const SOURCE_COMMIT_PATTERN = /^[a-f0-9]{40,64}$/;
 const RUN_ID_PATTERN = /^(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/;
 const MAX_PACKAGE_RECEIPT_BYTES = 1024 * 1024;
 const MAX_WINDOWS_INSTALLER_BYTES = 1024 * 1024 * 1024;
+const WINDOWS_SMOKE_OBSERVATION_KEYS = Object.freeze([
+  "schema", "runtime", "payload", "state", "codexConfig", "health", "runtimeTrace", "stateSecurity"
+]);
 
 function exactKeys(value, keys) {
   return value !== null
     && typeof value === "object"
     && !Array.isArray(value)
     && isDeepStrictEqual(Object.keys(value).sort(), [...keys].sort());
+}
+
+function isWindowsSmokeObservation(value) {
+  if (!exactKeys(value, WINDOWS_SMOKE_OBSERVATION_KEYS)
+    && !(exactKeys(value, [...WINDOWS_SMOKE_OBSERVATION_KEYS, "smokeFailure"])
+      && exactKeys(value.smokeFailure, ["stage", "code"])
+      && /^[a-z_]{1,40}$/.test(value.smokeFailure.stage || "")
+      && /^[A-Za-z0-9_]{1,80}$/.test(value.smokeFailure.code || ""))) return false;
+  return value.schema === WINDOWS_SMOKE_OBSERVATION_SCHEMA;
 }
 
 export function isWindowsSmokeBinding(value, expected = {}) {
@@ -89,15 +102,12 @@ export function createWindowsSmokeBindingFromPackage({ runId, sourceCommit, pack
     || receipt.source?.dirty !== false
     || receipt.payload?.releaseGraph?.schema !== "morrow.desktop-packager-admission.v1"
     || !SHA256_PATTERN.test(receipt.payload?.releaseGraph?.sha256 || "")
-    || receipt.signing?.mode !== "unsigned_private_qa"
-    || receipt.signing?.target !== "win32-x64"
-    || receipt.signing?.publicRelease !== false
-    || receipt.signing?.artifactSignature !== "authenticode_absent"
+    || !isUnsignedPackageSigning(receipt.signing, "win32-x64", { artifactSignature: "authenticode_absent" })
     || !artifact
     || artifact.name !== expectedName
     || !SHA256_PATTERN.test(artifact.sha256 || "")
     || basename(installer) !== artifact.name) {
-    throw new Error("Windows package receipt is not the expected unsigned QA release graph.");
+    throw new Error("Windows package receipt is not the expected unsigned release graph.");
   }
   const installerBytes = readExactTrustFile(installer, {
     label: "Windows installer",
@@ -116,8 +126,7 @@ export function createWindowsSmokeBindingFromPackage({ runId, sourceCommit, pack
 }
 
 export function bindWindowsSmokeObservation(observation, binding) {
-  if (!exactKeys(observation, ["schema", "runtime", "payload", "state", "codexConfig", "health", "runtimeTrace", "stateSecurity"])
-    || observation.schema !== WINDOWS_SMOKE_OBSERVATION_SCHEMA
+  if (!isWindowsSmokeObservation(observation)
     || !isWindowsSmokeBinding(binding)) {
     throw new Error("Windows smoke evidence can bind only an exact application observation and release identity.");
   }
@@ -128,7 +137,6 @@ export function windowsSmokeObservation(value, expectedBinding = {}) {
   if (!exactKeys(value, ["schema", "binding", "observation"])
     || value.schema !== WINDOWS_SMOKE_EVIDENCE_SCHEMA
     || !isWindowsSmokeBinding(value.binding, expectedBinding)
-    || !exactKeys(value.observation, ["schema", "runtime", "payload", "state", "codexConfig", "health", "runtimeTrace", "stateSecurity"])
-    || value.observation.schema !== WINDOWS_SMOKE_OBSERVATION_SCHEMA) return null;
+    || !isWindowsSmokeObservation(value.observation)) return null;
   return value.observation;
 }

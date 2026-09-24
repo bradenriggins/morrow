@@ -19,12 +19,17 @@ const release = readFileSync(join(repositoryRoot, releasePath), "utf8");
 const upgrade = readFileSync(join(root, upgradePath), "utf8");
 const boundedRunner = readFileSync(join(root, boundedRunnerPath), "utf8");
 const macSmoke = readFileSync(join(root, macSmokePath), "utf8");
+const versioningPath = "docs/versioning.md";
+const versioning = readFileSync(join(repositoryRoot, versioningPath), "utf8");
+// The build's own version names the installed application. A literal here broke the upgrade
+// harness on every version bump while this file stayed green.
+const DESKTOP_VERSION = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 const WINDOWS_APPLICATION_METADATA = Object.freeze({
   companyName: "Braden Riggins",
-  productName: "Morrow",
-  fileDescription: "Morrow",
-  fileVersion: "1.0.4",
-  productVersion: "1.0.4.0"
+  productName: "Morrow Desktop",
+  fileDescription: "Morrow Desktop",
+  fileVersion: DESKTOP_VERSION,
+  productVersion: `${DESKTOP_VERSION}.0`
 });
 
 function metadataMismatches(value) {
@@ -144,6 +149,41 @@ test("the release workflow is dispatch-only and builds both desktop platforms", 
   assert.equal((release.match(/^\s+if-no-files-found: error$/gm) || []).length, 2);
 });
 
+/** The upload-artifact steps of one job, each with its `if` and its `with` inputs. */
+function uploadSteps(job) {
+  return job.split(/^(?= {6}- )/m)
+    .filter((step) => /^ {6}- (?:[a-z]+: .*\n {8})*uses: actions\/upload-artifact@/m.test(step))
+    .map((step) => ({
+      if: /^ {8}if: (.+)$/m.exec(step)?.[1],
+      ...Object.fromEntries([...step.matchAll(/^ {10}([a-z-]+): (.+)$/gm)].map(([, key, value]) => [key, value])),
+    }));
+}
+
+/**
+ * A failed or cancelled QA run keeps the JSON receipts its harnesses already wrote, because once the
+ * runner is gone they are the only record of what failed. The installer, disk image and archive never
+ * leave a failed run: only complete successful evidence uses the normal artifact names. Written
+ * before the fix (final sweep 2026-09-23): both uploads ran `if: success()` only, so failed run
+ * 35915669818 kept no Windows artifact, although desktop-windows-upgrade.ps1 writes each app receipt
+ * and its uninstall residue receipt before it reports the failure.
+ */
+test("a failed or cancelled QA job uploads only its JSON receipts, under a separate name", () => {
+  for (const [id, job] of jobs(release)) {
+    const steps = uploadSteps(job);
+    const kept = steps.filter((step) => step.if === "success()");
+    const receipts = steps.filter((step) => step.if === "failure() || cancelled()");
+    assert.equal(kept.length, 1, `${id} must upload its complete evidence once, after success`);
+    assert.equal(receipts.length, 1, `${id} must upload its receipts when it fails or is cancelled`);
+    assert.equal(steps.length, 2, `${id} must have no other upload`);
+    assert.equal(receipts[0].path, `${kept[0].path}/*.json`, `${id} must upload only the JSON receipts from the directory its successful run uploads`);
+    assert.equal(receipts[0].name, kept[0].name.replace(/-\$\{\{ github\.run_id \}\}$/, "-failure-receipts-${{ github.run_id }}"),
+      `${id} must name the failure receipts apart from complete evidence`);
+    assert.equal(receipts[0]["if-no-files-found"], "warn", "a run that fails before its first receipt has none, and the upload must not hide that failure");
+    assert.equal(receipts[0]["retention-days"], kept[0]["retention-days"]);
+    assert.ok(job.lastIndexOf("uses: actions/upload-artifact@") > job.lastIndexOf("run:"), `${id} must upload after every step that writes a receipt`);
+  }
+});
+
 test("each release job runs in the desktop product directory and uploads from it", () => {
   for (const [id, job] of jobs(release)) {
     assert.match(job, /^ {4}defaults:\n {6}run:\n {8}working-directory: desktop$/m, `${id} must run its commands in desktop/`);
@@ -170,7 +210,7 @@ test("the Windows job runs bounded tests and packages through one retained relea
     previous = position;
   }
   assert.match(job, /Test each installer contract file with a process limit\n {8}timeout-minutes: 23/);
-  assert.match(job, /Test the complete installer contract suite with a process limit\n {8}timeout-minutes: 7/);
+  assert.match(job, /Test the complete installer contract suite with a process limit\n {8}timeout-minutes: 17/);
   assert.match(job, /Upgrade the exact published 3720 build and preserve its state\n {8}timeout-minutes: 32/);
   assert.match(job, /Install, start, damage and repair the sealed payload, uninstall, and check retained data\n {8}timeout-minutes: 30/);
   assert.match(job, /node scripts\/package-mcp-bundle\.mjs --target win32-x64 --unsigned-qa --output \$env:MORROW_WINDOWS_PACKAGE_OUTPUT/);
@@ -201,7 +241,9 @@ test("the Windows job upgrades the exact published 3720 artifact before its fina
   assert.match(job, /\$stateDir = Join-Path \$env:LOCALAPPDATA "MorrowUpgradeTest-\$runId"/);
   assert.doesNotMatch(job, /\$stateDir = Join-Path \$env:RUNNER_TEMP/);
   assert.match(job, /& scripts\/test\/desktop-windows-upgrade\.ps1/);
-  for (const parameter of ["OldInstaller", "OldSha256", "OldSourceHead", "NewInstaller", "NewSha256", "NewSourceHead", "InstallDirectory", "StateDirectory", "Receipt"]) {
+  // The new build's version comes from the package receipt of the installer this job built.
+  assert.match(job, /\$newVersion = \(Get-Content -LiteralPath \(Join-Path \$env:MORROW_WINDOWS_ARTIFACT_ROOT 'package-receipt\.json'\) -Raw \| ConvertFrom-Json\)\.version/);
+  for (const parameter of ["OldInstaller", "OldSha256", "OldSourceHead", "NewInstaller", "NewSha256", "NewSourceHead", "NewVersion", "InstallDirectory", "StateDirectory", "Receipt"]) {
     assert.match(job, new RegExp(`-${parameter}\\s`), `the Windows upgrade invocation must pass -${parameter}`);
   }
   assert.match(job, /\$receipt = Join-Path \$env:MORROW_WINDOWS_ARTIFACT_ROOT 'upgrade\.json'/);
@@ -211,9 +253,25 @@ test("the Windows job upgrades the exact published 3720 artifact before its fina
   assert.doesNotMatch(job, /"receipt\.json"/);
   assert.ok(job.indexOf(upgradeHarness) < job.indexOf("desktop-windows-smoke.mjs"), "the pinned upgrade must finish before the final isolated smoke");
   assert.match(upgrade, /\$ExpectedWindowsApplicationMetadata = \[ordered\]@\{/);
-  for (const [field, value] of Object.entries(WINDOWS_APPLICATION_METADATA)) {
+  // The fixed identity fields stay literal; the version fields follow the build's own version.
+  for (const field of ["companyName", "productName", "fileDescription"]) {
+    const value = WINDOWS_APPLICATION_METADATA[field];
     assert.match(upgrade, new RegExp(`^  ${field} = '${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'$`, "m"));
   }
+  assert.match(upgrade, /\[Parameter\(Mandatory = \$true\)\]\[string\] \$NewVersion/);
+  assert.match(upgrade, /if \(\$NewVersion -notmatch '\^\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$'\) \{ throw/);
+  assert.match(upgrade, /^  fileVersion = \$NewVersion$/m);
+  assert.match(upgrade, /^  productVersion = "\$NewVersion\.0"$/m);
+  assert.doesNotMatch(upgrade, /'[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?'/, "the harness must not pin any Morrow version");
+  assert.match(upgrade, /displayName -ne "Morrow Desktop \$NewVersion"/);
+  assert.match(upgrade, /displayVersion -ne \$NewVersion/);
+  // The pinned 3720 build wrote the first package manifest; this build writes the current one.
+  assert.match(upgrade, /function Package-Source\(\[string\] \$ExpectedSchema\)/);
+  assert.match(upgrade, /\$manifest\.schema -ne \$ExpectedSchema/);
+  assert.match(upgrade, /\$oldSource = Package-Source 'morrow\.desktop-package-input\.v1'/);
+  assert.match(upgrade, /\$newSource = Package-Source 'morrow\.desktop-package-input\.v2'/);
+  const packager = readFileSync(join(root, "scripts/package-mcp-bundle.mjs"), "utf8");
+  assert.match(packager, /schema: "morrow\.desktop-package-input\.v2"/, "the new build must write the schema the harness expects of it");
   assert.match(upgrade, /function Assert-AppMetadata\(\$Value\)/);
   assert.match(upgrade, /Assert-AppMetadata \$newApp/);
   assert.ok(upgrade.includes(`$PinnedOldSha256 = '${oldSha256}'`));
@@ -324,7 +382,7 @@ test("the smoke command the macOS job runs is accepted by the smoke harness", (t
   const harness = "scripts/test/desktop-mac-smoke.mjs";
   const options = invocationOptions(job, harness);
   const argv = argumentVector(options, {
-    "--disk-image": join(directory, "Morrow-1.0.4-mac-arm64.dmg"),
+    "--disk-image": join(directory, `Morrow-${DESKTOP_VERSION}-mac-arm64.dmg`),
     "--package-receipt": join(directory, "package-receipt.json"),
     "--receipt": join(directory, "receipt.json"),
     "--source": "a".repeat(40),
@@ -339,6 +397,74 @@ test("the smoke command the macOS job runs is accepted by the smoke harness", (t
   const rejected = node([harness, "--not-an-option", directory]);
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /Usage:/, "option rejection is what the accepted run above is measured against");
+});
+
+/**
+ * docs/versioning.md step 4 builds the files educators download with --unsigned-release on the
+ * maintainer's computers. The QA workflow tests other bytes, so step 4 must start the exact files
+ * it publishes, with the same harness options the workflow passes (the tests above prove the
+ * harnesses accept them), before `gh release create`.
+ *
+ * Failure mode pinned down (written before the fix; final sweep 2026-09-23): step 4 went from the
+ * packaging command straight to SHA256SUMS and `gh release create`, and the macOS harness refused
+ * the --unsigned-release receipt, so no published installer had ever been started by a smoke test.
+ */
+test("the release procedure smoke-tests the exact installers it publishes, before it publishes them", () => {
+  const start = versioning.indexOf("4. **");
+  const end = versioning.indexOf("\n5. **", start);
+  assert.ok(start >= 0 && end > start, `${versioningPath} must keep the Desktop publishing step as step 4`);
+  const step = versioning.slice(start, end);
+  const publish = step.indexOf("gh release create desktop/vX.Y.Z");
+  assert.ok(publish > 0, `${versioningPath} step 4 must publish with gh release create`);
+  const published = step.slice(publish).split("`")[0];
+
+  for (const [id, harness, fileOption, file] of [
+    ["macos-installer", "scripts/test/desktop-mac-smoke.mjs", "--disk-image", "Morrow-X.Y.Z-mac-arm64.dmg"],
+    ["windows-installer", "scripts/test/desktop-windows-smoke.mjs", "--installer", "Morrow-X.Y.Z-win-x64.exe"],
+  ]) {
+    const command = step.match(new RegExp(`\`(node ${harness.replaceAll(".", "\\.")} [^\`]+)\``));
+    assert.ok(command, `${versioningPath} step 4 must run ${harness}`);
+    assert.ok(command.index < publish, `${versioningPath} step 4 must run ${harness} before gh release create`);
+    const documented = [...command[1].matchAll(/(?<=\s)--[a-z][a-z0-9-]*/g)].map((match) => match[0]);
+    assert.deepEqual(documented, invocationOptions(jobs(release).get(id), harness),
+      `${versioningPath} must pass ${harness} the options ${releasePath} passes it`);
+    // A placeholder such as <mac folder> holds a space, so a value runs to the next option.
+    const value = (option) => new RegExp(`${option} (.+?)(?= --|$)`).exec(command[1])?.[1] ?? "";
+    assert.ok(value(fileOption).endsWith(file), `the ${harness} run must start ${file}`);
+    assert.ok(published.includes(` ${file} `), `the file ${harness} starts must be the ${file} that step 4 publishes`);
+    assert.equal(value("--source"), "<tag commit>", `the ${harness} run must bind the commit the tag names`);
+  }
+});
+
+/**
+ * Each release's notes are its product's CHANGELOG.md section. docs/versioning.md gives the command
+ * that saves that section as the notes file, and this test runs the documented command for each
+ * product's current version and compares it with the whole section.
+ *
+ * Failure mode pinned down (written before the fix; final sweep 2026-09-23): the step said only
+ * "Save the version's section as a notes file". The published muse/v0.4.0 notes stop in the middle
+ * of the section ("Documentation:"), and they kept an undo claim the changelog had corrected.
+ */
+test("the documented notes command saves each product's whole changelog section", () => {
+  const versions = {
+    desktop: JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version,
+    "morrow-for-muse": readFileSync(join(repositoryRoot, "morrow-for-muse", "VERSION"), "utf8").trim(),
+  };
+  const commands = [...versioning.matchAll(/`(awk -v v="X\.Y\.Z" '[^']+' (desktop|morrow-for-muse)\/CHANGELOG\.md) > <notes file>`/g)];
+  assert.deepEqual(commands.map(([, , product]) => product), ["desktop", "morrow-for-muse"],
+    `${versioningPath} must give the notes command for Morrow Desktop (step 4) and Morrow for Muse (step 5)`);
+  for (const [, command, product] of commands) {
+    const version = versions[product];
+    const lines = readFileSync(join(repositoryRoot, product, "CHANGELOG.md"), "utf8").split("\n");
+    const start = lines.findIndex((line) => line.startsWith(`## ${version} (`));
+    assert.ok(start >= 0, `${product}/CHANGELOG.md has no section for ${version}`);
+    const end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
+    const section = lines.slice(start + 1, end === -1 ? lines.length : end).join("\n") + (end === -1 ? "" : "\n");
+    const saved = spawnSync("sh", ["-c", command.replace("X.Y.Z", version)], { cwd: repositoryRoot, encoding: "utf8" });
+    assert.equal(saved.status, 0, saved.stderr);
+    assert.ok(section.trim().length > 0);
+    assert.equal(saved.stdout, section, `the ${product} notes command must save the whole ${version} section`);
+  }
 });
 
 test("the macOS job mounts and tests the same disk image it uploads", () => {

@@ -649,6 +649,28 @@ export function bridgeAuthenticationProofPayload(
   ]);
 }
 
+/**
+ * What Morrow Bridge signs to pair. The key is the secret in the active-folder marker of the
+ * Bridge folder Morrow set up, which no HTTP request can read, and the Bridge signs only after
+ * the educator selects Connect Morrow.
+ */
+export function bridgePairingProofPayload(pairing: {
+  readonly pairingId: string;
+  readonly challenge: string;
+  readonly extensionId: string;
+  readonly activeFolderChallengeId: string;
+}): string {
+  return JSON.stringify([
+    "morrow.bridge.pairing-proof.v1",
+    BRIDGE_PROTOCOL_VERSION,
+    BRIDGE_PATH,
+    pairing.pairingId,
+    pairing.challenge,
+    pairing.extensionId,
+    pairing.activeFolderChallengeId,
+  ]);
+}
+
 function optionalString(value: unknown, label: string, maxLength: number): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   return requiredString(value, label, maxLength);

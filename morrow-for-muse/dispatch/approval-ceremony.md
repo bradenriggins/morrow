@@ -18,7 +18,9 @@ product code calls `vault.lookup()` (a selftest asserts this). Wave 6
 added a NEW, different renderer, `dispatch/approval_display.py`
 (W6-P1-A1 / W6-P1-H1): it renders the full approval payload (op,
 category, target, issued/expiry, complete canonical params, undo
-availability, identity schedule) WITHOUT any vault lookup. Params
+availability, identity schedule) WITHOUT any vault lookup. It renders
+it twice: `render_educator_display` in plain words for the educator,
+and `render_approval_display` as the audit detail. Params
 carry tokens (lrn_...) by construction; the schedule's
 `displayed_as` values are the educator's own citation words relayed
 by the agent. A selftest asserts zero vault references in the new
@@ -67,13 +69,18 @@ signed record. Nothing in this tree de-tokenizes.
    category, and the exact request: method, path, query, and body)
    and stamps the human-readable write target (tenant,
    course ID, course name, term when known) into the record's
-   `target` block, under the tamper seal. The record is unsigned
-   (`by=None`).
+   `target` block, under the tamper seal. It also stamps a random
+   `approval_id`, so two approvals of the same change are two
+   records. The record is unsigned (`by=None`).
 2. **Show.** The agent shows the educator the approval display
-   (`dispatch/approval_display.py`; `executor.py plan-write` prints
-   it): op name, category, **tenant, course ID, and course name**
-   (read from Canvas), expiry, and the exact request that will be
-   sent (method, path, query, and body). The display, not the
+   (`dispatch/approval_display.py` `render_educator_display`;
+   `executor.py plan-write` prints it as `approval_display`): in plain
+   words, **the course as Canvas names it** (and the Canvas site), the
+   change, every value that will be sent, whether Morrow can undo it,
+   and how long the request stays open. The audit detail of the same
+   request (op name, category, method, path, query, JSON body, params,
+   integrity codes; `render_approval_display`, printed as
+   `audit_detail`) is for reviewers and is never relayed. The display, not the
    educator's reply, carries the target: dispatch later refuses when
    the provider's course name/term disagrees with the one shown
    (W4-P0-11), and when the request differs from the one shown. If
@@ -108,8 +115,11 @@ signed record. Nothing in this tree de-tokenizes.
    agree with this dispatch's tenant and params). On success it
    returns the journal audit block and the signed record; the
    dispatcher persists the record to `~/.morrow/approvals/<op_id>.json`
-   (0600) under the final op_id and consumes the digest, in that
-   order. Persist-before-consume makes every crash state recoverable:
+   (0600) under the final op_id and consumes the approval, in that
+   order. Single use is keyed by the op digest bound to the record's
+   `approval_id`: one signed record is refused on replay, while a new
+   plan-write for the same change (for example rename, rename back,
+   rename again) is a new record with its own educator reply. Persist-before-consume makes every crash state recoverable:
    persisted-but-unconsumed re-admits cleanly on retry, and consumed
    implies persisted, so the complete phase can always re-verify an
    admitted write.
@@ -148,8 +158,9 @@ before any receipt is journaled:
 - Recompute the op digest from the entry, the pending envelope's
   canonical params, and the tenant base. Refuse on mismatch with the
   stored record: what completes must be exactly what was approved.
-- Require the digest in the consumed set (proof the dispatch phase
-  admitted it). Refuse otherwise.
+- Require the record's use key (op digest plus `approval_id`) in the
+  consumed set (proof the dispatch phase admitted it). Refuse
+  otherwise.
 
 This closes the gap where a report is ingested for an op whose
 approval was never properly admitted.
@@ -159,7 +170,7 @@ approval was never properly admitted.
 `consume_approval()` serializes the check-then-record step with an
 exclusive `fcntl` lock on `consumed.json.lock` (mode 0600): the lock
 is taken, the consumed set is re-read while locked, an already-used
-digest is refused as `ApprovalMismatch`, and the set is written back
+approval is refused as `ApprovalMismatch`, and the set is written back
 atomically via `os.replace`. The lock file is created mode 0600 so
 the single-use bookkeeping is as private as the approvals it guards.
 Crash between persist and consume still fails closed: the signed

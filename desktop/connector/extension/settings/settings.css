@@ -177,7 +177,7 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
   .page-header h1, .page-header .lede, .private-chat-open { grid-column: 1; grid-row: auto; }
   .private-chat-open { justify-self: start; margin-top: var(--space-2); }
   .panel { padding: var(--space-4); border-radius: var(--radius-card); }
-  .section-heading, .permission-actions, .course-bulk-bar, .file-storage-card, .save-confirmation { align-items: stretch; flex-direction: column; gap: var(--space-3); }
+  .section-heading, .permission-actions, .course-bulk-bar, .file-storage-card, .save-confirmation, .edit-access-banner { align-items: stretch; flex-direction: column; gap: var(--space-3); }
   .selection-summary { max-width: none; text-align: left; }
   .mode-choice, .edit-controls, .category-list { grid-template-columns: 1fr; }
   .course-tools { flex-direction: column; align-items: stretch; }
@@ -190,6 +190,7 @@ h2 { margin-bottom: var(--space-1); font-size: 1.375rem; line-height: 1.3; lette
   .permission-actions > div:first-child, .course-bulk-bar > p, .save-confirmation > div:first-child, .file-storage-card > div:first-child { flex: 0 1 auto; }
   .action-buttons { justify-content: stretch; }
   .action-buttons button, .file-storage-actions button { width: 100%; }
+  .edit-access-banner button { width: 100%; white-space: normal; }
   .course-detail-top { flex-direction: column; align-items: stretch; }
   .course-level-control button, .course-detail-links button { width: 100%; }
   .private-chat-drawer { padding: var(--space-5) var(--space-4); }

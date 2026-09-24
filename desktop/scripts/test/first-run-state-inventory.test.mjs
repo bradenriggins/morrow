@@ -94,7 +94,10 @@ const COURSE_READY = Object.freeze({ ...PAIRED, runtimeVerifiedCourseCount: 1, s
 const INSTALLER_STATES = new Map([
   ["repair", installer({ lifecycle: "repair_required" })],
   ["claude-pending", installer({ assistants: [{ ...CLAUDE_DESKTOP, detected: true, pending: true, selected: true }], selectedAssistantId: "claude-desktop" })],
+  ["claude-checking", installer({ assistants: [{ ...CLAUDE_DESKTOP, detected: true, pending: true, checking: true, selected: true }], selectedAssistantId: "claude-desktop" })],
   ["no-assistant", installer({ assistants: [{ ...CHATGPT, detected: true }] })],
+  ["materials-default-missing", installer({ ...ASSISTANT_READY, runtimeStatus: "uncertain", materialsFolderMissing: { path: "/Users/teacher/Library/Application Support/Morrow/Materials", isDefault: true } })],
+  ["materials-chosen-missing", installer({ ...ASSISTANT_READY, runtimeStatus: "uncertain", materialsFolderMissing: { path: "/Users/teacher/Documents/Course materials", isDefault: false } })],
   ["runtime-not-ready", installer({ ...ASSISTANT_READY, runtimeStatus: "starting" })],
   ["delivery-blocked", installer({ ...ASSISTANT_READY, bridgeDelivery: "unavailable" })],
   ["reload-required", installer({ ...ASSISTANT_READY, bridgeManualChromeReloadRequired: true })],
@@ -170,17 +173,16 @@ test("every Morrow app setup state cites the line its own title is written on", 
 
 const anchor = (fields = {}) => ({ provider: "canvas", runtimeVerified: true, lastSeenAt: 1, siteAnchorId: "site-1", ...fields });
 const binding = (fields = {}) => ({ courseName: "Biology 101", runtimeVerified: true, lastSeenAt: 1, ...fields });
-const connection = { paired: false, pairing: false, connecting: false, connected: false, bindings: [], siteAnchors: [] };
+const connection = { paired: false, connecting: false, connected: false, bindings: [], siteAnchors: [] };
 const healthyPopup = { paired: true, connected: true, runtimeHealthy: true };
 
 // One state per branch of the popup's detail text.
 const POPUP_STATES = new Map([
   ["read-failed", { status: null }],
   ["not-paired", { status: { ...connection } }],
-  ["pairing", { status: { ...connection, pairing: true } }],
   ["connecting", { status: { ...connection, paired: true, connecting: true } }],
   ["paired-not-connected", { status: { ...connection, paired: true } }],
-  ["runtime-mismatch", { status: { ...connection, paired: true, connected: true, runtimeHealthy: false } }],
+  ["runtime-mismatch", { status: { ...connection, paired: true, versionMismatch: true }, sourceNeedle: "The Morrow app and Morrow Bridge versions do not match. ${VERSION_MISMATCH_RECOVERY}" }],
   ["authentication-failed", { status: { ...connection, ...healthyPopup, authenticationFailed: true } }],
   ["connected-no-site", { status: { ...connection, ...healthyPopup } }],
   ["detected-platform", { status: { ...connection, ...healthyPopup }, detectedProvider: "moodle", sourceNeedle: "Morrow Bridge detected" }],
@@ -238,10 +240,10 @@ const healthy = { paired: true, connected: true, runtimeHealthy: true };
 const GUIDE_STATES = new Map([
   ["read-failed", null],
   ["not-paired", { ...connection }],
-  ["pairing", { ...connection, pairing: true }],
+  ["authentication-failed", { ...connection, paired: true, authenticationFailed: true }],
   ["connecting", { ...connection, paired: true, connecting: true }],
   ["paired-not-connected", { ...connection, paired: true }],
-  ["runtime-mismatch", { ...connection, paired: true, connected: true }],
+  ["runtime-mismatch", { ...connection, paired: true, versionMismatch: true }],
   ["connected-no-site", { ...connection, ...healthy }],
   ["site-saved-not-verified", { ...connection, ...healthy, siteAnchors: [anchor({ runtimeVerified: false })] }],
   ["site-ready-no-course", { ...connection, ...healthy, siteAnchors: [anchor()] }],
@@ -251,6 +253,8 @@ const GUIDE_STATES = new Map([
 const GUIDE_SECTION = "5. Morrow Bridge setup guide";
 const GUIDE_SOURCE_NEEDLES = new Map([
   ["site-saved-not-verified", "or open the saved ${platform"],
+  // The version recovery is one sentence the popup and the Connect Morrow error share.
+  ["runtime-mismatch", "Morrow and Morrow Bridge report different versions. ${VERSION_MISMATCH_RECOVERY}"],
 ]);
 
 test("the inventory carries what every setup guide state renders", () => {
@@ -328,7 +332,9 @@ test("a citation that only matches an identifier, a longer word, or a comment fa
     ["Where to get help", "  return { title: `Where to get help`, body };"],
   ];
   for (const [name, line] of rendered) assert.equal(renderedOnLine(line, name), true, `${JSON.stringify(line)} renders ${name}`);
-  assert.equal(renderedOnLine('<h1 id="setup-title">Set up Morrow on this computer</h1>', "Set up Morrow on this computer", { html: true }), true);
+  assert.equal(renderedOnLine('<title>Morrow Desktop setup</title>', "Morrow Desktop setup", { html: true }), true);
+  assert.equal(renderedOnLine('    title: "Morrow Desktop",', "Morrow Desktop"), true);
+  assert.equal(renderedOnLine('<h1 id="setup-title">Set up Morrow Desktop on this computer</h1>', "Set up Morrow Desktop on this computer", { html: true }), true);
   assert.equal(renderedOnLine('<button aria-label="Remove connection">Remove</button>', "Remove connection", { html: true }), true);
   assert.equal(renderedOnLine('<button data-action="remove-connection">Forget</button>', "Remove connection", { html: true }), false);
 });

@@ -90,6 +90,8 @@ test("verifies every requested bulk date and refuses a partial or mismatched res
   assert.equal(evaluateCanvasOperationReadback(plan, complete)?.status, "verified");
   assert.equal(evaluateCanvasOperationReadback(plan, { ...complete, truncated: true })?.evidence, "collection_readback_incomplete");
   assert.equal(evaluateCanvasOperationReadback(plan, { ...complete, data: complete.data.slice(0, 1) })?.evidence, "requested_assignment_missing_or_ambiguous");
+  // A target the read cannot pick out proves nothing, so it is unconfirmed, never a mismatch.
+  assert.equal(evaluateCanvasOperationReadback(plan, { ...complete, data: complete.data.slice(0, 1) })?.status, "unconfirmed");
   const mismatch = structuredClone(complete);
   mismatch.data[0].all_dates[1].lock_at = "2026-10-05T17:00:00Z";
   assert.equal(evaluateCanvasOperationReadback(plan, mismatch)?.evidence, "assignment_date_mismatch:lock_at");

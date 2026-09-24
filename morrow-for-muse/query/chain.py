@@ -10,12 +10,16 @@ Links:
      window is "last_week" or "this_week", and the threshold is one of
      below_percent (0-100), below_points (>= 0), or letter_f.
   2. quiz_resolve.resolve: the quiz window -> exactly one quiz, with
-     exact week/effective-date semantics; zero or multiple matches
-     raise instead of silently picking.
+     exact week/effective-date semantics in the educator's time zone
+     (educator_zone); zero or multiple matches raise instead of
+     silently picking.
   3. submissions fetch: paginated GET
      /api/v1/courses/{id}/assignments/{aid}/submissions with
      include[]=user, following Link rel="next" (never a silent
-     partial collection).
+     partial collection). That read is a learner-data catalog row
+     (C-419); until the catalog marks it live-proven, a live run is
+     refused right after link 1, before any read or time zone
+     question, because the answer needs it.
   4. thresholds.classify: per-submission failed/passed/excused/
      ungraded with a named threshold source.
   5. present: de-identified educator result through the privacy
@@ -65,6 +69,59 @@ class ChainFailure(Exception):
         self.translated = translated
 
 
+class TimezoneUnknown(Exception):
+    """No time zone is known for the educator, so "last week" has no
+    edges. Never guessed: the query asks for the educator's zone."""
+
+
+def _named_zone(name, source):
+    try:
+        return _qr.zone(name), name, source
+    except Exception:
+        return None
+
+
+def _catalog_not_proven():
+    from dispatch import executor as _ex
+    return _ex.CatalogNotProven
+
+
+def educator_zone(user_id, reader, course_id):
+    """(ZoneInfo, name, source) for "last week" and "this week" when
+    the educator named no zone: the educator's `timezone` setting, the
+    course's time zone in Canvas, then the educator's Canvas profile.
+    Raises TimezoneUnknown when none is set; never falls back to a
+    fixed zone."""
+    from config.identity import default_user_id
+    uid = user_id or default_user_id()
+    if uid:
+        try:
+            from settings import store as _settings
+            name = _settings.get_setting(uid, "timezone")
+        except Exception:
+            name = ""
+        found = _named_zone(name, "your timezone setting") if name else None
+        if found:
+            return found
+    for path, source in (("/api/v1/courses/%s" % course_id,
+                          "the course's time zone in Canvas"),
+                         ("/api/v1/users/self",
+                          "your Canvas profile's time zone")):
+        try:
+            doc = reader.get_json(path)
+        except (_live_read.LiveReadError, _catalog_not_proven()):
+            continue
+        name = (doc or {}).get("time_zone") if isinstance(doc, dict) \
+            else None
+        found = _named_zone(name, source) \
+            if isinstance(name, str) and name.strip() else None
+        if found:
+            return found
+    raise TimezoneUnknown(
+        "no time zone is set for the educator: not in the timezone "
+        "setting, the course, or the Canvas profile")
+
+
 class SessionMissing(Exception):
     """No Canvas tenant is configured for this chain run.
 
@@ -106,8 +163,8 @@ def _translate_helper_failure(exc):
         evidence = dict(base, error="ExecutorError",
                         detail="login helper endpoint is down: " + msg)
     else:
-        return _translate("helper health check", exc)
-    return _translate("helper health check", evidence)
+        return _translate("checking the helper", exc)
+    return _translate("checking the helper", evidence)
 
 
 _SUBMISSIONS_READ = {
@@ -212,6 +269,63 @@ class _GatedReader:
         return getattr(self._reader, name)
 
 
+_ROSTER_READS = (
+    "/api/v1/courses/%s/users?enrollment_type[]=student"
+    "&enrollment_state[]=active&enrollment_state[]=invited"
+    "&enrollment_state[]=rejected&enrollment_state[]=completed"
+    "&enrollment_state[]=inactive&include[]=email&per_page=100",
+    "/api/v1/courses/%s/enrollments?type[]=StudentEnrollment"
+    "&state[]=deleted&per_page=100",
+)
+
+
+def _course_text_projector(reader, tenant_base, course_id, synthetic):
+    """project(value) for the course text this chain shows (quiz
+    titles): every student on the course roster becomes a course label,
+    as the executor does for course content (privacy/course_content.py).
+    The roster read is Morrow's own privacy read, never shown, so it
+    goes to the underlying reader like the executor's does. A synthetic
+    run never touches the learner vault: names are hidden one way."""
+    from dispatch import executor as _ex
+    from privacy import executor_wire as _wire
+    inner = getattr(reader, "_reader", reader)
+    lists = []
+    for template in _ROSTER_READS:
+        status, items, note = inner.get_paginated(template % course_id)
+        if status != 200 or note or not isinstance(items, list):
+            raise _ex.CourseRosterUnavailable(
+                "The student list of course %s could not be read (%s), so "
+                "no quiz from the course was shown: quiz titles can name "
+                "students." % (course_id, note or "HTTP %s" % status))
+        lists.append(items)
+    try:
+        identities = _wire.roster_identities(lists[0], lists[1])
+    except ValueError as exc:
+        raise _ex.CourseRosterUnavailable(
+            "The student list of course %s was not usable (%s), so no quiz "
+            "from the course was shown." % (course_id, exc))
+
+    def project(value):
+        return _wire.project_course_text(tenant_base, course_id, value,
+                                         identities,
+                                         use_vault=not synthetic)
+    return project
+
+
+def _project_quiz_error(exc, project):
+    """Label the quiz titles a quiz-resolution refusal carries."""
+    evidence = getattr(exc, "resolution_evidence", None)
+    if isinstance(evidence, dict):
+        exc.resolution_evidence = project(evidence)
+    for attr in ("nearest", "candidates"):
+        rows = getattr(exc, attr, None)
+        if isinstance(rows, list):
+            setattr(exc, attr, [tuple(project(list(row)))
+                                if isinstance(row, tuple) else project(row)
+                                for row in rows])
+    exc.args = tuple(project(list(exc.args)))
+
+
 def _translate(operation, exc):
     """Route a chain failure through failures/translator.py.
 
@@ -223,15 +337,24 @@ def _translate(operation, exc):
 
 def run_query(course_id, quiz, below_percent=None, below_points=None,
               letter_f=False, reader=None, tenant_base=None,
-              now_utc=None, synthetic_rows=None, progress=None):
+              now_utc=None, synthetic_rows=None, progress=None,
+              timezone=None, user_id=None, conversation_id=None):
     """Run the full chain.
 
     course_id: Canvas course id.
     quiz: the quiz window, "last_week" or "this_week".
+    timezone: the educator's IANA time zone when they named one; else
+        user_id's `timezone` setting (user_id defaults to
+        MORROW_USER_ID, then the Canvas account pinned at first
+        sign-in), the course's zone, or the Canvas profile's.
     below_percent / below_points / letter_f: at most one explicit fail
         threshold; none means the assignment's own default.
     reader: a LiveReader (default: create and health-check one).
-    tenant_base: tenant origin for the privacy binding.
+    tenant_base: tenant origin for the privacy binding (default:
+        CANVAS_BASE from the environment, then the tree's helper/env).
+    conversation_id: the Muse conversation, so a student the educator
+        named in it is shown by that name next to the label (default:
+        MORROW_CONVERSATION_ID, read in query/present.py).
     synthetic_rows: when set, a list of synthetic (fixture) submission
         dicts used INSTEAD of live submissions; the result is loudly
         labeled synthetic and never touches the learner vault.
@@ -252,7 +375,7 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
         except Exception:
             pass
 
-    operation = "find students who failed %s's quiz" % (
+    operation = "finding students who failed %s's quiz" % (
         str(quiz).replace("_", " "))
     own_reader = False
     try:
@@ -265,11 +388,36 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                 quiz, below_percent, below_points, letter_f)
         except QueryArgumentsInvalid as exc:
             raise _translate(operation, exc)
+        named_zone = None
+        if timezone is not None:
+            named_zone = _named_zone(timezone, "the time zone you named")
+            if named_zone is None:
+                raise _translate(operation, QueryArgumentsInvalid(
+                    "timezone must be an IANA name like America/Denver, "
+                    "got %r" % (timezone,)))
         parsed = {"quiz_ref": quiz_ref, "threshold": threshold}
+        if synthetic_rows is None:
+            # The submissions read (C-419) is pending [LEARNER-DATA],
+            # not live-proven, so a live failed-students run refuses
+            # here, before the time zone, the reader health check, and
+            # the roster, quizzes, assignments, and course reads: the
+            # task is not tested on a live Canvas course in this
+            # version, and Morrow must not read a single endpoint
+            # before it says so. Synthetic fixtures (the self-tests)
+            # never touch Canvas and keep the chain runnable.
+            try:
+                _require_live_proven(_SUBMISSIONS_READ)
+            except Exception as exc:  # CatalogNotProven or unreadable catalog
+                raise _translate(operation, exc)
         _prog("arguments_checked", str(quiz_ref))
+        from config import disconnect as _disconnect
+        try:
+            _disconnect.refuse_if_disconnected()
+        except _disconnect.CanvasDisconnected as exc:
+            raise _translate(operation, exc)
 
         if reader is None:
-            tenant_base = tenant_base or _live_read.TENANT_BASE
+            tenant_base = tenant_base or _live_read.tenant_base()
             if not tenant_base:
                 # Fail closed BEFORE the browser lane initializes: the
                 # privacy binding needs a real tenant origin, and a fresh
@@ -279,15 +427,15 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                 raise _translate(
                     operation,
                     SessionMissing("query chain needs a Canvas base URL: set "
-                                   "CANVAS_BASE or pass tenant_base"))
-            reader = _live_read.LiveReader()
+                                   "CANVAS_BASE in helper/env"))
+            reader = _live_read.LiveReader(tenant_base)
             own_reader = True
             try:
                 reader.health_check()
             except _live_read.LiveReadError as exc:
                 raise _translate_helper_failure(exc)
         else:
-            tenant_base = tenant_base or _live_read.TENANT_BASE
+            tenant_base = tenant_base or _live_read.tenant_base()
         _prog("reader_ready")
         reader = _GatedReader(reader)
         if not tenant_base:
@@ -295,15 +443,25 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
             raise _translate(
                 operation,
                 SessionMissing("query chain needs a Canvas base URL: set "
-                               "CANVAS_BASE or pass tenant_base"))
+                               "CANVAS_BASE in helper/env"))
 
         try:
+            tz, tz_name, _tz_source = named_zone or educator_zone(
+                user_id, reader, course_id)
+        except TimezoneUnknown as exc:
+            raise _translate(operation, exc)
+        # Quiz titles can name a student: read the course roster first
+        # and label every title the chain shows.
+        course_text = _course_text_projector(
+            reader, tenant_base, course_id, synthetic_rows is not None)
+        try:
             quiz, assignment, ctx = _qr.resolve(
-                reader, course_id, parsed["quiz_ref"], now_utc=now_utc)
+                reader, course_id, parsed["quiz_ref"], tz, now_utc=now_utc)
         except (_qr.QuizNotFound, _qr.QuizAmbiguous,
                 _qr.UnsupportedQuizRef) as exc:
+            _project_quiz_error(exc, course_text)
             raise _translate(operation, exc)
-        _prog("quiz_resolved", str(quiz.get("title", "")))
+        _prog("quiz_resolved", str(course_text(quiz.get("title", ""))))
 
         assignment = assignment or {}
         # New Quizzes carry grading metadata on the quiz record itself.
@@ -331,13 +489,8 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
             provenance = "SYNTHETIC fixtures (clearly labeled; no live " \
                 "learner data read)"
         else:
-            # Only live-proven catalog operations may run: the
-            # submissions list (a learner-data row) must be proven
-            # through the catalog before this chain reads it live.
-            try:
-                _require_live_proven(_SUBMISSIONS_READ)
-            except Exception as exc:  # CatalogNotProven or unreadable catalog
-                raise _translate(operation, exc)
+            # The live-proven gate for the submissions list already ran
+            # right after the argument check, before any Canvas read.
             status, submissions, note = reader.get_paginated(
                 "/api/v1/courses/%s/assignments/%s/submissions"
                 "?per_page=100&include[]=user" % (course_id, aid))
@@ -388,7 +541,6 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                     "score": cls["score"], "percent": cls["percent"],
                     "missing": cls["missing"], "late": cls["late"],
                     "detail": cls["detail"]})
-            reveal_audit = None
         else:
             learner_rows = []
             for sub, _cls in failed_rows:
@@ -399,8 +551,9 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
                     "sortable_name": user.get("sortable_name"),
                     "short_name": user.get("short_name"),
                 })
-            projected, reveal_audit = _present.project_live(
-                str(course_id), learner_rows, tenant_base)
+            projected = _present.project_live(
+                str(course_id), learner_rows, tenant_base,
+                conversation_id=conversation_id)
             label_by_qord = {p["qord"]: p["display_name"] for p in projected}
             display_rows = []
             for i, (sub, cls) in enumerate(failed_rows):
@@ -417,10 +570,11 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
             raise _translate(operation, RuntimeError(
                 "quiz resolution returned no window"))
         report = {
-            "quiz_title": quiz.get("title"),
+            "quiz_title": course_text(quiz.get("title")),
             "quiz_id": quiz.get("id"),
-            "window": "%s..%s (America/Chicago)" % (
-                _qr.chicago_ymd(win_start), _qr.chicago_ymd(win_end)),
+            "window": "%s..%s (%s)" % (
+                _qr.local_ymd(win_start, tz), _qr.local_ymd(win_end, tz),
+                tz_name),
             "effective_date": eff.isoformat() if eff else "unknown",
             "effective_field": eff_field or "none",
             "threshold_source": threshold_source,
@@ -432,7 +586,6 @@ def run_query(course_id, quiz, below_percent=None, below_points=None,
             "passed_count": passed_n,
             "excused_count": excused_n,
             "ungraded_count": ungraded_n,
-            "reveal_audit": reveal_audit,
             "data_provenance": provenance,
         }
         text_out = _present.render(
@@ -474,7 +627,23 @@ def main(argv):
                        help="failed means below this many points")
     group.add_argument("--letter-f", action="store_true",
                        help="failed means a letter grade of F")
-    ap.add_argument("--tenant", default=_live_read.TENANT_BASE)
+    ap.add_argument("--canvas-base", default=None,
+                    help="Canvas origin (default: CANVAS_BASE from the "
+                         "environment, then this tree's helper/env)")
+    ap.add_argument("--timezone", default=None,
+                    help="the educator's IANA time zone when they named "
+                         "one (default: their timezone setting, then the "
+                         "course's zone in Canvas, then their Canvas "
+                         "profile)")
+    ap.add_argument("--user-id", default=None,
+                    help="the educator, for their timezone setting "
+                         "(default: MORROW_USER_ID, then the Canvas "
+                         "account pinned at first sign-in)")
+    ap.add_argument("--conversation-id",
+                    default=os.environ.get("MORROW_CONVERSATION_ID"),
+                    help="the Muse conversation id, so a student the "
+                         "educator named in it is shown by that name "
+                         "(default: MORROW_CONVERSATION_ID)")
     ap.add_argument("--progress", action="store_true",
                     help="QOL-3: print chain progress lines to stderr as "
                          "each stage completes (stdout stays clean for "
@@ -492,7 +661,10 @@ def main(argv):
                            below_percent=args.below_percent,
                            below_points=args.below_points,
                            letter_f=args.letter_f,
-                           tenant_base=args.tenant, progress=progress)
+                           tenant_base=args.canvas_base,
+                           progress=progress, timezone=args.timezone,
+                           user_id=args.user_id,
+                           conversation_id=args.conversation_id)
     except ChainFailure as exc:
         # TranslatedError is a dataclass, not an exception: the
         # raisable carrier is ChainFailure, which wraps the

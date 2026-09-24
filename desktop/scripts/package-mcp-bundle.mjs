@@ -21,6 +21,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { pnpmCommand } from "./lib/pnpm-command.mjs";
+import { unsignedSigningState } from "./lib/unsigned-desktop-signing.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLER = resolve(ROOT, "installer");
@@ -189,7 +191,10 @@ function assertObjectKeys(value, keys, description) {
 }
 
 export function captureBridgeRelease(extensionRoot = resolve(ROOT, "connector", "extension")) {
-  const sourcePaths = regularFiles(extensionRoot).map((file) => relative(extensionRoot, file).replaceAll("\\", "/")).sort();
+  // `pnpm run setup` writes this marker into a source checkout so a source Bridge can pair. It is
+  // that computer's secret, never part of a release.
+  const sourcePaths = regularFiles(extensionRoot).map((file) => relative(extensionRoot, file).replaceAll("\\", "/"))
+    .filter((path) => path !== "morrow-bridge-active-folder.json").sort();
   exactList(sourcePaths, BRIDGE_SOURCE_FILES, "Morrow Bridge release file set");
   const source = BRIDGE_SOURCE_FILES.map((path) => {
     const file = resolve(extensionRoot, path);
@@ -245,9 +250,8 @@ export function bridgeReleaseManifest(extensionRoot) {
   };
 }
 
-function assertCurrentBridgeRelease(extensionRoot, manifest) {
-  if (resolve(extensionRoot) !== resolve(ROOT, "connector", "extension")) return;
-  const ledgerPath = resolve(ROOT, "connector", "release-ledger.json");
+function assertCurrentBridgeRelease(extensionRoot, manifest, ledgerRoot = resolve(ROOT, "connector")) {
+  const ledgerPath = resolve(ledgerRoot, "release-ledger.json");
   const ledger = JSON.parse(readFileSync(ledgerPath, "utf8"));
   const releases = ledger?.schema === "morrow.bridge-release-ledger.v1" && Array.isArray(ledger.releases)
     ? ledger.releases
@@ -257,19 +261,28 @@ function assertCurrentBridgeRelease(extensionRoot, manifest) {
   if (!current || current.version !== manifest.version || current.releaseManifestSha256 !== digest) {
     throw new Error("Morrow Bridge source changed without a new sealed release ledger entry.");
   }
+  return digest;
 }
 
-function copyBridgeRelease(appRoot, extensionRoot) {
+function copyBridgeRelease(appRoot, extensionRoot, ledgerRoot = resolve(ROOT, "connector")) {
   const releaseRoot = resolve(appRoot, "bridge-release");
   const manifest = bridgeReleaseManifest(extensionRoot);
-  assertCurrentBridgeRelease(extensionRoot, manifest);
+  const sealedDigest = assertCurrentBridgeRelease(extensionRoot, manifest, ledgerRoot);
   copy(extensionRoot, resolve(releaseRoot, "extension"));
   writeFileSync(resolve(releaseRoot, "manifest.json"), json(manifest), { mode: 0o600, flag: "wx" });
-  return { manifestSha256: digest(resolve(releaseRoot, "manifest.json")), version: manifest.version, extensionId: manifest.extensionId };
+  return { manifestSha256: digest(resolve(releaseRoot, "manifest.json")), version: manifest.version, extensionId: manifest.extensionId, sealedDigest };
+}
+
+/** The program and arguments that start `command` with no shell on this platform. */
+function startable(command, args, options) {
+  if (command !== "pnpm") return { program: command, programArgs: args };
+  const pnpm = pnpmCommand({ env: options.env || process.env });
+  return { program: pnpm.command, programArgs: [...pnpm.args, ...args] };
 }
 
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { cwd: ROOT, stdio: "inherit", ...options });
+  const { program, programArgs } = startable(command, args, options);
+  const result = spawnSync(program, programArgs, { cwd: ROOT, stdio: "inherit", ...options });
   if (result.error) throw new Error(`${command} could not start: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`${command} failed with exit status ${result.status ?? 1}`);
 }
@@ -343,7 +356,8 @@ function runtimeDependencies(packagesByName) {
 }
 
 function capture(command, args, options = {}) {
-  const result = spawnSync(command, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, ...options });
+  const { program, programArgs } = startable(command, args, options);
+  const result = spawnSync(program, programArgs, { cwd: ROOT, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, ...options });
   if (result.error) throw new Error(`${command} could not start: ${result.error.message}`);
   if (result.status !== 0) {
     const detail = String(result.stderr || result.stdout || "").trim();
@@ -853,6 +867,13 @@ async function preparePayload(target, destination, replace) {
     if (!sameSourceCheckpoint(beforeBuild, checkpoint)) {
       throw new Error("Tracked source changed while Morrow rebuilt desktop release outputs.");
     }
+    // The packager stages connector/extension under a temporary path, so the ledger guard below
+    // would not see the real source. Check the checkout itself first, then require the staged
+    // copy to carry exactly those sealed bytes.
+    const sealedBridgeDigest = assertCurrentBridgeRelease(
+      resolve(ROOT, "connector", "extension"),
+      bridgeReleaseManifest(resolve(ROOT, "connector", "extension"))
+    );
     materialization = materializeRuntimeDependencies(packages, staging);
     const dependencies = materialization.dependencies;
     const archive = await nodeArchive(target, resolve(ROOT, "artifacts", "desktop-runtime-cache"));
@@ -868,6 +889,9 @@ async function preparePayload(target, destination, replace) {
     copy(resolve(input.stage, "artifacts/canvas-api/canvas-api-catalog.json"), resolve(appRoot, "artifacts/canvas-api/canvas-api-catalog.json"));
     copy(resolve(input.stage, "connector/extension"), resolve(appRoot, "connector/extension"));
     const bridgeRelease = copyBridgeRelease(appRoot, resolve(input.stage, "connector/extension"));
+    if (bridgeRelease.sealedDigest !== sealedBridgeDigest) {
+      throw new Error("Morrow Bridge source changed without a new sealed release ledger entry.");
+    }
     copy(resolve(input.stage, "installer"), resolve(appRoot, "installer"));
     writeFileSync(resolve(appRoot, "package-input-manifest.json"), input.manifestBytes, { mode: 0o600, flag: "wx" });
     writeFileSync(resolve(appRoot, "mcp-runtime-manifest.json"), input.mcpRuntime.bytes, { mode: 0o600, flag: "wx" });
@@ -911,9 +935,9 @@ async function preparePayload(target, destination, replace) {
 }
 
 function signingState(target, unsignedQa, unsignedRelease) {
-  if (unsignedRelease) return { mode: "unsigned_public_release", target, publicRelease: true, automaticUpdates: false };
+  if (unsignedRelease) return unsignedSigningState(target, { publicRelease: true });
   if (!unsignedQa) throw new Error("Choose --unsigned-release for an unsigned distribution or --unsigned-qa for a private QA artifact.");
-  return { mode: "unsigned_private_qa", target, publicRelease: false };
+  return unsignedSigningState(target, { publicRelease: false });
 }
 
 function unsignedBuilderEnvironment(base = process.env) {
@@ -1117,4 +1141,4 @@ async function main() {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
 
-export { BRIDGE_SOURCE_FILES, WORKSPACE_PACKAGE_DIRECTORIES, RUNTIME_DEPENDENCY_NAMES, assertPayloadSnapshot, assertUnsignedWindowsExecutable, cacheVerifiedArchive, desktopInstallerReceipt, desktopTargetEnvironment, materializeRuntimeDependencies, rebuildWorkspaceReleaseOutputs, unsignedBuilderEnvironment, windowsAuthenticodeCertificateTable, workspacePackages };
+export { BRIDGE_SOURCE_FILES, WORKSPACE_PACKAGE_DIRECTORIES, RUNTIME_DEPENDENCY_NAMES, assertPayloadSnapshot, assertUnsignedWindowsExecutable, cacheVerifiedArchive, copyBridgeRelease, desktopInstallerReceipt, desktopTargetEnvironment, materializeRuntimeDependencies, rebuildWorkspaceReleaseOutputs, unsignedBuilderEnvironment, windowsAuthenticodeCertificateTable, workspacePackages };

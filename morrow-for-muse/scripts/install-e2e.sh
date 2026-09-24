@@ -1,8 +1,9 @@
 #!/bin/bash
 # scripts/install-e2e.sh: prove install from this repo, end to end (DEV-ONLY).
 #
-# 1. Carves the distribution from the working tree (scripts/carve.py
-#    --zip) into <repo>/dist/.
+# 1. Carves the distribution (scripts/carve.py --zip) into <repo>/dist/.
+#    Like a release build, it refuses uncommitted changes under
+#    morrow-for-muse/, so commit the work under test first.
 # 2. Builds a Linux container that looks like the Muse VM: user `hatch`,
 #    Chromium at /opt/meta-chromium/chrome, curl/ss/pgrep/flock/crontab,
 #    and an authenticated https_proxy in the environment.
@@ -12,6 +13,13 @@
 #    profile are gone, then runs scripts/uninstall.sh --yes.
 # 4. Writes the full transcript to <repo>/dist/install-e2e.log and exits
 #    non-zero on the first failed step.
+#
+# A test run needs isolated state and ports, and the container gives
+# both: a scratch HOME (a clean MORROW_HOME, no live helper profile, no
+# real credentials) and its own network, so the helper and Chromium
+# ports never meet a live helper on the host's 8901/19223. These are
+# test-run rules only; FIRST_RUN.md is the checklist for an educator's
+# Muse computer, where the helper uses 8901 and 19223.
 #
 # Needs Docker. Never touches the host crontab, ~/.morrow, or /tmp.
 set -euo pipefail

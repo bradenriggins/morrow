@@ -23,7 +23,7 @@ describe("canvasConnectorSummary", () => {
       ok: true,
       commandKind: "invoke_write",
       result: { verification: { schema: "morrow.browser-verification.v1", status: "mismatch" } },
-    })).toBe("Morrow could not confirm this change because Canvas returned a different result. Ask your assistant to check the existing request. Do not repeat this change.");
+    })).toBe("Morrow read Canvas again after this change, and Canvas does not hold the approved result. The change failed. Do not repeat this change.");
     expect(canvasConnectorSummary({
       schema: "morrow.canvas-connector.result.v1",
       ok: true,

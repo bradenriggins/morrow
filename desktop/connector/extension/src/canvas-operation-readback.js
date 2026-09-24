@@ -242,7 +242,7 @@ function evaluateBulkAssignmentDates(plan, readResult) {
   for (const target of plan.targets) {
     const assignment = exactRecord(readResult.data, target.assignmentId);
     if (!assignment) {
-      return verification("mismatch", plan.strategy, plan.readOperation.toolName, "requested_assignment_missing_or_ambiguous");
+      return verification("unconfirmed", plan.strategy, plan.readOperation.toolName, "requested_assignment_missing_or_ambiguous");
     }
     if (identifier(assignment.course_id) !== plan.courseId) {
       return verification("mismatch", plan.strategy, plan.readOperation.toolName, "assignment_course_mismatch");
@@ -253,7 +253,7 @@ function evaluateBulkAssignmentDates(plan, readResult) {
     for (const expectedDate of target.dates) {
       const matches = assignment.all_dates.filter((date) => matchingDate(date, expectedDate));
       if (matches.length !== 1) {
-        return verification("mismatch", plan.strategy, plan.readOperation.toolName, "requested_assignment_date_missing_or_ambiguous");
+        return verification("unconfirmed", plan.strategy, plan.readOperation.toolName, "requested_assignment_date_missing_or_ambiguous");
       }
       for (const [field, expectedValue] of Object.entries(expectedDate.fields)) {
         if (!Object.hasOwn(matches[0], field) || !sameInstant(matches[0][field], expectedValue)) {
@@ -273,7 +273,7 @@ function evaluateEnrollmentReactivation(plan, readResult) {
   }
   const enrollment = exactRecord(readResult.data, plan.enrollmentId);
   if (!enrollment) {
-    return verification("mismatch", plan.strategy, plan.readOperation.toolName, "reactivated_enrollment_missing_or_ambiguous");
+    return verification("unconfirmed", plan.strategy, plan.readOperation.toolName, "reactivated_enrollment_missing_or_ambiguous");
   }
   if (identifier(enrollment.course_id) !== plan.courseId || identifier(enrollment.user_id) !== plan.userId) {
     return verification("mismatch", plan.strategy, plan.readOperation.toolName, "enrollment_subject_or_course_mismatch");

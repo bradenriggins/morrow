@@ -3,7 +3,7 @@
 Morrow is one local operations layer between an MCP-compatible AI client and a course platform. Canvas and Moodle work through a signed-in Chrome session. Blackboard works through the official Anthology Learn REST API with a local credential and no browser, and no live Blackboard tenant has been tested. [LIMITATIONS.md](LIMITATIONS.md) holds the canonical platform sentence and the evidence for each platform.
 
 ```text
-Morrow desktop app
+Morrow Desktop
   writes the client configuration, verifies the sealed MCP payload,
   delivers Morrow Bridge, writes the optional Blackboard tenant file
                          |
@@ -66,7 +66,7 @@ It validates:
 - the extension ID;
 - the catalog digest;
 - the connector revision;
-- the pairing secret;
+- the pairing proof, made from the secret in the active-folder marker of the Bridge folder Morrow set up;
 - the protocol version;
 - request ID and operation ID;
 - exact operation key;
@@ -131,11 +131,11 @@ Learner identities are redacted inside this child before any result leaves it. W
 
 ### Desktop app and installer
 
-The Morrow desktop app is an Electron application in `installer/`. It sets Morrow up, repairs it, and updates it. It is not in the request path: no assistant request passes through it.
+Morrow Desktop is an Electron application in `installer/`. It sets Morrow up, repairs it, and updates it. It is not in the request path: no assistant request passes through it.
 
 It owns:
 
-- assistant detection, and the Morrow entry in the configuration of each assistant it set up: it writes that entry, writes it again for every configured assistant when the materials folder changes, and removes it on request, each time only while the file on disk still matches the file Morrow wrote;
+- assistant detection, and the Morrow entry in the configuration of each assistant it set up: it writes that entry, writes it again for every configured assistant when the materials folder changes, and removes it on request, each time finding its own entry by its marker and changing only that entry, and refusing a `morrow` entry it did not write or a file that changes while Morrow writes it;
 - verification of the sealed MCP payload against its manifest of file digests, which with a gateway health answer is the only way the runtime reports `ready`;
 - the app-owned Morrow Bridge folder that Chrome loads, its staged updates, and its rollback copies;
 - the optional Blackboard tenant configuration and credential files, written with restricted permissions and confirmed by reading their digests back, for a Blackboard route with no live-tenant evidence;
@@ -187,9 +187,9 @@ A Blackboard read replaces steps 3 to 5: the Blackboard child checks the integra
 6. The effect broker reserves one durable effect receipt before provider dispatch.
 7. The dispatching child consumes that receipt once and sends one provider request.
 8. That child performs the frozen fresh readback.
-9. Morrow records `verified`, `unconfirmed`, `failed`, or `applied_or_unknown` from evidence. It never maps an HTTP success alone to verified success.
+9. Morrow records `verified`, `unconfirmed`, `failed`, or `applied_or_unknown` from evidence. It never maps an HTTP success alone to verified success. A fresh readback has three outcomes, kept apart: it shows the approved result (`verified`), it proves the provider holds another result (the change is `failed` with verification `mismatch`, and it releases its target), or it compares nothing (the record stays unresolved with verification `unconfirmed`).
 
-An uncertain send is not replayed. Reconciliation runs the readback only. An unresolved record holds its provider object until it is settled; the refusal names the operation that holds it. When Morrow retained no read comparator it cannot settle the record itself, so `morrow_operation_close_unresolved` lets a person close it after reading the item with Morrow: it requires that read's exact result digest and an explicit person confirmation, records `closed_by_person`, and sends nothing. Undo is a new planned and approved corrective operation.
+An uncertain send is not replayed. Reconciliation runs the readback only. An unresolved record holds its provider object until it is settled; the refusal names the operation that holds it. When Morrow retained no read comparator it cannot settle the record itself, so a person closes it. `morrow_operation_close_unresolved` only prepares the close-out: for a change Morrow can read back it requires the exact result digest of a fresh Morrow read of the item, and it returns the change's status page. That page offers "I checked it in Canvas: close this change", and the review server accepts that form only with Morrow Bridge's signature over its path and nonce, which the Bridge adds only for a person's own click, the same as an approval. Only that signed post records `closed_by_person`, and it sends nothing. Neither the assistant nor another local HTTP client can close a change. Undo is a new planned and approved corrective operation.
 
 ## Transport limits
 
@@ -203,9 +203,9 @@ Official New Quizzes operations use the documented `/quiz/v1` routes. Every New 
 
 Item Bank endpoints are available only inside authenticated New Quizzes frames. The extension executes these requests in the page's main world. It runs that executor only in frames served over HTTPS from the tenant Quizzes host, and the probe that selects the frame carries the operation and the course binding, never the item payload. It validates the Canvas referrer origin and course before use. It strips token-like fields from returned values. The frame token never crosses into extension storage, the loopback protocol, MCP output, logs, or client configuration.
 
-The catalog defines seven Item Bank reads and nine owner-write shapes. The share read returns one observed page and always reports incomplete pagination. The quiz-entry read follows numbered pages to a required empty end page and fails closed at its page or row bound. All nine writes stop before provider I/O. Bank creation lacks a proved recoverable create-and-course-associate transaction. Existing-bank changes lack complete downstream reach. The selected-quiz bank draw lacks durable recovery after a browser worker or process interruption.
+The catalog defines nine Item Bank reads and twenty course-bound changes. The share read returns one observed page and always reports incomplete pagination. The quiz-entry read follows numbered pages to a required empty end page and fails closed at its page or row bound. Every change reads the exact current state first, sends one request, and rereads Canvas to prove the saved result. Bank creation lacks a proved recoverable create-and-course-associate transaction. Existing-bank changes lack complete downstream reach. The selected-quiz bank draw lacks durable recovery after a browser worker or process interruption.
 
-The fan-out reader reports entry counts, observed share rows, and quiz uses from selected connected courses. Current share rows use a private context UUID, which Morrow cannot map to a numeric Canvas course id from proved data. It therefore does not claim shared-course identities. The record is always incomplete and does not grant authority. All 16 private operations remain live-unverified because no Morrow-connected Canvas tenant has answered the Item Banks or builder routes through this release.
+The fan-out reader reports entry counts, observed share rows, and quiz uses from selected connected courses. Current share rows use a private context UUID, which Morrow cannot map to a numeric Canvas course id from proved data. It therefore does not claim shared-course identities. The record is always incomplete and does not grant authority. Attended runs on the BT2 test course confirmed the Item Bank reads and changes, except the two stimulus changes, and the [attended record](docs/implementation/NEW-QUIZZES-ITEM-BANKS-COVERAGE.md) lists each task.
 
 ## Batch flow
 
@@ -215,7 +215,7 @@ Batch state is durable in SQLite. Arguments and manifests use authenticated encr
 
 ## Trust boundaries
 
-- **AI client:** may choose and call tools. MCP exposes no approval tool. A separate local page records approval only with Morrow Bridge's signature over the form, which the Bridge adds for a trusted click in the review tab. Local HTTP requests cannot approve. It does not prove human presence against browser automation that drives Chrome input.
+- **AI client:** may choose and call tools. MCP exposes no approval tool. A separate local page records approval only with Morrow Bridge's signature over the form, which the Bridge adds for a trusted click in the review tab. Local HTTP requests cannot approve, and they cannot pair a Bridge: Morrow pairs only a Bridge that proves it holds the secret in the Bridge folder Morrow set up, in the Connect Morrow step the person selects. It does not prove human presence against browser automation that drives Chrome input, and it does not stop a program that runs as the educator and reads Morrow's files.
 - **Morrow MCP:** may plan and reserve effects; has no platform credential.
 - **Approval page:** may approve only one exact, unexpired durable plan on loopback.
 - **Extension:** may use only paired commands, admitted operations, current bindings, and unused receipts.

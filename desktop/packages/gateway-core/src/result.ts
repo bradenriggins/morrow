@@ -28,7 +28,7 @@ export interface CanonicalMorrowResultInput {
   readonly status?: string;
   readonly completeness?: "complete" | "limited" | "unknown";
   readonly effectState?: string;
-  readonly verificationStatus: "not_applicable" | "not_requested" | "unconfirmed" | "verified";
+  readonly verificationStatus: "not_applicable" | "not_requested" | "unconfirmed" | "verified" | "mismatch";
   readonly provider?: string;
   readonly verificationProvider?: string;
   readonly verificationEvidence?: readonly JsonObject[];
@@ -84,6 +84,12 @@ function canonicalContent(
     return [{
       type: "text",
       text: `This change was cancelled before it was sent to ${provider}.`,
+    }];
+  }
+  if (input.effectState === "failed" && input.verificationStatus === "mismatch") {
+    return [{
+      type: "text",
+      text: `Morrow read ${provider} again after this change, and ${provider} does not hold the approved result. The change failed. Do not repeat this change. Ask the person to open the item before a new review.`,
     }];
   }
   if (input.effectState === "failed") {

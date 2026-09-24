@@ -4,7 +4,9 @@ async function completeBridgeUpdate({ acquire, readback, matchesChallenge, inspe
   await acquire();
   try {
     const result = await readback();
-    if (matchesChallenge(result) !== true) throw new Error("Morrow Bridge reload is not confirmed");
+    if (matchesChallenge(result) !== true) {
+      throw Object.assign(new Error("Morrow Bridge reload is not confirmed"), { code: "bridge_reload_unconfirmed" });
+    }
     const pending = await inspect(result);
     await commit(pending);
     await confirm(result);

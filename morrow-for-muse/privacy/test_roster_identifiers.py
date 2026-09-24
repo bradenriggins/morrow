@@ -69,7 +69,7 @@ def _project(op, payload):
                              {"course_id": 1})
     view = ex._projection_entry(entry, url, payload)
     assert ex.admission_touches_learner_data(view), name
-    out, _reveal = wire.project_learner_result(
+    out = wire.project_learner_result(
         view, {"receipt": payload, "truncated": False, "bytes_received": 0},
         BASE, error_cls=RuntimeError)
     return json.dumps(out["receipt"])
@@ -104,8 +104,9 @@ def test_minimal_user_record_on_a_user_route_is_labeled():
 
 def test_vault_known_name_in_tags_is_labeled():
     _project(USERS, [dict(JANE)])
-    text = _project(TAGS, {"users": [{"user_id": 98765,
-                                      "tags": ["Jane Doe accommodations"]}]})
+    # Canvas answers bulk_user_tags with a map from user id to that
+    # user's tags (dispatch/test_student_id_keys.py labels the keys).
+    text = _project(TAGS, {"98765": ["Jane Doe accommodations"]})
     assert _leaks(text) == [], text
     assert "accommodations" in text
 

@@ -1,13 +1,40 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { Client } from "@modelcontextprotocol/client";
+import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { describe, expect, it } from "vitest";
 
 const fixtureUrl = pathToFileURL(fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url))).href;
 const entryPath = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+
+/**
+ * Lays out this build the way a shipped payload holds it: the compiled server under
+ * app/packages/mcp-server, with the sealed runtime manifest at app/. Returns the entry to run.
+ */
+async function sealedPayloadEntry(directory: string): Promise<string> {
+  const serverRoot = join(directory, "app", "packages", "mcp-server");
+  await mkdir(serverRoot, { recursive: true });
+  await cp(join(packageRoot, "dist"), join(serverRoot, "dist"), { recursive: true });
+  await cp(join(packageRoot, "package.json"), join(serverRoot, "package.json"));
+  await symlink(join(packageRoot, "node_modules"), join(serverRoot, "node_modules"), "dir");
+  await writeFile(join(directory, "app", "mcp-runtime-manifest.json"), `${JSON.stringify({
+    schema: "morrow.mcp-runtime-manifest.v2",
+    package: { name: "@morrow-lms/gateway", version: "1.0.0" },
+    entrypoint: { path: "packages/mcp-server/dist/index.js", bytes: 1, sha256: "c".repeat(64) },
+    dependencies: [],
+  })}\n`, "utf8");
+  return join(serverRoot, "dist", "index.js");
+}
+
+/** Waits for a process this test did not start as its own child to exit. */
+async function waitForExit(pid: number): Promise<void> {
+  while (processIsAlive(pid)) await new Promise((resolve) => setTimeout(resolve, 20));
+}
 
 function processIsAlive(pid: number): boolean {
   try {
@@ -18,28 +45,22 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
-async function within<T>(promise: Promise<T>, milliseconds: number, detail: string): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`Timed out waiting for ${detail}`)), milliseconds);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-async function waitForPid(path: string): Promise<number> {
-  return within((async () => {
-    for (;;) {
-      try {
-        const pid = Number((await readFile(path, "utf8")).trim());
-        if (Number.isSafeInteger(pid) && pid > 0) return pid;
-      } catch {}
-      await new Promise((resolve) => setTimeout(resolve, 10));
+/**
+ * Waits for a process to write its PID to `path`. A busy computer only makes
+ * this wait longer: it fails when `launcher` exits first, and the test's own
+ * limit ends a wait that never settles.
+ */
+async function waitForPid(path: string, launcher: ChildProcessWithoutNullStreams): Promise<number> {
+  for (;;) {
+    try {
+      const pid = Number((await readFile(path, "utf8")).trim());
+      if (Number.isSafeInteger(pid) && pid > 0) return pid;
+    } catch {}
+    if (launcher.exitCode !== null || launcher.signalCode !== null) {
+      throw new Error(`the launched process exited before ${path} named a PID`);
     }
-  })(), 3_000, "the delayed upstream PID");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 async function writeConfig(
@@ -119,11 +140,10 @@ describe("local owner startup lifecycle", () => {
     const processRun = launch(configPath);
     let upstreamPid = 0;
     try {
-      upstreamPid = await waitForPid(upstreamPidPath);
+      upstreamPid = await waitForPid(upstreamPidPath, processRun.child);
       processRun.child.stdin.end();
 
-      await expect(within(processRun.exit, 5_000, "the dedicated gateway exit"))
-        .resolves.toEqual({ code: 0, signal: null });
+      await expect(processRun.exit).resolves.toEqual({ code: 0, signal: null });
       expect(processIsAlive(upstreamPid)).toBe(false);
       expect(existsSync(lifecyclePath)).toBe(false);
     } finally {
@@ -139,26 +159,18 @@ describe("local owner startup lifecycle", () => {
     const ownerPath = `${journalPath}.local-owner.json`;
     const ownerStderrPath = join(directory, "owner.stderr");
     const { configPath, upstreamPidPath, lifecyclePath } = await writeConfig(directory, journalPath, 60_000);
+    // The proxy's one-second start limit begins when the owner's upstream has
+    // started, so the timed-out owner always has an upstream to reclaim.
     const processRun = launch(configPath, {
       MORROW_INSTALLER_TEST_MODE: "1",
       MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_MS: "1000",
+      MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_AFTER_PATH: upstreamPidPath,
       MORROW_LOCAL_OWNER_TEST_STDERR_PATH: ownerStderrPath,
     });
     let upstreamPid = 0;
     try {
-      upstreamPid = await waitForPid(upstreamPidPath);
-      let result: { code: number | null; signal: NodeJS.Signals | null };
-      try {
-        result = await within(processRun.exit, 6_000, "the timed-out proxy exit");
-      } catch (error) {
-        const ownerError = await readFile(ownerStderrPath, "utf8").catch(() => "");
-        const lifecycle = await readFile(lifecyclePath, "utf8").catch(() => "");
-        throw new Error(
-          `${error instanceof Error ? error.message : String(error)}; `
-          + `proxy stderr=${JSON.stringify(processRun.stderr())}; `
-          + `owner stderr=${JSON.stringify(ownerError)}; lifecycle=${JSON.stringify(lifecycle)}`,
-        );
-      }
+      upstreamPid = await waitForPid(upstreamPidPath, processRun.child);
+      const result = await processRun.exit;
 
       expect(result.code).not.toBe(0);
       expect(result.signal).toBeNull();
@@ -173,22 +185,71 @@ describe("local owner startup lifecycle", () => {
     }
   }, 10_000);
 
+  // The hooks that change how an owner starts are for a source checkout. A shipped runtime runs
+  // beside its sealed manifest, so it starts normally even when installer test mode sets them.
+  it("ignores the owner start test hooks when it runs from a sealed payload", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-owner-sealed-payload-"));
+    const journalPath = join(directory, "gateway.sqlite3");
+    const ownerPath = `${journalPath}.local-owner.json`;
+    const stubbornPidPath = join(directory, "stubborn.pid");
+    const { configPath, upstreamPidPath } = await writeConfig(directory, journalPath, 0);
+    const client = new Client({ name: "morrow-sealed-payload", version: "1.0.0" }, { versionNegotiation: { mode: "legacy" } });
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [await sealedPayloadEntry(directory)],
+      env: {
+        ...getDefaultEnvironment(),
+        MORROW_UPSTREAMS_FILE: configPath,
+        MORROW_INSTALLER_TEST_MODE: "1",
+        MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_MS: "25",
+        MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_AFTER_PATH: configPath,
+        MORROW_LOCAL_OWNER_TEST_STUBBORN_STARTUP: "1",
+        MORROW_LOCAL_OWNER_TEST_STUBBORN_PID_PATH: stubbornPidPath,
+      },
+      stderr: "pipe",
+    });
+    let ownerPid = 0;
+    let upstreamPid = 0;
+    try {
+      await client.connect(transport);
+      ownerPid = (JSON.parse(await readFile(ownerPath, "utf8")) as { pid: number }).pid;
+      upstreamPid = Number((await readFile(upstreamPidPath, "utf8")).trim());
+      const health = await client.callTool({ name: "morrow_health", arguments: {} });
+      expect(health.isError, JSON.stringify(health)).not.toBe(true);
+      expect(existsSync(stubbornPidPath)).toBe(false);
+      await client.close();
+      await waitForExit(ownerPid);
+      await waitForExit(upstreamPid);
+    } finally {
+      await client.close().catch(() => undefined);
+      if (ownerPid && processIsAlive(ownerPid)) process.kill(ownerPid, "SIGKILL");
+      if (upstreamPid && processIsAlive(upstreamPid)) process.kill(upstreamPid, "SIGKILL");
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("force-kills a stubborn exact owner and settles the startup failure", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-stubborn-owner-timeout-"));
     const journalPath = join(directory, "gateway.sqlite3");
     const ownerStderrPath = join(directory, "owner.stderr");
     const { configPath } = await writeConfig(directory, journalPath, 60_000);
+    const ownerPidPath = join(directory, "owner.pid");
+    // The proxy's one-second start limit begins when the stubborn owner has
+    // started, so the proxy always has that owner to force-kill.
     const processRun = launch(configPath, {
       MORROW_INSTALLER_TEST_MODE: "1",
       MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_MS: "1000",
+      MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_AFTER_PATH: ownerPidPath,
       MORROW_LOCAL_OWNER_TEST_STDERR_PATH: ownerStderrPath,
       MORROW_LOCAL_OWNER_TEST_STUBBORN_STARTUP: "1",
+      MORROW_LOCAL_OWNER_TEST_STUBBORN_PID_PATH: ownerPidPath,
     });
     let ownerPid = 0;
     try {
-      const result = await within(processRun.exit, 5_000, "the stubborn owner timeout");
+      ownerPid = await waitForPid(ownerPidPath, processRun.child);
+      const result = await processRun.exit;
       const ownerError = await readFile(ownerStderrPath, "utf8");
-      ownerPid = Number(/stubborn local owner pid=(\d+)/u.exec(ownerError)?.[1]);
+      expect(Number(/stubborn local owner pid=(\d+)/u.exec(ownerError)?.[1])).toBe(ownerPid);
 
       expect(result.code).not.toBe(0);
       expect(result.signal).toBeNull();

@@ -40,7 +40,7 @@ def _uid(name):
     return "test-%s" % clean
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def _morrow_home():
     root = os.path.join(MODES_DIR, ".test-state", "pid-%d" % os.getpid())
     shutil.rmtree(root, ignore_errors=True)
@@ -515,7 +515,10 @@ def test_edit_write_usage_journaled(no_settings):
             and e.get("grant_id") == grant["grant_id"]]
     assert len(uses) == 1
     assert uses[0]["course_id"] == "42"
-    assert uses[0]["op_id"] == "op-42"
+    # The gate decides before the executor claims the op id, so the
+    # record names the op without reserving it (final sweep 2026-09-23).
+    assert uses[0]["for_op_id"] == "op-42"
+    assert "op_id" not in uses[0]
     assert uses[0]["educator_identity"]["by"] == "educator"
     assert "use edit mode please" in uses[0]["educator_identity"]["authorization"]
 

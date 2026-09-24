@@ -3,11 +3,13 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   closeSync,
   constants,
+  existsSync,
   openSync,
   readFileSync,
   realpathSync,
   statSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -36,6 +38,7 @@ import {
   readExactPrivateStateFile,
   replaceExactPrivateStateFile,
   withExactPrivateStateFileTransaction,
+  withPrivateAccessOperation,
 } from "@morrow/gateway-core";
 import type { GatewayConfig } from "./config.js";
 import { createFullMorrowServer } from "./full-server.js";
@@ -153,6 +156,8 @@ const RUNTIME_IDENTITY = /^(?:source|[a-f0-9]{64})$/;
  * with against the files now installed at its own path.
  */
 function localOwnerRuntimeIdentity(): string {
+  const payload = mcpRuntimeHealthFromPayload();
+  if (payload) return payload.manifestSha256;
   if (process.env.MORROW_INSTALLER_TEST_MODE === "1" && process.env.MORROW_LOCAL_OWNER_TEST_RUNTIME_IDENTITY_FILE) {
     try {
       const value = readFileSync(process.env.MORROW_LOCAL_OWNER_TEST_RUNTIME_IDENTITY_FILE, "utf8").trim();
@@ -161,7 +166,17 @@ function localOwnerRuntimeIdentity(): string {
       return "source";
     }
   }
-  return mcpRuntimeHealthFromPayload()?.manifestSha256 ?? "source";
+  return "source";
+}
+
+/**
+ * Whether the test hooks that change how an owner starts apply: in installer test mode, and only
+ * from a source checkout. A shipped runtime runs beside its sealed runtime manifest, so it ignores
+ * them even in test mode. The installed-app smoke sets test mode on a shipped runtime, and only
+ * its owner stderr copy applies there.
+ */
+function sourceStartTestHooks(): boolean {
+  return process.env.MORROW_INSTALLER_TEST_MODE === "1" && mcpRuntimeHealthFromPayload() === undefined;
 }
 
 function durableJournalPath(config: GatewayConfig): string | null {
@@ -207,11 +222,22 @@ function testOwnerStderrDescriptor(): number | null {
 }
 
 function ownerStartTimeoutMs(): number {
-  if (process.env.MORROW_INSTALLER_TEST_MODE !== "1") return OWNER_START_TIMEOUT_MS;
+  if (!sourceStartTestHooks()) return OWNER_START_TIMEOUT_MS;
   const configured = Number(process.env.MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_MS);
   return Number.isSafeInteger(configured) && configured >= 25 && configured <= OWNER_START_TIMEOUT_MS
     ? configured
     : OWNER_START_TIMEOUT_MS;
+}
+
+/**
+ * Source test mode only: a file whose appearance starts the owner start
+ * deadline, so a test times out a start after the step that writes it, not
+ * after however long a busy computer takes to reach that step.
+ */
+function testOwnerStartDeadlineGate(): string | null {
+  if (!sourceStartTestHooks()) return null;
+  const configured = process.env.MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_AFTER_PATH;
+  return configured && isAbsolute(configured) && !/[\0\r\n]/.test(configured) ? configured : null;
 }
 
 async function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
@@ -712,12 +738,19 @@ async function runDedicatedStdio(config: GatewayConfig): Promise<void> {
   }
 }
 
-export async function runLocalOwner(config: GatewayConfig): Promise<void> {
-  if (
-    process.env.MORROW_INSTALLER_TEST_MODE === "1"
-    && process.env.MORROW_LOCAL_OWNER_TEST_STUBBORN_STARTUP === "1"
-  ) {
+/**
+ * Starts the local owner. The start is one private-access operation: on
+ * Windows each state path is asked about once, not once per read.
+ */
+export function runLocalOwner(config: GatewayConfig): Promise<void> {
+  return withPrivateAccessOperation(() => startLocalOwner(config));
+}
+
+async function startLocalOwner(config: GatewayConfig): Promise<void> {
+  if (process.env.MORROW_LOCAL_OWNER_TEST_STUBBORN_STARTUP === "1" && sourceStartTestHooks()) {
     console.error(`[morrow-test] stubborn local owner pid=${process.pid}`);
+    const pidPath = process.env.MORROW_LOCAL_OWNER_TEST_STUBBORN_PID_PATH;
+    if (pidPath && isAbsolute(pidPath)) writeFileSync(pidPath, String(process.pid), { mode: 0o600 });
     process.on("SIGINT", () => undefined);
     process.on("SIGTERM", () => undefined);
     setInterval(() => undefined, 1_000);
@@ -1398,13 +1431,16 @@ async function waitForOwner(journalPath: string, configDigest: string): Promise<
   let launchedChild: ChildProcess | null = null;
   let launchError: Error | null = null;
   let ready = false;
-  const deadline = Date.now() + ownerStartTimeoutMs();
+  const startTimeoutMs = ownerStartTimeoutMs();
+  const deadlineGate = testOwnerStartDeadlineGate();
+  let deadline = deadlineGate ? Number.POSITIVE_INFINITY : Date.now() + startTimeoutMs;
   const runtimeIdentity = localOwnerRuntimeIdentity();
   const retirementChecked = new Set<string>();
   const retiringOwners = new Set<string>();
   try {
     for (;;) {
       if (launchError) throw launchError;
+      if (deadlineGate && deadline === Number.POSITIVE_INFINITY && existsSync(deadlineGate)) deadline = Date.now() + startTimeoutMs;
       const descriptor = readOwnerDescriptor(journalPath);
       const descriptorLifetime = descriptor
         ? await processMatchesRecordedLifetimeAsync(descriptor.pid, descriptor.startedAt)

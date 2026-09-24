@@ -37,6 +37,7 @@ _home_sys.path.insert(0, _home_os.path.join(
     _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
 import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import json
+import urllib.parse
 import os
 import shutil
 import sys
@@ -111,18 +112,35 @@ _AUTH = ("selftest authorization basis: offline mocked-CDP write hardening "
 # fakes
 # ----------------------------------------------------------------------
 
+
+def _is_roster_read(method, path):
+    """The student roster read Morrow makes before it touches a course
+    (dispatch/test_course_content_e2e.py checks it and its order)."""
+    parts = urllib.parse.urlsplit(path)
+    query = urllib.parse.parse_qs(parts.query)
+    return method == "GET" and (
+        (parts.path.endswith("/users")
+         and "inactive" in query.get("enrollment_state[]", []))
+        or (parts.path.endswith("/enrollments")
+            and query.get("state[]") == ["deleted"]))
+
+
 class FakeTransport:
     """Scripted stand-in for LocalChromiumTransport (the CDP layer)."""
 
     def __init__(self, script):
         self.script = list(script)
         self.calls = []
+        self.roster_calls = []
 
     def ensure_session(self):
         return (1, "Test User")
 
     def api(self, method, path, data=None, _ws=None, timeout=60,
             as_json=False, max_bytes=None):
+        if _is_roster_read(method, path):
+            self.roster_calls.append(path)
+            return 200, {}, "[]"
         self.calls.append({"method": method, "path": path, "data": data,
                            "as_json": as_json, "max_bytes": max_bytes})
         if not self.script:
@@ -915,7 +933,7 @@ class _Boom(Exception):
 
 ex._journal_write_failure_audit(
     "test.n5", "dispatch", "write", {"a": 1}, None, _n5_op, _Boom("x"),
-    {"write_attempted": True}, None, None, None)
+    {"write_attempted": True}, None, None)
 check("audit record is not reported as the outcome",
       ex.find_journal_op(_n5_op) is None)
 check("claim stays live after audit record",
@@ -988,12 +1006,13 @@ def _t_destructive_confirm():
     # W6-P2-D2: claim-release needs a real reconciliation note.
     for bad in ("", "   ", "fixed it", "released the claim"):
         try:
-            ex._check_claim_release_reason(bad)
+            ex._check_operator_reason("claim-release", bad)
             check("w6p2d2: stub reason %r refused" % bad, False,
                   "no ExecutorError raised")
         except ex.ExecutorError:
             check("w6p2d2: stub reason %r refused" % bad, True)
-    ex._check_claim_release_reason(
+    ex._check_operator_reason(
+        "claim-release",
         "reconciled op abc123 against the provider: no such page exists")
     check("w6p2d2: genuine reconciliation note accepted", True)
 _t_destructive_confirm()
@@ -1091,7 +1110,7 @@ def _t_notification_failure_loud():
     fake = mock.MagicMock()
     fake.on_expiry_detected.return_value = None
     fake.quarantine_op.return_value = None
-    fake.quarantined_ops.return_value = [{"op_id": "x"}]
+    fake.paused_ops.return_value = [{"op_id": "x"}]
     fake.write_notify_expired.side_effect = OSError("disk full")
     fake.write_notify_stale.side_effect = OSError("disk full")
     err = io.StringIO()

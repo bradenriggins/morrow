@@ -18,11 +18,9 @@ live-proven 14, pending 2, failed 0, evidence-hold 4.
 Statuses mean:
 - `live-proven`: a disposable live battery proved the operation through
   the browser-owned session with readback verification and full cleanup.
-  This is the only status that dispatches without an educator override
-  (with one caveat, below).
-- `pending`: never proven. Dispatch refuses unless the educator signs
-  an explicit `--allow-unproven` override as part of the approval, and
-  even that cannot override the absolute refusals below.
+  This is the only status that dispatches (with one caveat, below).
+- `pending`: never proven. Dispatch refuses it, even when the educator
+  asks and even with a signed approval. Nothing overrides that.
 - `failed`: a live battery attempted it and it did not work. It is not
   retried without a code or request-shape change. Do not dispatch it.
 - `unsupported`: the provider does not serve the route (e.g. AI
@@ -35,39 +33,44 @@ Statuses mean:
 
 ## The dispatch rule (the part that bites)
 
-The gate checks the catalog row BEFORE anything else
-(`_catalog_provenance_gate` in `dispatch/executor.py`):
+A catalog dispatch is refused before anything is sent unless it
+passes the catalog row checks (`_catalog_provenance_gate` in
+`dispatch/executor.py`):
 
 1. The `--name` must be a real catalog tool name. An unknown name raises
-   `CatalogNotProven` and cannot be overridden by any flag. The name is
-   not free text.
+   `CatalogNotProven`. The name is not free text.
 2. The `--method` and `--path` you pass must match the row's recorded
    method and path exactly. A proven name paired with arbitrary CLI
    arguments raises `CatalogNotProven`. You cannot smuggle a new request
    shape behind a proven name.
-3. The row status must be `live-proven`. The one exception: a row
-   marked `pending` (never tried live) runs with `--allow-unproven` plus
-   an educator-signed approval record carrying `allow_unproven: true`
-   (sealed by `sign_approval`). Rows marked `failed`, `unsupported`, or
-   `excluded` are refused with or without it.
+3. The row status must be `live-proven`. Rows marked `pending`,
+   `failed`, `unsupported`, or `excluded` raise `CatalogNotProven`. No
+   flag and no approval changes that.
 
-Then the absolute refusals run, and `--allow-unproven` cannot touch
-them: `never_dispatch` rows (blueprint, CSP, SIS, conversations,
-feature flags, the quiz submission-users message), `unsupported`,
-`evidence-hold`, and `learner-data` (URL substrings `/users/`,
+When the name is unknown or belongs to another row, and the method and
+path (or else the name) are a live-proven row, the refusal is
+`CatalogNameMismatch`, a `CatalogNotProven` whose evidence names that
+row (`catalog_name`, `catalog_method`, `catalog_path`). Nothing was
+sent: run the command again with that row.
+
+The same gate also runs the absolute refusals: `never_dispatch` rows
+(blueprint, SIS, conversations, feature flags, the quiz
+submission-users message, and any change to CSP settings; reading a
+course's CSP settings, C-94, is a live-proven read), `unsupported`,
+and `evidence-hold`. Learner-data (URL substrings `/users/`,
 `/enrollments`, `/submissions`, `/gradebook`, `/grades`, `/analytics`,
-`/ai_conversations`, `/ai_experiences`; `/users/self` excepted).
+`/ai_conversations`, `/ai_experiences`; `/users/self` excepted) is a
+contingent refusal: it dispatches de-identified on the Chromium lane
+with the encrypted vault and is refused anywhere else (see
+Dispatching below).
 
 **Important caveat:** a catalog row marked live-proven can still be
-held by the admission policy. Example: `canvas_create_new_quiz` is
-live-proven in the catalog at the provider-path level, but
-`dispatch/admission_policy.json` holds it on evidence-hold because the
-2026-09-21 write battery proved the provider path only and the governed
-product pipeline has no live runs yet (the 2026-09-21 gap audit's
-finding: executor pipeline proven at the provider path, zero live
-runs through the governed pipeline). The catalog is the
-provenance record; the policy is the dispatch authority. When they
-disagree, the policy wins.
+held by the admission policy: `evidence_holds` in
+`dispatch/admission_policy.json` names each held row and why. Example:
+the discussion writes C-139, C-141, and C-167 are catalog live-proven,
+but only through the retired form lane, so the policy holds them. The
+catalog is the provenance record; the policy is the dispatch
+authority. When they disagree, the policy wins.
 
 ## What is live-proven (v1 working set)
 
@@ -76,7 +79,9 @@ readback and cleanup:
 
 - **Courses**: get course, update course (rename, readback-verified and
   restored), course settings, course tabs. Course create was never
-  tested. Course conclude/delete (C-108) is on evidence hold.
+  tested. Course conclude/delete (C-108) is on evidence hold, and so
+  is the same change sent as `course[event]` or `offer` on a course
+  update.
 - **Assignments**: create/read/update/delete, plus overrides
   (create/read/update/delete, batch override create/update, bulk date
   update) and assignment groups CRUD. Create proven with HTTP 201 and
@@ -91,47 +96,49 @@ readback and cleanup:
   questions CRUD. Provider soft-delete disclosure (D-002): after a
   delete, the quiz leaves the course quiz index but a direct member GET
   may still serve it. Index removal is the delete receipt.
-- **New Quizzes**: update/delete of the quiz object through the
-  Chromium lane (quizzes 4045401, 4045406, 4045410, 4045411; update
-  readback-verified; deletes verified with terminal GET 404).
-  **Admission still holds `canvas_create_new_quiz` on evidence-hold:**
-  the 2026-09-21 battery proved the provider path only and the governed
-  product pipeline has no live runs yet, so dispatch refuses it on
-  every tenant until a disposable live battery proves the integrated
-  path (D-007; the governed product pipeline has no live runs yet, so
-  it stays held until a disposable live battery proves the integrated
-  path). Excluded: publish (never tested). Question
-  items (catalog C-287/C-290/C-293/C-295/C-298): the gate currently
-  admits them as live-proven, but SCOPE.md withholds them from the v1
-  claim set (proven at the provider-path level only); treat them as
-  not-a-v1-claim and disclose that before touching them.
-- **Item Banks**: bank-level operations only (IB-1 archive, IB-5
-  create, IB-9 get, IB-12 list, IB-13 list entries, IB-10 get entry,
-  IB-15 list shares, IB-16 rename, IB-17 share, IB-20 unshare). Item create/read/update
-  (IB-6/IB-11/IB-18) are implemented in the Item Banks SDK lane but
-  live proof is pending, so they are cataloged as pending. Item delete
-  (IB-19) is implemented and unproven; the live battery attempts it
-  against a disposable item before any claim. quiz_entries routes
+- **New Quizzes**: create, update, and delete of the quiz object
+  through the Chromium lane (quizzes 4045401, 4045406, 4045410,
+  4045411; update readback-verified; deletes verified with terminal
+  GET 404), and on 2026-09-22 through the full governed product
+  pipeline (disposable quizzes 4049059 and 4049060). Question items
+  (C-287 create, C-293 read, C-295 list, C-298 update, C-290 delete)
+  are proven through the same pipeline (items 11057310, 11057311).
+  Excluded: publish (never tested).
+- **Item Banks**: bank operations (IB-1 archive, IB-5 create, IB-9
+  get, IB-12 list, IB-13 list entries, IB-10 get entry, IB-15 list
+  shares, IB-16 rename, IB-17 share, IB-20 unshare) and item
+  operations (IB-6 item create, IB-18 item update, IB-4 attach an item
+  to a bank, IB-7 remove a bank entry) are live-proven through the
+  Item Banks SDK lane. Read an item through its bank entry (IB-10).
+  The direct item read (IB-11) and item delete (IB-19) are pending: the
+  gate refuses them. quiz_entries routes
   (IB-2/3/8/14) are evidence-hold (401 under the banks.build scope).
   Full mechanism: `knowledge/item-banks-sdk.md`.
-- **Reads**: 113 verified GETs (108 Canvas plus 5 Item Bank) across
+- **Reads**: 115 live-proven reads (110 Canvas plus 5 Item Bank)
+  across the educator's own course list (C-437) and profile (C-436),
   course settings, tabs, sections, files and folders, pages, modules,
   assignments, assignment groups, classic quizzes, New Quiz reads,
   grading standards, rubrics, outcomes, external tools and feeds,
   content migrations and exports, groups, users and search,
   conferences, collaborations, media objects, permissions, and
-  activity stream, plus account/user/global reads. All recorded
-  `live-proven` in the catalog.
+  activity stream. All recorded `live-proven` in the catalog. Listing
+  accounts, another person's profile, global search, terms, and help
+  links have no catalog rows yet.
   Discussions: reads pending (C-144 through C-151, learner-data
   gated); plain discussion-topic writes (C-139 create, C-141 delete,
   C-167 update) are catalog live-proven BUT were proven through the
   retired canvas-batch form lane on 2026-09-20, not the Chromium lane,
   while C-238 (discussion date_details, PUT 204) was proven through
   the 2026-09-21 Chromium write battery. SCOPE.md withholds all
-  discussion writes from v1. Treat them as proven-mechanism-mixed:
-  disclose the lane before touching them.
-  Announcement variants stay excluded (posting an announcement
-  notifies enrolled users; a standing product exclusion).
+  discussion writes from v1, and the admission policy holds all four:
+  dispatch refuses them on every lane.
+  Announcements are never posted: any request that sets
+  `is_announcement`, on any route, and creating an announcement
+  external feed (C-25) are never-dispatch (posting an announcement
+  notifies every student in the course; a standing product
+  exclusion). So is any request, on any route, that sets
+  `notify_of_update` (Canvas notifies every student of the change) or
+  `as_user_id` (Canvas acts as that person).
 
 Not v1 claims at all: Moodle (proven in a sandbox, not packaged),
 Blackboard (no implementation exists), learner-data operations
@@ -157,7 +164,8 @@ and confirm the fields anyway.
   GET `/api/v1/courses/{id}`, compare the changed fields. Caveat:
   the rename battery restored the original name after the test write;
   course create was never tested; course conclude/delete (C-108) is
-  evidence-hold and refuses on every tenant.
+  evidence-hold and refuses on every tenant, and so does a course
+  update that sends `course[event]` or `offer`.
 - **Assignments** (C-38 create, C-43 update, C-40 delete, C-42
   duplicate; overrides C-39/C-41/C-51, batch C-34/C-36/C-37, groups
   C-29/C-30/C-31). Shape: POST `/api/v1/courses/{course_id}/
@@ -170,7 +178,12 @@ and confirm the fields anyway.
   as success ONLY with that follow-up GET). Caveats: changing
   `points_possible` rescales every score already entered, disclose
   it in the approval; changing `due_at` does NOT move existing
-  overrides (separate read).
+  overrides (separate read). Batch readback: C-36 re-reads exactly
+  the overrides it changed (GET `.../assignments/overrides` with
+  `assignment_overrides[][id]` and `[][assignment_id]` for each);
+  C-37 re-reads each assignment with its overrides and compares the
+  dates. Canvas applies a C-37 date update in the background, so a
+  date that has not moved yet reads as unconfirmed, never as failed.
 - **Modules** (C-268 create, C-282 update, C-270 delete; items C-269
   create, C-283 update; C-276/C-277/C-278/C-284 progress/overrides).
   Shape: POST `/api/v1/courses/{course_id}/modules` (body
@@ -194,26 +207,26 @@ and confirm the fields anyway.
   or group. Delete: removal from the course quiz index is the
   receipt (D-002: a direct member GET may still serve a deleted
   quiz, so 404 is not the receipt here).
-- **New Quiz** (C-299 update, C-289 delete; items C-287/C-290/
-  C-298/C-293/C-295). Shape: PATCH only on `/api/quiz/v1` paths;
-  the executor guards this (no PUT). Item fields nest under
-  `item.entry`. Readback: NQ GET, items GET with the expected
-  count, points mirror (parent `points_possible` equals the item
-  sum), parent assignment dates/overrides read. Caveats: create
-  (`canvas_create_new_quiz`) is evidence-held by the admission
-  policy and refuses on every tenant; the `quiz_settings` merge
+- **New Quiz** (C-286 create, C-299 update, C-289 delete; items
+  C-287/C-290/C-298/C-293/C-295). Shape: PATCH only on
+  `/api/quiz/v1` paths; the executor guards this (no PUT). Item
+  fields nest under `item.entry`. Readback: NQ GET, items GET with
+  the expected count, points mirror (parent `points_possible` equals
+  the item sum), parent assignment dates/overrides read. Caveats: the
+  `quiz_settings` merge
   rule is NOT IMPLEMENTED in this package (a partial PATCH can
   replace the whole settings block: read, merge locally, then
   PATCH); ghost-stub choice hazards are in
   `knowledge/new-quizzes-contract.md`.
 - **Discussions** (C-139/C-141/C-167 form-lane retired; C-238
-  date_details PUT 204). Withheld from v1. Shape: flat params
+  date_details PUT 204). Withheld from v1 and held by the admission
+  policy, so dispatch refuses them. Shape: flat params
   (`{"title": ..., "message": ...}`, NOT a `discussion_topic`
   wrapper; only the `assignment` subobject nests for graded
   discussions). The executor unwraps one nesting level for readback
   comparison and prevalidation but sends the body unchanged, so a
-  wrapped body still hits the D-009 failure class. Disclose the
-  lane before touching any discussion write.
+  wrapped body still hits the D-009 failure class. Correct this the
+  day a Chromium-lane battery proves discussion writes.
 - **Files** (C-130 upload, C-191 folder create, C-200/C-203 usage
   rights). Shape: POST `/api/v1/courses/{course_id}/files`. The
   provider upload is a multi-step flow; the recipe is the live
@@ -249,46 +262,50 @@ readback-verify, delete, verify-gone.
 ## Doc map: what to read, what to skip
 
 Agent-facing (read these): `SKILL.md` (this file's parent),
-`INSTALL.md`, `SCOPE.md`, the `knowledge/` files, the Status column of
-`proof-battery/OPERATION_CATALOG.md`, and `defects/DEFECTS.md` (open
-defects D-002 and D-005 affect delete receipts and Item Banks; D-003
-and D-004 were closed as moot 2026-09-21 when the relay/form lanes were
-retired; D-006 is superseded by the SDK lane).
+`INSTALL.md`, `SCOPE.md`, the `knowledge/` files, and the Status column
+of `proof-battery/OPERATION_CATALOG.md`. The delete-receipt rules D-002
+and D-005 are in `knowledge/api-patterns-and-errors.md`.
 
-Investigation notes (not agent-facing, do not ship to agents):
-`weasel-b1-runtime-browser.md`, `weasel-b2-canvas-auth.md`,
-`weasel-b3-lti-tokens.md`, `weasel-options-sweep.md`, and the
-`proof-battery/waves/`, `proof-battery/editor-transport/`,
-`proof-battery/js-execution-gate/`, `proof-battery/localhost-proof/`,
-and `proof-battery/data-url-diagnostic/` drafts. They record how
-proofs were run, not what agents should do. The approval ceremony
-behavior is implemented in `dispatch/admission.py` (v2 HMAC-sealed
-records, single-use digests, educator signing); the educator-facing
-UX wiring is open.
+The source repository also keeps investigation notes, which are not in
+the release: the proof battery's wave, editor-transport,
+JavaScript-gate, localhost, and data: URL drafts. They record how
+proofs were run, not what agents should do. The approval ceremony is
+implemented in `dispatch/admission.py` (v2 HMAC-sealed records,
+single-use digests, educator signing), and SKILL.md says how the agent
+runs it (`plan-write`, then `approve-write`).
 
 ## Dispatching
 
-Reads need no approval (except learner-data reads, which the admission
-gate refuses on every tenant regardless). Example (tool name must be a
-real catalog row):
+Reads need no approval. A learner-data read (roster rows, anything the
+policy's learner-data signals hit) runs on the Chromium lane only when
+the optional `cryptography` package is installed: every receipt is
+de-identified to labels (Student A1 and friends) before anyone sees
+it, so no name, email, or login ever reaches the assistant. Without
+that package the same read is refused (nothing was sent). Example
+(tool name must be a real catalog row):
 
 ```
 PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py catalog \
   --name canvas_get_single_assignment --method GET \
   --path /api/v1/courses/{course_id}/assignments/{id} \
-  --class read --backend chromium --canvas-base "$CANVAS_BASE" \
+  --class read --backend chromium \
   --params '{"course_id": 12345, "id": 67890}'
 ```
 
 `--params` is a JSON object that fills the `{slots}` in the path
 template. Through the CLI it fills path slots only; there is no CLI
-flag for query args like `per_page`. To send a body or query block,
+flag for query args like `per_page`. `--body` takes the request body
+as a JSON object string (the write's intent; the readback compares
+against it). There is no `--query` flag: to page deliberately,
 dispatch programmatically through `dispatch_catalog_op(...)` in
-`dispatch/executor.py` with `extra={"body": {...}}` or
-`extra={"query": {...}}`, or dispatch
-a manifest entry with `execute --entry <manifest.json> --params '{...}'`.
+`dispatch/executor.py` with `extra={"query": {...}}`.
 
-Writes need three things or they are refused:
+For writes, use the typed `plan-write` and `approve-write` commands
+(SKILL.md): they build the frozen plan, the approval, and the course
+check for you. In edit mode a write needs no approval. The lower-level
+`catalog --plan <file> --approval <file>` path is for scripts and
+proof drivers; in plan mode it refuses a write without these three
+things:
 
 1. A frozen plan file (`--plan`), digest-bound to the exact action.
 2. An educator-signed approval record (`--approval`), digest-bound to
@@ -307,8 +324,9 @@ pass, immediately before the first provider call. A refusal at any of
 those gates leaves the approval unconsumed and reusable, and the
 op_id claim is released (W4 approval ordering).
 
-`undo` runs an entry's undo block as a new, separately journaled
-operation (it needs its own educator approval bound to the undo action).
+This release has no automatic undo: the pack pins no manifest entry,
+so the executor's manifest and undo commands refuse. A reversal is a
+new write the educator approves.
 
 Every dispatch journals to `~/.morrow/trees/<tree-id>/journal/ops.jsonl`
 (or `$MORROW_TREE_STATE_DIR/journal/ops.jsonl` when overridden; the
@@ -328,11 +346,12 @@ use them: the standing rule is Chromium-only, no-PAT auth through
 the educator's browser session. A "faster" backend that asks you for
 a token, cookie, or PAT is a refusal, not a shortcut.
 
-**Approval rule:** never mint or sign an approval yourself. Approvals
-are educator-signed through `dispatch/admission.py` (the educator
-states the exact action in their own words); your job is to present
-the exact action in plain language and hand them the record to sign.
-A self-minted approval is a ceremony violation: stop and report it.
+**Approval rule:** never mint or sign an approval yourself, and never
+gate on the educator's wording: any non-empty educator reply approves
+(plan-write prints the exact approve-write command). Your job is to
+present the change in plain language, run approve-write with the
+educator's reply as the authorization text, and say what happened. A
+self-minted approval is a ceremony violation: stop and report it.
 
 Destructive operations that are evidence-held (course
 conclude/delete, anything on the policy's evidence-hold list) are

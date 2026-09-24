@@ -55,6 +55,8 @@ const BRIDGE_PATH = "/morrow-bridge/v1";
 const BRIDGE_PROTOCOL_VERSION = 1;
 const EXTENSION_ID = "a".repeat(32);
 const BRIDGE_TOKEN = "morrow-live-proof-bridge-token-".repeat(2);
+/** How long one harness resource may take to close before the harness stops waiting for it. */
+const CLOSE_DEADLINE_MS = 15_000;
 const read = (relativePath) => readFileSync(join(root, relativePath), "utf8");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const proofPayload = (direction, authentication, serverNonce) => JSON.stringify([
@@ -189,7 +191,10 @@ async function startFixtureSite(directory, fault) {
   ], { stdio: "ignore" });
   const requests = [];
   const posts = [];
+  const postRecords = [];
   const refusedPosts = [];
+  const connections = new WeakMap();
+  let connectionCount = 0;
   const state = { name: FIXTURE_CLASS.moduleName, content: FIXTURE_CLASS.content, visible: true };
   let editorItemId = 500;
   // Moodle saves the whole form. A POST that drops one of these would silently
@@ -271,8 +276,11 @@ async function startFixtureSite(directory, fault) {
       return;
     }
     if (url.pathname === "/course/modedit.php" && request.method === "POST") {
-      const values = new URLSearchParams(await requestBody(request));
+      const body = await requestBody(request);
+      const values = new URLSearchParams(body);
       posts.push(values);
+      if (!connections.has(request.socket)) connections.set(request.socket, ++connectionCount);
+      postRecords.push({ body, connection: connections.get(request.socket) });
       const dropped = Object.entries(protectedControls()).filter(([field, value]) => values.get(field) !== value).map(([field]) => field);
       if (dropped.length || !/^[1-9][0-9]*$/.test(values.get("introeditor[itemid]") || "")) {
         refusedPosts.push(dropped.length ? dropped : ["introeditor[itemid]"]);
@@ -299,8 +307,25 @@ async function startFixtureSite(directory, fault) {
     protectedControls: Object.keys(protectedControls()),
     requests,
     posts,
+    postRecords,
     refusedPosts,
     close: () => new Promise((done, fail) => server.close((error) => error ? fail(error) : done())),
+  };
+}
+
+/**
+ * What the fixture received for one dispatch. Chrome sends a request again on its own, on a new
+ * connection, when a reused connection closes before any answer. That copy is byte for byte the
+ * form Morrow sent, so the POSTs Chrome repeated are the extra copies of one body. A second
+ * dispatch would read the form again and carry a new editor item id.
+ */
+function providerPostRecord(records) {
+  const distinctBodies = new Set(records.map((record) => record.body)).size;
+  return {
+    providerPosts: records.length,
+    distinctProviderPostBodies: distinctBodies,
+    providerPostConnections: new Set(records.map((record) => record.connection)).size,
+    browserResends: distinctBodies === 1 ? records.length - 1 : 0,
   };
 }
 
@@ -313,7 +338,7 @@ async function startFixtureSite(directory, fault) {
 async function connectHarnessConnector({ port, binding, page, expiresAt, commands, operations }) {
   const { WebSocket } = require(require.resolve("ws", { paths: [join(root, "packages/mcp-server")] }));
   const socket = new WebSocket(`ws://127.0.0.1:${port}${BRIDGE_PATH}`, { origin: `chrome-extension://${EXTENSION_ID}` });
-  const closed = { code: 0, reason: "" };
+  const closed = { code: null, reason: null };
   socket.on("close", (code, reason) => {
     closed.code = code;
     closed.reason = reason.toString();
@@ -403,6 +428,13 @@ async function connectHarnessConnector({ port, binding, page, expiresAt, command
   };
   socket.on("message", async (raw) => {
     const command = JSON.parse(raw.toString());
+    // Morrow drops a Bridge that stays silent for two heartbeat periods, so the harness answers
+    // each heartbeat the way connector/extension/src/service-worker.js does. Opening and closing
+    // the review page in Chrome sends nothing else, and can take that long on a loaded machine.
+    if (command?.schema === "morrow.bridge.ping.v1" && command.generation === ready.generation) {
+      send({ schema: "morrow.bridge.pong.v1", protocolVersion: BRIDGE_PROTOCOL_VERSION, generation: ready.generation, sentAt: Date.now() });
+      return;
+    }
     if (command?.schema !== "morrow.bridge.command.v1") return;
     const record = { kind: command.kind, toolName: command.toolName, operationKey: command.operationKey, dispatchAttempt: command.outerGrant?.dispatchAttempt ?? null };
     answered.set(command.requestId, record);
@@ -498,12 +530,33 @@ async function connectHarnessConnector({ port, binding, page, expiresAt, command
   return {
     generation: ready.generation,
     approvalPresence: () => approvalPresence,
+    connection: () => ({ open: socket.readyState === 1, closeCode: closed.code, closeReason: closed.reason }),
     close: () => new Promise((done) => {
       if (socket.readyState !== 1) return done();
       socket.once("close", () => done());
       socket.close();
     }),
   };
+}
+
+/**
+ * Closes each harness resource in order and returns the names of those that did not finish
+ * closing within `deadlineMs`. A close that fails or never finishes must not keep a failed proof
+ * from reporting, or leave the resources after it open.
+ */
+async function closeHarnessResources(resources, { deadlineMs = CLOSE_DEADLINE_MS } = {}) {
+  const abandoned = [];
+  for (const [name, resource] of resources) {
+    if (!resource) continue;
+    let deadline;
+    const outcome = await Promise.race([
+      Promise.resolve().then(() => resource.close()).then(() => "closed", () => "failed"),
+      new Promise((done) => { deadline = setTimeout(() => done("abandoned"), deadlineMs); }),
+    ]);
+    clearTimeout(deadline);
+    if (outcome === "abandoned") abandoned.push(name);
+  }
+  return abandoned;
 }
 
 function unwrap(reply, runtime) {
@@ -560,7 +613,10 @@ async function approveThroughReviewPage(url, context, connector) {
       await route.continue({ postData: body.toString() });
     }, { times: 1 });
     const response = reviewPage.waitForResponse((candidate) => candidate.url() === `${url}/approve` && candidate.request().method() === "POST");
-    await form.getByRole("button").first().click();
+    // The approval's own answer is the event this waits for. The page it leads to names the change
+    // with a live read, which waits while the approved change runs, and the proof waits for that
+    // change to settle on its own.
+    await form.getByRole("button").first().click({ noWaitAfter: true });
     return { reviewStatus: loaded?.status() ?? 0, unsignedApproveStatus: unsigned.status(), approveStatus: (await response).status(), html };
   } finally {
     await reviewPage.close().catch(() => undefined);
@@ -659,6 +715,7 @@ async function runProof(options) {
   let server;
   let client;
   let connector;
+  let abandoned = [];
   try {
     for (const path of ["packages/mcp-server/dist/morrow-runtime.js", "packages/canvas-connector-mcp/dist/index.js"]) {
       assert.ok(existsSync(join(root, path)), `${path} is missing. Build the workspace first: pnpm -r --if-present build`);
@@ -804,7 +861,7 @@ async function runProof(options) {
       state: settled.state,
       dispatchAttempt: settled.dispatchAttempt,
       bridgeWriteCommands: commands.filter((entry) => entry.kind === "invoke_write" && entry.toolName === operation.toolName).length,
-      ...(fixture ? { providerPosts: fixture.posts.length } : {}),
+      ...(fixture ? providerPostRecord(fixture.postRecords) : {}),
     };
     receipt.replay = {
       refused: replay.isError === true,
@@ -850,20 +907,30 @@ async function runProof(options) {
   } catch (error) {
     receipt.status = "failed";
     receipt.error = safeError(error);
+    // A course read that fails for a missing binding names no cause of its own. Whether Morrow
+    // still held the harness Bridge connection, and how it ended, is that cause.
+    if (connector) receipt.bridgeConnection = connector.connection();
     save("failed");
     process.exitCode = 1;
     process.stderr.write(`${receipt.error}\n${receiptPath}\n`);
   } finally {
-    await connector?.close();
-    await client?.close();
-    await server?.close();
-    await runtime?.close();
-    await context?.close();
-    await browser?.close();
-    await fixture?.close();
+    abandoned = await closeHarnessResources([
+      ["bridge connection", connector],
+      ["assistant client", client],
+      ["assistant server", server],
+      ["gateway", runtime],
+      ["browser context", context],
+      ["browser", browser],
+      ["fixture site", fixture],
+    ]);
     rmSync(directory, { recursive: true, force: true });
+    if (abandoned.length > 0) {
+      receipt.cleanupAbandoned = abandoned;
+      save(receipt.stage);
+      process.stderr.write(`the harness stopped waiting for these to close: ${abandoned.join(", ")}\n`);
+    }
   }
-  return receiptPath;
+  return { receiptPath, abandoned };
 }
 
 /**
@@ -911,7 +978,7 @@ function buildChecklist() {
     "",
     "`--target=fixture` is the default and serves a local HTTPS Moodle fixture for the one write class named below. Nothing reaches a Moodle site. `--target=site --site=<https origin> --chrome-profile=<directory> --course-id=<id>` runs the same path against an authorized disposable Moodle site, which this machine does not have.",
     "",
-    "`--fixture-fault=lost-response` makes the fixture save the change and answer nothing. The proof then ends `failed` with `applied_or_unknown`, one dispatch, and a refused replay. A saved change with no answer is never a passed proof.",
+    "`--fixture-fault=lost-response` makes the fixture save the change and answer nothing. The proof then ends `failed` with `applied_or_unknown`, one dispatch, and a refused replay. When a connection Chrome reused closes before any answer, Chrome sends the same form once more on a new connection on its own, so the fixture records that one dispatch as two identical POSTs and the receipt counts the copy in `browserResends`. A saved change with no answer is never a passed proof.",
     "",
     "## Required proof fields",
     "",
@@ -922,7 +989,7 @@ function buildChecklist() {
     "| `target` | The exact site, installation subpath, signed-in principal and course the write bound to. |",
     "| `exactTargetBeforeChange` | The fresh read of the exact target, with the snapshot digest the change was bound to. |",
     "| `requestReview` | The frozen request, its approval (a Playwright click on Approve, signed by the harness in the Bridge role), its authorization, the refusal of a dispatch before approval, and the refusal of an approval posted without the Bridge signature. |",
-    "| `dispatch` | One dispatch: `dispatchAttempt: 1`, one bridge write command, and one provider POST or AJAX call. |",
+    "| `dispatch` | One dispatch: `dispatchAttempt: 1`, one bridge write command, and one provider POST or AJAX call. On the fixture, `browserResends` counts the identical copies Chrome sent on its own after a connection closed with no answer. |",
     "| `authoritativeSavedResult` | The fresh read after the change, from Moodle's own saved state, and the fields that changed. |",
     "| `replay` | The refusal of the repeated dispatch, and the unchanged dispatch count after it. |",
     "| `roleAndCapability` | The role of the account that ran it and the Moodle capability the catalog states for the operation. |",
@@ -985,14 +1052,20 @@ async function main() {
     process.stdout.write(`${CHECKLIST_PATH}\n`);
     return;
   }
-  await runProof(options);
+  return runProof(options);
 }
 
-export { buildChecklist, capabilitiesIn, writeClass };
+const HARNESS_BRIDGE = Object.freeze({ token: BRIDGE_TOKEN, runtimeRevision: RUNTIME_REVISION, extensionId: EXTENSION_ID });
+
+export { HARNESS_BRIDGE, buildChecklist, capabilitiesIn, closeHarnessResources, connectHarnessConnector, writeClass };
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) {
-  await main().catch((error) => {
+  const outcome = await main().catch((error) => {
     process.stderr.write(`${safeError(error)}\n`);
     process.exitCode = 1;
+    return null;
   });
+  // A resource the harness stopped waiting for can hold the event loop open. Leaving now also
+  // stops the Chrome it launched.
+  if (outcome?.abandoned?.length > 0) process.exit();
 }

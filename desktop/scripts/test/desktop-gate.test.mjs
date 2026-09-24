@@ -33,6 +33,12 @@ test("the authoritative gate runs the desktop installer suites and the update ha
   assert.doesNotMatch(workspace, /installer/, "the installer pins its own Electron toolchain and stays outside the workspace");
 });
 
+test("the gate runs the package suites one package at a time", () => {
+  // Several package suites bound a child start, an exit or a wait by the clock. Run together on
+  // a four-core CI runner, one suite's bound measures the other suites' load instead.
+  assert.match(rootPackage.scripts.test, /^pnpm build && pnpm -r --workspace-concurrency=1 --if-present test && /);
+});
+
 test("the installer test script runs every installer suite file", () => {
   assert.match(installerPackage.scripts.test, /^node test\/require-dependencies\.cjs && /);
   const globs = installerPackage.scripts.test.match(/test\/\*\.test\.[a-z]+/g) ?? [];

@@ -54,7 +54,7 @@ test("no assistant is chosen yet", () => {
   assert.equal(view.title, "Choose your assistant.");
   assert.match(view.body, /data-action="choose-assistant" data-assistant-id="codex"/);
   assert.match(view.body, /data-action="install-assistant"/);
-  assert.equal(statusSummary(current), "Continue setup");
+  assert.equal(statusSummary(current), "Choose your assistant");
   assert.equal(step(current, "Assistant").status, "current");
   assert.equal(step(current, "Assistant").detail, "Choose an installed assistant");
 });
@@ -82,6 +82,26 @@ test("Claude Desktop is waiting for approval", () => {
   assert.match(view.body, /data-action="check-claude-desktop"/);
   assert.equal(statusSummary(current), "Finish setting up Claude Desktop");
   assert.equal(step(current, "Assistant").detail, "Finish approval in Claude Desktop");
+});
+
+test("Claude Desktop connected and Morrow is still confirming the Claude app, so it says it is checking, not waiting for approval", () => {
+  const current = state({
+    lifecycle: "assistant_pending",
+    assistants: [{ ...CLAUDE_DESKTOP, detected: true, configured: false, pending: true, checking: true, selected: true }],
+    selectedAssistantId: "claude-desktop"
+  });
+  assert.equal(current.assistants[0].checking, true, "the state carries the check");
+  const view = actionView(current, { chosenAssistantId: "claude-desktop" });
+  assert.equal(view.title, "Morrow is checking the Claude Desktop connection.");
+  assert.match(view.copy, /Morrow keeps checking on its own/);
+  assert.doesNotMatch(`${view.title} ${view.copy} ${view.body}`, /approv|Install Extension|not connected/i);
+  assert.deepEqual(actions(view.body), ["check-claude-desktop", "open-claude-desktop"]);
+  assert.equal(statusSummary(current), "Checking the Claude Desktop connection");
+  assert.equal(step(current, "Assistant").detail, "Checking the Claude Desktop connection");
+  assert.match(setupManagementView(current).body, /Morrow is checking the connection to Claude Desktop\./);
+  assert.doesNotMatch(setupManagementView(current).body, /Waiting for your approval/);
+  const unchecked = state({ assistants: [{ ...CLAUDE_DESKTOP, detected: true, pending: true, selected: true }] });
+  assert.equal(unchecked.assistants[0].checking, false);
 });
 
 test("the local runtime is not ready yet", () => {
@@ -149,6 +169,27 @@ test("a ready installation exposes its sealed Bridge update", () => {
   assert.equal(statusSummary(current), "Update Morrow Bridge");
   assert.equal(step(current, "Morrow Bridge").status, "current");
   assert.equal(step(current, "Morrow Bridge").detail, "Update available");
+});
+
+// Updating a Bridge in Chrome needs a connected Bridge. With none connected,
+// Check Bridge on the Chrome steps replaces the folder itself, so those steps
+// stay on screen and no panel offers a step that cannot finish.
+test("a Bridge update waits for a connected Bridge, and the Chrome steps stay until then", () => {
+  const current = state({ ...READY_ASSISTANT, bridgeUpdateAvailable: true, bridgeFolderPath: "/Users/example/Library/Application Support/Morrow/Bridge" });
+  assert.equal(current.bridge.updateAvailable, true);
+  const view = actionView(current, { chosenAssistantId: "codex", platform: "darwin" });
+  assert.equal(view.title, "Add Morrow Bridge.");
+  assert.deepEqual(actions(view.body), ["copy-example-prompt", "reveal-bridge-folder", "check-bridge", "repair"]);
+  assert.equal(statusSummary(current), "Set up Morrow Bridge in Chrome");
+  assert.equal(step(current, "Morrow Bridge").detail, "Add in Chrome");
+  assert.equal(awaitingBridgeFolder(current), true, "the folder step is timed as the step on screen");
+
+  for (const connected of [{ bridgeLoadedInChrome: true }, { bridgePaired: true }]) {
+    const offered = state({ ...READY_ASSISTANT, ...connected, bridgeUpdateAvailable: true });
+    assert.equal(actionView(offered, { chosenAssistantId: "codex" }).title, "Update Morrow Bridge.");
+    assert.equal(step(offered, "Morrow Bridge").detail, "Update available");
+    assert.equal(awaitingBridgeFolder(offered), false);
+  }
 });
 
 test("Bridge delivery is unavailable", () => {
@@ -330,15 +371,43 @@ test("the data-retention section names every place, what it removes, and the ste
   assert.match(view.body, /data-action="remove-data"/);
 
   const windows = retentionView(state({ retention: { uninstall: "windows_settings_apps", locations: RETENTION_LOCATIONS } }));
-  assert.match(windows.body, /select Apps, select Morrow, and select Uninstall/);
+  // Microsoft's steps. Windows 11: Start > Settings > Apps > Installed apps, then the app's More > Uninstall.
+  // Windows 10: Start > Settings > Apps > Apps & features, then select the app and Uninstall.
+  assert.match(windows.body, /Then quit Morrow and open Settings, then Apps\. On Windows 11, select Installed apps, find Morrow, select More, then Uninstall\. On Windows 10, select Apps &amp; features, select Morrow, then Uninstall\./);
   assert.equal(/Trash/.test(windows.body), false);
 
-  assert.match(retention().body, /Chrome loaded Morrow Bridge from the Bridge folder above/, "the temporary route loads the Bridge folder");
+  // Chrome loaded the Bridge from the folder listed above only when Chrome loaded
+  // or connected it and that folder is on this computer.
+  const bridgeRow = { id: "bridge", label: "The Morrow Bridge folder Chrome loads", path: "/Morrow/Bridge", removable: true, keptReason: null };
+  const withBridge = { uninstall: "move_to_trash", locations: [...RETENTION_LOCATIONS, bridgeRow] };
+  for (const bridge of [{ bridgeLoadedInChrome: true }, { bridgePaired: true }]) {
+    assert.match(retentionView(state({ ...bridge, retention: withBridge })).body, /Chrome loaded Morrow Bridge from the Bridge folder above\. To remove/, "the temporary route loads the Bridge folder");
+  }
+  const loadedWithoutFolder = retentionView(state({ bridgeLoadedInChrome: true, retention: { uninstall: "move_to_trash", locations: RETENTION_LOCATIONS } }));
+  assert.doesNotMatch(loadedWithoutFolder.body, /Chrome loaded Morrow Bridge/, "no Bridge folder is listed above");
+  assert.match(loadedWithoutFolder.body, /To remove Morrow Bridge from Chrome, open/);
+  for (const unconfirmed of [retention(), retentionView(state({ bridgeLoadedInChrome: false, retention: withBridge }))]) {
+    assert.doesNotMatch(unconfirmed.body, /Chrome loaded Morrow Bridge/, "Chrome is not known to have loaded Morrow Bridge");
+    assert.match(unconfirmed.body, /If you added <strong>Morrow Bridge<\/strong> in Chrome, remove it there too: open the Chrome <strong>three-dot menu<\/strong>/);
+  }
   const store = retentionView(state({ bridgeDelivery: "available", retention: { uninstall: "move_to_trash", locations: RETENTION_LOCATIONS } }));
   assert.doesNotMatch(store.body, /Bridge folder/, "a Chrome Web Store install did not load the Bridge folder");
   assert.match(store.body, /remove <strong>Morrow Bridge<\/strong>/);
   assert.equal(retentionView(state()), null, "a state that names no place shows no section");
   assert.equal(retentionView(null), null);
+});
+
+// The summary sits above the two groups, so it must not claim the removal
+// takes what the second group, "Morrow does not remove these", keeps.
+test("the data-retention summary says which group the removal takes and which it never takes", () => {
+  const both = retention();
+  assert.equal(both.copy, "Removing the Morrow application removes the application only. Remove Morrow's data removes the first group below. Morrow never removes the second group.");
+  assert.doesNotMatch(both.copy, /Everything below/);
+  const removableOnly = retentionView(state({ retention: { uninstall: "move_to_trash", locations: RETENTION_LOCATIONS.filter((location) => location.removable) } }));
+  assert.equal(removableOnly.copy, "Removing the Morrow application removes the application only. Remove Morrow's data removes everything below.");
+  const keptOnly = retentionView(state({ retention: { uninstall: "move_to_trash", locations: RETENTION_LOCATIONS.filter((location) => !location.removable) } }));
+  assert.equal(keptOnly.copy, "Removing the Morrow application removes the application only. Morrow never removes anything below.");
+  assert.doesNotMatch(keptOnly.body, /data-action="remove-data"/);
 });
 
 test("the data-retention section reports one removal exactly as the receipt supports it", () => {
@@ -384,6 +453,21 @@ test("the materials folder is named, and can be changed, on Settings in every st
   }
 });
 
+// The default folder sits inside a folder macOS and Windows hide (Library, AppData), so the row
+// opens it and copies its path, the way the Bridge folder row does.
+test("the materials folder row can open the folder and copy its path, before and after setup", () => {
+  const copy = `data-action="copy-example-prompt" data-prompt="${escapeHtml(MATERIALS)}" aria-label="Copy the materials folder path">Copy path</button>`;
+  const settings = setupManagementView(state({ ...READY_ASSISTANT, materialsFolder: MATERIALS }));
+  assert.match(settings.body, /data-action="reveal-materials-folder">Show folder<\/button>/);
+  assert.ok(settings.body.includes(copy));
+  const welcome = actionView(state({ assistants: [{ ...CHATGPT, detected: true }], materialsFolder: MATERIALS, workspaceSelected: false }), { chosenAssistantId: null });
+  assert.match(welcome.body, /data-action="reveal-materials-folder">Show folder<\/button>/);
+  assert.ok(welcome.body.includes(copy));
+  // With no folder yet there is nothing to open or copy.
+  const none = actionView(state({ assistants: [{ ...CHATGPT, detected: true }] }), { chosenAssistantId: null });
+  assert.doesNotMatch(none.body, /reveal-materials-folder|Copy path/);
+});
+
 test("the folder row before setup asks for a folder and never claims a change it did not make", () => {
   const chosen = actionView(state({ assistants: [{ ...CHATGPT, detected: true }], materialsFolder: MATERIALS, workspaceSelected: false }), { chosenAssistantId: null });
   assert.ok(chosen.body.includes(escapeHtml(MATERIALS)));
@@ -397,6 +481,45 @@ test("the folder row before setup asks for a folder and never claims a change it
   assert.match(unknown.body, /Otherwise, Morrow creates and uses its own Materials folder\./);
 });
 
+// A configured assistant cannot use Morrow while its materials folder is gone,
+// and waiting never brings the folder back. Home names the folder and the step
+// that fixes it, and no row claims Morrow will make a folder it will not make.
+test("a materials folder that is gone asks for the step that brings one back", () => {
+  const defaultFolder = "/Users/teacher/Library/Application Support/Morrow/Materials";
+  const gone = state({ ...READY_ASSISTANT, runtimeStatus: "uncertain", materialsFolderMissing: { path: defaultFolder, isDefault: true } });
+  assert.deepEqual(gone.materialsFolderMissing, { path: defaultFolder, isDefault: true });
+  const view = actionView(gone, { chosenAssistantId: "codex" });
+  assert.equal(view.title, "Morrow cannot find its Materials folder.");
+  assert.ok(view.body.includes(escapeHtml(defaultFolder)), "Home names the folder");
+  assert.deepEqual(actions(view.body), ["restore-materials-folder", "choose-workspace"]);
+  assert.match(view.body, /data-action="restore-materials-folder">Make the folder again<\/button>/);
+  assert.match(view.body, /Files that were in the old folder do not come back\./);
+  assert.match(view.body, /Choosing a folder writes it into ChatGPT\./);
+  assert.doesNotMatch(`${view.copy} ${view.body}`, /getting ready|Keep Morrow open/);
+  assert.equal(statusSummary(gone), "Materials folder not found");
+  assert.equal(step(gone, "Assistant").status, "current");
+  assert.equal(step(gone, "Assistant").detail, "Materials folder not found");
+  assert.equal(step(gone, "Morrow Bridge").status, "pending");
+
+  const chosen = state({ ...READY_ASSISTANT, runtimeStatus: "uncertain", materialsFolderMissing: { path: MATERIALS, isDefault: false } });
+  const chosenView = actionView(chosen, { chosenAssistantId: "codex" });
+  assert.equal(chosenView.title, "Morrow cannot find your materials folder.");
+  assert.ok(chosenView.body.includes(escapeHtml(MATERIALS)));
+  assert.match(chosenView.copy, /moved, renamed, or deleted, or it may be on a drive that is not connected/);
+  assert.deepEqual(actions(chosenView.body), ["choose-workspace", "check-setup-state"], "a chosen folder is never made again");
+  assert.equal(statusSummary(chosen), "Materials folder not found");
+
+  // Settings names the folder that is gone, offers the same steps, and makes no claim about creating one.
+  for (const [current, expected] of [[gone, ["restore-materials-folder", "choose-workspace"]], [chosen, ["choose-workspace"]]]) {
+    const settings = setupManagementView(current);
+    const row = settings.body.slice(0, settings.body.indexOf("</div></div>") + 12);
+    assert.ok(row.includes(escapeHtml(current.materialsFolderMissing.path)));
+    assert.match(row, /Morrow cannot find this folder\./);
+    assert.doesNotMatch(row, /Morrow creates|reveal-materials-folder/);
+    assert.deepEqual(actions(row), expected);
+  }
+});
+
 test("the repair state offers the repair alone, with no setup to change", () => {
   const current = state({
     lifecycle: "repair_required",
@@ -407,6 +530,9 @@ test("the repair state offers the repair alone, with no setup to change", () => 
   const view = actionView(current, { chosenAssistantId: null });
   assert.deepEqual(actions(view.body), ["repair", "check-setup-state"]);
   assert.equal(view.body.includes(MATERIALS), false, "the folder cannot be changed from a state Morrow cannot read");
+  // Repair rewrites Morrow's own entry by its marker, also in a file edited since, so it promises only that.
+  assert.match(view.body, /It writes Morrow&#39;s own entry in each assistant&#39;s settings file again and leaves the rest of that file as it is\./);
+  assert.doesNotMatch(view.body, /newer assistant setting/);
   // Settings shows nothing to change either, so a repaired computer cannot
   // reach the folder or assistant list through either view.
   assert.equal(setupManagementView(current), null);
@@ -430,7 +556,9 @@ const TWO_ASSISTANTS = Object.freeze({
 test("two configured assistants are both shown as set up, and the panel keeps the course step", () => {
   const current = state(TWO_ASSISTANTS);
   const view = actionView(current, { chosenAssistantId: "claude-desktop" });
-  assert.equal(view.title, "Your selected course is connected.");
+  assert.equal(view.title, "Morrow cannot read your course yet.");
+  assert.equal(view.copy, "Open your Canvas or Moodle course in Chrome and make sure you are signed in, then select Check status.");
+  assert.doesNotMatch(`${view.title} ${view.copy} ${view.body}`, /is connected|not started/, "a course Morrow cannot read is never called connected");
   assert.equal(step(current, "Assistant").status, "done");
   assert.equal(step(current, "Assistant").detail, "ChatGPT, Claude Desktop");
   // Home carries neither assistant row now: that moved to Settings (D8).
@@ -440,7 +568,7 @@ test("two configured assistants are both shown as set up, and the panel keeps th
   const settings = setupManagementView(current);
   assert.match(settings.body, /<h3>ChatGPT<\/h3><p>Morrow is set up in this assistant\.<\/p>/);
   assert.match(settings.body, /<h3>Claude Desktop<\/h3><p>Morrow is set up in this assistant\.<\/p>/);
-  assert.deepEqual(actions(settings.body), ["choose-workspace", "remove-assistant", "remove-assistant"]);
+  assert.deepEqual(actions(settings.body), ["reveal-materials-folder", "copy-example-prompt", "choose-workspace", "remove-assistant", "remove-assistant"]);
   assert.match(settings.body, /data-assistant-id="codex" aria-label="Remove Morrow from ChatGPT"/);
   assert.match(settings.body, /data-assistant-id="claude-desktop" aria-label="Remove Morrow from Claude Desktop"/);
   // Both assistants are written the new folder, and Claude Desktop needs the
@@ -485,7 +613,7 @@ test("a second assistant waiting for approval keeps the first assistant's steps"
   // to, on Settings now.
   const settings = setupManagementView(current);
   assert.match(settings.body, /<h3>Claude Desktop<\/h3><p>Waiting for your approval in Claude Desktop\.<\/p>/);
-  assert.deepEqual(actions(settings.body), ["choose-workspace", "remove-assistant", "open-claude-desktop", "reveal-claude-extension", "check-claude-desktop", "remove-assistant"]);
+  assert.deepEqual(actions(settings.body), ["reveal-materials-folder", "copy-example-prompt", "choose-workspace", "remove-assistant", "open-claude-desktop", "reveal-claude-extension", "check-claude-desktop", "remove-assistant"]);
 });
 
 test("removing Claude Desktop names the step that is left inside Claude Desktop", () => {
@@ -512,6 +640,23 @@ test("an assistant on this computer that is not set up can be set up after setup
   assert.equal(settings.body.includes("Claude Code"), false);
 });
 
+test("an assistant whose project folder is gone names that folder and offers Remove, not Set up", () => {
+  const stale = { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, needsWorkspace: true, detected: true, configured: false, projectFolder: "/Home/Courses/Fall course", projectFolderMissing: true };
+  const withAnother = setupManagementView(state({
+    ...CONNECTED_COURSE,
+    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }, stale],
+    materialsFolder: MATERIALS
+  }));
+  assert.match(withAnother.body, /<h3>Claude Code<\/h3><p class="path-text">\/Home\/Courses\/Fall course<\/p><p>Morrow cannot find the project folder Claude Code was set up in\. If it is on a drive that is not connected, connect the drive, then select Check status\. Otherwise select Remove, then set up Claude Code in the project you use now\.<\/p>/);
+  assert.match(withAnother.body, /data-action="remove-assistant" data-assistant-id="claude-code"/);
+  assert.doesNotMatch(withAnother.body, /data-action="install-assistant" data-assistant-id="claude-code"/);
+
+  // With no other assistant set up, Settings still offers the Remove.
+  const alone = setupManagementView(state({ lifecycle: "ready_for_assistant", assistants: [{ ...CHATGPT, detected: true }, stale], materialsFolder: MATERIALS }));
+  assert.ok(alone, "Settings offers the setup to change");
+  assert.match(alone.body, /data-action="remove-assistant" data-assistant-id="claude-code"/);
+});
+
 test("the completed course connection shows the three status lines, then three example requests, each with its own Copy button", () => {
   const current = state({ ...CONNECTED_COURSE, firstPreview: { available: true, completed: true } });
   const view = actionView(current, { chosenAssistantId: "codex" });
@@ -533,7 +678,7 @@ test("the completed course connection shows the three status lines, then three e
     "Summarize the modules in this course and flag anything that needs review."
   ];
   for (const prompt of prompts) {
-    assert.ok(view.body.includes(`<div class="prompt">${prompt}`), `the body names the request: ${prompt}`);
+    assert.ok(view.body.includes(`<div class="prompt"><span class="prompt-text">${prompt}</span>`), `the body names the request in its own text column: ${prompt}`);
     assert.match(
       view.body,
       new RegExp(`data-action="copy-example-prompt" data-prompt="${prompt.replace(/[.]/g, "\\.")}">Copy</button>`),
@@ -675,6 +820,20 @@ test("kept copies of assistant settings, and the entry a data removal takes out,
   assert.match(view.body, /first select Remove Morrow&#39;s data/);
 });
 
+test("the retention section names Claude Desktop's own copy of the Morrow extension and the step that removes it", () => {
+  const extension = { id: "claude_desktop_extension", label: "The Morrow extension in Claude Desktop", path: "/Home/Library/Application Support/Claude/Claude Extensions/local.mcpb.morrow.morrow", removable: false, keptReason: "claude_desktop_extension" };
+  const view = retentionView(state({ retention: { uninstall: "move_to_trash", locations: [...RETENTION_LOCATIONS, extension] } }));
+  const kept = view.body.slice(view.body.indexOf("Morrow does not remove these"));
+  assert.ok(kept.includes(escapeHtml(extension.path)));
+  assert.match(kept, /Claude Desktop keeps its own copy of the Morrow extension\. Remove Morrow in Claude Desktop under Settings, Extensions\./);
+  // The uninstall steps carry the Claude Desktop step in order, once.
+  assert.match(view.body, /first select Remove Morrow&#39;s data\. It takes Morrow&#39;s entry out of every assistant settings file Morrow changed\. Also remove Morrow in Claude Desktop under Settings, Extensions\. Then quit Morrow and move it to the Trash\./);
+  assert.equal(view.body.split("Claude Desktop keeps its own copy").length - 1, 1, "the reason is said once, beside the folder");
+  // Remove Morrow's data does not stop Claude Desktop starting Morrow, so no step claims it does.
+  for (const current of [view, retention()]) assert.doesNotMatch(current.body, /stop starting Morrow/);
+  assert.doesNotMatch(retention().body, /Claude Desktop/, "no Claude Desktop step without its extension on this computer");
+});
+
 test("an assistant card says Claude Desktop is not installed and where to get it", () => {
   const view = actionView(state({ assistants: [{ ...CHATGPT, detected: true }, { ...CLAUDE_DESKTOP, detected: false }] }));
   assert.match(view.body, /Claude Desktop is not installed on this computer\. Get it from claude\.ai\/download, then select Check status\./);
@@ -724,6 +883,28 @@ test("setup asks the teacher to quit and reopen the assistant before it says to 
   const connected = actionView(connectedCourse({ connected: true }));
   assert.equal(connected.title, "Your course is connected.");
   assert.match(connected.copy, /Continue in ChatGPT/);
+});
+
+test("the reopen step for a project assistant names its project folder, and Claude Code's approval", () => {
+  const project = (id, title, projectFolder) => actionView(state({
+    ...connectedCourseFields(),
+    selectedAssistantId: id,
+    assistants: [{ id, title, tier: "advanced", supported: true, needsWorkspace: true, detected: true, configured: true, connected: false, selected: true, projectFolder }],
+  }));
+  const claudeCode = project("claude-code", "Claude Code", "/Home/Courses/Fall biology");
+  assert.equal(claudeCode.title, "Quit and reopen your assistant.");
+  assert.equal(claudeCode.copy, "Claude Code reads Morrow's entry only from the project folder you chose, and only when it starts there.");
+  assert.match(claudeCode.body, /<li>Quit <strong>Claude Code<\/strong> completely\.<\/li><li>Open <strong>Claude Code<\/strong> in the project folder <span class="path-text">\/Home\/Courses\/Fall biology<\/span>\. When Claude Code asks whether to use the morrow server from this project, approve it\.<\/li><li>Return here and select <strong>Check Claude Code<\/strong>\.<\/li>/);
+  assert.doesNotMatch(claudeCode.body, /start a new chat/);
+
+  const gemini = project("gemini-cli", "Gemini CLI", "/Home/Courses/Spring chemistry");
+  assert.equal(gemini.copy, "Gemini CLI reads Morrow's entry only from the project folder you chose, and only when it starts there.");
+  assert.match(gemini.body, /<li>Quit <strong>Gemini CLI<\/strong> completely\.<\/li><li>Start <strong>Gemini CLI<\/strong> in the project folder <span class="path-text">\/Home\/Courses\/Spring chemistry<\/span>\.<\/li><li>Return here and select <strong>Check Gemini CLI<\/strong>\.<\/li>/);
+
+  // A desktop app keeps the desktop wording.
+  assert.match(actionView(connectedCourse()).body, /<li>Open <strong>ChatGPT<\/strong> again and start a new chat\.<\/li>/);
+  // A check that finds no session points back at those steps instead of repeating the desktop wording.
+  assert.equal(errorDetails("assistant_not_connected").recovery, "Quit the assistant completely, then open it again as the steps on this screen say. Then select the Check button that names your assistant.");
 });
 
 test("a failed assistant check names the button the panel shows, not a Check again button it does not have", () => {
@@ -816,4 +997,83 @@ test("the renderer can tell when the Chrome folder step is the one on screen", (
   assert.equal(awaitingBridgeFolder(addBridgeState()), true);
   assert.equal(awaitingBridgeFolder(state({ ...addBridgeStateInput(), bridgeLoadedInChrome: true })), false);
   assert.equal(awaitingBridgeFolder(state({ lifecycle: "ready_for_assistant" })), false);
+});
+
+// The one line the header's polite live region announces for each panel. A
+// screen reader hears the step on screen, never a later or an earlier one.
+const PANEL_SUMMARIES = Object.freeze({
+  "Move Morrow to Applications.": "Move Morrow to Applications",
+  "Repair Morrow before you connect a course.": "Morrow needs repair",
+  "Update your assistant settings.": "Update your assistant settings",
+  "Finish setting up Claude Desktop.": "Finish setting up Claude Desktop",
+  "Choose your assistant.": "Choose your assistant",
+  "Morrow is getting ready.": "Morrow is getting ready",
+  "Morrow Bridge is not available yet.": "Morrow Bridge is not available yet",
+  "Reload Morrow Bridge.": "Reload Morrow Bridge in Chrome",
+  "Update Morrow Bridge.": "Update Morrow Bridge",
+  "Morrow Bridge is not ready to open.": "Morrow Bridge is not ready to open",
+  "Add Morrow Bridge.": "Set up Morrow Bridge in Chrome",
+  "Install Morrow Bridge.": "Set up Morrow Bridge in Chrome",
+  "Connect Morrow Bridge.": "Connect Morrow Bridge",
+  "Open your course in Chrome.": "Morrow Bridge is connected",
+  "Morrow cannot read your course yet.": "Morrow cannot read your course yet",
+  "Check your course connection.": "First read is ready",
+  "Quit and reopen your assistant.": "Quit and reopen ChatGPT",
+  "Your course is connected.": "First read complete"
+});
+
+// Educators read these panels on every start, during repair, and during a Bridge
+// update. They say what Morrow does in plain words and describe only what the
+// app really does: Update Bridge asks Morrow Bridge to reload itself, and the
+// move is asked for from any folder other than Applications.
+test("the start, repair, Bridge update, and move panels use plain words that match what Morrow does", () => {
+  const cases = [
+    [state({ ...READY_ASSISTANT, runtimeStatus: "uncertain" }), "Morrow will show the next Bridge step when it has finished starting. It will not open Chrome setup before then."],
+    [state({ lifecycle: "repair_required", runtimeStatus: "repair_required" }), "Morrow could not confirm that it is ready to work. No course connection or course action will start from this state."],
+    [state({ ...READY_ASSISTANT, bridgeManualChromeReloadRequired: true }), "Morrow put newer Bridge files in place. Chrome must reload Morrow Bridge before Morrow can check them."],
+    [state({ ...PAIRED, bridgeUpdateAvailable: true }), "This Morrow app includes a newer Morrow Bridge. Select Update Bridge. Morrow updates the Bridge folder and asks Chrome to reload Morrow Bridge. This does not change your course."],
+    [state({ lifecycle: "move_required", appLocation: "move_required", assistants: [{ ...CHATGPT, detected: true }] }), "Morrow is not in your Applications folder. An assistant set up from here would stop finding Morrow if this copy is moved or deleted."]
+  ];
+  for (const [current, copy] of cases) {
+    const view = actionView(current, { chosenAssistantId: "codex" });
+    assert.equal(view.copy, copy, `the "${view.title}" panel`);
+    assert.doesNotMatch(`${view.title} ${view.copy} ${view.body}`, /runtime|staged|app-owned|disk image|download folder|reload the extension/i, `the "${view.title}" panel`);
+  }
+});
+
+test("the header live region announces the same step the action panel shows, for every panel", () => {
+  const panels = [
+    state({ lifecycle: "move_required", appLocation: "move_required", assistants: [{ ...CHATGPT, detected: true }] }),
+    state({ lifecycle: "repair_required", runtimeStatus: "repair_required" }),
+    // Morrow moved: the panel asks for the assistant settings even after a first read.
+    state({ ...CONNECTED_COURSE, assistantsNeedRepoint: true, firstPreview: { available: true, completed: true } }),
+    state({ lifecycle: "assistant_pending", assistants: [{ ...CLAUDE_DESKTOP, detected: true, pending: true, selected: true }], selectedAssistantId: "claude-desktop" }),
+    state({ assistants: [{ ...CHATGPT, detected: true }] }),
+    state({ ...READY_ASSISTANT, runtimeStatus: "uncertain" }),
+    state({ ...READY_ASSISTANT, bridgeDelivery: "unavailable" }),
+    state({ ...READY_ASSISTANT, bridgeManualChromeReloadRequired: true }),
+    // A connected Bridge has a newer release to take.
+    state({ ...PAIRED, bridgeUpdateAvailable: true }),
+    // The Bridge folder is not verified.
+    state({ ...READY_ASSISTANT, bridgeFolderReady: false }),
+    state(READY_ASSISTANT),
+    state({ ...READY_ASSISTANT, bridgeDelivery: "available" }),
+    // Chrome loaded the Bridge, and it is not paired yet.
+    state({ ...READY_ASSISTANT, bridgeLoadedInChrome: true }),
+    state(PAIRED),
+    state(CONNECTED_COURSE),
+    state({ ...CONNECTED_COURSE, firstPreview: { available: true } }),
+    connectedCourse(),
+    connectedCourse({ connected: true })
+  ];
+  const seen = new Set();
+  for (const current of panels) {
+    const view = actionView(current, { chosenAssistantId: null });
+    assert.ok(Object.hasOwn(PANEL_SUMMARIES, view.title), `no summary is recorded for "${view.title}"`);
+    assert.equal(view.summary, PANEL_SUMMARIES[view.title], `the panel "${view.title}" carries its own summary`);
+    assert.equal(statusSummary(current), view.summary, `the header announces "${statusSummary(current)}" while the panel shows "${view.title}"`);
+    seen.add(view.title);
+  }
+  assert.deepEqual([...seen].sort(), Object.keys(PANEL_SUMMARIES).sort(), "every panel is covered");
+  assert.equal(statusSummary(null), "Checking setup");
 });

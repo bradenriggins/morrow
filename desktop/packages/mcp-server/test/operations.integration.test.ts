@@ -7,14 +7,14 @@ import { sha256Json, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { GatewayRuntime } from "../src/runtime.js";
-import { LoopbackApprovalServer } from "../src/approval-server.js";
+import { LoopbackApprovalServer, operationStatus } from "../src/approval-server.js";
 import type { ApprovalReviewContext } from "../src/approval-context.js";
 import type { ApprovalReviewContext } from "../src/approval-context.js";
 import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 
-function config(options: { readonly delayMs?: number } = {}) {
+function config(options: { readonly delayMs?: number; readonly reconnectBackoffMs?: number } = {}) {
   return parseGatewayConfig({
     schema: "morrow.upstreams.v1",
     profile: "private-full",
@@ -32,6 +32,9 @@ function config(options: { readonly delayMs?: number } = {}) {
         priority: 50,
         required: true,
         enabled: true,
+        ...(options.reconnectBackoffMs ? {
+          supervision: { startupAttempts: 1, reconnectAttempts: 1, initialBackoffMs: options.reconnectBackoffMs, maxBackoffMs: options.reconnectBackoffMs },
+        } : {}),
         outputPrivacy: {
           canvas_page_get: {
             allowedFields: ["source", "course_id", "value", "page_id"],
@@ -113,6 +116,32 @@ describe("outer provider effects", () => {
         state: "applied_or_unknown",
         attention: expect.arrayContaining(["provider_effect_may_have_landed"]),
       });
+    } finally {
+      await runtime.close();
+    }
+  }, 20_000);
+
+  // A source process that closed is reconnected only after a backoff. A change approved in that gap
+  // never leaves Morrow, so it is settled as not sent, and its target is not locked for a check.
+  it("settles a change as not sent when its source disconnected before dispatch", async () => {
+    const runtime = await GatewayRuntime.connect(config({ reconnectBackoffMs: 30_000 }), { journalPath: ":memory:" });
+    try {
+      const planned = runtime.planOperation("morrow_legacy_only", {
+        value: "offline-source",
+        course_id: "101",
+        _morrow: { operation_id: "operation:offline-source-1234" },
+      });
+      const id = operationId(planned);
+      runtime.approveOperation(id);
+      const upstream = (runtime as unknown as { upstreams: ReadonlyMap<string, { health(): { connected: boolean } }> }).upstreams.get("morrow-legacy")!;
+      await (upstream as unknown as { client: { close(): Promise<void> } }).client.close();
+      expect(upstream.health().connected).toBe(false);
+
+      const dispatched = await runtime.dispatchOperation(id);
+      expect(dispatched.structuredContent).toMatchObject({ effectState: "failed" });
+      const record = runtime.operationGet(id);
+      expect(record.state).toBe("failed");
+      expect(record.attention).not.toContain("provider_effect_may_have_landed");
     } finally {
       await runtime.close();
     }
@@ -340,8 +369,26 @@ describe("outer provider effects", () => {
       const lost = await runtime.call("morrow_legacy_only", { value: "lost", course_id: "302", note: "the source's read never returns this field" });
       const lostId = operationId(lost);
       runtime.approveOperation(lostId);
-      expect((await runtime.dispatchOperation(lostId)).structuredContent).toMatchObject({ effectState: "awaiting_verification", verification: { status: "unconfirmed" } });
-      expect(runtime.operationGet(lostId)).toMatchObject({ attention: ["readback_did_not_match_frozen_comparator"] });
+      expect((await runtime.dispatchOperation(lostId)).structuredContent).toMatchObject({
+        phase: "readback_unconfirmed", effectState: "awaiting_verification", verification: { status: "unconfirmed" },
+      });
+      // Nothing was compared, so the record does not say the read disagreed.
+      expect(runtime.operationGet(lostId)).toMatchObject({ verificationStatus: "unconfirmed", attention: ["readback_unavailable"] });
+
+      // The source answers the write as done but keeps the earlier value. The read proves the
+      // change did not save as approved, so the change failed and its target is free again.
+      const other = await runtime.call("morrow_legacy_only", { value: "kept something else", course_id: "301" });
+      const otherId = operationId(other);
+      runtime.approveOperation(otherId);
+      const mismatched = (await runtime.dispatchOperation(otherId)).structuredContent;
+      expect(mismatched).toMatchObject({
+        status: "failed", phase: "readback_mismatch", effectState: "failed", verification: { status: "mismatch" },
+        attention: ["readback_did_not_match_frozen_comparator"],
+      });
+      expect(runtime.operationGet(otherId)).toMatchObject({ state: "failed", verificationStatus: "mismatch" });
+      const retried = await runtime.call("morrow_legacy_only", { value: "kept again", course_id: "301" });
+      runtime.approveOperation(operationId(retried));
+      expect((await runtime.dispatchOperation(operationId(retried))).structuredContent).toMatchObject({ effectState: "verified" });
     } finally {
       await runtime.close();
     }
@@ -618,6 +665,23 @@ describe("outer provider effects", () => {
       expect(noSend).toContain("No change was sent");
       expect(noSend).toContain("read the latest Canvas content and prepare a new review");
       expect(noSend).not.toContain("This request did not finish");
+
+      // A read that proved the saved result differs is a failure of its own, not a change that was
+      // never sent and not one that still needs checking.
+      snapshot = {
+        state: "failed",
+        verificationStatus: "mismatch",
+        attention: ["readback_did_not_match_frozen_comparator"],
+        plan: { tool: "moodle_update_page", arguments: {} },
+      };
+      const savedOtherwise = await (await fetch(`${url}/operations/saved-otherwise`)).text();
+      expect(savedOtherwise).toContain("Did not save as approved");
+      expect(savedOtherwise).toContain("Moodle does not hold the result you approved");
+      expect(savedOtherwise).not.toContain("No change was sent");
+      expect(savedOtherwise).not.toContain("Needs checking");
+      expect(operationStatus("failed", "Canvas", "mismatch")).toBe("Did not save as approved");
+      expect(operationStatus("failed", "Canvas")).toBe("Did not finish");
+      expect(operationStatus("awaiting_verification", "Canvas", "unconfirmed")).toBe("Needs checking");
 
       snapshot = {
         state: "applied_or_unknown",

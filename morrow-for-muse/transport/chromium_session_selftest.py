@@ -50,6 +50,7 @@ _home_sys.path.insert(0, _home_os.path.join(
 import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import io
 import json
+import urllib.parse
 import os
 import sys
 import types
@@ -154,8 +155,9 @@ class _FakeRsm:
     def __init__(self):
         self.calls = []
 
-    def impose_halt(self, detection, reason="session_expiry"):
-        self.calls.append(("impose_halt", detection, reason))
+    def impose_halt(self, detection, reason="session_expiry",
+                    cause="session_expired"):
+        self.calls.append(("impose_halt", detection, reason, cause))
 
     def quarantine_session(self, cause, detection=None):
         self.calls.append(("quarantine_session", cause, detection))
@@ -164,6 +166,9 @@ class _FakeRsm:
         self.calls.append(("write_notify_expired", n))
 
     def quarantined_ops(self):
+        return []
+
+    def paused_ops(self):
         return []
 
     # Executor gate reads (hermetic answers; the real machine is the
@@ -177,8 +182,9 @@ class _FakeRsm:
     def on_expiry_detected(self, detection, simulated=False):
         self.calls.append(("on_expiry_detected", detection, simulated))
 
-    def quarantine_op(self, op_id, action, summary="", detection=None):
-        self.calls.append(("quarantine_op", op_id, action))
+    def quarantine_op(self, op_id, action, summary="", detection=None,
+                      write_sent=False):
+        self.calls.append(("quarantine_op", op_id, action, write_sent))
 
     def write_notify_stale(self, n):
         self.calls.append(("write_notify_stale", n))
@@ -190,6 +196,7 @@ _fake_rsm_mod = types.SimpleNamespace(
     quarantine_session=_fake_rsm.quarantine_session,
     write_notify_expired=_fake_rsm.write_notify_expired,
     quarantined_ops=_fake_rsm.quarantined_ops,
+    paused_ops=_fake_rsm.paused_ops,
     check_write_allowed=_fake_rsm.check_write_allowed,
     op_quarantine_status=_fake_rsm.op_quarantine_status,
     on_expiry_detected=_fake_rsm.on_expiry_detected,
@@ -204,18 +211,35 @@ sys.modules["reauth.state_machine"] = _fake_rsm_mod
 # fakes
 # ----------------------------------------------------------------------
 
+
+def _is_roster_read(method, path):
+    """The student roster read Morrow makes before it touches a course
+    (dispatch/test_course_content_e2e.py checks it and its order)."""
+    parts = urllib.parse.urlsplit(path)
+    query = urllib.parse.parse_qs(parts.query)
+    return method == "GET" and (
+        (parts.path.endswith("/users")
+         and "inactive" in query.get("enrollment_state[]", []))
+        or (parts.path.endswith("/enrollments")
+            and query.get("state[]") == ["deleted"]))
+
+
 class FakeTransport:
     """Scripted stand-in for LocalChromiumTransport (the CDP layer)."""
 
     def __init__(self, script):
         self.script = list(script)
         self.calls = []
+        self.roster_calls = []
 
     def ensure_session(self):
         return (1, "Test User")
 
     def api(self, method, path, data=None, _ws=None, timeout=60,
             as_json=False, max_bytes=None):
+        if _is_roster_read(method, path):
+            self.roster_calls.append(path)
+            return 200, {}, "[]"
         self.calls.append({"method": method, "path": path, "data": data,
                            "as_json": as_json})
         if not self.script:
@@ -390,8 +414,8 @@ s = cs.ChromiumSession(BASE, transport=t)
 s.raw_request("POST", BASE + "/api/v1/x",
               {"Content-Type": "application/x-www-form-urlencoded"},
               b"a=1&b=two", is_write=False)
-check("form body decodes to flat dict, as_json=False",
-      t.calls[0]["data"] == {"a": "1", "b": "two"}
+check("form body decodes to ordered pairs, as_json=False",
+      t.calls[0]["data"] == [["a", "1"], ["b", "two"]]
       and t.calls[0]["as_json"] is False, repr(t.calls[0]))
 
 t = FakeTransport([("ok", 200, "{}")])
@@ -440,6 +464,31 @@ try:
 except ex.UncertainWrite:
     check("write 500 raises UncertainWrite", True)
 check("write 500 not retried", len(t.calls) == 1)
+
+# Every 5xx is a provider failure, never a success. A CDN in front of
+# Canvas answers 520-526 (522/524: the origin timed out, and may still
+# apply a write); 501, 505, and 507 are not in the retryable set either.
+for _code in (501, 505, 507, 520, 522, 524, 599):
+    t = FakeTransport([("ok", _code, "<html>Error %d</html>" % _code)])
+    s = cs.ChromiumSession(BASE, transport=t)
+    try:
+        s.raw_request("GET", BASE + "/api/v1/x", {}, None, is_write=False)
+        check("read %d raises ProviderHttpError" % _code, False,
+              "returned as success")
+    except ex.ProviderHttpError as exc:
+        check("read %d raises ProviderHttpError" % _code,
+              exc.status == _code and len(t.calls) == 1,
+              "status=%s calls=%d" % (exc.status, len(t.calls)))
+    t = FakeTransport([("ok", _code, "<html>Error %d</html>" % _code)])
+    s = cs.ChromiumSession(BASE, transport=t)
+    try:
+        s.raw_request("PUT", BASE + "/api/v1/x", {},
+                      json.dumps({"a": 1}).encode(), is_write=True)
+        check("write %d raises UncertainWrite" % _code, False,
+              "returned as success")
+    except ex.UncertainWrite:
+        check("write %d raises UncertainWrite, not retried" % _code,
+              len(t.calls) == 1, "calls=%d" % len(t.calls))
 
 t = FakeTransport([("raise", ConnectionRefusedError("refused")),
                    ("ok", 200, "{}")])
@@ -1128,6 +1177,26 @@ try:
         check("SDK write 500 -> UncertainWrite", False, "no exception")
     except ex.UncertainWrite:
         check("SDK write 500 -> UncertainWrite", True)
+    for _code in (501, 524):
+        s5b, _t5b = _sdk_session()
+        s5b.raw_request("GET", BASE + "/api/banks/7", {}, None)
+        _FakeSdk.instances[-1].script.append(("status", _code, "x"))
+        try:
+            s5b.raw_request("POST", BASE + "/api/banks/7/items",
+                            {"Content-Type": "application/json"}, body,
+                            is_write=True)
+            check("SDK write %d -> UncertainWrite" % _code, False,
+                  "returned as success")
+        except ex.UncertainWrite:
+            check("SDK write %d -> UncertainWrite" % _code, True)
+        _FakeSdk.instances[-1].script.append(("status", _code, "x"))
+        try:
+            s5b.raw_request("GET", BASE + "/api/banks/7/items/9", {}, None)
+            check("SDK read %d -> ProviderHttpError" % _code, False,
+                  "returned as success")
+        except ex.ProviderHttpError as exc:
+            check("SDK read %d -> ProviderHttpError" % _code,
+                  exc.status == _code)
     s6, t6 = _sdk_session()
     s6.raw_request("GET", BASE + "/api/banks/7", {}, None)
     _FakeSdk.instances[-1].script.append(("status", 422, "x"))
@@ -1340,6 +1409,9 @@ check("wiring: halt detection carries the taxonomy cause",
 check("wiring: quarantine records the taxonomy cause",
       quar and quar[0][1] == cs.AUTH_DEATH_SESSION_ENDED,
       repr(quar))
+check("wiring: the halt records the session-expiry cause",
+      halt and halt[0][3] == "session_expired",
+      repr(halt[0]) if halt else "no halt call")
 
 # Sticky (W4-P2-2): the next write on the same dead object fails fast
 # as ChromiumSessionDead: no provider call, no second UncertainWrite,

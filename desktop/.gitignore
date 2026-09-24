@@ -31,3 +31,5 @@ docs/research/MORROW-MESSAGING-AND-RESPONSIVE-TYPE-2026-09-06.md
 /work/handoff-2026-09-07/
 /work/qa/
 /WEEKEND-HANDOFF.md
+# A source checkout's Bridge pairing secret (scripts/source-bridge-folder.mjs).
+/connector/extension/morrow-bridge-active-folder.json

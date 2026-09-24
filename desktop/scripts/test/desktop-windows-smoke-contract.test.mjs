@@ -142,6 +142,23 @@ test("binds each retained smoke observation to one exact installer, source, and 
   ]) assert.equal(windowsSmokeObservation(evidence, mismatch), null);
 });
 
+test("preserves the bounded failure classification when binding a damaged Windows observation", () => {
+  const binding = createWindowsSmokeBinding({
+    runId: "1".repeat(32),
+    sourceCommit: "a".repeat(40),
+    packageReceiptSha256: "c".repeat(64),
+    releaseGraphSha256: "e".repeat(64),
+    installerFileName: "Morrow-1.0.4-win-x64.exe",
+    installerSha256: "b".repeat(64),
+  });
+  const observation = damagedReceipt();
+  observation.smokeFailure = { stage: "verify_payload", code: "unclassified_error" };
+  const evidence = bindWindowsSmokeObservation(observation, binding);
+  assert.deepEqual(windowsSmokeObservation(evidence), observation);
+  observation.smokeFailure.code = "unsafe value";
+  assert.throws(() => bindWindowsSmokeObservation(observation, binding), /exact application observation/);
+});
+
 test("Windows smoke source identity comes from the retained package receipt", (t) => {
   const root = mkdtempSync(resolve(tmpdir(), "morrow-windows-package-binding-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -177,7 +194,53 @@ test("Windows smoke source identity comes from the retained package receipt", (t
     sourceCommit: "b".repeat(40),
     packageReceipt,
     installer,
-  }), /not the expected unsigned QA release graph/);
+  }), /not the expected unsigned release graph/);
+});
+
+// The published Windows installer is built with --unsigned-release. docs/versioning.md runs this
+// harness on it before `gh release create`, so the binding accepts that receipt as well as the QA
+// workflow's --unsigned-qa receipt, and no other signing record. Written before the fix (final
+// sweep 2026-09-23): every --unsigned-release receipt was refused.
+test("Windows smoke binds the unsigned release installer a maintainer publishes, and no other signing record", (t) => {
+  const root = mkdtempSync(resolve(tmpdir(), "morrow-windows-release-binding-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const installer = resolve(root, "Morrow-1.0.5-win-x64.exe");
+  const packageReceipt = resolve(root, "package-receipt.json");
+  const installerBytes = Buffer.from("published Windows installer");
+  writeFileSync(installer, installerBytes);
+  const bind = (signing) => {
+    writeFileSync(packageReceipt, JSON.stringify({
+      schema: "morrow.desktop-installer.v1",
+      version: "1.0.5",
+      target: "win32-x64",
+      source: { head: "a".repeat(40), dirty: false },
+      payload: { releaseGraph: { schema: "morrow.desktop-packager-admission.v1", sha256: "e".repeat(64) } },
+      signing,
+      artifacts: [{ name: "Morrow-1.0.5-win-x64.exe", sha256: createHash("sha256").update(installerBytes).digest("hex") }],
+    }));
+    return createWindowsSmokeBindingFromPackage({ runId: "1".repeat(32), sourceCommit: "a".repeat(40), packageReceipt, installer });
+  };
+
+  const release = {
+    mode: "unsigned_public_release",
+    target: "win32-x64",
+    publicRelease: true,
+    automaticUpdates: false,
+    artifactSignature: "authenticode_absent",
+  };
+  assert.equal(bind(release).installer.fileName, "Morrow-1.0.5-win-x64.exe");
+  bind({ mode: "unsigned_private_qa", target: "win32-x64", publicRelease: false, artifactSignature: "authenticode_absent" });
+
+  for (const signing of [
+    { ...release, publicRelease: false },
+    { ...release, automaticUpdates: true },
+    { ...release, artifactSignature: "authenticode_present" },
+    { mode: "unsigned_private_qa", target: "win32-x64", publicRelease: true, artifactSignature: "authenticode_absent" },
+    { ...release, target: "darwin-arm64" },
+    { mode: "unsigned_public_release", target: "win32-x64", publicRelease: true, automaticUpdates: false },
+  ]) {
+    assert.throws(() => bind(signing), /not the expected unsigned release graph/, JSON.stringify(signing));
+  }
 });
 
 test("Windows smoke reads the source and release graph embedded in the installed ASAR", (t) => {

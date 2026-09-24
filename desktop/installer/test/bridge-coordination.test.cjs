@@ -15,7 +15,7 @@ test("an unconfirmed Bridge reload keeps its maintenance lease", async () => {
     confirm: async () => assert.fail("confirmation must not run"),
     refresh: async () => assert.fail("refresh must not run"),
     release: async () => { releases += 1; }
-  }), /reload is not confirmed/);
+  }), (error) => /reload is not confirmed/.test(error.message) && error.code === "bridge_reload_unconfirmed");
   assert.equal(releases, 0);
 });
 

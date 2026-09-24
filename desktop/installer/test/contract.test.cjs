@@ -32,6 +32,7 @@ function loadMain() {
         isPackaged: false,
         getVersion: () => "1.0.0-rc.0",
         getPath: () => installerRoot,
+        setName() {},
         setPath() {},
         requestSingleInstanceLock: () => true,
         whenReady: () => new Promise(() => {}),
@@ -85,6 +86,7 @@ async function startedMorrow(controller = {}, updateController = null) {
         isPackaged: false,
         getVersion: () => "1.0.0-rc.0",
         getPath: () => path.join(os.tmpdir(), "morrow-start-user-data"),
+        setName() {},
         setPath() {},
         requestSingleInstanceLock: () => true,
         // main.cjs starts Morrow from app.whenReady().then(startMorrow) and
@@ -239,6 +241,24 @@ test("Check Bridge returns safe installer errors even when the runtime or state 
 
   failure = new Error("private Bridge mismatch detail");
   assert.deepEqual((await check()).error, errorDetails("bridge_check_failed"));
+
+  // Chrome has not reloaded a staged Bridge update yet. The reload step shows
+  // Check Bridge and Restore previous Bridge, and no Repair Morrow, so the
+  // answer names only the Chrome reload.
+  failure = Object.assign(new Error("private reload detail"), { code: "bridge_reload_unconfirmed" });
+  const unreloaded = (await check()).error;
+  assert.deepEqual(unreloaded, errorDetails("bridge_reload_unconfirmed"));
+  assert.equal(unreloaded.message, "Chrome has not reloaded Morrow Bridge yet.");
+  assert.equal(unreloaded.recovery, "In Chrome, open Manage Extensions and select Reload on Morrow Bridge, then select Check Bridge.");
+  assert.doesNotMatch(JSON.stringify(unreloaded), /Repair|private/);
+
+  // The Update panel offers only Update Bridge, so a failed update names that
+  // control and Chrome's own Reload, never Repair Morrow or Check Bridge.
+  failure = Object.assign(new Error("private staging detail"), { code: "bridge_update_failed" });
+  const notUpdated = (await check()).error;
+  assert.deepEqual(notUpdated, errorDetails("bridge_update_failed"));
+  assert.match(notUpdated.recovery, /select Update Bridge again/);
+  assert.doesNotMatch(JSON.stringify(notUpdated), /Repair|Check Bridge|private/);
 
   for (const error of [
     Object.assign(new Error("private MCP detail"), { code: -32603 }),
@@ -671,6 +691,45 @@ test("the Bridge step shows the app-owned folder and reports a folder failure as
   assert.equal(result.error.message, "Morrow could not show the Morrow Bridge folder.");
 });
 
+// The default materials folder sits inside a folder the system hides, so Morrow opens it itself.
+test("Show folder opens the materials folder Morrow uses, and reports a missing folder as its own error", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-materials-reveal-"));
+  test.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const userData = path.join(root, "UserData");
+  await fs.promises.mkdir(userData, { recursive: true });
+  const controller = (shell) => createInstallerController({
+    app: { getPath: () => userData },
+    dialog: {},
+    shell,
+    platform: process.platform,
+    homeDirectory: path.join(root, "Home"),
+    testRoot: null,
+    isTestMode: false,
+    payloadRoot: path.join(root, "Payload"),
+    productVersion: "1.0.0-rc.0",
+    trustedBridgeReleaseManifestSha256: () => null,
+    trustedMcpRuntimeManifestSha256: () => null,
+    detectAssistant: async () => false,
+    runCli: async () => ({ code: 0, stdout: "", stderr: "" })
+  });
+  const opened = [];
+  const installer = controller({ openPath: async (target) => { opened.push(target); return ""; } });
+
+  await assert.rejects(() => installer.revealMaterialsFolder(), (error) => error.code === "materials_folder_unavailable");
+  assert.deepEqual(opened, [], "nothing was opened while the materials folder was missing");
+
+  await fs.promises.mkdir(installer.paths.defaultMaterials, { recursive: true });
+  await installer.revealMaterialsFolder();
+  assert.deepEqual(opened, [await fs.promises.realpath(installer.paths.defaultMaterials)]);
+
+  const refusing = controller({ openPath: async () => "no file manager answered" });
+  await assert.rejects(() => refusing.revealMaterialsFolder(), (error) => error.code === "materials_folder_unavailable");
+
+  const result = envelope(repairRequiredState(), errorDetails("materials_folder_unavailable"));
+  assert.equal(result.error.message, "Morrow could not open the materials folder.");
+  assert.doesNotMatch(result.error.recovery, /\//, "the recovery names no path");
+});
+
 test("the Blackboard request clears FormData and reaches only the trusted filesystem transaction", () => {
   const preload = fs.readFileSync(path.join(installerRoot, "preload.cjs"), "utf8");
   const main = fs.readFileSync(path.join(installerRoot, "main.cjs"), "utf8");
@@ -743,4 +802,61 @@ test("an assistant settings error names only that absolute file, and only for er
   const unrelated = envelope(repairRequiredState(), { code: "setup_failed", file });
   assert.equal(unrelated.error.file, undefined);
   assert.equal(JSON.stringify(unrelated).includes(file), false);
+});
+
+// Every Blackboard step writes Morrow's own files under the maintenance fence,
+// so an open assistant or a running change refuses it before Blackboard is
+// contacted. That refusal says what holds Morrow; the Blackboard text would
+// blame the credentials or ask for a retry that fails the same way.
+test("a Blackboard step the maintenance fence refused keeps the refusal's own words", async () => {
+  const state = repairRequiredState();
+  let failure = null;
+  const refuse = async () => { throw failure; };
+  const started = await startedMorrow({
+    configureBlackboard: refuse,
+    selectBlackboardCourses: refuse,
+    removeBlackboardTenant: refuse,
+    removeBlackboardData: refuse,
+    state: async () => state
+  });
+  const event = { sender: started.window.webContents, senderFrame: started.window.webContents.mainFrame };
+  const steps = [
+    ["installer:configure-blackboard", [{ baseUrl: "https://learn.example.edu", applicationKey: "key-1", applicationSecret: "secret-1" }], "blackboard_configuration_invalid"],
+    ["installer:select-blackboard-courses", [{ tenantId: "learn-example-edu", courseBindings: [] }], "blackboard_course_selection_invalid"],
+    ["installer:remove-blackboard-tenant", [{ tenantId: "learn-example-edu" }], "blackboard_removal_failed"],
+    ["installer:remove-blackboard-data", [], "blackboard_removal_failed"]
+  ];
+  for (const [channel, input, own] of steps) {
+    const run = () => started.handlers.get(channel)(event, ...input);
+    for (const code of ["runtime_other_client_connected", "runtime_request_in_flight", "runtime_change_running", "active_or_uncertain_operations", "runtime_repair_required"]) {
+      failure = Object.assign(new Error("private fence detail"), { code });
+      const answer = await run();
+      assert.deepEqual(answer.error, errorDetails(code), `${channel} answers ${code} with its own words`);
+      assert.doesNotMatch(JSON.stringify(answer), /private|Blackboard web address/);
+    }
+    // A failure on the Blackboard side keeps the step's own fixed text.
+    failure = Object.assign(new Error("private Blackboard detail"), { code: "blackboard_discovery_failed" });
+    assert.deepEqual((await run()).error, errorDetails(own), `${channel} keeps its own text for a Blackboard failure`);
+    failure = new Error("private Blackboard detail");
+    assert.deepEqual((await run()).error, errorDetails(own));
+  }
+});
+
+test("Blackboard recoveries name only what the Blackboard form and course list offer", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "renderer", "index.html"), "utf8");
+  const renderer = fs.readFileSync(path.join(__dirname, "..", "renderer", "renderer.js"), "utf8");
+  const labels = [...html.matchAll(/<label for="blackboard-[^"]+">([^<]+)<\/label>/g)].map((match) => match[1]);
+  assert.deepEqual(labels, ["Your Blackboard web address", "Application key from your Blackboard administrator", "Application secret"]);
+  // Courses are chosen from the list Blackboard verified, with a button on each course.
+  assert.match(renderer, /\? "Remove" : "Allow Morrow"/);
+  const configuration = errorDetails("blackboard_configuration_invalid");
+  assert.equal(configuration.recovery, "Check the Blackboard web address and the application key and secret from your administrator, then save again.");
+  const selection = errorDetails("blackboard_course_selection_invalid");
+  assert.equal(selection.recovery, "Select Check status, then select Allow Morrow or Remove on that course again. Your Blackboard connection was left as it was.");
+  for (const text of [configuration.recovery, selection.recovery]) assert.doesNotMatch(text, /account ID|course ID|_45_1/);
+  // After a save the form keeps only the web address, and a save needs the
+  // application key, so changing the secret takes the key as well.
+  const savedNote = html.match(/<p id="blackboard-saved-note"[^>]*>([^<]+)<\/p>/)[1];
+  assert.match(savedNote, /To change the secret, paste the application key and the new secret, then save\.$/);
+  assert.doesNotMatch(savedNote, /paste it again/);
 });

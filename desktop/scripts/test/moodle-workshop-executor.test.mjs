@@ -5,7 +5,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import { executeMoodleWorkshopInPage } from "../../connector/extension/src/moodle-workshop-executor.js";
 
 const SESSION = "synthetic-session";
@@ -379,7 +379,7 @@ test("Moodle Workshop executor reads, creates hidden, edits bounded settings, an
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Workshop test server did not bind");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=2`);

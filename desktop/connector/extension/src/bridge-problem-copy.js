@@ -14,6 +14,14 @@
  * it, so a support conversation starts from the word the person can see.
  */
 
+/**
+ * The one recovery for Morrow and Morrow Bridge versions that do not match, shown by the popup, the
+ * setup guide and this copy alike. After a Morrow update Chrome still runs the old Morrow Bridge
+ * until it is reloaded; when the Bridge folder itself is out of date, the Morrow app shows its own
+ * Morrow Bridge step.
+ */
+export const VERSION_MISMATCH_RECOVERY = "Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.";
+
 const COPY = {
   // --- Connecting Morrow, Chrome and a learning platform ---------------------------------------------
   bridge_not_connected: {
@@ -21,10 +29,50 @@ const COPY = {
     detail: "Morrow Bridge asked the Morrow app on this computer to start a connection, and nothing answered.",
     action: "Open the Morrow app, then select Connect Morrow again.",
   },
+  bridge_pairing_refused: {
+    title: "Morrow answered but did not start a connection",
+    detail: "The Morrow app on this computer answered Morrow Bridge, and it did not start a new connection.",
+    action: "Quit and reopen the Morrow app, then select Connect Morrow again.",
+  },
+  bridge_pairing_folder_unconfirmed: {
+    title: "Morrow could not confirm this copy of Morrow Bridge",
+    detail: "Morrow connects only the Morrow Bridge that Chrome loaded from the folder Morrow set up on this computer, and this copy did not prove it came from that folder.",
+    action: "In the Morrow app, select Show Bridge folder. Load that folder with Load unpacked on the Chrome extensions page, then select Connect Morrow again.",
+  },
+  bridge_pairing_sender_refused: {
+    title: "Connect Morrow was not started from Morrow Bridge",
+    detail: "Morrow Bridge starts a connection only when you select Connect Morrow in its popup or its setup guide.",
+    action: "Open the Morrow Bridge popup and select Connect Morrow.",
+  },
+  bridge_pairing_response_timeout: {
+    title: "Morrow did not answer in time",
+    detail: "Morrow Bridge reached the Morrow app on this computer, and the app did not finish answering in time, so nothing was connected.",
+    action: "Check that the Morrow app is open and responding, then select Connect Morrow again.",
+  },
+  bridge_pairing_response_interrupted: {
+    title: "Connect Morrow stopped before it finished",
+    detail: "Morrow Bridge was disconnected, or course data use was no longer accepted, while it waited for the Morrow app, so nothing was connected.",
+    action: "Select Connect Morrow again when you want Morrow Bridge to connect.",
+  },
+  bridge_pairing_response_invalid: {
+    title: "Morrow Bridge could not read the answer to Connect Morrow",
+    detail: "The answer from the Morrow app's address on this computer is not in the form this Morrow Bridge uses, so nothing was connected. The Morrow app may be a different version, or another program may be answering at that address.",
+    action: "Quit and reopen the Morrow app, then select Connect Morrow again. If this continues, follow the Morrow Bridge step in the Morrow app.",
+  },
+  bridge_pairing_response_too_large: {
+    title: "The answer to Connect Morrow was too large to come from Morrow",
+    detail: "The answer from the Morrow app's address on this computer was far larger than Morrow's answer, so Morrow Bridge stopped reading it and connected nothing. Another program may be answering at that address.",
+    action: "Restart your computer, open the Morrow app, then select Connect Morrow again.",
+  },
+  bridge_pairing_superseded: {
+    title: "A newer Connect Morrow replaced this one",
+    detail: "Connect Morrow was selected again, or Morrow Bridge was disconnected, while this one waited for the Morrow app. Morrow Bridge keeps only the newest request, so this one connected nothing.",
+    action: "Open the Morrow Bridge popup to see whether Morrow is connected. If it is not, select Connect Morrow once.",
+  },
   bridge_version_mismatch: {
     title: "Morrow and Morrow Bridge versions do not match",
     detail: "The Morrow app on this computer refused the connection because it expects a different Morrow Bridge.",
-    action: "Update Morrow, then reload Morrow Bridge on the Chrome extensions page and select Connect Morrow again.",
+    action: VERSION_MISMATCH_RECOVERY,
   },
   bridge_port_in_use: {
     title: "Another Morrow is already using this connection",
@@ -45,6 +93,11 @@ const COPY = {
     title: "Morrow Bridge cannot read its own list of course actions",
     detail: "This Chrome extension is damaged or only partly updated, so it cannot say which course actions it supports.",
     action: "Reload Morrow Bridge on the Chrome extensions page, then open this page again.",
+  },
+  connector_private_contract_invalid: {
+    title: "Morrow Bridge files come from different versions",
+    detail: "Part of this Chrome extension does not match the rest, so Morrow Bridge cannot connect or run course actions.",
+    action: "Open the Morrow app and follow its Morrow Bridge step, then reload Morrow Bridge on the Chrome extensions page.",
   },
   bridge_request_failed: {
     title: "Morrow could not complete that step",
@@ -81,6 +134,11 @@ const COPY = {
     detail: "Chrome never displayed the access request, so Morrow received no answer.",
     action: "Close this popup and open it again on the signed-in course. Then select Connect this course.",
   },
+  course_connection_superseded: {
+    title: "Another course connection replaced this one",
+    detail: "Connect this course started again, or Morrow was disconnected, before this course finished connecting, so Morrow did not connect it.",
+    action: "Open the course you want in Chrome, then select Connect this course in the Morrow Bridge popup once.",
+  },
   blackboard_browser_unsupported: {
     title: "Morrow does not connect Blackboard through Chrome",
     detail: "Blackboard Learn uses the REST connection in the Morrow app. No live Blackboard site has been tested.",
@@ -100,7 +158,7 @@ const COPY = {
   },
   edit_policy_status_unreadable: {
     title: "Morrow Bridge answered with a course state this page cannot read",
-    detail: "The list of connected courses and Edit lengths did not arrive in the shape this page expects.",
+    detail: "The list of connected courses and their Edit access did not arrive in the shape this page expects.",
     action: "Refresh this page. If it continues, reload Morrow Bridge on the Chrome extensions page.",
   },
   edit_policy_options_unreadable: {
@@ -224,6 +282,58 @@ const COPY = {
     action: "Remove that permission on the Chrome extensions page under Morrow Bridge site access.",
   },
 
+  // --- A Private Chat message Morrow did not send ------------------------------------------------
+  private_chat_course_unavailable: {
+    title: "The course for this Private Chat is not open",
+    detail: "Morrow sent nothing. Morrow reads the course's class list from its signed-in Canvas or Moodle tab, and that tab is closed or signed out.",
+    action: "Open the course in Canvas or Moodle and sign in if asked, then send the message again.",
+  },
+  private_chat_roster_incomplete: {
+    title: "Morrow could not read this course's class list",
+    detail: "Morrow sent nothing. Morrow protects student names only against the complete class list, and Canvas or Moodle did not return all of it.",
+    action: "Keep the course open and signed in, wait a moment, then send the message again.",
+  },
+  protected_request_identifier_unknown: {
+    title: "A student detail matches no student in this course",
+    detail: "Morrow sent nothing. A student you listed, or an email address or student ID in the message, is not on this course's class list.",
+    action: "Check the spelling of each listed student, and remove any email address or ID that is not a student in this course, then send again.",
+  },
+  protected_request_identifier_ambiguous: {
+    title: "A name in the message matches more than one student",
+    detail: "Morrow sent nothing. Morrow cannot tell which student the name means.",
+    action: "Use the student's full name or email address in the list and in the message, then send again.",
+  },
+  protected_request_assertion_missing: {
+    title: "A listed student is not named in the message",
+    detail: "Morrow sent nothing. Each student in the list must appear in the message, so Morrow knows the list matches what you wrote.",
+    action: "Name that student in the message, or remove the student from the list, then send again.",
+  },
+  protected_request_existing_label_refused: {
+    title: "The message uses a student label this chat has not given",
+    detail: "Morrow sent nothing. A label such as Student A1 names a student only after Morrow gives that label in this course.",
+    action: "Write the student's name instead of the label, then send again.",
+  },
+  private_chat_exchange_changed: {
+    title: "The assistant is no longer waiting for this message",
+    detail: "Morrow sent nothing. The assistant's Private Chat ended or started over before this message was protected and sent.",
+    action: "Ask your assistant to start Private Chat again, then send your message.",
+  },
+  private_chat_scope_change_refused: {
+    title: "This Private Chat belongs to another course",
+    detail: "Morrow sent nothing. One Private Chat works in one course, and this message names a different course.",
+    action: "Close this drawer, then ask your assistant to start a new Private Chat for this course.",
+  },
+  private_chat_message_invalid: {
+    title: "Morrow could not read this message",
+    detail: "Morrow sent nothing. The message or the student list is longer than Morrow accepts, or the message starts with a bracket, which Morrow reads as a data block, and the block is not complete.",
+    action: "Shorten the message or the list, or start the message with a word, then send again.",
+  },
+  private_chat_send_failed: {
+    title: "Morrow could not send this message",
+    detail: "Morrow Bridge reported no reason for this one, and the message was not sent.",
+    action: "Send the message again. If it fails again, close this drawer and ask your assistant to start a new Private Chat.",
+  },
+
   // --- One course read or change Morrow Bridge could not complete -------------------------------
   canvas_binding_required: {
     title: "The Canvas or Moodle tab is not open and signed in",
@@ -249,6 +359,11 @@ const COPY = {
     title: "That change is outside the Edit access you gave",
     detail: "Morrow sent nothing. The change is not one of the change types selected for this course.",
     action: "Open Plan and Edit settings to see the selected change types, or keep the change in Plan for your review.",
+  },
+  edit_policy_page_missing: {
+    title: "That page is not in the course",
+    detail: "Morrow sent nothing. Canvas would create this page, and Edit access changes only a page that already exists.",
+    action: "Ask your assistant to check the page's name, or to add it as a new page.",
   },
   edit_policy_canvas_content_guard_required: {
     title: "That content repair needs the current page content",

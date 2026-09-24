@@ -6,6 +6,7 @@ param(
   [Parameter(Mandatory = $true)][string] $NewInstaller,
   [Parameter(Mandatory = $true)][string] $NewSha256,
   [Parameter(Mandatory = $true)][string] $NewSourceHead,
+  [Parameter(Mandatory = $true)][string] $NewVersion,
   [Parameter(Mandatory = $true)][string] $InstallDirectory,
   [Parameter(Mandatory = $true)][string] $StateDirectory,
   [Parameter(Mandatory = $true)][string] $Receipt
@@ -21,12 +22,14 @@ $PinnedOldSha256 = '2750cd7b6746fb7f6701a92920158691eb9ad787732826597f6de4c3ed0f
 $PinnedOldSourceHead = '3720b76bfd5dc5d132627777be4034bf9ef0dae5'
 $PrivateAclClassification = 'current_user_system_admin_sensitive_access_only'
 $Pinned3720LegacyAclClassification = 'additional_principal_sensitive_access_allow'
+if ($NewVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw 'The new build version must be X.Y.Z.' }
+# The new build's own version names the installed application, so a version bump cannot break this check.
 $ExpectedWindowsApplicationMetadata = [ordered]@{
   companyName = 'Braden Riggins'
-  productName = 'Morrow'
-  fileDescription = 'Morrow'
-  fileVersion = '1.0.4'
-  productVersion = '1.0.4.0'
+  productName = 'Morrow Desktop'
+  fileDescription = 'Morrow Desktop'
+  fileVersion = $NewVersion
+  productVersion = "$NewVersion.0"
 }
 
 function Assert-AbsolutePath([string] $Name, [string] $Value) {
@@ -69,7 +72,8 @@ function Assert-ReadyReceipt($Value, [string] $Label, [bool] $RequireGatewayRead
   if ($Value.schema -ne 'morrow.desktop-windows-smoke.v1' -or -not $Value.runtime.ready -or -not $Value.health.attempted `
     -or ($RequireGatewayReady -and -not $Value.health.gatewayReady)) {
     $trace = $Value.runtimeTrace | ConvertTo-Json -Depth 8 -Compress
-    throw "The $Label packaged runtime did not become ready: runtime=$($Value.runtime.ready), attempted=$($Value.health.attempted), gateway=$($Value.health.gatewayReady), trace=$trace."
+    $smokeFailure = if ($Value.smokeFailure) { $Value.smokeFailure | ConvertTo-Json -Compress } else { 'unavailable' }
+    throw "The $Label packaged runtime did not become ready: runtime=$($Value.runtime.ready), attempted=$($Value.health.attempted), gateway=$($Value.health.gatewayReady), smokeFailure=$smokeFailure, trace=$trace."
   }
   $private = $PrivateAclClassification
   $legacy = $Pinned3720LegacyAclClassification
@@ -96,9 +100,10 @@ function Run-App([string] $Label, [bool] $RequireGatewayReady = $true, [bool] $A
   return $value
 }
 
-function Package-Source {
+# The pinned 3720 build wrote the first package manifest schema; the build under test writes the current one.
+function Package-Source([string] $ExpectedSchema) {
   $manifest = Get-Content -LiteralPath "$InstallDirectory\resources\MorrowPayload\app\package-input-manifest.json" -Raw | ConvertFrom-Json
-  if ($manifest.schema -ne 'morrow.desktop-package-input.v2' -or $manifest.source.dirty -ne $false) {
+  if ($manifest.schema -ne $ExpectedSchema -or $manifest.source.dirty -ne $false) {
     throw 'The installed package source binding is unavailable or dirty.'
   }
   return $manifest.source.head
@@ -239,7 +244,7 @@ New-Item -ItemType Directory -Path $StateDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path (Split-Path -Parent $Receipt) -Force | Out-Null
 
 Install-App $OldInstaller
-$oldSource = Package-Source
+$oldSource = Package-Source 'morrow.desktop-package-input.v1'
 if ($oldSource -ne $OldSourceHead) { throw 'The published installer has the wrong source binding.' }
 $oldCold = Run-App 'before-upgrade-cold' $false $true
 $oldRetryUsed = -not $oldCold.health.gatewayReady
@@ -261,7 +266,7 @@ Assert-Present $retainedBefore 'Required retained data'
 Assert-Present $stateBefore 'Required application state'
 
 Install-App $NewInstaller
-$newSource = Package-Source
+$newSource = Package-Source 'morrow.desktop-package-input.v2'
 if ($newSource -ne $NewSourceHead -or $newSource -eq $oldSource) { throw 'The new installer did not replace the published packaged source.' }
 $stateAfterInstall = Compare-Files $stateBefore (Capture-Files $stateTargets) 'The installer upgrade application state'
 $newReady = Run-App 'after-upgrade'
@@ -274,7 +279,7 @@ $stateAfterUpgrade = Capture-Files $stateTargets
 Assert-Present $stateAfterUpgrade 'Application state after upgrade'
 $registryAfterUpgrade = @(Registry-Matches)
 if ($registryAfterUpgrade.Count -ne 1) { throw "Expected one current-user Morrow registration after upgrade; found $($registryAfterUpgrade.Count)." }
-if ($registryAfterUpgrade[0].publisher -ne 'Braden Riggins' -or $registryAfterUpgrade[0].displayName -ne 'Morrow 1.0.4' -or $registryAfterUpgrade[0].displayVersion -ne '1.0.4') {
+if ($registryAfterUpgrade[0].publisher -ne 'Braden Riggins' -or $registryAfterUpgrade[0].displayName -ne "Morrow Desktop $NewVersion" -or $registryAfterUpgrade[0].displayVersion -ne $NewVersion) {
   throw 'The uninstall registration metadata is wrong.'
 }
 

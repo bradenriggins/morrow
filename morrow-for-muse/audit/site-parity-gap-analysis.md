@@ -198,7 +198,7 @@ does not reflect. Any per-entry evidence-status rebuild of `pack/pack.json`
 
 - Sibling agents were implementing P0-1/P0-2/P0-4/P0-7 items in `provision/provision.py`, `dispatch/executor.py`, and `transport/browser_backend.py` during this read; statuses marked "in flight" may have landed by the time this is read.
 - `proof-battery/LEDGER.md` live-evidence claims (2026-09-20 batteries) were not re-verified here; PENDING/NOT PROVEN rows there remain unproven.
-- The desktop Morrow analysis reports (`~/workspace/morrow-desktop-analysis/`) document how desktop does governed tools and session handling; this analysis covers only what exists in the Muse deploy tree.
+- The Morrow Desktop analysis reports (`~/workspace/morrow-desktop-analysis/`) document how desktop does governed tools and session handling; this analysis covers only what exists in the Muse deploy tree.
 - Claim 10 (ChatGPT/Claude/Gemini) is a platform-layer concern; the tree backend is model-agnostic and needs no change for it.
 
 ## Independent reconciliation pass (2026-09-21, second analyst)

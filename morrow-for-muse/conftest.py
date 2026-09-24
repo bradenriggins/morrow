@@ -13,6 +13,8 @@ import os
 import shutil
 import tempfile
 
+import pytest
+
 _TREE = os.path.dirname(os.path.abspath(__file__))
 _BASE = os.path.join(_TREE, ".selftest-work")
 os.makedirs(_BASE, exist_ok=True)
@@ -29,6 +31,29 @@ for _name in ("MORROW_TREE_STATE_DIR", "MORROW_SOURCE_VAULT_PATH",
               "MORROW_PRIVACY_MAP", "MORROW_PRIVACY_SALT",
               "LOGIN_HELPER_PROFILE_DIR"):
     os.environ.pop(_name, None)
+# Agent-side code reads the tree's helper/env when the environment has
+# no value; the suite reads an empty scratch file instead.
+os.environ["MORROW_HELPER_ENV_FILE"] = os.path.join(
+    os.environ["MORROW_HOME"], "helper-env")
+
+
+# The session's scratch home. config.selftest_home adopts it only while
+# MORROW_HOME still equals MORROW_SELFTEST_HOME; otherwise a selftest
+# started in a subprocess makes its own home beside its own tree.
+_SESSION_ENV = {name: os.environ[name]
+                for name in ("HOME", "MORROW_HOME", "MORROW_SELFTEST_HOME")}
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _session_home_restored():
+    """A module may point HOME or MORROW_HOME elsewhere for its own tests,
+    but must restore them before the next module starts."""
+    changed = sorted(name for name, value in _SESSION_ENV.items()
+                     if os.environ.get(name) != value)
+    if changed:
+        pytest.fail("an earlier test module changed %s and did not restore "
+                    "it" % ", ".join(changed), pytrace=False)
+    yield
 
 
 def pytest_unconfigure(config):

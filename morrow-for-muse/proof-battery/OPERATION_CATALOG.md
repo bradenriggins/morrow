@@ -1,7 +1,7 @@
 # Morrow for Muse: Operation Catalog (authoritative)
 
 Date: 2026-09-20. Product: Morrow for Muse (no-PAT Canvas-only connector, no MCP).
-This file is the authoritative operation catalog for the proof battery. It supersedes proof-battery/LEDGER.md, which is kept as-is for history.
+This file is the authoritative operation catalog for the proof battery. It supersedes the older proof ledger (proof-battery/LEDGER.md), which the source repository keeps as-is for history; it is not in the release.
 
 Path convention: the desktop catalog records paths without the /api prefix; every Canvas REST path below is shown with the real /api prefix added.
 
@@ -10,9 +10,12 @@ Each operation needs: (1) a batch rendered by transport/batch.py or the equivale
 
 ## Evidence citations: what is in this tree and what is not
 Citations in row notes name where the evidence was recorded, not
-always a file in this tree. In-tree evidence lives under
-`proof-battery/evidence/`, `proof-battery/waves/`, and
-`proof-battery/live-product-proof/`. The following are external
+always a file in this tree. In the source repository, evidence lives
+under `proof-battery/evidence/`, `proof-battery/waves/`, and
+`proof-battery/live-product-proof/`, and row notes also cite
+`DEPLOY.md` (the 2026-09-20 deployment record) and `LEDGER.md` (the
+older proof ledger). The release does not carry any of them. The
+following are external
 evidence history from the operator's 2026-09-20/21 proof campaign;
 they do not exist in this tree and are not carried into the package:
 `proofs/quiz-lane/battery2.py`, `proofs/dress-rehearsal/stage4_driver.py`,
@@ -27,11 +30,13 @@ Do not go looking for these files in the tree.
 ## Transport mechanisms
 - canvas-batch: transport/batch.py browser-task transport. Mechanism proven live 2026-09-20 (assignment lifecycle 4045368, course read, users/self). Per-operation proof still required. Integrated behind dispatch/executor.py as the default --backend chromium lane (transport/local_chromium.py over CDP on 127.0.0.1:19223); canvas-batch remains the proof-battery reference transport.
 - quiz-api-token: provision/provision.py LTI chain plus dispatch/executor.py. Proven for the banks.build scope (bank lifecycle 4040/4041/4037).
-- moodle-ajax: moodle/session.py AJAX envelope (lib/ajax/service.php). Proven for allowed_from_ajax functions.
+- moodle-ajax: moodle/session.py AJAX envelope (lib/ajax/service.php). Proven for allowed_from_ajax functions. Moodle is out for v1 (SCOPE.md): the Moodle code is in the source repository only, not in the release.
 - moodle-form: moodle/session.py form-path fallback. Proven for forum discussion create/delete.
 - executor-plain: dispatch/executor.py plain HTTPS. Works with PAT; session-cookie replay is OTP-walled on the CHCP tenant class, so no-PAT proof goes through canvas-batch.
 
 ## Audit corrections vs LEDGER.md
+The older proof ledger is in the source repository only, not in the release.
+
 1. C-R2 (list assignments) was marked PROVEN on 'lifecycle readbacks'. Audit found no explicit list-assignments receipt, only single-assignment GETs. Corrected to pending.
 2. NQ-R1/NQ-R2 (list/get New Quiz) were marked PROVEN on 'provisioning battery'. The battery2 proof used quiz-api host paths (/api/quizzes/{id}), not the /api/quiz/v1 Canvas paths. The /api/quiz/v1 ops are corrected to pending; the quiz-api host read/edit are recorded in the New Quiz sequence table.
 3. NQ-W1 was marked PROVEN. SUPERSEDED 2026-09-20 by the full New Quiz lifecycle (quiz 4045369): quiz-API DELETE returns HTTP 200 and cleans both quiz and assignment, no orphan. The old 401/orphan-506477 reading was wrong; that orphan came from deleting assignment 4045366 through the Canvas assignment endpoint first. Correct lifecycle: always delete a New Quiz through the quiz API. Orphan 506477 itself remains Braden's call.

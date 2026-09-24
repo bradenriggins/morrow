@@ -1190,7 +1190,11 @@ describe("MorrowRuntime durable batches", () => {
       const approvalBody = await (await fetch(String(created.approvalUrl))).text();
       expect(approvalBody).toContain("Course 41");
       expect(approvalBody).toContain("Course 42");
+      // A planned batch is both a review still open and an approved group not yet started, so the
+      // status names which one it is for morrow_operation_wait.
+      expect(runtime.batchApprovalStatus(batch.batchId)).toMatchObject({ batch: { state: "planned" }, approval: "awaiting_approval" });
       runtime.approveBatch(batch.batchId);
+      expect(runtime.batchApprovalStatus(batch.batchId)).toMatchObject({ batch: { state: "planned" }, approval: "approved" });
 
       const result = await runtime.batchRun({ batchId: batch.batchId, maxChildren: 10 });
       expect((result.batch as { state: string }).state).toBe("paused");

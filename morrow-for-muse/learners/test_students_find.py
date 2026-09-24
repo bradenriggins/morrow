@@ -22,6 +22,33 @@ audit round 4, H3a/H3b, 2026-09-22):
      only; the record ends with the conversation; the journal never
      holds the name.
   9. bin/morrow routes `students find` to this tool.
+ 10. The check that no stored file holds the name searched every byte
+     for "Jane", including the vault ciphertext, a random run of
+     base64url that holds "Jane" by chance with no leak. A stored name
+     stands as its own word; the check matches it that way.
+ 11. A course given as anything but its Canvas number (the SIS form
+     "sis_course_id:BIO101", a path like "1/../2") got labels in a
+     scope of its own. The same label, used in the course by number,
+     named a different student. Such a course is refused before any
+     read, as the executor and the query refuse it.
+ 12. Errors skipped the failure funnel: they carried Python class names
+     and no reference, and a stopped helper told the agent to sign the
+     educator in again. Every error now carries a mode and a reference
+     and names the real remedy: helper-down, the roster read failed,
+     or the learner vault is missing.
+ 13. (round-2 finding muse-ux-r2-wrong-course-never-not-found) every
+     roster read failure, a 404 for a course number that does not exist
+     included, gave the failed-students query's message ("no students
+     were sorted"), so the agent retried a course number that cannot
+     work. Canvas's answer for the course now reaches the educator: 404
+     says the course number may be wrong, 401 and 403 say the account
+     may not open it, and any other failure is the course's student
+     list that could not be read.
+ 14. (round-2 finding muse-ux-r2-students-find-skips-account-pin) the
+     roster was read as whatever Canvas account was signed in to the
+     helper. With an account pinned, students find first reads which
+     account is signed in; a different account is refused before the
+     roster is read, and writes are paused, as on every other read path.
 
 Needs the optional 'cryptography' package (labels come from the
 encrypted vault); skips without it except the routing test.
@@ -31,6 +58,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -77,11 +105,30 @@ SECRETS = ("98765", "55123", "70001", "70002", "70003", "jdoe", "rsmith",
            "Robert", "Smith", "Mia", "Chen", "Doe, Jane")
 
 
+_WORD_RE = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def found_in(text, needles):
+    """The needles that occur in text.
+
+    A needle made only of letters, digits, "_" and "-" counts only as a
+    whole word. Ciphertext, HMACs, digests, keys, and op ids are long
+    random runs of exactly those characters, so a short name or id can
+    sit inside one by chance with no leak. A needle with any other
+    character ("jane.doe@", "Doe, Jane") cannot occur inside such a run
+    and counts anywhere."""
+    words = set(_WORD_RE.findall(text))
+    return [n for n in needles
+            if (n in words if _WORD_RE.fullmatch(n) else n in text)]
+
+
 def fake_canvas(roster=ROSTER, sections=SECTIONS):
     calls = []
 
     def fetch(url):
         calls.append(url)
+        if url.endswith("/api/v1/users/self"):
+            return 200, {}, json.dumps({"id": 4242, "name": "Pat Teacher"})
         if "/sections" in url:
             return 200, {}, json.dumps(sections)
         if "/users" in url:
@@ -206,14 +253,32 @@ def test_ending_the_conversation_in_settings_ends_the_echo(home):
     assert wire.apply_name_echo(text, BASE, COURSE, CONV) == text
 
 
+def _files_holding(root, needles):
+    hits = {}
+    for dirpath, _dirs, files in os.walk(root):
+        for name in files:
+            path = os.path.join(dirpath, name)
+            with open(path, "rb") as fh:
+                data = fh.read()
+            found = found_in(data.decode("utf-8", "replace"), needles)
+            if found:
+                hits[os.path.relpath(path, root)] = found
+    return hits
+
+
+def test_stored_name_search_ignores_random_runs(home):
+    with open(os.path.join(home, "vault.json"), "w") as fh:
+        json.dump({"ciphertext": "hCn1HQlmx07kJaneV4X-q7XGMnGXJI0Og"}, fh)
+    assert _files_holding(home, ("Jane",)) == {}
+    with open(os.path.join(home, "leak.json"), "w") as fh:
+        json.dump({"shown": "Jane Doe (Student A2)"}, fh)
+    assert _files_holding(home, ("Jane",)) == {"leak.json": ["Jane"]}
+
+
 def test_echo_store_and_journal_hold_no_plaintext_name(home):
     from dispatch import executor as ex
     _find("Jane Doe")
-    for dirpath, _dirs, files in os.walk(home):
-        for name in files:
-            with open(os.path.join(dirpath, name), "rb") as fh:
-                data = fh.read()
-            assert b"Jane" not in data, os.path.join(dirpath, name)
+    assert _files_holding(home, ("Jane",)) == {}
     with open(ex.JOURNAL_PATH, encoding="utf-8") as fh:
         events = [json.loads(line) for line in fh if line.strip()]
     assert any(e.get("event") == "privacy.name_echo_recorded"
@@ -280,3 +345,250 @@ def test_bin_morrow_routes_students_find(monkeypatch):
                             "argv", argv) and 0)
     cli.main(["students", "find", "--course", "1", "Jane Doe"])
     assert seen["argv"] == ["--course", "1", "Jane Doe"]
+
+
+# ------------------------------------------- course numbers and errors --
+
+def _journal_lookups_or_none():
+    from dispatch import executor as ex
+    if not os.path.exists(ex.JOURNAL_PATH):
+        return []
+    return _lookups()
+
+
+@pytest.mark.parametrize("course", ["sis_course_id:BIO101", "1/../2",
+                                    "101?per_page=1", "0101", "", "abc"])
+def test_course_must_be_given_by_its_canvas_number(home, course):
+    from learners import find
+    fetch = fake_canvas()
+    out = find.find_student(fetch, BASE, course, "Jane Doe",
+                            conversation_id=CONV)
+    assert out["ok"] is False and out["status"] == "refused", out
+    assert out["mode_id"] == "query-course-id-invalid", out
+    assert out["correlation_id"]
+    assert "canvas_list_courses" in out["next_step"], out
+    assert "student" not in out
+    # Nothing was read, so no label was issued in any scope.
+    assert fetch.calls == []
+    assert _journal_lookups_or_none() == []
+
+
+def test_cli_refuses_a_sis_course_before_the_helper(home, capsys,
+                                                    monkeypatch):
+    from learners import find
+    from learners import resolve_student as rs
+
+    def _no_helper(*_a, **_k):
+        raise AssertionError("the helper was reached for a bad course")
+    monkeypatch.setattr(rs, "helper_fetch_factory", _no_helper)
+    rc = find.main(["--course", "sis_course_id:BIO101", "--canvas-base",
+                    BASE, "Jane Doe"])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 1 and out["status"] == "refused", out
+
+
+_CLASS_NAME_RE = re.compile(r"\b[A-Za-z]*(?:Error|Exception|Unavailable)\b")
+
+
+def _funneled(out, mode_id):
+    assert out["ok"] is False and out["status"] == "error", out
+    assert out["mode_id"] == mode_id, out
+    assert re.fullmatch(r"[0-9a-f]{12}", out["correlation_id"]), out
+    assert out["correlation_id"] in out["message"], out
+    assert _CLASS_NAME_RE.findall(out["message"]) == [], out["message"]
+    assert "error" not in out
+    return out
+
+
+@pytest.fixture
+def helper_env(tmp_path, monkeypatch):
+    """helper/env and the tree state dir for the real helper client."""
+    def write(port):
+        env_file = tmp_path / "helper-env"
+        env_file.write_text("CANVAS_BASE=%s\nLOGIN_HELPER_PORT=%d\n"
+                            % (BASE, port))
+        env_file.chmod(0o600)
+        state = tmp_path / "tree-state"
+        state.mkdir(exist_ok=True)
+        (state / "helper_token").write_text("ab" * 32 + "\n")
+        for name in ("CANVAS_BASE", "LOGIN_HELPER_PORT",
+                     "LOGIN_HELPER_TLS_CERT", "LOGIN_HELPER_TLS_KEY"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("MORROW_HELPER_ENV_FILE", str(env_file))
+        monkeypatch.setenv("MORROW_TREE_STATE_DIR", str(state))
+    return write
+
+
+def test_helper_down_says_helper_down_not_sign_in(home, helper_env,
+                                                  capsys):
+    """The scenario: the helper process is down while the Canvas sign-in
+    is fine. A bound socket that never listens refuses the connection,
+    as a stopped helper does."""
+    import socket
+    from learners import find
+    closed = socket.socket()
+    closed.bind(("127.0.0.1", 0))
+    try:
+        helper_env(closed.getsockname()[1])
+        rc = find.main(["--course", "89585", "--conversation-id", "c1",
+                        "Jane Doe"])
+    finally:
+        closed.close()
+    out = _funneled(json.loads(capsys.readouterr().out), "helper-down")
+    assert rc == 1
+    assert "Sign the educator in" not in out["message"]
+    assert "not affected" in out["message"]
+    assert "keepalive" in out["next_step"]
+
+
+def test_signed_out_helper_asks_for_a_sign_in(home, helper_env, capsys):
+    import http.server
+    import threading
+    from learners import find
+
+    class _Helper(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            raw = json.dumps({"logged_in": False,
+                              "chromium_alive": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Helper)
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        helper_env(srv.server_address[1])
+        rc = find.main(["--course", "89585", "Jane Doe"])
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        thread.join()
+    _funneled(json.loads(capsys.readouterr().out), "canvas-session-dead")
+    assert rc == 1
+
+
+def test_roster_read_failure_is_the_course_student_list(home):
+    def fetch(url):
+        return 500, {}, "<html>Internal error</html>"
+    out = _funneled(_find("Jane Doe", fetcher=fetch),
+                    "course-roster-unavailable")
+    assert "student list" in out["message"]
+    assert "not an empty class" not in out["message"]
+
+
+def _roster_answers(status, body):
+    def fetch(url):
+        fetch.calls.append(url)
+        if "/users?" in url:
+            return status, {}, body
+        return fake_canvas()(url)
+    fetch.calls = []
+    return fetch
+
+
+def test_a_course_canvas_does_not_know_says_the_course_number_is_wrong(
+        home):
+    out = _funneled(_find("Jane Doe", fetcher=_roster_answers(
+        404, '{"errors": [{"message": "The specified resource does not '
+             'exist."}]}')), "canvas-not-found")
+    assert "course number" in out["message"], out["message"]
+    assert "try once more" not in out["message"]
+    assert "sorted" not in out["message"]
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_course_the_account_may_not_open_is_not_permitted(home, status):
+    out = _funneled(_find("Jane Doe", fetcher=_roster_answers(
+        status, '{"status": "unauthorized", "errors": [{"message": "user '
+                'not authorized to perform that action"}]}')),
+        "canvas-not-permitted")
+    assert "permission" in out["message"], out["message"]
+
+
+@pytest.fixture
+def pinned(home, monkeypatch):
+    """Account 4242 pinned, with the pin and the write halt in this
+    test's home."""
+    from reauth import state_machine as rsm
+    from transport import state as lane_state
+    monkeypatch.setattr(rsm, "STORE_DIR", home)
+    for name in ("STATE_PATH", "HALT_PATH", "QUAR_PATH", "NOTIFY_PATH",
+                 "APPROVAL_PATH", "SESSION_PATH", "SESSION_PREV",
+                 "LAST_DEATH_PATH", "SESSION_PREV_MONO"):
+        monkeypatch.setattr(rsm, name, os.path.join(
+            home, os.path.basename(getattr(rsm, name))))
+    monkeypatch.setattr(lane_state, "STATE_PATH",
+                        os.path.join(home, "browser_lane.json"))
+    lane_state.save(BASE, 4242, "Pat Teacher")
+    return rsm
+
+
+def _signed_in_as(account_id, status=200):
+    fake = fake_canvas()
+
+    def fetch(url):
+        fetch.calls.append(url)
+        if url.endswith("/api/v1/users/self"):
+            return status, {}, json.dumps({"id": account_id})
+        return fake(url)
+    fetch.calls = []
+    return fetch
+
+
+def test_another_signed_in_account_is_refused_before_the_roster(pinned):
+    fetch = _signed_in_as(9999)
+    out = _find("Jane Doe", fetcher=fetch)
+    assert out["ok"] is False and out["status"] == "refused", out
+    assert out["mode_id"] == "canvas-account-mismatch", out
+    assert [u for u in fetch.calls if "/users?" in u] == [], fetch.calls
+    assert pinned.is_write_halted()
+    assert _no_secrets(out) == [], out
+
+
+def test_the_pinned_account_reads_the_roster(pinned):
+    fetch = _signed_in_as(4242)
+    out = _find("Jane Doe", fetcher=fetch)
+    assert out["status"] == "resolved", out
+    assert fetch.calls[0].endswith("/api/v1/users/self"), fetch.calls
+    assert not pinned.is_write_halted()
+
+
+def test_an_account_check_that_fails_reads_nothing(pinned):
+    fetch = _signed_in_as(None, status=500)
+    out = _find("Jane Doe", fetcher=fetch)
+    assert out["ok"] is False, out
+    assert out["mode_id"] == "canvas-account-check-failed", out
+    assert [u for u in fetch.calls if "/users?" in u] == [], fetch.calls
+
+
+def test_missing_vault_is_learner_data_gated(home, monkeypatch):
+    from privacy import core
+    monkeypatch.setattr(core, "AESGCM", None)
+    out = _funneled(_find("Jane Doe"), "learner-data-gated")
+    assert "requirements-optional.txt" in out["message"]
+    assert _no_secrets(out) == [], out
+
+
+def test_unrecorded_lookup_is_funneled(home, monkeypatch):
+    from learners import find
+
+    def _fail(*_a, **_k):
+        raise OSError("journal disk full")
+    monkeypatch.setattr(find, "_journal_lookup", _fail)
+    out = _find("Jane Doe")
+    assert out["ok"] is False and out["status"] == "error", out
+    assert out["correlation_id"] and "student" not in out
+    assert _CLASS_NAME_RE.findall(out["message"]) == [], out["message"]
+
+
+def test_skill_says_the_lookup_checks_the_account_and_the_course():
+    with open(os.path.join(TREE, "SKILL.md"), encoding="utf-8") as fh:
+        skill = " ".join(fh.read().split())
+    flow = skill[skill.index("### Working by name"):]
+    assert "a different account is refused before anything is read" in flow
+    assert "canvas-not-found" in flow

@@ -1,6 +1,6 @@
-# Accessibility catalog (ported from desktop Morrow)
+# Accessibility catalog (ported from Morrow Desktop)
 
-This directory ports the desktop Morrow accessibility audit system
+This directory ports the Morrow Desktop accessibility audit system
 (`packages/mcp-server/src/course-audit.ts`, `page-correction.ts`,
 `item-bank-repair.ts`) into Morrow for Muse catalog entries. It is the
 missing a11y scanner: read-only signal detection plus ten guarded
@@ -63,9 +63,10 @@ the same limitation: it is a teaching aid, not a conformance tool.
 Evidence: the two checker modules are live-verified against real course
 content on 2026-09-22 (course 89585, BIOL 101: General Biology); see
 `~/workspace/audits/a11y-parity-2026-09-22/REPORT.md`. Parity selftests
-75/75 and the existing 74/74 regression both pass (run:
-`python3 catalog/a11y/a11y_parity_selftest.py` and
-`python3 catalog/a11y/a11y_selftest.py`).
+75/75 and the existing 74/74 regression both pass (run from the source
+repository: `python3 catalog/a11y/a11y_parity_selftest.py` and
+`python3 catalog/a11y/a11y_selftest.py`; CI runs both through
+`scripts/dev-suites.sh`, and neither is part of the release).
 
 ## Files
 
@@ -75,10 +76,10 @@ content on 2026-09-22 (course 89585, BIOL 101: General Biology); see
 | `a11y_repair.py` | `validate_repair_plan(kind, params, evidence)`: enforces every desktop planner guard against fresh audit evidence; raises `RepairPlanRefused` with a stable code. |
 | `morrow_audit_course_item.json` | Read-only audit catalog entry. 28 target kinds (12 Canvas, 16 Moodle). Effects: read. Executor wiring: wired via `catalog/a11y/runner.py` audit mode (`run_audit`); `dispatch/executor.py` deliberately carries no a11y branches per the F-17 carve. Evidence status: live-unverified. |
 | `runner.py` | A11y mode runner: audit mode (`run_audit`) and planner mode (`run_planner`). Uses the executor's public `dispatch_catalog_op` for reads only; never writes. Unknown/unwired kinds funnel through `failures/funnel.py`. |
-| `runner_selftest.py` | 23 offline checks for the runner (audit, planner, refusals, funnel, PARITY LAW). Run: `python3 catalog/a11y/runner_selftest.py` |
+| `runner_selftest.py` | 29 offline checks for the runner (audit, planner, refusals, funnel, PARITY LAW). Run: `python3 catalog/a11y/runner_selftest.py` |
 | `morrow_plan_*_image_alt_repair.json` (10) | Guarded repair planner manifests, one per desktop planner: page, assignment, discussion, classic quiz description, classic quiz question, new quiz item, new quiz choice, new quiz answer feedback, new quiz feedback, item bank question. Effects: plan (no write during planning). |
 | `build_repair_manifests.py` | Generator for the 10 repair manifests (shared guard contract in one place). |
-| `a11y_selftest.py` | 74 offline checks. Run: `python3 a11y_selftest.py` |
+| `a11y_selftest.py` | 74 offline checks, in the source repository only (CI runs it through `scripts/dev-suites.sh`). Run: `python3 a11y_selftest.py` |
 
 ## What was ported
 
@@ -149,7 +150,7 @@ syllabus, Moodle) are refused with a named reason instead of guessed.
 ## Verification
 
 ```
-python3 catalog/a11y/a11y_selftest.py   # 74 checks, all offline
+python3 catalog/a11y/a11y_selftest.py   # 74 checks, all offline (source repository only)
 python3 catalog/a11y/runner_selftest.py  # 23 checks, all offline
 python3 catalog/a11y/build_repair_manifests.py  # regenerate manifests
 ```

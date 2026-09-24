@@ -68,7 +68,8 @@ def test_bad_course_id_refused_before_any_read(course):
     reader = _Reader()
     with pytest.raises(C.ChainFailure) as info:
         C.run_query(course, QUIZ, reader=reader, now_utc=NOW,
-                    tenant_base=TENANT, synthetic_rows=SYNTHETIC)
+                    tenant_base=TENANT, synthetic_rows=SYNTHETIC,
+                    timezone="America/Chicago")
     assert reader.paths == []
     assert info.value.translated.mode_id == "query-course-id-invalid"
     assert "—" not in info.value.translated.agent_message
@@ -79,14 +80,15 @@ def test_cli_refuses_bad_course_before_any_read(monkeypatch, capsys):
         raise AssertionError("no reader may start for a bad course id")
     monkeypatch.setattr(C._live_read, "LiveReader", boom)
     assert C.main(["--quiz", "last-week", "--course", "1/../2",
-                   "--tenant", TENANT]) == 2
+                   "--canvas-base", TENANT]) == 2
     assert "course" in capsys.readouterr().out.lower()
 
 
 def test_good_course_runs_the_chain():
     reader = _Reader()
     result = C.run_query("89585", QUIZ, reader=reader, now_utc=NOW,
-                         tenant_base=TENANT, synthetic_rows=SYNTHETIC)
+                         tenant_base=TENANT, synthetic_rows=SYNTHETIC,
+                         timezone="America/Chicago")
     assert "Quiz 1" in result.text
     assert any("/courses/89585/quizzes" in p for p in reader.paths)
 
@@ -119,7 +121,8 @@ def test_every_chain_read_is_gated(monkeypatch, template, required):
     reader = _Reader()
     try:
         C.run_query("89585", QUIZ, reader=reader, now_utc=NOW,
-                    tenant_base=TENANT, synthetic_rows=SYNTHETIC)
+                    tenant_base=TENANT, synthetic_rows=SYNTHETIC,
+                    timezone="America/Chicago")
         refused = False
     except C.ChainFailure:
         refused = True

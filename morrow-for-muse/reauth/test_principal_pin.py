@@ -173,12 +173,14 @@ def test_pin_cli_first_signin_is_quiet_when_already_pinned(home,
 
 def test_helper_ui_shows_pinned_name(home, monkeypatch):
     import importlib.util
-    import config.paths as cp
     rsm.pin_principal(BASE, 777, "Edu T. Or", first_signin=True)
     profile = os.path.join(home, "profile")
     os.makedirs(profile)
     monkeypatch.setenv("LOGIN_HELPER_PROFILE_DIR", profile)
-    monkeypatch.setattr(cp, "morrow_home", lambda: home)
+    # Through the environment, not by replacing config.paths.morrow_home:
+    # a module first imported while that function was replaced keeps the
+    # replacement after the test, and later tests read this test's home.
+    monkeypatch.setenv("MORROW_HOME", home)
     spec = importlib.util.spec_from_file_location(
         "helper_server_pin_test", os.path.join(_TREE, "helper", "server.py"))
     server = importlib.util.module_from_spec(spec)

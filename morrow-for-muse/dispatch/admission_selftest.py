@@ -152,11 +152,13 @@ def write_entry(name="canvas_create_page", method="POST",
 # 1. Policy loads and has the expected shape.
 def t_policy_shape():
     p = load_policy()
-    assert p["version"] == "1.3.0", "policy version"
-    assert len(p["never_dispatch"]["tool_names"]) == 8, "8 never-dispatch tools"
+    assert p["version"] == "1.4.0", "policy version"
+    assert len(p["never_dispatch"]["tool_names"]) == 9, "9 never-dispatch tools"
+    assert sorted(p["never_dispatch"]["request_flags"]) == [
+        "as_user_id", "is_announcement", "notify_of_update"]
     assert "canvas_item_bank_get_item" in p["unsupported"]["tool_names"]
     assert "tenant_restricted" not in p, "no tenant allowlists anywhere"
-    assert len(p["evidence_holds"]["tool_names"]) == 5, "5 evidence-held tools"
+    assert len(p["evidence_holds"]["tool_names"]) == 9, "9 evidence-held tools"
     assert "canvas_create_new_quiz" in p["admitted_on_proof"], \
         "create_new_quiz admitted on proof"
     assert "/users" in p["learner_data"]["url_substrings"]
@@ -231,6 +233,52 @@ def t_evidence_hold_delete_conclude():
                   lambda: admit(e, {}, tenant_base="https://x.instructure.com", approval=ap))
 check("evidence-hold refuses delete/conclude course on every tenant",
       t_evidence_hold_delete_conclude)
+
+
+# 6b. An announcement is never posted: the is_announcement flag is a
+#     standing exclusion on every route, before any approval, even on
+#     a lane that can de-identify student data.
+def t_announcement_never_dispatched():
+    for path, method in (("/api/v1/courses/{course_id}/discussion_topics",
+                          "POST"),
+                         ("/api/v1/courses/{course_id}/discussion_topics/"
+                          "{topic_id}", "PUT")):
+        e = write_entry("canvas_create_page", method=method, path=path)
+        e["request"]["body"] = {"title": "Class cancelled",
+                                "is_announcement": "true"}
+        ap = signed_approval(e, {"course_id": "1"})
+        expect_raises(NeverDispatch, lambda: admit(
+            e, {"course_id": "1"}, tenant_base="https://x.instructure.com",
+            approval=ap, vault_ready=True))
+    e = write_entry("canvas_create_external_feed_courses",
+                    path="/api/v1/courses/{course_id}/external_feeds")
+    expect_raises(NeverDispatch, lambda: admit(
+        e, {"course_id": "1"}, vault_ready=True))
+check("an announcement or announcement feed is never dispatched",
+      t_announcement_never_dispatched)
+
+
+# 6c. Discussion writes were proven only through the retired form lane;
+#     they are held even where learner data can be de-identified.
+def t_discussion_writes_held_with_vault():
+    for name, method, path in (
+            ("canvas_create_new_discussion_topic_courses", "POST",
+             "/api/v1/courses/{course_id}/discussion_topics"),
+            ("canvas_update_topic_courses", "PUT",
+             "/api/v1/courses/{course_id}/discussion_topics/{topic_id}"),
+            ("canvas_delete_topic_courses", "DELETE",
+             "/api/v1/courses/{course_id}/discussion_topics/{topic_id}"),
+            ("canvas_update_learning_object_s_date_information_"
+             "discussion_topics", "PUT",
+             "/api/v1/courses/{course_id}/discussion_topics/"
+             "{discussion_topic_id}/date_details")):
+        e = write_entry(name, method=method, path=path)
+        ap = signed_approval(e, {"course_id": "1"})
+        expect_raises(EvidenceHold, lambda: admit(
+            e, {"course_id": "1"}, tenant_base="https://x.instructure.com",
+            approval=ap, vault_ready=True))
+check("discussion writes are held with the vault ready",
+      t_discussion_writes_held_with_vault)
 
 
 # 7. Learner data gated (enrollments read).
@@ -974,9 +1022,8 @@ def t_concurrent_consume_single_winner():
                if m in _mp.get_all_start_methods()]
     assert methods, "no multiprocessing start method available"
     for method in methods:
-        digest = ap["op_digest"]
         consumed = _admission_mod._load_consumed()
-        consumed.pop(digest, None)
+        consumed.pop(_admission_mod._use_key(ap), None)
         with open(_admission_mod.CONSUMED_PATH, "w", encoding="utf-8") as fh:
             json.dump(consumed, fh)
         # W6-P1-6: the consumed set is HMAC-sealed; re-seal after the

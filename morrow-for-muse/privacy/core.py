@@ -56,6 +56,7 @@ import base64
 import binascii
 import contextlib
 import fcntl
+import functools
 import hashlib
 import hmac
 import json
@@ -134,6 +135,18 @@ def _require_aesgcm():
             "'pip install -r requirements-optional.txt', then rerun."
             % (installed,))
     return AESGCM
+
+
+def learner_vault_problem():
+    """Why the encrypted learner vault cannot run with this Python, or
+    None when it can. All student-data work needs the vault (working by
+    name, the course roster); install.sh reports the problem at install
+    time."""
+    try:
+        _require_aesgcm()
+    except PrivacyError as exc:
+        return str(exc)
+    return None
 
 # How deep a provider answer may nest before the privacy walk refuses it.
 MAX_PRIVACY_OUTPUT_DEPTH = 32
@@ -1030,18 +1043,59 @@ def _confusable_fold_table():
 
 _CONFUSABLE_FOLD = _confusable_fold_table()
 
+# A roster and a course often spell one name with and without accents
+# ("Jose Alvarez", "José Álvarez"), and text pasted from a word processor
+# carries typographic apostrophes ("O\u2019Brien"). Matching compares base
+# letters: accents are dropped (NFD, then the combining marks), letters
+# NFD keeps whole fold to the base letters a plain spelling uses, and
+# every apostrophe reads as the straight one.
+LETTER_FOLD = {
+    "\u0142": "l", "\u0141": "L", "\u00f8": "o", "\u00d8": "O",
+    "\u0111": "d", "\u0110": "D", "\u0131": "i", "\u00df": "ss",
+    "\u00e6": "ae", "\u00c6": "AE", "\u0153": "oe", "\u0152": "OE",
+    "\u00fe": "th", "\u00de": "TH", "\u00f0": "d", "\u00d0": "D",
+    "\u0127": "h", "\u0126": "H", "\u0167": "t", "\u0166": "T",
+    "\u1e9e": "SS",
+}
+APOSTROPHES = frozenset({"\u2019", "\u2018", "\u02bc", "\u02bb",
+                         "\uff07"})
+
+
+@functools.lru_cache(maxsize=8192)
+def base_letters(char):
+    """char with its accents dropped and a whole-letter fold applied
+    (\u00e9 -> e, \u0141 -> L, \u00df -> ss); case is kept."""
+    return "".join(LETTER_FOLD.get(part, part)
+                   for part in unicodedata.normalize("NFD", char)
+                   if unicodedata.category(part) != "Mn")
+
+
+@functools.lru_cache(maxsize=8192)
+def _fold_char(char):
+    """What one character contributes to alias matching: base letters
+    (accents dropped), lookalike letters folded (W2-P0-12), every
+    apostrophe straight, invisible format characters dropped
+    (W2-P0-13), lowercase."""
+    out = []
+    for part in base_letters(char):
+        part = _CONFUSABLE_FOLD.get(part, part)
+        if part in APOSTROPHES:
+            part = "'"
+        # Category Cf: zero-width space/joiner/non-joiner, BOM, word
+        # joiner, soft hyphen, bidi marks. Invisible in rendering; their
+        # only effect here would be to defeat matching.
+        if unicodedata.category(part) == "Cf":
+            continue
+        out.append(part.lower())
+    return "".join(out)
+
 
 def _normalize_alias(value):
-    """Alias key normalization: NFKC, confusable fold (W2-P0-12), strip
-    invisible format characters (W2-P0-13), whitespace-collapse, lower."""
-    folded = "".join(_CONFUSABLE_FOLD.get(char, char)
+    """Alias key normalization: NFKC, then each character folded
+    (_fold_char), whitespace collapsed."""
+    folded = "".join(_fold_char(char)
                      for char in unicodedata.normalize("NFKC", value))
-    # Category Cf: zero-width space/joiner/non-joiner, BOM, word joiner,
-    # soft hyphen, bidi marks. Invisible in rendering; their only effect
-    # here would be to defeat matching.
-    stripped = "".join(char for char in folded
-                       if unicodedata.category(char) != "Cf")
-    return re.sub(r"\s+", " ", stripped.strip()).lower()
+    return re.sub(r"\s+", " ", folded.strip()).lower()
 
 
 def _fold_match_text(text):
@@ -1057,26 +1111,49 @@ def _fold_match_text(text):
     re-apply NFKC: whole-string NFKC is not position-preserving (it can
     expand ligatures or compose combining marks), so re-applying it here
     would make index_map point at the wrong source positions. The fold
-    is strictly per-character (confusable map, Cf strip, lower, which
-    can expand only via str.lower and is tracked per source char), so
-    the mapping stays exact.
+    is strictly per-character (_fold_char: accents dropped, confusable
+    map, apostrophes, Cf strip, lower; an expansion such as \u00df -> ss
+    is tracked per source char), so the mapping stays exact.
     """
     folded = []
     index_map = []
     for i, char in enumerate(text):
-        char = _CONFUSABLE_FOLD.get(char, char)
-        if unicodedata.category(char) == "Cf":
-            continue
-        for out in char.lower():
+        for out in _fold_char(char):
             folded.append(out)
             index_map.append(i)
     return "".join(folded), index_map
 
 
+# Generational suffixes: never a given name or a surname. Roman numerals
+# stop at IV so a real surname such as "Vi" is never dropped.
+_NAME_SUFFIXES = frozenset({"jr", "sr", "jnr", "snr", "ii", "iii", "iv"})
+
+
+def _without_name_suffixes(name):
+    """The name without its generational suffixes ("Martin Luther King
+    Jr." -> "Martin Luther King", "King, Jr., Martin" -> "King, Martin").
+    The first word is never a suffix, and a suffix stays when dropping it
+    would leave a single word."""
+    kept = []
+    for i, token in enumerate(name.split()):
+        if i and token.strip(".,").lower() in _NAME_SUFFIXES:
+            # "King Jr., Martin": the suffix carried the name's comma.
+            if token.endswith(",") and not kept[-1].endswith(","):
+                kept[-1] += ","
+            continue
+        kept.append(token)
+    if len([t for t in kept if t.strip(",")]) < 2:
+        return " ".join(name.split())
+    kept[-1] = kept[-1].rstrip(",")
+    return " ".join(kept)
+
+
 def _surname_of_name(normalized):
     """Last whitespace-separated token of a normalized full name, when it
     is a plausible surname (2+ letters, and the name is not a single
-    word). Comma form ("Thornton, Alice"): the token before the comma."""
+    word). Comma form ("Thornton, Alice"): the token before the comma.
+    Generational suffixes (Jr., III) are never the surname."""
+    normalized = _without_name_suffixes(normalized)
     if "," in normalized:
         head = normalized.split(",", 1)[0].strip().split()
         candidate = head[-1] if head else ""
@@ -1094,14 +1171,18 @@ def _learner_name_aliases(identity):
     name = identity.get("name")
     if not name:
         return []
-    normalized = _normalize_alias(name)
-    if not normalized or len(normalized) > 500:
+    full = _normalize_alias(name)
+    if not full or len(full) > 500:
         return []
+    aliases = {full}
+    # Given name, surname, and reordered forms come from the name without
+    # its generational suffix (Jr., III), which also names the student.
+    normalized = _without_name_suffixes(full)
+    aliases.add(normalized)
     if "," in normalized:
-        given = normalized.split(",", 1)[1].strip().split()[0]
+        given = (normalized.split(",", 1)[1].strip().split() or [""])[0]
     else:
         given = normalized.split()[0]
-    aliases = {normalized}
     letters = sum(1 for c in given if unicodedata.category(c).startswith("L"))
     if letters >= 2:
         aliases.add(given)
@@ -1157,16 +1238,41 @@ def _add_alias(aliases, alias, token, partial_surnames=(),
         existing["name_token"] = True
 
 
+def _alias_trie_expression(candidates):
+    """One expression for every alias, as a character trie: a course
+    roster has thousands of aliases, and a flat alternation tries each
+    one at every position. At each node the longer continuations come
+    before ending there, so the longest alias the text holds matches
+    (the text allows at most one branch per character). A space in an
+    alias matches any run of whitespace."""
+    trie = {}
+    for candidate in candidates:
+        node = trie
+        for char in candidate:
+            node = node.setdefault(char, {})
+        node[None] = True
+
+    def emit(node):
+        branches = [(r"\s+" if char == " " else _escape_regexp(char))
+                    + emit(child)
+                    for char, child in sorted(
+                        (k, v) for k, v in node.items() if k is not None)]
+        if not branches:
+            return ""
+        if len(branches) == 1 and None not in node:
+            return branches[0]
+        return "(?:%s)%s" % ("|".join(branches), "?" if None in node else "")
+    return emit(trie)
+
+
 def _build_alias_matcher(aliases):
-    candidates = sorted(aliases.keys(), key=len, reverse=True)
+    candidates = [key for key in aliases if key]
     if not candidates:
         return None
-    expression = "|".join(
-        _escape_regexp(candidate).replace(r"\ ", r"\s+").replace(" ", r"\s+")
-        for candidate in candidates)
-    # Divergence note: \p{L}\p{N} -> \w under re.UNICODE (equivalent for
-    # letter/number/underscore).
-    return re.compile(r"(?<!\w)(?:%s)(?!\w)" % expression,
+    # A name ends at anything but a letter or a digit: "_" separates
+    # words in a file name ("Jane_Doe_essay.pdf") as a space does.
+    return re.compile(r"(?<![^\W_])(?:%s)(?![^\W_])"
+                      % _alias_trie_expression(candidates),
                       re.IGNORECASE | re.UNICODE)
 
 
@@ -1653,6 +1759,10 @@ def redact_known_learner_text(value, context):
 _MOODLE_CAPABILITY_RE = re.compile(r"^(?:moodle|mod|block|enrol|report)/[a-z_]+:[a-z_]+$")
 _TOKEN_LABEL_RE = re.compile(
     r"\b(?:Student A[1-9][0-9]*|learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b")
+# The "(as written)" course-content marker, plain or percent-encoded in a
+# URL: a label followed by it is literal text, already projected.
+_AS_WRITTEN_REF_RE = re.compile(
+    r" ?\((?:as|As) written\)|%20%28(?:as|As)%20written%29")
 _WHOLE_ID_RE = re.compile(r"^[0-9]+$")
 
 
@@ -1674,6 +1784,12 @@ def _redact_known_learner_text_prepared(value, exact_context,
         reference = match.group(0)
         label = exact_context["referenceLabels"].get(reference)
         if not label:
+            # Text course_content.py already projected: "(as written)"
+            # marks a label the educator wrote as literal text, not a
+            # person reference. Leave it for the course-content restore;
+            # an unmarked unknown label still refuses (fail closed).
+            if _AS_WRITTEN_REF_RE.match(value, match.end()):
+                return reference
             raise PrivacyError("learner_roster_identity_unavailable")
         return label
 
@@ -1922,6 +2038,7 @@ _IDENTITY_VALUE_FIELDS = frozenset([
 _PERSON_ID_ARRAY_FIELDS = frozenset([
     "userids", "studentids", "learnerids", "recipientids",
     "participantids", "authorids", "participatinguserids",
+    "assignmentvisibility",
 ])
 _IDENTITY_RECORD_VALUE_FIELDS = frozenset([
     "id", "name", "fullname", "username", "sortablename", "shortname",
@@ -2003,12 +2120,22 @@ def _normalized_identity_fields(value):
             for key, candidate in value.items()}
 
 
+# A projected reference (the stable label, its marker form, or the
+# one-time token) carries no identity information: a record field that
+# already holds one was projected by an outer pass, and treating it as
+# a fresh name made the identity merge refuse the record as a conflict.
+_PROJECTED_REFERENCE_RE = re.compile(
+    r"^(?:(?:Student A[1-9][0-9]*)(?: or Student A[1-9][0-9]*)*"
+    r"|learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+    r"(?: \([^()]{1,60}\))?$")
+
+
 def _identity_value(fields, keys):
     for key in keys:
         candidate = fields.get(_normalize_privacy_key(key))
         if isinstance(candidate, (str, int)) and not isinstance(candidate, bool):
             normalized = str(candidate).strip()
-            if normalized:
+            if normalized and not _PROJECTED_REFERENCE_RE.match(normalized):
                 return normalized
     return None
 

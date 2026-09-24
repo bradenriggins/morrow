@@ -1,9 +1,10 @@
 /**
  * The phrases Morrow retired from every product-facing surface, read by the document gate
- * (`scripts/test/product-claims.test.mjs`). The website carried its own copy of this gate until the
- * website moved to its own repository; this file is not a test: `pnpm scripts:test` globs
- * `scripts/test/*.test.mjs`, so it stays out of that glob by living in `lib/` and by keeping
- * `.test.` out of its name.
+ * (`scripts/test/product-claims.test.mjs`). That gate checks the desktop claim documents and every
+ * product-facing Markdown or HTML page in the repository, including the root README, docs/ and
+ * Morrow for Muse. The website lives in its own repository and is not checked here. This file is not
+ * a test: `pnpm scripts:test` globs `scripts/test/*.test.mjs`, so it stays out of that glob by living
+ * in `lib/` and by keeping `.test.` out of its name.
  *
  * Each phrase named a state or a product that Morrow no longer is:
  * - "Development preview" and "private preview" described the product as a preview. Morrow
@@ -16,6 +17,8 @@
  * - "Blackboard browser connection" and "Blackboard browser access" describe a route that does not
  *   exist: Blackboard runs through the Anthology Learn REST API with a local credential, and the
  *   Chrome connector never connects a Blackboard course page.
+ * - "Morrow for Mac and Windows" was a second name for Morrow Desktop. The product has one public
+ *   name, Morrow Desktop, and a page may add that it is for Mac and Windows.
  */
 export const RETIRED_PHRASES = [
   "Development preview",
@@ -24,6 +27,7 @@ export const RETIRED_PHRASES = [
   "private preview",
   "Blackboard browser connection",
   "Blackboard browser access",
+  "Morrow for Mac and Windows",
 ];
 
 /** A prohibition needs both parts: something forbidden, and the act of writing or saying it. */

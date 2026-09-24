@@ -121,12 +121,55 @@ async function detectAssistantCommand({
   return false;
 }
 
+const GEMINI_CLI_PACKAGE = "@google/gemini-cli";
+const PACKAGE_MANIFEST_MAX_BYTES = 256 * 1024;
+
+/**
+ * Whether one resolved `gemini` command belongs to the Gemini CLI package,
+ * read from that package's own package.json. An npm or Homebrew link resolves
+ * into the package, and npm's Windows command files sit beside the
+ * node_modules folder they start.
+ */
+async function geminiCliPackageFound(resolved, { platform = process.platform, readFile = fs.readFile, stat = fs.stat } = {}) {
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
+  const candidates = [];
+  let directory = pathApi.dirname(resolved);
+  for (let depth = 0; depth < 3; depth += 1) {
+    candidates.push(pathApi.join(directory, "package.json"));
+    const parent = pathApi.dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  candidates.push(pathApi.join(pathApi.dirname(resolved), "node_modules", "@google", "gemini-cli", "package.json"));
+  for (const candidate of candidates) {
+    try {
+      const info = await stat(candidate);
+      if (!info.isFile() || info.size > PACKAGE_MANIFEST_MAX_BYTES) continue;
+      const manifest = JSON.parse(await readFile(candidate, "utf8"));
+      if (manifest?.name === GEMINI_CLI_PACKAGE && typeof manifest.version === "string" && /^\d+\.\d+\.\d+/.test(manifest.version)) return true;
+    } catch {}
+  }
+  return false;
+}
+
+/**
+ * Finds Gemini CLI without running it. `gemini --version` registers the folder
+ * it runs in as a Gemini project in the person's own ~/.gemini folder, and its
+ * first start can take longer than a detection probe waits.
+ */
+async function detectGeminiCli(options = {}) {
+  const platform = options.platform || process.platform;
+  const probe = (candidate) => geminiCliPackageFound(candidate, { platform, readFile: options.readFile, stat: options.stat });
+  return detectAssistantCommand({ ...options, command: "gemini", platform, probe, probeWindowsShim: probe });
+}
+
 module.exports = {
   CODEX_BUNDLE_IDENTIFIER,
   assistantApplicationNames,
   commandDirectories,
   detectAssistantApplication,
   detectAssistantCommand,
+  detectGeminiCli,
   probeWindowsCommandShim,
   WINDOWS_COMMAND_SHIM_ENV,
   windowsCommandShimInvocation,

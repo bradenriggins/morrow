@@ -179,7 +179,7 @@ export const CURATED_CATEGORY_SPECS = Object.freeze([
     id: "dates",
     group: "Common Moodle actions",
     label: "Change Moodle assignment and quiz dates",
-    description: "Change Moodle Assignment due dates and Quiz open or close dates in this course.",
+    description: "Change Moodle Assignment due dates and Quiz open or close dates. Each change is visible to learners as soon as Moodle saves it.",
     provider: "moodle",
     rememberable: true,
     rules: Object.freeze([
@@ -453,7 +453,7 @@ export const CURATED_CATEGORY_SPECS = Object.freeze([
     id: "canvas_dates",
     group: "Canvas task bundles",
     label: "Change due dates and availability dates",
-    description: "Change due dates and availability dates for Canvas Assignments, Discussions, Files, Pages, and Quizzes, one at a time or in bulk. Each change is visible to learners as soon as Canvas saves it.",
+    description: "Change due dates and availability dates for Canvas Assignments, Discussions, Files, Pages, and Quizzes, one at a time or in bulk, including the dates an assignment gives one student or one section. Each change is visible to learners as soon as Canvas saves it.",
     provider: "canvas",
     area: "assignments",
     rememberable: true,
@@ -951,6 +951,12 @@ export function categoriesForBinding(binding, operations) {
   // permission validates against them. The seven alternative-text specs that `canvas_alt_text`
   // joins carry `hiddenFromUi`, and the Customize view (WI-5.5) is the place that folds them.
   return categorySpecsForBinding(binding, operations).map(publicCategory);
+}
+
+/** The selected category ids whose actions remove course content on this course connection. */
+export function destructiveCategoryIds(enabledCategories, binding, operations) {
+  const available = new Map(categorySpecsForBinding(binding, operations).map((spec) => [spec.id, spec]));
+  return (Array.isArray(enabledCategories) ? enabledCategories : []).filter((id) => available.get(id)?.destructive === true);
 }
 
 function selectedCategories(enabledCategories, binding, operations) {

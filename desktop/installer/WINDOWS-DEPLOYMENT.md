@@ -4,19 +4,21 @@ Morrow uses the NSIS target in `electron-builder.config.cjs`. It is a
 one-click, per-user installer. It does not offer a machine-wide mode, ask for
 elevation, or package the NSIS elevation helper.
 
-Build the x64 artifact in two steps. `electron-builder.config.cjs` refuses to
-load without an absolute prepared payload, so the payload is prepared first and
-named in the environment:
+Build the x64 installer on Windows x64. Step 4 of the release procedure in
+[docs/versioning.md](../../docs/versioning.md) names the install and build
+commands to run first. Then, in `desktop/`, run one command:
 
-```sh
-node scripts/package-mcp-bundle.mjs --target win32-x64 --prepare-desktop-payload <absolute-payload-path>
-MORROW_INSTALLER_PAYLOAD=<absolute-payload-path> MORROW_SIGNED_RELEASE=0 \
-  pnpm --dir installer --ignore-workspace package:win
+```text
+node scripts/package-mcp-bundle.mjs --target win32-x64 --unsigned-release --output <new absolute folder>
 ```
 
-The output is `Morrow-<version>-win-x64.exe`. Version `1.0.0` is an unsigned
-release. Automatic updates remain disabled. Use the complete NSIS installer;
-do not deploy an unpacked app or a separately copied `MorrowPayload` directory.
+It writes `Morrow-<version>-win-x64.exe` and `receipt.json` into that folder.
+The receipt ties the installer to the commit it was built from. The same step 4
+installs, starts, repairs, and removes that exact installer in a test run.
+Morrow Desktop 1.0.5 is an unreleased candidate. Every published Windows
+artifact so far is unsigned. Automatic updates remain disabled. Use the
+complete NSIS installer; do not deploy an unpacked app or a separately copied
+`MorrowPayload` directory.
 
 ## The Morrow Bridge delivery route
 
@@ -27,13 +29,14 @@ to the exact packaged extension before the builder can expose that route. The
 Bridge identity, active-folder, and pairing checks stay required for every
 delivery route.
 
-On 7 September, the unsigned 1.0.0 installer passed native `BOOTZ` installation,
-startup, damaged-payload refusal, exact repair, uninstall and retained-data
-checks through `scripts/test/desktop-windows-smoke.mjs`. That harness runs on
-native Windows only. Its saved receipt is
-`output/final-pass-20260907/smoke-1.0.0.harness.json`. It uses isolated application
-state. Public-download SmartScreen behavior and institution-managed deployment
-remain live-unverified. No signed Windows artifact exists.
+On 7 September, on the native Windows machine `BOOTZ`, the unsigned 1.0.0
+installer passed installation, startup, damaged-payload refusal, exact repair,
+uninstall and retained-data checks through
+`scripts/test/desktop-windows-smoke.mjs`. That harness runs on native Windows
+only and uses isolated application state. Its receipt stayed on that machine
+and is not in this repository. Public-download SmartScreen behavior and
+institution-managed deployment remain live-unverified. No signed Windows
+artifact exists.
 
 ## Silent deployment
 
@@ -72,8 +75,11 @@ that data-removal action.
 
 The action is **Remove Morrow's data**, in the *What stays on this computer*
 section of the app. That section names the exact path of every place this
-installation keeps data: `State`, the materials folder, the `Assistant settings
-backups` folder, the Bridge folder Chrome loads, the Blackboard credential
+installation keeps data: `State`, the materials folder, the `Materials` folder
+Morrow made first when a different materials folder was chosen later, the
+`Assistant settings backups` folder, the `Window data` folder where Morrow's
+window keeps its caches and site data while Morrow is open, the Bridge folder
+Chrome loads, the Blackboard credential
 folder, the Blackboard configuration file, and each assistant configuration file
 Morrow wrote.
 
@@ -81,14 +87,17 @@ The action asks for a confirmation that lists every path it will remove and
 every path it will not. It first takes Morrow's own `morrow` entry out of each
 assistant configuration file Morrow wrote and leaves the rest of that file; if it
 cannot, it stops, names the file, and removes nothing. It then removes only paths
-inside Morrow's own user-data folder and inside the Blackboard credential folder.
-It keeps the `Assistant settings backups` folder. It never removes an
+inside Morrow's own user-data folder, the Blackboard credential folder, and the
+Blackboard configuration file.
+It keeps the `Assistant settings backups` folder and the `Window data`
+folder; delete `Window data` after you remove the application. It never removes an
 assistant's own configuration file. After the removal it reads each path again
 and reports which are gone and which are still on the computer.
 
-Removing the application itself stays a Windows step: Settings, Apps, Morrow,
-Uninstall, or the uninstaller the installed copy registered for the current
-user. `installer/test/installer-controller.test.cjs` proves the in-app removal
+Removing the application itself stays a Windows step. Windows 11: Settings,
+Apps, Installed apps, Morrow, More, Uninstall. Windows 10: Settings, Apps, Apps &
+features, Morrow, Uninstall. The uninstaller the installed copy registered for
+the current user does the same. `installer/test/installer-controller.test.cjs` proves the in-app removal
 on macOS. `scripts/test/desktop-windows-smoke.mjs` runs the Windows uninstaller
 and then compares State, Materials, backups, and the assistant configuration
 byte for byte against the reading it took before the uninstall. The harness

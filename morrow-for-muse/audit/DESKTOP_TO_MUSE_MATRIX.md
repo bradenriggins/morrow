@@ -1,7 +1,7 @@
-# Desktop Morrow to Morrow for Muse: Feature Migration Matrix
+# Morrow Desktop to Morrow for Muse: Feature Migration Matrix
 
 **Audit date:** 2026-09-20. **Auditor:** Hermes (subagent, read-only; no files changed anywhere).
-**Scope:** `~/workspace/morrow-fix` (desktop Morrow, VM copy, read-only) vs
+**Scope:** `~/workspace/morrow-fix` (Morrow Desktop, VM copy, read-only) vs
 `~/workspace/morrow-for-muse-deploy` (Morrow for Muse, no-MCP connector product).
 **Method:** code reading only; nothing executed against live services. "Proven" below means a
 live receipt exists in the deploy workspace or in `~/workspace/morrow-for-muse/proofs`; code
@@ -24,10 +24,10 @@ journal path below are stale.
 - Admission engine: the "Catalog dispatch path" row (section 3,
   "no admission, no catalog pin") is obsolete. `dispatch/executor.py`
   runs `_catalog_provenance_gate` before any session is loaded or
-  admission runs: unknown names, method/path mismatch,
-  non-live-proven without an educator-signed `--allow-unproven`
-  override, never-dispatch, unsupported, evidence-hold, and
-  learner-data are refused before dispatch. The admission gate is
+  admission runs: unknown names, method/path mismatch, every
+  non-live-proven row (no override exists), never-dispatch,
+  unsupported, evidence-hold, and learner-data are refused before
+  dispatch. The admission gate is
   real and fail-closed.
 - Journal path: the live journal is
   `~/.morrow/trees/<tree-id>/journal/ops.jsonl` (or

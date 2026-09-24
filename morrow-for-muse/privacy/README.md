@@ -1,7 +1,7 @@
 # Student privacy boundary
 
-Faithful Python port of the desktop Morrow source privacy boundary
-(historical provenance: the desktop Morrow monorepo, not shipped in this package):
+Faithful Python port of the Morrow Desktop source privacy boundary
+(historical provenance: the Morrow Desktop monorepo, not shipped in this package):
 
 - `origin-morrow/packages/gateway-core/src/source-mcp-privacy.ts`
 - `origin-morrow/packages/gateway-core/src/privacy.ts` (1,585 lines)
@@ -24,8 +24,8 @@ read-only sources; nothing was modified there.
   private and multi-course tool refusal, stable failure envelopes,
   metadata-only internal capability.
 - `source_privacy_selftest.py`: the test suite (see below).
-- `executor_wire.py`: the executor's projection point, the educator
-  reveal check, working-by-name helpers (`issue_labels`,
+- `executor_wire.py`: the executor's projection point (every learner
+  read, no reveal), working-by-name helpers (`issue_labels`,
   `apply_name_echo`, `resolve_learner_labels`, `relabel_learner_ids`),
   and the shipped purge commands.
 - `name_echo.py`: the encrypted per-conversation record of students
@@ -82,7 +82,7 @@ dispatch only on the Chromium lane with the encrypted vault; the raw
 HTTPS lane, and any lane without `cryptography`, refuses them
 (`LearnerDataGated`). `transport/browser_backend.py::_project_learner_result`
 delegates to the same function for the proof-battery lane. Working by
-name: `learners/find.py` (`morrow students find`) issues labels and
+name: `learners/find.py` (`bin/morrow students find`) issues labels and
 records the name echo; `dispatch_entry` resolves labels in a write to
 real ids after the mode gate and relabels everything afterwards. See
 FERPA_POLICY.md for the honest scope.

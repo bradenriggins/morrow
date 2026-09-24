@@ -40,10 +40,8 @@ the governance port (architecture doc sections 1.2, 2.2, 4):
                                  pipeline as manifest entries, but only after
                                  the catalog provenance gate: the op must be
                                  marked live-proven in
-                                 proof-battery/OPERATION_CATALOG.md, or the
-                                 educator must have signed an explicit
-                                 allow_unproven override (--allow-unproven),
-                                 which is journaled with the op
+                                 proof-battery/OPERATION_CATALOG.md; nothing
+                                 overrides that
   undo                         - an entry's undo block runs as a new, separately
                                  journaled operation
 
@@ -117,32 +115,33 @@ import contextvars
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
-try:
-    from dispatch.admission import (
-        admit, persist_signed_record, consume_approval, check_policy_gates,
-        load_policy, check_never_dispatch, check_unsupported,
-        check_evidence_holds, check_learner_data, check_unproven_override,
-        touches_learner_data as admission_touches_learner_data,
-        request_subject as admission_request_subject,
-        request_digest as admission_request_digest,
-    )
-except ImportError:  # run as a script: dispatch/ itself is on sys.path
-    from admission import (
-        admit, persist_signed_record, consume_approval, check_policy_gates,
-        load_policy, check_never_dispatch, check_unsupported,
-        check_evidence_holds, check_learner_data, check_unproven_override,
-        touches_learner_data as admission_touches_learner_data,
-        request_subject as admission_request_subject,
-        request_digest as admission_request_digest,
-    )
-
 # W4-P1-17: the morrow state root (and the stable tree UUID) has ONE
-# source of truth: config/paths. Insert the tree root so this module
-# works both as `python3 dispatch/executor.py` and as
-# `python3 -m dispatch.executor`.
+# source of truth: config/paths. The tree root goes first on sys.path
+# before any tree import, so this module works both as
+# `python3 dispatch/executor.py` and as `python3 -m dispatch.executor`.
+# Script mode puts dispatch/ first, not the tree root, and an installed
+# package named `dispatch` (pyobjc's libdispatch on Homebrew Python)
+# would otherwise be imported in the tree's place.
 _EXEC_TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _EXEC_TREE_ROOT not in sys.path:
     sys.path.insert(0, _EXEC_TREE_ROOT)
+# Run as a script or with -m, this file is __main__, and the Chromium lane
+# imports it again as dispatch.executor. The lane's errors would then be
+# the second copy's classes, and no except clause here would catch them.
+# The CLI therefore always runs in the dispatch.executor copy.
+if __name__ == "__main__":
+    from dispatch import executor as _executor
+    raise SystemExit(_executor._script_main(sys.argv[1:]))
+from dispatch.admission import (  # noqa: E402
+    admit, persist_signed_record, consume_approval, check_policy_gates,
+    load_policy, check_never_dispatch, check_unsupported,
+    check_evidence_holds, check_learner_data,
+    touches_learner_data as admission_touches_learner_data,
+    request_subject as admission_request_subject,
+    request_digest as admission_request_digest,
+    write_target_course_id as admission_write_target_course_id,
+    _render_path as admission_render_path,
+)
 from config.paths import morrow_home, read_tree_uuid  # noqa: E402
 # W6-P2-7: one-shot journal-secret uses go through a zeroizable buffer
 # (see config/secretbuf.py for the honest residual statement).
@@ -178,6 +177,18 @@ class ManifestPinMismatch(ExecutorError):
 
 class MissingFrozenPlan(ExecutorError):
     pass
+
+
+class PreparedWriteMissing(MissingFrozenPlan):
+    """approve-write found no prepared write waiting under the op id, so
+    it sent nothing. already_used is True when the journal holds the
+    op's claim or outcome: the change was sent, or tried, with an
+    earlier approval. False means it was never sent (it expired, or it
+    was never prepared)."""
+
+    def __init__(self, message, already_used):
+        super().__init__(message)
+        self.already_used = bool(already_used)
 
 
 class WriteHaltActive(ExecutorError):
@@ -284,6 +295,19 @@ class LocalProcedureRefused(ExecutorError):
     pass
 
 
+class CallerInputError(ExecutorError):
+    """A command's own argument (--params, --body, --course-resolution,
+    a maintenance command's --reason) was refused before anything was
+    sent or changed. The text is Morrow's own check, never provider
+    data."""
+
+
+class ConfirmationRequired(ExecutorError):
+    """A maintenance command that changes Morrow's own records was run
+    without --yes and without a terminal to ask on, so it refused
+    before doing anything."""
+
+
 class VerificationFailed(ExecutorError):
     pass
 
@@ -292,6 +316,20 @@ class LearnerLabelUnresolved(ExecutorError):
     """A write named a student by a label this course never issued, or by
     an echoed name that does not match the educator's record. Nothing
     was sent (round-4 privacy audit H3c)."""
+
+
+class CourseRosterUnavailable(ExecutorError):
+    """The course's student list could not be read before a dispatch
+    that reads or changes something in the course, so nothing in the
+    course was read or changed: without it, student names in course
+    content could not be hidden."""
+
+
+class InvalidCourseId(ExecutorError):
+    """A request names its course by something other than the course's
+    Canvas number (a SIS form such as sis_course_id:BIO101). Refused
+    before anything is sent; the failure catalog matches this name, as
+    it does query/chain.py's refusal of the same kind."""
 
 
 class RedirectDowngradeRefused(ExecutorError):
@@ -344,12 +382,23 @@ def _uncertain_write_from_session_death(exc) -> bool:
     return False
 
 
-def _on_session_death(op_id, entry_name, evidence):
+def _on_session_death(op_id, entry_name, evidence, write_sent=False,
+                      is_write=True):
     """W4-P2-1: run the re-auth state machine when session death is
     detected: impose the write halt, quarantine the op, and write the
     educator notification. Runs after detection and before the original
     exception is re-raised, so the run stops loudly instead of writing
-    through a half-dead session.
+    through a half-dead session. write_sent is True when the write was
+    already sent, so Canvas may hold the change.
+
+    is_write is False for a read, and for a plan-write's own reads: only
+    a write that has an op id is parked as a paused change. A read, and
+    a write whose op id does not exist yet, still halt and notify, but
+    the death is recorded as a session_death record (as
+    ChromiumSession._notify_reauth_machine records it), never as an op
+    the educator is asked to approve. (Final sweep 2026-09-23: a read
+    was quarantined as a paused change, so the notice said a change was
+    stopped while nothing was being changed.)
 
     Lazy-imports reauth.state_machine: the state machine never imports
     the executor, so there is no import cycle. Best effort by design:
@@ -368,12 +417,26 @@ def _on_session_death(op_id, entry_name, evidence):
         print("MORROW WARNING: re-auth halt could not be imposed for op "
               "%s (%s); the original session-death error is still raised "
               "below" % (op_id, type(exc).__name__), file=sys.stderr)
-    try:
-        _rsm.quarantine_op(op_id, entry_name, str(evidence)[:200])
-    except Exception as exc:
-        print("MORROW WARNING: op %s could not be quarantined after "
-              "session death (%s); the original error is still raised "
-              "below" % (op_id, type(exc).__name__), file=sys.stderr)
+    if is_write and op_id is not None:
+        try:
+            _rsm.quarantine_op(op_id, entry_name, str(evidence)[:200],
+                               write_sent=write_sent)
+        except Exception as exc:
+            print("MORROW WARNING: op %s could not be quarantined after "
+                  "session death (%s); the original error is still raised "
+                  "below" % (op_id, type(exc).__name__), file=sys.stderr)
+    else:
+        # A read, or a write that has no op id yet: record the death the
+        # same way the lane's session death is recorded. paused_ops()
+        # never counts it, so the notice asks the educator to re-sign
+        # in, not to approve a read.
+        try:
+            _rsm.quarantine_session("session_dead", detection)
+        except Exception as exc:
+            print("MORROW WARNING: the session death of op %s could not "
+                  "be recorded after session death (%s); the original "
+                  "error is still raised below"
+                  % (op_id, type(exc).__name__), file=sys.stderr)
     # W4-P2-1: on_expiry_detected wrote the educator notification BEFORE
     # this op was quarantined, so its "N op(s) paused" count is stale.
     # Detection and quarantine still run before the raise; refresh the
@@ -383,14 +446,13 @@ def _on_session_death(op_id, entry_name, evidence):
     # paused. Fail loud on stderr; the notification is also readable
     # via `state_machine.py notify` and the helper /status, so a
     # missing file is detectable, not silent.
+    paused = None
     try:
-        n_paused = len(_rsm.quarantined_ops())
-    except Exception:
-        n_paused = -1  # count unknown; the warning below still names it
-    try:
-        _rsm.write_notify_expired(max(n_paused, 0))
+        paused = _rsm.paused_ops()
+        _rsm.write_notify_expired(paused)
     except Exception as exc:
-        count_txt = str(n_paused) if n_paused >= 0 else "an unknown number of"
+        count_txt = str(len(paused)) if paused is not None \
+            else "an unknown number of"
         print("MORROW WARNING: the educator notification for %s paused "
               "op(s) FAILED to write (%s); the educator may not know ops "
               "are paused. Read the quarantine directly: "
@@ -421,7 +483,7 @@ def _on_stale_verify(op_id, entry_name, evidence):
     # W6-P1-S2: see _on_session_dead: never swallow a failed educator
     # notification silently.
     try:
-        _rsm.write_notify_stale(len(_rsm.quarantined_ops()))
+        _rsm.write_notify_stale(len(_rsm.paused_ops()))
     except Exception as exc:
         print("MORROW WARNING: the educator notification for the stale "
               "verify of op %s FAILED to write (%s); read the quarantine "
@@ -496,9 +558,24 @@ class CatalogNotProven(ExecutorError):
     """The catalog provenance gate refused a catalog dispatch: the named
     operation is not in proof-battery/OPERATION_CATALOG.md, the supplied
     method/path do not match the catalog row, or the row is not marked
-    live-proven and no educator-signed --allow-unproven override was
-    presented. Never-dispatch, unsupported, evidence-hold, and
-    learner-data refusals raise their own admission errors instead."""
+    live-proven. Nothing overrides it. Never-dispatch, unsupported,
+    evidence-hold, and learner-data refusals raise their own admission
+    errors instead."""
+
+
+class CatalogNameMismatch(CatalogNotProven):
+    """The task name and the request are not one catalog row, but one of
+    them is a live-proven row: an unknown name for a live-proven method
+    and path, or a name paired with another row's method and path.
+    Refused like any CatalogNotProven, before anything is sent;
+    catalog_name, catalog_method, and catalog_path name the live-proven
+    row the dispatch should use."""
+
+    def __init__(self, message, catalog_name, catalog_method, catalog_path):
+        super().__init__(message)
+        self.catalog_name = catalog_name
+        self.catalog_method = catalog_method
+        self.catalog_path = catalog_path
 
 
 class CatalogEffectMismatch(ExecutorError):
@@ -860,11 +937,13 @@ def check_uuid(value: str) -> str:
 # representative per visual equivalence class, so a homoglyph name is
 # detectable: skeleton("B<cy>ilogy 101") == "biology 101" while the raw
 # name is not ASCII. assert_no_spoof_identifier() fails closed when a
-# human-reviewed name mixes scripts around such characters: a write gate
-# must never bless a target whose human-readable name is a visual spoof.
-# Pure single-script names (a Russian course name, a Japanese course
-# name) are NOT flagged: the spoof signal requires mixed scripts, which
-# is the shape of the homoglyph attack, not of multilingual text.
+# word of a human-reviewed name mixes scripts around such characters:
+# a write gate must never bless a target whose human-readable name is a
+# visual spoof.
+# Multilingual names are NOT flagged: the spoof signal is a word that
+# mixes Latin, Cyrillic, or Greek letters, which is the shape of the
+# homoglyph attack. A Russian or Greek word next to English words (a
+# bilingual course name) is not.
 # --------------------------------------------------------------------------
 
 def norm_identifier(text) -> str:
@@ -933,23 +1012,39 @@ def confusable_skeleton(text) -> str:
     ).casefold().strip()
 
 
-def spoof_characters(text):
-    """Characters in text that have a cross-script visual twin AND sit in
-    a mixed-script string (the homoglyph-attack shape).
+_TWIN_SCRIPTS = frozenset({"Latin", "Cyrillic", "Greek"})
 
-    Returns [(char, latin_twin), ...]. Pure single-script text (a
-    Russian or Japanese course name) returns []: multilingual names are
-    not spoofs."""
-    normed = unicodedata.normalize(
-        "NFKC", str(text if text is not None else ""))
-    hits = [(ch, _CONFUSABLE_SKELETON[ch])
-            for ch in normed if ch in _CONFUSABLE_SKELETON]
-    if not hits:
-        return []
-    scripts = {_char_script(ch) for ch in normed
-               if unicodedata.category(ch).startswith("L")}
+
+def _mixed_word_hits(word):
+    """The confusable characters of one word when that word mixes Latin,
+    Cyrillic, or Greek letters; [] for a single-script word."""
+    scripts = {_char_script(ch) for ch in word} & _TWIN_SCRIPTS
     if len(scripts) < 2:
         return []
+    return [(ch, _CONFUSABLE_SKELETON[ch])
+            for ch in word if ch in _CONFUSABLE_SKELETON]
+
+
+def spoof_characters(text):
+    """Characters with a cross-script visual twin inside a word that mixes
+    scripts (the homoglyph-attack shape, UTS #39 mixed-script words).
+
+    Returns [(char, latin_twin), ...]. Words are runs of letters and
+    marks. A word that mixes Latin, Cyrillic, or Greek letters
+    ("Вiology" with a Cyrillic В) is a spoof; single-script words are
+    not, whatever sits next to them, so a bilingual name ("Русский язык
+    (Russian Language I)") or a Greek letter as its own word
+    ("Statistics: μ and σ") returns []."""
+    normed = unicodedata.normalize(
+        "NFKC", str(text if text is not None else ""))
+    hits, word = [], []
+    for ch in normed + " ":
+        if unicodedata.category(ch)[0] in ("L", "M"):
+            word.append(ch)
+            continue
+        if word:
+            hits.extend(_mixed_word_hits(word))
+            word = []
     return hits
 
 
@@ -2652,6 +2747,12 @@ def _journal_state_locked():
             "(it rebuilds the index once the journal verifies); do not "
             "re-claim op_ids meanwhile."
             % (_journal_index_path(), JOURNAL_PATH))
+    if idx is None:
+        # Nothing journaled yet: no journal, no index, and (checked above)
+        # no secret. A rebuild here would mint the secret and index with
+        # no journal file, which every later read and claim takes for a
+        # deleted journal. The first append creates all three.
+        return {"op_ids": _retired_op_ids(), "locations": {}}
     return _rebuild_index_locked()
 
 
@@ -3232,6 +3333,12 @@ def find_journal_op(op_id: str):
         return found
 
 
+# Write claims taken in this process. No change reaches the provider
+# before claim_op_id returns, so a CLI failure raised while this count is
+# unchanged sent nothing (main marks it nothing_sent for the translator).
+_WRITE_CLAIMS = [0]
+
+
 def claim_op_id(op_id: str, kind: str, entry_name: str, effects: str,
                 params_digest: str) -> str:
     """Atomically check-and-claim an op_id under the journal lock.
@@ -3306,6 +3413,8 @@ def claim_op_id(op_id: str, kind: str, entry_name: str, effects: str,
                 "journal; refusing to dispatch again (use a fresh op_id)"
                 % op_id)
         _append_record_locked(record)
+    if effects != "read" or kind == "undo":
+        _WRITE_CLAIMS[0] += 1
     return token
 
 
@@ -4601,15 +4710,15 @@ def request_with_retry(method: str, url: str, headers: dict, body_bytes,
 
     Reads: retry transport errors and 408/429/500/502/503/504; a 429 with
     a Retry-After header sleeps that long (capped at RETRY_AFTER_CAP_S);
-    fail fast on other 4xx. Writes: retry ONLY on transport failures that
-    prove the request never reached the server (DNS failure, connection
-    refused, unreachable host). A reset, incomplete read, or timeout after
+    fail fast on other 4xx and 5xx. Writes: retry ONLY on transport
+    failures that prove the request never reached the server (DNS
+    failure, connection refused, unreachable host). A reset, incomplete read, or timeout after
     the bytes left is indistinguishable from a reset before the server
     applied the write, so those become UncertainWrite, never a silent
     retry (W2-P0-1). A 429 on a write is likewise uncertain (the provider
     may have applied it before throttling); the Retry-After value is
-    reported in the detail for reconciliation. 5xx with a response is
-    uncertain, never retried.
+    reported in the detail for reconciliation. Any 5xx with a response
+    is uncertain, never retried.
     """
     attempts = 0
     last_exc = None
@@ -4659,7 +4768,9 @@ def request_with_retry(method: str, url: str, headers: dict, body_bytes,
                         _backoff_sleep(attempts - 1)
                         continue
                 raise ExecutorError("read transport failed: %s" % exc)
-        if status in RETRYABLE_STATUSES:
+        # Every 5xx is a provider failure: a CDN in front of Canvas
+        # answers 520-526 while the origin may still apply a write.
+        if status in RETRYABLE_STATUSES or status >= 500:
             if is_write:
                 detail = ("write returned HTTP %s; effect state unknown, "
                           "not retried" % status)
@@ -4672,6 +4783,9 @@ def request_with_retry(method: str, url: str, headers: dict, body_bytes,
                     detail, attempts=attempts,
                     evidence=[{"method": method, "url": _redacted_url(url),
                                "status": status, "attempts": attempts}])
+            if status not in RETRYABLE_STATUSES:
+                raise ProviderHttpError(
+                    status, "provider error, not retried", body=raw)
             if attempts < MAX_ATTEMPTS:
                 delay = _retry_after_delay(resp_headers) \
                     if status == 429 else None
@@ -5665,9 +5779,8 @@ def _project_verification_detail(entry: dict, verification: dict,
     those values can be learner names or identifiers. The journal is a
     learner-PII-free surface, so the detail is projected through the same
     privacy boundary as the receipt (privacy/executor_wire), with the
-    same gate (touches_learner_data), the same reveal decision, and a
-    roster harvested from the same raw provider payload the receipt
-    projection uses. Entries that do not touch learner data pass through
+    same gate (touches_learner_data) and a roster harvested from the
+    same raw provider payload the receipt projection uses. Entries that do not touch learner data pass through
     untouched. The input verification dict is never mutated; the (possibly
     new) dict is returned. Raises ExecutorError (fail closed) when the
     boundary itself fails.
@@ -5677,7 +5790,7 @@ def _project_verification_detail(entry: dict, verification: dict,
         return verification
     from privacy import executor_wire as _wire
     try:
-        projected, reveal = _wire.project_learner_result(
+        projected = _wire.project_learner_result(
             entry,
             {"receipt": {"verification_detail": detail,
                         "provider_payload": raw_payload}},
@@ -5688,19 +5801,6 @@ def _project_verification_detail(entry: dict, verification: dict,
         raise ExecutorError(
             "learner privacy boundary failed for verification detail of "
             "entry %r: %s" % (entry_name, exc))
-    if reveal is not None:
-        # Round-4 H2: a sealed educator reveal for this course, so the
-        # detail passes through raw for the agent. The reveal audit
-        # rides with the verification dict so the journal records who
-        # revealed and why. Final muse audit H1: the journal gets the
-        # de-identified detail ("journal_detail"), never the raw one.
-        out = dict(verification)
-        out["pii_reveal"] = reveal
-        out["journal_detail"] = _project_verification_detail(
-            entry, verification, raw_payload, tenant_base, entry_name,
-            lane_context=_wire.without_pii_reveal(lane_context)).get(
-                "detail")
-        return out
     projected_detail = (projected.get("receipt") or {}).get(
         "verification_detail")
     if not isinstance(projected_detail, str):
@@ -6071,6 +6171,13 @@ def verify_write_target_identity(entry, params, plan, session, pack, config,
     # mixed-script confusables before comparing anything.
     if isinstance(provider_name, str):
         assert_no_spoof_identifier(provider_name, "provider course name")
+    term = course.get("term")
+    term_name = term.get("name") if isinstance(term, dict) else term
+    # What the agent and the journal see: the name and term labeled with
+    # the course's roster, never a student's name in them.
+    shown = _shown_course_text(entry, write_cid, config.get("canvas_base"),
+                               {"name": provider_name, "term": term_name})
+    shown_name, shown_term = shown.get("name"), shown.get("term")
     declared_cid = declared.get("course_id")
     declared_name = declared.get("course_name")
     if declared_cid is not None and str(declared_cid) != write_cid:
@@ -6079,22 +6186,19 @@ def verify_write_target_identity(entry, params, plan, session, pack, config,
             "(%r): refusing." % (write_cid, declared_cid, declared_name))
     if declared_name is not None:
         assert_no_spoof_identifier(declared_name, "declared course name")
-        if not isinstance(provider_name, str) or \
-                norm_identifier(provider_name) != \
-                norm_identifier(declared_name):
+        if not _same_course_text(provider_name, shown_name, declared_name,
+                                 declared.get("course_name_digest")):
             raise TargetIdentityMismatch(
                 "course %s on this tenant is named %r, but the reviewed "
                 "target declares %r: this is a different course than the "
                 "educator reviewed (possible typo'd course_id). Refusing."
-                % (write_cid, provider_name, declared_name))
-    term = course.get("term")
-    term_name = term.get("name") if isinstance(term, dict) else term
+                % (write_cid, shown_name, declared_name))
     declared_term = declared.get("term")
     if declared_term is not None and term_name is not None:
-        if norm_identifier(term_name) != norm_identifier(declared_term):
+        if not _same_course_text(term_name, shown_term, declared_term):
             raise TargetIdentityMismatch(
                 "course %s is in term %r, but the reviewed target declares "
-                "term %r. Refusing." % (write_cid, term_name, declared_term))
+                "term %r. Refusing." % (write_cid, shown_term, declared_term))
     # W4-P0-11(3): the approval's target block must name the same course
     # the plan declared and the provider confirmed. A record reviewed
     # for "Intended Course" cannot authorize a write whose frozen plan
@@ -6104,14 +6208,12 @@ def verify_write_target_identity(entry, params, plan, session, pack, config,
         # W5-P1-1: the signed approval's name gets the same spoof screen;
         # a twin name reviewed from a search result must not authorize.
         assert_no_spoof_identifier(approval_name, "approval course name")
-        if not isinstance(provider_name, str) or \
-                norm_identifier(provider_name) != \
-                norm_identifier(approval_name):
+        if not _same_course_text(provider_name, shown_name, approval_name):
             raise TargetIdentityMismatch(
                 "the signed approval was reviewed for course %r, but the "
                 "provider-verified target of course %s is %r: the approval "
                 "does not cover this course. Refusing."
-                % (approval_name, write_cid, provider_name))
+                % (approval_name, write_cid, shown_name))
         if declared_name is not None and \
                 norm_identifier(declared_name) != \
                 norm_identifier(approval_name):
@@ -6122,14 +6224,14 @@ def verify_write_target_identity(entry, params, plan, session, pack, config,
                 % (approval_name, declared_name))
     approval_term = approval_target.get("term")
     if approval_term is not None and term_name is not None:
-        if norm_identifier(term_name) != norm_identifier(approval_term):
+        if not _same_course_text(term_name, shown_term, approval_term):
             raise TargetIdentityMismatch(
                 "the signed approval was reviewed for term %r, but course "
                 "%s is in term %r. Refusing."
-                % (approval_term, write_cid, term_name))
+                % (approval_term, write_cid, shown_term))
     return {"course_id": write_cid,
-            "course_name": provider_name,
-            "term": term_name,
+            "course_name": shown_name,
+            "term": shown_term,
             "tenant": config.get("canvas_base")}
 
 
@@ -6212,7 +6314,12 @@ def recompute_before_state(entry, params, plan, session, pack, config,
 #   - Classic Canvas (/api/v1): assignment_groups, discussion_topics,
 #     assignments, modules, quizzes, pages. POST to a collection derives
 #     the member URL from the create response's id (or page url);
-#     PUT/PATCH to a member route re-reads that route.
+#     PUT/PATCH to a member route re-reads that route. A course update
+#     (PUT /api/v1/courses/{id}) re-reads the course. Batch writes are
+#     read back where each change lives: C-36 (PUT
+#     /assignments/overrides) with the batch retrieve of the overrides
+#     it changed, C-37 (PUT /assignments/bulk_update) with one GET per
+#     assignment.
 #   - New Quiz (/api/quiz/v1): quizzes collection + quiz member,
 #     quizzes/{id}/items collection + item member. Create responses carry
 #     the member in the "id" field; PUT/PATCH already name the member.
@@ -6224,7 +6331,8 @@ def recompute_before_state(entry, params, plan, session, pack, config,
 #   - New Quiz accommodations, reports, and media upload routes: bulk or
 #     binary surfaces with no stable member GET to compare against intent.
 #   - DELETE: deletion is verified by the terminal 404 of the follow-up
-#     read, not by a GET of the removed object.
+#     read, not by a GET of the removed object. A classic quiz delete is
+#     verified by the course quiz index (D-002).
 #   - Every other route: unknown surface; skipped rather than failed so a
 #     new endpoint can never be "proven" by accident.
 _WRITE_READBACK_COLLECTIONS = (
@@ -6237,10 +6345,18 @@ _WRITE_READBACK_COLLECTIONS = (
     (r"/api/quiz/v1/courses/\d+/quizzes$", "id"),
     (r"/api/quiz/v1/courses/\d+/quizzes/\d+/items$", "id"),
 )
+# Members have numeric ids (pages keep their url slug), so a batch
+# route such as /assignments/overrides or /assignments/bulk_update is
+# never mistaken for a member.
 _WRITE_READBACK_MEMBER_RE = re.compile(
     r"(?:/api/v1/courses/\d+/(?:assignment_groups|discussion_topics|"
-    r"assignments|modules|quizzes|pages)/[^/]+"
+    r"assignments|modules|quizzes)/\d+"
+    r"|/api/v1/courses/\d+/pages/[^/]+"
     r"|/api/quiz/v1/courses/\d+/quizzes/\d+(?:/items/\d+)?)$")
+# A course update (C-128) is read back with the course GET. Updates
+# only: a course DELETE may conclude the course, which the course GET
+# still serves, so it has no delete readback here.
+_COURSE_READBACK_MEMBER_RE = re.compile(r"/api/v1/courses/\d+$")
 
 
 # W3-P2-22: Item Bank readback derivation. The SDK lane's bank create
@@ -6313,6 +6429,8 @@ def _readback_target(method, url, result_payload):
     if _IB_READBACK_BANK_MEMBER_RE.search(path):
         return target
     if _WRITE_READBACK_MEMBER_RE.search(path):
+        return target
+    if _COURSE_READBACK_MEMBER_RE.search(path):
         return target
     return None
 
@@ -6794,8 +6912,125 @@ def _readback_get(entry, session, pack, config, params, transients, target,
     return apply_result_block(entry, raw, resp_headers)["payload"]
 
 
+_CLASSIC_QUIZ_MEMBER_RE = re.compile(r"/api/v1/courses/\d+/quizzes/(\d+)$")
+
+
+def _url_path(url) -> str:
+    try:
+        return (urllib.parse.urlparse(str(url)).path or "").rstrip("/")
+    except Exception:  # noqa: BLE001 - an unparsable URL has no path
+        return ""
+
+
+# A course index (every classic quiz of a course) can be far larger than
+# one operation's receipt bound; only its ids are read.
+_INDEX_READ_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _read_collection_ids(entry, session, pack, config, params, transients,
+                         url, method):
+    """The ids a paginated collection lists, and whether every page was
+    read in full: ({id, ...}, complete). Follows Link rel="next" (and
+    the Chromium lane's next page) up to PAGINATION_MAX_PAGES; a page
+    cut at the byte bound makes the read incomplete. A failed read
+    raises UncertainWrite: the write returned 2xx."""
+    ids, pages = set(), 0
+    while True:
+        pages += 1
+        block = {"method": "GET", "url": url, "headers": {}}
+        try:
+            rmethod, rurl, rheaders, rbody = build_request(
+                entry, block, params, session, pack, config,
+                transients or {})
+            _status, resp_headers, raw, _attempts = session.raw_request(
+                rmethod, rurl, rheaders, rbody, is_write=False,
+                max_bytes=_INDEX_READ_MAX_BYTES)
+        except ProviderHttpError as exc:
+            raise UncertainWrite(
+                "delete readback GET %s failed HTTP %s; the %s effect is "
+                "unconfirmed, not a proven failure" % (url, exc.status, method))
+        except ExecutorError as exc:
+            raise UncertainWrite(
+                "delete readback GET %s failed (%s); the %s effect is "
+                "unconfirmed, not a proven failure"
+                % (url, type(exc).__name__, method))
+        headers = {str(k).lower(): v for k, v in (resp_headers or {}).items()}
+        cut = len(raw or b"") > _INDEX_READ_MAX_BYTES \
+            or bool(headers.get("x-morrow-truncated"))
+        try:
+            payload = json.loads((raw or b"").decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            payload = None
+        if not isinstance(payload, list):
+            if cut:
+                return ids, False
+            raise UncertainWrite(
+                "delete readback GET %s did not return a list; the %s effect "
+                "is unconfirmed, not a proven failure" % (url, method))
+        for item in payload:
+            if isinstance(item, dict) and item.get("id") is not None:
+                ids.add(str(item["id"]))
+        if cut:
+            return ids, False
+        pagination = _pagination_state(resp_headers)
+        if pagination is None or not pagination.get("partial"):
+            return ids, True
+        next_page = pagination.get("next_page")
+        if not next_page or pages >= PAGINATION_MAX_PAGES:
+            return ids, False
+        url = urllib.parse.urljoin(url, next_page)
+
+
+def _verify_classic_quiz_delete(entry, session, pack, config, params,
+                                transients, method, url, quiz_id, max_bytes):
+    """D-002: after a classic quiz delete Canvas may still serve the quiz
+    on a direct member GET; the quiz leaving the course quiz index is
+    the delete receipt."""
+    member = str(url).split("?")[0].split("#")[0].rstrip("/")
+    index = member[:-len("/" + quiz_id)]
+    listed, complete = _read_collection_ids(
+        entry, session, pack, config, params, transients,
+        index + "?per_page=100", method)
+    if quiz_id in listed:
+        raise WriteFieldMismatch(
+            "delete readback mismatch on %s %s: the quiz is still listed in "
+            "the course quiz index (readback %s)" % (method, url, index))
+    if complete:
+        return {"status": "pass",
+                "detail": "readback %s no longer lists quiz %s: removal from "
+                          "the course quiz index is the delete receipt "
+                          "(D-002: a direct GET may still serve a deleted "
+                          "classic quiz)" % (index, quiz_id)}
+    try:
+        parsed = _readback_get(entry, session, pack, config, params,
+                               transients, member, method, max_bytes)
+    except ProviderHttpError as exc:
+        if exc.status in (404, 410):
+            return {"status": "pass",
+                    "detail": "readback %s returned HTTP %s: the quiz is "
+                              "gone" % (member, exc.status)}
+        parsed = None
+    except ExecutorError:
+        parsed = None
+    if isinstance(parsed, dict) and (
+            str(parsed.get("workflow_state") or "").lower() == "deleted"
+            or parsed.get("deleted") is True or parsed.get("deleted_at")):
+        return {"status": "pass",
+                "detail": "readback %s shows the quiz marked deleted"
+                          % member}
+    return {"status": "unverified",
+            "detail": "the course quiz index %s could not be read in full, "
+                      "and the pages read do not list quiz %s; the delete "
+                      "is not confirmed" % (index, quiz_id)}
+
+
 def _verify_delete(entry, session, pack, config, params, transients, method,
                    url, max_bytes):
+    classic_quiz = _CLASSIC_QUIZ_MEMBER_RE.search(_url_path(url))
+    if classic_quiz:
+        return _verify_classic_quiz_delete(
+            entry, session, pack, config, params, transients, method, url,
+            classic_quiz.group(1), max_bytes)
     target = _delete_readback_target(url)
     if target is None:
         return {"status": "unverified",
@@ -6873,6 +7108,16 @@ def run_write_readback(entry, session, pack, config, params, transients,
     if str(method).upper() == "DELETE":
         return _verify_delete(entry, session, pack, config, params,
                               transients, method, url, max_bytes)
+    if str(method).upper() == "PUT":
+        path = _url_path(url)
+        if _OVERRIDE_BATCH_RE.search(path):
+            return _readback_override_batch(
+                entry, session, pack, config, params, transients, method,
+                url, resolved_body, max_bytes)
+        if _BULK_DATES_RE.search(path):
+            return _readback_bulk_dates(
+                entry, session, pack, config, params, transients, method,
+                url, resolved_body, max_bytes)
     target = _readback_target(method, url, result_payload)
     if target is None:
         return {"status": "unverified",
@@ -6914,6 +7159,15 @@ def run_write_readback(entry, session, pack, config, params, transients,
                                   % "; ".join(settings_mismatches))
         else:
             unechoed.append("quiz_settings")
+    return _readback_verdict(method, url, target, parsed, compared,
+                             unechoed, mismatches, unconfirmed)
+
+
+def _readback_verdict(method, url, target, parsed, compared, unechoed,
+                      mismatches, unconfirmed):
+    """The readback outcome from a finished comparison: WriteFieldMismatch
+    for a proven difference, "unverified" when a requested field was not
+    confirmed or nothing was comparable, else "pass"."""
     if mismatches:
         # W3-P2-5: the mismatch detail formats raw readback values with
         # %r, which can be learner names or identifiers. Carry the raw
@@ -6945,6 +7199,133 @@ def run_write_readback(entry, session, pack, config, params, transients,
     return {"status": "pass",
             "detail": "readback %s matched %d requested field(s): %s"
                       % (target, len(compared), ", ".join(sorted(compared)))}
+
+
+# Batch writes change many objects in one request. Each change is read
+# back where it lives, never by re-reading the batch route.
+_OVERRIDE_BATCH_RE = re.compile(r"/api/v1/courses/\d+/assignments/overrides$")
+_BULK_DATES_RE = re.compile(r"/api/v1/courses/\d+/assignments/bulk_update$")
+_BULK_DATE_FIELDS = ("due_at", "unlock_at", "lock_at")
+
+
+def _batch_readback_get(entry, session, pack, config, params, transients,
+                        target, method, max_bytes):
+    """GET one batch readback target; a failed read is UncertainWrite."""
+    try:
+        return _readback_get(entry, session, pack, config, params,
+                             transients, target, method, max_bytes)
+    except ProviderHttpError as exc:
+        raise UncertainWrite(
+            "write readback GET %s failed HTTP %s; the %s effect is "
+            "unconfirmed, not a proven mismatch" % (target, exc.status, method))
+    except ExecutorError as exc:
+        raise UncertainWrite(
+            "write readback GET %s failed (%s); the %s effect is "
+            "unconfirmed, not a proven mismatch"
+            % (target, type(exc).__name__, method))
+
+
+def _readback_override_batch(entry, session, pack, config, params,
+                             transients, method, url, resolved_body,
+                             max_bytes):
+    """C-36: read back exactly the overrides the batch update changed,
+    with the batch retrieve (assignment_overrides[][id] and
+    [][assignment_id] for each)."""
+    sent = resolved_body.get("assignment_overrides") \
+        if isinstance(resolved_body, dict) else None
+    if not isinstance(sent, list) or not sent or not all(
+            isinstance(o, dict) and o.get("id") is not None
+            and o.get("assignment_id") is not None for o in sent):
+        return {"status": "unverified",
+                "detail": "readback not run: the batch override update "
+                          "does not name each override's id and "
+                          "assignment_id, so there is nothing to re-read"}
+    pairs = []
+    for override in sent:
+        pairs.append(("assignment_overrides[][id]", str(override["id"])))
+        pairs.append(("assignment_overrides[][assignment_id]",
+                      str(override["assignment_id"])))
+    target = "%s?%s" % (str(url).split("?")[0].split("#")[0].rstrip("/"),
+                        urllib.parse.urlencode(pairs))
+    parsed = _batch_readback_get(entry, session, pack, config, params,
+                                 transients, target, method, max_bytes)
+    if not isinstance(parsed, list):
+        raise UncertainWrite(
+            "write readback GET %s did not return a list; the %s effect is "
+            "unconfirmed, not a proven mismatch" % (target, method))
+    read = {str(o["id"]): o for o in parsed
+            if isinstance(o, dict) and o.get("id") is not None}
+    compared, unechoed, mismatches, unconfirmed = [], [], [], []
+    for index, override in enumerate(sent):
+        where = "assignment_overrides[%d] (override %s)" % (index,
+                                                             override["id"])
+        got = read.get(str(override["id"]))
+        if got is None:
+            unechoed.append(where)
+            continue
+        _compare_intent(override, got, where, compared, unechoed,
+                        mismatches, unconfirmed)
+    return _readback_verdict(method, url, target, parsed, compared,
+                             unechoed, mismatches, unconfirmed)
+
+
+def _readback_bulk_dates(entry, session, pack, config, params, transients,
+                         method, url, resolved_body, max_bytes):
+    """C-37: one GET per assignment (with its overrides), comparing the
+    dates the update set. Canvas applies the update in the background
+    (the PUT answers with a progress record), so a date that does not
+    match yet is unconfirmed, never a proven failure."""
+    sent = resolved_body
+    if not isinstance(sent, list) or not sent or not all(
+            isinstance(a, dict) and a.get("id") is not None
+            and isinstance(a.get("all_dates"), list) for a in sent):
+        return {"status": "unverified",
+                "detail": "readback not run: the bulk date update does not "
+                          "name each assignment id and its all_dates, so "
+                          "there is nothing to re-read"}
+    collection = str(url).split("?")[0].split("#")[0].rstrip("/")
+    collection = collection[:-len("/bulk_update")]
+    query = urllib.parse.urlencode([("include[]", "overrides")])
+    compared, unechoed, mismatches, unconfirmed = [], [], [], []
+    for assignment in sent:
+        target = "%s/%s?%s" % (collection, urllib.parse.quote(
+            str(assignment["id"]), safe=""), query)
+        read = _batch_readback_get(entry, session, pack, config, params,
+                                   transients, target, method, max_bytes)
+        if not isinstance(read, dict):
+            raise UncertainWrite(
+                "write readback GET %s did not return a JSON object; the %s "
+                "effect is unconfirmed, not a proven mismatch"
+                % (target, method))
+        overrides = {str(o.get("id")): o for o in read.get("overrides") or []
+                     if isinstance(o, dict)}
+        for index, date in enumerate(assignment["all_dates"]):
+            where = "assignment %s all_dates[%d]" % (assignment["id"], index)
+            if not isinstance(date, dict):
+                unechoed.append(where)
+                continue
+            want = {k: date[k] for k in _BULK_DATE_FIELDS if k in date}
+            if date.get("base"):
+                got = read
+            elif date.get("id") is not None:
+                got = overrides.get(str(date["id"]))
+            else:
+                got = None
+            if got is None:
+                unechoed.append(where)
+                continue
+            _compare_intent(want, got, where, compared, unechoed,
+                            mismatches, unconfirmed)
+    where = "of %d assignment(s)" % len(sent)
+    if mismatches:
+        return {"status": "unverified",
+                "detail": "readback %s found date(s) that do not match yet: "
+                          "%s. Canvas applies a bulk date update in the "
+                          "background, so this is not proof the change "
+                          "failed; it is not confirmed"
+                          % (where, "; ".join(mismatches))}
+    return _readback_verdict(method, url, where, sent, compared, unechoed,
+                             mismatches, unconfirmed)
 
 
 # --------------------------------------------------------------------------
@@ -7097,28 +7478,16 @@ def _release_claim_quietly(op_id, claim_token, reason):
 def _write_target_course_id(entry: dict, params: dict) -> str | None:
     """The course id the write will actually target.
 
-    From params.course_id first (params are substituted into path
-    templates by build_request), then from a /courses/<id> path in the
-    request URL or any multi_step step URL. The frozen plan's declared
-    target is deliberately NOT consulted here: the provider precheck
-    must GET the course the write will hit, then compare it against the
-    plan's declared target. Consulting the plan for the GET target
-    would let a typo'd params.course_id slip past.
+    The /courses/<id> segment of the rendered request path (request
+    URL, then each multi_step URL), else params.course_id; see
+    admission.write_target_course_id, which admission uses for the same
+    write. The frozen plan's declared target is deliberately NOT
+    consulted here: the provider precheck must GET the course the write
+    will hit, then compare it against the plan's declared target.
+    Consulting the plan for the GET target would let a typo'd course id
+    slip past.
     """
-    if isinstance(params, dict) and params.get("course_id") is not None:
-        return str(params["course_id"])
-    urls = []
-    request = entry.get("request") or {}
-    if request.get("url"):
-        urls.append(str(request["url"]))
-    for step in entry.get("multi_step") or []:
-        if isinstance(step, dict) and step.get("url"):
-            urls.append(str(step["url"]))
-    for url in urls:
-        match = re.search(r"/courses/(\d+)", url)
-        if match:
-            return match.group(1)
-    return None
+    return admission_write_target_course_id(entry, params)
 
 
 def _declared_target(plan) -> dict:
@@ -7227,7 +7596,7 @@ def _verify_plan_request(entry: dict, params: dict, plan,
                 "%s no longer names the student the educator approved: "
                 "this course's student labels were cleared and issued "
                 "again after the approval was prepared. Nothing was sent. "
-                "Run `morrow students find` again, then prepare a new "
+                "Run `bin/morrow students find` again, then prepare a new "
                 "approval with plan-write." % ", ".join(changed))
         subject = dict(subject, learner_tokens=current)
     if admission_request_digest(subject) != plan.request_digest:
@@ -7314,10 +7683,14 @@ def _check_write_gates(entry: dict, params: dict, plan, op_id, kind="dispatch",
         from reauth import state_machine as _rsm
         _allowed, _reason = _rsm.check_write_allowed()
         if not _allowed:
-            raise WriteHaltActive(
-                "write halt is active (%s): %s (manual lever per "
-                "INSTALL.md and SKILL.md); every write is refused while "
-                "the halt stands" % (WRITE_HALT_PATH, _reason))
+            halted = WriteHaltActive(
+                "write halt is active (%s): %s; every write is refused "
+                "while the halt stands" % (WRITE_HALT_PATH, _reason))
+            # For the failure translator: a session-expiry halt lifts
+            # only after the educator signs in again and resume
+            # verifies the account; any other halt is an operator's.
+            halted.halt_cause = _rsm.halt_cause() or "manual"
+            raise halted
     if is_write and kind != "undo" and not resume and plan is None \
             and not plan_not_required:
         raise MissingFrozenPlan(
@@ -7337,11 +7710,13 @@ def _check_write_gates(entry: dict, params: dict, plan, op_id, kind="dispatch",
         from reauth import state_machine as _rsm_q
         _qstatus = _rsm_q.op_quarantine_status(str(op_id))
         if _qstatus in ("quarantined", "awaiting_approval"):
-            raise WriteHaltActive(
+            parked = WriteHaltActive(
                 "op %s is quarantined (status %s) after a session "
                 "death: re-dispatch needs the educator's explicit "
                 "approval (reauth approve --op-id %s) after verified "
                 "resume; nothing auto-resumes" % (op_id, _qstatus, op_id))
+            parked.halt_cause = "session_expired"
+            raise parked
     if resume:
         # Second phase of a two-phase dispatch: the request phase already
         # claimed this op_id. Re-validate ownership via the claim token;
@@ -7476,15 +7851,23 @@ def _render_dry_run(entry, params, session, pack, plan, op_id,
     kind, journals nothing, claims no op_id, and never persists or
     consumes the approval. Returns the report dict; the CLI prints it."""
     is_write = declared == "write"
+    if not is_write:
+        admission_detail = "read: no approval required"
+    elif isinstance(approval_audit, dict) \
+            and approval_audit.get("mode") == "edit":
+        admission_detail = ("admitted by Edit mode (no per-write approval); "
+                            "nothing is recorded in dry-run")
+    elif approval_audit is not None:
+        admission_detail = ("write approval verified (digest-bound, "
+                            "educator-signed, unexpired, single-use check "
+                            "passed); NOT consumed in dry-run")
+    else:
+        admission_detail = "admitted with no approval record checked"
     gates = [
         {"gate": "effect_class_derivation", "result": "pass",
          "detail": "declared %r, derived %r from the entry's blocks"
                    % (declared, derived)},
-        {"gate": "admission", "result": "pass",
-         "detail": ("write approval verified (digest-bound, educator-signed, "
-                     "unexpired, single-use check passed); NOT consumed in "
-                     "dry-run" if is_write and approval_audit is not None
-                     else "read: no approval required")},
+        {"gate": "admission", "result": "pass", "detail": admission_detail},
         {"gate": "write_halt", "result": "pass",
          "detail": "no write halt file present"},
     ]
@@ -7506,6 +7889,14 @@ def _render_dry_run(entry, params, session, pack, plan, op_id,
                       "detail": "dry-run: no provider calls; the fresh-read "
                                 "comparison would run after the claim, before "
                                 "any write"})
+        publish_target = _new_quiz_publish_target(entry)
+        if publish_target:
+            gates.append({"gate": "new_quiz_publish_check",
+                          "result": "skipped",
+                          "detail": "dry-run: no provider calls; the %s "
+                                    "is read before the change is sent, "
+                                    "and publishing a New Quiz is refused"
+                                    % publish_target})
     config = {"canvas_base": tenant_base or ""}
     secret_headers = _dry_run_secret_headers(entry, pack)
     requests = []
@@ -7545,7 +7936,7 @@ def _render_dry_run(entry, params, session, pack, plan, op_id,
                      "was consumed")}
 
 
-def _burn_write_approval(approval_record, override_record, op_id) -> None:
+def _burn_write_approval(approval_record, op_id) -> None:
     """Persist the signed write approval under the final op_id, then mark
     it single-use (W4 approval ordering).
 
@@ -7558,15 +7949,25 @@ def _burn_write_approval(approval_record, override_record, op_id) -> None:
     write that never happened. Persist-before-consume keeps every
     crash state recoverable: persisted-but-unconsumed re-admits cleanly
     on retry, and consumed implies persisted, so the complete phase
-    can always re-verify an admitted write. For writes the F-2 override
-    record IS the write approval; a distinct override record (should
-    one ever exist) burns here too."""
-    if approval_record is not None:
-        persist_signed_record(approval_record, op_id)
+    can always re-verify an admitted write."""
+    if approval_record is None:
+        return
+    path = os.path.join(_approvals_dir(), str(op_id) + ".json")
+    preexisting = os.path.exists(path)
+    persist_signed_record(approval_record, op_id)
+    try:
         consume_approval(approval_record)
-    if override_record is not None and override_record is not approval_record:
-        persist_signed_record(override_record, op_id)
-        consume_approval(override_record)
+    except Exception:
+        # The write is not sent: drop the copy this burn persisted
+        # under the refused op_id. A record that was on disk before
+        # (the file ceremony's signed approval) is the educator's
+        # and stays.
+        if not preexisting:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        raise
 
 
 def _learner_vault_ready(session) -> bool:
@@ -7610,11 +8011,9 @@ def _journalable_result(projection_entry: dict, result: dict, tenant_base,
     the receipt, the journal keeps a withheld marker instead."""
     from privacy import executor_wire as _wire
     try:
-        projected, _reveal = _wire.project_learner_result(
+        return _wire.project_learner_result(
             projection_entry, result, tenant_base,
-            lane_context=_wire.without_pii_reveal(lane_context),
-            error_cls=ExecutorError)
-        return projected
+            lane_context=lane_context, error_cls=ExecutorError)
     except Exception:
         out = dict(result)
         out["receipt"] = {"withheld": "the receipt could not be "
@@ -7686,9 +8085,9 @@ def _require_course_resolution(entry: dict, params: dict, mode_ctx) -> None:
 def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
                    plan: FrozenPlan = None, op_id: str = None,
                    kind: str = "dispatch", approval: dict = None,
-                   unproven_override=None, catalog_status=None,
+                   catalog_status=None,
                    dry_run=False, require_educator_channel: bool = True,
-                   mode_ctx: dict = None, pii_reveal: dict = None) -> dict:
+                   mode_ctx: dict = None) -> dict:
     """Execute one manifest entry; see _dispatch_entry_inner.
 
     Working by name (round-4 privacy audit H3): learner labels in params
@@ -7699,26 +8098,24 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
     raised error are relabeled before the agent sees them, and labels
     the educator introduced by name in this conversation are echoed as
     "<typed name> (label)" (privacy/name_echo).
-
-    pii_reveal: a sealed educator reveal record
-    (dispatch/admission.mint_pii_reveal) for one course; see
-    privacy/executor_wire.pii_reveal_audit.
     """
+    from privacy import executor_wire as _wire
     holder = {}
     token = _ACTIVE_ID_LABELS.set(holder)
+    rosters = _wire.begin_course_rosters()
     try:
         out = _dispatch_entry_inner(
             entry, params, session, pack, plan=plan, op_id=op_id, kind=kind,
-            approval=approval, unproven_override=unproven_override,
+            approval=approval,
             catalog_status=catalog_status, dry_run=dry_run,
             require_educator_channel=require_educator_channel,
-            mode_ctx=mode_ctx, pii_reveal=pii_reveal, _labels=holder)
+            mode_ctx=mode_ctx, _labels=holder)
     except Exception as exc:
         _relabel_exception(exc, holder.get("map"))
         raise
     finally:
+        _wire.end_course_rosters(rosters)
         _ACTIVE_ID_LABELS.reset(token)
-    from privacy import executor_wire as _wire
     if holder.get("map"):
         out = _wire.relabel_learner_ids(out, holder["map"])
     conversation_id = mode_ctx.get("conversation_id") \
@@ -7761,10 +8158,284 @@ def _relabel_exception(exc, mapping):
         pass
 
 
+# Every enrollment state the course roster read asks for; students
+# whose enrollment was deleted come from the enrollments read.
+_ROSTER_ENROLLMENT_STATES = ("active", "invited", "rejected", "completed",
+                             "inactive")
+_ROSTER_MAX_READS = 30
+_ROSTER_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _read_all_pages(session, url):
+    """Every item of a Canvas list read through the session, following
+    the lane's pagination reports. Raises CourseRosterUnavailable on a
+    partial or malformed list: a partial roster must never stand in for
+    the whole one."""
+    items = []
+    seen = set()
+    base = session.base_for("canvas")
+    while url:
+        if url in seen or len(seen) >= _ROSTER_MAX_READS:
+            raise CourseRosterUnavailable(
+                "the course's student list did not end after %d reads"
+                % len(seen))
+        seen.add(url)
+        _status, headers, raw, _attempts = session.raw_request(
+            "GET", url, {"Accept": "application/json"}, None,
+            is_write=False, max_bytes=_ROSTER_MAX_BYTES)
+        text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        try:
+            page = json.loads(text or "[]")
+        except ValueError:
+            page = None
+        if not isinstance(page, list):
+            raise CourseRosterUnavailable(
+                "the course's student list was not a list")
+        items.extend(page)
+        state = _pagination_state(headers)
+        if state is None or not state.get("partial"):
+            break
+        url = state.get("next_page")
+        if not url:
+            raise CourseRosterUnavailable(
+                "the course's student list was cut short (%s)"
+                % state.get("note"))
+        if url.startswith("/"):
+            url = base.rstrip("/") + url
+    return items
+
+
+_COURSE_NUMBER_RE = re.compile(r"[1-9][0-9]*")
+
+
+def _require_numbered_course(entry, params):
+    """Refuse a request whose course is not named by its Canvas number.
+    The roster read, the course-content projection, the learner-label
+    scope, and the course checks all know a course by its number. A SIS
+    form (sis_course_id:BIO101) reaches the same course in Canvas but
+    none of them, so the students named in its content would reach the
+    agent and the journal unlabeled. A leading zero ("0101") reaches
+    course 101 but scopes its labels apart from "101"."""
+    course_id = _write_target_course_id(entry, params)
+    if course_id is not None and not _COURSE_NUMBER_RE.fullmatch(
+            str(course_id)):
+        raise InvalidCourseId(
+            "the course is given as %r, not as its Canvas course number; "
+            "find the course by name (canvas_list_courses) and use the "
+            "number in its Canvas address. Nothing was sent."
+            % str(course_id)[:80])
+
+
+def _read_course_roster_first(entry, params, session, tenant_base,
+                              dry_run, op_id=None):
+    """Read the course's whole student roster before a Chromium-lane
+    dispatch reads or changes anything in that course. Course content
+    (a page body, an assignment description) can name any student, and
+    a name can be labeled only when Morrow knows it
+    (privacy/course_content.py); a student gets a label in the vault
+    when their name appears in what the agent sees, and without the
+    vault the names are hidden one way. The roster is held for this
+    dispatch only: never journaled, never shown. Fails closed: when the
+    roster cannot be read, nothing in the course is read or changed. It
+    is the dispatch's first Canvas call, so a sign-in that died here
+    arms the re-sign-in flow as an attach-time death does."""
+    if dry_run or not getattr(session, "browser_owned_auth", False):
+        return
+    if entry.get("effects") == "write":
+        # A write the halt refuses must reach Canvas not at all; the
+        # write gates refuse it right after this.
+        from reauth import state_machine as _rsm
+        if not _rsm.check_write_allowed()[0]:
+            return
+    # The course the request path names, or for an Item Bank route the
+    # course its launch is bound to (params.course_id).
+    course_id = _write_target_course_id(entry, params)
+    if course_id is None:
+        return
+    _require_numbered_course(entry, params)
+    from privacy import executor_wire as _wire
+    try:
+        _wire.remember_course_roster(
+            tenant_base, course_id, _course_roster(session, course_id))
+    except (ProviderHttpError, CourseRosterUnavailable, ValueError,
+            TypeError) as exc:
+        if isinstance(exc, ProviderHttpError) and exc.status in (401, 403,
+                                                                 404):
+            # Canvas's answer for the course itself: no such course for
+            # this account (the number is wrong), or not allowed to open
+            # it. Trying again cannot help, so the educator hears which.
+            refused = ProviderHttpError(
+                exc.status, "the student list of course %s" % course_id,
+                body=exc.body)
+            refused.provider = "canvas"
+            refused.operation_kind = "read"
+            raise refused from None
+        raise CourseRosterUnavailable(
+            "The student list of course %s could not be read (%s), so "
+            "nothing in the course was read or changed: without it, "
+            "Morrow cannot hide student names in course content. Nothing "
+            "was sent." % (course_id, _roster_failure(exc))) from None
+    except Exception as exc:
+        if _is_session_dead(exc):
+            _on_session_death(op_id, entry.get("name"),
+                              "session dead while reading the course "
+                              "roster: %s" % str(exc)[:200],
+                              is_write=entry.get("effects") == "write")
+        raise
+
+
+def _course_roster(session, course_id):
+    """One course's whole student roster as vault identities: the users
+    list (every enrollment state) and the students whose enrollment was
+    deleted, whose names can still be in older content. Raises
+    ProviderHttpError, CourseRosterUnavailable, or ValueError when it
+    cannot be read whole."""
+    from privacy import executor_wire as _wire
+    base = session.base_for("canvas").rstrip("/")
+    users_url = "%s/api/v1/courses/%s/users?%s" % (
+        base, course_id, urllib.parse.urlencode(
+            [("enrollment_type[]", "student")]
+            + [("enrollment_state[]", s) for s in _ROSTER_ENROLLMENT_STATES]
+            + [("include[]", "email"), ("per_page", "100")]))
+    deleted_url = "%s/api/v1/courses/%s/enrollments?%s" % (
+        base, course_id, urllib.parse.urlencode(
+            [("type[]", "StudentEnrollment"), ("state[]", "deleted"),
+             ("per_page", "100")]))
+    return _wire.roster_identities(_read_all_pages(session, users_url),
+                                   _read_all_pages(session, deleted_url))
+
+
+def _roster_failure(exc):
+    return exc.status if isinstance(exc, ProviderHttpError) \
+        else type(exc).__name__
+
+
+# The educator's course list (C-437) spans courses, so no one roster
+# covers it: each listed course is labeled with its own. Rosters are
+# read for at most COURSE_LIST_ROSTER_MAX courses of one list (two or
+# more reads each); any other course keeps its number and a withheld
+# name.
+_COURSE_LIST_ROUTE = ("GET", "/api/v1/courses")
+COURSE_LIST_ROSTER_MAX = 30
+COURSE_NAME_WITHHELD = ("(name not shown: Morrow could not check it for "
+                        "student names)")
+
+
+def _is_course_list(entry):
+    request = (entry or {}).get("request") or {}
+    return not (entry or {}).get("multi_step") and \
+        _block_catalog_key(request) == \
+        _normalized_catalog_key(*_COURSE_LIST_ROUTE)
+
+
+def _label_course_list(entry, result, session, tenant_base, op_id):
+    """The course list with each course's own text labeled with that
+    course's roster, as a course read (C-114) labels it, so a course
+    named for its student shows the student's label. On the Chromium
+    lane each listed course's roster is read; elsewhere the labels the
+    vault already issued in each course apply, as they do for a course
+    read there. A course whose roster cannot be read, or past
+    COURSE_LIST_ROSTER_MAX, is listed as {"id", "name":
+    COURSE_NAME_WITHHELD}: Morrow never returns a course's text it could
+    not check. Refuses a list it cannot read as courses."""
+    from privacy import executor_wire as _wire
+    courses = result.get("receipt")
+    if not isinstance(courses, list) or not all(
+            isinstance(course, dict) and not isinstance(course.get("id"),
+                                                        bool)
+            and _COURSE_NUMBER_RE.fullmatch(str(course.get("id")))
+            for course in courses):
+        raise ExecutorError(
+            "the course list could not be read as a list of courses (it "
+            "may have been cut short), so Morrow could not check each "
+            "course's name for student names and shows none of them. Ask "
+            "for fewer courses at a time (per_page).")
+    reads_rosters = bool(getattr(session, "browser_owned_auth", False))
+    shown = []
+    for n, course in enumerate(courses):
+        course_id = str(course["id"])
+        withheld = {"id": course["id"], "name": COURSE_NAME_WITHHELD}
+        identities = []
+        if reads_rosters:
+            if n >= COURSE_LIST_ROSTER_MAX:
+                shown.append(withheld)
+                continue
+            try:
+                identities = _course_roster(session, course_id)
+            except (ProviderHttpError, CourseRosterUnavailable, ValueError,
+                    TypeError):
+                shown.append(withheld)
+                continue
+            except Exception as exc:
+                if _is_session_dead(exc):
+                    _on_session_death(op_id, entry.get("name"),
+                                      "session dead while reading a listed "
+                                      "course's roster: %s" % str(exc)[:200],
+                                      is_write=False)
+                raise
+        try:
+            shown.append(_wire.project_course_text(
+                tenant_base, course_id, course, identities,
+                provider=entry.get("provider") or "canvas"))
+        except Exception as exc:
+            raise ExecutorError(
+                "course %s in the course list could not be de-identified "
+                "(%s); refusing rather than showing student names"
+                % (course_id, type(exc).__name__))
+    return dict(result, receipt=shown)
+
+
+def _course_text_view(entry, course_id, tenant_base):
+    """The course read (C-114) a course's own text is labeled as."""
+    return {"name": (entry or {}).get("name"),
+            "provider": (entry or {}).get("provider") or "canvas",
+            "effects": "read",
+            "request": {"method": "GET",
+                        "url": "%s/api/v1/courses/%s" % (
+                            str(tenant_base or "").rstrip("/"),
+                            urllib.parse.quote(str(course_id), safe=""))}}
+
+
+def _shown_course_text(entry, course_id, tenant_base, texts):
+    """texts (a course's name and term as Canvas has them) as the agent
+    sees them: labeled with the course's roster exactly as a course read
+    (C-114) labels them, so a course named for its student shows the
+    student's label. The roster is the one this dispatch read; without
+    one, the labels the vault already issued in the course apply."""
+    from privacy import executor_wire as _wire
+    return _wire.project_learner_result(
+        _course_text_view(entry, course_id, tenant_base),
+        {"receipt": dict(texts)}, tenant_base,
+        error_cls=ExecutorError)["receipt"]
+
+
+def _course_text_digest(text):
+    """The digest a reviewed course name is compared by: the name as
+    Canvas has it, which the plan never stores."""
+    return hashlib.sha256(norm_identifier(text).encode("utf-8")).hexdigest()
+
+
+def _same_course_text(raw, shown, reviewed, digest=None):
+    """True when a course's name (or term) as Canvas has it now, raw, and
+    as the agent sees it, shown, is the one the educator reviewed. A
+    reviewed digest compares the Canvas name itself, so a rename to the
+    labeled text is still a rename; without one (an older plan, the
+    journaled target an undo reviews), the reviewed text may be either
+    form."""
+    if not isinstance(raw, str):
+        return False
+    if digest:
+        return _course_text_digest(raw) == digest
+    return norm_identifier(reviewed) in (norm_identifier(raw),
+                                         norm_identifier(shown))
+
+
 def _resolve_dispatch_labels(entry, params, tenant_base, mode_ctx):
     """(entry, params, {real id: label}, {label: vault token}) with
-    learner labels resolved for the course this dispatch targets. No
-    labels: inputs unchanged."""
+    learner labels resolved for the course this dispatch targets: to
+    real ids in learner-id positions, and to the student's real text in
+    free text (privacy/course_content.py). No labels: inputs
+    unchanged."""
     from privacy import executor_wire as _wire
     course_id = _write_target_course_id(entry, params)
     conversation_id = mode_ctx.get("conversation_id") \
@@ -7775,7 +8446,7 @@ def _resolve_dispatch_labels(entry, params, tenant_base, mode_ctx):
         conversation_id, error_cls=LearnerLabelUnresolved,
         provider=entry.get("provider"),
         extra_keys=_wire.learner_route_param_keys(entry), tokens_out=tokens)
-    if not mapping:
+    if not mapping and not tokens:
         return entry, params, {}, {}
     if not course_id:
         raise LearnerLabelUnresolved(
@@ -7787,17 +8458,15 @@ def _resolve_dispatch_labels(entry, params, tenant_base, mode_ctx):
 def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                           pack: dict, plan: FrozenPlan = None,
                           op_id: str = None, kind: str = "dispatch",
-                          approval: dict = None, unproven_override=None,
+                          approval: dict = None,
                           catalog_status=None, dry_run=False,
                           require_educator_channel: bool = True,
-                          mode_ctx: dict = None, pii_reveal: dict = None,
+                          mode_ctx: dict = None,
                           _labels: dict = None) -> dict:
     """Execute one manifest entry through the full pipeline and journal it.
 
-    unproven_override is the F-2 (audit, signed_record) pair from the
-    catalog provenance gate, or (None, None); catalog_status is the
-    catalog status row of a catalog-dispatched op (None for manifest
-    entries). Both are journaled with the op.
+    catalog_status is the catalog status row of a catalog-dispatched op
+    (None for manifest entries). It is journaled with the op.
 
     dry_run=True (W4-P2-26): evaluate every gate and render the exact
     write request that would be sent, without sending anything and
@@ -7813,10 +8482,11 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
          "course_resolution": {"course_id": ..., "confidence": 0-1,
                                "user_confirmed": bool, ...},
          "destructive_confirmed": "<verbatim educator yes>"}
-    The Muse harness supplies user_id (and conversation_id when a
-    conversation is in scope) for every dispatch; without user_id the
-    gate fails closed to the legacy plan-mode approval path. See
-    modes/README.md for the integrator contract.
+    The CLI fills user_id from --user-id, MORROW_USER_ID, or the Canvas
+    account pinned at first sign-in, and conversation_id from the
+    agent's --conversation-id; without user_id the gate fails closed to
+    the legacy plan-mode approval path. See modes/README.md for the
+    integrator contract.
     """
     # W4-P0-10: derive the effect class from the entry's blocks before
     # anything trusts the manifest's "effects" field.
@@ -7828,7 +8498,8 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         _aux = entry.get(_key)
         if isinstance(_aux, dict) and _aux.get("url"):
             _assert_read_only_block(entry, _aux, _key)
-    live_proven_gate(entry, unproven_override, journal=not dry_run)
+    live_proven_gate(entry, journal=not dry_run)
+    _require_numbered_course(entry, params)
     if is_write:
         _require_course_resolution(entry, params, mode_ctx)
 
@@ -7848,6 +8519,10 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # globally-wrong tenant cannot sail through.
         _chromium_session_mod().verify_helper_tenant_binding(tenant_base)
     _check_auxiliary_learner_data(entry, _learner_vault_ready(session))
+    if is_write and not dry_run:
+        # Before the mode gate and the approval: publishing a New Quiz is
+        # refused whatever was approved.
+        _refuse_new_quiz_publish(entry, params, session, pack)
     approval_audit, approval_record = admit(
         entry, params, tenant_base=tenant_base, approval=approval, op_id=op_id,
         require_educator_channel=require_educator_channel,
@@ -7859,13 +8534,17 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # point, and no lane can project without the encrypted vault
         # ('cryptography'), so those keep refusing learner-bearing entries.
         vault_ready=_learner_vault_ready(session))
+    # Course content can name any student: read the course roster (and
+    # refuse the course when it cannot be read) before anything in the
+    # course is read, changed, or restored from labels.
+    _read_course_roster_first(entry, params, session, tenant_base, dry_run,
+                              op_id)
     # Working by name: resolve learner labels to real ids AFTER the mode
     # gate and BEFORE the write gates claim the op (a refusal here leaves
     # nothing claimed). The gates and every journal record keep the
     # label params; provider calls get the resolved ones.
     wire_entry, wire_params, id_labels, label_tokens = \
         _resolve_dispatch_labels(entry, params, tenant_base, mode_ctx)
-    lane_context = {"pii_reveal": pii_reveal} if pii_reveal else None
     # Learner-data decision 2026-09-20: the raw lane passes no vault_ready,
     # so learner-bearing entries are refused here (LearnerDataGated) rather
     # than projected. Projection runs in dispatch_entry's success path
@@ -7890,13 +8569,20 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                                             plan_not_required=mode_edit_write,
                                             learner_tokens=label_tokens)
     journal_params = params
-    entry, params = wire_entry, wire_params
     if id_labels and isinstance(_labels, dict):
         _labels["map"] = id_labels
     if dry_run:
-        return _render_dry_run(entry, params, session, pack, plan, op_id,
-                                approval_audit, tenant_base, _derived,
-                                declared)
+        # The report goes to the agent: the request as the agent wrote
+        # it, with labels, never the students' real text or ids.
+        report = _render_dry_run(entry, params, session, pack, plan, op_id,
+                                 approval_audit, tenant_base, _derived,
+                                 declared)
+        if wire_entry is not entry or wire_params is not params:
+            report["note"] += (
+                ". Student labels are shown as written; Morrow puts back "
+                "each student's real text only when it sends the change")
+        return report
+    entry, params = wire_entry, wire_params
     # Post-claim, pre-provider: every step from here to the provider
     # call runs before any provider call, so any failure proves
     # nothing applied. The claim is released (op_id reusable) instead
@@ -7914,20 +8600,6 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # call: release the claim (nothing could have applied) and stop
         # before burning approvals or touching the provider.
         _raise_if_shutdown_requested(op_id, claim_token)
-        # F-2: the unproven-catalog override for reads burns here: reads
-        # have no target-identity or before-state provider checks. For
-        # writes the approval (and any override it carries) burns only
-        # after the target-identity and before-state checks pass,
-        # immediately before the write is sent (see _burn_write_approval
-        # below): a refusal on those checks must leave the approval
-        # reusable, the op_id unclaimed, and nothing journaled. The
-        # dispatcher persists the record under the final op_id, then
-        # marks it consumed: persist-before-consume keeps every crash
-        # state recoverable.
-        override_audit, override_record = unproven_override or (None, None)
-        if override_record is not None and not is_write:
-            persist_signed_record(override_record, op_id)
-            consume_approval(override_record)
 
         if provider == "morrow" or (entry.get("request") or {}).get("method") == "LOCAL":
             raise LocalProcedureRefused(
@@ -7999,7 +8671,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                     entry, params, session, pack, config, transients)
                 # W4 approval ordering: every pre-write check passed; burn
                 # the approval now, immediately before the write is sent.
-                _burn_write_approval(approval_record, override_record, op_id)
+                _burn_write_approval(approval_record, op_id)
             result, transients = run_multi_step(
                 entry, session, pack, config, params, transients,
                 max_bytes=entry_max_bytes, attempt_state=attempt_state)
@@ -8033,7 +8705,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                     max_bytes=entry_max_bytes)
                 # W4 approval ordering: every pre-write check passed; burn
                 # the approval now, immediately before the write is sent.
-                _burn_write_approval(approval_record, override_record, op_id)
+                _burn_write_approval(approval_record, op_id)
                 attempt_state["write_attempted"] = True
             status, resp_headers, raw, attempts = session.raw_request(
                 method, url, headers, body_bytes, is_write=is_write,
@@ -8065,7 +8737,6 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                                  uncertain_result, exc.attempts or 0,
                                  uncertain=True,
                                  approval_audit=approval_audit,
-                                 unproven_override=override_audit,
                                  catalog_status=catalog_status,
                                  target=target_identity_verified,
                                  before_state=before_state_check,
@@ -8079,7 +8750,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
             _on_session_death(op_id, entry_name,
                               "SessionDead mid-write; the write may have "
                               "executed before the session died; uncertain "
-                              "journal preserved")
+                              "journal preserved", write_sent=True)
         # W5-P2-1: the uncertain outcome is journaled (drained); a
         # pending shutdown now stops the run instead of continuing.
         _raise_if_shutdown_requested()
@@ -8099,12 +8770,11 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         verification = _project_verification_detail(
             _projection_entry(entry, url, getattr(exc, "readback_payload", None)),
             verification, getattr(exc, "readback_payload", None),
-            tenant_base, entry_name, lane_context=lane_context)
+            tenant_base, entry_name)
         record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                  op_id, None, verification,
                                  failed_result, 0, uncertain=False,
                                  approval_audit=approval_audit,
-                                 unproven_override=override_audit,
                                  catalog_status=catalog_status,
                                  target=target_identity_verified,
                                  before_state=before_state_check,
@@ -8142,6 +8812,11 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
             # provider call, the failure is pre-network, it is a read, or
             # it is a fail-fast / pre-send refusal. Release the claim
             # (journaled) so the op_id stays reusable, then re-raise.
+            if isinstance(exc, ProviderHttpError):
+                # For the failure translator: which provider refused,
+                # and whether it refused a write (nothing was saved).
+                exc.provider = entry.get("provider") or "canvas"
+                exc.operation_kind = "write" if is_write else "read"
             try:
                 release_op_id(op_id, claim_token,
                               "request-phase failure before any effect "
@@ -8155,7 +8830,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                 # and recovery needs explicit re-approval.
                 _on_session_death(op_id, entry_name,
                                   "session dead at attach/probe time: %s"
-                                  % str(exc)[:200])
+                                  % str(exc)[:200], is_write=is_write)
             # W5-P2-1: claim released; a pending shutdown stops here.
             _raise_if_shutdown_requested()
             raise
@@ -8166,10 +8841,27 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # reserved for reconciliation), and re-raise.
         _journal_write_failure_audit(
             entry_name, kind, effects, journal_params, plan, op_id, exc,
-            attempt_state, approval_audit, override_audit, catalog_status)
+            attempt_state, approval_audit, catalog_status)
         # W5-P2-1: the audit record is journaled (drained); a pending
         # shutdown now stops the run instead of continuing.
         _raise_if_shutdown_requested()
+        raise
+    except Exception as exc:
+        # Not an ExecutorError: an admission refusal while the approval
+        # burns (a concurrent dispatch consumed it first, or it could
+        # not be persisted), an OSError, a bug. Before a write provider
+        # call nothing could have applied: release the claim so the
+        # op_id stays reusable. After one, the claim stays pending for
+        # reconciliation, like a crash. KeyboardInterrupt and SystemExit
+        # are not Exceptions and keep the crash semantics.
+        if not is_write or not attempt_state.get("write_attempted"):
+            try:
+                release_op_id(op_id, claim_token,
+                              "request-phase failure before any effect "
+                              "could apply: %s" % type(exc).__name__)
+            except DuplicateOpId:
+                pass
+            _raise_if_shutdown_requested()
         raise
 
     # Verify phase for writes: the D-009 silent-write readback runs first
@@ -8216,16 +8908,15 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
             # journaled, same as the success path below.
             verification = _project_verification_detail(
                 projection_entry, verification, result.get("payload"), tenant_base,
-                entry_name, lane_context=lane_context)
+                entry_name)
             after_digest = digest_of(result["receipt"])
             record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                      op_id, after_digest, verification,
                                      _journalable_result(
                                          projection_entry, result,
-                                         tenant_base, lane_context),
+                                         tenant_base),
                                      attempts, uncertain=False,
                                                                   approval_audit=approval_audit,
-                                                                  unproven_override=override_audit,
                                                                   catalog_status=catalog_status,
                                                                   target=target_identity_verified,
                                                                   before_state=before_state_check,
@@ -8244,16 +8935,15 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                             "detail": _provider_detail(exc)}
             verification = _project_verification_detail(
                 projection_entry, verification, result.get("payload"),
-                tenant_base, entry_name, lane_context=lane_context)
+                tenant_base, entry_name)
             after_digest = digest_of(result["receipt"])
             record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                      op_id, after_digest, verification,
                                      _journalable_result(
                                          projection_entry, result,
-                                         tenant_base, lane_context),
+                                         tenant_base),
                                      attempts, uncertain=True,
                                      approval_audit=approval_audit,
-                                     unproven_override=override_audit,
                                      catalog_status=catalog_status,
                                      target=target_identity_verified,
                                      before_state=before_state_check,
@@ -8263,7 +8953,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                     or _uncertain_write_from_session_death(exc)):
                 _on_session_death(op_id, entry_name,
                                   "session dead during write readback: %s"
-                                  % type(exc).__name__)
+                                  % type(exc).__name__, write_sent=True)
             _raise_if_shutdown_requested()
             raise UncertainWrite(
                 "write op %s returned success, but the readback could not "
@@ -8281,16 +8971,15 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
             # project it through the learner boundary before journaling.
             verification = _project_verification_detail(
                 projection_entry, verification, result.get("payload"), tenant_base,
-                entry_name, lane_context=lane_context)
+                entry_name)
             after_digest = digest_of(result["receipt"])
             record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                      op_id, after_digest, verification,
                                      _journalable_result(
                                          projection_entry, result,
-                                         tenant_base, lane_context),
+                                         tenant_base),
                                      attempts, uncertain=not proven,
                                      approval_audit=approval_audit,
-                                     unproven_override=override_audit,
                                      catalog_status=catalog_status,
                                      target=target_identity_verified,
                                      before_state=before_state_check,
@@ -8303,7 +8992,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                     or _uncertain_write_from_session_death(exc)):
                 _on_session_death(op_id, entry_name,
                                   "session dead during verify readback: %s"
-                                  % type(exc).__name__)
+                                  % type(exc).__name__, write_sent=True)
             elif _is_stale_command(exc):
                 # W4-P2-1: stale verify command, not session death. The
                 # write already returned 2xx (request phase journaled);
@@ -8337,19 +9026,20 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
     #
     # W3-P2-5: the success-path verification detail (a write readback
     # mismatch narrative, or a declared-verify detail) formats raw
-    # provider values with %r. Project it first, with the same gate, the
-    # same reveal decision, and the same raw-payload roster the receipt
-    # projection uses, so the journal never carries learner names or
-    # identifiers in verification_detail.
+    # provider values with %r. Project it first, with the same gate and
+    # the same raw-payload roster the receipt projection uses, so the
+    # journal never carries learner names or identifiers in
+    # verification_detail.
     verification = _project_verification_detail(
         projection_entry, verification, result.get("payload"), tenant_base,
-        entry_name, lane_context=lane_context)
-    pii_reveal = None
+        entry_name)
+    if not is_write and _is_course_list(entry):
+        result = _label_course_list(entry, result, session, tenant_base,
+                                    op_id)
     try:
         from privacy import executor_wire as _wire
-        result, pii_reveal = _wire.project_learner_result(
-            projection_entry, result, tenant_base, lane_context=lane_context,
-            error_cls=ExecutorError)
+        result = _wire.project_learner_result(
+            projection_entry, result, tenant_base, error_cls=ExecutorError)
     except ExecutorError:
         raise
     except Exception as exc:
@@ -8361,9 +9051,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
     record = _journal_record(entry_name, kind, effects, journal_params, plan, op_id,
                              after_digest, verification, result, attempts,
                                                           approval_audit=approval_audit,
-                                                          unproven_override=override_audit,
                                                           catalog_status=catalog_status,
-                                                          pii_reveal=pii_reveal,
                                                           pagination=(
                                                               {"note": pagination.get("note"),
                                                                "partial": pagination.get("partial")}
@@ -8399,8 +9087,7 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # uncertain write raises instead of returning.
         "outcome": outcome,
         "verified": outcome == "verified",
-        "verification": {k: v for k, v in verification.items()
-                         if k != "journal_detail"},
+        "verification": dict(verification),
         "receipt": result["receipt"],
         "truncated": truncation is not None,
         "truncation": truncation,
@@ -8450,8 +9137,8 @@ def _link_next_url(link_header):
 
 def _journal_record(entry_name, kind, effects, params, plan, op_id,
                     after_digest, verification, result, attempts, uncertain=False,
-                    approval_audit=None, unproven_override=None,
-                    catalog_status=None, pii_reveal=None, pagination=None,
+                    approval_audit=None,
+                    catalog_status=None, pagination=None,
                     target=None, before_state=None, undo_available=None):
     """Canonical journal record for dispatch/undo completion.
 
@@ -8473,14 +9160,9 @@ def _journal_record(entry_name, kind, effects, params, plan, op_id,
         "before_state_digest": plan.before_state_digest if plan else None,
         "after_state_digest": after_digest,
         "verification": verification["status"],
-        # Final muse audit H1: under an educator reveal the agent gets
-        # real names, the journal only ever the de-identified projection.
         "verification_detail": redact_payload(
-            verification.get("journal_detail", verification.get("detail")),
-            DEFAULT_REDACT_PATTERNS),
-        "receipt": redact_payload(result.get("journal_receipt",
-                                             result["receipt"]),
-                                  DEFAULT_REDACT_PATTERNS),
+            verification.get("detail"), DEFAULT_REDACT_PATTERNS),
+        "receipt": redact_payload(result["receipt"], DEFAULT_REDACT_PATTERNS),
         "truncated": result["truncated"],
         "bytes_received": result["bytes_received"],
         "attempts": attempts,
@@ -8489,22 +9171,8 @@ def _journal_record(entry_name, kind, effects, params, plan, op_id,
         # op_digest, channel, provenance, verbatim authorization citation.
         "approval": approval_audit,
         # F-2 catalog provenance: the catalog status row of the dispatched
-        # op, and the signed unproven-override audit block when an override
-        # was used (None for manifest entries and live-proven catalog ops).
-        "unproven_override": unproven_override,
+        # op (None for manifest entries).
         "catalog_status": catalog_status,
-        # Learner-data reveal audit: None when de-identification applied
-        # (the default); the sealed educator reveal audit (revealed_by
-        # "educator-sealed-record" plus the educator's verbatim words)
-        # when a reveal record for this course showed real names.
-        # The verification dict carries the reveal audit for the
-        # verification detail itself (W3-P2-5): when the record-level
-        # audit was not supplied (verification failure paths journal
-        # before the receipt projection runs), fall back to it so a
-        # revealed detail is never journaled without its audit.
-        "pii_reveal": (pii_reveal if pii_reveal is not None
-                       else (verification.get("pii_reveal")
-                             if isinstance(verification, dict) else None)),
         # W4-P0-11: the provider-verified write target identity
         # (course_id, course_name, term, tenant), None for reads and
         # non-course writes.
@@ -8513,8 +9181,8 @@ def _journal_record(entry_name, kind, effects, params, plan, op_id,
         # unverifiable / unsupported / absent, with detail). A digest
         # that implies a guard always says here whether the guard ran.
         "before_state": before_state,
-        # W6-P1-H1: per-change undoability disclosure, enforcing the
-        # consent.md promise ("whether it can be undone"). The
+        # W6-P1-H1: per-change undoability disclosure (consent.md: this
+        # version cannot undo a change automatically). The
         # pre-dispatch half of the promise is the approval display
         # (dispatch/approval_display.py renders the Undo line); this is
         # the receipt half, journaled with every completion.
@@ -8527,8 +9195,7 @@ def _journal_record(entry_name, kind, effects, params, plan, op_id,
 
 def _journal_write_failure_audit(entry_name, kind, effects, params, plan,
                                  op_id, exc, attempt_state,
-                                 approval_audit, override_audit,
-                                 catalog_status):
+                                 approval_audit, catalog_status):
     """Journal an ambiguous write failure (W2-P0-4) under a fresh event id.
 
     A write provider call was invoked and the failure is neither
@@ -8569,9 +9236,7 @@ def _journal_write_failure_audit(entry_name, kind, effects, params, plan,
         "attempts": getattr(exc, "attempts", None) or 0,
         "uncertain": True,
         "approval": approval_audit,
-        "unproven_override": override_audit,
         "catalog_status": catalog_status,
-        "pii_reveal": None,
     }
     journal_append(record)
 
@@ -8583,8 +9248,7 @@ def _journal_write_failure_audit(entry_name, kind, effects, params, plan,
 # F-2: the catalog provenance gate. dispatch/executor.py reads the
 # authoritative operation catalog directly (no generated side index that
 # could go stale) and refuses to synthesize a dispatchable entry for any
-# op that is not marked live-proven, unless the educator signed an
-# explicit allow_unproven override (CLI --allow-unproven).
+# op that is not marked live-proven.
 _OPERATION_CATALOG_PATH = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "proof-battery",
     "OPERATION_CATALOG.md"))
@@ -8651,6 +9315,50 @@ def catalog_descriptor_for(name: str):
     return _load_operation_catalog().get(name)
 
 
+def _live_row_for(method: str, path_template: str):
+    """(tool name, descriptor) of the live-proven row with this method
+    and path template (slot names ignored), or None."""
+    key = _normalized_catalog_key(method, path_template)
+    for row_name, desc in sorted(_load_operation_catalog().items()):
+        if desc["status"] == "live-proven" and _normalized_catalog_key(
+                desc["method"], desc["path"]) == key:
+            return row_name, desc
+    return None
+
+
+def _catalog_name_refusal(name: str, method: str, path_template: str):
+    """The refusal for a catalog dispatch whose name and request are not
+    one row. When the method and path are a live-proven row, or else the
+    name is one, the refusal is CatalogNameMismatch naming that row, so
+    the agent runs it again under the right name instead of telling the
+    educator the task is untested. Otherwise it is CatalogNotProven."""
+    method_u = str(method or "").upper()
+    descriptor = catalog_descriptor_for(name)
+    if descriptor is None:
+        detail = ("operation %r is not a dispatchable row in "
+                  "proof-battery/OPERATION_CATALOG.md; only live-proven "
+                  "operations run. Refusing." % name)
+    else:
+        detail = ("operation %r is in the catalog as %s %s, but the "
+                  "dispatch asked for %s %s; a proven name cannot be "
+                  "paired with arbitrary CLI arguments" % (
+                      name, descriptor["method"], descriptor["path"],
+                      method_u, path_template))
+    row = _live_row_for(method_u, path_template)
+    if row is None and descriptor is not None \
+            and descriptor["status"] == "live-proven":
+        row = (name, descriptor)
+    if row is None:
+        return CatalogNotProven(detail)
+    row_name, row_desc = row
+    return CatalogNameMismatch(
+        "%s. Nothing was sent. The live-proven row to use is %s: --name "
+        "%s --method %s --path '%s'" % (
+            detail.rstrip("."), row_desc["id"], row_name,
+            row_desc["method"], row_desc["path"]),
+        row_name, row_desc["method"], row_desc["path"])
+
+
 def _journal_catalog_refusal(name, method, path_template, params, status,
                              detail):
     """Journal a catalog-gate refusal under its own event id.
@@ -8684,35 +9392,23 @@ def _journal_catalog_refusal(name, method, path_template, params, status,
               file=sys.stderr)
 
 
-# Catalog statuses the educator-signed --allow-unproven override may
-# reach: rows never tried live. failed, unsupported, excluded, and
-# evidence-hold rows are refused with or without it.
-_UNPROVEN_OVERRIDABLE = frozenset({"pending"})
-
-
 def _catalog_provenance_gate(entry: dict, name: str, method: str,
-                             path_template: str, params: dict,
-                             provider: str, approval, allow_unproven: bool,
-                             session, require_educator_channel: bool = True):
+                             path_template: str, params: dict, session):
     """F-2 catalog provenance gate for catalog dispatch.
 
-    Runs BEFORE any session is loaded or admission runs. Returns
-    (catalog_status, (override_audit, override_record)): the override pair
-    is (None, None) for live-proven ops. Raises on any refusal:
+    Runs BEFORE any session is loaded or admission runs. Returns the
+    catalog status ("live-proven"). Raises on any refusal. Nothing
+    overrides a refusal, and no approval changes the answer: admission
+    checks the approval later, for writes only.
 
       - the absolute admission checks (never-dispatch, unsupported,
-        evidence-hold, learner-data) raise their own errors and cannot be
-        overridden by --allow-unproven;
-      - an unknown tool name raises CatalogNotProven and cannot be
-        overridden;
+        evidence-hold, learner-data) raise their own errors;
+      - an unknown tool name raises CatalogNotProven;
       - a supplied method/path that does not match the catalog row raises
         CatalogNotProven (a proven name cannot be paired with arbitrary
         CLI arguments);
-      - a failed, unsupported, or excluded row raises CatalogNotProven
-        and cannot be overridden;
-      - a pending row raises CatalogNotProven unless allow_unproven is
-        set AND the educator-signed approval record carries
-        allow_unproven: true (sealed by sign_approval).
+      - a row that is not marked live-proven (pending, failed,
+        unsupported, excluded, or unmarked) raises CatalogNotProven.
 
     Every refusal is journaled under its own refusal event id.
     """
@@ -8735,55 +9431,23 @@ def _catalog_provenance_gate(entry: dict, name: str, method: str,
                                      label, str(exc))
             raise
     descriptor = catalog_descriptor_for(name)
-    if descriptor is None:
-        detail = ("operation %r is not a dispatchable row in "
-                  "proof-battery/OPERATION_CATALOG.md; refusing (unknown "
-                  "operations cannot be overridden)" % name)
-        _journal_catalog_refusal(name, method, path_template, params,
-                                 "unknown", detail)
-        raise CatalogNotProven(detail)
-    if descriptor["method"] != str(method or "").upper() or \
+    if descriptor is None or \
+            descriptor["method"] != str(method or "").upper() or \
             descriptor["path"] != path_template:
-        detail = ("operation %r is in the catalog as %s %s, but the dispatch "
-                  "asked for %s %s; a proven name cannot be paired with "
-                  "arbitrary CLI arguments" % (
-                      name, descriptor["method"], descriptor["path"],
-                      str(method or "").upper(), path_template))
-        _journal_catalog_refusal(name, method, path_template, params,
-                                 "descriptor_mismatch", detail)
-        raise CatalogNotProven(detail)
+        refusal = _catalog_name_refusal(name, method, path_template)
+        _journal_catalog_refusal(
+            name, method, path_template, params,
+            "unknown" if descriptor is None else "descriptor_mismatch",
+            str(refusal))
+        raise refusal
     status = descriptor["status"]
     if status == "live-proven":
-        return status, (None, None)
-    if status not in _UNPROVEN_OVERRIDABLE:
-        # A row the live battery proved failed, or marked unsupported or
-        # excluded, has no working route: no override reaches it.
-        detail = ("operation %r is marked %r in the catalog; only "
-                  "live-proven operations run, and the educator-signed "
-                  "--allow-unproven override reaches only rows marked "
-                  "pending (never tried live). Refusing."
-                  % (name, status or "unmarked"))
-        _journal_catalog_refusal(name, method, path_template, params,
-                                 status or "unmarked", detail)
-        raise CatalogNotProven(detail)
-    if not allow_unproven:
-        detail = ("operation %r is marked %r in the catalog, not "
-                  "live-proven; dispatch needs --allow-unproven plus an "
-                  "educator-signed approval record carrying "
-                  "allow_unproven: true" % (name, status or "unmarked"))
-        _journal_catalog_refusal(name, method, path_template, params,
-                                 status or "unmarked", detail)
-        raise CatalogNotProven(detail)
-    if session is None:
-        session = SessionStore.load()
-    try:
-        tenant_base = session.base_for(provider or "canvas")
-    except Exception:
-        tenant_base = None
-    audit, record = check_unproven_override(
-        entry, params, approval, tenant_base,
-        require_educator_channel=require_educator_channel)
-    return status, (audit, record)
+        return status
+    detail = ("operation %r is marked %r in the catalog; only live-proven "
+              "operations run. Refusing." % (name, status or "unmarked"))
+    _journal_catalog_refusal(name, method, path_template, params,
+                             status or "unmarked", detail)
+    raise CatalogNotProven(detail)
 
 _BLOCK_BASE_TOKEN_RE = re.compile(r"^\{[A-Za-z_][A-Za-z0-9_]*\}")
 _PATH_SLOT_RE = re.compile(r"\{[^{}]+\}")
@@ -8815,22 +9479,17 @@ def _block_catalog_key(block: dict) -> tuple:
     return _normalized_catalog_key(block.get("method") or "GET", stripped)
 
 
-def live_proven_gate(entry: dict, unproven_override=None,
-                     journal: bool = True) -> None:
+def live_proven_gate(entry: dict, journal: bool = True) -> None:
     """Refuse unless every request-issuing block of the entry is a
     live-proven row of proof-battery/OPERATION_CATALOG.md.
 
     Applies to every dispatch path (manifest entries, catalog-synthetic
     entries, undo), not only to dispatch_catalog_op: the catalog is the
     authority on what may run. Blocks are matched by method and path
-    template (slot names ignored). The one exception is the F-2
-    educator-signed unproven override issued by the catalog provenance
-    gate: with a signed override record present, the entry's own
-    request block may be a known non-live-proven row; every other block
-    must still be live-proven. Unknown operations are never runnable.
-    Readbacks derived by the executor itself are not entry blocks and
-    are not gated here. Raises CatalogNotProven."""
-    _audit, override_record = unproven_override or (None, None)
+    template (slot names ignored). There is no exception: unknown and
+    non-live-proven operations are never runnable. Readbacks derived by
+    the executor itself are not entry blocks and are not gated here.
+    Raises CatalogNotProven."""
     index = _catalog_rows_by_key()
     name = entry.get("name")
     for where, block in _entry_request_blocks(entry):
@@ -8840,8 +9499,6 @@ def live_proven_gate(entry: dict, unproven_override=None,
         rows = index.get((method, path)) or []
         statuses = sorted({row["status"] for row in rows})
         if "live-proven" in statuses:
-            continue
-        if rows and override_record is not None and where == "request":
             continue
         detail = ("entry %r %s block %s %s is %s in "
                   "proof-battery/OPERATION_CATALOG.md; only live-proven "
@@ -8901,10 +9558,9 @@ def catalog_descriptor_to_entry(name: str, method: str, path_template: str,
         effect_class = canonical
     else:
         if effect_class is None:
-            raise ExecutorError(
-                "effect_class is required for %r: it is not a catalog row, "
-                "so no effect class can be derived from the catalog"
-                % (name,))
+            # No effect class can be derived for a name the catalog does
+            # not know, and the provenance gate refuses the name anyway.
+            raise _catalog_name_refusal(name, method, path_template)
     if effect_class not in ("read", "write", "plan"):
         raise ExecutorError("effect_class must be 'read', 'write', or 'plan', got %r" % effect_class)
     default_slots = {"canvas": "canvas_pat", "quiz_api": "canvas_pat"}
@@ -8961,23 +9617,19 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
                         provider: str = "canvas", auth_slot: str = None,
                         plan: FrozenPlan = None, op_id: str = None,
                         pack: dict = None, extra: dict = None,
-                        approval: dict = None, session=None,
-                        allow_unproven: bool = False, dry_run=False,
+                        approval: dict = None, session=None, dry_run=False,
                         require_educator_channel: bool = True,
-                        mode_ctx: dict = None,
-                        pii_reveal: dict = None) -> dict:
+                        mode_ctx: dict = None) -> dict:
     """Dispatch one generated-catalog operation through the full pipeline.
 
-    mode_ctx and pii_reveal are passed through to dispatch_entry: see its
-    docstring. People-bearing rows (learner data) dispatch only on the
+    mode_ctx is passed through to dispatch_entry: see its docstring. People-bearing rows (learner data) dispatch only on the
     Chromium lane with the encrypted learner vault, where every receipt
     is de-identified; elsewhere they are refused (LearnerDataGated).
 
     F-2: the catalog provenance gate runs first. The op must be marked
-    live-proven in proof-battery/OPERATION_CATALOG.md, or the caller must
-    pass allow_unproven=True with an educator-signed approval record
-    carrying allow_unproven: true. Unknown names and descriptor mismatches
-    are refused outright and cannot be overridden.
+    live-proven in proof-battery/OPERATION_CATALOG.md; every other row,
+    unknown names, and descriptor mismatches are refused, and nothing
+    overrides that.
 
     session defaults to the https lane's SessionStore; pass a
     ChromiumSession for the chromium backend.
@@ -8989,18 +9641,15 @@ def dispatch_catalog_op(name: str, method: str, path_template: str,
     params = params or {}
     entry = catalog_descriptor_to_entry(name, method, path_template,
                                         effect_class, provider, auth_slot, extra)
-    status, unproven_override = _catalog_provenance_gate(
-        entry, name, method, path_template, params, provider,
-        approval=approval, allow_unproven=allow_unproven, session=session,
-        require_educator_channel=require_educator_channel)
+    status = _catalog_provenance_gate(
+        entry, name, method, path_template, params, session=session)
     if session is None:
         session = SessionStore.load()
     return dispatch_entry(entry, params, session, pack, plan=plan, op_id=op_id,
                           approval=approval,
-                          unproven_override=unproven_override,
                           catalog_status=status, dry_run=dry_run,
                           require_educator_channel=require_educator_channel,
-                          mode_ctx=mode_ctx, pii_reveal=pii_reveal)
+                          mode_ctx=mode_ctx)
 
 
 # --------------------------------------------------------------------------
@@ -9237,6 +9886,7 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
                            if isinstance(params, dict) else None)
     entry_max_bytes = int((entry.get("result") or {}).get("max_bytes",
                                                           DEFAULT_MAX_BYTES))
+    undo_sent = False
     try:
         # W5-P2-1: shutdown checkpoint before any provider I/O: a pending
         # signal releases the fresh claim (nothing could have applied)
@@ -9263,12 +9913,13 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
         # approval now, immediately before the undo write is sent, so a
         # target refusal leaves the approval reusable and the undo op_id
         # unclaimed.
-        _burn_write_approval(approval_record, None, undo_op_id)
+        _burn_write_approval(approval_record, undo_op_id)
         # W5-P2-1: last checkpoint before the provider call: a pending
         # signal releases the claim and stops before any effect.
         _raise_if_shutdown_requested(undo_op_id, undo_claim)
         method, url, headers, body_bytes = build_request(
             entry, undo, params, session, pack, config, {}, result_payload)
+        undo_sent = True
         status, resp_headers, raw, attempts = session.raw_request(
             method, url, headers, body_bytes, is_write=True,
             max_bytes=entry_max_bytes)
@@ -9315,6 +9966,18 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
         except DuplicateOpId:
             pass
         raise
+    except Exception:
+        # Not an ExecutorError (an admission refusal while the approval
+        # burns, an OSError, a bug): before the undo was sent nothing
+        # could have applied, so release the claim; after, it stays
+        # pending for reconciliation, like a crash.
+        if not undo_sent:
+            try:
+                release_op_id(undo_op_id, undo_claim,
+                              "undo failure before any effect could apply")
+            except DuplicateOpId:
+                pass
+        raise
     record = {
         "op_id": undo_op_id,
         "entry_name": entry.get("name"),
@@ -9359,25 +10022,42 @@ def _load_params(text: str) -> dict:
     except ValueError as exc:
         # W6-P2-E2: the raw ValueError text echoes the offending input
         # (params can carry learner tokens); keep it off stderr.
-        raise ExecutorError("params are not valid JSON: %s" % "REDACTED") from exc
+        raise CallerInputError(
+            "--params is not valid JSON: %s" % "REDACTED") from exc
     if not isinstance(obj, dict):
-        raise ExecutorError("params must be a JSON object")
+        raise CallerInputError("--params must be a JSON object")
     return obj
 
 
-def _load_reveal(path: str | None) -> dict | None:
-    """Load a sealed educator reveal record (the seal, channel, course,
-    and expiry are checked at projection time)."""
-    if not path:
-        return None
+def _caller_op_id(value, flag: str = "--op-id") -> str:
+    """An op id argument, checked before anything is read or sent."""
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            record = json.load(fh)
-    except (OSError, ValueError) as exc:
-        raise ExecutorError("reveal file is not readable JSON") from exc
-    if not isinstance(record, dict):
-        raise ExecutorError("reveal file must contain a JSON object")
-    return record
+        return check_uuid(value)
+    except (TypeError, ValueError, AttributeError):
+        # The value is not echoed: an agent may paste other text here.
+        raise CallerInputError(
+            "%s is not an op id: pass the op id exactly as Morrow printed "
+            "it (letters, digits, and dashes only), with no brackets, "
+            "quotes, or other text. Nothing was sent." % flag) from None
+
+
+def _load_body(text: str):
+    """The request body from --body: a JSON object, or a JSON array of
+    objects (the bulk date update, C-37, takes a bare array)."""
+    try:
+        body = json.loads(text)
+    except ValueError as exc:
+        # The offending input can carry learner tokens; keep it off
+        # stderr (W6-P2-E2).
+        raise CallerInputError("--body is not valid JSON") from exc
+    if isinstance(body, dict):
+        return body
+    if isinstance(body, list) and body and all(
+            isinstance(item, dict) for item in body):
+        return body
+    raise CallerInputError(
+        "--body must be a JSON object, or a JSON array of objects (the "
+        "bulk date update takes an array)")
 
 
 def _load_approval(path: str | None) -> dict | None:
@@ -9401,15 +10081,33 @@ def _load_approval(path: str | None) -> dict | None:
     return record
 
 
+def _repeated_approve_flags(args) -> list:
+    """The plan-write flags approve-write must repeat to reach the same
+    Canvas, session, and educator: each one given with a non-default
+    value."""
+    flags = []
+    if args.backend != "chromium":
+        flags += ["--backend", args.backend]
+        if args.session != SESSION_PATH:
+            flags += ["--session", args.session]
+    if args.canvas_base:
+        flags += ["--canvas-base", args.canvas_base]
+    if args.user_id:
+        flags += ["--user-id", args.user_id]
+    return flags
+
+
 def _mode_ctx_from_args(args) -> dict | None:
     """Build the Plan/Edit mode_ctx from CLI flags (or None).
 
-    user_id defaults to MORROW_USER_ID; conversation_id defaults to
-    MORROW_CONVERSATION_ID. Returns None when no user identity is
-    available, in which case the admission gate fails closed to the
-    legacy plan-mode approval path.
+    user_id defaults to MORROW_USER_ID, then the Canvas account pinned
+    at first sign-in (config/identity.default_user_id); conversation_id
+    defaults to MORROW_CONVERSATION_ID. Returns None when no user
+    identity is available, in which case the admission gate fails
+    closed to the legacy plan-mode approval path.
     """
-    user_id = getattr(args, "user_id", None) or os.environ.get("MORROW_USER_ID")
+    from config.identity import default_user_id
+    user_id = getattr(args, "user_id", None) or default_user_id()
     if not user_id:
         return None
     ctx = {"user_id": user_id}
@@ -9422,11 +10120,11 @@ def _mode_ctx_from_args(args) -> dict | None:
         try:
             resolution = json.loads(resolution_text)
         except ValueError:
-            raise ExecutorError(
-                "course-resolution is not valid JSON: REDACTED")
+            raise CallerInputError(
+                "--course-resolution is not valid JSON: REDACTED")
         if not isinstance(resolution, dict):
-            raise ExecutorError(
-                "course-resolution must be a JSON object")
+            raise CallerInputError(
+                "--course-resolution must be a JSON object")
         ctx["course_resolution"] = resolution
     destructive_confirmed = getattr(args, "destructive_confirmed", None)
     if destructive_confirmed:
@@ -9448,6 +10146,9 @@ def _mode_ctx_from_args(args) -> dict | None:
 # --------------------------------------------------------------------------
 
 PENDING_WRITES_DIRNAME = "pending_writes"
+# approve-write sets this on an exception it raises: the change in the
+# educator's words, for the failure message (_funnel_operation).
+OPERATION_LABEL_ATTR = "morrow_operation_label"
 
 
 def pending_write_path(op_id: str) -> str:
@@ -9468,68 +10169,323 @@ def _write_private_json(path: str, doc: dict) -> None:
 
 
 def _read_course_identity(entry: dict, params: dict, session, pack: dict,
-                          course_id: str) -> dict:
-    """The course as Canvas names it: {"course_id", "course_name",
-    "term"}. Refuses a missing course, an id mismatch, or a spoofed
-    name; the educator must see the real name of the course the write
-    targets."""
+                          course_id: str, tenant_base=None) -> dict:
+    """The course as the educator reviews it: {"course_id",
+    "course_name", "course_name_digest", "term", "time_zone"}. The name
+    and term are labeled with the course's roster, as a course read
+    labels them, so a course named for its student shows the student's
+    label; course_name_digest binds the name as Canvas has it for the
+    check before the send. Refuses a missing course, an id mismatch, a
+    spoofed name, or a course whose roster cannot be read."""
+    from privacy import executor_wire as _wire
+    tenant_base = tenant_base or session.base_for("canvas")
     config = {"canvas_base": session.base_for("canvas")}
     block = {"method": "GET",
              "url": "{canvas_base}/api/v1/courses/%s"
                     % urllib.parse.quote(str(course_id), safe=""),
              "headers": {}}
+    rosters = _wire.begin_course_rosters()
     try:
+        _read_course_roster_first(dict(entry, effects="read", request=block),
+                                  params, session, tenant_base,
+                                  dry_run=False)
+        try:
+            rmethod, rurl, rheaders, rbody = build_request(
+                entry, block, params, session, pack, config, {})
+            _status, _hdrs, raw, _attempts = session.raw_request(
+                rmethod, rurl, rheaders, rbody, is_write=False)
+        except ProviderHttpError as exc:
+            raise TargetIdentityMismatch(
+                "course %s could not be read (HTTP %s); nothing was "
+                "prepared. Check the course id with the educator."
+                % (course_id, exc.status))
+        course = _parse_provider_json(raw, "course %s read" % course_id)
+        if str(course.get("id")) != str(course_id):
+            raise TargetIdentityMismatch(
+                "Canvas returned course id %r for requested course %s; "
+                "nothing was prepared." % (course.get("id"), course_id))
+        name = course.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise TargetIdentityMismatch(
+                "course %s has no name to show the educator; nothing was "
+                "prepared." % course_id)
+        assert_no_spoof_identifier(name, "course name")
+        term = course.get("term")
+        term_name = term.get("name") if isinstance(term, dict) else term
+        texts = {"name": name}
+        if isinstance(term_name, str) and term_name.strip():
+            texts["term"] = term_name
+        shown = _shown_course_text(entry, course_id, tenant_base, texts)
+    finally:
+        _wire.end_course_rosters(rosters)
+    identity = {"course_id": str(course_id), "course_name": shown["name"],
+                "course_name_digest": _course_text_digest(name)}
+    if "term" in shown:
+        identity["term"] = shown["term"]
+    zone = course.get("time_zone")
+    if isinstance(zone, str) and zone.strip():
+        identity["time_zone"] = zone.strip()
+    return identity
+
+
+# The objects Canvas serves by GET: the routes the write readback
+# re-reads (a course is named by _read_course_identity instead). A
+# favorite names a course in a user route; the course is read.
+_NAMED_OBJECT_READ_ALIASES = {
+    "/api/v1/users/self/favorites/courses/{id}": "/api/v1/courses/{id}",
+}
+
+
+def _named_object_route(entry, params):
+    """(read URL template, path slot) for the object a write names: the
+    deepest object on its path that Canvas serves by GET (the page a
+    revision restores, the module an item goes into, the assignment
+    itself). None when the path names no such object."""
+    url = str(((entry or {}).get("request") or {}).get("url") or "")
+    url = url.split("?", 1)[0]
+    base = re.match(r"^\{[a-z_]+_base\}", url)
+    if not base:
+        return None
+    template = "/" + url[base.end():].strip("/")
+    alias = _NAMED_OBJECT_READ_ALIASES.get(template)
+    if alias is not None:
+        return base.group(0) + alias, alias.rsplit("/", 1)[1][1:-1]
+    tparts = template.strip("/").split("/")
+    rparts = admission_render_path(url, params).strip("/").split("/")
+    if len(tparts) != len(rparts):
+        return None
+    for n in range(len(tparts), 0, -1):
+        slot = tparts[n - 1]
+        if not (slot.startswith("{") and slot.endswith("}")):
+            continue
+        rendered = "/" + "/".join(rparts[:n])
+        if _WRITE_READBACK_MEMBER_RE.match(rendered) or \
+                _IB_READBACK_BANK_MEMBER_RE.match(rendered):
+            return (base.group(0) + "/" + "/".join(tparts[:n]),
+                    slot[1:-1])
+    return None
+
+
+def _object_title(payload):
+    """The name Canvas gives an object: its title or name (a New Quiz
+    item keeps its title under "entry", an item bank under "bank")."""
+    if not isinstance(payload, dict):
+        return None
+    for node in (payload, payload.get("entry"), payload.get("bank")):
+        if isinstance(node, dict):
+            for key in ("title", "name", "display_name"):
+                value = node.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    return None
+
+
+def _read_named_object(entry, params, session, pack, tenant_base,
+                       project=True, stage="prepared"):
+    """The object a write names, read before the educator approves it:
+    {"object_slot", "object_name", "object_name_digest"}, or None when
+    the path names no object Canvas serves by GET. object_name is
+    labeled like course content (project=True), so a student named in a
+    title reaches the agent as a label; it is None for an object with
+    no name. Refuses (TargetIdentityMismatch) when the object cannot be
+    read: the educator never approves a change to an object Morrow
+    could not name."""
+    from privacy import executor_wire as _wire
+    from dispatch.approval_display import _noun
+    # The agent can name the object by its labeled address (a page whose
+    # address holds a student's name): the read goes to the real one.
+    shown_params = params
+    params, _ids = _wire.resolve_learner_labels(
+        {"params": params}, tenant_base,
+        _write_target_course_id(entry, params), None,
+        error_cls=LearnerLabelUnresolved, provider=entry.get("provider"),
+        extra_keys=_wire.learner_route_param_keys(entry))
+    params = params["params"]
+    found = _named_object_route(entry, params)
+    if found is None:
+        return None
+    template, slot = found
+    read_entry = dict(entry, effects="read",
+                      request={"method": "GET", "url": template,
+                               "headers": {}})
+    config = {"canvas_base": session.base_for("canvas")}
+    words = template.split("?", 1)[0].split("/")
+    what = "%s %s" % (_noun(words[-2], words[-4] if len(words) > 3
+                            else None), shown_params.get(slot))
+    rosters = _wire.begin_course_rosters()
+    try:
+        if project:
+            _read_course_roster_first(read_entry, params, session,
+                                      tenant_base, dry_run=False)
         rmethod, rurl, rheaders, rbody = build_request(
-            entry, block, params, session, pack, config, {})
+            read_entry, read_entry["request"], params, session, pack,
+            config, {})
+        try:
+            _status, _hdrs, raw, _attempts = session.raw_request(
+                rmethod, rurl, rheaders, rbody, is_write=False)
+        except ProviderHttpError as exc:
+            missing = exc.status in (404, 410)
+            raise TargetIdentityMismatch(
+                "the %s %s in Canvas (HTTP %s), so it cannot be named for "
+                "the educator. Nothing was %s. Check which one the "
+                "educator means." % (what, "was not found" if missing
+                                     else "could not be read", exc.status,
+                                     stage))
+        title = _object_title(_parse_provider_json(raw, "%s read" % what))
+        shown = title
+        if project and title:
+            view = {"name": entry.get("name"),
+                    "provider": entry.get("provider") or "canvas",
+                    "effects": "read",
+                    "request": {"method": "GET",
+                                "url": rurl.split("?", 1)[0]}}
+            shown = _wire.project_learner_result(
+                view, {"receipt": {"name": title}}, tenant_base,
+                error_cls=ExecutorError)["receipt"]["name"]
+    finally:
+        _wire.end_course_rosters(rosters)
+    return {"object_slot": slot, "object_name": shown,
+            "object_name_digest": hashlib.sha256(
+                (title or "").encode("utf-8")).hexdigest()}
+
+
+# Routes that can publish a New Quiz without naming one: the assignment
+# a New Quiz is (C-43) and its module item (C-283). Publishing a New Quiz
+# was never tested (SCOPE.md), so Morrow reads the target first (C-44 and
+# C-281 are live-proven reads) and refuses a New Quiz. The New Quiz routes
+# themselves are refused by admission_policy.json request_fields.
+_PUBLISH_TARGETS = {
+    ("PUT", "/api/v1/courses/{}/assignments/{}"): "assignment",
+    ("PUT", "/api/v1/courses/{}/modules/{}/items/{}"): "module item",
+}
+
+
+def _new_quiz_publish_target(entry):
+    """"assignment" or "module item" when the write sets published on a
+    route whose target can be a New Quiz, else None."""
+    from dispatch.admission import _field_values, _flag_is_false, _route_key
+    request = (entry or {}).get("request") or {}
+    kind = _PUBLISH_TARGETS.get(_route_key(request.get("method"),
+                                           request.get("url")))
+    if kind is None:
+        return None
+    url_query = urllib.parse.urlsplit(str(request.get("url") or "")).query
+    for part in (request.get("query"), request.get("body"), url_query):
+        if part and any(not _flag_is_false(value)
+                        for value in _field_values(part, "published")):
+            return kind
+    return None
+
+
+def _is_new_quiz_assignment(doc):
+    """True for an assignment that is a New Quiz: Canvas flags it
+    is_quiz_lti_assignment, and it launches the quiz-lti tool."""
+    if doc.get("is_quiz_lti_assignment") is True:
+        return True
+    tool = doc.get("external_tool_tag_attributes")
+    url = tool.get("url") if isinstance(tool, dict) else None
+    return "external_tool" in (doc.get("submission_types") or []) \
+        and ".quiz-lti" in str(url or "").lower()
+
+
+def _read_publish_target(entry, url_template, params, session, pack, what):
+    read_entry = dict(entry, effects="read",
+                      request={"method": "GET", "url": url_template,
+                               "headers": {}})
+    config = {"canvas_base": session.base_for("canvas")}
+    rmethod, rurl, rheaders, rbody = build_request(
+        read_entry, read_entry["request"], params, session, pack, config,
+        {})
+    try:
         _status, _hdrs, raw, _attempts = session.raw_request(
             rmethod, rurl, rheaders, rbody, is_write=False)
-    except ProviderHttpError as exc:
-        raise TargetIdentityMismatch(
-            "course %s could not be read (HTTP %s); nothing was prepared. "
-            "Check the course id with the educator." % (course_id,
-                                                       exc.status))
-    course = _parse_provider_json(raw, "course %s read" % course_id)
-    if str(course.get("id")) != str(course_id):
-        raise TargetIdentityMismatch(
-            "Canvas returned course id %r for requested course %s; "
-            "nothing was prepared." % (course.get("id"), course_id))
-    name = course.get("name")
-    if not isinstance(name, str) or not name.strip():
-        raise TargetIdentityMismatch(
-            "course %s has no name to show the educator; nothing was "
-            "prepared." % course_id)
-    assert_no_spoof_identifier(name, "course name")
-    identity = {"course_id": str(course_id), "course_name": name}
-    term = course.get("term")
-    term_name = term.get("name") if isinstance(term, dict) else term
-    if isinstance(term_name, str) and term_name.strip():
-        identity["term"] = term_name
-    return identity
+        return _parse_provider_json(raw, "the %s read" % what)
+    except (ProviderHttpError, TargetIdentityMismatch) as exc:
+        raise WriteNotAttempted(
+            "the %s could not be read (%s), so Morrow could not check that "
+            "it is not a New Quiz before publishing it. Nothing was sent."
+            % (what, "HTTP %s" % exc.status
+               if isinstance(exc, ProviderHttpError) else exc))
+
+
+def _refuse_new_quiz_publish(entry, params, session, pack):
+    """Refuse (EvidenceHold) a write that publishes a New Quiz through its
+    assignment or module item. Reads the target first; a target Morrow
+    cannot read is not published (WriteNotAttempted)."""
+    kind = _new_quiz_publish_target(entry)
+    if kind is None:
+        return
+    from reauth import state_machine as _rsm
+    if not _rsm.check_write_allowed()[0]:
+        # Changes are paused: the write gates refuse it, and nothing is
+        # read or sent.
+        return
+    url = entry["request"]["url"].split("?", 1)[0]
+    doc = _read_publish_target(entry, url, params, session, pack, kind)
+    if kind == "module item":
+        new_quiz = doc.get("quiz_lti") is True
+        if "quiz_lti" not in doc and doc.get("type") == "Assignment":
+            course_url = url.split("/modules/", 1)[0]
+            new_quiz = _is_new_quiz_assignment(_read_publish_target(
+                entry, course_url + "/assignments/{content_id}",
+                dict(params, content_id=doc.get("content_id")), session,
+                pack, "assignment"))
+    else:
+        new_quiz = _is_new_quiz_assignment(doc)
+    if new_quiz:
+        from dispatch.admission import EvidenceHold
+        raise EvidenceHold(
+            "operation %r publishes a New Quiz (the %s is one), which was "
+            "never tested; refused on every tenant until a live battery "
+            "proves it. Nothing was sent." % (entry.get("name"), kind))
+
+
+def _educator_time_zone(user_id, course_zone):
+    """The zone the approval shows dates in: the educator's timezone
+    setting, then the course's time zone in Canvas; None (UTC) when
+    neither is set."""
+    from config.identity import default_user_id
+    uid = user_id or default_user_id()
+    if uid:
+        try:
+            from settings import store as _settings
+            name = _settings.get_setting(uid, "timezone")
+        except Exception:
+            name = None
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return course_zone
 
 
 def prepare_plan_write(name: str, method: str, path_template: str,
                        params: dict, body, session, pack: dict,
                        provider: str = "canvas",
                        ttl_seconds: int = 3600,
-                       conversation_id: str | None = None) -> dict:
+                       conversation_id: str | None = None,
+                       user_id: str | None = None,
+                       approve_flags=()) -> dict:
     """Prepare one Plan-mode catalog write for the educator's approval.
 
-    Runs the catalog and policy gates, reads the target course, builds
-    the frozen plan and the unsigned approval record bound to the exact
-    request, and stores them as a pending write. Sends nothing and
-    journals nothing. Returns what the agent shows the educator.
+    Runs the catalog and policy gates, reads the target course and the
+    object the write names (_read_named_object), builds the frozen plan
+    and the unsigned approval record bound to the exact request, and
+    stores them as a pending write. Sends nothing and journals nothing.
+    Returns what the agent shows the educator; its dates are in the
+    educator's time zone (user_id's timezone setting, then the
+    course's).
 
     Students named by label (or by the echoed "<typed name> (label)"
     form, checked against conversation_id) are stored as bare labels,
     and the plan binds each label to its vault token (final muse audit
     M1/M2): the typed name stays in the encrypted name-echo store, and
-    approve-write refuses when a label names a different issue."""
-    try:
-        from dispatch.admission import mint_approval
-        from dispatch.approval_display import render_approval_display
-    except ImportError:  # run as a script: dispatch/ itself is on sys.path
-        from admission import mint_approval
-        from approval_display import render_approval_display
+    approve-write refuses when a label names a different issue.
+
+    The returned message gives the approve-write command to run, with
+    approve_flags (the plan-write flags approve-write must repeat, such
+    as a non-default --backend) and this conversation's id."""
+    from dispatch.admission import mint_approval
+    from dispatch.approval_display import (render_approval_display,
+                                           render_educator_display)
     expire_write_ceremony_files(quiet=True)
     params = dict(params or {})
     extra = {"body": body} if body is not None else None
@@ -9553,22 +10509,26 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         entry = catalog_descriptor_to_entry(name, method, path_template,
                                             None, provider, None, extra)
     if entry.get("effects") != "write":
-        raise ExecutorError(
+        raise CallerInputError(
             "plan-write prepares writes only; %r is a %s operation (run "
-            "it with the catalog command, no approval needed)"
-            % (name, entry.get("effects")))
+            "it with the catalog command, no approval needed). Nothing "
+            "was sent." % (name, entry.get("effects")))
     enforce_effect_class(entry)
     _catalog_provenance_gate(entry, name, method, path_template, params,
-                             provider, approval=None, allow_unproven=False,
                              session=session)
     check_policy_gates(entry, bool(getattr(session, "browser_owned_auth",
                                            False)))
+    _refuse_new_quiz_publish(entry, params, session, pack)
     tenant_base = session.base_for(provider or "canvas")
     course_id = _write_target_course_id(entry, params)
     target = None
     if course_id is not None:
         target = _read_course_identity(entry, params, session, pack,
-                                       course_id)
+                                       course_id, tenant_base)
+    time_zone = _educator_time_zone(user_id, (target or {}).get("time_zone"))
+    named = _read_named_object(entry, params, session, pack, tenant_base)
+    if named is not None:
+        target = dict(target or {}, **named)
     op_id = str(uuid.uuid4())
     subject = admission_request_subject(entry, params)
     if learner_tokens:
@@ -9580,7 +10540,7 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         "before_state_digest": "",
         "frozen_readback": ({"course_id": target["course_id"],
                              "name": target["course_name"]}
-                            if target else {}),
+                            if target and course_id is not None else {}),
         "request": subject,
         "request_digest": admission_request_digest(subject),
     }
@@ -9588,12 +10548,19 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         plan["target_identity"] = target
     record = mint_approval(entry, params, tenant_base, ttl_seconds,
                            target_identity=target)
-    display = render_approval_display(record, params, entry=entry)
+    display = render_educator_display(record, params, entry=entry,
+                                      time_zone=time_zone)
+    audit_detail = render_approval_display(record, params, entry=entry)
     if learner_tokens and conversation_id and course_id is not None:
         # Shown to the educator (through the agent, in this conversation
         # only): the names the educator typed, next to their labels.
         display = _wire.apply_name_echo(display, tenant_base, course_id,
                                         conversation_id)
+    where = None
+    if target and target.get("course_name") and course_id is not None:
+        where = 'the course "%s"' % target["course_name"]
+    elif course_id is not None:
+        where = "course %s" % course_id
     _write_private_json(pending_write_path(op_id), {
         "version": 1,
         "op_id": op_id,
@@ -9601,6 +10568,8 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         "descriptor": {"name": name, "method": method,
                        "path": path_template, "provider": provider,
                        "params": params, "body": body},
+        "operation_label": _describe_operation(method, path_template,
+                                               where),
         "plan": plan,
         "approval": record,
     })
@@ -9609,14 +10578,58 @@ def prepare_plan_write(name: str, method: str, path_template: str,
         "status": "awaiting_approval",
         "op_id": op_id,
         "course": ({"id": target["course_id"], "name": target["course_name"],
-                    "term": target.get("term")} if target else None),
+                    "term": target.get("term")}
+                   if target and course_id is not None else None),
         "approval_display": display,
+        "audit_detail": audit_detail,
         "expires_at": record.get("expires_at"),
         "message": ("Nothing was sent. Show the educator approval_display "
                     "exactly as written and ask them to approve this write. "
-                    "When they approve, run approve-write --op-id %s "
-                    "--authorization \"<their reply, verbatim>\"." % op_id),
+                    "Do not show them audit_detail: it is the technical "
+                    "record of the same request, for reviewers. When they "
+                    "approve, run %s" % _approve_write_command(
+                        op_id, conversation_id, approve_flags)),
     }
+
+
+def _approve_write_command(op_id, conversation_id, flags=()):
+    """The approve-write command, from the tree root, that sends a
+    prepared write. The educator's reply replaces its placeholder."""
+    import shlex
+    parts = ["PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py "
+             "approve-write --op-id", shlex.quote(op_id),
+             "--authorization \"<their reply, verbatim>\""]
+    parts += [shlex.quote(str(flag)) for flag in flags]
+    parts += ["--conversation-id",
+              shlex.quote(conversation_id) if conversation_id
+              else "\"<this conversation's id>\""]
+    return " ".join(parts)
+
+
+def _recheck_named_object(descriptor, target, session, pack):
+    """Before an approved write is sent, read the object it names again:
+    it must still be the object the educator was shown by name (the
+    prepared plan's target). Refuses (TargetIdentityMismatch) before the
+    approval is used."""
+    expected = (target or {}).get("object_name_digest") \
+        if isinstance(target, dict) else None
+    if not expected:
+        return
+    body = descriptor.get("body")
+    provider = descriptor.get("provider") or "canvas"
+    entry = catalog_descriptor_to_entry(
+        descriptor.get("name"), descriptor.get("method"),
+        descriptor.get("path"), None, provider, None,
+        {"body": body} if body is not None else None)
+    seen = _read_named_object(entry, descriptor.get("params") or {},
+                              session, pack, session.base_for(provider),
+                              project=False, stage="sent")
+    if seen is None or seen["object_name_digest"] != expected:
+        raise TargetIdentityMismatch(
+            "the object this change names was renamed or replaced in "
+            "Canvas after the educator approved it by name. Nothing was "
+            "sent. Run plan-write again and show the educator the new "
+            "approval.")
 
 
 def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
@@ -9627,22 +10640,51 @@ def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
     gate, the approval bound to the exact request, single use). The
     course resolution is the course the educator saw named in the
     approval display; the provider name is re-verified before the
-    write."""
+    write. A failure carries the change as the educator approved it
+    (OPERATION_LABEL_ATTR)."""
+    label = {"text": "the change you approved"}
     try:
-        from dispatch.admission import sign_approval
-    except ImportError:  # run as a script: dispatch/ itself is on sys.path
-        from admission import sign_approval
+        return _approve_plan_write(op_id, authorization, session, pack,
+                                   mode_ctx, channel, label)
+    except Exception as exc:
+        try:
+            setattr(exc, OPERATION_LABEL_ATTR, label["text"])
+        except Exception:
+            pass
+        raise
+
+
+def _approve_plan_write(op_id, authorization, session, pack, mode_ctx,
+                        channel, label):
+    from dispatch.admission import (approval_used, sign_approval,
+                                    _is_destructive)
+    op_id = _caller_op_id(op_id)
     expire_write_ceremony_files(quiet=True)
     path = pending_write_path(op_id)
     try:
         with open(path, "r", encoding="utf-8") as fh:
             doc = json.load(fh)
     except (OSError, ValueError):
-        raise MissingFrozenPlan(
-            "no prepared write %s is waiting for approval (it was sent "
-            "already, it expired, or it was never prepared); run "
-            "plan-write again" % op_id)
+        already_used = find_journal_op(op_id) is not None \
+            or claim_is_live(op_id)
+        raise PreparedWriteMissing(
+            "no prepared write %s is waiting for approval (%s); run "
+            "plan-write again" % (
+                op_id, "the journal holds its claim or outcome: it was "
+                "sent, or tried, with an earlier approval" if already_used
+                else "the journal has no record of it: it expired or was "
+                "never prepared, and was never sent"),
+            already_used)
     descriptor = doc.get("descriptor") or {}
+    if isinstance(doc.get("operation_label"), str) \
+            and doc["operation_label"]:
+        label["text"] = doc["operation_label"]
+    elif descriptor.get("method") and descriptor.get("path"):
+        label["text"] = _describe_operation(descriptor["method"],
+                                            descriptor["path"])
+    _recheck_named_object(
+        descriptor, (doc.get("plan") or {}).get("target_identity"),
+        session, pack)
     plan_path = path[:-len(".json")] + ".plan.json"
     _write_private_json(plan_path, doc.get("plan") or {})
     plan = load_frozen_plan(plan_path, descriptor.get("name"))
@@ -9660,6 +10702,16 @@ def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
                      "which named course %r" % target.get("course_name"),
         }
     body = descriptor.get("body")
+    # The educator's reply approved this exact deletion as shown, so it
+    # is also the explicit yes that confirm_destructive_writes asks for
+    # in edit mode.
+    if ctx is not None and not ctx.get("destructive_confirmed") \
+            and _is_destructive(catalog_descriptor_to_entry(
+                descriptor.get("name"), descriptor.get("method"),
+                descriptor.get("path"), None,
+                descriptor.get("provider") or "canvas", None,
+                {"body": body} if body is not None else None)):
+        ctx["destructive_confirmed"] = authorization
     try:
         out = dispatch_catalog_op(
             descriptor.get("name"), descriptor.get("method"),
@@ -9668,6 +10720,16 @@ def approve_plan_write(op_id: str, authorization: str, session, pack: dict,
             op_id=plan.op_id, pack=pack,
             extra={"body": body} if body is not None else None,
             approval=signed, session=session, mode_ctx=ctx)
+    except Exception:
+        # A refusal before the approval was used keeps the prepared
+        # write, so the educator's reply can be sent again. Once it was
+        # used (the write was attempted), a retry is a new plan-write.
+        if approval_used(signed):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        raise
     finally:
         try:
             os.unlink(plan_path)
@@ -9691,10 +10753,7 @@ APPROVAL_RECORD_RETENTION = timedelta(hours=24)
 
 
 def _approvals_dir():
-    try:
-        from dispatch import admission as _adm
-    except ImportError:  # run as a script: dispatch/ itself is on sys.path
-        import admission as _adm
+    from dispatch import admission as _adm
     return _adm.APPROVALS_DIR
 
 
@@ -9827,14 +10886,14 @@ def _chromium_session_mod():
     return chromium_session
 
 
-def _check_claim_release_reason(reason):
+def _check_operator_reason(command, reason):
     # W6-P2-D2: "OPERATOR ONLY" is enforced as far as code can: the
     # reason must be a real reconciliation note, not a stub.
     if len((reason or "").strip()) < 20:
-        raise ExecutorError(
-            "claim-release --reason must be at least 20 characters: "
-            "state what you reconciled against the provider "
-            "('fixed it' is not a reconciliation)")
+        raise CallerInputError(
+            "%s --reason must be at least 20 characters: state what you "
+            "reconciled against the provider ('fixed it' is not a "
+            "reconciliation). Nothing was changed." % command)
 
 
 def _require_destructive_confirm(command, warning, yes):
@@ -9848,7 +10907,7 @@ def _require_destructive_confirm(command, warning, yes):
               file=sys.stderr)
         return
     if not sys.stdin.isatty():
-        raise ExecutorError(
+        raise ConfirmationRequired(
             "%s is destructive: %s Re-run with --yes to confirm, or run "
             "this command interactively to be prompted." % (command, warning))
     print("WARNING: %s" % warning, file=sys.stderr)
@@ -9860,20 +10919,25 @@ def _require_destructive_confirm(command, warning, yes):
         raise ExecutorError("%s aborted by operator" % command)
 
 
-def main(argv=None):
-    # W5-P2-1: graceful SIGTERM/SIGINT handling for the whole CLI.
-    _install_shutdown_handlers()
+def build_parser():
+    """The executor CLI's argument parser (main parses with it)."""
     parser = argparse.ArgumentParser(
         description="Morrow Direct dispatch executor")
     parser.add_argument("--session", default=SESSION_PATH,
                         help="path to session.json (https backend only)")
     parser.add_argument("--canvas-base", default=None,
                         help="Canvas base URL override (chromium backend; "
-                             "default precedence: this flag, CANVAS_BASE env, "
-                             "then the lane state store)")
+                             "default precedence: this flag, CANVAS_BASE "
+                             "from the environment or this tree's "
+                             "helper/env, then the lane state store)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_backend(p):
+        # Accepted after the command too. SUPPRESS leaves the top-level
+        # value in place when the flag is not repeated here.
+        p.add_argument("--canvas-base", default=argparse.SUPPRESS,
+                       help="the same Canvas base URL override as "
+                            "--canvas-base before the command")
         p.add_argument("--backend", default="chromium", choices=("https", "chromium"),
                        help="chromium: synchronous executor through the local "
                             "Chromium's authenticated tab via CDP on "
@@ -9904,12 +10968,13 @@ def main(argv=None):
                             "admitted on this path.")
 
     def add_mode_ctx(p):
-        # Plan/Edit mode gate (modes workstream). The harness supplies
-        # the calling user's identity; without --user-id the gate fails
+        # Plan/Edit mode gate (modes workstream). With no user id at all
+        # (no flag, no MORROW_USER_ID, no pinned account) the gate fails
         # closed to the legacy plan-mode approval path.
         p.add_argument("--user-id", default=None,
-                       help="mode gate: the calling user's id "
-                            "(env MORROW_USER_ID is the default)")
+                       help="mode gate: the calling user's id (default: "
+                            "env MORROW_USER_ID, then the Canvas account "
+                            "pinned at first sign-in)")
         p.add_argument("--conversation-id", default=None,
                        help="mode gate: the Muse conversation id, for "
                             "conversation-scoped grants "
@@ -9925,11 +10990,6 @@ def main(argv=None):
                        help="mode gate: the educator's verbatim yes for "
                             "this destructive write (required in edit mode "
                             "while confirm_destructive_writes is on)")
-        p.add_argument("--pii-reveal", default=None,
-                       help="path to a sealed educator reveal record "
-                            "(dispatch/admission.mint_pii_reveal): real "
-                            "student names for ONE course, educator-chat "
-                            "channel, expires within 30 minutes")
 
     p_exec = sub.add_parser("execute", help="execute one manifest entry")
     p_exec.add_argument("--entry", required=True, help="path to the manifest entry JSON")
@@ -9956,9 +11016,11 @@ def main(argv=None):
                             "does not know.")
     p_cat.add_argument("--params", default="{}", help="params as a JSON object string")
     p_cat.add_argument("--body", default=None,
-                       help="request body as a JSON object string (the write's "
-                            "intent; the readback compares against it). Values "
-                            "may reference params as \"params.<name>\"")
+                       help="request body as a JSON object string, or a "
+                            "JSON array of objects for the bulk date update "
+                            "(the write's intent; the readback compares "
+                            "against it). Values may reference params as "
+                            "\"params.<name>\"")
     p_cat.add_argument("--provider", default="canvas")
     p_cat.add_argument("--slot", default=None, help="credential slot override (https backend only)")
     p_cat.add_argument("--plan", default=None, help="frozen plan file (required for writes)")
@@ -9967,14 +11029,6 @@ def main(argv=None):
                        help="path to an educator-signed v2 approval record JSON (required for writes); "
                         "must be digest-bound to this exact action, unexpired, category-scoped, "
                         "and unused (see dispatch/admission.mint_approval)")
-    p_cat.add_argument("--allow-unproven", action="store_true",
-                       help="dispatch a catalog op that is not marked live-proven in "
-                            "proof-battery/OPERATION_CATALOG.md. Requires an educator-signed "
-                            "approval record carrying allow_unproven: true (see "
-                            "dispatch/admission.check_unproven_override); the override is "
-                            "journaled with the op. Unknown operations and never-dispatch / "
-                            "unsupported / evidence-hold / learner-data refusals cannot be "
-                            "overridden.")
     add_backend(p_cat)
     add_mode_ctx(p_cat)
     add_dry_run(p_cat)
@@ -9994,7 +11048,8 @@ def main(argv=None):
                       help="params as a JSON object string (include "
                            "course_id for a course write)")
     p_pw.add_argument("--body", default=None,
-                      help="request body as a JSON object string")
+                      help="request body as a JSON object string, or a "
+                           "JSON array of objects for the bulk date update")
     p_pw.add_argument("--provider", default="canvas")
     add_backend(p_pw)
     add_mode_ctx(p_pw)
@@ -10129,8 +11184,32 @@ def main(argv=None):
              "persist indefinitely.")
     add_dry_run(p_undo)
     add_channel_gate(p_undo)
+    return parser
 
-    args = parser.parse_args(argv)
+
+def main(argv=None):
+    """Run one CLI command. A failure raised before this run claimed a
+    write carries nothing_sent=True, so the failure translator never
+    tells the educator that a change might have been made."""
+    claims_before = _WRITE_CLAIMS[0]
+    try:
+        return _run_cli(argv)
+    except Exception as exc:
+        if _WRITE_CLAIMS[0] == claims_before:
+            try:
+                exc.nothing_sent = True
+            except Exception:
+                pass
+        raise
+
+
+def _run_cli(argv=None):
+    # W5-P2-1: graceful SIGTERM/SIGINT handling for the whole CLI.
+    _install_shutdown_handlers()
+    args = build_parser().parse_args(argv)
+    for flag, attr in (("--op-id", "op_id"), ("--of-op-id", "of_op_id")):
+        if getattr(args, attr, None) is not None:
+            setattr(args, attr, _caller_op_id(getattr(args, attr), flag))
     # Only the shipped pack runs from the CLI: a caller-chosen pack would
     # let the caller pin any entry it authored, so there is no --pack
     # flag and no environment override.
@@ -10167,8 +11246,7 @@ def main(argv=None):
                                      approval=approval,
                                      dry_run=args.dry_run,
                                      require_educator_channel=not args.allow_driver_channel,
-                                     mode_ctx=mode_ctx,
-                                     pii_reveal=_load_reveal(args.pii_reveal))
+                                     mode_ctx=mode_ctx)
             finally:
                 close_chromium_session(session)
         else:
@@ -10177,20 +11255,13 @@ def main(argv=None):
                                  op_id=args.op_id, approval=approval,
                                  dry_run=args.dry_run,
                                  require_educator_channel=not args.allow_driver_channel,
-                                 mode_ctx=mode_ctx,
-                                 pii_reveal=_load_reveal(args.pii_reveal))
+                                 mode_ctx=mode_ctx)
         print(canonical(out))
     elif args.command == "catalog":
         params = _load_params(args.params)
         extra = None
         if args.body is not None:
-            try:
-                body = json.loads(args.body)
-            except ValueError:
-                raise ExecutorError("--body is not valid JSON")
-            if not isinstance(body, dict):
-                raise ExecutorError("--body must be a JSON object")
-            extra = {"body": body}
+            extra = {"body": _load_body(args.body)}
         plan = load_frozen_plan(args.plan, args.name) if args.plan else None
         approval = _load_approval(args.approval)
         mode_ctx = _mode_ctx_from_args(args)
@@ -10202,13 +11273,10 @@ def main(argv=None):
                                           provider=args.provider, auth_slot=args.slot,
                                           plan=plan, op_id=args.op_id, pack=pack,
                                           extra=extra, approval=approval,
-                                          allow_unproven=args.allow_unproven,
                                           session=session,
                                           dry_run=args.dry_run,
                                           require_educator_channel=not args.allow_driver_channel,
-                                          mode_ctx=mode_ctx,
-                                          pii_reveal=_load_reveal(
-                                              args.pii_reveal))
+                                          mode_ctx=mode_ctx)
             finally:
                 close_chromium_session(session)
         else:
@@ -10217,11 +11285,9 @@ def main(argv=None):
                                       provider=args.provider, auth_slot=args.slot,
                                       plan=plan, op_id=args.op_id, pack=pack,
                                       extra=extra, approval=approval,
-                                      allow_unproven=args.allow_unproven,
                                       dry_run=args.dry_run,
                                       require_educator_channel=not args.allow_driver_channel,
-                                      mode_ctx=mode_ctx,
-                                      pii_reveal=_load_reveal(args.pii_reveal))
+                                      mode_ctx=mode_ctx)
         print(canonical(out))
     elif args.command in ("plan-write", "approve-write"):
         session = need_chromium_session() if args.backend == "chromium" \
@@ -10230,18 +11296,15 @@ def main(argv=None):
             if args.command == "plan-write":
                 body = None
                 if args.body is not None:
-                    try:
-                        body = json.loads(args.body)
-                    except ValueError:
-                        raise ExecutorError("--body is not valid JSON")
-                    if not isinstance(body, dict):
-                        raise ExecutorError("--body must be a JSON object")
+                    body = _load_body(args.body)
+                mode_ctx = _mode_ctx_from_args(args) or {}
                 out = prepare_plan_write(
                     args.name, args.method, args.path,
                     _load_params(args.params), body, session, pack,
                     provider=args.provider,
-                    conversation_id=(_mode_ctx_from_args(args) or {}).get(
-                        "conversation_id"))
+                    conversation_id=mode_ctx.get("conversation_id"),
+                    user_id=mode_ctx.get("user_id"),
+                    approve_flags=_repeated_approve_flags(args))
             else:
                 out = approve_plan_write(args.op_id, args.authorization,
                                          session, pack,
@@ -10302,7 +11365,7 @@ def main(argv=None):
             args.yes)
         print(canonical(journal_reconcile()))
     elif args.command == "journal-recover-secret":
-        _check_claim_release_reason(args.reason)
+        _check_operator_reason("journal-recover-secret", args.reason)
         _require_destructive_confirm(
             "journal-recover-secret",
             "this re-keys the journal under a NEW secret and re-seals "
@@ -10328,7 +11391,7 @@ def main(argv=None):
         # needs the same explicit confirmation as the other destructive
         # commands. There is no separate operator identity on this
         # machine; the journaled forced=true record is the audit trail.
-        _check_claim_release_reason(args.reason)
+        _check_operator_reason("claim-release", args.reason)
         _require_destructive_confirm(
             "claim-release",
             "this forcibly releases a live journal claim WITHOUT the "
@@ -10370,57 +11433,88 @@ def main(argv=None):
 # purpose (raw text is never the primary message again).
 # --------------------------------------------------------------------------
 
-def _funnel_operation(argv):
-    """Human operation label for the error translation layer.
+def _describe_operation(method, path, where=None):
+    from dispatch.approval_display import describe_operation
+    return describe_operation(method, path, where)
 
-    Built from the CLI subcommand plus stable identifiers only (entry
-    path, catalog op name, op id). Flag VALUES such as --params are
-    never included: they can carry educator content.
+
+# Options before the command that take a value (build_parser).
+_TOP_LEVEL_VALUE_FLAGS = ("--session", "--canvas-base")
+
+
+def _funnel_operation(argv, exc=None):
+    """What was attempted, in the words the educator reads: "changing a
+    page in course 101". approve-write labels its own failures with the
+    course name the educator approved (OPERATION_LABEL_ATTR). Otherwise
+    the label comes from the method and path template; the only flag
+    value read is a numeric course_id. Op ids, command and operation
+    names, and file paths never become the label.
     """
+    label = getattr(exc, OPERATION_LABEL_ATTR, None)
+    if isinstance(label, str) and label:
+        return label
     tokens = list(argv or [])
 
-    def _flag(*names):
+    def _flag(name):
         for i, token in enumerate(tokens):
-            for name in names:
-                if token == name and i + 1 < len(tokens):
-                    return tokens[i + 1]
-                if token.startswith(name + "="):
-                    return token[len(name) + 1:]
+            if token == name and i + 1 < len(tokens):
+                return tokens[i + 1]
+            if token.startswith(name + "="):
+                return token[len(name) + 1:]
         return None
 
-    subcommand = next((t for t in tokens if not t.startswith("-")), None)
-    target = _flag("--entry") or _flag("--name")
-    op_id = _flag("--op-id")
-    if subcommand in ("execute", "catalog", "undo", "plan-write"):
-        label = subcommand
-        if target:
-            label += " %s" % target
-        elif op_id:
-            label += " op %s" % op_id
-        return label
+    subcommand = None
+    skip_value = False
+    for token in tokens:
+        if skip_value:
+            skip_value = False
+        elif token in _TOP_LEVEL_VALUE_FLAGS:
+            skip_value = True
+        elif not token.startswith("-"):
+            subcommand = token
+            break
+    if subcommand in ("catalog", "plan-write"):
+        method, path = _flag("--method"), _flag("--path")
+        if not (method and path):
+            return "the Canvas request you asked for"
+        try:
+            course_id = str(json.loads(_flag("--params") or "{}")
+                            .get("course_id", ""))
+        except (ValueError, AttributeError):
+            course_id = ""
+        where = "course %s" % course_id if course_id.isdigit() else None
+        return _describe_operation(method, path, where)
+    if subcommand == "approve-write":
+        return "the change you approved"
+    if subcommand == "execute":
+        return "the task you asked for"
+    if subcommand == "undo":
+        return "undoing an earlier change"
     if subcommand:
-        return "executor %s%s" % (
-            subcommand, (" op " + op_id) if op_id else "")
-    if op_id:
-        return "executor op %s" % op_id
-    return "(unnamed executor operation)"
+        return "a Morrow maintenance step"
+    return "the step you asked for"
 
 
-if __name__ == "__main__":
+def _agent_error(argv, exc):
+    """The agent-facing payload for an exception escaping main()."""
+    from failures.funnel import agent_error_payload
+    return agent_error_payload(_funnel_operation(argv, exc), exc)
+
+
+def _script_main(argv):
+    """The CLI entry for every documented way to start the executor."""
     try:
-        sys.exit(main())
+        return main(argv)
     except SystemExit:
         raise
     except Exception as exc:
         # Agent-facing error funnel: translate before the agent sees it.
         try:
-            from failures.funnel import agent_error_payload
-            payload = agent_error_payload(
-                _funnel_operation(sys.argv[1:]), exc)
+            payload = _agent_error(argv, exc)
         except Exception:
             # The translation layer itself failed: degrade to the old
             # shape rather than a traceback.
             payload = {"error": type(exc).__name__,
                        "detail": _provider_detail(exc, 500)}
         print(json.dumps(payload), file=sys.stderr)
-        sys.exit(2)
+        return 2

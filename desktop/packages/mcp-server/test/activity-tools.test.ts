@@ -390,7 +390,7 @@ describe("morrow_activity", () => {
         tool: "morrow_legacy_only",
         courseId: "77",
         state: "awaiting_verification",
-        attention: ["readback_did_not_match_frozen_comparator"],
+        attention: ["readback_unavailable"],
       });
       expect(needsPerson.requestedBy).toMatchObject({ clientName: "assistant-a", workspaceName: "project-a" });
       expect(typeof needsPerson.targetDigest).toBe("string");

@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SdkError, SdkErrorCode } from "@modelcontextprotocol/client";
 import { DomUtils, parseDocument } from "htmlparser2";
 import sanitizeHtml from "sanitize-html";
 import {
@@ -48,6 +49,7 @@ import {
 import {
   applyPublicationPolicy,
   ArtifactGenerationRegistry,
+  BRIDGE_NOT_CONNECTED_TEXT,
   LearnerRoster,
   LearnerVault,
   canonicalMorrowResult,
@@ -88,14 +90,15 @@ import {
   GatewayOperationJournal,
   ProviderEffectBroker,
   ProviderEffectTargetConflictError,
-  CORRECTABLE_EFFECT_OPERATION_STATES,
   EFFECT_TARGET_IDENTITY_VERSION,
+  isCorrectableEffectOperation,
   ProviderEffectTargetIdentityVersionError,
   ProviderEffectTargetScopeUnknownError,
   classifySourceResult,
   effectOperationProjection,
   operationRecordProjection,
   type EffectOperationRecord,
+  type EffectReadbackOutcome,
   type EffectBatchRevocation,
   type EffectAuthoritySnapshot,
   type EffectAuthorization,
@@ -103,8 +106,9 @@ import {
   type GatewayOperationRecord,
   type GatewayOperationState,
 } from "@morrow/operation-journal";
-import { StdioMcpUpstream } from "@morrow/upstream-mcp";
+import { StdioMcpUpstream, UpstreamNotDispatchedError } from "@morrow/upstream-mcp";
 import { FileStageStore, MAX_STAGED_FILE_BYTES, type FileStageBinding, type FileStageScope } from "./file-staging.js";
+import { DESTRUCTIVE_EDIT_REFUSAL, EditAccessReviews, FIELD_SELECTION_EDIT_REFUSAL } from "./edit-access-review.js";
 import { validItemBankFanOutReceipt } from "./item-bank-fan-out.js";
 import { itemBankFanOutPlanRefusal } from "./item-bank-repair.js";
 import { readExactTrustFile, readExactTrustJson } from "./exact-trust-file.js";
@@ -431,6 +435,31 @@ function loadCanvasPlainLabels(): ReadonlyMap<string, string> {
   }
 }
 
+/**
+ * The Bridge waits up to 9 minutes for the educator's next Private Chat message
+ * (canvas-connector-mcp privateChatExchange). The gateway's call to the connector
+ * outlasts that wait, so the Bridge, not the MCP SDK's 60-second request default,
+ * decides when a wait ends.
+ */
+const PRIVATE_CHAT_EXCHANGE_TIMEOUT_MS = 10 * 60_000;
+
+/** No Private Chat message arrived before the wait ended, and the drawer was cleared. */
+export class PrivateChatWaitEndedError extends Error {
+  constructor() {
+    super("private_chat_wait_ended");
+  }
+}
+
+/**
+ * The connector answered a Private Chat exchange with Morrow Bridge's reason instead of a message,
+ * for example no Bridge connected. `code` is that reason's code, or "" when it named none.
+ */
+export class PrivateChatBridgeProblemError extends Error {
+  constructor(readonly code: string) {
+    super("private_chat_bridge_problem");
+  }
+}
+
 /** A selected Edit category names an action this gateway cannot invoke. */
 export class EditCategoryUnavailableError extends Error {
   constructor(readonly categoryId: string, readonly reason: string) {
@@ -443,7 +472,15 @@ const LEARNER_PRIVACY_REFUSAL_TEXT = "Morrow did not return this result because 
 /** The fixed person-facing sentence for a privacy-boundary refusal. */
 export function privacyProblemText(code: string): string {
   if (code === "privacy_browser_binding_unverified") {
-    return "Open this course in Chrome and sign in, then select Connect this course in Morrow Bridge. Its signed-in Canvas tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection.";
+    return "Open this course in Chrome and sign in, then select Connect this course in Morrow Bridge. Its signed-in Canvas or Moodle tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection.";
+  }
+  // Closing Chrome or disconnecting a course is a step the person can take, not a privacy fault.
+  if (code === "privacy_browser_bridge_not_connected") return BRIDGE_NOT_CONNECTED_TEXT;
+  if (code === "privacy_browser_bridge_port_in_use") {
+    return "Another Morrow is already connected to Morrow Bridge, so this Morrow could not reach the course. Close the other Morrow, or use one Morrow for all your assistants.";
+  }
+  if (code === "privacy_browser_binding_missing") {
+    return "This course is not connected in Morrow Bridge, so Morrow could not reach it. Open the course in Chrome and sign in, then select Connect this course in the Morrow Bridge popup. Then ask again.";
   }
   // The connection is working and carries another course, so this names what is
   // true instead of pointing at the privacy boundary.
@@ -730,6 +767,11 @@ export interface BrowserEditAccessSelection {
   readonly catalogDigest: string;
   readonly expectedPolicyRevision: number;
   readonly enabledCategories: readonly BrowserEditAccessCategory[];
+  /**
+   * The end time of the course's current grant, when it is one saved while Edit was timed. The
+   * reviewed kinds join that grant and end with it.
+   */
+  readonly grantEndsAt?: number;
 }
 
 export interface BrowserEditAccessCategory {
@@ -744,6 +786,8 @@ export interface BrowserEditAccessCategory {
   readonly learnerVisible?: boolean;
   readonly routine?: boolean;
   readonly rememberable?: boolean;
+  /** The Bridge grants no field of this action on its own, so Edit on it changes nothing. */
+  readonly requiresFieldSelection?: true;
 }
 
 export interface BrowserEditAccessPrepared {
@@ -1096,6 +1140,25 @@ function isBlackboardContentPatchVerify(mapping: CatalogTool): boolean {
 }
 
 const REVIEW_AUTHORIZATION: EffectAuthorization = { kind: "review" };
+
+// Canvas's two "Update/create page" routes create the page when it does not exist: a page route
+// whose url_or_id names no page creates that page, and the front page route creates a published
+// page and sets it as the front page when the course has none. Edit access changes only what
+// exists, so an Edit change on either route is sent with no review only after a fresh read of its
+// page finds it. A guarded content repair reads its page in Canvas before it sends anything.
+const CANVAS_PAGE_UPSERT_READS: ReadonlyMap<string, { readonly read: string; readonly target: readonly string[] }> = new Map([
+  ["canvas_update_create_page_courses", { read: "canvas_show_page_courses", target: ["course_id", "url_or_id"] }],
+  ["canvas_update_create_front_page_courses", { read: "canvas_show_front_page_courses", target: ["course_id"] }],
+]);
+
+function canvasPageFound(result: JsonObject): boolean {
+  if (result.isError === true || !isJsonObject(result.structuredContent)) return false;
+  const content = result.structuredContent;
+  const browser = content.schema === "morrow.canvas-connector.result.v1" && content.ok === true
+    && content.commandKind === "invoke_read" && isJsonObject(content.result) ? content.result : null;
+  return Boolean(browser && browser.ok === true && browser.sent === true
+    && isJsonObject(browser.data) && exactDecimalId(browser.data.page_id));
+}
 
 function browserEditFields(mapping: CatalogTool, request: JsonObject): readonly string[] {
   const pathFields = new Set([...(mappingOperationKey(mapping) || "").matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)]
@@ -1542,6 +1605,12 @@ const CONNECTOR_RECOVERY_DUPLICATE_LIMITATION = "Canvas holds more than one reco
 const CONNECTOR_RECOVERY_READ_ONLY_NOTE = "This check only reads Canvas. It never sends the change again.";
 const CONNECTOR_READBACK_NOT_SENT_LIMITATION = "Morrow has not sent this change to Canvas, so there is no saved result to check.";
 const PERSON_CLOSED_LIMITATION = "Morrow did not check this change itself. It is closed because a person read the item and confirmed the saved state.";
+const READBACK_MISMATCH_LIMITATION = "Morrow read Canvas again after this change, and Canvas does not hold the approved result. The request is closed as failed and Morrow will not send it again. Open the item in Canvas, then ask Morrow for a new review if it still needs the change.";
+
+/** A read verdict as the effect journal records it. Anything but a proof either way is unconfirmed. */
+function readbackOutcome(status: unknown): EffectReadbackOutcome {
+  return status === "verified" || status === "mismatch" ? status : "unconfirmed";
+}
 const PERSON_CLOSE_READ_REQUIRED_LIMITATION = "Read the item with Morrow first, then close this request with the digest that read returns. Morrow closes nothing on a description of the result.";
 
 function requestedNewQuizFromArguments(args: JsonObject): JsonObject {
@@ -1610,6 +1679,47 @@ function requestedJsonShapeMatches(actual: unknown, expected: unknown): boolean 
   if ((typeof expected === "string" || typeof expected === "number")
     && (typeof actual === "string" || typeof actual === "number")) return String(actual) === String(expected);
   return actual === expected;
+}
+
+/**
+ * What one complete fresh course New Quiz list proves about an unresolved New
+ * Quiz create or delete. Only a list that lacks the approved result proves a
+ * mismatch. A list that holds it and also changed in another way, such as a
+ * second copy Chrome sent on its own or a colleague's change at the same
+ * moment, cannot single this change out, so it stays unconfirmed.
+ * `readQuiz` answers null when the created quiz could not be read.
+ */
+export async function newQuizLifecycleRecoveryVerification(
+  lifecycle: NonNullable<CanvasRecoveryDescriptor["newQuizLifecycle"]>,
+  strategy: string,
+  afterIds: readonly string[],
+  readQuiz: (quizId: string) => Promise<unknown>,
+): Promise<JsonObject> {
+  const base = { schema: "morrow.browser-verification.v1", strategy };
+  const additions = afterIds.filter((id) => !lifecycle.beforeIds.includes(id));
+  const removals = lifecycle.beforeIds.filter((id) => !afterIds.includes(id));
+  if (lifecycle.kind === "delete") {
+    if (lifecycle.targetId && afterIds.includes(lifecycle.targetId)) {
+      return { ...base, status: "mismatch", reason: "new_quiz_delete_readback_mismatch" };
+    }
+    return additions.length === 0 && removals.length === 1 && removals[0] === lifecycle.targetId
+      ? { ...base, status: "verified", evidence: "complete_course_new_quiz_list_reread_after_restart" }
+      : { ...base, status: "unconfirmed", reason: "new_quiz_list_changed_concurrently" };
+  }
+  if (additions.length === 0) return { ...base, status: "mismatch", reason: "new_quiz_create_membership_mismatch" };
+  if (additions.length > 1) return { ...base, status: "unconfirmed", reason: "new_quiz_duplicate_effect_suspected" };
+  const quizId = additions[0]!;
+  const requested = lifecycle.requestedQuiz;
+  const created = requested ? await readQuiz(quizId) : null;
+  if (!requested || created === null || created === undefined) {
+    return { ...base, status: "unconfirmed", reason: "new_quiz_created_read_unavailable" };
+  }
+  if (!isJsonObject(created) || targetIdentityValue(created.id) !== quizId || !requestedJsonShapeMatches(created, requested)) {
+    return { ...base, status: "mismatch", reason: "new_quiz_create_readback_mismatch" };
+  }
+  return removals.length > 0
+    ? { ...base, status: "unconfirmed", reason: "new_quiz_list_changed_concurrently" }
+    : { ...base, status: "verified", evidence: "complete_course_quiz_list_and_created_quiz_reread_after_restart" };
 }
 
 function canvasRecoveryReadDescriptor(value: unknown): CanvasRecoveryRead | null {
@@ -2010,11 +2120,17 @@ export class GatewayRuntime {
   private approvalBaseUrl: string | null = null;
   private approvalPresence: BridgeUiApprovalPresence | null = null;
   /**
+   * Edit asked for in a conversation, waiting for the person's click on Morrow's review page. The
+   * review server turns one on only with Morrow Bridge's signature over that click.
+   */
+  readonly editAccessReviews = new EditAccessReviews((prepared, options) => this.applyBrowserEditAccess(prepared, options));
+  /**
    * Who each learner label on an open review is, keyed by review path, for Morrow Bridge only.
    * An entry ends with its review: when the change is cancelled, or 15 minutes after the review
    * page last showed it, the same lifetime as the page's approval cookie.
    */
   private readonly bridgeReviewLearnerNames = new Map<string, { readonly entry: BridgeUiLearnerNames; readonly expiresAt: number }>();
+  private learnerNamesExpiryTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * The requesting assistant for the tool call running on this async stack. One
    * runtime serves every connected assistant, so the identity travels with the
@@ -2610,6 +2726,24 @@ export class GatewayRuntime {
       this.bridgeReviewLearnerNames.delete(path);
     }
     this.pushBrowserUiState();
+    this.scheduleLearnerNamesExpiry();
+  }
+
+  /**
+   * Tells the Bridge when a review's names end, even when nothing else would push a new state
+   * then. Each push leaves out the names that have ended.
+   */
+  private scheduleLearnerNamesExpiry(): void {
+    if (this.learnerNamesExpiryTimer) clearTimeout(this.learnerNamesExpiryTimer);
+    this.learnerNamesExpiryTimer = null;
+    const next = Math.min(...[...this.bridgeReviewLearnerNames.values()].map(({ expiresAt }) => expiresAt));
+    if (!Number.isFinite(next)) return;
+    this.learnerNamesExpiryTimer = setTimeout(() => {
+      this.learnerNamesExpiryTimer = null;
+      this.pushBrowserUiState();
+      this.scheduleLearnerNamesExpiry();
+    }, Math.max(0, next - Date.now()));
+    this.learnerNamesExpiryTimer.unref?.();
   }
 
   private currentReviewLearnerNames(): readonly BridgeUiLearnerNames[] {
@@ -3272,19 +3406,22 @@ export class GatewayRuntime {
     additionalLimitations: readonly string[] = [],
   ): JsonObject {
     this.noteEffectState(record);
-    const verificationStatus = record.verificationStatus === "verified"
-      ? "verified"
+    const verificationStatus = record.verificationStatus === "verified" || record.verificationStatus === "mismatch"
+      ? record.verificationStatus
       : record.readback ? "unconfirmed" : "not_requested";
-    const stateLimitations = record.state === "awaiting_inner_approval"
-      ? ["The source still requires its own human approval. Morrow did not infer provider completion."]
-      : record.state === "awaiting_verification"
-        ? ["A fresh, frozen readback comparator is required before Morrow can report verified."]
-        : record.state === "applied_or_unknown"
-          ? ["Morrow will not replay this operation because the provider effect may have occurred."]
-          : record.state === "closed_by_person"
-            ? [PERSON_CLOSED_LIMITATION]
-            : [];
     const mapping = this.toolByPublicName.get(record.publicToolName);
+    const provider = mapping?.capability?.provider;
+    const stateLimitations = record.state === "failed" && record.verificationStatus === "mismatch"
+      ? [READBACK_MISMATCH_LIMITATION.replaceAll("Canvas", provider ? `${provider.slice(0, 1).toUpperCase()}${provider.slice(1)}` : "Canvas")]
+      : record.state === "awaiting_inner_approval"
+        ? ["The source still requires its own human approval. Morrow did not infer provider completion."]
+        : record.state === "awaiting_verification"
+          ? ["A fresh, frozen readback comparator is required before Morrow can report verified."]
+          : record.state === "applied_or_unknown"
+            ? ["Morrow will not replay this operation because the provider effect may have occurred."]
+            : record.state === "closed_by_person"
+              ? [PERSON_CLOSED_LIMITATION]
+              : [];
     const reviewAttention = record.state === "awaiting_approval"
       ? [
           `Review and approve: ${this.plainOperationLabel(record, mapping)} in ${this.operationCourseName(record)}`,
@@ -3509,10 +3646,45 @@ export class GatewayRuntime {
     const current = permission && !Array.isArray(permission.rules)
       ? await this.browserEditOptions(bindingsTool, binding, options)
       : binding;
+    const authorization = currentEditAuthorization(mapping, request, current);
     return {
-      authorization: currentEditAuthorization(mapping, request, current),
+      authorization: authorization.kind === "edit_scope" && await this.editChangeWouldCreatePage(mapping, request, options)
+        ? REVIEW_AUTHORIZATION
+        : authorization,
       bindingScope: this.effectBindingScope(mapping, request, current),
     };
+  }
+
+  /**
+   * True unless a fresh read finds the page an unguarded Edit change on a Canvas "Update/create
+   * page" route names. A read that fails for any reason counts as not found, so the change goes to
+   * review rather than risk a page Canvas creates.
+   */
+  private async editChangeWouldCreatePage(
+    mapping: CatalogTool,
+    request: JsonObject,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<boolean> {
+    const upsert = CANVAS_PAGE_UPSERT_READS.get(mapping.upstreamName);
+    const control = isJsonObject(request._morrow) ? request._morrow : {};
+    if (!upsert || control.canvas_content_guard !== undefined || control.page_guard !== undefined) return false;
+    const reads = this.catalog.tools.filter((candidate) => candidate.upstreamId === mapping.upstreamId
+      && candidate.upstreamName === upsert.read && candidate.annotations?.readOnlyHint === true
+      && candidate.capability?.route.backend === "canvas-connector");
+    const sourceBindingId = legacyRouting(request).sourceBindingId;
+    if (reads.length !== 1 || !sourceBindingId) return true;
+    const readArguments: JsonObject = { _morrow: { source_binding_id: sourceBindingId } };
+    for (const field of upsert.target) {
+      const value = request[field];
+      if (typeof value !== "string" || !value) return true;
+      readArguments[field] = value;
+    }
+    try {
+      return !canvasPageFound(this.resolveResultArtifact(await this.callSourceOwned(reads[0]!.publicName, readArguments, options)));
+    } catch {
+      options.signal?.throwIfAborted();
+      return true;
+    }
   }
 
   private async currentEffectAuthority(
@@ -3551,6 +3723,11 @@ export class GatewayRuntime {
    * the Bridge popup were waiting for the person's review.
    */
   private readonly browserReviewWaiting = new Set<string>();
+  /**
+   * The close-outs the assistant prepared, each waiting for the person's own click on the
+   * change's status page. Kept in memory only: after a restart the assistant prepares it again.
+   */
+  private readonly personCloseRequests = new Map<string, string | null>();
 
   /**
    * Tracks whether one operation just entered or left `awaiting_approval`. On
@@ -3715,11 +3892,12 @@ export class GatewayRuntime {
         || (category.learnerVisible !== undefined && typeof category.learnerVisible !== "boolean")
         || (category.routine !== undefined && typeof category.routine !== "boolean")
         || (category.rememberable !== undefined && typeof category.rememberable !== "boolean")
+        || (category.requiresFieldSelection !== undefined && category.requiresFieldSelection !== true)
         || available.has(category.id)) {
         throw new Error("The selected browser course categories changed. Read current course connections and try again.");
       }
-      // The confirmation a person accepts has to name what the settings page names, so the two
-      // flags its confirmation stage reads travel with the label instead of being dropped here.
+      // The Edit access review a person answers has to name what the settings page names, so the
+      // two flags its confirmation stage reads travel with the label instead of being dropped here.
       // The six WI-3.1 option facts (area, kind, reach, learnerVisible, routine, rememberable)
       // pass through the same way, for later work items that read a category's facts here.
       if (category.availability !== "review") {
@@ -3735,6 +3913,7 @@ export class GatewayRuntime {
           ...(category.learnerVisible !== undefined ? { learnerVisible: category.learnerVisible as boolean } : {}),
           ...(category.routine !== undefined ? { routine: category.routine as boolean } : {}),
           ...(category.rememberable !== undefined ? { rememberable: category.rememberable as boolean } : {}),
+          ...(category.requiresFieldSelection === true ? { requiresFieldSelection: true as const } : {}),
         });
       }
     }
@@ -3742,6 +3921,9 @@ export class GatewayRuntime {
       for (const id of input.enabledCategories ?? []) {
         const reason = this.browserEditCategoryUnavailableReason(provider, id);
         if (reason !== null) throw new EditCategoryUnavailableError(id, reason);
+        // A removal is turned on only by the person in Morrow Bridge settings, never from a conversation.
+        if (available.get(id)?.destructive === true) throw new EditCategoryUnavailableError(id, DESTRUCTIVE_EDIT_REFUSAL);
+        if (available.get(id)?.requiresFieldSelection === true) throw new EditCategoryUnavailableError(id, FIELD_SELECTION_EDIT_REFUSAL);
       }
     }
     const selectedIds = input.enabledCategories ? [...input.enabledCategories] : [];
@@ -3755,6 +3937,8 @@ export class GatewayRuntime {
     if (mode === "plan" && input.enabledCategories !== undefined) {
       throw new Error("Plan access does not accept Edit categories.");
     }
+    const currentGrant = mode === "edit" && isJsonObject(binding.editPermission) ? binding.editPermission : null;
+    const grantEndsAt = typeof currentGrant?.expiresAt === "number" && Number.isSafeInteger(currentGrant.expiresAt) ? currentGrant.expiresAt : undefined;
     return {
       sourceBindingId,
       provider,
@@ -3766,6 +3950,7 @@ export class GatewayRuntime {
       catalogDigest,
       expectedPolicyRevision,
       enabledCategories: enabledCategories.filter((category): category is BrowserEditAccessCategory => Boolean(category)),
+      ...(grantEndsAt !== undefined ? { grantEndsAt } : {}),
     };
   }
 
@@ -3790,6 +3975,18 @@ export class GatewayRuntime {
     return { mode, selections };
   }
 
+  /**
+   * Opens Morrow's Edit access review for a scope `prepareBrowserEditAccess` already checked. It
+   * saves nothing: only the person's signed click on that review page does.
+   */
+  createEditAccessReview(prepared: BrowserEditAccessPrepared): JsonObject {
+    return this.editAccessReviews.create(prepared, this.approvalBaseUrl);
+  }
+
+  editAccessReviewResult(editAccessId: string): JsonObject {
+    return this.editAccessReviews.result(editAccessId);
+  }
+
   async applyBrowserEditAccess(
     prepared: BrowserEditAccessPrepared,
     options: { readonly merge?: true } = {},
@@ -3806,8 +4003,9 @@ export class GatewayRuntime {
     if (!source || !upstream) throw new Error("The current browser connection is unavailable.");
     const command = {
       mode: prepared.mode,
-      // `merge` is for rememberKind's own grant only (WI-4.3): every other caller of this method
-      // omits it, and the Bridge still replaces the category list then (F6).
+      // `merge` adds the sent kinds to the course's current grant, so nothing the person turned on
+      // ends. rememberKind (WI-4.3) and the Edit access review send it; without it the Bridge
+      // replaces the category list (F6).
       ...(prepared.mode === "edit" && options.merge ? { merge: true as const } : {}),
       selections: prepared.selections.map((selection) => ({
         sourceBindingId: selection.sourceBindingId,
@@ -3821,8 +4019,7 @@ export class GatewayRuntime {
     try {
       result = await upstream.callTool("morrow_browser_edit_policy_set", command, { safeToRetry: false });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      outcome = message.includes("disconnected before dispatch") ? "not_sent" : "unknown";
+      outcome = error instanceof UpstreamNotDispatchedError ? "not_sent" : "unknown";
       const latest = await this.currentEditAccessBindings(selectedIds).catch(() => ({ bindings: [] as readonly JsonObject[] }));
       return { mode: prepared.mode, command: null, bindings: latest.bindings, outcome };
     }
@@ -3953,10 +4150,26 @@ export class GatewayRuntime {
     // The Bridge asks once per message for the labels of the students it names,
     // then answers the labels exchange with the protected message.
     for (let round = 0; round < 2; round += 1) {
-      const raw = await upstream.callTool("morrow_private_chat_exchange", request, { safeToRetry: false, signal });
+      let raw: unknown;
+      try {
+        raw = await upstream.callTool("morrow_private_chat_exchange", request, { safeToRetry: false, signal, timeoutMs: PRIVATE_CHAT_EXCHANGE_TIMEOUT_MS });
+      } catch (error) {
+        // The SDK reports a cancelled request with the timeout code too, so a cancel is not a wait that ended.
+        if (error instanceof SdkError && error.code === SdkErrorCode.RequestTimeout && !signal?.aborted) {
+          throw new PrivateChatWaitEndedError();
+        }
+        throw error;
+      }
       const result = isJsonObject(raw) && isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
       if (!result || result.schema !== "morrow.private-chat.exchange.v1") throw new Error("The Private Chat relay returned an invalid result.");
+      if (result.status === "error" && isJsonObject(result.problem) && result.problem.code === "private_chat_wait_expired") {
+        throw new PrivateChatWaitEndedError();
+      }
+      if (result.status === "error") {
+        throw new PrivateChatBridgeProblemError(isJsonObject(result.problem) && typeof result.problem.code === "string" ? result.problem.code : "");
+      }
       if (result.status === "closed" && Object.keys(result).every((key) => ["schema", "status"].includes(key))) return result;
+      if (input.action === "reply_at_limit") throw new Error("The Private Chat relay did not end the chat at its limit.");
       if (result.status === "labels_required" && round === 0) {
         const learnerIds = result.learnerIds;
         if (Object.keys(result).some((key) => !["schema", "status", "sessionId", "sourceBindingId", "courseId", "learnerIds"].includes(key))
@@ -6632,6 +6845,28 @@ export class GatewayRuntime {
     return candidate;
   }
 
+  /** The course names the course list already projected for its connections, oldest dropped past this bound. */
+  private projectedCourseNames = new Map<string, string>();
+
+  private noteProjectedCourseName(sourceBindingId: string, courseName: string): void {
+    this.projectedCourseNames.delete(sourceBindingId);
+    this.projectedCourseNames.set(sourceBindingId, courseName);
+    while (this.projectedCourseNames.size > 500) {
+      this.projectedCourseNames.delete(this.projectedCourseNames.keys().next().value!);
+    }
+  }
+
+  /**
+   * The projected course name the course list tool already computed for one
+   * connection, keyed by its `sourceBindingId`. A miss names nothing: the
+   * caller shows the connection without a course name rather than serving the
+   * Bridge's raw courseName.
+   */
+  connectionCourseName(sourceBindingId: string | null): string | null {
+    if (!sourceBindingId) return null;
+    return this.projectedCourseNames.get(sourceBindingId) ?? null;
+  }
+
   private async publicBrowserBindingMetadata(
     mapping: CatalogTool,
     binding: BridgeBinding,
@@ -6652,6 +6887,10 @@ export class GatewayRuntime {
       const courseName = redactLearnerEgress(binding.courseName, context);
       if (typeof courseName !== "string") throw new Error("privacy_browser_bindings_invalid");
       output.courseName = courseName;
+      // A course name the course list already projected is what the review
+      // server's pages may name this connection by: a cheap, already-known
+      // lookup of the connections a person has open now, never a fresh read.
+      if (sourceBindingId) this.noteProjectedCourseName(sourceBindingId, courseName);
     } catch (error) {
       if (options.signal?.aborted) throw error;
       // A connection id remains usable without free-text metadata. Do not
@@ -6715,7 +6954,8 @@ export class GatewayRuntime {
     if (!bindingTool) throw new Error("learner_roster_source_unavailable");
     const bindings = await this.callSourceOwned(bindingTool.publicName, {}, options);
     if (bindings.isError === true) throw new Error("privacy_edit_options_bindings_source_failed");
-    const matches = browserBindingContent(bindings).filter((binding) => {
+    const listed = browserBindingContent(bindings);
+    const matches = listed.filter((binding) => {
       const provider = this.exactString(binding.provider, 30);
       return binding.runtimeVerified === true
         && binding.sourceBindingId === sourceBindingId
@@ -6732,8 +6972,45 @@ export class GatewayRuntime {
         && Number.isSafeInteger(binding.editPolicyRevision)
         && Number(binding.editPolicyRevision) >= 0;
     });
-    if (matches.length !== 1) throw new Error("privacy_edit_options_binding_mismatch");
+    if (matches.length !== 1) {
+      const named = listed.filter((binding) => binding.sourceBindingId === sourceBindingId);
+      throw await this.missingBrowserBindingReason(mapping, listed, new Error(named.length === 0
+        ? "privacy_browser_binding_missing"
+        : named.length === 1 && named[0]!.runtimeVerified !== true
+          ? "privacy_browser_binding_unverified"
+          : "privacy_edit_options_binding_mismatch"), options);
+    }
     return matches[0]!;
+  }
+
+  /**
+   * Morrow Bridge lists no connection while it is not connected to this Morrow, so a connection
+   * that is missing for that reason is named as the Bridge: connecting the course cannot help yet.
+   * The connector's health is read only on this failure path.
+   */
+  private async missingBrowserBindingReason(
+    mapping: CatalogTool,
+    listed: readonly JsonObject[],
+    error: unknown,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<unknown> {
+    if (!(error instanceof Error) || error.message !== "privacy_browser_binding_missing" || listed.length > 0) return error;
+    const healthTools = this.catalog.tools.filter((candidate) => (
+      candidate.upstreamId === mapping.upstreamId && this.isBrowserConnectorHealth(candidate)
+    ));
+    if (healthTools.length !== 1) return error;
+    try {
+      const raw = await this.callSourceOwned(healthTools[0]!.publicName, {}, options);
+      const health = raw.isError !== true && isJsonObject(raw.structuredContent)
+        && raw.structuredContent.schema === "morrow.canvas-connector.health.v1" ? raw.structuredContent : null;
+      const bridge = health && isJsonObject(health.bridge) && health.bridge.schema === "morrow.bridge.health.v1" ? health.bridge : null;
+      if (bridge?.connected !== false) return error;
+      return new Error(isJsonObject(bridge.problem) && bridge.problem.code === "bridge_port_in_use"
+        ? "privacy_browser_bridge_port_in_use"
+        : "privacy_browser_bridge_not_connected");
+    } catch {
+      return error;
+    }
   }
 
   private canonicalBrowserEditOptions(
@@ -6805,7 +7082,12 @@ export class GatewayRuntime {
     if (!bindingTool) throw new Error("learner_roster_source_unavailable");
     const bindings = await this.callSourceOwned(bindingTool.publicName, {}, options);
     if (bindings.isError === true) throw new Error("learner_roster_binding_unavailable");
-    return this.matchVerifiedBrowserBinding(browserBindingContent(bindings), request, expectedProvider);
+    const listed = browserBindingContent(bindings);
+    try {
+      return this.matchVerifiedBrowserBinding(listed, request, expectedProvider);
+    } catch (error) {
+      throw await this.missingBrowserBindingReason(mapping, listed, error, options);
+    }
   }
 
   private matchVerifiedBrowserBinding(
@@ -6843,6 +7125,9 @@ export class GatewayRuntime {
       if (named.length === 0 && connection.length === 1 && connection[0]!.runtimeVerified === true) {
         throw new Error("canvas_course_not_connected");
       }
+      // Morrow Bridge holds no connection by this name: the course was never connected here, was
+      // disconnected, or Morrow Bridge itself is not connected and so lists none.
+      if (connection.length === 0) throw new Error("privacy_browser_binding_missing");
       throw new Error(named.length === 1 && named[0]!.runtimeVerified !== true
         ? "privacy_browser_binding_unverified"
         : "learner_roster_binding_unavailable");
@@ -7228,11 +7513,14 @@ export class GatewayRuntime {
       || mapping.annotations?.readOnlyHint !== true
       || mapping.capability?.provider !== "canvas"
       || !isCanvasConnector(mapping)) return raw;
+    // A read the source could not make carries no Course. It crosses as the source's own sanitized
+    // reason, the same as every other read, so the person is told what to do next.
+    if (raw.isError === true) return raw;
     const courseId = this.exactString(request.id, 19);
     const structured = isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
     const result = structured && isJsonObject(structured.result) ? structured.result : null;
     const course = result && isJsonObject(result.data) ? result.data : null;
-    if (raw.isError === true || !courseId || !/^[1-9][0-9]{0,18}$/u.test(courseId)
+    if (!courseId || !/^[1-9][0-9]{0,18}$/u.test(courseId)
       || !structured || structured.schema !== "morrow.canvas-connector.result.v1"
       || structured.ok !== true || structured.provider !== "canvas" || structured.commandKind !== "invoke_read"
       || !result || result.ok !== true || result.sent !== true || result.truncated !== false
@@ -7809,8 +8097,9 @@ export class GatewayRuntime {
     }) as JsonObject;
   }
 
-  private operationVerificationStatus(record: EffectOperationRecord): "not_requested" | "unconfirmed" | "verified" {
+  private operationVerificationStatus(record: EffectOperationRecord): "not_requested" | "unconfirmed" | "verified" | "mismatch" {
     return record.verificationStatus === "verified" || record.verificationStatus === "unconfirmed"
+      || record.verificationStatus === "mismatch"
       ? record.verificationStatus
       : "not_requested";
   }
@@ -8020,6 +8309,19 @@ export class GatewayRuntime {
     try {
       return await this.scopedNativeEgress(value, this.egressRequest(request), options);
     } catch {
+      // A prepared close-out still names the change's status page, which is local and holds no
+      // course content, so the person can be sent there.
+      if (options.toolName === "morrow_operation_close_unresolved" && value.isError !== true
+        && this.personCloseRequests.has(record.operationId)) {
+        return canonicalMorrowResult({
+          operationId: record.operationId,
+          tool: "morrow_operation_close_unresolved",
+          phase: "person_close_requested",
+          effectState: record.state,
+          verificationStatus: this.operationVerificationStatus(record),
+          result: this.personCloseRequestAnswer(record, null),
+        });
+      }
       return this.historicalOperationControlResult(record, options.toolName || "morrow_operation_get");
     }
   }
@@ -8158,7 +8460,12 @@ export class GatewayRuntime {
       const sourceBindingId = this.requestSourceBindingId(selection);
       const courseId = this.requestCourseId(selection);
       if (!sourceBindingId || !courseId) throw new Error("learner_roster_binding_unavailable");
-      const binding = this.matchVerifiedBrowserBinding(bindings, selection, provider);
+      let binding: JsonObject;
+      try {
+        binding = this.matchVerifiedBrowserBinding(bindings, selection, provider);
+      } catch (error) {
+        throw await this.missingBrowserBindingReason(mapping, bindings, error, options);
+      }
       const contextKey = this.inventoryContextKey(mapping, provider, binding, sourceBindingId, courseId);
       const pending = pendingContexts.get(contextKey);
       if (pending) pending.selectionKeys.push(selectionKey);
@@ -9330,14 +9637,14 @@ export class GatewayRuntime {
         const readbackSettled = this.effects.recordReadback(
           settled.operationId,
           readbackDigest,
-          verified,
+          readbackOutcome(verification.status),
           resultBindingEnvelope ? { ...resultBindingEnvelope } : undefined,
         );
-        return this.effectResult(
+        return this.readbackResult(
           readbackSettled,
-          verified ? "verified_readback" : "readback_unconfirmed",
           result,
-          !verified && verification.reason === "no_safe_readback_route" ? [CANVAS_UNCHECKABLE_CHANGE_LIMITATION] : [],
+          result,
+          verification.reason === "no_safe_readback_route" ? [CANVAS_UNCHECKABLE_CHANGE_LIMITATION] : [],
         );
       }
       return this.verifyOperation(settled.operationId);
@@ -9408,6 +9715,10 @@ export class GatewayRuntime {
 
   async verifyOperation(operationId: string): Promise<JsonObject> {
     const operation = this.effects.get(operationId);
+    // A read already proved this change did not save as approved. It is settled and not read again.
+    if (operation.state === "failed" && operation.verificationStatus === "mismatch") {
+      return this.effectResult(operation, "readback_mismatch");
+    }
     if (!operation.readback) {
       return this.effectResult(operation, "verification_unsupported");
     }
@@ -9451,12 +9762,15 @@ export class GatewayRuntime {
     const fresh = this.resolveResultArtifact(await this.callSourceOwned(mapping.publicName, readbackArguments));
     if (fresh.isError === true) return this.effectResult(operation, "verification_failed", fresh);
     const readbackDigest = sha256Json(resultComparable(fresh));
+    // A Blackboard comparator answers only whether it found the reviewed result. It says false
+    // for a copy still running and for a create it cannot tell from an older item, so a false
+    // answer proves nothing either way.
     const settled = this.effects.recordReadback(
       operation.operationId,
       readbackDigest,
-      readbackDigest === operation.readback.expectedDigest,
+      readbackDigest === operation.readback.expectedDigest ? "verified" : "unconfirmed",
     );
-    return this.effectResult(settled, "verified_readback", fresh);
+    return this.readbackResult(settled, fresh, fresh, []);
   }
 
   async settleInnerOperation(
@@ -9471,6 +9785,9 @@ export class GatewayRuntime {
 
   async reconcileOperation(operationId: string): Promise<JsonObject> {
     const operation = this.effects.get(operationId);
+    if (operation.state === "failed" && operation.verificationStatus === "mismatch") {
+      return this.effectResult(operation, "readback_mismatch");
+    }
     const effectMapping = this.toolByPublicName.get(operation.publicToolName);
     if (effectMapping && isCanvasConnector(effectMapping) && !hasExactConnectorReadbackPolicy(operation, effectMapping)) {
       return this.effectResult(operation, "reconciliation_requires_provider_evidence");
@@ -9649,42 +9966,136 @@ export class GatewayRuntime {
   }
 
   /**
-   * Closes one unresolved change after a person checked the item themselves.
-   * Morrow sends nothing here and confirms nothing here: the record keeps its
-   * unconfirmed verification status, and the close-out is refused unless it
-   * carries an explicit person confirmation and the exact digest of a fresh
-   * Morrow read. It is the exit for a change Morrow has no way to check.
+   * Prepares the close-out of one unresolved change a person checked themselves. It closes
+   * nothing: the assistant cannot say for a person that they checked the item. The change's
+   * status page then offers the person the close-out, and only their own click there, signed by
+   * Morrow Bridge, closes it (`confirmPersonClose`). A change Morrow can read back must first be
+   * read with Morrow, and the close-out carries the exact digest of that fresh read.
    */
-  async closeUnresolvedOperation(
+  async requestPersonClose(
     operationId: string,
-    observedState: string,
-    confirmedByPerson: boolean,
+    observedState: string | undefined,
     options: { readonly signal?: AbortSignal } = {},
   ): Promise<JsonObject> {
+    const operation = this.effects.get(operationId);
+    const checked = await this.personCloseEvidence(operation, observedState, "morrow_operation_close_unresolved", options);
+    if ("refused" in checked) return checked.refused;
+    this.personCloseRequests.set(operation.operationId, checked.observedState ?? null);
+    return this.effectResult(operation, "person_close_requested", this.personCloseRequestAnswer(operation, checked.evidence?.publicToolName ?? null));
+  }
+
+  private personCloseRequestAnswer(operation: EffectOperationRecord, readTool: string | null): JsonObject {
+    const statusUrl = this.approvalUrl(operation.operationId);
+    const provider = this.toolByPublicName.get(operation.publicToolName)?.capability?.provider;
+    const platform = provider ? `${provider.slice(0, 1).toUpperCase()}${provider.slice(1)}` : "Canvas";
+    return {
+      content: [{
+        type: "text",
+        text: `Morrow has not closed this request. Give the person the link in statusUrl. On that page they confirm with their own click that they checked the item in ${platform}, and only that closes the request. Morrow sends nothing.`,
+      }],
+      structuredContent: {
+        schema: "morrow.operation-person-close-request.v1",
+        ...(statusUrl ? { statusUrl } : {}),
+        readTool,
+      },
+    };
+  }
+
+  /** Whether the status page of this change offers the person its close-out now. */
+  personCloseAvailable(operationId: string): boolean {
+    let operation: EffectOperationRecord;
+    try {
+      operation = this.effects.get(operationId);
+    } catch {
+      return false;
+    }
+    if (!["awaiting_verification", "applied_or_unknown"].includes(operation.state)) return false;
+    // A change with no reading of its own has only the person's check as evidence, so the page
+    // offers it. A change Morrow can read back waits until the assistant brings a fresh read.
+    return !this.capabilityCloseReadsBack(operation.publicToolName) || this.personCloseRequests.has(operation.operationId);
+  }
+
+  /**
+   * Closes one unresolved change after a person's own click on its status page, which the
+   * review server accepts only with Morrow Bridge's signature. Morrow sends nothing and confirms
+   * nothing here: the record keeps its unconfirmed verification status.
+   */
+  async confirmPersonClose(
+    operationId: string,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<JsonObject> {
+    const operation = this.effects.get(operationId);
+    const requested = this.personCloseRequests.get(operation.operationId);
+    const checked = await this.personCloseEvidence(operation, requested ?? undefined, "morrow_person_close", options);
+    if ("refused" in checked) return checked.refused;
+    this.personCloseRequests.delete(operation.operationId);
+    if (!checked.evidence) {
+      // The person's own check is the only evidence, so the close records what they confirmed.
+      const confirmed = checked.observedState
+        ?? sha256Json({ schema: "morrow.person-close-confirmation.v1", operationId: operation.operationId, confirmedAt: new Date().toISOString() });
+      const closedWithoutRead = this.effects.closeWithoutReadableResult(operation.operationId, confirmed);
+      return this.effectResult(closedWithoutRead, "closed_by_person", {
+        content: [{
+          type: "text",
+          text: "Morrow closed this request because the person checked the saved state themselves. Morrow has no reading of its own that could settle this change, so Morrow confirmed nothing, and it will not send it again.",
+        }],
+        structuredContent: {
+          schema: "morrow.operation-person-close.v1",
+          observedState: confirmed,
+          readTool: null,
+          resentWrite: false,
+        },
+      });
+    }
+    const closed = this.effects.closeAfterPersonCheck(operation.operationId, checked.observedState!, checked.evidence.preparedCausalSequence!);
+    return this.effectResult(closed, "closed_by_person", {
+      content: [{
+        type: "text",
+        text: "Morrow closed this request because the person checked the saved state themselves. Morrow did not confirm the change, and it will not send it again.",
+      }],
+      structuredContent: {
+        schema: "morrow.operation-person-close.v1",
+        observedState: checked.observedState!,
+        readTool: checked.evidence.publicToolName,
+        readAt: checked.evidence.createdAt,
+        resentWrite: false,
+      },
+    });
+  }
+
+  /**
+   * What a close-out of this change may rest on: nothing but the person's check for a change
+   * Morrow cannot read back, or the exact digest of a successful Morrow read of this item, course,
+   * browser connection and sign-in made after the change was sent.
+   */
+  private async personCloseEvidence(
+    operation: EffectOperationRecord,
+    observedState: string | undefined,
+    tool: string,
+    options: { readonly signal?: AbortSignal },
+  ): Promise<
+    | { readonly refused: JsonObject }
+    | { readonly observedState: string | undefined; readonly evidence: GatewayOperationRecord | null }
+  > {
     const refused = (
       code: string,
       text: string,
       detail: JsonObject = {},
       limitations: readonly string[] = [],
-    ): JsonObject => canonicalMorrowResult({
-      operationId,
-      tool: "morrow_operation_close_unresolved",
-      phase: "rejected",
-      verificationStatus: "not_requested",
-      ...(limitations.length ? { limitations: [...limitations] } : {}),
-      result: {
-        content: [{ type: "text", text }],
-        isError: true,
-        structuredContent: { schema: "morrow.problem.v1", code, recoverable: true, ...detail },
-      },
+    ) => ({
+      refused: canonicalMorrowResult({
+        operationId: operation.operationId,
+        tool,
+        phase: "rejected",
+        verificationStatus: "not_requested",
+        ...(limitations.length ? { limitations: [...limitations] } : {}),
+        result: {
+          content: [{ type: "text", text }],
+          isError: true,
+          structuredContent: { schema: "morrow.problem.v1", code, recoverable: true, ...detail },
+        },
+      }),
     });
-    if (confirmedByPerson !== true) {
-      return refused(
-        "person_confirmation_required",
-        "Morrow closes an unresolved change only when a person says they checked the saved state themselves.",
-      );
-    }
-    const operation = this.effects.get(operationId);
     if (!["awaiting_verification", "applied_or_unknown"].includes(operation.state)) {
       return refused(
         "operation_not_unresolved",
@@ -9692,60 +10103,27 @@ export class GatewayRuntime {
         { effectState: operation.state },
       );
     }
-    // A change whose route offers the person no reading Morrow could accept has
-    // only their own check as evidence, so it is what closes the change. Every
-    // change Morrow can read back this way still needs that reading.
-    if (!this.capabilityCloseReadsBack(operation.publicToolName)) {
-      const closedWithoutRead = this.effects.closeWithoutReadableResult(operation.operationId, observedState);
-      return this.effectResult(closedWithoutRead, "closed_by_person", {
-        content: [{
-          type: "text",
-          text: "Morrow closed this request because you checked the saved state yourself. Morrow has no reading of its own that could settle this change, so Morrow confirmed nothing, and it will not send it again.",
-        }],
-        structuredContent: {
-          schema: "morrow.operation-person-close.v1",
-          observedState,
-          readTool: null,
-          resentWrite: false,
-        },
-      });
+    if (observedState !== undefined && !/^[0-9a-f]{64}$/u.test(observedState)) {
+      return refused("observed_state_invalid", "observed_state must be the SHA-256 digest a fresh Morrow read returned.");
     }
+    // A change whose route offers no reading Morrow could accept has only the person's own
+    // check as evidence. Every change Morrow can read back still needs that reading.
+    if (!this.capabilityCloseReadsBack(operation.publicToolName)) return { observedState, evidence: null };
+    const readRequired = [
+      "observed_state_not_from_fresh_read",
+      "That digest does not match a successful Morrow read of this exact item, course, browser connection and sign-in made after the change was sent. Read the item with Morrow again and close this request with the digest that read returns.",
+      {},
+      [PERSON_CLOSE_READ_REQUIRED_LIMITATION],
+    ] as const;
+    if (observedState === undefined) return refused(...readRequired);
     const evidence = this.freshReadEvidence(operation, observedState)
       ?? this.freshReadEvidence(
         operation,
         observedState,
         await this.historicalProviderScope(operation, options) ?? undefined,
       );
-    if (!evidence) {
-      return refused(
-        "observed_state_not_from_fresh_read",
-        "That digest does not match a successful Morrow read of this exact item, course, browser connection and sign-in made after the change was sent. Read the item with Morrow again and close this request with the digest that read returns.",
-        {},
-        [PERSON_CLOSE_READ_REQUIRED_LIMITATION],
-      );
-    }
-    if (!evidence.preparedCausalSequence) {
-      return refused(
-        "observed_state_not_from_fresh_read",
-        "That digest does not match a successful Morrow read of this exact item, course, browser connection and sign-in made after the change was sent. Read the item with Morrow again and close this request with the digest that read returns.",
-        {},
-        [PERSON_CLOSE_READ_REQUIRED_LIMITATION],
-      );
-    }
-    const closed = this.effects.closeAfterPersonCheck(operationId, observedState, evidence.preparedCausalSequence);
-    return this.effectResult(closed, "closed_by_person", {
-      content: [{
-        type: "text",
-        text: "Morrow closed this request because you checked the saved state yourself. Morrow did not confirm the change, and it will not send it again.",
-      }],
-      structuredContent: {
-        schema: "morrow.operation-person-close.v1",
-        observedState,
-        readTool: evidence.publicToolName,
-        readAt: evidence.createdAt,
-        resentWrite: false,
-      },
-    });
+    if (!evidence?.preparedCausalSequence) return refused(...readRequired);
+    return { observedState, evidence };
   }
 
   /** The read-only source tool a non-connector route declares as its review read, or null. */
@@ -9791,10 +10169,14 @@ export class GatewayRuntime {
     if (fresh.isError === true) return this.effectResult(operation, "verification_failed", fresh);
     const observed = isJsonObject(fresh.structuredContent) ? fresh.structuredContent : null;
     const requested = requestedReadbackFields(request, identityKeys);
-    const verified = observed !== null && requested.length > 0
-      && requested.every(([key, value]) => Object.hasOwn(observed, key) && sha256Json(observed[key]) === sha256Json(value));
-    const settled = this.effects.recordReadback(operation.operationId, sha256Json(resultComparable(fresh)), verified);
-    return this.effectResult(settled, "verified_readback", fresh);
+    // Only a read that holds every requested field can prove anything; one that lacks a field
+    // proves neither the change nor its absence.
+    const complete = observed !== null && requested.length > 0 && requested.every(([key]) => Object.hasOwn(observed, key));
+    const outcome: EffectReadbackOutcome = !complete
+      ? "unconfirmed"
+      : requested.every(([key, value]) => sha256Json(observed![key]) === sha256Json(value)) ? "verified" : "mismatch";
+    const settled = this.effects.recordReadback(operation.operationId, sha256Json(resultComparable(fresh)), outcome);
+    return this.readbackResult(settled, fresh, fresh, []);
   }
 
   private async connectorReadbackReconciliationResult(operation: EffectOperationRecord): Promise<JsonObject> {
@@ -9960,14 +10342,9 @@ export class GatewayRuntime {
     const settled = this.effects.recordReadback(
       operation.operationId,
       sha256Json(verdict.verification),
-      verdict.verification.status === "verified",
+      readbackOutcome(verdict.verification.status),
     );
-    return verdict.verification.status === "verified"
-      ? this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE])
-      : this.effectResult(settled, "readback_unconfirmed", { structuredContent: evidence }, [
-        CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION,
-        CONNECTOR_RECOVERY_READ_ONLY_NOTE,
-      ]);
+    return this.recoveryReadbackResult(settled, evidence);
   }
 
   /**
@@ -10008,14 +10385,35 @@ export class GatewayRuntime {
     const settled = this.effects.recordReadback(
       operation.operationId,
       sha256Json(verification),
-      verification.status === "verified",
+      readbackOutcome(verification.status),
     );
-    return verification.status === "verified"
-      ? this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE])
-      : this.effectResult(settled, "readback_unconfirmed", { structuredContent: evidence }, [
-        CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION,
-        CONNECTOR_RECOVERY_READ_ONLY_NOTE,
-      ]);
+    return this.recoveryReadbackResult(settled, evidence);
+  }
+
+  /**
+   * The answer to a recorded readback, named by what the read showed: the approved result, a
+   * different saved result, or nothing Morrow could compare. The three are never reported as one.
+   */
+  private readbackResult(
+    record: EffectOperationRecord,
+    verifiedResult: JsonObject | undefined,
+    unsettledResult: JsonObject | undefined,
+    unconfirmedLimitations: readonly string[],
+    notes: readonly string[] = [],
+  ): JsonObject {
+    if (record.verificationStatus === "verified") return this.effectResult(record, "verified_readback", verifiedResult, notes);
+    if (record.verificationStatus === "mismatch") return this.effectResult(record, "readback_mismatch", unsettledResult, notes);
+    return this.effectResult(record, "readback_unconfirmed", unsettledResult, [...unconfirmedLimitations, ...notes]);
+  }
+
+  private recoveryReadbackResult(record: EffectOperationRecord, evidence: JsonObject): JsonObject {
+    return this.readbackResult(
+      record,
+      this.canvasRecoveryOutcome(evidence),
+      { structuredContent: evidence },
+      [CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION],
+      [CONNECTOR_RECOVERY_READ_ONLY_NOTE],
+    );
   }
 
   private canvasRecoveryOutcome(evidence: JsonObject): JsonObject {
@@ -10139,36 +10537,18 @@ export class GatewayRuntime {
         const afterIds = rows ? rows.map((row) => isJsonObject(row) && targetIdentityValue(row.id)).filter((id): id is string => Boolean(id)) : [];
         let verification: JsonObject = { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: descriptor.strategy, reason: "complete_new_quiz_list_unavailable" };
         if (rows && afterIds.length === rows.length && new Set(afterIds).size === afterIds.length) {
-          const compareExactIds = (left: string, right: string): number => left.length - right.length || (left < right ? -1 : left > right ? 1 : 0);
-          const sortedAfter = [...afterIds].sort(compareExactIds);
-          const sortedBefore = [...lifecycle.beforeIds].sort(compareExactIds);
-          if (lifecycle.kind === "delete") {
-            const expected = sortedBefore.filter((id) => id !== lifecycle.targetId);
-            verification = sortedAfter.length === expected.length && sortedAfter.every((id, index) => id === expected[index])
-              ? { schema: "morrow.browser-verification.v1", status: "verified", strategy: descriptor.strategy, evidence: "complete_course_new_quiz_list_reread_after_restart" }
-              : { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: descriptor.strategy, reason: "new_quiz_delete_readback_mismatch" };
-          } else {
-            const additions = sortedAfter.filter((id) => !sortedBefore.includes(id));
-            const removals = sortedBefore.filter((id) => !sortedAfter.includes(id));
-            if (sortedAfter.length === sortedBefore.length + 1 && additions.length === 1 && removals.length === 0
-              && lifecycle.getTool && lifecycle.requestedQuiz) {
-              const created = await this.canvasRecoveryRead({ readTool: lifecycle.getTool, arguments: {
-                course_id: String(descriptor.collection.arguments.course_id), assignment_id: additions[0]!,
-              } }, operation.sourceBindingId);
-              verification = created && isJsonObject(created.data) && targetIdentityValue(created.data.id) === additions[0]
-                && requestedJsonShapeMatches(created.data, lifecycle.requestedQuiz)
-                ? { schema: "morrow.browser-verification.v1", status: "verified", strategy: descriptor.strategy, evidence: "complete_course_quiz_list_and_created_quiz_reread_after_restart" }
-                : { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: descriptor.strategy, reason: "new_quiz_create_readback_mismatch" };
-            } else {
-              verification = { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: descriptor.strategy, reason: "new_quiz_create_membership_mismatch" };
-            }
-          }
+          const courseId = String(descriptor.collection.arguments.course_id);
+          const getTool = lifecycle.getTool;
+          verification = await newQuizLifecycleRecoveryVerification(lifecycle, descriptor.strategy, afterIds, async (quizId) => {
+            const created = getTool ? await this.canvasRecoveryRead({ readTool: getTool, arguments: {
+              course_id: courseId, assignment_id: quizId,
+            } }, operation.sourceBindingId) : null;
+            return created ? created.data : null;
+          });
         }
         evidence.verification = verification;
-        const settled = this.effects.recordReadback(operation.operationId, sha256Json(verification), verification.status === "verified");
-        return verification.status === "verified"
-          ? this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE])
-          : this.effectResult(settled, "readback_unconfirmed", { structuredContent: evidence }, [CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION, CONNECTOR_RECOVERY_READ_ONLY_NOTE]);
+        const settled = this.effects.recordReadback(operation.operationId, sha256Json(verification), readbackOutcome(verification.status));
+        return this.recoveryReadbackResult(settled, evidence);
       }
       scan = collection
         ? this.canvasDuplicateScan(descriptor, collection, window)
@@ -10231,14 +10611,9 @@ export class GatewayRuntime {
       const settled = this.effects.recordReadback(
         operation.operationId,
         sha256Json(outcome),
-        outcome.status === "verified",
+        readbackOutcome(outcome.status),
       );
-      return outcome.status === "verified"
-        ? this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE])
-        : this.effectResult(settled, "readback_unconfirmed", { structuredContent: evidence }, [
-          CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION,
-          CONNECTOR_RECOVERY_READ_ONLY_NOTE,
-        ]);
+      return this.recoveryReadbackResult(settled, evidence);
     }
     if (scan?.outcome === "single" && descriptor.collection) {
       const verification = {
@@ -10249,7 +10624,7 @@ export class GatewayRuntime {
         evidence: "fresh_collection_holds_one_record_created_in_operation_window",
       };
       evidence.verification = structuredClone(verification) as unknown as JsonObject;
-      const settled = this.effects.recordReadback(operation.operationId, sha256Json(verification), true);
+      const settled = this.effects.recordReadback(operation.operationId, sha256Json(verification), "verified");
       return this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE]);
     }
     return this.effectResult(operation, "readback_unconfirmed", { structuredContent: evidence }, [
@@ -10264,7 +10639,7 @@ export class GatewayRuntime {
     correctionArguments: Readonly<Record<string, unknown>>,
   ): JsonObject {
     const original = this.effects.get(operationId);
-    if (!CORRECTABLE_EFFECT_OPERATION_STATES.has(original.state)) {
+    if (!isCorrectableEffectOperation(original)) {
       throw new Error("Only an operation Morrow may have sent can take a correction");
     }
     const mapping = this.toolByPublicName.get(correctionTool);
@@ -10500,6 +10875,23 @@ export class GatewayRuntime {
         },
       }, mapping, this.catalog.digest, failed, this.config.profile);
     }
+    const safeToRetry = mapping.upstreamId === "meridian" && mapping.annotations?.readOnlyHint === true;
+    // A source that closed while this call prepared is refused here, before the operation is marked
+    // dispatched, because callTool would refuse it without sending. Nothing awaits between this
+    // check and callTool, so the connection cannot close in between.
+    if (!safeToRetry && !upstream.health().connected) {
+      const failed = this.journal.recordFailedBeforeSend(prepared.record.operationId, new UpstreamNotDispatchedError(upstream.id));
+      return attachOperationMeta({
+        content: [{ type: "text", text: `The source for ${publicName} is not connected right now. Morrow did not send this request.` }],
+        isError: true,
+        structuredContent: {
+          schema: "morrow.problem.v1",
+          code: "upstream_unavailable",
+          recoverable: true,
+          source: mapping.upstreamId,
+        },
+      }, mapping, this.catalog.digest, failed, this.config.profile);
+    }
     const dispatched = this.journal.markDispatched(prepared.record.operationId);
     try {
       if (options.privateAttachment) dispatchedArguments.privateAttachment = options.privateAttachment;
@@ -10508,8 +10900,7 @@ export class GatewayRuntime {
       const result = await upstream.callTool(mapping.upstreamName, dispatchedArguments, {
         signal: options.signal,
         ...(options.upstreamTimeoutMs === undefined ? {} : { timeoutMs: options.upstreamTimeoutMs }),
-        safeToRetry: mapping.upstreamId === "meridian"
-          && mapping.annotations?.readOnlyHint === true,
+        safeToRetry,
       });
       if (!isJsonObject(result)) throw new Error("upstream_result_invalid");
       const source = classifySourceResult(result);
@@ -10573,6 +10964,8 @@ export class GatewayRuntime {
   }
 
   async close(): Promise<void> {
+    if (this.learnerNamesExpiryTimer) clearTimeout(this.learnerNamesExpiryTimer);
+    this.learnerNamesExpiryTimer = null;
     this.fileStages.clear();
     this.operationFileStages.clear();
     await Promise.allSettled([...this.upstreams.values()].map((upstream) => upstream.close()));

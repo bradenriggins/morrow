@@ -10,6 +10,7 @@ import { runOwnedProcess } from "../lib/owned-process.mjs";
 import { assertDesktopRendererSmokeReceipt } from "../lib/desktop-renderer-smoke.mjs";
 import { electronAsarReleaseIdentity, readElectronAsarPackage } from "../lib/electron-asar-package.mjs";
 import { withTemporaryDirectory } from "../lib/temporary-directory.mjs";
+import { isUnsignedPackageSigning } from "../lib/unsigned-desktop-signing.mjs";
 
 const MAX_OUTPUT_BYTES = 128 * 1024;
 // Morrow verifies every file of the sealed MCP payload by hash before it starts
@@ -81,9 +82,9 @@ async function createMacSmokeBinding({ diskImage, packageReceipt, source, runId 
     || receipt.target !== "darwin-arm64" || receipt.source?.head !== source || receipt.source?.dirty !== false
     || receipt.payload?.releaseGraph?.schema !== "morrow.desktop-packager-admission.v1"
     || !/^[0-9a-f]{64}$/.test(receipt.payload?.releaseGraph?.sha256 || "")
-    || receipt.signing?.mode !== "unsigned_private_qa" || receipt.signing?.target !== "darwin-arm64"
-    || receipt.signing?.publicRelease !== false || !Array.isArray(receipt.artifacts) || receipt.artifacts.length !== 2) {
-    throw new Error("The macOS smoke package receipt is not the expected unsigned QA release graph.");
+    || !isUnsignedPackageSigning(receipt.signing, "darwin-arm64")
+    || !Array.isArray(receipt.artifacts) || receipt.artifacts.length !== 2) {
+    throw new Error("The macOS smoke package receipt is not the expected unsigned release graph.");
   }
   const artifactDirectory = dirname(packageReceipt);
   const artifacts = [];
@@ -142,7 +143,7 @@ function ensureSuccess(result, label) {
 
 /**
  * The single executable inside the application bundle. macOS names it after
- * productName, so a bundle that carries no `Contents/MacOS/Morrow` and no
+ * executableName, so a bundle that carries no `Contents/MacOS/Morrow` and no
  * `Contents/Resources/MorrowPayload` is not the application this harness
  * measures, and saying so is more useful than a later failure to launch.
  */
@@ -316,7 +317,10 @@ function assertAppReceipt(receipt, precondition) {
   const actual = normalizedAppReceipt(receipt);
   const differing = Object.keys(expected).filter((key) => !isDeepStrictEqual(actual[key], expected[key]));
   if (differing.length === 0) return;
-  throw new Error(`Morrow smoke receipt did not prove the required contained runtime, state, and Codex configuration. These records differ from what a contained run must report: ${differing.join(", ")}.`);
+  // The normalized records hold only flags, stage names, and sanitized codes,
+  // so the log can name the cause of a failed run.
+  const details = differing.map((key) => `${key} observed ${JSON.stringify(actual[key])}; expected ${JSON.stringify(expected[key])}`);
+  throw new Error(`Morrow smoke receipt did not prove the required contained runtime, state, and Codex configuration. These records differ from what a contained run must report: ${differing.join(", ")}. ${details.join(". ")}.`);
 }
 
 function receiptSidecarPath(receipt) {
@@ -400,7 +404,7 @@ async function main() {
         listenerProven: bridgePortFree
       },
       observed: { stderrStage: appReceipt.runtimeTrace.stderrStage, portBinding: appReceipt.runtimeTrace.portBinding },
-      // This harness mounts and launches the retained unsigned QA disk image.
+      // This harness mounts and launches the retained unsigned disk image.
       // It measures none of the following, so no run of it is evidence about them.
       notVerified: ["code signature", "notarization", "Gatekeeper quarantine handling", "macOS on Intel"]
     };

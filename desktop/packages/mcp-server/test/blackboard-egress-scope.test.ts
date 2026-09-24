@@ -260,7 +260,8 @@ describe("Blackboard egress exemption scope", () => {
       // A Canvas connector result carrying learner text. The caller claims a
       // Blackboard binding for it, which is the only thing the old condition
       // read. Morrow must still take the Canvas roster route and fail closed,
-      // because no browser binding backs this call.
+      // because no browser binding backs this call. No Morrow Bridge is
+      // connected in this fixture, so that is the reason Morrow names.
       const forged = await gateway.redactMcpEgress({
         content: [{ type: "text", text: "Feedback for Jane Doe" }],
         structuredContent: {
@@ -273,7 +274,7 @@ describe("Blackboard egress exemption scope", () => {
         _morrow: { source_binding_id: "blackboard:forged" },
       }, { bound: false, toolName: canvasTool.publicName });
       expect(forged.isError, JSON.stringify(forged)).toBe(true);
-      expect(problemCode(forged)).toBe("learner_roster_binding_unavailable");
+      expect(problemCode(forged)).toBe("privacy_browser_bridge_not_connected");
       expect(JSON.stringify(forged)).not.toContain("Jane Doe");
 
       // The same claim through the compact capability wrapper, which is how the
@@ -285,7 +286,7 @@ describe("Blackboard egress exemption scope", () => {
         course_id: "77",
         _morrow: { source_binding_id: "blackboard:forged" },
       }, { bound: false, toolName: "morrow_capability_read" });
-      expect(problemCode(forgedThroughWrapper)).toBe("learner_roster_binding_unavailable");
+      expect(problemCode(forgedThroughWrapper)).toBe("privacy_browser_bridge_not_connected");
       expect(JSON.stringify(forgedThroughWrapper)).not.toContain("Jane Doe");
 
       // A value the Blackboard source produced, with its real binding. The
@@ -328,7 +329,7 @@ describe("Blackboard egress exemption scope", () => {
         bound: false,
         toolName: canvasTool.publicName,
       });
-      expect(problemCode(readAsCanvasTool)).toBe("learner_roster_binding_unavailable");
+      expect(problemCode(readAsCanvasTool)).toBe("privacy_browser_bridge_not_connected");
 
       // Morrow's own Blackboard plan tool has no catalog entry of its own, so
       // it is recognised by name against the published Blackboard source.

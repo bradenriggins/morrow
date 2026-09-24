@@ -1,13 +1,16 @@
 # Optional dependencies for Morrow for Muse (exact pins, tested 2026-09-21).
 #
-# Nothing here is required to install or run the connector: install.sh
-# and every selftest pass without these packages. They unlock degraded
-# capabilities that fail loudly with a remediation message when missing.
+# install.sh and every selftest pass without these packages, but all
+# student-data work needs them. install.sh step 1 warns when they are
+# missing.
 #
 #   cryptography: the encrypted learner vault (privacy/core.py). Without
-#   it, vault seal/open raise PrivacyError telling the educator to
-#   install this file; identity normalization, roster, and redaction
-#   work without it.
+#   it, Morrow refuses everything that touches student data (finding a
+#   student by name, the failed-students question, rosters, grades,
+#   submissions) with a message telling the educator to install this
+#   file. Student names in course content are hidden without labels,
+#   and a change that would save one back is refused. Everything else
+#   works.
 #
 # Hash-pinned (W4-P2-19): --require-hashes means pip verifies every
 # downloaded artifact against one of the hashes below before

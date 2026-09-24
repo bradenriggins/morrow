@@ -25,8 +25,9 @@
 # listed hash, including transitive dependencies:
 #   - requests==2.34.2 requires charset-normalizer, idna, urllib3, certifi
 #   - opencv-python-headless==5.0.0.93 requires numpy (>=2 on Python 3.9+)
-#   - numpy==2.2.6 is the latest numpy supporting the Python 3.11 floor
-#     (numpy 2.5.x requires Python >=3.12); it has no dependencies.
+#   - numpy==2.4.6 is the latest numpy supporting the Python 3.11 floor
+#     (numpy 2.5 and later require Python >=3.12, so .github/dependabot.yml
+#     ignores them); it has no dependencies.
 #   - charset-normalizer, idna, urllib3, certifi have no runtime deps
 #     (idna/urllib3 extras are not used).
 #
@@ -47,6 +48,11 @@
 # Offline-install proof (2026-09-21): a fresh venv installed with
 # --no-index --find-links on the local artifact dir, WITH dependencies
 # (not --no-deps), so the transitive closure is exercised.
+#
+# numpy 2.4.6 (2026-09-23) replaced 2.2.6 after that proof. Its two
+# hashes are PyPI's published sha256 digests for the CPython 3.11 and 3.12
+# manylinux_2_27 x86_64 wheels (glibc 2.27 or later). CI's hash-locked
+# install on CPython 3.12 exercises it.
 --require-hashes
 requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
@@ -66,6 +72,6 @@ urllib3==2.8.0 \
 certifi==2026.7.22 \
     --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775 \
     --hash=sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55
-numpy==2.2.6 \
-    --hash=sha256:ba10f8411898fc418a521833e014a77d3ca01c15b0c6cdcce6a0d2897e6dbbdf \
-    --hash=sha256:fd83c01228a688733f1ded5201c678f0c53ecc1006ffbc404db9f7a899ac6249
+numpy==2.4.6 \
+    --hash=sha256:89cd468399cfd2504718f0ba50e410dca55a170b61a02ad92bb18c8a65186e93 \
+    --hash=sha256:90f9849678c75fe7afa2d348ac842c168b0a4d3d61919687216dfc547976d853

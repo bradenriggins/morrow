@@ -13,6 +13,7 @@ import {
   detailText,
   nextError,
   pendingReviews,
+  primaryAction,
   primaryLabel,
   reviewButtonLabel,
   runtimeNeedsReload,
@@ -36,6 +37,28 @@ const statuses = [
   { paired: true, pairing: false, connecting: false, connected: true, runtimeHealthy: true, bindings: [binding({ runtimeVerified: false })], siteAnchors: [anchor()], bindingCount: 1 },
 ];
 
+// The primary button's words and what a click on it does come from one decision, so a label can
+// never promise one step while the click takes another.
+test("every primary label names the one action a click on it takes", () => {
+  const actionFor = { "Try again": "retry", "Open setup guide": "open_setup", "Reconnect Morrow": "pair",
+    "Connect Morrow": "pair", "Choose courses": "choose_courses", "Waiting for your assistant": "wait", "Connect this course": "connect_course", "": "none" };
+  const cases = [
+    ...statuses.map((status) => [status, null]),
+    ...statuses.map((status) => [status, "canvas"]),
+    [{ paired: true, pairing: true, authenticationFailed: false, connected: false, bindings: [], siteAnchors: [] }, "canvas"],
+    [{ paired: true, pairing: true, authenticationFailed: true, connected: false, bindings: [], siteAnchors: [] }, null],
+    [{ ...statuses[9], runtimeHealthy: false }, "canvas"],
+  ];
+  for (const [status, detected] of cases) {
+    const action = primaryAction(status, detected);
+    assert.equal(action.label, primaryLabel(status, detected), JSON.stringify(status));
+    assert.equal(action.id, actionFor[action.label], `${action.label}: ${JSON.stringify(status)}`);
+  }
+  // Connect Morrow pairs in one step, so no status ever waits on an approval page. A status that
+  // still carries an older pairing flag is read by its other fields alone.
+  assert.equal(primaryAction({ paired: true, pairing: true, connected: false, bindings: [], siteAnchors: [] }, "canvas").id, "wait");
+});
+
 test("a connected socket with an unhealthy runtime asks for a Bridge reload", () => {
   const status = { ...statuses[9], runtimeHealthy: false };
   assert.equal(runtimeNeedsReload(status), true);
@@ -46,6 +69,19 @@ test("a connected socket with an unhealthy runtime asks for a Bridge reload", ()
   assert.equal(controlState(status).primaryDisabled, false);
   assert.match(detailText(status), /versions do not match/i);
   assert.match(detailText(status), /reload Morrow Bridge/i);
+});
+
+// Morrow closes a connection from a Bridge build it does not expect with its own reason. A new
+// connection approval cannot fix that; an update and a reload can.
+test("a Morrow that refused this Bridge version asks for a Bridge reload, not a new connection", () => {
+  const status = { paired: true, pairing: false, connecting: false, connected: false, authenticationFailed: false, versionMismatch: true, runtimeHealthy: false, bindings: [binding()], siteAnchors: [anchor()], bindingCount: 1 };
+  assert.equal(runtimeNeedsReload(status), true);
+  assert.equal(statusValue(status), "Reload needed");
+  assert.equal(courseValue(status), "Not available");
+  assert.equal(primaryLabel(status), "Open setup guide");
+  assert.equal(controlState(status).primaryDisabled, false);
+  assert.match(detailText(status), /versions do not match/i);
+  assert.doesNotMatch(detailText(status), /Reconnect Morrow|approve the new connection/);
 });
 
 test("a refused server identity offers re-pairing without discarding selected courses", () => {
@@ -115,7 +151,7 @@ test("pendingReviews keeps only well-formed entries, and reviewButtonLabel names
 });
 
 // WI-5.8: the popup's own course list keeps D7's exact wording ("Plan. Asks first.", "Edit.
-// Routine edits.", and so on), the same text the Courses and access page shows, from nothing but
+// Routine edits.", and so on), the same text Plan and Edit settings shows, from nothing but
 // morrow_edit_policy_status's own bindings array. Edit is not timed, so no state names an end time.
 test("courseStateText keeps D7's own wording, from the edit permission alone", () => {
   const canvasRoutineIds = CURATED_CATEGORY_SPECS.filter((spec) => spec.provider === "canvas" && spec.routine === true).map((spec) => spec.id);
@@ -193,8 +229,11 @@ test("no popup text calls this product a preview", () => {
 test("known connection states keep their own value, label, and detail", () => {
   assert.equal(statusValue(statuses[1]), "Not connected");
   assert.equal(primaryLabel(statuses[1]), "Connect Morrow");
-  assert.equal(statusValue(statuses[2]), "Waiting for approval");
-  assert.equal(controlState(statuses[2]).primaryDisabled, true);
+  // Pairing has no waiting state: a status that still carries an older pairing flag reads as unpaired.
+  assert.equal(statusValue(statuses[2]), "Not connected");
+  assert.equal(primaryLabel(statuses[2]), "Connect Morrow");
+  assert.equal(controlState(statuses[2]).primaryDisabled, false);
+  assert.match(detailText(statuses[1]), /Connecting does not approve changes to your courses\.$/);
   assert.equal(statusValue(statuses[3]), "Connecting…");
   assert.equal(controlState(statuses[3]).primaryBusy, true);
   assert.equal(statusValue(statuses[4]), "Not available");
@@ -283,7 +322,7 @@ test("the popup answers a failed first status read with a retry, then clears it 
     "#account": stubElement("", true),
     "#account-label": stubElement(),
     "#account-origin": stubElement(),
-    "#account-last-checked": stubElement(),
+    "#account-connected-at": stubElement(),
     "#notice": stubElement("", true),
     ".edit-access": stubElement(),
     "#editing-settings": stubElement("Open Plan and Edit settings"),

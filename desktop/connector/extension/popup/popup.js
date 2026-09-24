@@ -1,5 +1,5 @@
 import { problemText } from "../src/bridge-problem-copy.js";
-import { activeEditBindings, canChooseCourses, connectedCourseRows, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, editBannerText, nextError, openPlatformLabel, pendingReviews, platformClosed, primaryLabel, reviewButtonLabel, runtimeNeedsReload, statusAnnouncement, statusValue } from "./popup-view.js";
+import { activeEditBindings, canChooseCourses, connectedCourseRows, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, editBannerText, nextError, openPlatformLabel, pendingReviews, platformClosed, primaryAction, primaryLabel, reviewButtonLabel, runtimeNeedsReload, statusAnnouncement, statusValue } from "./popup-view.js";
 
 const primary = document.querySelector("#primary");
 const consentAction = document.querySelector("#consent-action");
@@ -21,7 +21,7 @@ const announcement = document.querySelector("#status-announcement");
 const account = document.querySelector("#account");
 const accountLabel = document.querySelector("#account-label");
 const accountOrigin = document.querySelector("#account-origin");
-const accountLastChecked = document.querySelector("#account-last-checked");
+const accountConnectedAt = document.querySelector("#account-connected-at");
 const notice = document.querySelector("#notice");
 const editAccess = document.querySelector(".edit-access");
 const editingSettings = document.querySelector("#editing-settings");
@@ -136,7 +136,7 @@ function render(status) {
     accountOrigin.textContent = binding
       ? `${binding.courseName || "Selected course"}${status.bindingCount > 1 ? ` · ${status.bindingCount} courses selected` : ""}`
       : `${anchor?.provider === "moodle" ? "Moodle" : anchor?.provider === "canvas" ? "Canvas" : "Learning platform"}`;
-    setLastChecked(binding?.lastSeenAt ?? anchor?.lastSeenAt);
+    setConnectedAt(binding?.lastSeenAt ?? anchor?.lastSeenAt);
   }
   courseLabel.textContent = binding ? "Connection" : anchor?.runtimeVerified === true ? "Course selection" : anchor ? "Learning platform" : "Course";
   canvasValue.textContent = courseValue(status);
@@ -164,15 +164,16 @@ function render(status) {
   updateControls(status);
 }
 
-function setLastChecked(lastSeenAt) {
+/** The Bridge records lastSeenAt when the course or its site is connected, and at no other time. */
+function setConnectedAt(lastSeenAt) {
   const date = new Date(typeof lastSeenAt === "number" && Number.isFinite(lastSeenAt) ? lastSeenAt : NaN);
   if (Number.isNaN(date.getTime())) {
-    accountLastChecked.textContent = "Last checked time is not available";
-    accountLastChecked.removeAttribute("datetime");
+    accountConnectedAt.textContent = "Connection time is not available";
+    accountConnectedAt.removeAttribute("datetime");
     return;
   }
-  accountLastChecked.dateTime = date.toISOString();
-  accountLastChecked.textContent = `Last checked ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" }).format(date)}`;
+  accountConnectedAt.dateTime = date.toISOString();
+  accountConnectedAt.textContent = `Connected on ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" }).format(date)}`;
 }
 
 function updateControls(status = current) {
@@ -339,30 +340,29 @@ consentAction.addEventListener("click", async () => {
 });
 
 primary.addEventListener("click", async () => {
-  if (!current) {
+  const action = primaryAction(current, detectedProvider).id;
+  if (action === "retry") {
     await retryStatus();
     return;
   }
-  if (runtimeNeedsReload(current)) {
+  if (action === "open_setup") {
     clearNotice();
     await runAction(() => message("morrow_open_setup"));
     return;
   }
-  if (canChooseCourses(current)) {
+  if (action === "choose_courses") {
     clearNotice();
     openCourseSelection();
     return;
   }
-  await runAction(async () => {
-    if (current?.authenticationFailed === true) return await message("morrow_pair");
-    if (!current?.paired) return await message("morrow_pair");
-    return await connectCanvasCourse();
-  }, (result) => {
-    if (result?.siteAnchorId) {
-      clearNotice();
-      openCourseSelection();
-    }
-    else clearNotice();
+  if (action === "pair") {
+    await runAction(() => message("morrow_pair"), () => clearNotice());
+    return;
+  }
+  if (action !== "connect_course") return;
+  await runAction(connectCanvasCourse, (result) => {
+    clearNotice();
+    if (result?.siteAnchorId) openCourseSelection();
   });
 });
 
@@ -382,8 +382,12 @@ openPlatformAction.addEventListener("click", async () => {
   if (actionInFlight) return;
   const binding = currentBinding(current);
   const anchor = currentSiteAnchor(current);
-  const siteAnchorId = binding?.siteAnchorId || anchor?.siteAnchorId;
-  if (!siteAnchorId) return;
+  // A selected course opens only on its own site, never on another saved site that happens to be open.
+  const siteAnchorId = binding ? binding.siteAnchorId : anchor?.siteAnchorId;
+  if (!siteAnchorId) {
+    reportError("action", new Error("platform_open_anchor_missing"));
+    return;
+  }
   const platform = currentPlatform(current);
   actionInFlight = true;
   openPlatformProgressVisible = false;
@@ -429,7 +433,7 @@ editingSettings.addEventListener("click", () => {
   void chrome.runtime.openOptionsPage();
 });
 
-// WI-5.8: "All courses" opens the same Courses and access page as "Open Plan and Edit settings".
+// WI-5.8: "All courses" opens the same Plan and Edit settings page as "Open Plan and Edit settings".
 allCoursesButton.addEventListener("click", () => {
   openCourseSelection();
 });
@@ -441,7 +445,7 @@ setupGuide.addEventListener("click", () => {
 disconnect.addEventListener("click", async () => {
   await runAction(() => message("morrow_disconnect"), (result) => {
     if (result?.permissionsRevoked === false) {
-      showNotice("Morrow is disconnected. Chrome site access still needs removal in this extension's settings.");
+      showNotice("Morrow is disconnected. Chrome kept site access for your learning platform. Remove it on the Chrome extensions page under Morrow Bridge site access.");
     } else {
       clearNotice();
     }

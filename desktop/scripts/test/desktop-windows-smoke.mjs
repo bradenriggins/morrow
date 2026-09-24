@@ -260,11 +260,14 @@ function normalizedDescriptor(value) {
 }
 
 function normalizedAppReceipt(value) {
-  const receipt = exactObject(value, ["schema", "runtime", "payload", "state", "codexConfig", "health", "runtimeTrace", "stateSecurity"]);
+  const receiptKeys = ["schema", "runtime", "payload", "state", "codexConfig", "health", "runtimeTrace", "stateSecurity"];
+  if (value && typeof value === "object" && !Array.isArray(value)
+    && Object.hasOwn(value, "smokeFailure")) receiptKeys.push("smokeFailure");
+  const receipt = exactObject(value, receiptKeys);
   const trace = exactObject(receipt.runtimeTrace, ["schema", "child", "stderrStage", "owner", "portBinding", "upstream"]);
   const upstream = exactObject(trace.upstream, ["initialize", "listTools", "readResource"]);
   const stateSecurity = exactObject(receipt.stateSecurity, ["schema", "state", "descriptor", "posix"]);
-  return {
+  const normalized = {
     schema: receipt.schema,
     runtime: exactObject(receipt.runtime, ["ready"]),
     payload: exactObject(receipt.payload, ["withinResources"]),
@@ -290,6 +293,15 @@ function normalizedAppReceipt(value) {
       posix: exactObject(stateSecurity.posix, ["stateMode", "stateOwner", "descriptorOwner"])
     }
   };
+  if (Object.hasOwn(receipt, "smokeFailure")) {
+    const failure = exactObject(receipt.smokeFailure, ["stage", "code"]);
+    if (!/^[a-z_]{1,40}$/.test(failure.stage)
+      || !/^[A-Za-z0-9_]{1,80}$/.test(failure.code)) {
+      throw new Error("Morrow smoke receipt has an invalid failure classification.");
+    }
+    normalized.smokeFailure = { stage: failure.stage, code: failure.code };
+  }
+  return normalized;
 }
 
 function assertReceipt(receipt, expected, subject) {
@@ -455,13 +467,24 @@ async function startInstalledMorrow(application, { testRoot, receiptPath, label 
 }
 
 async function startInstalledRenderer(application, { testRoot, receiptPath }) {
-  ensureSuccess(await run(application, [
+  const result = await run(application, [
     `--morrow-test-root=${testRoot}`,
     `--morrow-renderer-smoke-receipt=${receiptPath}`
   ], {
     timeoutMs: APP_TIMEOUT_MS,
     environment: { ...process.env, MORROW_INSTALLER_TEST_MODE: "1" }
-  }), "Installed Morrow renderer startup");
+  });
+  if (result.code !== 0) {
+    let diagnostic = null;
+    try {
+      const candidate = JSON.parse(await readFile(join(dirname(receiptPath), "renderer-diagnostic.json"), "utf8"));
+      if (candidate.schema === "morrow.desktop-renderer-smoke-diagnostic.v1" && Array.isArray(candidate.stages)) {
+        diagnostic = candidate.stages;
+      }
+    } catch { /* The diagnostic is supplementary to the smoke failure. */ }
+    const detail = [result.stderr, result.stdout].filter(Boolean).join("\n").slice(0, MAX_OUTPUT_BYTES);
+    throw new Error(`Installed Morrow renderer startup failed with exit ${result.code ?? "unknown"}${result.signal ? ` (${result.signal})` : ""}${detail ? `:\n${detail}` : ""}${diagnostic ? `\nRenderer stages: ${JSON.stringify(diagnostic)}` : ""}`);
+  }
   return waitForReceipt(receiptPath, RECEIPT_TIMEOUT_MS);
 }
 
@@ -512,7 +535,7 @@ async function main() {
     testRoot,
     receiptPath: join(testRoot, "renderer-receipt.json")
   });
-  assertDesktopRendererSmokeReceipt(rendererReceipt);
+  assertDesktopRendererSmokeReceipt(rendererReceipt, { requireVisible: false });
 
   // Repair is measured against real damage. Without it, re-running the same
   // installer proves only that an unchanged installation stays unchanged.

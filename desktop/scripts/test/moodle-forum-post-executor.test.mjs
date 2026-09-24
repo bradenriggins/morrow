@@ -5,7 +5,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import { executeMoodleForumPostInPage } from "../../connector/extension/src/moodle-forum-post-executor.js";
 
 const PRIVATE_SESSION = "moodle-private-session";
@@ -362,7 +362,7 @@ test("the Moodle Forum discussion lifecycle sends one native POST and requires t
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("test server did not bind");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(`${origin}/course/view.php?id=2`);
     const invoke = (operation, args) => page.evaluate(

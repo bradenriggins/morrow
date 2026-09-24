@@ -180,7 +180,7 @@ async function main() {
 
     const settings = await context.newPage();
     await settings.goto(`chrome-extension://${EXTENSION_ID}/settings/settings.html`);
-    await settings.getByRole("heading", { name: "Courses and access" }).waitFor();
+    await settings.getByRole("heading", { name: "Plan and Edit settings" }).waitFor();
     results.push(["Settings page", await census(settings)]);
 
     const onboarding = context.pages().find((candidate) => candidate.url() === `chrome-extension://${EXTENSION_ID}/onboarding/onboarding.html`)

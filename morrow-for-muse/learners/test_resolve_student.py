@@ -491,12 +491,12 @@ class CliPrivacyBoundaryTests(unittest.TestCase):
     labels, never raw Canvas user ids or names, and must fail closed
     when no label can be issued."""
 
-    def _run_cli(self, argv, labeler):
+    def _run_cli(self, argv, labeler, roster=None):
         import contextlib
         import io
         import json as _json
         from learners import resolve_student as rs
-        body = _json.dumps([
+        body = _json.dumps(roster or [
             _user(5550101, "Jane Doe", login_id="jdoe"),
             _user(5550102, "Omar Haddad", section_id=12),
         ])
@@ -529,9 +529,53 @@ class CliPrivacyBoundaryTests(unittest.TestCase):
             self.assertNotIn(raw, out)
 
     def test_ambiguous_lists_labels_not_names(self):
-        code, out = self._run_cli(["--query", "Student"], self._labeler)
-        self.assertNotIn("Jane", out)
-        self.assertNotIn("5550101", out)
+        # Failure mode (final sweep 2026-09-23): this test queried
+        # "Student", which matches no roster row, so it only checked a
+        # "not found" answer and never reached the ambiguous branch.
+        import json as _json
+        roster = [
+            _user(5550101, "Jane Doe", login_id="jdoe",
+                  email="jdoe@school.example.edu", sis_user_id="S-1001"),
+            _user(5550103, "Jane Doe", section_id=12, login_id="jdoe2",
+                  email="jdoe2@school.example.edu", sis_user_id="S-1003"),
+        ]
+        code, out = self._run_cli(["--query", "Jane Doe"], self._labeler,
+                                  roster=roster)
+        self.assertNotEqual(code, 0, out)
+        payload = _json.loads(out)
+        self.assertEqual(payload["error_class"], "StudentAmbiguous", out)
+        public = payload["evidence"]["candidates_public"]
+        self.assertIn("Student A1", public)
+        self.assertIn("Student A2", public)
+        for raw in ("Jane", "Doe", "jdoe", "school.example.edu", "S-100",
+                    "5550101", "5550103"):
+            self.assertNotIn(raw, out)
+
+    def test_a_course_not_given_by_its_number_is_refused_first(self):
+        # Muse engine audit 2026-09-23: labels are numbered per course
+        # scope, so a course given another way ("sis_course_id:BIO101")
+        # got labels that name different students than the same numbers
+        # in the course given by number. Refused before any read.
+        import contextlib
+        import io
+        from learners import resolve_student as rs
+
+        def no_helper(*_a, **_k):
+            raise AssertionError("the helper was reached for a bad course")
+        saved = (rs.helper_fetch_factory, sys.argv)
+        rs.helper_fetch_factory = no_helper
+        out = io.StringIO()
+        try:
+            for course in ("sis_course_id:BIO101", "1/../2", "0101"):
+                sys.argv = ["resolve_student.py", "--tenant-base",
+                            "https://canvas.example.edu", "--course-id",
+                            course, "--query", "jdoe"]
+                with contextlib.redirect_stdout(out):
+                    code = rs._cli()
+                self.assertNotEqual(code, 0, out.getvalue())
+        finally:
+            rs.helper_fetch_factory, sys.argv = saved
+        self.assertIn("not as its Canvas course number", out.getvalue())
 
     def test_no_vault_fails_closed(self):
         def broken(*_a):

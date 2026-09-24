@@ -373,7 +373,8 @@ test("readback proof binds to the exact declared target record", () => {
     status: 200,
     data: [{ id: "7", title: "Old title" }, { id: "7", title: "Participation" }],
   });
-  assert.equal(ambiguous.status, "mismatch");
+  // Two records with the target's id prove neither the change nor its absence.
+  assert.equal(ambiguous.status, "unconfirmed");
   assert.equal(ambiguous.evidence, "target_ambiguous_in_readback");
   assert.equal(evaluateBrowserReadback(column, { ok: true, status: 200, data: [{ id: "7", title: "Participation" }] }).status, "verified");
   assert.equal(evaluateBrowserReadback(column, { ok: true, status: 200, data: [{ id: "9", title: "Participation" }] }).evidence, "target_missing_from_readback");

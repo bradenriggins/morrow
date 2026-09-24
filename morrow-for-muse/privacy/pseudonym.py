@@ -33,12 +33,10 @@ Design:
   ~/.morrow/privacy_map.jsonl (0600), so the educator can audit or
   reverse a pseudonym. It never leaves the VM and never ships in the
   package (pack/deny-list.txt denies privacy_salt* and privacy_map*).
-- De-identification is ON by default for every learner-data read. The
-  shipped pipeline's only reveal is a sealed educator record for one
-  course (dispatch/admission.mint_pii_reveal); see
-  privacy/FERPA_POLICY.md. The legacy environment variable
-  MORROW_REVEAL_STUDENT_PII_REASON is ignored: it is not a consent
-  channel.
+- De-identification is ON for every learner-data read, and nothing
+  turns it off (see privacy/FERPA_POLICY.md). The legacy environment
+  variable MORROW_REVEAL_STUDENT_PII_REASON is ignored: it is not a
+  consent channel.
 
 Retention: purge --tenant drops that tenant's map records (issued
 pseudonyms stop resolving); wipe deletes the salt and the whole map,

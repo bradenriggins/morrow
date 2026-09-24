@@ -12,7 +12,7 @@ const { createUpdateAttemptStore, createUpdateController } = require("./shared/u
 const { UPDATE_FEED } = require("./shared/update-feed.cjs");
 const { createInstallerController, detectAssistant, errorDetails, repairRequiredState } = require("./shared/installer-controller.cjs");
 const { appLocationStatus } = require("./shared/app-location.cjs");
-const { canonicalDirectory, exists, isComplete, mkdirPrivate, payloadLayout } = require("./shared/runtime.cjs");
+const { canonicalDirectory, exists, isComplete, mkdirPrivate, payloadLayout, windowDataDirectory } = require("./shared/runtime.cjs");
 
 /**
  * The only web addresses Morrow may ever open, and only from this fixed list
@@ -35,8 +35,13 @@ const IS_TEST_MODE = process.env.MORROW_INSTALLER_TEST_MODE === "1";
 const testRoot = IS_TEST_MODE && TEST_ROOT_ARGUMENT
   ? path.resolve(TEST_ROOT_ARGUMENT.slice("--morrow-test-root=".length))
   : null;
+app.setName("Morrow");
 if (testRoot && !path.isAbsolute(testRoot)) throw new Error("Morrow test root must be absolute.");
 if (testRoot) app.setPath("userData", path.join(testRoot, "UserData"));
+// Electron writes the window's caches and storage loose in the user-data
+// folder unless told otherwise. One named folder is a place What stays on this
+// computer can list.
+app.setPath("sessionData", windowDataDirectory(app.getPath("userData")));
 
 let mainWindow = null;
 let installer = null;
@@ -44,7 +49,14 @@ let updateController = null;
 let updateSubscription = null;
 let updatesStarted = false;
 const rendererSmokeReceipt = requestedArgument("morrow-renderer-smoke-receipt");
+const rendererSmokeDiagnostic = rendererSmokeReceipt && testRoot
+  ? path.join(path.dirname(rendererSmokeReceipt), "renderer-diagnostic.json")
+  : null;
+const rendererSmokeStages = [];
+let rendererSmokeDiagnosticWrite = Promise.resolve();
 let rendererSmokeWindowReady = false;
+let rendererSmokeWindowShowRequested = false;
+let rendererSmokeWindowVisible = false;
 let rendererSmokeStateDelivered = false;
 let rendererSmokeStateRendered = false;
 let rendererSmokeCompletion = null;
@@ -363,12 +375,25 @@ function rendererSmokeRequestIsValid() {
     && !requestedArgument("morrow-smoke-receipt");
 }
 
+function recordRendererSmokeStage(stage, detail = null) {
+  if (!rendererSmokeDiagnostic || !rendererSmokeRequestIsValid()) return;
+  rendererSmokeStages.push(detail === null ? { stage } : { stage, detail });
+  if (rendererSmokeStages.length > 30) rendererSmokeStages.shift();
+  const snapshot = {
+    schema: "morrow.desktop-renderer-smoke-diagnostic.v1",
+    stages: rendererSmokeStages
+  };
+  rendererSmokeDiagnosticWrite = rendererSmokeDiagnosticWrite
+    .then(() => fs.writeFile(rendererSmokeDiagnostic, `${JSON.stringify(snapshot)}\n`, { mode: 0o600 }))
+    .catch(() => {});
+}
+
 function completeRendererSmokeIfReady() {
   if (!rendererSmokeReceipt || !rendererSmokeWindowReady || !rendererSmokeStateRendered || rendererSmokeCompletion) return;
   rendererSmokeCompletion = writeSmokeReceipt(rendererSmokeReceipt, {
     schema: "morrow.desktop-renderer-smoke.v1",
     renderer: { loaded: true, stateRendered: true },
-    window: { visible: true }
+    window: { showRequested: rendererSmokeWindowShowRequested, visible: rendererSmokeWindowVisible }
   }).then(() => desktopLifecycle.close()).catch(() => {
     app.exitCode = 2;
     return desktopLifecycle.close();
@@ -377,8 +402,18 @@ function completeRendererSmokeIfReady() {
 
 function markRendererSmokeWindowReady(window) {
   if (!rendererSmokeReceipt) return;
-  if (window.isDestroyed() || typeof window.isVisible !== "function" || window.isVisible() !== true) return;
+  if (window.isDestroyed()) {
+    recordRendererSmokeStage("window_not_ready", "destroyed");
+    return;
+  }
+  const visible = typeof window.isVisible === "function" && window.isVisible() === true;
+  if (!visible && process.platform !== "win32") {
+    recordRendererSmokeStage("window_not_ready", "not_visible");
+    return;
+  }
+  rendererSmokeWindowVisible = visible;
   rendererSmokeWindowReady = true;
+  recordRendererSmokeStage(visible ? "window_visible" : "window_show_requested");
   completeRendererSmokeIfReady();
 }
 
@@ -407,23 +442,32 @@ async function runDesktopSmokeIfRequested() {
   let health = { attempted: false, gatewayReady: false, bridgeConnected: false };
   let runtimeTrace = unavailableSmokeRuntimeTrace();
   let stateSecurity = unavailableSmokeStateSecurity();
+  let smokeStage = "ensure_runtime";
   try {
     await installer.ensureRuntime();
+    smokeStage = "configure_runtime";
     await installer.executeCli([
       "setup", "--repository", installer.paths.appRoot, "--upstreams", installer.paths.upstreams,
       "--node", installer.paths.node, "--state-directory", installer.paths.state, "--json"
     ]);
+    smokeStage = "resolve_workspace";
     const materials = await installer.workspaceForAssistantSetup(await installer.record());
     if (!materials) throw new Error("materials unavailable");
+    const codexConfig = path.join(installer.home, ".codex", "config.toml");
     if (installCodex) {
-      await installer.executeCli([
-        "mcp", "install", "codex", "--scope", "user",
-        "--repository", installer.paths.appRoot, "--upstreams", installer.paths.upstreams,
-        "--node", installer.paths.node, "--server-entry", installer.paths.server,
-        "--workspace-root", materials, "--json"
-      ]);
-      configured = await exists(path.join(installer.home, ".codex", "config.toml"));
+      configured = await exists(codexConfig);
+      if (!configured) {
+        smokeStage = "install_codex_config";
+        await installer.executeCli([
+          "mcp", "install", "codex", "--scope", "user",
+          "--repository", installer.paths.appRoot, "--upstreams", installer.paths.upstreams,
+          "--node", installer.paths.node, "--server-entry", installer.paths.server,
+          "--workspace-root", materials, "--json"
+        ]);
+        configured = await exists(codexConfig);
+      }
     }
+    smokeStage = "check_runtime";
     const runtime = await installer.runtimeSnapshot(materials);
     health = {
       attempted: runtime.health.attempted === true,
@@ -432,7 +476,6 @@ async function runDesktopSmokeIfRequested() {
     };
     runtimeTrace = await currentSmokeRuntimeTrace().catch(() => unavailableSmokeRuntimeTrace());
     stateSecurity = await smokeStateSecurity(installer.paths, installer.userData);
-    const codexConfig = path.join(installer.home, ".codex", "config.toml");
     await writeSmokeReceipt(receipt, {
       schema: "morrow.desktop-windows-smoke.v1",
       runtime: { ready: await isComplete(installer.paths.payload) },
@@ -443,9 +486,13 @@ async function runDesktopSmokeIfRequested() {
       runtimeTrace,
       stateSecurity
     });
-  } catch {
+  } catch (error) {
     runtimeTrace = await currentSmokeRuntimeTrace().catch(() => unavailableSmokeRuntimeTrace());
     stateSecurity = await smokeStateSecurity(installer.paths, installer.userData).catch(() => unavailableSmokeStateSecurity());
+    const rawFailureCode = error && typeof error.code === "string" ? error.code
+      : error && typeof error.name === "string" ? error.name : "unclassified_error";
+    const failureCode = /^[A-Za-z0-9_]{1,80}$/.test(rawFailureCode)
+      ? rawFailureCode : "unclassified_error";
     await writeSmokeReceipt(receipt, {
       schema: "morrow.desktop-windows-smoke.v1",
       runtime: { ready: false },
@@ -454,7 +501,8 @@ async function runDesktopSmokeIfRequested() {
       codexConfig: { withinTestRoot: true, exists: false },
       health,
       runtimeTrace,
-      stateSecurity
+      stateSecurity,
+      smokeFailure: { stage: smokeStage, code: failureCode }
     }).catch(() => {});
   }
   app.quit();
@@ -485,6 +533,22 @@ function trusted(event, window = mainWindow) {
 
 function noInput(input) {
   if (input.length !== 0) throw errorDetails("setup_failed");
+}
+
+// The refusals Morrow's maintenance fence answers with. Each names what holds
+// Morrow and how to free it, so a step that fixes its own failure text still
+// forwards these unchanged.
+const MAINTENANCE_REFUSALS = Object.freeze([
+  "runtime_repair_required",
+  "active_or_uncertain_operations",
+  "runtime_request_in_flight",
+  "runtime_change_running",
+  "runtime_other_client_connected",
+]);
+
+/** The error one step answers with: a known refusal keeps its own text, anything else the step's fixed text. */
+function knownRefusalOr(error, codes, fallback) {
+  return codes.includes(error?.code) ? errorDetails(error.code) : fallback;
 }
 
 /**
@@ -533,7 +597,7 @@ async function createWindow() {
     minWidth: 320,
     minHeight: 640,
     show: false,
-    title: "Morrow",
+    title: "Morrow Desktop",
     backgroundColor: "#F5F4EE",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -543,6 +607,22 @@ async function createWindow() {
       webSecurity: true
     }
   });
+  if (rendererSmokeReceipt) {
+    window.webContents.on("dom-ready", () => recordRendererSmokeStage("dom_ready"));
+    window.webContents.on("did-finish-load", () => recordRendererSmokeStage("load_finished"));
+    window.webContents.on("did-fail-load", (_event, errorCode) => {
+      recordRendererSmokeStage("load_failed", Number.isInteger(errorCode) ? errorCode : null);
+    });
+    window.webContents.on("render-process-gone", (_event, details) => {
+      const reasons = new Set(["clean-exit", "abnormal-exit", "killed", "crashed", "oom", "launch-failed", "integrity-failure"]);
+      recordRendererSmokeStage("render_process_gone", reasons.has(details?.reason) ? details.reason.trim() : "other");
+    });
+    window.webContents.on("console-message", (_event, level) => {
+      if (level >= 2) recordRendererSmokeStage("console_error");
+    });
+    window.webContents.on("unresponsive", () => recordRendererSmokeStage("unresponsive"));
+    recordRendererSmokeStage("window_created");
+  }
   mainWindow = window;
   window.once("closed", () => { if (mainWindow === window) mainWindow = null; });
   window.webContents.on("will-navigate", (event) => event.preventDefault());
@@ -553,6 +633,13 @@ async function createWindow() {
     if (window.isDestroyed()) {
       if (mainWindow === window) mainWindow = null;
       return null;
+    }
+    if (rendererSmokeReceipt) {
+      window.once("show", () => {
+        recordRendererSmokeStage("window_show_event");
+        markRendererSmokeWindowReady(window);
+      });
+      rendererSmokeWindowShowRequested = true;
     }
     window.show();
     markRendererSmokeWindowReady(window);
@@ -733,13 +820,16 @@ async function startMorrow(lifecycle) {
   // other read, including the one on window focus, uses what Morrow already read.
   ipcMain.handle("installer:get-state", async (event, ...input) => {
     trusted(event);
+    if (rendererSmokeReceipt) recordRendererSmokeStage("state_requested");
     const result = await respond({ recheckAssistants: input[0]?.recheckAssistants === true });
+    if (rendererSmokeReceipt) recordRendererSmokeStage("state_replied");
     if (rendererSmokeReceipt) rendererSmokeStateDelivered = true;
     return result;
   });
   ipcMain.handle("installer:renderer-ready", async (event, ...input) => {
     trusted(event);
     noInput(input);
+    if (rendererSmokeReceipt) recordRendererSmokeStage("renderer_ready");
     markRendererSmokeStateRendered();
   });
   ipcMain.handle("installer:choose-workspace", async (event) => {
@@ -759,8 +849,8 @@ async function startMorrow(lifecycle) {
     try {
       await installer.configureBlackboard(input);
       return respond();
-    } catch {
-      return failed(errorDetails("blackboard_configuration_invalid"));
+    } catch (error) {
+      return failed(knownRefusalOr(error, MAINTENANCE_REFUSALS, errorDetails("blackboard_configuration_invalid")));
     }
   });
   ipcMain.handle("installer:select-blackboard-courses", async (event, input) => {
@@ -768,8 +858,8 @@ async function startMorrow(lifecycle) {
     try {
       await installer.selectBlackboardCourses(input);
       return respond();
-    } catch {
-      return failed(errorDetails("blackboard_course_selection_invalid"));
+    } catch (error) {
+      return failed(knownRefusalOr(error, MAINTENANCE_REFUSALS, errorDetails("blackboard_course_selection_invalid")));
     }
   });
   // Removal answers with the state Morrow read back from its own files, so a
@@ -779,8 +869,8 @@ async function startMorrow(lifecycle) {
     try {
       await installer.removeBlackboardTenant(input);
       return respond();
-    } catch {
-      return failed(errorDetails("blackboard_removal_failed"));
+    } catch (error) {
+      return failed(knownRefusalOr(error, MAINTENANCE_REFUSALS, errorDetails("blackboard_removal_failed")));
     }
   });
   ipcMain.handle("installer:remove-blackboard-data", async (event, ...input) => {
@@ -789,8 +879,8 @@ async function startMorrow(lifecycle) {
       noInput(input);
       await installer.removeBlackboardData();
       return respond();
-    } catch {
-      return failed(errorDetails("blackboard_removal_failed"));
+    } catch (error) {
+      return failed(knownRefusalOr(error, MAINTENANCE_REFUSALS, errorDetails("blackboard_removal_failed")));
     }
   });
   ipcMain.handle("installer:install-assistant", async (event, input) => {
@@ -817,6 +907,23 @@ async function startMorrow(lifecycle) {
     trusted(event);
     try { await installer.revealBridgeFolder(); return respond(); }
     catch { return failed(errorDetails("bridge_folder_unavailable")); }
+  });
+  ipcMain.handle("installer:reveal-materials-folder", async (event) => {
+    trusted(event);
+    try { await installer.revealMaterialsFolder(); return respond(); }
+    catch { return failed(errorDetails("materials_folder_unavailable")); }
+  });
+  // Makes Morrow's own default materials folder again after it was deleted.
+  // The controller refuses any other folder, so a chosen one is never replaced.
+  ipcMain.handle("installer:restore-materials-folder", async (event, ...input) => {
+    trusted(event);
+    try {
+      noInput(input);
+      await installer.restoreMaterialsFolder();
+      return respond();
+    } catch (error) {
+      return failed(error);
+    }
   });
   // Copies one example request to the system clipboard. Morrow writes nothing
   // else there, and this step changes no setup state, so it answers with the
@@ -864,15 +971,7 @@ async function startMorrow(lifecycle) {
       return respond();
     } catch (error) {
       // A known refusal keeps its own fixed public text; anything else stays generic.
-      return failed([
-        "runtime_repair_required",
-        "active_or_uncertain_operations",
-        "runtime_request_in_flight",
-        "runtime_change_running",
-        "runtime_other_client_connected",
-      ].includes(error?.code)
-        ? errorDetails(error.code)
-        : errorDetails("bridge_check_failed"));
+      return failed(knownRefusalOr(error, [...MAINTENANCE_REFUSALS, "bridge_reload_unconfirmed", "bridge_update_failed"], errorDetails("bridge_check_failed")));
     }
   });
   ipcMain.handle("installer:check-for-updates", async (event, ...input) => {

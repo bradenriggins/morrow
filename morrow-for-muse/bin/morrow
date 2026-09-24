@@ -11,7 +11,8 @@ Subcommands:
   dispatch  run dispatch/executor.py (manifest entries, catalog ops, journal)
   audit     run the a11y audit mode (catalog/a11y/runner.py audit ...)
   plan      run the a11y planner mode (catalog/a11y/runner.py plan ...)
-  query     run the failed-students query chain (query/chain.py)
+  query     the failed-students question: not available in this
+            version, so it refuses before any read (query/chain.py)
   doctor    read-only health check: helper status, tree sanity
   version   read-only: print the tree version and command inventory
   failure   read-only: look up one failure-catalog entry by id or fragment
@@ -50,18 +51,23 @@ _COMMANDS = {
     "plan": ("catalog/a11y/runner.py",
              "accessibility repair planning (validates, never writes)"),
     "query": ("query/chain.py",
-              "failed-students query (typed: --course, --quiz, one threshold)"),
+              "the failed-students question: not available in this "
+              "version (Morrow refuses it)"),
 }
 
 # audit/plan need their runner subcommand prepended.
 _PREPEND = {"audit": ["audit"], "plan": ["plan"]}
 
-HELPER_STATUS_URL = os.environ.get(
-    "MORROW_HELPER_STATUS_URL", "http://127.0.0.1:8901/status")
+def _helper_status_url():
+    """This tree's helper /status: LOGIN_HELPER_PORT from the
+    environment, then helper/env (MORROW_HELPER_STATUS_URL overrides)."""
+    from config import tree_config
+    return os.environ.get("MORROW_HELPER_STATUS_URL") \
+        or "http://127.0.0.1:%d/status" % tree_config.helper_port()
 
 
 def _print_help():
-    lines = ["usage: morrow <command> [args...]",
+    lines = ["usage: bin/morrow <command> [args...]",
              "",
              "Morrow for Muse operator front door.",
              "",
@@ -86,7 +92,7 @@ def _print_help():
                                   "the sign-in); --yes to skip the prompt"))
     lines.append("")
     lines.append("Each command passes its arguments through to the underlying")
-    lines.append("entry point; run `morrow <command> --help` for details.")
+    lines.append("entry point; run `bin/morrow <command> --help` for details.")
     print("\n".join(lines))
 
 
@@ -132,7 +138,8 @@ def _failure(argv):
     from failures.catalog import load_catalog
 
     if not argv or argv[0] in ("-h", "--help", "help"):
-        print("usage: morrow failure <id-or-text-fragment> | morrow failure --list")
+        print("usage: bin/morrow failure <id-or-text-fragment> | "
+              "bin/morrow failure --list")
         print("")
         print("Look up one failure-catalog entry. Read-only: the catalog")
         print("file is loaded and validated, nothing is written.")
@@ -162,7 +169,7 @@ def _failure(argv):
     if not hits:
         print("morrow failure: no catalog entry matches %r" % needle,
               file=sys.stderr)
-        print("hint: run `morrow failure --list` for every entry id.",
+        print("hint: run `bin/morrow failure --list` for every entry id.",
               file=sys.stderr)
         return 1
     print("morrow failure: %r matches %d entries:" % (needle, len(hits)),
@@ -208,12 +215,13 @@ def _doctor(json_mode=False):
     facts = {"helper": {}, "tree": {}, "entries": {}}
 
     # 1. Helper reachability and session state (read-only).
+    status_url = _helper_status_url()
     try:
-        with urllib.request.urlopen(HELPER_STATUS_URL, timeout=10) as resp:
+        with urllib.request.urlopen(status_url, timeout=10) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
         logged_in = bool(payload.get("logged_in"))
         alive = bool(payload.get("chromium_alive"))
-        lines.append("helper: reachable (%s)" % HELPER_STATUS_URL)
+        lines.append("helper: reachable (%s)" % status_url)
         lines.append("helper: logged_in=%s chromium_alive=%s"
                      % (logged_in, alive))
         facts["helper"] = {"reachable": True, "logged_in": logged_in,
@@ -265,14 +273,34 @@ def _doctor(json_mode=False):
 def _start():
     """Keep this tree's helper supervised. With cron, install.sh's
     per-tree cron entry does it; without cron, start the keepalive
-    background loop (a no-op when it already runs)."""
+    background loop (a no-op when it already runs). After bin/morrow
+    disconnect it starts nothing: only install.sh reconnects."""
+    from config import disconnect
     from helper import supervisor as _sup
+    if disconnect.is_disconnected():
+        print(json.dumps({
+            "started": False, "disconnected": True,
+            "message": "the educator disconnected Morrow from Canvas "
+                       "(bin/morrow disconnect), so nothing was started. "
+                       "Reconnect only when they ask: confirm it, then run "
+                       "bash install.sh from %s, and they sign in on the "
+                       "helper page" % DEPLOY_DIR}))
+        return 1
     method = _sup.detect()
     if method == "cron":
+        if not _sup.cron_entry_installed(DEPLOY_DIR):
+            print(json.dumps({
+                "method": "cron", "started": False, "installed": False,
+                "message": "this machine has cron, but the crontab has no "
+                           "keepalive entry for this tree, so nothing keeps "
+                           "the helper up. Run bash install.sh from %s to "
+                           "add it" % DEPLOY_DIR}))
+            return 1
         print(json.dumps({"method": "cron", "started": False,
+                          "installed": True,
                           "message": "cron runs this tree's keepalive "
-                                     "every 5 minutes (install.sh "
-                                     "installed the entry)"}))
+                                     "every 5 minutes (its crontab entry "
+                                     "is in place)"}))
         return 0
     out = _sup.ensure(DEPLOY_DIR)
     out["message"] = ("the keepalive background loop %s (pid %s); it runs "
@@ -303,19 +331,19 @@ def main(argv=None):
     rest = argv[1:]
     if name == "start":
         if rest:
-            print("usage: morrow start", file=sys.stderr)
+            print("usage: bin/morrow start", file=sys.stderr)
             return 2
         return _start()
     if name != "disconnect":
         _resume_supervision()
     if name == "doctor":
         if rest and rest != ["--json"]:
-            print("usage: morrow doctor [--json]", file=sys.stderr)
+            print("usage: bin/morrow doctor [--json]", file=sys.stderr)
             return 2
         return _doctor(json_mode=(rest == ["--json"]))
     if name == "version":
         if rest:
-            print("usage: morrow version", file=sys.stderr)
+            print("usage: bin/morrow version", file=sys.stderr)
             return 2
         return _version()
     if name == "failure":
@@ -325,14 +353,15 @@ def main(argv=None):
         return _settings_commands.main([name] + rest)
     if name == "students":
         if not rest or rest[0] != "find":
-            print("usage: morrow students find --course C [--choose LABEL] "
-                  "\"<name as the educator typed it>\"", file=sys.stderr)
+            print("usage: bin/morrow students find --course C "
+                  "[--choose LABEL] \"<name as the educator typed it>\"",
+                  file=sys.stderr)
             return 2
         from learners import find as _find
         return _find.main(rest[1:])
     if name == "disconnect":
         if rest not in ([], ["--yes"]):
-            print("usage: morrow disconnect [--yes]", file=sys.stderr)
+            print("usage: bin/morrow disconnect [--yes]", file=sys.stderr)
             return 2
         script = os.path.join(DEPLOY_DIR, "scripts", "uninstall.sh")
         try:

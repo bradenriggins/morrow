@@ -16,10 +16,16 @@ marked `live-proven` is not a v1 claim.
   through `dispatch/executor.py` with `--backend chromium`, executing as
   in-page `fetch()` inside the educator's own authenticated Chromium
   session via CDP on 127.0.0.1:19223.
+- Your own account: list your courses (C-437, the first request an
+  educator makes: "Show me my courses") and read your own profile
+  (C-436, `/api/v1/users/self`), proven live on 2026-09-22 and
+  2026-09-21.
 - Course read/update: get course, update course (rename, readback
   verified and restored), course settings, course tabs. Course create was
   never tested. Course delete/conclude (C-108) is on evidence hold and
-  is not a v1 claim.
+  is not a v1 claim. The same change sent through a course update is
+  refused too: `event` (delete, conclude, claim, offer, undelete) on
+  C-128, and `offer`, which publishes the course.
 - Assignment create/read/update/delete, proven 2026-09-21 through the
   Chromium lane (assignment 4045385 created with readback verification;
   delete verified with terminal GET 404).
@@ -30,7 +36,10 @@ marked `live-proven` is not a v1 claim.
 - Pages: create/read/update/delete/duplicate/revert, proven 2026-09-21.
   Front-page management is excluded: C-333 failed live (PUT returned 200
   but the provider returned the original front page, so readback caught
-  no state change). Setting the front page is not a v1 claim.
+  no state change). Setting the front page is not a v1 claim, and the
+  same effect through a field is refused: `front_page` true on a page
+  create or update (C-323, C-334), and `default_view` on a course update
+  (C-128).
 - Classic quizzes: create/read/update/delete, question groups
   (create/update/delete/reorder), and quiz questions
   (create/update/delete), proven 2026-09-21 (quiz 338345; question
@@ -53,7 +62,10 @@ marked `live-proven` is not a v1 claim.
   left evidence-hold on 2026-09-22 (admission_policy.json v1.2.0) after
   the integrated-path battery passed with full cleanup. Explicitly
   excluded: quiz publish (never tested) and quiz reports (provider
-  400s on report creation; honestly failed).
+  400s on report creation; honestly failed). A publish is refused on
+  every route that can make one: `published` true on a New Quiz create
+  or update (C-286, C-299), and on the assignment (C-43) or module item
+  (C-283) of a New Quiz, which the executor reads first to check.
 - Item Banks, through the Item Banks SDK lane (`transport/item_bank_sdk.py`:
   course-scoped banks.build launch, token held in memory only,
   per-tenant quiz-api host). Bank writes (IB-1 archive, IB-4 attach
@@ -69,36 +81,37 @@ marked `live-proven` is not a v1 claim.
   answers 404 on live items; the bank entry GET is the working item
   read), item delete (IB-19, never proven on any lane), and the quiz
   entry routes (IB-2/IB-3/IB-8/IB-14, evidence-hold).
-- 113 verified GETs (2026-09-21; GET/HEAD only, no writes):
-  108 Canvas reads plus 5 Item Bank reads, all recorded
-  `live-proven` in `proof-battery/OPERATION_CATALOG.md`, across course
-  settings, tabs, sections, files and folders, pages, modules,
-  assignments, assignment groups, classic quizzes, New Quiz reads,
-  grading standards, rubrics, outcomes, external tools and feeds,
-  content migrations and exports, groups, users and search, conferences,
-  collaborations, media objects, permissions, and activity stream.
-  Some of these reads return people and are now classified as learner
-  data, so they are refused like every other learner-data row (see
+- 115 live-proven reads (GET/HEAD only, no writes): 110 Canvas reads
+  plus 5 Item Bank reads, all recorded `live-proven` in
+  `proof-battery/OPERATION_CATALOG.md`, across your courses and your
+  own profile, course settings, tabs, sections, files and folders,
+  pages, modules, assignments, assignment groups, classic quizzes, New
+  Quiz reads, grading standards, rubrics, outcomes, external tools and
+  feeds, content migrations and exports, groups, users and search,
+  conferences, collaborations, media objects, permissions, and
+  activity stream.
+  Some of these reads return people, so they are learner data (see
   "Out for v1"): C-78 potential collaborators, C-105/C-106 activity
   stream, C-112 effective due dates, C-274/C-343/C-344 assignment
   overrides, C-327/C-331/C-332 page revisions, C-231/C-234/C-235/C-236
   date details (override student lists), C-403 course search, and
-  C-322 outcome alignments for a student. The live-proven
-  override writes (C-34, C-36, C-39, C-41, C-51, C-284) and the page
-  revision revert (C-328) are refused for the same reason.
+  C-322 outcome alignments for a student. Like every learner-data row,
+  they dispatch only on the Chromium lane with the encrypted learner
+  vault, de-identified before the agent or the journal sees them
+  (fixture-proven, see "Out for v1"); no other lane runs them
+  (`LearnerDataGated`). The live-proven override writes (C-34, C-36,
+  C-39, C-41, C-51, C-284) and the page revision revert (C-328) follow
+  the same rule.
 - The governance layer that makes it safe: frozen plans, the admission
   gate (`dispatch/admission.py`) enforcing the live-proven catalog,
-  educator-signed approvals, per-category never-dispatch lists,
-  journaled dispatches, and undo entries for undoable writes. Only
-  live-proven operations run, with one exception: a catalog row marked
-  `pending` (never tried live) dispatches only with `--allow-unproven`
-  plus an educator-signed v2 approval carrying `allow_unproven: true`,
-  bound to that exact operation and its parameters, single use. The
-  educator must sign it; the agent cannot. Rows marked `failed`,
-  `unsupported`, `excluded`, or `evidence-hold` are refused with or
-  without it, and it does not bypass write approval, frozen-plan
-  requirements, never-dispatch, learner-data refusal, or
-  unknown-operation refusal.
+  educator-signed approvals, per-category never-dispatch lists, and
+  journaled dispatches. This release has no automatic undo: no undo
+  entry is pinned, and each approval says the change cannot be undone
+  automatically; a reversal is a new change the educator approves. Only
+  live-proven operations run, with no exception and no override: rows
+  marked `pending`, `failed`, `unsupported`, `excluded`, or
+  `evidence-hold`, and unknown operations, are refused even when the
+  educator asks and even with a signed approval.
 - The Canvas Login Helper (`helper/`): educator self-sign-in,
   SSO/MFA-capable, with keepalive.
 
@@ -109,14 +122,18 @@ yet, so the skill must not claim or dispatch them until a disposable
 live battery marks them live-proven in
 `proof-battery/OPERATION_CATALOG.md`:
 
-- Account, user, and global reads (accounts, users, courses, search,
-  terms, help links): in scope by the parity rule, but there are
-  currently no catalog rows proving them. Dispatch requires educator
-  sign-in to confirm.
+- Account, other-user, and global reads (listing accounts, another
+  person's profile, global search, terms, help links): in scope by the
+  parity rule, but there are currently no catalog rows proving them.
+  Your own course list and profile are live-proven and ship (see "Ships
+  in v1").
 - Discussion writes (C-139 create, C-141 delete, C-167 update,
   C-238 date_details): catalog live-proven only (C-139/C-141/C-167
   through the retired form lane 2026-09-20; C-238 through the
-  2026-09-21 Chromium battery), withheld from v1 claims.
+  2026-09-21 Chromium battery), withheld from v1 claims. The admission
+  policy holds all four (`evidence_holds`), so they are refused on
+  every lane until a Chromium-lane battery proves create, update, and
+  delete.
 - Item Bank item read and delete (IB-11/IB-19): implemented in the SDK
   lane, not proven (see Item Banks above).
 
@@ -141,24 +158,46 @@ live battery marks them live-proven in
   package), where every receipt is de-identified in `dispatch_entry`
   (course-scoped labels such as `Student A1`) before the agent or the
   journal sees it. Everywhere else (the raw HTTPS lane, or no
-  `cryptography`) they are refused (`LearnerDataGated`;
-  `--allow-unproven` cannot override it). The educator works by name
-  through `morrow students find` and writes by label (SKILL.md
+  `cryptography`) they are refused (`LearnerDataGated`). The educator
+  works by name through `bin/morrow students find` and writes by label (SKILL.md
   "Working by name"). Proof status: the by-name flow and the opened
   people-bearing rows are proven against synthetic Canvas fixtures in
   the source tree's end-to-end tests; they have not yet been exercised
   end to end against a live Canvas
   course with real students, so treat them as fixture-proven, not
   live-proven, until that battery runs.
+- Course content de-identification: before a Chromium-lane dispatch
+  reads or changes anything in a course, the executor reads the
+  course's student roster (every enrollment state, and deleted
+  enrollments) and labels every student named in course content (a
+  page body, an assignment description), restoring the real text when
+  content is saved back (`privacy/course_content.py`). It is a privacy
+  control, not a capability, and it is fixture-proven like the by-name
+  flow: the roster read (the same Canvas requests Morrow Desktop
+  makes) has not yet been run through this lane against a live
+  course.
 - Discussions: C-139 (create), C-141 (delete), and C-167 (update) are
-  catalog live-proven on 2026-09-20 (discussion 1241942 lifecycle) and
-  carry the learner-data flag, so they dispatch only on the Chromium
-  lane with the encrypted vault (receipts de-identified), and are
-  refused elsewhere. C-238 (discussion date_details PUT) is live-proven
-  through the 2026-09-21 Chromium write battery (PUT 204). No
-  discussion reads are among the 113 verified GETs (all discussion
+  catalog live-proven on 2026-09-20 (discussion 1241942 lifecycle)
+  through the retired form lane, never the Chromium lane. C-238
+  (discussion date_details PUT) is live-proven through the 2026-09-21
+  Chromium write battery (PUT 204). The admission policy holds all
+  four on every lane (see "In scope but pending live proof"). No
+  discussion reads are among the 115 live-proven reads (all discussion
   reads are pending).
-- Classic question banks: never tested. Not a v1 claim.
+- Announcements: never posted, even when the educator asks. Any
+  request that sets `is_announcement` (on any route, in the body or
+  the query) and creating an announcement external feed (C-25) are
+  never-dispatch in the admission policy. Posting an announcement
+  notifies every student in the course.
+- Messages to people and acting as someone else: never done, even when
+  the educator asks. Any request that sets `notify_of_update` (Canvas
+  then notifies every student in the course of the change) or
+  `as_user_id` (Canvas then acts as that person), on any route, in the
+  body or the query, is never-dispatch in the admission policy.
+  `notify_of_update` set to false sends nothing and is not refused.
+- Classic question banks: never tested. Not a v1 claim. A question
+  group that draws from one (`assessment_question_bank_id` on C-347 or
+  C-352) is refused.
 - The remainder of the 457-row for-muse catalog (437 Canvas rows
   plus 20 Item Bank rows): only rows marked `live-proven` are v1
   claims. (The desktop harvest catalog is a separate 1,137-operation

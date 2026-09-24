@@ -580,12 +580,31 @@ function verifiedCanvasCreateArtifact(child: BatchChildRecord, result: JsonObjec
   };
 }
 
+/**
+ * The effect states in which a sent change may be held by the provider: it went out, or may have,
+ * and no readback has settled it yet.
+ */
+const EFFECT_STATES_THAT_MAY_HAVE_REACHED_THE_PROVIDER: ReadonlySet<string> = new Set([
+  "dispatching",
+  "awaiting_inner_approval",
+  "awaiting_verification",
+  "applied_or_unknown",
+]);
+
+/** A staged change that reached the LMS, where a fresh read proved the LMS holds another result. */
+function sentAndMismatched(operation: JsonObject | null): boolean {
+  return isJsonObject(operation) && operation.state === "failed" && operation.verificationStatus === "mismatch";
+}
+
+/** A child's result, and for a staged change that failed after it was sent, the settlement to record. */
+type ChildOutcome = BatchExecutionResult & { readonly dispatchSettlement?: "failed_effect_possible" };
+
 function childResult(
   runtime: GatewayRuntime,
   batch: BatchRecord,
   child: BatchChildRecord,
   result: JsonObject,
-): BatchExecutionResult {
+): ChildOutcome {
   const meta = gatewayMeta(result);
   const operationId = gatewayOperationId(result) || "";
   const operation = operationId
@@ -606,6 +625,21 @@ function childResult(
   const resultDigest = sha256Json(retainedArtifact || result);
   const ratePolicy = canvasRatePolicy(result);
 
+  // The change was sent and the LMS holds another result: it failed, and it may have changed the
+  // course. Neither "needs checking" nor "no effect" is true of it.
+  if (batch.mode === "stage_writes" && operationId.startsWith("op:") && sentAndMismatched(operation)) {
+    return {
+      state: "failed",
+      resultDigest,
+      gatewayOperationId: operationId,
+      gatewayOperationState,
+      ...(sourceResultState ? { sourceResultState } : {}),
+      errorDigest: sha256Text("verification_mismatch"),
+      ...(ratePolicy ? { ratePolicy } : {}),
+      dispatchSettlement: "failed_effect_possible",
+    };
+  }
+
   if (gatewayOperationState === "source_unknown") {
     return {
       state: "unknown",
@@ -615,6 +649,23 @@ function childResult(
       ...(sourceResultState ? { sourceResultState } : {}),
       ...(sourceTaskId ? { sourceTaskId } : {}),
       errorDigest: sha256Text("gateway_source_unknown"),
+      ...(ratePolicy ? { ratePolicy } : {}),
+    };
+  }
+
+  // A staged change whose own record says it may have reached the provider is never a failure
+  // with no effect, even when the dispatch answered with an error: the LMS may hold it, so it
+  // needs checking and the batch stops before the next change.
+  if (result.isError === true && batch.mode === "stage_writes" && operationId.startsWith("op:")
+    && EFFECT_STATES_THAT_MAY_HAVE_REACHED_THE_PROVIDER.has(gatewayOperationState)) {
+    return {
+      state: "unknown",
+      resultDigest,
+      gatewayOperationId: operationId,
+      gatewayOperationState,
+      ...(sourceResultState ? { sourceResultState } : {}),
+      ...(sourceTaskId ? { sourceTaskId } : {}),
+      errorDigest: sha256Text(problemCode(result) || "gateway_tool_error"),
       ...(ratePolicy ? { ratePolicy } : {}),
     };
   }
@@ -759,11 +810,21 @@ export class MorrowRuntime {
         setApprovalPresence: (presence) => gateway.setApprovalPresence(presence),
         announceApprovalPresence: () => gateway.announceApprovalPresence(),
         setReviewLearnerNames: (reviewPath, names) => gateway.setReviewLearnerNames(reviewPath, names),
+        personCloseAvailable: (operationId) => gateway.personCloseAvailable(operationId),
+        confirmPersonClose: (operationId) => gateway.confirmPersonClose(operationId),
+        // The projected course name the course list already computed for each connection, the
+        // same lookup the recent-changes list uses. The page and that list never serve the
+        // Bridge's raw courseName.
+        connectionName: (sourceBindingId) => gateway.connectionCourseName(sourceBindingId),
         batchApprovalGet: (batchId) => runtime!.batchApprovalGet(batchId),
         batchApprovalStatus: (batchId) => runtime!.batchApprovalStatus(batchId),
         approveBatch: (batchId) => runtime!.approveBatch(batchId),
         runApprovedBatch: (batchId, signal) => runtime!.runApprovedBatch(batchId, signal),
         cancelBatchApproval: (batchId) => runtime!.cancelBatchApproval(batchId),
+        editAccessGet: (editAccessId) => gateway.editAccessReviews.page(editAccessId),
+        approveEditAccess: (editAccessId) => gateway.editAccessReviews.approve(editAccessId),
+        runApprovedEditAccess: (editAccessId) => gateway.editAccessReviews.run(editAccessId),
+        cancelEditAccess: (editAccessId) => gateway.editAccessReviews.cancel(editAccessId),
       });
       runtime = new MorrowRuntime(gateway, batches, sourceSettlements, approval);
       runtime.synchronizeEffectBatchAuthority();
@@ -949,10 +1010,16 @@ export class MorrowRuntime {
               child.gatewayOperationId || undefined,
             );
           } else if (child.state === "failed") {
+            let operation: JsonObject | null = null;
+            try {
+              operation = child.gatewayOperationId ? this.gateway.operationGet(child.gatewayOperationId) : null;
+            } catch {
+              // A child whose effect record is gone keeps the failure it recorded.
+            }
             this.sourceSettlements.markDispatchResult(
               batchId,
               child.childId,
-              "failed",
+              sentAndMismatched(operation) ? "failed_effect_possible" : "failed",
               child.gatewayOperationId || undefined,
             );
           }
@@ -1511,20 +1578,38 @@ export class MorrowRuntime {
     const states: Record<string, string> = {};
     const tools = new Set<string>();
     let confirmedChildren = 0;
+    // Unfinished staged writes are still in the person's review, approved by the person on the
+    // review page, or allowed by Edit with no review. Only the children's own operations say which,
+    // so they are read only while the batch is planned or running.
+    const unfinishedWrites = batch.mode === "stage_writes" && (batch.state === "planned" || batch.state === "running");
+    let reviewOpen = false;
+    let editAllowed: boolean | null = null;
     let offset = 0;
     for (;;) {
       const page = this.batches.listChildren(batchId, offset, 500);
       for (const child of page.children) {
         tools.add(child.publicToolName);
         if (child.gatewayOperationState === "verified") confirmedChildren += 1;
-        states[String(child.ordinal - 1)] = operationStatus(
-          child.state === "pending" ? "awaiting_approval"
-            : child.state === "running" ? "dispatching"
-              : child.state === "cancelled" ? "cancelled"
-                : child.state === "failed" ? "failed"
-                  : child.gatewayOperationState || child.state,
-          reviewPlatform([child.publicToolName]),
-        );
+        const readOperation = unfinishedWrites && child.gatewayOperationId && (editAllowed === null
+          || (batch.state === "planned" && !reviewOpen && child.state === "pending"));
+        if (readOperation) {
+          const operation = this.gateway.operationGet(child.gatewayOperationId!);
+          const authorization = isJsonObject(operation.plan) && isJsonObject(operation.plan.authorization)
+            ? operation.plan.authorization : {};
+          editAllowed ??= authorization.kind === "edit_scope";
+          if (batch.state === "planned" && child.state === "pending" && operation.state === "awaiting_approval") reviewOpen = true;
+        }
+        const shownState = child.state === "pending" ? "awaiting_approval"
+          : child.state === "running" ? "dispatching"
+            : child.state === "cancelled" ? "cancelled"
+              : child.state === "failed" ? "failed"
+                : child.gatewayOperationState || child.state;
+        // A failed change says whether it failed before it was sent or after a read proved the
+        // platform saved something else, as the page's first render does.
+        const verification = shownState === "failed" && child.gatewayOperationId?.startsWith("op:")
+          ? this.gateway.operationGet(child.gatewayOperationId).verificationStatus
+          : undefined;
+        states[String(child.ordinal - 1)] = operationStatus(shownState, reviewPlatform([child.publicToolName]), verification);
       }
       if (page.nextOffset === null) break;
       offset = page.nextOffset;
@@ -1533,6 +1618,10 @@ export class MorrowRuntime {
       schema: "morrow.batch-approval-status.v1",
       platform: reviewPlatform([...tools]),
       batch,
+      ...(unfinishedWrites && (reviewOpen || editAllowed !== null)
+        ? { approval: reviewOpen ? "awaiting_approval" : editAllowed ? "edit" : "approved" }
+        : {}),
+      applying: this.batchScheduler.holds(batchId),
       totalChildren: batch.totalChildren,
       confirmedChildren,
       states,
@@ -1896,7 +1985,7 @@ export class MorrowRuntime {
                 { signal: input.signal, bound: false, toolName: NATIVE_COURSE_AUDIT_TOOL },
               )
             : await this.gateway.callSourceOwned(child.publicToolName, forwarded, { signal: input.signal });
-        const outcome = isNativeCourseInventoryChild(child)
+        const { dispatchSettlement, ...outcome }: ChildOutcome = isNativeCourseInventoryChild(child)
           ? nativeCourseInventoryResult(resultValue)
           : isNativeCourseAuditChild(child)
           ? nativeCourseAuditResult(resultValue)
@@ -1923,7 +2012,7 @@ export class MorrowRuntime {
               this.sourceSettlements.markDispatchResult(
                 batch.batchId,
                 child.childId,
-                outcome.state === "unknown" ? "unknown" : "failed",
+                dispatchSettlement ?? (outcome.state === "unknown" ? "unknown" : "failed"),
                 outcome.gatewayOperationId,
               );
             }

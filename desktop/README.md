@@ -1,31 +1,31 @@
-# Morrow
+# Morrow Desktop
 
 [![CI](https://github.com/bradenriggins/morrow/actions/workflows/ci.yml/badge.svg)](https://github.com/bradenriggins/morrow/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/bradenriggins/morrow)](LICENSE)
 [![Website](https://img.shields.io/badge/website-meetmorrow.app-1f6feb)](https://meetmorrow.app)
 
-Morrow connects the AI assistant you already use to your Canvas and Moodle courses, and to a configured Blackboard course.
+Morrow Desktop, the app for Mac and Windows, connects the AI assistant you already use to your Canvas and Moodle courses, and to a configured Blackboard course.
 
 **Current state:** Morrow works with Canvas and Moodle through the signed-in Chrome connection and with Blackboard through the official Anthology Learn REST API; Canvas has selected live test-course proof, part of the Moodle catalog has been checked on a signed-in Moodle test course, and no live Blackboard tenant has been tested. Morrow works with the Canvas and Moodle courses your own signed-in account can open, and it acts only with that account's permissions. The test courses named in this file are Morrow's own verification evidence. They are not a rule about which of your courses you can connect. Of the 250 Moodle operations, 31 have been checked on a signed-in Moodle test course and the other 219 pass local browser fixtures only; the [Moodle capability surface](#moodle-capability-surface) lists both sets. A reviewed Moodle Resource upload takes one workspace file of at most 1 MiB. Moodle file support also replaces the file of a Resource, deletes one extra Resource file, adds up to 8 reviewed files of at most 1 MiB together to one Folder path, creates one empty subfolder, and replaces one hidden H5P package, each with browser-fixture proof only; it has no editor-attachment route. The assistant file planners stage Resource replacement, multiple Folder files, hidden SCORM replacement, and hidden H5P replacement for review. Blackboard needs an Anthology Learn REST application that a Blackboard administrator installs on your Learn site, and local credentials; Morrow then reads a connected Blackboard course and exposes 15 reviewed action planners for its supported REST changes. A planner sends no course write. Blackboard test and question authoring is not available through the public Learn REST API, and every Blackboard statement in this file is proved against local mocked-HTTPS fixtures only. See [current limits](LIMITATIONS.md).
 
 Morrow helps instructors, instructional designers, and course reviewers turn lesson and quiz requests into reviewed changes and checked results. Ask an assistant set up with Morrow for a change, review the exact change in Morrow, and see what the course platform saved. You keep the teaching decisions.
 
-Morrow runs on your computer and connects to an assistant through MCP. The desktop app sets up ChatGPT, Claude Desktop, Claude Code, or Gemini CLI, and the source route sets up the same four. A selected Codex update has passed a live test-course check; each other assistant still needs its own complete live checks. See the [test record](docs/implementation/BT2-LIVE-PROOF.md).
+Morrow Desktop runs on your computer and connects to an assistant through MCP. The app sets up ChatGPT, Claude Desktop, Claude Code, or Gemini CLI, and the source route sets up the same four. A selected Codex update has passed a live test-course check; each other assistant still needs its own complete live checks. See the [test record](docs/implementation/BT2-LIVE-PROOF.md).
 
 ## What a user installs
 
 A user installs two Morrow parts:
 
-1. **The Morrow desktop app** runs on your computer. It carries the Morrow MCP runtime and the Node runtime that runs it, sets up the assistant you choose, and guides the rest of setup. Assistants set up from one installation share one course connection.
+1. **Morrow Desktop** is the app that runs on your computer. It carries the Morrow MCP runtime and the Node runtime that runs it, sets up the assistant you choose, and guides the rest of setup. Assistants set up from one installation share one course connection.
 2. **Morrow Bridge** is one Manifest V3 Chrome extension. It uses the Canvas or Moodle session already signed in within Chrome.
 
-The app is built for macOS on Apple silicon and for Windows on x64. It needs no separate Node.js, pnpm, or source checkout, and normal setup asks for no command and no typed path. Morrow Bridge has no Chrome Web Store listing yet, so the app guides one temporary Chrome step: it opens the exact folder Chrome must load, and you turn on Developer mode and select **Load unpacked**. [The Morrow desktop app](#the-morrow-desktop-app) states what is built and what is still unproven.
+The app is built for macOS 13 or later on Apple silicon, and for Windows 10 or Windows 11 on x64. It needs no separate Node.js, pnpm, or source checkout, and normal setup asks for no command and no typed path. Morrow Bridge has no Chrome Web Store listing yet, so the app guides one temporary Chrome step: it opens the exact folder Chrome must load, and you turn on Developer mode and select **Load unpacked**. [The Morrow Desktop app](#the-morrow-desktop-app) states what is built and what is still unproven.
 
 Canvas and Moodle need no platform access token, developer key, OAuth app, hosted Morrow account, or separate approval application. Blackboard is the exception. A Blackboard administrator installs Morrow's REST application on your Learn site and chooses the Learn account it acts as. It then needs an Anthology Learn REST integration key and secret that you supply locally, and Morrow keeps that secret in a private local file, separate from the assistant configuration.
 
-## How a user works with Morrow
+## How a user works with Morrow Desktop
 
-1. **Download and open Morrow.** Choose the download for your computer, install it, and open the app.
+1. **Download and open Morrow Desktop.** Choose the download for your computer, install it, and open the app.
 2. **Follow the setup in the app.** Choose your assistant. Morrow then shows one next action at a time while you add Morrow Bridge to Chrome and connect it to Morrow. The materials folder is optional; Morrow creates a default one unless you choose another.
 3. **Open and connect your course.** Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge identifies the platform and shows **Connect this course**. Select that button and allow the exact platform address Chrome shows. In Morrow Bridge, select **Open Plan and Edit settings**, then select **Connect** next to each course under **Your courses**, and complete the first read. Then return to your assistant and ask it to use Morrow. Plan keeps changes in review. In settings, you can grant Edit access to specific change types in specific courses. Edit stays on until you return the course to Plan.
 
@@ -141,19 +141,29 @@ questions worth 20 question points. Check for repeated question content in the
 Week 2 quiz too.” Your assistant resolves the named course and quizzes, then calls
 `morrow_check_new_quiz` with those exact targets.
 
-The report names the course and quizzes. It checks the number of directly listed
-questions, their total points, saved choice-based answer settings, and repeated
-question content. It can compare up to three other New Quizzes in the same
-course. Reads use the existing Chrome connection. No change approval is needed.
+The report names the course and quizzes. It counts the questions and their
+total points, checks each question's saved shape and scoring settings for all 12
+question types, and finds repeated question content. It can compare up to three
+other New Quizzes in the same course. Reads use the existing Chrome connection.
+No change approval is needed.
+
+The check covers the questions written in the quiz and the single bank questions
+the saved quiz carries. A bank draw holds only its bank, so Morrow reads that
+Item Bank and checks the questions it can supply, up to 20 Item Banks for each
+quiz and 300 bank questions in one check. A draw counts as the number of
+questions it takes, each worth its points per question. Canvas picks the drawn
+questions for each learner when the learner starts the quiz, so the report
+cannot say which ones a learner got. A bank Morrow cannot read in full is marked
+incomplete, and so is a quiz past either limit.
 
 This is a structural check, not a complete assessment review. Repeated content
 means identical question content apart from extra whitespace, not similar ideas.
 The check does not judge answer correctness, learning objectives, accessibility,
-bank contents, or student access. Partial reads and bank draws are marked
-incomplete. Question points are not the same as Canvas assignment gradebook points.
+or student access. Partial reads are marked incomplete. Question points are not
+the same as Canvas assignment gradebook points.
 
-This workflow has automated connector tests. Live Canvas verification is still
-required before treating it as a production-ready feature.
+Attended runs on the BT2 test course confirmed this check, and the [attended
+record](docs/implementation/NEW-QUIZZES-ITEM-BANKS-COVERAGE.md) lists it.
 
 ## Review a lesson against your source
 
@@ -200,7 +210,7 @@ Canvas coverage includes course discovery, pages, modules, assignments, discussi
 
 New Quizzes accepts all twelve question types its interaction contract covers: Multiple Answer, Matching, Categorization, File Upload, Formula, Ordering, Rich Fill in the Blank, Hot Spot, Multiple Choice, Numeric, True or False, and Essay. A Hot Spot create stages the reviewed image privately, sends it once to the presigned host Canvas names, and refuses the create unless the upload observer confirmed that exact request. See [current limits](LIMITATIONS.md) for what each type still needs before it is live-verified.
 
-Canvas Item Banks expose seven reads and eleven course-bound owner-write shapes. Every operation is bound to the selected course. Bank management reads use a fresh credential from the exact signed-in Item Banks frame. The share read returns one observed page and always reports that pagination is incomplete. The quiz-entry read follows numbered pages to an empty end page and fails closed if it reaches its page or row bound. All eleven writes dispatch to Canvas behind exact snapshots and fresh readbacks. Eight of them can hold a standing Edit grant; the three that remove content (archiving a bank, deleting an entry, and removing a quiz's use of a bank) are approved change by change. Existing-bank changes lack complete downstream reach: Canvas provides no complete record of every course a bank reaches, so the fan-out record is always incomplete. Duplicate, standalone item deletion, stimulus lifecycle, move or copy, tags, QTI import, and broader sharing remain absent. The private routes remain live-unverified.
+Canvas Item Banks expose nine reads and twenty course-bound changes. Every operation is bound to the selected course. Bank management reads use a fresh credential from the exact signed-in Item Banks frame. The share read returns one observed page and always reports that pagination is incomplete. The quiz-entry read follows numbered pages to an empty end page and fails closed if it reaches its page or row bound. Every change reads the exact current state first, sends one request, and rereads Canvas to prove the saved result. Fourteen of the twenty changes can hold a standing Edit grant. Six are approved change by change: deleting a bank, removing a question from a bank, moving a question to another bank, removing a tag, changing or removing a share, and removing a bank draw or bank question from a quiz. Existing-bank changes lack complete downstream reach: Canvas provides no complete record of every course a bank reaches, so the fan-out record is always incomplete. Attended runs on the BT2 test course confirmed the Item Bank reads and changes by reading Canvas back, and the [attended record](docs/implementation/NEW-QUIZZES-ITEM-BANKS-COVERAGE.md) lists each task. Stimuli are the exception: Canvas refuses Morrow's request to create one, so changing one has not been confirmed either. Deleting a question outright (removing it from a bank leaves the question in place), QTI import, restoring a deleted bank, sharing a bank with a user or an account, and uploading a new image into a bank remain absent.
 
 Four instructor-facing reads answer questions about work in progress as counts only, so no learner row has to be read and redacted: `canvas_get_classic_quiz_submission_summary`, `canvas_get_assignment_submission_summary`, `canvas_get_course_gradebook_summary`, and `canvas_get_course_activity_summary`. Each one counts inside the Canvas page before anything crosses the connection, and returns no learner identity, score, comment, or attachment name. The gradebook summary publishes a score distribution only when the assignment has at least 5 scored submissions and every band it would show holds at least 5, so no individual score can be inferred; otherwise that assignment's distribution is dropped. A read that reaches a byte or page bound reports an explicit incomplete state instead of a partial count. The three course-level reads are proved against local browser fixtures only; no signed-in Canvas course has run them, and real submission and gradebook payloads vary by tenant and role.
 
@@ -281,7 +291,7 @@ Each of these passes a browser fixture that drives Chrome against a local server
 - The calendar of a course, and its dates. List the events of one course month by month, read every date the course carries grouped by the activity that owns it, and read one exact event: `moodle_list_course_events`, `moodle_get_course_dates`, `moodle_get_event`. Moodle ships no core course Dates page, so the grouped read is the course calendar and nothing else, and an activity date the calendar does not carry is not listed. Create, change, and delete one course event: `moodle_create_course_event`, `moodle_update_event`, `moodle_delete_event`. An activity's own due, open, and close dates reach the calendar as activity events, and these reads list and read them; changing one is done on the activity itself. A course event is in the calendar of everyone enrolled in the course as soon as Moodle saves it. Morrow never converts a wall-clock date: every date it reports is the year, month, day, hour, and minute Moodle itself rendered, every date it sends is the one that was approved, every result names the time zone the signed-in person has configured, and it refuses the operation when the page states no time zone. Morrow refuses an event an activity owns, because that date belongs to the activity and Moodle builds the event again, and it refuses a repeating series, a personal, site, or category event, and any event outside the course. Deleting an event cannot be undone; the event read states exactly what a deletion removes and keeps before you approve it.
 - The internal privacy roster `moodle_get_course_participant_roster`. Morrow uses it only to redact learner identifiers before a result leaves the browser. It is not offered to an assistant as a participant list.
 
-Morrow claims no Moodle feature that is not in these lists. Missing areas include participants and enrolment, calendar and events, access restrictions, learner completion state and completion reports, import, backup and restore, reports and logs, question authoring outside the dedicated hidden bank route above, and site administration. See the [full functionality scope](docs/implementation/MOODLE-FULL-FUNCTIONALITY.md) for the complete gap list.
+Morrow claims no Moodle feature that is not in these lists, and every area in the second list is implemented and locally tested only. Missing areas include question authoring outside the dedicated hidden bank route above, any change to a saved question, grading a response by hand, running a regrade, grading an Assignment and granting an extension, deleting an override, administration changes of any kind, Report Builder and report downloads, and messaging, badges, competencies, portfolios, plagiarism, and comments. See the [full functionality scope](docs/implementation/MOODLE-FULL-FUNCTIONALITY.md) for the complete gap list.
 
 ## Blackboard capability surface
 
@@ -289,7 +299,7 @@ Blackboard does not use the Chrome connection. Morrow calls the official Antholo
 
 Before any of this works, a Blackboard administrator has to install Morrow's REST application on the Learn site, choose the Learn account the integration acts as, and give that account the entitlements these routes need. Morrow cannot do that part for you, and the entitlement list is not settled: no tenant has confirmed it, so Morrow records every entitlement as unknown. The [Blackboard REST scope](docs/implementation/BLACKBOARD-REST-SCOPE.md) holds the route inventory, the held operations, and the live-tenant acceptance runbook.
 
-These Blackboard reads ship: `blackboard_read_course`, `blackboard_list_course_contents`, `blackboard_read_course_content`, `blackboard_list_content_children`, `blackboard_inventory_course_contents`, `blackboard_get_course_availability`, `blackboard_list_my_courses`, `blackboard_list_content_attachments`, `blackboard_read_content_attachment`, `blackboard_read_integration_account`, `blackboard_list_gradebook_columns`, `blackboard_read_gradebook_column`, `blackboard_list_gradebook_attempts`, `blackboard_read_gradebook_attempt`, `blackboard_read_course_assessment`, `blackboard_list_course_announcements`, `blackboard_read_course_announcement`, `blackboard_list_course_groups`, `blackboard_list_course_group_sets`, `blackboard_read_course_group`, `blackboard_list_group_members`, and `blackboard_course_roster_summary`. The roster summary reports how many people are in the course and returns no name and no contact detail; each person’s role is returned with a protected reference. The identity map stays encrypted on your computer. Two more reads, `blackboard_read_course_membership` and `blackboard_read_gradebook_grade`, read one person's course role and one person's grade, using one of those exact course references. The references survive a restart; a reference from another course is refused. `blackboard_list_group_members` names everyone in one group by one of those references and returns no name and no contact detail. The attempt reads name each person by one of those references and return the score, the status, and the timestamps; they return no submitted work and no feedback, and they do not ask Blackboard for either. `morrow_blackboard_health` reports what is configured; a configured status is not a live connection. `blackboard_unresolved_effects` lists the Blackboard changes Morrow sent and could not confirm, so you can open each item in Blackboard and check it yourself; it sends no Blackboard request and repeats no change. In the Full tool surface an assistant calls each read under its own name. In the compact tool surface the desktop app configures, no catalog tool is registered under its own name, and an assistant reaches each read under that same name through `morrow_capability_read`.
+These Blackboard reads ship: `blackboard_read_course`, `blackboard_list_course_contents`, `blackboard_read_course_content`, `blackboard_list_content_children`, `blackboard_inventory_course_contents`, `blackboard_get_course_availability`, `blackboard_list_my_courses`, `blackboard_list_content_attachments`, `blackboard_read_content_attachment`, `blackboard_read_integration_account`, `blackboard_list_gradebook_columns`, `blackboard_read_gradebook_column`, `blackboard_list_gradebook_attempts`, `blackboard_read_gradebook_attempt`, `blackboard_read_course_assessment`, `blackboard_list_course_announcements`, `blackboard_read_course_announcement`, `blackboard_list_course_groups`, `blackboard_list_course_group_sets`, `blackboard_read_course_group`, `blackboard_list_group_members`, and `blackboard_course_roster_summary`. The roster summary reports how many people are in the course and returns no name and no contact detail; each person’s role is returned with a protected reference. The identity map stays encrypted on your computer. Two more reads, `blackboard_read_course_membership` and `blackboard_read_gradebook_grade`, read one person's course role and one person's grade, using one of those exact course references. The references survive a restart; a reference from another course is refused. `blackboard_list_group_members` names everyone in one group by one of those references and returns no name and no contact detail. The attempt reads name each person by one of those references and return the score, the status, and the timestamps; they return no submitted work and no feedback, and they do not ask Blackboard for either. `morrow_blackboard_health` reports what is configured; a configured status is not a live connection. `blackboard_unresolved_effects` lists the Blackboard changes Morrow sent and could not confirm, so you can open each item in Blackboard and check it yourself; it sends no Blackboard request and repeats no change. In the Full tool surface an assistant calls each read under its own name. In the compact tool surface Morrow Desktop configures, no catalog tool is registered under its own name, and an assistant reaches each read under that same name through `morrow_capability_read`.
 
 Morrow exposes 15 reviewed Blackboard action planners: `morrow_plan_blackboard_membership_patch`, `morrow_plan_blackboard_gradebook_column_patch`, `morrow_plan_blackboard_gradebook_grade_patch`, `morrow_plan_blackboard_content_attachment`, `morrow_plan_blackboard_ultra_assignment`, `morrow_plan_blackboard_course_announcement`, `morrow_plan_blackboard_course_announcement_patch`, `morrow_plan_blackboard_course_group`, `morrow_plan_blackboard_course_group_patch`, `morrow_plan_blackboard_group_membership`, `morrow_plan_blackboard_group_membership_removal`, `morrow_plan_blackboard_course_availability`, `morrow_plan_blackboard_content_dated_visibility`, `morrow_plan_blackboard_course_copy`, `morrow_plan_blackboard_content_patch`. Each planner freezes the exact selected course, account, credential generation and change. It sends no course write. Approval permits one dispatch, followed by a fresh saved-result comparison. The source apply and verification tools remain private.
 
@@ -317,26 +327,26 @@ Morrow projects results before it returns them to the AI client. It applies fiel
 
 Learner tokenization works from the complete course roster. Each student on it gets one course label, such as `Student A4`, and the assistant receives that label in place of the student's name, email address, login, SIS id, and platform id. Morrow also replaces the platform id where a link carries it, such as a Canvas grade or submission link or a Moodle profile or grade report link, and a rostered id of five or more digits written on its own in text. When the assistant writes to a label, Morrow sends the student's real platform id to Canvas or Moodle and returns the label again. See [learner privacy limits](LIMITATIONS.md#learner-privacy).
 
-The assistant sees labels; the educator sees names only in Chrome, through Morrow Bridge. The review server is plain local HTTP that any program on this computer can read, including an assistant that runs shell commands, so every review page and status answer it serves names students by label only. Morrow sends the names for one review to Morrow Bridge over the paired, authenticated Bridge connection. Morrow Bridge keeps them in Chrome's session storage, and in the review tab for that exact review it shows each student's name beside the label, for example `Jane Doe (Student A4)`. It writes names into the page text only, never into a form field, the request in Technical details, or anything the page sends. Morrow Bridge forgets them when the change is cancelled, 15 minutes after the review page last showed them, and when the Bridge disconnects. A program that reads the review page over local HTTP, such as `curl`, sees only labels. The names come from the learner vault on this computer. They are never part of a tool result, a receipt, or anything else Morrow returns to the assistant.
+The assistant sees labels; the educator sees names only in Chrome, through Morrow Bridge. The review server is plain local HTTP that any program on this computer can read, including an assistant that runs shell commands, so every review page and status answer it serves names students by label only. Morrow sends the names for one review to Morrow Bridge over the paired, authenticated Bridge connection. Morrow Bridge keeps them in Chrome's session storage, and in the review tab for that exact review it shows each student's name beside the label, for example `Jane Doe (Student A4)`. It writes names into the page text only, never into a form field, the request in Technical details, or anything the page sends. Morrow Bridge forgets them when the change is cancelled, 15 minutes after the review page last showed them, and when the Bridge disconnects. A program that reads the review page over local HTTP, such as `curl`, sees only labels, and it cannot pair itself as Morrow Bridge. A program that runs as you and reads Morrow's files can take over the Bridge connection and see the names, as the [security boundary](LIMITATIONS.md#security-boundary) describes. The names come from the learner vault on this computer. They are never part of a tool result, a receipt, or anything else Morrow returns to the assistant.
 
 ### Private Chat
 
-`morrow_private_chat` opens the Private Chat drawer in Morrow Bridge's settings page and relays a conversation about one connected course to the assistant through MCP sampling. The educator writes with student names and lists each student the message names. Before the message leaves Chrome, Morrow Bridge reads a fresh, complete course roster and replaces each name, email address, login, SIS id, and platform id it matches with that student's course label. It matches names with or without accents. The label comes from the same learner vault as tool results, so one student has one label everywhere in that course. Morrow Bridge sends Morrow only the platform ids of the students it found, to ask for their labels; no name leaves Chrome. A capitalized word that looks like a name but matches no student stops the message, and Morrow Bridge names it; the educator adds the student to the list or sends the message again to send it as written. The drawer shows the educator each student's name where the assistant sees a label. Closing the drawer ends the session and clears the conversation and its names. See [learner privacy limits](LIMITATIONS.md#learner-privacy).
+`morrow_private_chat` opens the Private Chat drawer in Morrow Bridge's settings page and relays a conversation about one connected course to the assistant through MCP sampling. The educator writes with student names and lists each student the message names. A follow-up that names no student needs no list. Before the message leaves Chrome, Morrow Bridge reads a fresh, complete course roster and replaces each name, email address, login, SIS id, and platform id it matches with that student's course label. It matches names with or without accents. The label comes from the same learner vault as tool results, so one student has one label everywhere in that course. Morrow Bridge sends Morrow only the platform ids of the students it found, to ask for their labels; no name leaves Chrome. A capitalized word that looks like a name but matches no student stops the message, and Morrow Bridge names it; the educator adds the student to the list or sends the message again to send it as written. The drawer shows the educator each student's name where the assistant sees a label. Closing the drawer ends the session and clears the conversation and its names. See [learner privacy limits](LIMITATIONS.md#learner-privacy).
 
 Client configuration contains only the local Node command, server entry path, working directory, and `MORROW_UPSTREAMS_FILE`. It contains no Canvas credential, Blackboard secret, or browser secret.
 
-## The Morrow desktop app
+## The Morrow Desktop app
 
-Morrow is one desktop application. It carries the Morrow MCP runtime, the Node runtime that runs it, and the Morrow Bridge files Chrome loads. `installer/electron-builder.config.cjs` builds exactly two artifacts.
+Morrow Desktop is one desktop application. It carries the Morrow MCP runtime, the Node runtime that runs it, and the Morrow Bridge files Chrome loads. `installer/electron-builder.config.cjs` builds exactly two artifacts.
 
 | System | Artifact | What has been checked |
 | --- | --- | --- |
 | macOS on Apple silicon | `Morrow-<version>-mac-arm64.dmg`, with a matching `.zip` | The unsigned 1.0.0 disk image was mounted and installed on the MacBook. The packaged runtime passed `scripts/test/desktop-mac-smoke.mjs`, including the Bridge listener and private state modes. |
 | Windows on x64 | `Morrow-<version>-win-x64.exe`, a one-click per-user NSIS installer | The unsigned 1.0.0 installer passed install, start, damaged-payload refusal, exact repair, uninstall, and retained-data checks on native Windows `BOOTZ`. `scripts/test/desktop-windows-smoke.mjs` runs on native Windows only. |
 
-There is no Intel macOS build and no Linux build. Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature so that a downloaded copy shows the Open Anyway route instead of a damaged-app refusal. The public unsigned 1.0.5 release is available from the [Morrow downloads page](https://meetmorrow.app/download). Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
+There is no Intel macOS build and no Linux build. Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature so that a downloaded copy shows the Open Anyway route instead of a damaged-app refusal. Morrow Desktop 1.0.5 is an unreleased candidate. Its public installers will be available from the [Morrow downloads page](https://meetmorrow.app/download) after release. Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
 
-You need Chrome 116 or later and one supported assistant already installed on the same computer: ChatGPT, Claude Desktop, Claude Code, or Gemini CLI.
+You need a Mac with Apple silicon and macOS 13 or later, or an x64 computer with Windows 10 or Windows 11. On that computer you also need Chrome 116 or later and one supported assistant already installed: ChatGPT, Claude Desktop, Claude Code, or Gemini CLI.
 
 ### What the app asks you to do
 
@@ -345,10 +355,10 @@ On a Mac, Morrow first asks you to move it to Applications when it runs from the
 The app presents three stages and shows one next action at a time:
 
 1. **Choose your assistant.** Morrow lists the assistants it found on this computer and configures only the one you select. Claude Desktop receives a generated local extension and asks you to approve it in Claude Desktop. Each of the other three receives one Morrow entry in its own settings file. Morrow keeps a copy of a settings file before it changes it, named after the file and the time, in the **Assistant settings backups** folder.
-2. **Set up Morrow Bridge.** Select **Show Bridge folder**. Morrow opens the folder Chrome must load and shows its full path with a **Copy path** button. In Chrome, open the three-dot menu, select **Extensions**, then **Manage Extensions**, turn on **Developer mode**, select **Load unpacked**, and select that folder. The folder is hidden by default: on a Mac, press Command+Shift+G in Chrome's folder picker and paste the path; on Windows, paste the path into the picker's address bar. Open Morrow Bridge, select **Connect Morrow**, then select **Allow connection** on the Morrow page only if you started it. This temporary Chrome step stands until Morrow Bridge has a Chrome Web Store listing. A managed Chrome profile can block it, and Morrow does not work around that restriction.
+2. **Set up Morrow Bridge.** Select **Show Bridge folder**. Morrow opens the folder Chrome must load and shows its full path with a **Copy path** button. In Chrome, open the three-dot menu, select **Extensions**, then **Manage Extensions**, turn on **Developer mode**, select **Load unpacked**, and select that folder. The folder is hidden by default: on a Mac, press Command+Shift+G in Chrome's folder picker and paste the path; on Windows, paste the path into the picker's address bar. Open Morrow Bridge and select **Connect Morrow**. Morrow connects only the Morrow Bridge that Chrome loaded from the folder Morrow shows. This temporary Chrome step stands until Morrow Bridge has a Chrome Web Store listing. A managed Chrome profile can block it, and Morrow does not work around that restriction.
 3. **Open and connect your course.** Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge identifies the platform and shows **Connect this course**. Select that button and allow the exact platform address Chrome shows. In Morrow Bridge, select **Open Plan and Edit settings**, then select **Connect** next to a course under **Your courses**. Each course starts in Plan. Morrow then reads the course it names once to confirm the connection. That read changes nothing in the course.
 
-When the course is connected, Morrow asks you to quit and reopen the assistant you chose, because an assistant reads its settings only when it starts. Open it again, start a new chat, then select **Check** in Morrow. Morrow shows the final "Continue in your assistant" step only after that assistant's own Morrow session has connected once.
+When the course is connected, Morrow asks you to quit and reopen the assistant you chose, because an assistant reads its settings only when it starts. Open it again, start a new chat, then select **Check** in Morrow. Claude Code and Gemini CLI read Morrow's entry only in the project folder you chose at setup, so Morrow names that folder: start the assistant there, and approve the morrow server when Claude Code asks. Morrow shows the final "Continue in your assistant" step only after that assistant's own Morrow session has connected once.
 
 Morrow creates a default materials folder. Choosing another folder is optional, and you can change it after setup.
 
@@ -359,23 +369,23 @@ Morrow does not ask you to open a terminal, type a path, install Node.js or pnpm
 The app keeps the same window for the rest of the installation's life. It carries:
 
 - **Repair Morrow**, which checks the files inside Morrow, replaces the Morrow Bridge folder from the copy Morrow ships when the folder does not match it, and writes Morrow's entry again into every assistant it set up, so each one points at this copy of Morrow. Morrow finds its own entry by what it is, so an assistant that rewrote the rest of its settings file since is not a problem. It leaves a server of the same name that Morrow did not write alone and changes nothing in your course.
-- **What stays on this computer**, which names the exact path of every place this installation keeps data, marks which of them Morrow can remove, and states the step this computer uses to remove the application itself. **Remove Morrow's data** first shows a confirmation listing every path it will remove and every path it will keep. It then takes Morrow's own entry out of each assistant settings file, so no assistant keeps starting a Morrow that is gone, and stops without removing anything if it cannot. It keeps the **Assistant settings backups** folder. It then reads each path again and reports which are gone and which are still there.
-- To remove the application, select **Remove Morrow's data** first, then quit Morrow and move it to the Trash (Mac) or uninstall it from Settings, Apps (Windows).
-- Changing the materials folder and removing an assistant after setup.
+- **What stays on this computer**, which names the exact path of every place this installation keeps data, marks which of them Morrow can remove, and states the step this computer uses to remove the application itself. **Remove Morrow's data** first shows a confirmation listing every path it will remove and every path it will keep. It then takes Morrow's own entry out of each assistant settings file Morrow changed, so those assistants stop starting a Morrow that is gone, and stops without removing anything if it cannot. It keeps the **Assistant settings backups** folder, and it keeps the **Window data** folder, where Morrow's window keeps its caches and site data while Morrow is open; delete that folder after you remove the application. Claude Desktop keeps its own copy of the Morrow extension, which Morrow does not remove; the list and the confirmation name it and say to remove Morrow in Claude Desktop under Settings, Extensions. It then reads each path again and reports which are gone and which are still there.
+- To remove the application, select **Remove Morrow's data** first. If you set up Claude Desktop, also remove Morrow in Claude Desktop under Settings, Extensions. Then quit Morrow and move it to the Trash (Mac), or uninstall it from Settings, Apps, Installed apps (Windows 11) or Settings, Apps, Apps & features (Windows 10).
+- Changing the materials folder and removing an assistant after setup. When the materials folder is moved, renamed, deleted, or on a drive that is not connected, Home names it and offers **Choose folder**, and **Make the folder again** for Morrow's own folder.
 - Manual installation of a newer unsigned build. Automatic updates remain disabled in unsigned releases.
 
-### What the desktop app has not proved
+### What Morrow Desktop has not proved
 
 - The Mac and Windows releases are unsigned, as required for this release. A quarantined download of the macOS app passes `codesign --verify --deep --strict` and is refused by Gatekeeper only for the missing notarization, which is the state that offers Open Anyway in Privacy & Security. The Windows installer carries no Authenticode signature, so SmartScreen shows More info and Run anyway. Neither dialog has been walked by hand on a fresh machine.
 - Complete live-course setup through the final installed app is still open. The native startup and repair checks use isolated application state.
 - Automatic signed updates have not been tested or enabled. They are outside this unsigned release.
-- Morrow Bridge has no Chrome Web Store listing. The temporary Developer-mode step is the only route, and reloading the unpacked Bridge in Chrome always needs a person.
+- Morrow Bridge has no Chrome Web Store listing. The temporary Developer-mode step is the only route, and loading the unpacked Bridge in Chrome the first time needs a person. Later the app updates the unpacked Bridge and asks it to reload itself; it never opens or automates Chrome's extensions page.
 
 See [current limits](LIMITATIONS.md) for the complete list. The exact saved receipt for each desktop result, and each result that has no receipt, is listed in the [completion goal](docs/implementation/MORROW-1.0-COMPLETION-GOAL.md).
 
 ## Development and engineering evidence
 
-The two sections below are how Morrow is built and checked. Neither is the consumer installation. A person installing Morrow uses [the desktop app](#the-morrow-desktop-app).
+The two sections below are how Morrow is built and checked. Neither is the consumer installation. A person installing Morrow Desktop uses [the app](#the-morrow-desktop-app).
 
 ### The macOS Apple silicon MCP archive
 
@@ -423,7 +433,7 @@ pnpm install --frozen-lockfile
 pnpm run setup
 ```
 
-`pnpm run setup` builds the workspace and writes a private local `morrow.upstreams.json` with absolute paths. It prints the unpacked extension directory.
+`pnpm run setup` builds the workspace and writes a private local `morrow.upstreams.json` with absolute paths. It prints the unpacked extension directory. It also writes a pairing secret into `connector/extension`, so a Morrow Bridge loaded from that folder can connect to Morrow; git ignores that file, and no Bridge release carries it.
 
 Morrow Bridge is not installed from the Chrome Web Store. Open
 `chrome://extensions`, turn on **Developer mode**, select **Load unpacked**, and
@@ -431,17 +441,19 @@ choose the `connector/extension` folder. Your organization must allow this.
 If managed Chrome blocks Developer mode or this extension, Morrow cannot
 connect through that browser. Do not bypass your organization's restrictions.
 
-To build a ZIP of the extension:
+To build the Bridge release ZIP:
 
 ```bash
 pnpm package:connector
 ```
 
-Extract `artifacts/connector/morrow-canvas-connector-v1.0.6.zip`. Use **Load
-unpacked** to select the extracted folder that contains `manifest.json`, not the
-ZIP file. Keep that folder in place while the extension is installed.
+It writes `artifacts/connector/morrow-canvas-connector-v<version>.zip`, where
+`<version>` is the Bridge version in `connector/extension/manifest.json`. The
+ZIP is a release artifact, not a way to install Morrow Bridge. A folder
+extracted from it has no pairing secret, so it cannot connect to a Morrow you
+run from source. From source, always load `connector/extension`.
 
-Bridge 1.0.6 is the current release. Update the desktop app and Bridge together, reload the unpacked extension, then reconnect them. An older Bridge does not carry the complete 1.0 operation set.
+Each desktop release ships with the Bridge version its [changelog](CHANGELOG.md) names. Update Morrow Desktop and Morrow Bridge together, reload the unpacked extension, then reconnect them. An older Bridge does not carry the complete 1.0 operation set.
 
 Configure Morrow in any of these clients. Compatible clients on the same computer share one Morrow runtime and Chrome Bridge connection. Keep their Morrow configuration consistent. Avoid competing edits to the same course content:
 
@@ -520,4 +532,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md), [LIMITATIONS.md](LIMITATIONS.md), and [S
 
 ## Release status
 
-The release checkout uses `1.0.5`. The public `desktop/v1.0.5` release on [GitHub Releases](https://github.com/bradenriggins/morrow/releases/tag/desktop/v1.0.5) provides unsigned macOS Apple silicon and Windows x64 installers: `Morrow-1.0.5-mac-arm64.dmg`, `Morrow-1.0.5-mac-arm64.zip`, and `Morrow-1.0.5-win-x64.exe`. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
+The release checkout uses `1.0.5`. The public `desktop/v1.0.5` release is not published yet. After release, it will provide unsigned macOS Apple silicon and Windows x64 installers: `Morrow-1.0.5-mac-arm64.dmg`, `Morrow-1.0.5-mac-arm64.zip`, and `Morrow-1.0.5-win-x64.exe`. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.

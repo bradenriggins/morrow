@@ -34,15 +34,23 @@ On detection the agent:
    executor checks; `reauth/state_machine.py` owns the halt, quarantine,
    and notify mechanics).
 2. Quarantines in-flight ops. Nothing retries against a dead session.
-3. Tells the educator, plainly: "Your Canvas sign-in expired. Nothing
-   was lost. Please sign in again on the login helper page."
+3. Tells the educator, plainly: "Your Canvas sign-in expired. Please
+   sign in again on the login helper page." and what happened to each
+   change in progress, as the notice says it
+   (`reauth/state_machine.py notify`): a change stopped before it was
+   sent did not change anything in Canvas and waits for the
+   educator's OK; a change that was on its way to Canvas may already
+   be in Canvas.
 4. Waits for the educator to re-sign in through the helper page.
 5. Verification batch: GET /api/v1/users/self. The principal id MUST
    match the pinned id in lane state; on mismatch, the halt stays and
-   the situation escalates (possible account change), never
-   auto-resumes.
-6. On match: mark verified, lift the halt. Quarantined ops resume only
-   with the educator's fresh approval; nothing auto-retries.
+   the situation escalates (possible account change), and nothing is
+   sent.
+6. On match: mark verified, lift the halt. A change that was not sent
+   waits for the educator's fresh approval. A change that may already
+   be in Canvas is never sent again: the agent checks the course first
+   and prepares it again only with the educator's OK. Nothing
+   auto-retries.
 
 ## Keepalive
 

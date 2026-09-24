@@ -221,8 +221,11 @@ describe("Blackboard Gateway effect execution state", () => {
 
       // No Morrow reading of a Blackboard item can carry read authority, so the
       // person's own check is the only evidence this close could ever have. The
-      // close takes it, and the closed record stops holding the item.
-      const closed = await runtime.gateway.closeUnresolvedOperation(unconfirmedOperationId, "c".repeat(64), true);
+      // change's page offers them the close-out with no request from the assistant,
+      // their own signed click takes it, and the closed record stops holding the item.
+      expect(runtime.gateway.personCloseAvailable(unconfirmedOperationId)).toBe(true);
+      expect(runtime.gateway.operationGet(unconfirmedOperationId).state).toBe("applied_or_unknown");
+      const closed = await runtime.gateway.confirmPersonClose(unconfirmedOperationId);
       expect(closed.isError, JSON.stringify(closed)).not.toBe(true);
       const closedRecord = runtime.gateway.operationGet(unconfirmedOperationId);
       expect(closedRecord.state).toBe("closed_by_person");

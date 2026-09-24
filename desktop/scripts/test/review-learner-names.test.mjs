@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import {
   clearReviewLearnerNames,
   handleReviewLearnerNamesMessage,
@@ -102,7 +102,7 @@ test("keeps the map in session storage, tells the review tab, and forgets it whe
 const CONTENT_SOURCE = readFileSync(new URL("../../connector/extension/src/review-approval-content.js", import.meta.url), "utf8");
 
 test("the review tab shows each name beside its label in page text only, and removes it when the map ends", async () => {
-  const browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+  const browser = await launchTestChromium();
   try {
     const page = await browser.newPage();
     await page.setContent(`<main>

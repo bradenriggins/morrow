@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Morrow Bridge: Courses and access</title>
+  <title>Morrow Bridge: Plan and Edit settings</title>
   <link rel="stylesheet" href="../brand/theme.css">
   <link rel="stylesheet" href="settings.css">
 </head>
@@ -12,7 +12,7 @@
     <header class="page-header">
       <span class="brand-wordmark"><img class="brand-mark" src="../brand/morrow-knot.svg" alt=""><span>morrow</span></span>
       <div>
-        <h1>Courses and access</h1>
+        <h1>Plan and Edit settings</h1>
         <p class="lede">Plan is the default. Choose specific courses and individual Edit actions only when Morrow should apply changes for you.</p>
       </div>
       <button id="private-chat-open" class="private-chat-open secondary" type="button" aria-haspopup="dialog" aria-controls="private-chat-drawer" aria-expanded="false">Private Chat</button>
@@ -36,7 +36,7 @@
       </div>
       <div class="course-tools">
         <label class="search-field" for="course-filter">
-          <span>Search courses, accounts, or sites</span>
+          <span>Search courses or sites</span>
           <input id="course-filter" type="search" autocomplete="off">
         </label>
         <label class="platform-field" for="course-platform-filter" hidden>
@@ -92,7 +92,7 @@
         <div id="routine-switch" class="routine-switch" hidden>
           <label class="mode-option routine-toggle" for="routine-edits">
             <input id="routine-edits" type="checkbox">
-            <span><strong>Routine edits</strong><small>Morrow edits text, titles, the order of modules and items, file names and alternative text without another approval. It always asks before it creates, publishes, removes, posts, or changes a date, points or a setting.</small></span>
+            <span><strong>Routine edits</strong><small>Morrow edits text and titles, changes module item links and how they open, reorders, indents and moves modules, items and files, creates folders, and adds alternative text without another approval. It always asks before it creates anything other than a folder, publishes, removes, posts, or changes a date, points or a course setting.</small></span>
           </label>
           <div id="routine-bundle-list" class="routine-bundle-list"></div>
         </div>
@@ -206,7 +206,7 @@
     </div>
     <label class="private-chat-label" for="private-chat-identifiers">Student names or IDs used in the message
       <textarea id="private-chat-identifiers" rows="2" autocomplete="off" spellcheck="false" placeholder="One name, email, or school ID per line"></textarea>
-      <small>List every student detail used. Morrow refuses an unknown or ambiguous entry.</small>
+      <small>List every student detail used, or leave this empty when the message names no student. Morrow refuses an unknown or ambiguous entry.</small>
     </label>
     <label class="private-chat-label" for="private-chat-message">Message
       <textarea id="private-chat-message" rows="5" autocomplete="off" placeholder="Type the request here"></textarea>

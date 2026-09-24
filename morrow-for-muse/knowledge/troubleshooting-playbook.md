@@ -48,12 +48,13 @@ profile path, e.g. `LOGIN_HELPER_PROFILE_DIR` pointing at a fresh
 profile): check `profile_dir` in the JSON, never a dead session, never
 a re-sign-in case.
 
-Then confirm the principal through the executor:
+Then confirm the principal through the executor (it reads the Canvas
+address from the tree's `helper/env`, and changes nothing):
 
 ```
 PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py catalog \
-  --name <a live-proven read row> --method GET --path <its path> \
-  --class read --backend chromium --canvas-base "$CANVAS_BASE"
+  --name users_self --method GET --path /api/v1/users/self \
+  --class read --backend chromium
 ```
 
 Confirm the returned identity is the educator before doing anything
@@ -74,9 +75,16 @@ Detection signals:
 - The tab shows a login page where profile JSON was expected.
 
 On detection:
-1. Activate the write halt: create `~/.morrow/write_halt`. The
-   executor refuses all writes while it exists.
-2. Quarantine in-flight ops. Nothing retries against a dead session.
+1. The executor imposes the write halt itself when a call finds the
+   session dead (`write_halt` under `MORROW_HOME`, reason
+   `session_expiry`), quarantines the op, and writes the educator's
+   notice. Every write refuses while the halt stands. Never create
+   `write_halt` by hand: a hand-made halt reads as a manual pause, so
+   the educator hears that someone who looks after this Morrow setup
+   paused all changes, and `resume` does not treat it as a sign-in
+   expiry.
+2. Nothing retries against a dead session: quarantined ops stay
+   parked.
 3. Tell the educator plainly: their Canvas session expired. They open
    the helper UI and sign in again themselves (SSO/MFA included),
    leaving "Stay signed in" on.
@@ -151,33 +159,42 @@ If CDP attach fails:
    If the helper is down, restart it via `helper/keepalive.sh` (which
    sources the tree's `helper/env` for `CANVAS_BASE`), never by launching
    Chromium directly.
-3. After any machine restart: the keepalive cron (every 5 minutes)
-   self-heals the helper. The profile is never wiped on restart, so
-   the session survives if "Stay signed in" was left on.
+3. After any machine restart: on a machine with cron, the keepalive
+   cron entry (every 5 minutes) brings the helper back. On the Muse VM
+   (no cron), keepalive runs from a background loop that a restart
+   ends: run `bin/morrow start` to start the loop again (any `morrow`
+   command also restarts it). Nothing brings the helper back until
+   then. The profile is never wiped on restart, so the session
+   survives if "Stay signed in" was left on.
 4. Never kill a Chromium process unless its exact `--user-data-dir`
    argv value resolves to this tree's helper profile dir (the keepalive
    reap is scoped that way), and never kill a helper server unless its
    cmdline proves it belongs to this tree. A foreign tree's processes
    are refused, never killed.
 
-## Install, onboarding sentinel, and the one-time sign-in notice
+## Install, onboarding sentinel, and the sign-in notice
 
 `install.sh` is idempotent (safe to run twice) and never writes
-secrets. What it does: checks python3 >= 3.10, locates Chromium,
-probes egress, creates the `~/.morrow` state layout and
+secrets. What it does: checks python3 >= 3.11 (3.10 is refused),
+locates Chromium, probes egress, creates the `~/.morrow` state layout and
 `helper/profile/` on first install (an existing profile is never
-wiped, reset, or repackaged), installs the keepalive cron without
-duplicating it, launches the helper when `CANVAS_BASE` is set,
-re-runs all 23 selftest suites, and runs the secrets deny-list gate.
-It exits non-zero naming the failed step.
+wiped, reset, or repackaged), sets up keepalive supervision (one cron
+entry when the machine has cron; otherwise a supervised background
+loop, which is what the Muse VM gets), probes the Canvas address and
+launches the helper when `CANVAS_BASE` is set, re-runs all 23 selftest
+suites, and runs the secrets deny-list gate. It exits non-zero naming
+the failed step.
 
 - The onboarding sentinel is `~/.morrow/onboarded`. The installer
-  prints the one-time sign-in notice once ever and then writes the
-  sentinel. If the notice shows again, something deleted the
-  sentinel (or `~/.morrow` is not the same machine's home).
-- `MORROW_CRON=0` skips cron install (the educator runs their own
-  scheduler). It does not disable the helper; it only skips the
-  5-minute keepalive install.
+  prints the sign-in notice on every run until onboarding genuinely
+  completes (a signed-in session with cookies stored in the profile),
+  and only then writes the sentinel. The notice repeating before the
+  educator signs in is expected. If it shows again after a completed
+  sign-in, something deleted the sentinel (or `~/.morrow` is not the
+  same machine's home).
+- `MORROW_CRON=0` skips keepalive supervision (both the cron entry and
+  the background loop) for an operator who runs their own scheduler.
+  It does not disable the helper.
 - The installer launches the helper only when `CANVAS_BASE` is set.
   There is no default tenant; the helper refuses to start on the
   placeholder.
@@ -249,18 +266,21 @@ criterion.)
 **Symptom.** Options read "A. ..." but the stem's answer key points
 at the wrong letter once students see it. **Cause.** Canvas shuffles
 answers; literal letter prefixes in option text do not move with
-them. **Do.** Strip `A. `/`B. `/`C. `/`D. ` from option text.
-PENDING: question items are not a v1 claim in this package, so this
-is doctrine for the day they are, not an active operation.
+them. **Do.** Strip `A. `/`B. `/`C. `/`D. ` from option text
+before a New Quiz item create or update.
 
 (MindTap/Cengage-specific quirks are deliberately not ported. That
 platform is out of scope for this package.)
 
 ## Keepalive behavior
 
-`helper/keepalive.sh` runs every 5 minutes from cron (guarded by a
-marker comment so reinstalls never duplicate it; skip with
-`MORROW_CRON=0` if the educator runs their own scheduler).
+`helper/keepalive.sh` runs every 5 minutes: from a cron entry when the
+machine has cron (guarded by a marker comment so reinstalls never
+duplicate it), otherwise from a supervised background loop
+(`helper/supervisor.py`; the Muse VM has no cron daemon). After a
+reboot on a machine without cron, `bin/morrow start` starts the loop
+again. `MORROW_CRON=0` skips both, for an operator who runs their own
+scheduler.
 
 Its health model:
 - Probes `/status` with retries and backoff (2s, 4s) before any

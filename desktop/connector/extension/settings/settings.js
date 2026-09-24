@@ -11,6 +11,7 @@ const actionCheckedOnly = document.querySelector("#action-checked-only");
 const routineSwitchContainer = document.querySelector("#routine-switch");
 const routineSwitch = document.querySelector("#routine-edits");
 const routineBundleList = document.querySelector("#routine-bundle-list");
+const routineSwitchSummary = document.querySelector("#routine-switch .routine-toggle small");
 const actionFilterField = document.querySelector("#action-filter-field");
 const actionCheckedOnlyField = document.querySelector("#action-checked-only-field");
 const selectionSummary = document.querySelector("#selection-summary");
@@ -319,8 +320,14 @@ function renderPrivateChat() {
     ? messages.map((message) => `<div class="private-chat-message private-chat-message-${message.role === "assistant" ? "assistant" : "user"}"><strong>${message.role === "assistant" ? escapeHtml(selectedClient?.name || "Assistant") : "You"}</strong><p>${privateChatMessageHtml(message)}</p></div>`).join("")
     : '<p class="state-message">No messages in this local conversation.</p>';
   privateChatHistory.scrollTop = privateChatHistory.scrollHeight;
+  // A chat that exists but waits for no message is answering the one just sent, unless it ended at
+  // its message limit.
   privateChatStatus.textContent = !transportAvailable
-    ? "Ask the connected assistant to start Morrow Private Chat. Keep this drawer open while you chat."
+    ? chat?.ended === true
+      ? "This Private Chat reached its message limit. Close this drawer, then ask your assistant to start a new Private Chat."
+      : clients.length
+        ? messages.length ? "Sent. Waiting for the assistant's reply. Keep this drawer open." : "Waiting for the assistant. Keep this drawer open."
+        : "Ask the connected assistant to start Morrow Private Chat. Keep this drawer open while you chat."
     : !clients.length
       ? "The assistant relay is not ready."
       : !courses.length
@@ -349,8 +356,8 @@ async function sendPrivateChatMessage() {
   const binding = privateChatCourses().find((candidate) => candidate.sourceBindingId === privateChatCourse.value);
   const identifiers = privateChatIdentifiers.value.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean);
   const text = privateChatMessage.value;
-  if (!binding || !text.trim() || identifiers.length === 0) {
-    privateChatStatus.textContent = "Choose a course, enter a message, and list each student name or ID used in it.";
+  if (!binding || !text.trim()) {
+    privateChatStatus.textContent = "Choose a course and enter a message.";
     announce(privateChatStatus.textContent);
     return;
   }
@@ -362,7 +369,7 @@ async function sendPrivateChatMessage() {
     text,
     assertedIdentifiers: identifiers,
     ...privateChatConfirmedNames(JSON.stringify([binding.sourceBindingId, text, identifiers])),
-  }).catch(() => ({ ok: false, error: "private_chat_send_failed" }));
+  }).catch((cause) => ({ ok: false, code: problemCode(cause) }));
   state.privateChatBusy = false;
   state.privateChatReview = null;
   if (response?.ok && response.result?.status === "review" && Array.isArray(response.result.names)) {
@@ -374,7 +381,7 @@ async function sendPrivateChatMessage() {
   }
   if (!response?.ok) {
     renderPrivateChat();
-    privateChatStatus.textContent = "Morrow could not protect and send this message. Check every listed student identity and try again.";
+    privateChatStatus.textContent = problemText(problemCode(response?.code || "private_chat_send_failed"));
     announce(privateChatStatus.textContent);
     return;
   }
@@ -539,6 +546,7 @@ function courseRows() {
       code: meta?.code || "",
       term: meta?.term || "",
       platform: providerName(binding),
+      site: siteAddress(binding),
       role: meta?.role || "",
       favorite: meta?.favorite === true,
       scope: bindingScope(binding)
@@ -554,6 +562,7 @@ function courseRows() {
       code: course.code,
       term: course.term,
       platform: providerName(course),
+      site: siteAddress(course),
       role: course.role,
       favorite: course.favorite === true,
       scope: "available"
@@ -561,9 +570,14 @@ function courseRows() {
   return [...bindingRows, ...availableRows];
 }
 
+/** The site a course belongs to, as the address a person types, so the search finds it. */
+function siteAddress(entity) {
+  return [entity?.siteUrl, entity?.origin].filter((value) => typeof value === "string" && value).join(" ");
+}
+
 function rowMatchesFilters(row, { skipScope = false } = {}) {
   const query = state.filters.q.trim().toLocaleLowerCase();
-  if (query && !`${row.name} ${row.code}`.toLocaleLowerCase().includes(query)) return false;
+  if (query && ![row.name, row.code, row.term, row.platform, row.site].join(" ").toLocaleLowerCase().includes(query)) return false;
   if (state.filters.platform !== "all" && row.platform !== state.filters.platform) return false;
   if (state.filters.term !== "all" && row.term !== state.filters.term) return false;
   if (!skipScope && state.filters.scope !== "all" && row.scope !== state.filters.scope) return false;
@@ -708,16 +722,41 @@ function categoryFamily(category) {
   return null;
 }
 
-const CATEGORY_FAMILIES = Object.freeze({
-  routine: Object.freeze({
-    label: "Routine edits",
-    description: "Edit titles, text, order, file names and alternative text that already exist in every selected course. It never creates, publishes, removes, posts, or changes a date, points or a setting.",
-  }),
-  dates: Object.freeze({
-    label: "Change assignment and quiz dates",
-    description: "Change existing due dates and open or close dates in every selected course. Each change is visible to learners as soon as the course platform saves it.",
-  }),
+// What each platform's routine set changes with no review. Canvas's and Moodle's routine sets
+// differ, so a selection is told only about the platforms it holds.
+// scripts/test/settings-page.test.mjs checks each sentence names every field its routine set changes.
+const ROUTINE_CHANGES = Object.freeze({
+  canvas: "edits text and titles, changes module item links and how they open, reorders, indents and moves modules, items and files, creates folders, and adds alternative text",
+  moodle: "edits text and titles in Moodle Pages, Text and media areas, Assignments, and Quizzes",
 });
+
+/** The Routine edits promise for the platforms a selection holds. */
+function routineSummary(providers) {
+  const platforms = ["canvas", "moodle"].filter((provider) => providers.includes(provider));
+  const changes = platforms.length === 1
+    ? `Morrow ${ROUTINE_CHANGES[platforms[0]]} without another approval.`
+    : `In Canvas courses, Morrow ${ROUTINE_CHANGES.canvas}. In Moodle courses, Morrow ${ROUTINE_CHANGES.moodle}. Morrow makes these changes without another approval.`;
+  return `${changes} ${routineAsks(platforms)}`;
+}
+
+/** What the routine set never does with no review. Only Canvas's creates anything: a folder. */
+function routineAsks(providers) {
+  return providers.includes("canvas")
+    ? "It always asks before it creates anything other than a folder, publishes, removes, posts, or changes a date, points or a course setting."
+    : "It always asks before it creates anything, publishes, removes, posts, or changes a date, points or a course setting.";
+}
+
+const CATEGORY_FAMILY_LABELS = Object.freeze({
+  routine: "Routine edits",
+  dates: "Change due dates and availability dates",
+});
+
+/** A family row states what it grants on each selected platform: the routine promise for those
+ * platforms, or the words of each platform's own date bundle, which name its own objects. */
+function familyDescription(family, members) {
+  if (family === "routine") return routineSummary(members.map((option) => option.provider));
+  return [...new Set(members.map((option) => option.description))].join(" ");
+}
 
 /** WI-5.6: a Canvas id and a Moodle id never match, so the same-id intersection rebuildCategories
  * otherwise uses would show nothing for a mixed selection. One row stands in for each family below,
@@ -725,11 +764,14 @@ const CATEGORY_FAMILIES = Object.freeze({
  * (so the choice can never grant one connection nothing); resolveEnabledCategoriesFor expands a
  * family row back to each connection's own ids at save. */
 function mixedPlatformCategories(details) {
-  return Object.entries(CATEGORY_FAMILIES)
-    .filter(([family]) => details.every((detail) => detail.options.some((option) =>
-      option.availability === "edit" && !option.requiresFieldSelection && categoryFamily(option) === family)))
-    .map(([family, { label, description }]) => ({
-      id: `family:${family}`, group: "Actions for every selected course", label, description,
+  const members = (detail, family) => detail.options.filter((option) =>
+    option.availability === "edit" && !option.requiresFieldSelection && categoryFamily(option) === family);
+  const byPlatform = [...details].sort((left, right) => String(left.provider).localeCompare(String(right.provider)));
+  return Object.entries(CATEGORY_FAMILY_LABELS)
+    .filter(([family]) => details.every((detail) => members(detail, family).length > 0))
+    .map(([family, label]) => ({
+      id: `family:${family}`, group: "Actions for every selected course", label,
+      description: familyDescription(family, byPlatform.flatMap((detail) => members(detail, family).map((option) => ({ ...option, provider: detail.provider })))),
       availability: "edit", destructive: false, routine: family === "routine", rememberable: true, requiresFieldSelection: false, family,
     }))
     .sort((left, right) => left.label.localeCompare(right.label));
@@ -830,14 +872,28 @@ function clearNotice() {
 // connector/extension/src/bridge-problem-copy.js. A code that file does not explain still reaches
 // this page with its own state name in it. Work that finished before the failure is stated first,
 // so a person reads what was saved as well as what stopped.
-function showError(cause, { prefix = "" } = {}) {
+//
+// Every action reads the course state again when it ends, and Morrow Bridge writes storage while an
+// action runs, which reads it again too. A read of the course state or of a course's actions that
+// succeeds says nothing about an action, or about a list of available courses (read again only when
+// the person selects Refresh connected courses), so it clears only an error such a read raised. The
+// popup's nextError keeps the same rule. A new action clears any error.
+let errorSource = null;
+
+function showError(cause, { prefix = "", source = "action" } = {}) {
+  errorSource = source;
   error.hidden = false;
   error.textContent = `${prefix}${problemText(problemCode(cause))}`;
 }
 
 function clearError() {
+  errorSource = null;
   error.hidden = true;
   error.textContent = "";
+}
+
+function clearReadError() {
+  if (errorSource === "read") clearError();
 }
 
 function categoryFlags(category) {
@@ -1075,9 +1131,10 @@ function renderCustomize() {
   syncCustomizeTriStates();
 }
 
-/** WI-1.1: the course is otherwise usable, but its saved Canvas or Moodle tab is not open. */
+/** WI-1.1: the course is otherwise usable, but its saved Canvas or Moodle tab is not open. A saved
+ * grant that lapsed or no longer matches the action list says nothing about the tab. */
 function siteClosed(binding) {
-  return isEligible(binding) && !permissionHasExpired(binding) && !isStale(binding) && binding.runtimeVerified !== true;
+  return isEligible(binding) && binding.runtimeVerified !== true;
 }
 
 /** WI-5.1, WI-3.3: every curated category id that is routine, grouped by provider (a static list,
@@ -1198,10 +1255,10 @@ function renderCourseDetail(binding, isOpen) {
   const level = courseLevel(binding);
   const ids = level === "plan" ? [] : (Array.isArray(binding?.editPermission?.enabledCategories) ? binding.editPermission.enabledCategories.filter((value) => typeof value === "string") : []);
   const lead = level === "routine"
-    ? "Morrow makes the routine edits below without another approval until you choose Plan. It always asks before it creates, publishes, removes, posts, or changes a date, points or a setting."
+    ? `Morrow makes the routine edits below without another approval until you choose Plan. ${routineAsks([binding.provider])}`
     : level === "custom"
       ? "Morrow makes the changes you selected in Customize until you choose Plan. It asks before every other change."
-      : "Morrow asks before each change. To skip the review for one kind of edit, choose Edit above, or use “do not ask again” on a review.";
+      : "Morrow asks before each change. To skip the review for all routine edits, choose “Edit. Routine edits.” above. To choose single kinds of edit, select Customize, or use “do not ask again” on a review.";
   const listHtml = ids.length ? `<div class="routine-bundle-list">${ids.map((id) => `
     <div class="routine-bundle-item">
       <span>${escapeHtml(categoryLabelFor(id))}</span>
@@ -1289,13 +1346,15 @@ function renderCourseList(focus = focusedCourseControl()) {
     courseList.innerHTML = Array.from({ length: 3 }, () => '<div class="course-card-skeleton" aria-hidden="true"></div>').join("");
   } else if (!connectedBindings.length && !rows.length) {
     // WI-F.10: one composed empty message, plus the WI-1.1 open-platform action once a site is saved.
+    // With no saved site, Morrow Bridge has no Chrome access to any course tab, so the message names
+    // the popup step that grants it.
     const anchor = savedAnchor();
     courseList.innerHTML = anchor
       ? `<div class="course-list-empty state-message">
           <p>Open a course in Canvas or Moodle. Morrow Bridge finds it.</p>
           <button id="open-platform-empty" type="button" ${state.openPlatformBusy ? 'disabled aria-busy="true"' : ""}>${escapeHtml(openPlatformLabel(anchor, state.openPlatformProgressVisible))}</button>
         </div>`
-      : '<p class="state-message">Open a course in Canvas or Moodle. Morrow Bridge finds it.</p>';
+      : '<p class="state-message">Open a signed-in Canvas or Moodle course in Chrome. Then open the Morrow Bridge popup, select Connect this course, and allow access when Chrome asks.</p>';
   } else if (!limited.length) {
     courseList.innerHTML = state.filters.q.trim() || state.filters.platform !== "all" || state.filters.term !== "all" || state.filters.scope !== "all"
       ? `<p class="state-message">No course matches this search or filter. Clear it to view every course in this list.</p>`
@@ -1360,6 +1419,7 @@ function renderRoutineSwitch(showEditStage) {
   routineSwitchContainer.hidden = !canOffer;
   routineSwitch.disabled = state.busy || !canOffer;
   routineSwitch.checked = state.routineMode;
+  if (canOffer) routineSwitchSummary.textContent = routineSummary(selectedBindings().map((binding) => binding.provider));
   const bundles = state.routineMode
     ? [...state.selectedCategories].map(categoryById).filter((category) => category && category.routine === true)
       .sort((left, right) => left.label.localeCompare(right.label))
@@ -1671,7 +1731,7 @@ async function refresh() {
     }
     rebuildCategories();
     reconcileSelectedCategories();
-    clearError();
+    clearReadError();
   } catch (cause) {
     if (generation !== state.readGeneration) return;
     state.status = null;
@@ -1679,7 +1739,7 @@ async function refresh() {
     state.categories = [];
     state.optionsByBinding.clear();
     state.selected.clear();
-    showError(cause);
+    showError(cause, { source: "read" });
   } finally {
     if (generation !== state.readGeneration) return;
     refreshButton.disabled = state.busy;
@@ -1722,13 +1782,13 @@ async function refreshSelectedOptions() {
     state.optionsLoading = false;
     rebuildCategories();
     reconcileSelectedCategories();
-    clearError();
+    clearReadError();
   } catch (cause) {
     if (requestToken !== state.optionsRequestToken) return;
     state.optionsLoading = false;
     rebuildCategories();
     reconcileSelectedCategories();
-    showError(cause);
+    showError(cause, { source: "read" });
   }
   render();
 }
@@ -1841,13 +1901,23 @@ function toggleCourseDetail(sourceBindingId) {
  */
 async function ensureBindingOptions(binding) {
   if (optionsFor(binding)) return true;
-  if (!binding || binding.runtimeVerified !== true) {
-    showError("edit_policy_options_unreadable");
+  if (!binding) {
+    showError("edit_policy_binding_missing");
+    return false;
+  }
+  if (binding.runtimeVerified !== true) {
+    showError("edit_policy_binding_stale");
     return false;
   }
   try {
     const detail = normalizeEditOptions(await request("morrow_edit_policy_options", { sourceBindingId: binding.sourceBindingId }), binding);
     state.optionsByBinding.set(binding.sourceBindingId, detail);
+    // The course's tab closed after this page last read it, so the course now needs opening.
+    if (detail.runtimeVerified !== true) {
+      state.status = { ...state.status, bindings: state.status.bindings.map((entry) => entry.sourceBindingId === binding.sourceBindingId ? { ...entry, runtimeVerified: false } : entry) };
+      showError("edit_policy_binding_stale");
+      return false;
+    }
     return true;
   } catch (cause) {
     showError(cause);
@@ -1937,7 +2007,6 @@ async function disconnectCourse(binding) {
   setBusy(true);
   clearError();
   clearNotice();
-  let failure = null;
   try {
     const result = await request("morrow_course_disconnect", { sourceBindingId: binding.sourceBindingId });
     if (result?.disconnected !== true || result.sourceBindingId !== binding.sourceBindingId) throw new Error("edit_policy_failed");
@@ -1945,14 +2014,12 @@ async function disconnectCourse(binding) {
     state.selected.delete(binding.sourceBindingId);
     showNotice(`${courseName(binding)} is disconnected. Its Edit access was removed.`);
   } catch (cause) {
-    failure = cause;
+    showError(cause);
   } finally {
     state.confirmingDisconnect = null;
     setBusy(false);
     await refresh();
   }
-  // Shown after the read that follows, because a successful read clears the error region.
-  if (failure) showError(failure);
 }
 
 /**
@@ -2066,8 +2133,6 @@ async function autoStartDiscovery() {
   const pending = anchors().filter((anchor) => !state.discoveries.has(anchor.siteAnchorId) && !state.discoveryFailed.has(anchor.siteAnchorId));
   if (!pending.length) return;
   setBusy(true);
-  clearError();
-  clearNotice();
   try {
     for (const anchor of pending) await readDiscovery(anchor);
   } finally {
@@ -2350,6 +2415,7 @@ courseList.addEventListener("click", (event) => {
     const sourceBindingId = openPlatformButton.dataset.openPlatform;
     const binding = (state.status?.bindings || []).find((entry) => entry.sourceBindingId === sourceBindingId);
     if (binding?.siteAnchorId) void openSavedPlatform(binding.siteAnchorId, binding.sourceBindingId, binding.provider);
+    else showError("platform_open_anchor_missing");
     return;
   }
   const connectButton = event.target.closest("[data-connect-row]");
@@ -2426,6 +2492,8 @@ courseList.addEventListener("change", (event) => {
 // Refresh connected courses also reads every site's list of available courses again, including a
 // list that could not be read before.
 refreshButton.addEventListener("click", () => {
+  clearError();
+  clearNotice();
   state.discoveries.clear();
   state.discoveryFailed.clear();
   void refresh();

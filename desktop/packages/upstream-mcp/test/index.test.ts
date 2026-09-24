@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StdioMcpUpstream } from "../src/index.js";
+import { StdioMcpUpstream, UpstreamNotDispatchedError } from "../src/index.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 const duplicateFixturePath = fileURLToPath(new URL("./fixtures/raw-duplicate-tools-upstream.mjs", import.meta.url));
@@ -331,7 +331,10 @@ describe("StdioMcpUpstream", () => {
       id: "fixture", label: "Fixture upstream", command: process.execPath, args: [fixturePath],
       env: { FAKE_TOOL_COUNT: "1" },
     }));
-    await expect(upstream.callTool("fake_tool_1", {})).rejects.toThrow(/disconnected before dispatch/);
+    const refused = upstream.callTool("fake_tool_1", {});
+    await expect(refused).rejects.toThrow(/disconnected before dispatch/);
+    // The gateway settles such a call as not sent by this type, not by its message.
+    await expect(refused).rejects.toBeInstanceOf(UpstreamNotDispatchedError);
   });
 
   it("stops reconnecting once closed, and a later call is refused rather than reviving it", async () => {

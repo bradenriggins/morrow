@@ -45,7 +45,8 @@ Usage:
     python3 proxy_forwarder.py [listen_port]  # default 18080
 In production the launcher always passes an explicit per-tree port
 (CDP port + 10000, or MORROW_FORWARDER_PORT); the 18080 default only
-applies to manual runs.
+applies to manual runs. Port 0 takes a free port from the kernel; the
+startup line names the port it got.
 """
 import asyncio
 import base64
@@ -690,11 +691,14 @@ async def _handle_inner(client_r, client_w):
 
 
 async def main():
-    global _CONN_SEM
+    global _CONN_SEM, LISTEN_PORT
     # W5-P2-3: bound concurrent CONNECT sessions; past the cap new
     # clients get an immediate 503 (see handle()).
     _CONN_SEM = asyncio.Semaphore(MAX_CONNECTIONS)
     server = await asyncio.start_server(handle, LISTEN_HOST, LISTEN_PORT)
+    # Client authentication matches connections to the listening port,
+    # so it must be the bound one when port 0 was asked for.
+    LISTEN_PORT = server.sockets[0].getsockname()[1]
     # Redacted: host and port only, never credentials.
     print("forwarder on %s:%d -> %s://%s:%d" % (
         LISTEN_HOST, LISTEN_PORT, UPSTREAM_SCHEME, UPSTREAM_HOST,

@@ -16,9 +16,13 @@ below is what makes a write trustworthy end to end.
 - The row status is `live-proven`, and it is not on evidence-hold in
   `dispatch/admission_policy.json` (the policy is the dispatch
   authority; the catalog is the provenance record).
-- For writes: a frozen plan file digest-bound to the exact action, an
-  educator-signed approval digest-bound to the exact action (unexpired,
-  category-scoped, unused), and no `~/.morrow/write_halt` present.
+- For writes in plan mode: a frozen plan file digest-bound to the
+  exact action, an educator-signed approval digest-bound to the exact
+  action (unexpired, category-scoped, unused), and no
+  `~/.morrow/write_halt` present. In edit mode a write needs no
+  approval (run `catalog` directly); the executor still asks before a
+  deletion while the educator's `confirm_destructive_writes` setting
+  is on.
 - The principal is verified: a readback through the executor confirms
   the educator before anything else runs.
 
@@ -66,16 +70,17 @@ dispatch until a live battery proves it.
 | Pages create/delete/duplicate/revert/update (C-323, C-324, C-325, C-328, C-334) | wiki page content | Member GET by page URL (PUT goes to `/pages/{url}`, not `/pages/{id}`); front-page management excluded (C-333 failed: PUT 200 but the provider kept the original front page) | covered |
 | Classic quizzes CRUD (C-374..C-378), question groups CRUD + reorder (C-347, C-348, C-352, C-351), quiz questions CRUD (C-353, C-354, C-357) | classic quizzes | Create: member GET; delete: removal from the course quiz index (D-002; member GET may still serve a deleted quiz) | covered |
 | New Quiz object update/delete (Chromium lane; C-299, C-289) | NQ object + parent assignment link | NQ GET, items GET with expected count, points mirror (parent `points_possible` == item sum), parent assignment dates/overrides read | covered |
-| New Quiz object create (`canvas_create_new_quiz`) | NQ object | NOT a covered path: catalog live-proven at the provider-path level but the admission policy holds it on evidence-hold; the governed pipeline has no live runs; dispatch refuses it on every tenant | evidence-hold |
-| Item Bank bank-level ops: create (IB-5), get (IB-9), list (IB-12), list entries (IB-13), get entry (IB-10), list shares (IB-15), rename (IB-16), share (IB-17) | banks, entries, shares | Per-op snapshot rules in `item-banks-sdk.md` (before/after readback; bank_entries cannot confirm a phase-one item create) | covered at mechanism level; integrated-pipeline live proof pending sign-in |
+| New Quiz object create (`canvas_create_new_quiz`, C-286) | NQ object | NQ GET readback of the title; proven through the full governed pipeline 2026-09-22 (disposable quizzes 4049059 and 4049060, deleted with terminal GET 404) | covered |
+| Item Bank bank-level ops: create (IB-5), get (IB-9), list (IB-12), list entries (IB-13), get entry (IB-10), list shares (IB-15), rename (IB-16), share (IB-17) | banks, entries, shares | Per-op snapshot rules in `item-banks-sdk.md` (before/after readback; bank_entries cannot confirm a phase-one item create) | covered; live-proven through the executor pipeline (2026-09-22) |
 | Bank archive (IB-1) | whole bank deleted | Admission ceremony: fresh bank read (title/entries/shares) presented to the educator, explicit approval on the fan-out caveat (no account-wide reverse lookup exists), disposable-only in batteries | covered; never a casual operation |
 | Deletes generally | any deletable object | Follow-up member GET confirming absence (D-005; 404-after-delete counts as success ONLY with that GET) | covered |
-| Undo | reversal of a prior write | Runs as a new, separately journaled operation with its own educator approval bound to the undo action | covered |
+| Undo | reversal of a prior write | Not in this release: no undo entry is pinned, so the undo command refuses. A reversal is a new write the educator approves, verified like any other write | not available |
 | Course conclude/delete (C-108) | whole course access | evidence-hold: no dispatch on any tenant until a disposable live battery proves the full path; even then, the full admission ceremony | pending |
-| New Quiz item rows (C-287/C-290/C-293/C-295/C-298), IB-6/IB-11/IB-18 item create/read/update | quiz and bank items | NOT v1 claims: SCOPE.md withholds question items; ghost-stub and shape doctrine in `new-quizzes-contract.md` is the acceptance bar when they are ever admitted | pending |
+| New Quiz item rows (C-287 create, C-293 read, C-295 list, C-298 update, C-290 delete) | quiz items | Entry readback; interaction-id preservation check on every PATCH; absence check after delete; proven through the governed pipeline 2026-09-22 (items 11057310, 11057311); ghost-stub and shape doctrine in `new-quizzes-contract.md` | covered |
+| Item Bank item create/update (IB-6, IB-18) and direct item read (IB-11) | bank items | Create and update read back through the bank entry (live-proven through the Chromium SDK lane 2026-09-21, item 11244176); the direct item GET (IB-11) answers 404 on live items and is not a v1 claim | covered (IB-6, IB-18); pending (IB-11) |
 | Item delete (IB-19) | bank item | PENDING: implemented route, no proven flow; never dispatch against a real item; the live battery attempts it against a disposable item first | pending |
 | quiz_entries / bank-draw routes (IB-2/IB-3/IB-8/IB-14) | quiz draws from banks | evidence-hold: 401 under banks.build scope; do not retry without a proven different authorization scope | evidence-hold |
-| Discussion topic writes (C-139/C-141/C-167/C-238) | discussion topics | C-139/C-141/C-167 proven only through the retired form lane; C-238 (date_details PUT 204) proven through the 2026-09-21 Chromium write battery; SCOPE.md withholds from v1; flat shape NOT yet implemented: the executor unwraps one nesting level only for readback comparison and prevalidation (`_unwrap_canvas_body` in dispatch/executor.py) and sends the body unchanged, so a wrapped `{"discussion_topic": {...}}` body still hits the D-009 failure class. The flat `{"title": ..., "message": ...}` shape is documented as the production-verified contract in `api-patterns-and-errors.md`; correct the day discussion writes are ever proven on this lane | proven-mechanism-mixed |
+| Discussion topic writes (C-139/C-141/C-167/C-238) | discussion topics | C-139/C-141/C-167 proven only through the retired form lane; C-238 (date_details PUT 204) proven through the 2026-09-21 Chromium write battery; SCOPE.md withholds from v1; flat shape NOT yet implemented: the executor unwraps one nesting level only for readback comparison and prevalidation (`_unwrap_canvas_body` in dispatch/executor.py) and sends the body unchanged, so a wrapped `{"discussion_topic": {...}}` body still hits the D-009 failure class. The flat `{"title": ..., "message": ...}` shape is documented as the production-verified contract in `api-patterns-and-errors.md`; correct the day discussion writes are ever proven on this lane. The admission policy holds all four, so dispatch refuses them | evidence-hold |
 
 ### The recipe discipline (symptoms / use / avoid / verify)
 
@@ -123,12 +128,12 @@ full lifecycle on 89585 only.
 
 ## Hard lines (never, no exception)
 
-- Never dispatch a write without the educator-signed approval
-  bound to that exact action. The three requirements (frozen plan,
-  signed approval, no write halt) are all mandatory.
-- Never mint or sign an approval yourself, and never mint an
-  educator PII reveal (`mint_pii_reveal`) the educator did not ask
-  for in their own words.
+- Never dispatch a plan-mode write without the educator-approved
+  ceremony (frozen plan, educator-signed approval, no write halt); in
+  edit mode the write runs without asking, except a deletion while
+  `confirm_destructive_writes` is on.
+- Never mint or sign an approval yourself, and never try to learn
+  the real name behind a label the educator did not name.
 - Never send anything externally on the educator's behalf without
   their explicit word: no announcements (permanently excluded as a standing
   product exclusion), no conversation messages (the `/conversations` rows are

@@ -27,7 +27,7 @@ This command sets up only the current project. Reopen that project in your assis
 3. In this extracted folder, select `app/connector/extension`.
 4. Morrow opens its setup guide. Use **Guide me** for the next action or **Setup overview** for the three stages. You can reopen the guide from **Setup guide** in Morrow Bridge.
 
-Keep your assistant open. In Morrow Bridge, select **Connect Morrow**. Select **Allow connection** in the page that opens.
+Morrow pairs only a Morrow Bridge loaded from a Bridge folder that Morrow set up, and this route sets up none, so **Connect Morrow** refuses a Bridge loaded from `app/connector/extension`. To connect Morrow Bridge, use the Morrow desktop app, or install from source, where `pnpm run setup` prepares `connector/extension`.
 
 Open a permitted Canvas or Moodle course in Chrome and sign in. Morrow Bridge identifies the platform and shows **Connect Canvas** or **Connect Moodle**. Select that button and allow Chrome access to the exact address shown. In **Plan and Edit settings**, find courses, choose one, and select **Connect selected courses in Plan**.
 

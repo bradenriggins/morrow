@@ -219,9 +219,9 @@ test("installing Morrow keeps every unrelated setting, and repair replaces only 
   );
   assert.equal(readFileSync(file, "utf8"), changedByHand, "the refused install changed nothing");
 
-  // Repair carries the digest Morrow recorded. It replaces its own entry when
-  // the file is still exactly what Morrow wrote, and refuses once anything else
-  // has edited that file.
+  // With --expected-config-sha256 the command replaces its own entry only while
+  // the file is still exactly the digest given, and refuses once anything else
+  // has edited that file. The desktop app finds its entry by its marker instead.
   const { createHash } = await import("node:crypto");
   const digestOf = (value) => createHash("sha256").update(value, "utf8").digest("hex");
   const repaired = withHome(home, () => installMorrowClient({

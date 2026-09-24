@@ -86,6 +86,24 @@ def test_live_proven_totals_in_every_doc():
     assert seen >= 4, "the docs no longer state the counts this test checks"
 
 
+# Failure mode (round-2 finding muse-ux-r2-first-run-mode-count,
+# 2026-09-23, written before the fix): FIRST_RUN.md said "every catalog
+# mode (now 88) has a fixture" while the failure catalog had 95 modes.
+def test_failure_mode_counts_in_every_doc():
+    from failures.catalog import load_catalog
+    modes = len(load_catalog().entries)
+    seen = 0
+    for rel in DOCS:
+        text = _read(rel)
+        for match in re.finditer(
+                r"catalog modes? \(now (\d+)\)|(?<![-\w])(\d+) "
+                r"(?:catalog|failure) modes\b", text):
+            seen += 1
+            stated = int(match.group(1) or match.group(2))
+            assert stated == modes, (rel, match.group(0), modes)
+    assert seen >= 1, "the docs no longer state the failure mode count"
+
+
 def test_status_breakdowns_in_the_knowledge_docs():
     counts = _counts()
     c, ib = counts["status"]["C"], counts["status"]["IB"]
@@ -115,3 +133,166 @@ def test_status_breakdowns_in_the_knowledge_docs():
     assert [int(x) for x in m.groups()] == [
         counts["live_reads"], counts["live_writes"],
         counts["live_canvas_reads"], counts["live_ib_reads"]], m.group(0)
+
+
+def test_live_proven_read_counts_in_every_doc():
+    # SCOPE.md and the operations runbook said "113 verified GETs (108
+    # Canvas plus 5 Item Bank)" after the catalog gained the educator's
+    # own reads (C-436 users/self, C-437 list courses) (final sweep
+    # 2026-09-23).
+    counts = _counts()
+    seen = 0
+    for rel in DOCS:
+        text = _read(rel)
+        for match in re.finditer(
+                r"(?<![-\w])(\d{3}) (?:verified GETs|live-proven reads)"
+                r"(?: \([^)]*\))?:? \(?(\d{3}) Canvas(?: reads)? plus "
+                r"(\d+) Item Bank", text):
+            seen += 1
+            assert [int(x) for x in match.groups()] == [
+                counts["live_reads"], counts["live_canvas_reads"],
+                counts["live_ib_reads"]], (rel, match.group(0))
+        for match in re.finditer(r"(?<![-\w])(\d{3}) (?:verified GETs|"
+                                 r"live-proven reads)", text):
+            assert int(match.group(1)) == counts["live_reads"], (
+                rel, match.group(0))
+    assert seen >= 2, "the docs no longer state the read counts"
+
+
+def _scope_section(heading):
+    with open(os.path.join(TREE, "SCOPE.md"), encoding="utf-8") as fh:
+        text = fh.read()
+    start = text.index(heading)
+    end = text.find("\n#", start + len(heading))
+    return " ".join(text[start:end if end != -1 else None].split())
+
+
+def test_scope_ships_the_educators_own_live_proven_reads():
+    # SCOPE.md, "the exact, complete statement of what v1 ships", listed
+    # course and user reads as having no catalog rows, while C-437 (list
+    # your courses: the educator's first request) and C-436 (your own
+    # profile) are live-proven, so the agent hedged on "Show me my
+    # courses" (final sweep 2026-09-23).
+    live = set()
+    with open(CATALOG, encoding="utf-8") as fh:
+        for line in fh:
+            f = [x.strip() for x in line.split("|")]
+            if len(f) >= 9 and f[1] in ("C-436", "C-437") \
+                    and f[7].startswith("live-proven"):
+                live.add(f[1])
+    assert live == {"C-436", "C-437"}
+    ships = _scope_section("## Ships in v1")
+    assert "C-436" in ships and "C-437" in ships
+    pending = _scope_section("### In scope but pending live proof")
+    assert "courses" not in pending and "users/self" not in pending
+
+
+# Failure mode (final sweep 2026-09-23, written before the fix): three
+# knowledge docs SKILL.md tells the agent to read said Item Bank item
+# create and update (IB-6, IB-18) were pending ("do not dispatch against
+# real items, do not claim them") after the catalog marked them
+# live-proven, so the agent refused a task the Muse page offers.
+IB_DOCS = ("SKILL.md", "SCOPE.md", "knowledge/operations-runbook.md",
+           "knowledge/api-catalog-guide.md",
+           "knowledge/new-quizzes-contract.md", "knowledge/item-banks-sdk.md",
+           "knowledge/api-patterns-and-errors.md",
+           "knowledge/audit-checklist.md")
+_NOT_PROVEN = re.compile(
+    r"pending|unproven|not proven|never proven|evidence-hold|"
+    r"not (?:a )?v1 claims?|do not claim|not implemented", re.I)
+_PROVEN = re.compile(r"live-proven", re.I)
+
+
+def _ib_status():
+    out = {}
+    with open(CATALOG, encoding="utf-8") as fh:
+        for line in fh:
+            f = [x.strip() for x in line.rstrip("\n").split("|")]
+            if len(f) >= 9 and re.fullmatch(r"IB-\d+", f[1]):
+                out[f[1]] = (f[7].split() or [""])[0]
+    return out
+
+
+def _ib_ids(clause):
+    ids = []
+    for m in re.finditer(r"IB-(\d+)((?:/(?:IB-)?\d+)*)", clause):
+        ids.append("IB-" + m.group(1))
+        ids += ["IB-" + n for n in re.findall(r"/(?:IB-)?(\d+)", m.group(2))]
+    return ids
+
+
+def test_every_item_bank_status_claim_matches_the_catalog():
+    status = _ib_status()
+    assert status["IB-6"] == status["IB-18"] == "live-proven"
+    wrong = []
+    for rel in IB_DOCS:
+        text = _read(rel)
+        for clause in re.split(r"(?<=[.;])\s+|\s+-\s+(?=\S)|\*\*|\|", text):
+            ids = _ib_ids(clause)
+            negative = bool(_NOT_PROVEN.search(clause))
+            positive = bool(_PROVEN.search(clause))
+            if negative and not positive:
+                wrong += [(rel, i, "said not proven") for i in ids
+                          if status.get(i) == "live-proven"]
+            elif positive and not negative:
+                wrong += [(rel, i, "said live-proven") for i in ids
+                          if status.get(i) != "live-proven"]
+    assert wrong == []
+
+
+# Failure mode (final sweep 2026-09-23, written before the fix): SCOPE.md
+# and the operations runbook said 113 verified GETs (108 Canvas plus 5
+# Item Bank) after the catalog reached 115 live-proven reads (110 plus
+# 5), and SCOPE.md said the live-proven people-bearing reads and the
+# override writes "are refused", while the executor dispatches them
+# de-identified on the Chromium lane with the learner vault.
+def test_verified_read_counts_in_every_doc():
+    counts = _counts()
+    seen = 0
+    for rel in DOCS:
+        text = _read(rel)
+        # A per-area count ("Outcomes: 7 live-proven reads") is not the
+        # total.
+        for match in re.finditer(r"(\d+) verified GETs|(?<![-\w])(\d{3}) "
+                                 r"live-proven reads", text):
+            seen += 1
+            assert int(match.group(1) or match.group(2)) == \
+                counts["live_reads"], (rel, match.group(0))
+        for match in re.finditer(
+                r"(\d+) Canvas (?:reads )?plus (\d+) Item Bank", text):
+            seen += 1
+            assert [int(match.group(1)), int(match.group(2))] == [
+                counts["live_canvas_reads"], counts["live_ib_reads"]], \
+                (rel, match.group(0))
+    assert seen >= 3, "the docs no longer state the read counts"
+
+
+def _scope_reads_bullet():
+    text = _read("SCOPE.md")
+    start = re.search(r"\d+ (?:verified GETs|live-proven reads)",
+                      text).start()
+    return text[start:text.index(" - ", start)]
+
+
+def test_scope_says_the_people_bearing_rows_it_names_dispatch():
+    import pytest
+    pytest.importorskip("cryptography")
+    from types import SimpleNamespace
+    from dispatch import executor as ex
+    bullet = _scope_reads_bullet()
+    assert not re.search(r"\bare refused\b|refused like", bullet), bullet
+    assert "de-identified" in bullet, bullet
+    ids = set()
+    for m in re.finditer(r"C-(\d+)((?:/C-\d+)*)", bullet):
+        ids.add("C-" + m.group(1))
+        ids.update(re.findall(r"C-\d+", m.group(2)))
+    assert len(ids) >= 20, sorted(ids)
+    rows = {d["id"]: (n, d) for n, d in ex._load_operation_catalog().items()}
+    vault_lane = SimpleNamespace(browser_owned_auth=True)
+    for row_id in sorted(ids):
+        name, desc = rows[row_id]
+        entry = ex.catalog_descriptor_to_entry(name, desc["method"],
+                                               desc["path"])
+        assert ex._catalog_provenance_gate(
+            entry, name, desc["method"], desc["path"], {},
+            session=vault_lane) == "live-proven", row_id

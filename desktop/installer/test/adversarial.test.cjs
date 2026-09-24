@@ -96,6 +96,8 @@ async function startedMorrow(options = {}) {
     installAssistant: answer("installAssistant", undefined),
     removeAssistant: answer("removeAssistant", undefined),
     revealBridgeFolder: answer("revealBridgeFolder", undefined),
+    revealMaterialsFolder: answer("revealMaterialsFolder", undefined),
+    restoreMaterialsFolder: answer("restoreMaterialsFolder", undefined),
     reconcileBridgeRelease: answer("reconcileBridgeRelease", undefined),
     firstSafeRead: answer("firstSafeRead", undefined),
     openClaudeDesktop: answer("openClaudeDesktop", undefined),
@@ -129,6 +131,7 @@ async function startedMorrow(options = {}) {
         isPackaged: false,
         getVersion: () => "1.0.0-rc.0",
         getPath: () => path.join(os.tmpdir(), "morrow-adversarial-start"),
+        setName() {},
         setPath() {},
         requestSingleInstanceLock: () => true,
         // main.cjs starts Morrow from app.whenReady().then(startMorrow) and
@@ -180,6 +183,7 @@ function loadMain() {
       isPackaged: false,
       getVersion: () => "1.0.0-rc.0",
       getPath: () => installerRoot,
+      setName() {},
       setPath() {},
       requestSingleInstanceLock: () => true,
       whenReady: () => new Promise(() => {}),
@@ -307,6 +311,7 @@ async function completePayload(root, options = {}) {
     ["dist/index.js", "gateway entrypoint"],
     ["dist/local-owner-maintenance.js", [
       "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+      "export function workspaceRootTooBroad() { return false; }",
       "export function acquireStoppedLocalOwnerMaintenanceLease() { return { leaseId: '00000000-0000-4000-8000-000000000001', leaseToken: 'morrow-stopped-maintenance-token-1234567890123456' }; }",
       "export function replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard() { return null; }",
       "export function removeExactLocalOwnerMaintenanceLease() { return true; }",
@@ -440,7 +445,8 @@ test("every action that takes no input refuses one, and performs its step only w
     ["installer:restore-bridge", "restorePreviousBridge", null],
     ["installer:remove-data", "removeData", null],
     ["installer:check-assistant-connection", "checkAssistantConnection", null],
-    ["installer:move-to-applications", "moveToApplications", null]
+    ["installer:move-to-applications", "moveToApplications", null],
+    ["installer:restore-materials-folder", "restoreMaterialsFolder", null]
   ];
   for (const [channel, method, updateMethod] of inputFree) {
     const handler = started.handlers.get(channel);
@@ -527,6 +533,7 @@ test("a duplicate start registers no setup action at all", async (t) => {
         isPackaged: false,
         getVersion: () => "1.0.0-rc.0",
         getPath: () => path.join(root, "UserData"),
+        setName() {},
         setPath() {},
         requestSingleInstanceLock: () => false,
         whenReady: () => new Promise(() => {}),

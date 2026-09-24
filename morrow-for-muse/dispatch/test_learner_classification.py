@@ -14,6 +14,7 @@ would rewrite names in content an educator may save back.
 Stdlib only. Scratch lives under .selftest-work/ (never /tmp).
 """
 
+import json
 import os
 import shutil
 import sys
@@ -190,9 +191,8 @@ def test_potential_collaborators_receipt_never_reaches_agent_raw(
             executor_wire.project_learner_result(
                 entry, result, "https://school.instructure.com")
         return
-    out, reveal = executor_wire.project_learner_result(
+    out = executor_wire.project_learner_result(
         entry, result, "https://school.instructure.com")
-    assert reveal is None
     text = repr(out)
     for raw in ("Jane Doe", "Doe, Jane", "Omar Haddad", "5550101"):
         assert raw not in text, raw
@@ -259,3 +259,78 @@ def test_every_live_proven_row_with_person_keys_is_learner_data():
             missed.append((row_id, people))
     assert scanned >= 4
     assert not missed, "unclassified rows with person keys: %s" % missed
+
+
+# Final-sweep finding muse/dispatch/admission.py learner-token scan reads
+# course text (2026-09-23, written before the fix): the gate searched the
+# whole canonical query/body JSON, values included, so a live-proven
+# content write whose body merely says "students" or "users" was refused
+# as student data without the vault (SKILL.md, INSTALL.md, and install.sh
+# all promise content still works), and took the learner path with it.
+# The tokens must match query/body KEYS and the VALUES of include[] only.
+CONTENT_WRITE_BODY = {
+    "C-334": [{"wiki_page": {"body": "<p>Welcome, students, to week 3."
+                             "</p>"}},
+              {"wiki_page": {"body": "<p>Signed, your users.</p>"}}],
+    "C-38": [{"assignment": {
+        "name": "Essay 1",
+        "description": "Students submit a two-page essay."}}],
+    "C-268": [{"module": {"name": "Guide for new users"}}],
+}
+
+
+@pytest.mark.parametrize("row_id, body_json", sorted(
+    (row_id, json.dumps(body))
+    for row_id, bodies in CONTENT_WRITE_BODY.items()
+    for body in bodies), ids=lambda v: v[:72])
+def test_a_content_write_that_says_students_or_users_is_admitted(row_id,
+                                                                 body_json):
+    body = json.loads(body_json)
+    name, desc = _rows_by_id()[row_id]
+    entry = ex.catalog_descriptor_to_entry(name, desc["method"], desc["path"],
+                                           extra={"body": body})
+    assert not admission.touches_learner_data(entry), (
+        "%s body %r was read as learner data" % (row_id, body))
+    # Without the vault the write is admitted to the approval step, and
+    # with the vault it takes the course-content projection path (the
+    # receipt is labeled through the course roster), never the learner
+    # boundary.
+    admission.check_learner_data(entry, admission.load_policy(),
+                                 vault_ready=False)
+
+
+# Security-review finding 1 on lane/muse-s3-1 (2026-09-24, written before
+# the fix): the key-token scan matches a whole form key only, so a
+# compound learner-key parameter (observed_user_id, the Canvas planner
+# and missing-submissions reads) escaped it, and a learner key encoded
+# inside a nested pre-encoded JSON string value was never re-parsed.
+# A raw write with a bare compound learner-id key must still be gated;
+# plain prose must still pass.
+@pytest.mark.parametrize("block", [
+    {"query": {"observed_user_id": "98765"}},
+    {"body": {"observed_user_id": "98765"}},
+    {"body": {"previous_user_id": "98765"}},
+    {"body": [{"course_id": 101, "user_id": 98765}]},
+])
+def test_a_compound_learner_id_key_still_gates_a_raw_write(block):
+    entry = {"name": "probe", "request": dict(
+        {"method": "PUT", "url": "{canvas_base}/api/v1/courses/"
+                                 "{course_id}/things"}, **block)}
+    assert admission.touches_learner_data(entry), block
+
+
+def test_a_learner_key_inside_a_pre_encoded_json_string_gates():
+    entry = {"name": "probe", "request": {
+        "method": "PUT",
+        "url": "{canvas_base}/api/v1/courses/{course_id}/things",
+        "body": {"step": "bulk", "key": "anyVal",
+                 "json": '{"assignment_override": {"student_ids": [123]}}'}}}
+    assert admission.touches_learner_data(entry)
+
+
+def test_a_nested_prose_value_is_never_a_learner_signal():
+    entry = {"name": "probe", "request": {
+        "method": "PUT",
+        "url": "{canvas_base}/api/v1/courses/{course_id}/things",
+        "body": {"body": "<p>Welcome, students, to week 3.</p>"}}}
+    assert not admission.touches_learner_data(entry)

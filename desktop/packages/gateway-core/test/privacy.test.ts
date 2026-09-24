@@ -130,6 +130,42 @@ describe("privacy output boundary", () => {
     expect(text({ schema: "morrow.canvas-browser-failure.v1", provider: "moodle", sent: false })).toEqual([{ type: "text", text: "Morrow did not send this request to Moodle." }]);
   });
 
+  // The Bridge's own message is dropped here, so its reason is named from Morrow's code alone. A
+  // course tab that closed, or a Bridge that is not connected, is a step for the person to take,
+  // not unsafe output.
+  it("names Morrow Bridge's reason for a request it did not send, and keeps whether trying again can work", () => {
+    const refused = (code: string, recoverable?: boolean) => normalize({
+      isError: true,
+      content: [{ type: "text", text: "Morrow sent nothing: the Canvas site tab for Biology 101 is not open and signed in." }],
+      structuredContent: {
+        schema: "morrow.canvas-connector.result.v1",
+        ok: false,
+        provider: "canvas",
+        resultState: "not_sent",
+        problem: {
+          schema: "morrow.bridge.problem.v1", code,
+          message: "Morrow sent nothing: the Canvas site tab for Biology 101 is not open and signed in.",
+          ...(recoverable === undefined ? {} : { recoverable }),
+        },
+      },
+    }, { descriptor: learnerDescriptor });
+    const closedTab = refused("canvas_binding_required", true);
+    expect(closedTab.content).toEqual([{ type: "text", text: "Morrow sent nothing, because the signed-in Canvas or Moodle tab for this course is closed, signed out, or showing another page. Open the course in Canvas or Moodle and sign in, then ask again. If the course is closed, select Open Canvas or Open Moodle in the Morrow Bridge popup." }]);
+    expect(closedTab.structuredContent).toEqual({
+      schema: "morrow.problem.v1", code: "upstream_error_sanitized", recoverable: true, resultState: "not_sent", sourceCode: "canvas_binding_required",
+    });
+    expect(JSON.stringify(closedTab)).not.toContain("Biology");
+    expect(refused("bridge_unavailable", true).content).toEqual([{ type: "text", text: "Morrow Bridge is not connected to Morrow, so Morrow could not reach the course. Open Chrome and open the Morrow Bridge popup, which shows the step that connects it. Then ask again." }]);
+    expect(refused("bridge_port_in_use", true).content).toEqual([{ type: "text", text: "Another Morrow is already connected to Morrow Bridge, so this Morrow could not reach the course. Close the other Morrow, or use one Morrow for all your assistants." }]);
+    expect(refused("course_binding_mismatch", true).content).toEqual([{ type: "text", text: "This request names a course that is not the one this Morrow connection carries, so Morrow sent nothing to the course. Connect that course in Morrow Bridge, or ask for this in the connected course." }]);
+    const unnamed = refused("operation_catalog_mismatch", false);
+    expect(unnamed.content).toEqual([{ type: "text", text: "Morrow Bridge could not complete this request." }]);
+    expect(unnamed.structuredContent).toMatchObject({ recoverable: false, sourceCode: "operation_catalog_mismatch" });
+    // A source that does not say whether trying again can work is not told it can.
+    expect(refused("canvas_binding_required").structuredContent).toMatchObject({ recoverable: false });
+    for (const result of [closedTab, unnamed]) expect(JSON.stringify(result)).not.toContain("unsafe");
+  });
+
   it("does not retain malformed or extended provider failure records", () => {
     const result = normalize({
       isError: true,
@@ -1113,12 +1149,12 @@ describe("complete roster structured identity regression", () => {
 });
 
 describe("bidirectional roster dictionary", () => {
-  it("replaces unique given names everywhere and never resolves an ambiguous given name", () => {
+  it("replaces unique given and family names everywhere and never resolves an ambiguous one", () => {
     const roster = new LearnerRoster();
     roster.register(scope, [{ id: "501", name: "Michaela Adams" }, { id: "502", name: "Alex Smith" }, { id: "503", name: "Alex Jones" }]);
     const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
     const token = redactKnownLearnerText("Michaela Adams", ctx);
-    expect(redactKnownLearnerText("Michaela wrote a message. Adams replied.", ctx)).toBe(`${token} wrote a message. Adams replied.`);
+    expect(redactKnownLearnerText("Michaela wrote a message. Adams replied.", ctx)).toBe(`${token} wrote a message. ${token} replied.`);
     expect(redactKnownLearnerText("Alex replied.", ctx)).toBe("[learner] replied.");
     expect(redactLearnerEgress({ outer: [{ body: "Michaela Adams replied to Michaela.", nested: { Michaela: "Alex replied." } }] }, ctx))
       .toEqual({ outer: [{ body: `${token} replied to ${token}.`, nested: { [token]: "[learner] replied." } }] });
@@ -1126,6 +1162,185 @@ describe("bidirectional roster dictionary", () => {
     expect(request).toEqual({ user_id: "501", body: "Hello Michaela Adams.", nested: { "501": "selected" } });
     roster.register(scope, []);
     expect(() => resolveLearnerTokens({ body: `Hello ${token}.` }, ctx.learnerVault, scope, roster)).toThrow("learner_roster_identity_unavailable");
+  });
+  it("replaces a family name used alone when the roster gives only the full name", () => {
+    const roster = new LearnerRoster();
+    // A Moodle roster read carries the id, the full name, and the email, never a separate family name.
+    roster.register(scope, [
+      { id: "601", name: "Michaela Adams", email: "madams@example.edu" },
+      { id: "602", name: "Jordan Whitfield" },
+      { id: "603", name: "Martin Luther King Jr." },
+      { id: "604", name: "Henry Ford II" },
+      { id: "605", name: "Okafor, Chidi" },
+      { id: "606", name: "Jane Alexandra Doe" },
+      { id: "607", name: "Sam Taylor" },
+      { id: "608", name: "Taylor Reed" },
+      { id: "609", name: "Mary X" },
+    ]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const label = (name: string) => redactKnownLearnerText(name, ctx);
+    const [adams, whitfield, king, ford, okafor, doe] = ["Michaela Adams", "Jordan Whitfield", "Martin Luther King Jr.", "Henry Ford II", "Okafor, Chidi", "Jane Alexandra Doe"].map(label);
+    expect(new Set([adams, whitfield, king, ford, okafor, doe]).size).toBe(6);
+    expect(redactKnownLearnerText("Adams posted. Whitfield replied to Adams.", ctx)).toBe(`${adams} posted. ${whitfield} replied to ${adams}.`);
+    expect(redactKnownLearnerText("Ms. Whitfield's essay", ctx)).toBe(`Ms. ${whitfield}'s essay`);
+    expect(redactKnownLearnerText("King and Ford presented. Jr. and II stay as written.", ctx)).toBe(`${king} and ${ford} presented. Jr. and II stay as written.`);
+    expect(redactKnownLearnerText("Okafor asked Chidi.", ctx)).toBe(`${okafor} asked ${okafor}.`);
+    expect(redactKnownLearnerText("Jane Doe and Doe", ctx)).toBe(`${doe} and ${doe}`);
+    expect(redactKnownLearnerText("Taylor spoke to Reed. Sam listened.", ctx)).toBe(`[learner] spoke to ${label("Taylor Reed")}. ${label("Sam Taylor")} listened.`);
+    expect(redactKnownLearnerText("Mary chose option X.", ctx)).toBe(`${label("Mary X")} chose option X.`);
+  });
+  it("never replaces a leading title or a family-name particle as a student's name, and never restores one", () => {
+    const roster = new LearnerRoster();
+    roster.register(scope, [
+      { id: "771", name: "Dr. Jane Doe" },
+      { id: "772", name: "Ms. Ada Frizzle" },
+      { id: "773", name: "Ana van der Berg" },
+      { id: "774", name: "Van Nguyen" },
+    ]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [jane, frizzle, berg, nguyen] = ["Dr. Jane Doe", "Ms. Ada Frizzle", "Ana van der Berg", "Van Nguyen"].map((name) => redactKnownLearnerText(name, ctx));
+    expect(new Set([jane, frizzle, berg, nguyen]).size).toBe(4);
+    // A title in prose names the course's teacher, and a particle is an ordinary
+    // word: neither stands for a rostered student, so the write path never
+    // restores a student's name where one stood.
+    const teacher = "Dr. Smith will collect the homework. Ms. Brown graded it.";
+    expect(redactKnownLearnerText(teacher, ctx)).toBe(teacher);
+    expect(redactKnownLearnerText("Van and Der asked a question.", ctx)).toBe("Van and Der asked a question.");
+    expect(resolveLearnerTokens({ body: redactKnownLearnerText(teacher, ctx) }, ctx.learnerVault, scope, roster))
+      .toEqual({ body: teacher });
+    // The student's own names still replace, with or without the title or particle.
+    expect(redactKnownLearnerText("Jane Doe and Doe asked. Dr. Jane Doe replied.", ctx)).toBe(`${jane} and ${jane} asked. ${jane} replied.`);
+    expect(redactKnownLearnerText("Ada Frizzle and Frizzle asked. Ms. Ada Frizzle replied.", ctx)).toBe(`${frizzle} and ${frizzle} asked. ${frizzle} replied.`);
+    expect(redactKnownLearnerText("van der Berg and Berg asked.", ctx)).toBe(`van der ${berg} and ${berg} asked.`);
+    expect(redactKnownLearnerText("Nguyen asked, and Van Nguyen too.", ctx)).toBe(`${nguyen} asked, and ${nguyen} too.`);
+  });
+  it("replaces a lone family name only where it is written with a capital letter", () => {
+    const roster = new LearnerRoster();
+    roster.register(scope, [
+      { id: "701", name: "Jordan Long" },
+      { id: "702", name: "Ana Page" },
+      { id: "703", name: "Lee Lee" },
+      { id: "704", name: "Robin Hall", aliases: ["Hall"] },
+      { id: "705", name: "Luca d'Angelo" },
+    ]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [long, page, lee, hall, angelo] = ["Jordan Long", "Ana Page", "Lee Lee", "Robin Hall", "Luca d'Angelo"].map((name) => redactKnownLearnerText(name, ctx));
+    // Written in small letters, a family name is usually an ordinary word, and a label
+    // there would come back as the student's full name in text the assistant saves.
+    expect(redactKnownLearnerText("Write a long answer on this page.", ctx)).toBe("Write a long answer on this page.");
+    expect(redactKnownLearnerText("Long and PAGE replied to d'Angelo.", ctx)).toBe(`${long} and ${page} replied to ${angelo}.`);
+    expect(redactKnownLearnerText("jordan long replied.", ctx)).toBe(`${long} replied.`);
+    // A family name the roster gives in its own field keeps matching in any case.
+    expect(redactKnownLearnerText("Lee met the hall monitor.", ctx)).toBe(`${lee} met the ${hall} monitor.`);
+  });
+  it("replaces a lone given name only where it is written with a capital letter", () => {
+    const roster = new LearnerRoster();
+    roster.register(scope, [
+      { id: "711", name: "Will Okafor" },
+      { id: "712", name: "Grace Hopper" },
+      { id: "713", name: "Cher" },
+      { id: "714", name: "하늘 민준" },
+    ]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [will, grace, cher, minjun] = ["Will Okafor", "Grace Hopper", "Cher", "하늘 민준"].map((name) => redactKnownLearnerText(name, ctx));
+    // Written in small letters, a given name used alone is usually an ordinary word too, and a
+    // label there would come back as the student's full name in text the assistant saves.
+    expect(redactKnownLearnerText("You will see the grace period on this page.", ctx)).toBe("You will see the grace period on this page.");
+    expect(redactKnownLearnerText("Will and GRACE replied.", ctx)).toBe(`${will} and ${grace} replied.`);
+    expect(redactKnownLearnerText("will okafor replied.", ctx)).toBe(`${will} replied.`);
+    // A one-word roster name is the whole name, not a part of it, so it matches in any case.
+    expect(redactKnownLearnerText("cher replied.", ctx)).toBe(`${cher} replied.`);
+    // A script with no capital letters cannot mark a name, so a lone name part in it always matches.
+    expect(redactKnownLearnerText("민준 replied. 하늘 agreed.", ctx)).toBe(`${minjun} replied. ${minjun} agreed.`);
+  });
+  it("replaces a name inside running text of a script that writes no spaces or attaches a particle or prefix to it", () => {
+    const roster = new LearnerRoster();
+    roster.register(scope, [
+      { id: "721", name: "王小明" },
+      { id: "722", name: "佐藤 花子" },
+      { id: "723", name: "김민준" },
+      { id: "724", name: "محمد علي" },
+      { id: "725", name: "דוד כהן" },
+      { id: "726", name: "สมชาย ใจดี" },
+      { id: "727", name: "Ada Lovelace" },
+    ]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [wang, sato, kim, ali, cohen, somchai, ada] = ["王小明", "佐藤 花子", "김민준", "محمد علي", "דוד כהן", "สมชาย ใจดี", "Ada Lovelace"]
+      .map((name) => redactKnownLearnerText(name, ctx));
+    expect(new Set([wang, sato, kim, ali, cohen, somchai, ada]).size).toBe(7);
+    expect(redactKnownLearnerText("我同意王小明的看法", ctx)).toBe(`我同意${wang}的看法`);
+    expect(redactKnownLearnerText("请看王小明的作业。", ctx)).toBe(`请看${wang}的作业。`);
+    expect(redactKnownLearnerText("佐藤花子さんの課題を見てください。", ctx)).toBe(`${sato}さんの課題を見てください。`);
+    expect(redactKnownLearnerText("花子さんの課題を確認して。", ctx)).toBe(`${sato}さんの課題を確認して。`);
+    expect(redactKnownLearnerText("김민준의 과제를 확인해 주세요.", ctx)).toBe(`${kim}의 과제를 확인해 주세요.`);
+    expect(redactKnownLearnerText("김 민준 학생", ctx)).toBe(`${kim} 학생`);
+    expect(redactKnownLearnerText("أرسل ملاحظة لمحمد علي اليوم.", ctx)).toBe(`أرسل ملاحظة ل${ali} اليوم.`);
+    expect(redactKnownLearnerText("שלח הודעה לדוד כהן היום.", ctx)).toBe(`שלח הודעה ל${cohen} היום.`);
+    expect(redactKnownLearnerText("ช่วยตรวจงานของสมชายหน่อย", ctx)).toBe(`ช่วยตรวจงานของ${somchai}หน่อย`);
+    // A name in a spaced script still ends where a word of an unspaced script begins.
+    expect(redactKnownLearnerText("请看Ada Lovelace的作业。", ctx)).toBe(`请看${ada}的作业。`);
+    expect(redactKnownLearnerText("Ada의 과제", ctx)).toBe(`${ada}의 과제`);
+    // A script that separates words with spaces keeps its word edges.
+    expect(redactKnownLearnerText("Please review Ada Lovelace's essay.", ctx)).toBe(`Please review ${ada}'s essay.`);
+    expect(redactKnownLearnerText("Adalovelace and Adas stay as written.", ctx)).toBe("Adalovelace and Adas stay as written.");
+  });
+  it("replaces a name written with a curly apostrophe, another hyphen, a capital dotted I, or without its accents", () => {
+    const roster = new LearnerRoster();
+    roster.register(scope, [
+      { id: "731", name: "Sean O'Brien" },
+      { id: "732", name: "Maria D'Angelo" },
+      { id: "733", name: "Ana Smith-Jones" },
+      { id: "734", name: "İlkay Yıldız" },
+      { id: "735", name: "José García" },
+      { id: "736", name: "Liam O’Neil" },
+    ]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [obrien, dangelo, smithJones, ilkay, garcia, oneil] = ["Sean O'Brien", "Maria D'Angelo", "Ana Smith-Jones", "İlkay Yıldız", "José García", "Liam O’Neil"]
+      .map((name) => redactKnownLearnerText(name, ctx));
+    expect(new Set([obrien, dangelo, smithJones, ilkay, garcia, oneil]).size).toBe(6);
+    expect(redactKnownLearnerText("Sean O’Brien submitted the lab.", ctx)).toBe(`${obrien} submitted the lab.`);
+    expect(redactKnownLearnerText("Please check O’Brien’s draft.", ctx)).toBe(`Please check ${obrien}’s draft.`);
+    expect(redactKnownLearnerText("<p>Sean O&#8217;Brien asked.</p>", ctx)).toBe(`<p>${obrien} asked.</p>`);
+    expect(redactKnownLearnerText("Maria DʼAngelo and D＇Angelo and D`Angelo and D´Angelo asked.", ctx))
+      .toBe(`${dangelo} and ${dangelo} and ${dangelo} and ${dangelo} asked.`);
+    expect(redactKnownLearnerText("Ana Smith‑Jones wrote this. Smith–Jones replied. Smith‐Jones agreed.", ctx))
+      .toBe(`${smithJones} wrote this. ${smithJones} replied. ${smithJones} agreed.`);
+    expect(redactKnownLearnerText("İlkay Yıldız submitted late. İlkay asked.", ctx)).toBe(`${ilkay} submitted late. ${ilkay} asked.`);
+    expect(redactKnownLearnerText("Jose Garcia submitted late. Garcia asked.", ctx)).toBe(`${garcia} submitted late. ${garcia} asked.`);
+    expect(redactKnownLearnerText("Liam O'Neil asked.", ctx)).toBe(`${oneil} asked.`);
+  });
+  it("replaces a name whose letters carry a stroke or are written as two letters, with or without them", () => {
+    const roster = new LearnerRoster();
+    const names = ["Łukasz Wałęsa", "Søren Kierkegaard", "Đorđe Jovanović", "Ilkay Yıldız", "Đặng Thu Hà", "Guðrún Þórsdóttir", "Lætitia Cœur", "Jürgen Weiß"];
+    roster.register(scope, names.map((name, index) => ({ id: String(741 + index), name })));
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [walesa, soren, dorde, yildiz, dang, gudrun, laetitia, weiss] = names.map((name) => redactKnownLearnerText(name, ctx));
+    expect(new Set([walesa, soren, dorde, yildiz, dang, gudrun, laetitia, weiss]).size).toBe(8);
+    expect(redactKnownLearnerText("Łukasz Wałęsa submitted late.", ctx)).toBe(`${walesa} submitted late.`);
+    expect(redactKnownLearnerText("Lukasz Walesa submitted late. Walesa asked.", ctx)).toBe(`${walesa} submitted late. ${walesa} asked.`);
+    expect(redactKnownLearnerText("Soren Kierkegaard asked. Soren replied.", ctx)).toBe(`${soren} asked. ${soren} replied.`);
+    expect(redactKnownLearnerText("Dorde Jovanovic asked. Dorde replied.", ctx)).toBe(`${dorde} asked. ${dorde} replied.`);
+    expect(redactKnownLearnerText("Ilkay Yildiz submitted late. Please ask Yildiz.", ctx)).toBe(`${yildiz} submitted late. Please ask ${yildiz}.`);
+    expect(redactKnownLearnerText("Dang Thu Ha asked.", ctx)).toBe(`${dang} asked.`);
+    expect(redactKnownLearnerText("Gudrun Thorsdottir asked.", ctx)).toBe(`${gudrun} asked.`);
+    expect(redactKnownLearnerText("Laetitia Coeur asked.", ctx)).toBe(`${laetitia} asked.`);
+    expect(redactKnownLearnerText("Jurgen Weiss asked. Weiss replied.", ctx)).toBe(`${weiss} asked. ${weiss} replied.`);
+    expect(redactKnownLearnerText("<p>S&#248;ren and So&#x308;ren asked.</p>", ctx)).toBe(`<p>${soren} and ${soren} asked.</p>`);
+  });
+  it("replaces a given or family name used alone from a Chinese, Japanese, or Korean roster name written with no space", () => {
+    const roster = new LearnerRoster();
+    const names = ["王小明", "김민준", "欧阳小红", "남궁민수", "田中太郎"];
+    roster.register(scope, names.map((name, index) => ({ id: String(751 + index), name })));
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const [wang, kim, ouyang, namgung, tanaka] = names.map((name) => redactKnownLearnerText(name, ctx));
+    expect(new Set([wang, kim, ouyang, namgung, tanaka]).size).toBe(5);
+    expect(redactKnownLearnerText("请提醒小明交作业。", ctx)).toBe(`请提醒${wang}交作业。`);
+    expect(redactKnownLearnerText("민준에게 과제를 알려 주세요.", ctx)).toBe(`${kim}에게 과제를 알려 주세요.`);
+    expect(redactKnownLearnerText("小红交了作业，欧阳也交了。", ctx)).toBe(`${ouyang}交了作业，${ouyang}也交了。`);
+    expect(redactKnownLearnerText("민수 학생", ctx)).toBe(`${namgung} 학생`);
+    expect(redactKnownLearnerText("太郎さんと田中さん", ctx)).toBe(`${tanaka}さんと${tanaka}さん`);
+    // A one-letter family name alone is a common word, such as 王 or 김, and stays as written.
+    expect(redactKnownLearnerText("王老师和김 선생님", ctx)).toBe("王老师和김 선생님");
   });
   it("neutralizes a pasted label outside the roster and refuses it only in the strict projection", () => {
     const roster = new LearnerRoster(); roster.register(scope, [{ id: "17", name: "Ada Lovelace" }]);
@@ -1336,5 +1551,130 @@ describe("learner ids inside links", () => {
       "https://moodle.school.test/pluginfile.php/17/mod_forum/attachment/17/notes.pdf",
       "https://moodle.school.test/course/modedit.php?update=17&return=1",
     ]) expect(redactKnownLearnerText(link, context)).toBe(link);
+  });
+});
+
+// A Canvas HTML body, an HTML file Morrow reads, or text pasted from Word can
+// carry a name as named character references or with invisible format
+// characters. The match view decodes every named reference and drops those
+// characters, so the name is replaced exactly as its raw spelling is.
+describe("learner names written as references and with invisible characters", () => {
+  const identities = [
+    { id: "701", name: "José García" },
+    { id: "702", name: "François Müller" },
+    { id: "703", name: "Ada Lovelace" },
+  ];
+  const context = () => {
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, identities);
+    return { learnerRoster, learnerVault: new LearnerVault(":memory:"), learnerScope: scope };
+  };
+
+  it("decodes named character references for accented letters", () => {
+    expect(redactKnownLearnerText("<p>Great work, Jos&eacute; Garc&iacute;a!</p>", context()))
+      .toBe("<p>Great work, Student A1!</p>");
+    expect(redactKnownLearnerText("<p>Fran&ccedil;ois M&uuml;ller presented.</p>", context()))
+      .toBe("<p>Student A2 presented.</p>");
+  });
+
+  it("keeps replacing raw UTF-8 and numeric references the way it did", () => {
+    expect(redactKnownLearnerText("<p>Great work, José García!</p>", context()))
+      .toBe("<p>Great work, Student A1!</p>");
+    expect(redactKnownLearnerText("<p>Great work, Jos&#233; Garc&#237;a!</p>", context()))
+      .toBe("<p>Great work, Student A1!</p>");
+  });
+
+  it("drops invisible format characters from the match view on the text side", () => {
+    for (const [text, expected] of [
+      ["Ada Love\u00adlace presented.", "Student A3 presented."],
+      ["<p>Ada Love&shy;lace presented.</p>", "<p>Student A3 presented.</p>"],
+      ["Ada Love\u200blace presented.", "Student A3 presented."],
+      ["Ada Love\u2060lace presented.", "Student A3 presented."],
+    ] as const) {
+      expect(redactKnownLearnerText(text, context())).toBe(expected);
+    }
+  });
+
+  it("drops invisible format characters from the roster side too", () => {
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [{ id: "704", name: "Grace\u200bHopper" }]);
+    const context = { learnerRoster, learnerVault: new LearnerVault(":memory:"), learnerScope: scope };
+    expect(redactKnownLearnerText("Grace Hopper submitted late.", context)).toBe("Student A1 submitted late.");
+  });
+});
+
+// A student with two family names, as most Spanish- and Portuguese-speaking
+// students have, is referred to by either surname alone. The roster's own
+// family-name fields and, where it gives none, every word after the given name
+// name that student on their own.
+describe("compound family names", () => {
+  const identities = [
+    { id: "601", name: "José García López", aliases: ["García López, José"] },
+    { id: "603", name: "Ada Lovelace" },
+  ];
+  const context = () => {
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, identities);
+    return { learnerRoster, learnerVault: new LearnerVault(":memory:"), learnerScope: scope };
+  };
+
+  it("replaces each surname alone and both surnames without the given name", () => {
+    expect(redactKnownLearnerText("García submitted late.", context())).toBe("Student A1 submitted late.");
+    expect(redactLearnerEgress({ note: "García López submitted late." }, context()))
+      .toEqual({ note: "Student A1 submitted late." });
+    expect(redactKnownLearnerText("Hablé con el Sr. García ayer.", context()))
+      .toBe("Hablé con el Sr. Student A1 ayer.");
+  });
+
+  it("keeps replacing the given name, the last family word, and the whole name", () => {
+    expect(redactKnownLearnerText("Please remind José to submit.", context())).toBe("Please remind Student A1 to submit.");
+    expect(redactKnownLearnerText("López submitted late.", context())).toBe("Student A1 submitted late.");
+    expect(redactKnownLearnerText("José García López submitted late.", context())).toBe("Student A1 submitted late.");
+  });
+
+  it("replaces a middle name used alone when the roster names no family part", () => {
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [{ id: "605", name: "Ada Grace Lovelace" }]);
+    const context = { learnerRoster, learnerVault: new LearnerVault(":memory:"), learnerScope: scope };
+    expect(redactKnownLearnerText("Grace submitted late.", context)).toBe("Student A1 submitted late.");
+  });
+});
+
+// Canvas builds page addresses from titles and teachers name files with the
+// student's full name joined by hyphens, underscores, or dots. The match view
+// treats those spellings as the same name, and a page addressed by its
+// redacted address still resolves when it comes back.
+describe("full names joined without spaces", () => {
+  const identities = [{ id: "703", name: "Ada Lovelace" }];
+  const context = () => {
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, identities);
+    return { learnerRoster, learnerVault: new LearnerVault(":memory:"), learnerScope: scope };
+  };
+
+  it("replaces the name joined by hyphens, underscores, and dots", () => {
+    expect(redactKnownLearnerText("ada-lovelace-reflection", context())).toBe("Student A1-reflection");
+    expect(redactLearnerEgress({ filename: "Lovelace_Ada_feedback.docx" }, context()))
+      .toEqual({ filename: "Student A1_feedback.docx" });
+    expect(redactKnownLearnerText("pages/ada.lovelace.notes", context())).toBe("pages/Student A1.notes");
+  });
+
+  it("keeps matching the spaced spellings and the reversed order", () => {
+    expect(redactKnownLearnerText("Lovelace Ada submitted late.", context())).toBe("Student A1 submitted late.");
+    expect(redactKnownLearnerText("Ada Lovelace submitted late.", context())).toBe("Student A1 submitted late.");
+  });
+
+  it("restores a page address the assistant sends back so it still resolves", () => {
+    const vault = new LearnerVault(":memory:");
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, identities);
+    const context = { learnerRoster, learnerVault: vault, learnerScope: scope };
+    expect(redactKnownLearnerText("Ada Lovelace submitted late.", context)).toBe("Student A1 submitted late.");
+    const resolved = resolveLearnerTokens(
+      { url_or_id: "https://canvas.example.test/courses/42/pages/Student A1-reflection" },
+      vault,
+      scope,
+    );
+    expect(resolved).toEqual({ url_or_id: "https://canvas.example.test/courses/42/pages/ada-lovelace-reflection" });
   });
 });

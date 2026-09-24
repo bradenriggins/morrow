@@ -320,11 +320,15 @@ async function load(name, invoke, platform) {
   return dom;
 }
 
-test("a setup problem is placed above the step body, where it is visible without scrolling", () => {
+test("a setup problem is shared by Home and Settings and placed above both, where it is visible without scrolling", () => {
   const html = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "renderer", "index.html"), "utf8");
-  const panel = html.slice(html.indexOf('<section class="action-panel"'), html.indexOf("</section>", html.indexOf('<section class="action-panel"')));
-  assert.ok(panel.includes('id="problem"'), "the problem region belongs to the step panel");
-  assert.ok(panel.indexOf('id="problem"') < panel.indexOf('id="action-content"'), "the problem region comes before the step body");
+  const problemAt = html.indexOf('id="problem"');
+  const homeAt = html.indexOf('<div id="home-view"');
+  const settingsAt = html.indexOf('<div id="settings-view"');
+  assert.ok(problemAt > html.indexOf('<nav class="app-nav"'), "the problem region follows the app nav");
+  // Neither view contains it, so hiding the inactive view never hides a problem.
+  assert.ok(problemAt < homeAt && problemAt < settingsAt, "the problem region comes before both views");
+  assert.match(html.slice(html.lastIndexOf("<", problemAt), html.indexOf(">", problemAt)), /role="alert"/);
   const renderer = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "renderer", "renderer.js"), "utf8");
   const setProblem = renderer.slice(renderer.indexOf("function setProblem("), renderer.indexOf("\n}\n", renderer.indexOf("function setProblem(")));
   assert.match(setProblem, /scrollIntoView/, "a newly shown problem is brought into view");
@@ -633,7 +637,7 @@ test("the problem alert is written once for each distinct problem", async () => 
 
 test("a rejected Blackboard save keeps the three safe values and clears only the secret", async () => {
   let request = null;
-  let answer = () => failed(state(), { code: "blackboard_configuration_invalid", message: "Morrow could not save that connection.", recovery: "Check the account ID, then save again." });
+  let answer = () => failed(state(), { code: "blackboard_configuration_invalid", message: "Morrow could not save that connection.", recovery: "Check the Blackboard web address and the application key and secret from your administrator, then save again." });
   const dom = await load("blackboard", async (method, payload) => {
     if (method === "installer:configure-blackboard") request = payload;
     return answer();
@@ -648,11 +652,21 @@ test("a rejected Blackboard save keeps the three safe values and clears only the
   assert.equal(form.fields.baseUrl.value, BLACKBOARD_FIELDS.baseUrl);
   assert.equal(form.fields.applicationKey.value, BLACKBOARD_FIELDS.applicationKey);
   assert.match(dom.element("#problem").innerHTML, /Morrow could not save that connection\./);
-  // The emptied secret is the only field with something to correct.
-  assert.match(dom.element(BLACKBOARD_FIELD_ERRORS.applicationSecret).textContent, /Paste the application secret/);
-  for (const name of ["baseUrl", "applicationKey"]) {
+  // Morrow emptied the secret itself, so the field has no message of its own:
+  // the problem above states the real reason.
+  for (const name of ["baseUrl", "applicationKey", "applicationSecret"]) {
     assert.equal(dom.element(BLACKBOARD_FIELD_ERRORS[name]).textContent, "", name);
+    assert.equal(form.fields[name].getAttribute("aria-invalid"), "false", name);
   }
+  form.fields.applicationKey.value = "key-2";
+  await form.dispatch("input");
+  assert.equal(dom.element(BLACKBOARD_FIELD_ERRORS.applicationSecret).textContent, "", "editing another field does not raise the emptied secret");
+  form.fields.applicationKey.value = BLACKBOARD_FIELDS.applicationKey;
+  const attempts = request;
+  await form.dispatch("submit");
+  await settle();
+  assert.equal(request, attempts, "saving again without the secret reaches no IPC call");
+  assert.match(dom.element(BLACKBOARD_FIELD_ERRORS.applicationSecret).textContent, /Paste the application secret/);
   assert.equal(dom.element("#blackboard-courses").hidden, true);
   assert.equal(dom.element("#blackboard-admin-note").hidden, false);
   assert.equal(dom.element("#blackboard-saved-note").hidden, true);
@@ -998,6 +1012,46 @@ test("copying an example request sends its exact text through the clipboard chan
   assert.equal(dom.element("#copy-status").textContent, "Copied to the clipboard.");
 });
 
+test("a missing default materials folder is made again from Home, and the answer is drawn", async () => {
+  const calls = [];
+  const folder = "/Users/teacher/Library/Application Support/Morrow/Materials";
+  let current = state({ runtimeStatus: "uncertain", materialsFolderMissing: { path: folder, isDefault: true } });
+  const dom = await load("materials-restore", async (method, payload) => {
+    calls.push({ method, payload });
+    if (method === "installer:restore-materials-folder") current = state({ materialsFolder: folder });
+    return ok(current);
+  });
+  assert.equal(dom.element("#action-title").textContent, "Morrow cannot find its Materials folder.");
+  const body = dom.element("#action-body");
+  const restore = body.querySelectorAll("[data-action]").find((element) => element.dataset.action === "restore-materials-folder");
+  assert.ok(restore, "Home offers Make the folder again");
+  await body.dispatch("click", { target: restore });
+  await settle();
+  assert.deepEqual(calls.at(-1), { method: "installer:restore-materials-folder", payload: undefined });
+  assert.notEqual(dom.element("#action-title").textContent, "Morrow cannot find its Materials folder.");
+});
+
+test("the materials folder row on Settings opens the folder and copies its path", async () => {
+  const calls = [];
+  const folder = "/Users/teacher/Library/Application Support/Morrow/Materials";
+  const current = state({ materialsFolder: folder });
+  const dom = await load("materials-folder", async (method, payload) => {
+    calls.push({ method, payload });
+    return ok(current);
+  });
+  await dom.element("#nav-settings").dispatch("click");
+  const body = dom.element("#setup-management-body");
+  const control = (action) => body.querySelectorAll("[data-action]").find((element) => element.dataset.action === action && (action !== "copy-example-prompt" || element.dataset.prompt === folder));
+  await body.dispatch("click", { target: control("reveal-materials-folder") });
+  await settle();
+  assert.deepEqual(calls.at(-1), { method: "installer:reveal-materials-folder", payload: undefined });
+  await body.dispatch("click", { target: control("copy-example-prompt") });
+  await settle();
+  assert.deepEqual(calls.at(-1), { method: "installer:copy-to-clipboard", payload: { text: folder } });
+  assert.equal(control("copy-example-prompt").textContent, "Copied");
+  assert.equal(dom.element("#copy-status").textContent, "Copied to the clipboard.");
+});
+
 test("the nav switches between Home and Settings, and Manage on Home reaches Settings (D8, D9)", async () => {
   const current = state({
     bridgePaired: true,
@@ -1035,9 +1089,15 @@ test("the nav switches between Home and Settings, and Manage on Home reaches Set
   // Manage, on the Assistant status line, reaches Settings the same way.
   const manage = dom.element("#action-body").querySelectorAll("[data-action]").find((entry) => entry.dataset.action === "open-settings");
   assert.ok(manage, "Home offers a Manage control for the Assistant status line");
+  manage.focus();
   await dom.element("#action-body").dispatch("click", { target: manage });
   assert.equal(dom.element("#settings-view").hidden, false);
   assert.equal(dom.element("#home-view").hidden, true);
+  // Manage sits in the view it hides, so focus moves to the Settings heading
+  // instead of falling to the page, and a later answer does not pull it back.
+  assert.equal(dom.document.activeElement, dom.element("#setup-management-title"), "focus lands on the Settings heading");
+  await checkStatus(dom);
+  assert.equal(dom.document.activeElement, dom.element("#setup-management-title"), "a refresh keeps focus on Settings");
 });
 
 test("Home shows the three status lines once the first read is complete, and no setup to change", async () => {

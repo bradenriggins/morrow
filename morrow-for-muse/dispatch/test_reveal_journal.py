@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""A sealed educator reveal shows real names to the agent, never to the journal.
+"""A catalog roster read is de-identified for the agent and the journal.
 
 Failure modes this suite pins down (written before the fix; final muse
-audit 2026-09-22, H1, proof final-muse/tests/test_reveal_journal.py):
+audit 2026-09-22, H1, proof final-muse/tests/test_reveal_journal.py;
+final sweep 2026-09-22):
   1. A PII reveal read journaled the REVEALED receipt: real names,
      emails, SIS ids, and Canvas ids went into the sealed, append-only
-     journal, which purge cannot rewrite. The journal must always get
-     the de-identified projection (labels), while the agent gets the
-     revealed result it asked for.
-  2. The journal record still says a reveal happened (the audit), so a
-     reviewer can see who revealed what course and when.
-  3. A reveal for one course never reveals another course's read.
-  4. A read with no reveal stays de-identified everywhere (unchanged).
+     journal, which purge cannot rewrite.
+  2. The reveal also handed those names to the agent, and so to the
+     model. The reveal is gone: every roster read reaches the agent and
+     the journal as labels, and the journal records no reveal.
+  3. The checks searched the journal and the result for 5-digit ids and
+     short names as substrings, so an HMAC, digest, or op id that
+     happened to contain one failed the suite with no leak. A stored
+     name or id stands as its own word (found_in).
 """
 
 import json
@@ -28,9 +30,8 @@ for _p in (TREE, os.path.join(TREE, "transport")):
 pytest.importorskip("cryptography")
 
 from dispatch import executor as ex  # noqa: E402
-from dispatch import admission as ad  # noqa: E402
 from dispatch.test_by_name_e2e import (  # noqa: E402,F401
-    BASE, CONV, USER, BrowserFake, _journal_text, hermetic, world)
+    BASE, CONV, USER, BrowserFake, _journal_text, found_in, hermetic, world)
 from dispatch.test_direct_lane_hardening import _pack  # noqa: E402
 from learners.test_students_find import ROSTER  # noqa: E402
 
@@ -51,15 +52,16 @@ class RosterCanvas(BrowserFake):
     def raw_request(self, method, url, headers, body, is_write=False,
                     max_bytes=None):
         self.calls.append((method, url, None))
+        if url.split("?", 1)[0].endswith("/enrollments"):
+            return self._ok([])
         return self._ok(ROSTER)
 
 
-def _read(course, reveal=None):
+def _read(course):
     return ex.dispatch_catalog_op(
         _users_op(), "GET", USERS_PATH, "read", {"course_id": course},
         pack=_pack(), session=RosterCanvas(),
-        mode_ctx={"user_id": USER, "conversation_id": CONV},
-        pii_reveal=reveal)
+        mode_ctx={"user_id": USER, "conversation_id": CONV})
 
 
 def _journal_records():
@@ -67,36 +69,24 @@ def _journal_records():
             if line.strip()]
 
 
-def test_revealed_read_journals_the_de_identified_projection():
-    reveal = ad.mint_pii_reveal(BASE, "1", "show me real names",
-                                channel="educator-chat")
+def test_roster_read_is_de_identified_for_the_agent_and_the_journal():
     before = _journal_text()
-    out = _read("1", reveal)
-    # The agent gets what the educator asked for.
-    assert "Jane Doe" in json.dumps(out)
-    # The journal never holds identity: only the op records written by
-    # this read are checked (the reveal mint record itself is journaled
-    # separately and carries no roster data).
+    out = _read("1")
+    assert found_in(json.dumps(out), IDENTIFIERS) == []
     added = _journal_text()[len(before):]
     assert added.strip(), "the read journaled nothing"
-    leaked = [s for s in IDENTIFIERS if s in added]
-    assert leaked == [], leaked
+    assert found_in(added, IDENTIFIERS) == []
     reads = [r for r in _journal_records() if r.get("entry_name")
              == _users_op() and r.get("wal") == "complete"]
-    assert reads and reads[-1].get("pii_reveal"), \
-        "the journal must still record that a reveal happened"
+    assert reads and "pii_reveal" not in reads[-1]
     # The de-identified receipt is journaled (one record per student),
     # not dropped.
     assert len(reads[-1]["receipt"]) == len(ROSTER)
 
 
-def test_reveal_is_course_scoped_and_no_reveal_stays_de_identified():
-    reveal = ad.mint_pii_reveal(BASE, "1", "show me real names",
-                                channel="educator-chat")
-    other = _read("2", reveal)
-    assert "Jane" not in json.dumps(other)
-    plain = _read("1")
-    assert "Jane" not in json.dumps(plain)
+def test_every_course_read_stays_de_identified():
+    for course in ("1", "2"):
+        assert "Jane" not in json.dumps(_read(course))
     op_text = "\n".join(json.dumps(r) for r in _journal_records()
                         if r.get("entry_name") == _users_op())
-    assert [s for s in IDENTIFIERS if s in op_text] == []
+    assert found_in(op_text, IDENTIFIERS) == []

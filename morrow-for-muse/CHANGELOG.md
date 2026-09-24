@@ -1,5 +1,636 @@
 # Changelog
 
+## 0.4.1 (unreleased)
+
+The `morrow-muse-connector-0.4.1.zip` package is not published yet.
+This candidate fixes what a final review of 0.4.0 found, including two
+privacy fixes.
+
+In plain words:
+
+Student privacy:
+
+- Privacy fix: the name "reveal" is removed. In 0.4.0, when you asked
+  to see a course's student names, Morrow gave every student's real
+  name, email, and login in that course to the assistant, and so to
+  the Muse model, for up to 30 minutes. Now nothing can turn the
+  labels off, and the assistant never sees a real student name you did
+  not type. To check who a label is, name the student you have in
+  mind: the assistant looks that name up and tells you whether it is
+  the same label.
+- Privacy fix: student names in course content are hidden too. In
+  0.4.0, a page, an assignment description, or a quiz question that
+  named a student reached the assistant as written. Now the assistant
+  sees the student's label there and in quiz titles. To do
+  that, Morrow first reads the course's student list, and if it
+  cannot, it reads and changes nothing in the course. When the
+  assistant saves the content back, Morrow puts the real text back in:
+  a first name stays a first name, and an email stays an email.
+- Privacy fix: when the assistant previewed a change to text that
+  names students, the preview showed those students' real names,
+  emails, and logins. Now the preview keeps each student's label, and
+  Morrow puts the real text back only when it sends the change.
+- A student whose name ends in Jr., Sr., II, III, or IV has the last
+  name hidden when it is used alone. Morrow took the ending for the last
+  name, so for "Martin Luther King Jr." the name "King" reached the
+  assistant as written, and a "Jr." elsewhere in the course was hidden
+  instead.
+- Privacy fix: a link in course content to a student's grades, to an
+  assignment submission, or to a profile showed the student's Canvas
+  ID number. Now it shows the student's label, and Morrow puts the
+  number back when it saves the content.
+- A student's full name is hidden in a page's web address
+  ("jane-doe-iep-accommodations") and in a file name
+  ("Jane_Doe_essay.pdf", "JaneDoe.pdf", "doe_jane.docx"). Both reached
+  the assistant as written. The assistant can still open and change
+  such a page, and the address goes back exactly as Canvas has it.
+- A name is hidden however its accents and apostrophes are written:
+  "José Álvarez" when Canvas lists "Jose Alvarez", "Zoe Mueller" for
+  "Zoë Müller", and "O’Brien" with a curly apostrophe. These reached
+  the assistant as written.
+- A name with ð, ħ, ŧ, or a capital ẞ is hidden when it is written
+  without them too, as "Gudrun" for "Guðrún" or "Hili" for "Ħili".
+  These reached the assistant as written.
+- Some student details are still not hidden, and the consent page
+  lists them: a name Canvas does not list for the student, such as a
+  nickname; a name written with a grammatical ending, such as "Annas"
+  for Anna in German; a first or last name used alone and written in
+  small letters, such as "jane" in a page's web address, because in
+  small letters it is usually an ordinary word; the name of someone
+  who was never a student in that course; an ID number written as
+  plain text, such as "Canvas ID 912345" in a page; and other details
+  written about a student, such as a birth date.
+- Privacy fix: the name of a course named for its student, such as an
+  independent study, reached the assistant as written in the course
+  list, in the approval the assistant shows you, and in messages about
+  a change, and Morrow's record of each change held it too. Now the
+  assistant sees the student's label wherever Morrow names the course.
+  For the course list, Morrow reads each listed course's student list
+  to do that; a course whose list it cannot read is listed by its
+  number, with its name not shown.
+- The consent page says that on some Muse computers, the network that
+  carries traffic out of the computer can read that traffic, including
+  your Canvas sign-in and the course pages Morrow loads.
+- Privacy fix: a course given by its SIS code (for example
+  `sis_course_id:BIO101`) skipped the step that hides student names, so
+  a page's names, emails, and logins reached the assistant. Looking up
+  a student by name in such a course gave a label that could name a
+  different student in the same course given by its number. Morrow now
+  refuses such a course before it reads anything, and the assistant
+  asks for the course by name or by the number in its Canvas address.
+- Privacy fix: three reads showed students' Canvas user ids to the
+  assistant and kept them in Morrow's log: the due dates each student
+  has, the tags on each student, and which students can see an
+  assignment. Canvas puts those ids where Morrow did not look for
+  them. The assistant now sees each student's label there, and a read
+  that has an id Morrow cannot turn into a label is refused.
+
+Changes to your courses:
+
+- Morrow never posts an announcement, even when asked: posting one
+  notifies every student in the course. A request that would post one,
+  or add a feed that posts them, is refused before anything is sent,
+  and the assistant is told why in plain words.
+- Morrow never has Canvas send students a notice about a change, and
+  never acts as another person in Canvas, even when asked. A change
+  that asked Canvas to notify every student, or to act as someone
+  else, ran after your approval or in Edit mode. It is now refused
+  before anything is sent. Changing an assignment, page, or quiz
+  without a notice still works.
+- A read that asks Canvas for several extra details at once, such as
+  an assignment's due date overrides and all its dates, gets all of
+  them. Morrow sent them to Canvas as one value it did not recognize,
+  so the read came back without them and still reported success.
+- Discussion changes are refused until they are tested through the
+  browser Morrow uses today; they were tested only through an older,
+  retired route.
+- Morrow does only tasks we have tested on a real Canvas course, with
+  no exception. In 0.4.0, the assistant could offer to run a task we
+  had not tested if you approved it, although the consent page said
+  Morrow refuses such a task even if you ask. That option is gone.
+- The assistant can read a course's content security settings, one of
+  the 115 tested reads. Morrow refused that read along with changes to
+  those settings; only a change is refused now.
+- What this version does not do is refused even when it is part of a
+  task we tested: making a page the course home page, choosing the
+  course home page, publishing a New Quiz, making a graded
+  discussion, and a question group that draws from a classic question
+  bank. Each one ran after your approval, or in Edit mode. To
+  catch a New Quiz published through its assignment or module item,
+  Morrow reads that item first. Make these changes in Canvas yourself
+  for now.
+- Morrow can no longer delete, conclude, publish, or unpublish a whole
+  course through the course rename task. That task also took a course
+  "event", so after one approval, or in Edit mode with no question at
+  all, the assistant could delete or conclude the course, although the
+  docs said Morrow refuses that even with your approval. Only a
+  course rename was tested, so those changes are refused now.
+- The approval you read before a change is in plain words: the
+  course, the change, every value that will be sent, and whether
+  Morrow can undo it. A course rename and a change to the dates of
+  several assignments read as plain actions too.
+- You can approve the same change again (rename a page, rename it
+  back, rename it again). Each approval is still used once. After a
+  sign-in expiry, the change is prepared again and you approve it
+  again.
+- Renaming a course or changing its late policy now names the course
+  in the approval, checks the course before the change, and, for a
+  rename, reads the course back after it.
+- A course whose name mixes languages (for example "Русский язык
+  (Russian Language I)" or "Statistics: μ and σ") can be changed. A
+  name that mixes alphabets inside one word, the way a lookalike name
+  does, is still refused.
+- The assistant can change the dates of several assignments at once.
+  After a change to several due date overrides, or to the dates of
+  several assignments, Morrow reads back each item it changed. Canvas
+  applies a change to the dates of several assignments in the
+  background, so a date that has not moved yet is reported as
+  unconfirmed, never as failed.
+- Deleting a classic quiz is confirmed by the quiz leaving the
+  course's quiz list, so a successful delete is no longer reported as
+  failed. When the list is too long to read in full, the delete is
+  reported as unconfirmed unless Canvas says the quiz is gone.
+- Item Banks no longer refuse a school whose Canvas runs on its own
+  web address (for example canvas.school.edu). This is tested with a
+  stand-in for such a school, not yet on a live one.
+- Morrow closes the Item Banks tabs it opens in the helper browser
+  when it finishes.
+- The assistant offers New Quiz creation again: it was tested and
+  turned on for 0.4.0, but the assistant's instructions still said it
+  was on hold. A task that is on hold is now described as the task you
+  asked for, not as a New Quiz.
+- "Last week's quiz" uses your time zone: your timezone setting, then
+  the course's time zone, then your Canvas profile. If none is set,
+  Morrow asks.
+- A change is never sent twice. If the helper's Canvas tab moved to
+  another page while Morrow was sending a change, Morrow sent it again,
+  so Canvas could end up with two copies. Now Morrow reports the change
+  as unconfirmed and does not send it again.
+- Every server error from Canvas, or from a service in front of it,
+  is a failure. Some (for example 501, or 522 and 524 when the
+  connection to Canvas timed out) were taken as the answer: a read gave
+  the assistant the error page as course content, and a change could
+  be reported as failed while Canvas still applied it. Now a read
+  reports the error, and a change is reported as unconfirmed and is
+  not sent again.
+- A course page whose title starts with "Login" (for example "Login
+  Help") can be read and changed. Morrow took it for Canvas's sign-in
+  page, paused every change, and said your Canvas connection expired.
+  The same happened to a page, quiz question, or post that shows the
+  field names of Canvas's sign-in form. It can be read and changed
+  now too.
+- The approval names what a change touches by its title, for example
+  Delete the assignment "Week 3 Quiz", never only by its number.
+  Morrow reads the page, assignment, module, quiz, discussion, or item
+  bank first. If it cannot, nothing is prepared. If it was renamed
+  before you approve, nothing is sent, and the assistant prepares the
+  change again for you to approve. A title that names a student shows
+  the student's label.
+- Every change reads as what it does. Restoring a page to an earlier
+  version says it replaces what the page says now; replacing the
+  course's blackout dates says a date not on the list is deleted;
+  adding a course to your favorites, marking a module item done, and
+  reordering quiz questions say so.
+- Dates in an approval are shown in your time zone (your timezone
+  setting, else the course's time zone), for example "Wednesday,
+  September 30, 2026 at 7:59 PM (America/New_York)". With neither set,
+  they are shown in UTC and say so.
+
+Settings and undo:
+
+- Your mode and settings belong to your Canvas account. Morrow needed
+  the assistant to name you with an id that nothing gave it, so "use
+  edit mode" could fail, or stop applying in the next conversation.
+  Now Morrow uses the Canvas account you signed in with. The assistant
+  starts a new conversation id for each conversation, so "edit mode for
+  this conversation" ends with that conversation.
+- Turning on edit mode, or changing a setting, is confirmed once, in
+  plain words: what changed and what it means for you.
+- The deletion confirmations setting says what it does: deletions ask
+  first. It never covered other kinds of changes.
+- In Edit mode, a change the assistant showed you and you approved now
+  runs. Morrow refused every one of them as already sent, and a
+  deletion you said yes to was refused again while "always confirm
+  deletions" was on. Your yes to the deletion you were shown is the
+  confirmation.
+- "Always confirm deletions" covers a change that replaces a list,
+  because Canvas deletes what is not on the new list: the course's
+  blackout dates, its timetable events, a module's date overrides, and
+  a change to an assignment that sends its list of date overrides. In
+  Edit mode these ran without asking. The approval for the timetable events and for a module's
+  date overrides now says that an item not on the list is deleted.
+- Three settings that promised things Morrow does not do are gone:
+  batched approvals, bulk action confirmations, and cleanup of test
+  objects.
+- The docs no longer describe an undo command. This release has no
+  automatic undo, and each approval says so. To reverse a change,
+  Morrow prepares the reverse change as a new change you approve. If
+  an undo is tried anyway, you are told that nothing was sent and
+  nothing changed.
+- In Edit mode, a preview of a change (a dry run) says that Edit mode
+  allows it. It said your signed approval had been checked, which the
+  assistant could pass on to you as an approval you never gave.
+
+Messages:
+
+- When Canvas refuses a value, you are told what Canvas said and that
+  nothing changed.
+- When Canvas says your account may not do something (for example a TA
+  changing a setting only a teacher can change), cannot find an item
+  (a renamed page, a deleted assignment), or refuses a request for
+  another reason, you are told what Canvas said and that nothing
+  changed. These got a message that said the change might have
+  applied and promised an engineering follow-up.
+- A failure Morrow cannot classify no longer promises a follow-up that
+  never comes. It gives the support address instead.
+- When the helper is not running, looking up a student by name says so
+  and that your Canvas sign-in is not affected. It told the assistant
+  to have you sign in again.
+- When changes are paused because your Canvas sign-in expired, you
+  are told to sign in again on the helper page. This also happens when
+  the sign-in expires just as Morrow starts work in a course. While
+  changes are paused, a change you ask for is refused before Morrow
+  contacts Canvas.
+- When something fails, you are told what was tried in plain words
+  ("changing a page in the course "Biology 101""), never an internal
+  command name or id.
+- When Morrow refuses a request's own input, you are told that nothing
+  was sent.
+- A change refused before it was sent no longer stays listed as
+  unfinished.
+- When you approve a change that is no longer waiting, nothing is sent,
+  and you are told why: it was already sent with your earlier approval
+  (the assistant reads the course before it prepares it again), or it
+  was never sent (a prepared change waits one hour). It was reported as
+  a failure Morrow could not explain.
+- When changes are paused because another Canvas account signed in on
+  the helper page, you are told to sign out there and sign back in with
+  your own account. When they are paused because your sign-in expired
+  while Morrow worked in the helper browser, you are told to sign in
+  again. Before, both said that someone who looks after your setup
+  paused changes and that you could not lift the pause.
+- When Morrow stops a change before sending it (the helper page had no
+  security token for changes, no account was confirmed as yours, the
+  account check got no answer, or the helper browser or Item Banks
+  could not be reached), you are told nothing was sent. Before, some of
+  these said the change might have been applied.
+- The notice about paused changes counts only changes that are still
+  waiting for you, not earlier expired sign-ins, and it goes away once
+  nothing waits.
+- Messages about a problem use plain words and promise only what
+  Morrow does. When Canvas refuses a change, you are told that nothing
+  changed and that the assistant can prepare it again when you say so;
+  Morrow never sends it again on its own. When a request needs student
+  records and the package that hides student names is missing, the
+  message names the command that installs it.
+- When the assistant uses a wrong name for a tested task, Morrow stops
+  before sending anything, gives the assistant the right name, and you
+  are told nothing was sent. Before, you heard that the task was not
+  tested, or that a change might have been made.
+- When the assistant passes a prepared change's reference with extra
+  characters (for example angle brackets), or asks to prepare a read
+  as a change, you are told nothing was sent. Before, you heard that
+  a change might have been made.
+- Approving a paused change before you sign back in, approving it
+  twice, or approving one that is not waiting tells you why and that
+  nothing was sent. It was reported as a failure Morrow could not
+  explain.
+- A failure Morrow cannot classify that happens before Morrow sends a
+  change says that nothing changed in Canvas. It said a change might
+  have been made.
+- A read Morrow never does in this version, such as a blueprint
+  course's links, is described as a read. It was described as a
+  change, with an offer to help you write it.
+- After a change is prepared, the assistant is given the whole command
+  that sends it once you approve, with this conversation's id. It was
+  given only part of the command, which does not run as written.
+- The step to recover Morrow's log after its key is lost runs as the
+  assistant's instructions show it: they give a real reason of at
+  least 20 characters. A shorter reason is refused as a reason that is
+  too short, naming that step. It was reported as a failure Morrow
+  could not explain, with a note to email support.
+
+Installing and the docs:
+
+- Installing on a Muse computer works, and so does running the
+  installer again. A Muse computer has no scheduled-task service
+  (cron), and the installer's checks mistook Morrow's own logs for
+  release files. Logs now live in `~/.morrow/trees/<tree id>/`, never
+  in the installed folder, and a fresh install records the folder's
+  stable id.
+- Sign-in recovery and finding a student by name read your Canvas
+  address and the helper's port from `helper/env`, where the installer
+  asks you to put them.
+- The installer warns when the `cryptography` package is missing.
+  Without it, Morrow refuses everything that touches student data
+  (working by name and the course roster), so the warning names the
+  one command that fixes it.
+- The consent, setup, and disconnect pages use plain words. To sign
+  out, open the helper page and use Canvas's own menu: Account, then
+  Logout.
+- The first-run checklist starts with your install; the test-only
+  steps moved to the install test.
+- The release no longer ships old code that nothing uses (the retired
+  form relay) or internal review notes. The install guide no longer
+  describes a Moodle connection, and the assistant's instructions no
+  longer describe one or ask for a Canvas token. Both name Moodle only
+  as not in this version.
+- The release no longer includes the developer tests. Run from an
+  installed copy, they wrote to Morrow's own records, and Morrow then
+  refused to make changes until the records were restored. The
+  installer's own checks still ship, and they keep to a scratch folder.
+- The troubleshooting guide names the Python version the installer
+  needs: 3.11 or newer.
+- The docs say so wherever they name a file the release leaves out,
+  such as the proof records, the Moodle code, and the old sign-in
+  capture script. Some named them as if they were in the installed
+  folder, and the operations runbook sent the assistant to a defects
+  file that does not exist.
+- Morrow's commands run on a computer that has another Python package
+  named `dispatch` (Homebrew's Python can have one). Approving a
+  change stopped with "cannot import name 'executor' from 'dispatch'",
+  because the command loaded that package before its own files. Every
+  command now loads its own files first.
+- Upgrading works as the install guide says. Its unpack commands, run a
+  second time, moved the new release inside the installed folder, so
+  nothing was upgraded and the installer refused the folder. The same
+  commands now install and upgrade in place and keep your Canvas
+  address, your sign-in, and the folder's id. The guide installs the
+  student-data package as a step, names `unzip` as a prerequisite, and
+  starts a helper the installer skipped by running the installer again,
+  which checks your Canvas address first.
+- Running the installer again after you connect Canvas and sign in
+  works. Its safety check refused your school's Canvas address in
+  `helper/env`, and once the helper's browser had run, its own tests
+  refused the browser's files, so connecting, repairing, and upgrading
+  all stopped. Those tests also cleared part of the helper browser's
+  stored data on every run; they now use a scratch copy.
+- When an upgrade fails, the installer says what it put back: the
+  folder as it found it, with the new release in it, not the previous
+  release. Fix what failed and run the installer again to finish the
+  upgrade.
+- Disconnecting works when the install folder's path has a space in
+  it. Morrow deleted the wrong folder, kept your sign-in, and said the
+  sign-in was deleted. Uninstalling had the same problem.
+- The installer's own tests no longer fail when another program uses
+  a network port they used, or when two installs run at once.
+- The install guide's fallback for a computer without the platform
+  Chromium works: name another Chromium with `CHROMIUM_BIN` in
+  `helper/env`. Placing one inside the install folder, as the guide
+  said before, made the installer refuse the folder.
+- The backup and restore steps run as written: verify and restore take
+  the folder the backup command prints, and the step after a restore
+  includes `--yes`. Run without `--yes`, that step now says nothing
+  ran, instead of an unknown failure that said a change might have
+  been made.
+- The setup, consent, and disconnect pages, and the assistant's
+  instructions, say how to get help: email hello@meetmorrow.app or see
+  meetmorrow.app/support, with the Morrow for Muse version and the step
+  that failed, and never with student information.
+- The list of what this version does names "Show me my courses" and
+  reading your own Canvas profile. Both were tested live, but the list
+  called them untested, so the assistant could hesitate on the first
+  thing you ask. It also counts 115 tested reads, not 113.
+- The release zip includes the license (MIT) at the top of the
+  folder, so anyone reviewing the zip has the license with it.
+- A restored backup works. The backup left out the key that checks
+  your approvals, settings, and Edit mode, so after a restore Morrow
+  refused every change. It also left out your student labels, the
+  Canvas account you signed in with, your settings, and your Edit
+  mode. The backup now holds all of them.
+- The example commands in the assistant's instructions and the install
+  guide run as written. They put the Canvas address option after the
+  command, where Morrow refused it, so every example read and change
+  stopped before it started. The option now works in either place, and
+  the examples leave it out: Morrow reads your Canvas address from
+  `helper/env`.
+- The documented `python3 dispatch/executor.py` runs even when the
+  computer's Python has another package named `dispatch` (on a Mac,
+  PyObjC ships one). Every executor command failed there.
+- The release no longer includes 15 test scripts that no install step
+  ran, among them `transport/local_chromium_selftest.py`, which failed
+  in the release. They run in the source repository's automated checks
+  (`scripts/dev-suites.sh`) instead.
+- The installer's own notes match the install guide: upgrade by
+  copying the new release over the installed folder (a new folder
+  loses your Canvas address and sign-in), and 3 backups are kept.
+  When your Canvas address is not set, it says to set it and run the
+  installer again, which checks the address before it starts the
+  helper. It no longer suggests waiting for the helper to start on its
+  own, which skips that check.
+- The installer's network check tries your school's Canvas address
+  from `helper/env`. It tried example.com, so a computer that needs a
+  proxy to reach your school passed the check.
+- Installing no longer leaves an empty test folder
+  (`helper/.selftest-warn-profile`) in the installed folder.
+- The install guide says what a reinstall does with the keepalive
+  schedule of another installed copy of Morrow for Muse: it keeps it,
+  and changes only this copy's entry. The guide said the reinstall
+  removed it, and contradicted its own step 7.
+- The assistant's instructions give Morrow's commands as
+  `bin/morrow ...`, run from the installed folder. A bare `morrow` is
+  not on the computer's command path, so those commands failed with
+  "command not found". Morrow's own help, usage lines, and hints name
+  them the same way.
+
+Technical notes:
+
+- The educator reveal is gone: `dispatch.admission.mint_pii_reveal`,
+  `check_pii_reveal`, the executor's `--pii-reveal`, and the journal's
+  reveal audit field are removed, and `project_learner_result` always
+  projects.
+- `privacy/course_content.py` projects every course-scoped result
+  (and learner receipts after the boundary) through the course roster
+  with reversible form markers, and `resolve_learner_labels` restores
+  labels in a write's free text; `dispatch/executor.py`
+  `_read_course_roster_first` reads the roster (users in every
+  enrollment state, deleted enrollments) before a Chromium-lane course
+  dispatch and fails closed (`CourseRosterUnavailable`). A session
+  death there arms the write halt, quarantine, and re-sign-in notice,
+  and the roster read steps aside for a write the write halt refuses.
+  The roster read is fixture-proven, not yet live-proven through this
+  lane.
+- `privacy/executor_wire.py`: `assignment_visibility` is a person-ids
+  key (and `include[]=assignment_visibility` a learner-data signal in
+  `dispatch/admission.py`), and the effective due dates (C-112) and
+  bulk user tags (C-226) reads add the student ids they use as map
+  keys to the boundary's roster, so the boundary labels those keys. A
+  non-id key in a student position refuses the read.
+- `dispatch/admission_policy.json` 1.4.0: `never_dispatch.request_flags`
+  refuses `is_announcement` on any route; `canvas_create_external_feed_courses`
+  is never-dispatch; C-139, C-141, C-167, and C-238 are evidence holds;
+  `evidence_holds.request_fields` refuses `event` (any value) and
+  `offer` (true) on the course update (C-128).
+- The failure catalog gains `never-dispatch` and
+  `course-roster-unavailable`; `new-quiz-create-evidence-hold` became
+  the general `evidence-hold`.
+- The privacy tests match a stored name or id as a whole word, so an
+  HMAC, digest, key, or op id that happens to contain one no longer
+  fails the suite (1 run in 55 before; 0 in 2000 after). The students
+  find check does the same for the vault ciphertext.
+- `scripts/install-suites.sh` holds the 23 install suites and runs each
+  in its own scratch home with every live-state variable removed.
+  install.sh step 9 runs it, and CI runs it on the carved release tree
+  after the carve's secrets gate. The carve drops every `test_*.py`
+  that is not an install suite.
+- The carve's secrets gate passes again: a docstring in
+  `transport/item_bank_sdk.py` no longer names a real tenant host.
+- CI installs pytest from the hash-locked `requirements-test.txt`.
+- The troubleshooting playbook names the Python 3.11 floor that
+  install.sh enforces.
+- `test_release_version.py` requires every current-version statement
+  (`pack/version.txt`, `pack/pack.json`, SKILL.md, INSTALL.md, the
+  install selftest stub, and this changelog) to name `VERSION`.
+- `dispatch/executor.py` renders `--dry-run` from the label form of the
+  request (the entry and params before label resolution, which the
+  gates and the journal already use), and the report's note says labels
+  are restored only when the change is sent.
+- `config/identity.default_user_id()` gives `morrow mode`, `morrow
+  settings`, `morrow query`, and the executor's write gate the user id
+  when none is passed: `MORROW_USER_ID`, else the account pinned at
+  first sign-in as `canvas:<account id>@<Canvas host>`. With neither,
+  the settings commands change nothing and say to sign in, and writes
+  need approval. `morrow query` takes `--conversation-id`. SKILL.md
+  tells the agent to make a new conversation id for each conversation
+  and never reuse one, and modes/README.md no longer says a harness
+  supplies the ids.
+- `transport/local_chromium.py` `api()` runs a change's page-context
+  program again only when CDP says its world was gone before it ran
+  ("Cannot find context with specified id"). Any other context loss
+  raises `ApiCallMaybeSent`, which the Chromium session journals as an
+  uncertain write. A read still retries once. Only a response path of
+  `/login` or under `/login/` means a dead session.
+- `ChromiumSession.load` reads `CANVAS_BASE` the way every other agent
+  command does (`config/tree_config`: the environment, then the tree's
+  `helper/env`) before the pinned account's lane state, so an executor
+  command before the pin no longer says Canvas is not connected.
+- `transport/chromium_session.py` `_decode_body` sends a JSON array of
+  objects as JSON, so the bulk date update (C-37) runs on the Chromium
+  lane, not only on the https lane. A body the lane cannot encode
+  raises `WriteNotAttempted`, so its claim is released instead of being
+  journaled as a write that may have applied.
+- The failure catalog gains `canvas-not-permitted` (401
+  "unauthorized", 403), `canvas-not-found` (404), and
+  `canvas-refused-request` (any other standard 4xx), each only for a
+  refusal the executor classified as fail-fast (it sets
+  `operation_kind`). A 401 "unauthenticated" is never "not permitted".
+  The translator reads Canvas's words from every 4xx body except the
+  CSRF 422. The `unknown` fallback and the funnel's degraded message
+  point to hello@meetmorrow.app instead of an engineering review.
+  `failures/test_canvas_refusals.py` checks every standard 4xx status.
+- `modes/state.py` journals `mode.write_admitted` and
+  `mode.write_refused` with `for_op_id`, not `op_id`: the gate runs
+  before the executor claims the op id, and an `op_id` field put the
+  id in the journal's op-id index, so the claim refused every Edit-mode
+  `approve-write` (and any retry after a mode refusal) with
+  `DuplicateOpId`. `_approve_plan_write` passes the educator's reply as
+  `destructive_confirmed` when the prepared request is destructive.
+  SKILL.md documents `--destructive-confirmed` for edit-mode deletions.
+  `dispatch/test_edit_mode_approve_write.py` covers both.
+- `scripts/carve.py` ships the repository's `LICENSE` at the tree
+  root (`REPO_FILES`), listed in `pack/carve-manifest.json` and in the
+  zip; the carve fails when it is missing or untracked, or when
+  `morrow-for-muse/LICENSE` would shadow it.
+- `scripts/carve.py --zip`, the release build, refuses to start while
+  a tracked file under `morrow-for-muse/` or `LICENSE` differs from the
+  commit checked out (an edit, a staged, deleted, added, or mode
+  change, or an edit hidden by `assume-unchanged`), so a published zip
+  always holds its tag's bytes. Every carve records `source_commit`
+  and `source_dirty` in `pack/carve-manifest.json`. Before, the zip
+  copied the working tree and recorded no commit, so an uncommitted
+  edit shipped silently.
+- `dispatch/state_backup.py` backs up and restores the approval signing
+  keyring (`secrets/`), the source vault Morrow writes
+  (`morrow_source_vault.json` with its `.key` and `.echo`, restored to
+  the current vault path), the pinned account (`browser_lane.json`,
+  `principal_pin.json`), `settings/`, and `modes/`. A signing key moved
+  out with `MORROW_APPROVAL_SIGNING_KEY` stays out, and create says so.
+  Restore makes missing state folders 0700, and a backed-up name may
+  hold a colon (the user id) but never starts with a drive letter.
+  `dispatch/test_state_backup_restore.py` seeds an install, backs it
+  up, deletes the home, restores, and approves a change.
+- `dispatch/executor.py` accepts `--canvas-base` before or after the
+  subcommand (`build_parser`), and the error funnel skips the values of
+  top-level options when it names the step. `dispatch/test_documented_commands.py`
+  parses every executor command in the docs' code blocks and
+  install.sh's operator check.
+- The retired form-host server (`transport/form_host_server.py`, its
+  selftest, and `transport/form-host/`) is deleted. Nothing used it and
+  the release already left it out, but its selftest started servers it
+  could not stop on macOS (it looked for them in /proc), so they kept
+  running for hours after a test run.
+- pytest runs every selftest script the install suites do not run (22
+  scripts, `test_selftest_scripts.py`), each the way
+  `scripts/install-suites.sh` runs a suite, and fails a script that
+  leaves a process running. Nothing ran them before. The Chromium and
+  keepalive selftests pass on macOS: a check that needs Linux's /proc
+  uses a stand-in there, or is skipped when there is nothing to read.
+- `reauth/state_machine.py` records a `cause` in the write halt file
+  (`session_expired` or `account_mismatch`) and `halt_cause()` reads
+  it; a halt file from 0.4.0 keeps its meaning through its reason text.
+  `transport/chromium_session.py` records `session_expired` for a
+  session death and `account_mismatch` for a different signed-in
+  account. New failure mode `write-halt-account-mismatch`.
+- Chromium-lane refusals before the page's fetch are `WriteNotAttempted`
+  subclasses, so the claim is released and nothing is journaled as
+  possibly applied: `CsrfWriteNotSent`, `PrincipalNotPinned`,
+  `PrincipalMismatch`, `AccountCheckFailed`, `HelperNotReached`,
+  `ItemBanksNotReached`, and `RequestNotSendable`. New failure modes
+  `canvas-account-check-failed`, `helper-browser-not-reached`, and
+  `item-banks-not-reached`. With the two prepared-write modes and the
+  three Canvas refusal modes, less the 14 modes retired for lanes that
+  do not ship, the catalog has 88 modes. An Item Banks
+  page-program outcome other than the program's own is now
+  `ItemBankSdkMaybeAttempted` (uncertain), never "not sent".
+- `reauth/state_machine.py` `paused_ops()` (one entry per op, newest
+  status quarantined or awaiting_approval) sets every notice count; a
+  verified resume with nothing waiting removes `notify.txt`. SKILL.md
+  tells the agent to run `reauth/state_machine.py notify` after resume.
+- `dispatch/executor.py` refuses a request whose course is not a plain
+  number (`InvalidCourseId`, mode `query-course-id-invalid`) before
+  anything is sent, and `privacy/executor_wire.py` refuses content from
+  a course not named by its number instead of passing it through.
+- `plan-write` reads the object the write names (`_read_named_object`:
+  the deepest member on the path the write readback re-reads, or the
+  course of a favorite), labels its title through the course roster,
+  and stores `object_slot` and `object_name` in the sealed approval
+  target and a digest of the title in the plan; `approve-write` reads
+  it again and refuses a changed title before the approval is used.
+  `dispatch/approval_display.py` has its own words for action routes
+  (`_ROUTE_WORDS`), plain nouns for every live-proven collection, and
+  `render_educator_display(..., time_zone=)`.
+- `dispatch/executor.py` puts the tree root on `sys.path` before its
+  first tree import.
+- `dispatch/executor.py`: `CatalogNameMismatch` (a `CatalogNotProven`)
+  names the live-proven row when a dispatch's name and request are not
+  one row; an op id argument that is not an id, and plan-write for a
+  read, raise `CallerInputError`; `main` marks a failure raised before
+  any write claim `nothing_sent`. `dispatch/admission_policy.json`
+  `never_dispatch.write_url_substrings` refuses changes only
+  (`/csp_settings`). The failure catalog gains `catalog-name-mismatch`,
+  `never-dispatch-read`, `paused-change-not-resumed`,
+  `paused-change-already-approved`, `paused-change-not-waiting`, and
+  `unknown-nothing-sent`.
+- `dispatch/admission_policy.json` `never_dispatch.request_flags` adds
+  `notify_of_update` and `as_user_id` (Canvas masquerading), refused on
+  every route and lane before approval like `is_announcement`;
+  `privacy/executor_wire.is_learner_id_key` no longer treats
+  `as_user_id` as a learner-id position.
+- `dispatch/executor.py`: `_read_course_identity` reads the course
+  roster and labels the course name and term (`_shown_course_text`, the
+  C-114 projection); the plan's `target_identity` keeps
+  `course_name_digest` of the Canvas name, which
+  `verify_write_target_identity` compares, and the journaled write
+  target holds the labeled name. `_label_course_list` labels each
+  C-437 course with its own roster (`COURSE_LIST_ROSTER_MAX` 30 per
+  read; a course past it, or whose roster fails, becomes
+  `{"id", "name": COURSE_NAME_WITHHELD}`).
+- `transport/chromium_session.py` builds a GET or DELETE's query itself
+  (one pair per list item) and refuses a value with no query form
+  (`RequestNotSendable`); a form body decodes to ordered pairs. The
+  page program in `transport/local_chromium.py` encodes list values
+  and pairs one pair per item.
+
 ## 0.4.0 (2026-09-22)
 
 Release: `morrow-muse-connector-0.4.0.zip` from the `muse/v0.4.0`
@@ -10,7 +641,8 @@ In plain words:
 
 - Every write path goes through the mode gate (discovery, pack
   override, and undo included), and only live-proven operations run.
-  Undo is its own approved write, bound to the journaled operation.
+  (Correction, final sweep: 0.4.0 pins no undo entry, so it has no
+  automatic undo; the undo command refuses every entry.)
 - An approval binds the exact method, path, query, and body, and the
   vault token of each student label it names. Any non-empty educator
   reply approves. The typed `plan-write` and `approve-write` commands
@@ -24,6 +656,8 @@ In plain words:
   by label reaches the right student, and a name reveal is
   educator-only, for one course, short-lived, and never journaled in
   the clear.
+  (Correction, 0.4.1: the reveal gave the course's real names to the
+  assistant, and so to the Muse model. 0.4.1 removes it.)
 - More learner data is labeled: ids inside URLs, SIS ids, bare user
   records, content editors, date details, smart search, and outcome
   alignments.
@@ -138,26 +772,26 @@ The detailed notes below cover the work since 0.3.0.
 - New suite `dispatch/journal_integrity_selftest.py` (26 checks), wired
   into `install.sh` (now 9 suites).
 
-### Form-relay lane removed (2026-09-21) The first-party static relay page
-  on meetmorrow.app/morrow/form-relay/ was taken down and its source
-  deleted (transport/form_relay.py, transport/form-relay/,
-  transport/form_relay_selftest.py). Dead code: the live write path runs
-  in the helper Chromium's page context (dispatch/executor.py chromium
-  backend), so nothing called the relay anymore. transport/batch.py now
-  fails closed on every form write (FormTransportUnavailable,
-  unconditionally); the relay routing, relay_url parameter, and
-  _render_relay_brief are gone from batch.py and
-  transport/browser_backend.py. Proof-battery wave-1 renderer and briefs
-  marked retired; defect-log relay items annotated historical. All 22
-  source selftests pass (20
-  `*_selftest.py` files, `transport/selftest.py`, and
-  `helper/keepalive_selftest.sh`; count re-verified 2026-09-21, all
-  exit 0). Measured suite counts
-  (2026-09-21): keepalive 53 checks on the shipped copy (88 combined
-  across both variants); privacy/source_privacy 69/69;
-  privacy/deidentif 30/30; privacy/learner_vault 15/15;
-  transport/item_bank_sdk 59; transport/local_chromium 31;
-  dispatch/executor_write_hardening 124 checks PASS.
+### Form-relay lane removed (2026-09-21)
+
+The first-party static relay page on meetmorrow.app/morrow/form-relay/
+was taken down and its source deleted (transport/form_relay.py,
+transport/form-relay/, transport/form_relay_selftest.py). Dead code: the
+live write path runs in the helper Chromium's page context
+(dispatch/executor.py chromium backend), so nothing called the relay
+anymore. transport/batch.py now fails closed on every form write
+(FormTransportUnavailable, unconditionally); the relay routing,
+relay_url parameter, and _render_relay_brief are gone from batch.py and
+transport/browser_backend.py. Proof-battery wave-1 renderer and briefs
+marked retired; defect-log relay items annotated historical. All 22
+source selftests pass (20 `*_selftest.py` files,
+`transport/selftest.py`, and `helper/keepalive_selftest.sh`; count
+re-verified 2026-09-21, all exit 0). Measured suite counts (2026-09-21):
+keepalive 53 checks on the shipped copy (88 combined across both
+variants); privacy/source_privacy 69/69; privacy/deidentif 30/30;
+privacy/learner_vault 15/15; transport/item_bank_sdk 59;
+transport/local_chromium 31; dispatch/executor_write_hardening 124
+checks PASS.
 
 ### Item Bank lane hardening (2026-09-21)
   `transport/item_bank_sdk.py`: quiz-lti frame detection now requires a

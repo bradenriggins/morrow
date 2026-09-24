@@ -12,11 +12,14 @@ import os as _home_os, sys as _home_sys  # noqa: E401
 _home_sys.path.insert(0, _home_os.path.join(
     _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
 import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
+import atexit
 import contextlib
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -24,13 +27,41 @@ sys.path.insert(0, _HERE)
 import egress
 import local_chromium as lc
 
-WORK = os.path.join(_HERE, ".selftest-work")
+# A fresh scratch dir per run, removed at exit: two runs from one tree
+# (parallel CI jobs, a test beside an install) must not share or delete
+# each other's certificate fixtures.
+os.makedirs(os.path.join(_HERE, ".selftest-work"), exist_ok=True)
+WORK = tempfile.mkdtemp(prefix="egress-",
+                        dir=os.path.join(_HERE, ".selftest-work"))
+atexit.register(shutil.rmtree, WORK, True)
 FAKE_USER = "selftestuser"
 FAKE_PASS = "selftestpass"
 FAKE_PROXY_AUTH = "http://%s:%s@proxy.example:3128" % (FAKE_USER, FAKE_PASS)
 FAKE_PROXY_BARE = "http://proxy.example:3128"
 
 passed = []
+
+# Every loopback listener here takes a free port from the kernel (port
+# 0) and reports it: a fixed port fails the suite whenever another
+# program, or a second install running at the same time, holds it.
+_SERVING = re.compile(r"forwarder on 127\.0\.0\.1:(\d+)")
+
+
+def _serving_port(proc, what):
+    """Wait for the forwarder's startup line and return the port it
+    bound, reading line by line until it appears or the process ends."""
+    seen = ""
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        line = proc.stdout.readline()
+        if not line:
+            break
+        seen += line
+        m = _SERVING.search(line)
+        if m:
+            return int(m.group(1)), seen
+    raise SystemExit("selftest failed at: forwarder serve (%s): %s"
+                     % (what, seen[-300:]))
 
 
 def check(name, cond, detail=""):
@@ -269,7 +300,7 @@ def main():
         sys.modules["egress"] = fake
         # The forwarder reads sys.argv[1] as the listen port at import.
         saved_argv = sys.argv[:]
-        sys.argv = [fw, "18999"]
+        sys.argv = [fw, "0"]
         buf = io.StringIO()
         code, msg = None, ""
         try:
@@ -317,7 +348,7 @@ def main():
     env = {k: v for k, v in os.environ.items()
            if k not in ("https_proxy", "HTTPS_PROXY",
                         "http_proxy", "HTTP_PROXY")}
-    r = subprocess.run([sys.executable, fw, "18099"],
+    r = subprocess.run([sys.executable, fw, "0"],
                        capture_output=True, text=True, timeout=30, env=env)
     out = (r.stdout or "") + (r.stderr or "")
     if r.returncode == 0:
@@ -343,17 +374,12 @@ def main():
     fw_env["HTTPS_PROXY"] = FAKE_PROXY_AUTH
     fw_env["MORROW_FORWARDER_LAUNCHER_PID"] = str(os.getpid())
     r = subprocess.Popen(
-        [sys.executable, fw, "18098"],
+        [sys.executable, fw, "0"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, start_new_session=True, env=fw_env)
     try:
-        line = r.stdout.readline()
-        deadline = time.time() + 15
-        serving = "forwarder on 127.0.0.1:18098" in line
-        while not serving and time.time() < deadline:
-            line = r.stdout.readline()
-            serving = "forwarder on 127.0.0.1:18098" in line
-        check("forwarder serves with auth proxy", serving, line[:200])
+        _port_b, line = _serving_port(r, "b")
+        check("forwarder serves with auth proxy", _port_b > 0, line[:200])
         check("forwarder startup line redacted",
               "@" not in line and FAKE_USER not in line, line[:200])
     finally:
@@ -366,7 +392,7 @@ def main():
               if k != "MORROW_FORWARDER_LAUNCHER_PID"}
     env_nc["https_proxy"] = FAKE_PROXY_AUTH
     env_nc["HTTPS_PROXY"] = FAKE_PROXY_AUTH
-    r = subprocess.run([sys.executable, fw, "18097"],
+    r = subprocess.run([sys.executable, fw, "0"],
                        capture_output=True, text=True, timeout=30,
                        env=env_nc)
     out_nc = (r.stdout or "") + (r.stderr or "")
@@ -393,7 +419,7 @@ def main():
         saved_argv = sys.argv[:]
         saved_pid = os.environ.get("MORROW_FORWARDER_LAUNCHER_PID")
         os.environ["MORROW_FORWARDER_LAUNCHER_PID"] = str(os.getpid())
-        sys.argv = [fw, "18998"]
+        sys.argv = [fw, "0"]
         out_buf, err_buf = io.StringIO(), io.StringIO()
         code = None
         try:
@@ -448,7 +474,8 @@ def main():
     import socket as _socket
     dummy = _socket.socket()
     dummy.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-    dummy.bind(("127.0.0.1", 18095))
+    dummy.bind(("127.0.0.1", 0))
+    dummy_port = dummy.getsockname()[1]
     dummy.listen(5)
     dummy.settimeout(10)
 
@@ -475,22 +502,18 @@ def main():
     fw_env2 = dict(os.environ)
     # W4-P2-19: use format-string credentials (not a literal user:pass@ URL)
     # so the packaging secrets gate does not flag this selftest.
-    fw_env2["https_proxy"] = "http://%s:%s@127.0.0.1:18095" % (FAKE_USER, FAKE_PASS)
-    fw_env2["HTTPS_PROXY"] = "http://%s:%s@127.0.0.1:18095" % (FAKE_USER, FAKE_PASS)
+    fw_env2["https_proxy"] = "http://%s:%s@127.0.0.1:%d" % (
+        FAKE_USER, FAKE_PASS, dummy_port)
+    fw_env2["HTTPS_PROXY"] = fw_env2["https_proxy"]
     fw_env2["MORROW_FORWARDER_LAUNCHER_PID"] = str(os.getpid())
     r = subprocess.Popen(
-        [sys.executable, fw, "18096"],
+        [sys.executable, fw, "0"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, start_new_session=True, env=fw_env2)
     try:
-        line = ""
-        deadline = time.time() + 15
-        while "forwarder on 127.0.0.1:18096" not in line:
-            line = r.stdout.readline()
-            if not line or time.time() > deadline:
-                raise SystemExit("selftest failed at: forwarder serve (d)")
+        fw_port, _line = _serving_port(r, "d")
         # Direct CONNECT from this (non-descendant) process -> 403.
-        s = _socket.create_connection(("127.0.0.1", 18096), timeout=10)
+        s = _socket.create_connection(("127.0.0.1", fw_port), timeout=10)
         try:
             s.sendall(b"CONNECT example.com:443 HTTP/1.1\r\n"
                       b"Host: example.com:443\r\n\r\n")
@@ -506,11 +529,11 @@ def main():
         t.start()
         child_code = (
             "import socket,sys;"
-            "s=socket.create_connection(('127.0.0.1',18096),timeout=10);"
+            "s=socket.create_connection(('127.0.0.1',%d),timeout=10);"
             "s.sendall(b'CONNECT example.com:443 HTTP/1.1\\r\\n"
             "Host: example.com:443\\r\\n\\r\\n');"
             "d=s.recv(32);"
-            "sys.stdout.write(d.decode('latin1'))")
+            "sys.stdout.write(d.decode('latin1'))" % fw_port)
         cr = subprocess.run([sys.executable, "-c", child_code],
                             capture_output=True, text=True, timeout=20)
         t.join(timeout=10)
@@ -537,14 +560,14 @@ def main():
          "-addext", "subjectAltName=IP:127.0.0.1"],
         check=True, capture_output=True)
     tls_seen = {}
+    ls = _socket.socket()
+    ls.bind(("127.0.0.1", 0))
+    tls_port = ls.getsockname()[1]
+    ls.listen(1)
 
     def _fake_tls_proxy():
         ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(tls_cert, tls_key)
-        ls = _socket.socket()
-        ls.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-        ls.bind(("127.0.0.1", 18094))
-        ls.listen(1)
         ls.settimeout(20)
         try:
             raw, _ = ls.accept()
@@ -581,32 +604,25 @@ def main():
     pt.start()
     fw_env3 = dict(os.environ)
     fw_env3["https_proxy"] = (
-        "https://%s:%s@127.0.0.1:18094" % (FAKE_USER, FAKE_PASS))
+        "https://%s:%s@127.0.0.1:%d" % (FAKE_USER, FAKE_PASS, tls_port))
     fw_env3["HTTPS_PROXY"] = fw_env3["https_proxy"]
     fw_env3["SSL_CERT_FILE"] = tls_cert
     fw_env3["MORROW_FORWARDER_LAUNCHER_PID"] = str(os.getpid())
     r = subprocess.Popen(
-        [sys.executable, fw, "18093"],
+        [sys.executable, fw, "0"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, start_new_session=True, env=fw_env3)
     try:
-        line = ""
-        boot_lines = ""
-        deadline = time.time() + 15
-        while "forwarder on 127.0.0.1:18093" not in line:
-            line = r.stdout.readline()
-            boot_lines += line
-            if not line or time.time() > deadline:
-                raise SystemExit("selftest failed at: forwarder serve (e)")
+        fw_port, boot_lines = _serving_port(r, "e")
         check("forwarder https upstream logs tls: yes",
               "tls: yes" in boot_lines, boot_lines[:200])
         child_code = (
             "import socket,sys;"
-            "s=socket.create_connection(('127.0.0.1',18093),timeout=15);"
+            "s=socket.create_connection(('127.0.0.1',%d),timeout=15);"
             "s.sendall(b'CONNECT example.com:443 HTTP/1.1\\r\\n"
             "Host: example.com:443\\r\\n\\r\\n');"
             "d=s.recv(64);"
-            "sys.stdout.write(d.decode('latin1'))")
+            "sys.stdout.write(d.decode('latin1'))" % fw_port)
         cr = subprocess.run([sys.executable, "-c", child_code],
                             capture_output=True, text=True, timeout=30)
         check("forwarder relays through https upstream (200)",
@@ -920,13 +936,9 @@ def main():
     check("W6-P2-6: missing peer cert fails closed", _nc_ok)
 
     # Self-clean: throwaway CA material is deny-list-matching residue
-    # (*.key/*.pem) and must not linger in the tree.
-    for _f in ("throwaway-ca.pem", "throwaway-ca.key",
-               "tls-proxy.pem", "tls-proxy.key"):
-        try:
-            os.unlink(os.path.join(WORK, _f))
-        except FileNotFoundError:
-            pass
+    # (*.key/*.pem) and must not linger in the tree. (atexit removes
+    # WORK on a failed run too.)
+    shutil.rmtree(WORK, ignore_errors=True)
 
     print("\nAll %d checks passed." % len(passed))
 

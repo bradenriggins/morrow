@@ -75,6 +75,13 @@ import sys
 import unicodedata
 import urllib.parse
 
+# Script mode (`python3 learners/resolve_student.py`) puts learners/ first
+# on sys.path; the tree root goes first so an installed package named
+# `privacy` is never imported in the tree's place.
+_TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _TREE_ROOT not in sys.path:
+    sys.path.insert(0, _TREE_ROOT)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -377,6 +384,14 @@ _RUNGS = (RUNG_USER_ID, RUNG_SIS_USER_ID, RUNG_LOGIN, RUNG_EMAIL,
           RUNG_NAME_EXACT, RUNG_NAME_FUZZY)
 
 
+# Canvas's enrollment role names in the educator's words.
+_PLAIN_ROLES = {"StudentEnrollment": "student", "TaEnrollment": "TA",
+                "TeacherEnrollment": "teacher",
+                "ObserverEnrollment": "observer",
+                "DesignerEnrollment": "designer",
+                "StudentViewEnrollment": "test student"}
+
+
 def public_candidate_summary(candidates, label_for=None):
     """PII-free disambiguation list for the agent-visible message.
 
@@ -396,8 +411,8 @@ def public_candidate_summary(candidates, label_for=None):
         sections = sorted(candidate_sections(cand))
         section_bit = ("section %s" % (", ".join(str(s) for s in sections))
                        if sections else "no section recorded")
-        roles = candidate_roles(cand)
-        role_bit = ("roles: %s" % ", ".join(roles)) if roles else "no roles"
+        roles = [_PLAIN_ROLES.get(r, r) for r in candidate_roles(cand)]
+        role_bit = ", ".join(roles) if roles else "no role recorded"
         test_bit = " (test student)" if candidate_is_test_student(cand) else ""
         parts.append("%s (%s; %s)%s" % (who, section_bit, role_bit, test_bit))
     return "; ".join(parts)
@@ -520,12 +535,23 @@ def _parse_link_next(headers):
     return None
 
 
+class RosterHttpError(RuntimeError):
+    """Canvas answered a list read with a non-2xx status. status and body
+    are Canvas's own answer, so the caller can say what it means."""
+
+    def __init__(self, status, url, body):
+        super().__init__("roster fetch failed: HTTP %d at %r" % (status, url))
+        self.status = status
+        self.body = (body or "")[:2000]
+
+
 def fetch_paginated(fetcher, first_url, *, max_pages=100):
     """Follow a Canvas paginated list. Returns (items, pages_fetched).
 
     fetcher(url) -> (status:int, headers:dict, body_text:str).
-    Non-2xx raises RuntimeError (fail-closed: a partial roster must
-    never resolve). A non-list body raises RuntimeError.
+    Non-2xx raises RosterHttpError, a RuntimeError (fail-closed: a
+    partial roster must never resolve). A non-list body raises
+    RuntimeError.
     """
     items = []
     url = first_url
@@ -540,8 +566,7 @@ def fetch_paginated(fetcher, first_url, *, max_pages=100):
         status, headers, body_text = fetcher(url)
         pages += 1
         if not (200 <= status < 300):
-            raise RuntimeError(
-                "roster fetch failed: HTTP %d at %r" % (status, url))
+            raise RosterHttpError(status, url, body_text)
         try:
             body = json.loads(body_text) if body_text else []
         except ValueError:
@@ -563,6 +588,17 @@ def fetch_paginated(fetcher, first_url, *, max_pages=100):
     return items, pages
 
 
+# Labels are numbered per course scope, so a course given another way
+# (sis_course_id:BIO101, 1/../2, 0101) gets labels that name different
+# students than the same numbers in the course by number. Only a plain
+# Canvas course number is accepted: the rule query/chain.py applies.
+COURSE_NUMBER_RE = re.compile(r"[1-9][0-9]{0,15}")
+
+
+def is_course_number(course_id):
+    return bool(COURSE_NUMBER_RE.fullmatch(str(course_id)))
+
+
 def users_url(tenant_base, course_id, *, per_page=100):
     base = check_tenant_base(tenant_base)
     query = urllib.parse.urlencode([
@@ -573,8 +609,68 @@ def users_url(tenant_base, course_id, *, per_page=100):
     return "%s/api/v1/courses/%s/users?%s" % (base, course_id, query)
 
 
+class PrincipalMismatch(RuntimeError):
+    """The helper is signed in to a Canvas account other than the pinned
+    one. Nothing was read, and writes are paused."""
+
+
+class PrincipalNotPinned(RuntimeError):
+    """The record of the pinned Canvas account cannot be trusted, so the
+    signed-in account cannot be checked. Nothing was read."""
+
+
+class AccountCheckFailed(RuntimeError):
+    """Reading which Canvas account is signed in gave no account back.
+    Nothing was read."""
+
+
+def check_signed_in_account(fetcher, tenant_base):
+    """Refuse unless the helper browser is signed in as the pinned
+    account, as the Chromium lane refuses (transport/chromium_session.py
+    _verify_principal). With no account pinned yet there is nothing to
+    compare, so reads run, as they do on that lane. A different account
+    pauses writes (the re-auth write halt) before the refusal."""
+    from reauth import state_machine as rsm
+    try:
+        pin = rsm.pinned_principal()
+    except rsm.PrincipalPinError as exc:
+        raise PrincipalNotPinned(
+            "the record of the pinned Canvas account cannot be trusted "
+            "(%s); nothing was read" % exc)
+    if pin is None:
+        return
+    status, _headers, body = fetcher(
+        check_tenant_base(tenant_base) + "/api/v1/users/self")
+    if status == 401 and "unauthenticated" in (body or ""):
+        raise HelperSignedOut(
+            "GET /api/v1/users/self answered 401 unauthenticated")
+    try:
+        me = json.loads(body) if status == 200 else None
+    except ValueError:
+        me = None
+    live_id = me.get("id") if isinstance(me, dict) else None
+    if live_id in (None, ""):
+        raise AccountCheckFailed(
+            "GET /api/v1/users/self did not return the signed-in account "
+            "(HTTP %s); nothing was read" % status)
+    if str(live_id) != str(pin.get("id")):
+        try:
+            rsm.impose_halt({"signal": "principal_mismatch",
+                             "cause": "different_account_signed_in"},
+                            reason="a different Canvas account is signed "
+                                   "in to the helper",
+                            cause="account_mismatch")
+        except Exception:
+            pass
+        raise PrincipalMismatch(
+            "the Canvas account signed in to the helper is not the pinned "
+            "account; nothing was read, and writes are paused")
+
+
 def fetch_course_candidates(fetcher, tenant_base, course_id, *, per_page=100):
-    """Fetch and normalize the student candidate pool for a course."""
+    """Fetch and normalize the student candidate pool for a course, after
+    the check that the pinned account is the one signed in."""
+    check_signed_in_account(fetcher, tenant_base)
     raw_users, pages = fetch_paginated(
         fetcher, users_url(tenant_base, course_id, per_page=per_page))
     candidates = []
@@ -713,6 +809,14 @@ def _cdp_capture_with_headers(cdp, tab, url, timeout=60):
             pass
 
 
+class HelperUnavailable(RuntimeError):
+    """The login helper did not answer /status: it is not running."""
+
+
+class HelperSignedOut(RuntimeError):
+    """The helper answered, but its Canvas session is signed out."""
+
+
 def helper_fetch_factory(canvas_base, timeout=60):
     """Build a fetcher(url) -> (status, headers, body) via the login helper.
 
@@ -723,11 +827,11 @@ def helper_fetch_factory(canvas_base, timeout=60):
     JSON response via CDP network interception, and closes the tab.
     Read-only: only GET navigations, no form writes.
 
-    Callers must set MORROW_TREE_STATE_DIR to the live helper tree's
-    state dir (the failures/live_verify.py pattern) and
-    LOGIN_HELPER_PROFILE_DIR to the live profile before calling, so the
-    launcher passes the holder proof and _helper_request picks up the
-    live helper's auth token.
+    In an installed tree the helper's port, token, and profile resolve
+    from the tree itself (helper/env and the tree state dir, as
+    keepalive writes them). A dev harness that drives a live helper
+    elsewhere sets MORROW_TREE_STATE_DIR and LOGIN_HELPER_PROFILE_DIR
+    first (the failures/live_verify.py pattern).
     """
     here = os.path.dirname(os.path.abspath(__file__))
     repo = os.path.dirname(here)
@@ -736,17 +840,16 @@ def helper_fetch_factory(canvas_base, timeout=60):
         if entry not in sys.path:
             sys.path.insert(0, entry)
     from local_chromium import (ChromiumLauncher, default_binary,
-                                tree_cdp_port, tree_helper_profile_dir)
-    import urllib.request as _urllib_request
+                                helper_status, tree_cdp_port,
+                                tree_helper_profile_dir)
 
     try:
-        with _urllib_request.urlopen(
-                "http://127.0.0.1:8901/status", timeout=10) as resp:
-            status_doc = json.load(resp)
+        status_doc = helper_status(timeout=10)
     except Exception as exc:
-        raise RuntimeError("helper status unreachable: %s" % exc)
+        raise HelperUnavailable("helper status unreachable: %s" % exc)
     if not status_doc.get("logged_in"):
-        raise RuntimeError("helper reports logged_in:false; refusing fetch")
+        raise HelperSignedOut(
+            "helper reports logged_in:false; refusing fetch")
 
     launcher = ChromiumLauncher(
         default_binary(), tree_helper_profile_dir(),
@@ -784,10 +887,6 @@ def vault_label_for(tenant_base, course_id, candidates):
     everywhere. Raises when no label can be issued (for example, the
     optional vault dependency is missing): the caller fails closed.
     """
-    here = os.path.dirname(os.path.abspath(__file__))
-    repo = os.path.dirname(here)
-    if repo not in sys.path:
-        sys.path.insert(0, repo)
     from privacy import executor_wire
     # Every identifier the roster knows goes into the vault record, so a
     # later read that mentions this student's email or login in free
@@ -834,6 +933,16 @@ def _cli():
     parser.add_argument("--include-concluded", action="store_true")
     parser.add_argument("--include-test-student", action="store_true")
     args = parser.parse_args()
+    if not is_course_number(args.course_id):
+        print(json.dumps({
+            "resolved": False,
+            "error_class": "InvalidCourseId",
+            "message": "the course is given as %r, not as its Canvas course "
+                       "number; find the course by name and use the number "
+                       "in its Canvas address. Nothing was read."
+                       % args.course_id[:80],
+        }, indent=1))
+        return 2
 
     section_id = None
     if args.section_id is not None:

@@ -19,12 +19,13 @@ const LAST_SEEN = Date.UTC(2026, 8, 1, 15, 4, 5);
 const COURSE_ORIGIN = "https://canvas.example.edu";
 
 const connection = (fields = {}) => ({
-  paired: false, pairing: false, connecting: false, connected: false, bindings: [], siteAnchors: [],
+  paired: false, connecting: false, connected: false, bindings: [], siteAnchors: [],
   ...(fields.connected === true && fields.runtimeHealthy === undefined ? { runtimeHealthy: true } : {}),
   ...fields,
 });
 const anchor = (fields = {}) => ({ siteAnchorId: "canvas:site", provider: "canvas", origin: COURSE_ORIGIN, principalId: "teacher@example.edu", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
-const binding = (fields = {}) => ({ sourceBindingId: "canvas:course-1", provider: "canvas", courseName: "Anatomy", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
+// morrow_status names each course's own saved site, as the worker sends it.
+const binding = (fields = {}) => ({ sourceBindingId: "canvas:course-1", siteAnchorId: "canvas:site", provider: "canvas", courseName: "Anatomy", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
 const editPermission = (sourceBindingId, enabledCategories = ["canvas_page_content"]) => ({
   schema: "morrow.bridge.edit-permission.v1", sourceBindingId, revision: 1, scopeDigest: "d".repeat(64), catalogDigest: "c".repeat(64), enabledCategories,
 });
@@ -98,13 +99,7 @@ test("before a course site is connected the popup names the state it is in", asy
       connection: "Not connected", courseLabel: "Course", course: "Not connected",
       primary: "Connect Morrow", primaryDisabled: false, primaryBusy: "false",
       secondary: null, openPlatform: null, disconnect: null, planAndEdit: false, online: false, account: null,
-      detail: "Add Morrow to your assistant, then open it. Select Connect Morrow to continue.",
-    }],
-    ["the person has not approved this connection yet", () => connection({ pairing: true }), {
-      connection: "Waiting for approval", courseLabel: "Course", course: "Not connected",
-      primary: "Waiting for approval", primaryDisabled: true, primaryBusy: "true",
-      secondary: null, openPlatform: null, disconnect: null, planAndEdit: false, online: false, account: null,
-      detail: "Confirm this connection on the Morrow page that opens. Then return to this popup.",
+      detail: "Add Morrow to your assistant, then open it. Select Connect Morrow to connect this extension to Morrow. Connecting does not approve changes to your courses.",
     }],
     ["Morrow Bridge is connecting", () => connection({ paired: true, connecting: true }), {
       connection: "Connecting…", courseLabel: "Course", course: "Not connected",
@@ -181,6 +176,16 @@ test("Open Canvas opens the saved site itself, with no permission prompt, and as
   assert.equal(page.text("#notice"), "Sign in to Canvas in the tab that opened. Morrow continues after that.");
 });
 
+test("Open Canvas names a selected course whose saved site is gone, and opens no other site", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding({ runtimeVerified: false, siteAnchorId: undefined })], bindingCount: 1, siteAnchors: [anchor()] }),
+  });
+  await page.click("#open-platform-action");
+  assert.deepEqual(page.messages("morrow_open_platform"), []);
+  assert.equal(page.hidden("#error"), false);
+  assert.equal(page.text("#error"), problemText("platform_open_anchor_missing"));
+});
+
 test("Open Canvas clears its sign-in notice once the reopened site verifies", async () => {
   const page = await openPopup({
     status: () => connection({ paired: true, connected: true, siteAnchors: [anchor({ runtimeVerified: false })] }),
@@ -238,7 +243,7 @@ test("a version-mismatched Bridge exposes only setup recovery", async () => {
     primary: "Open setup guide", primaryDisabled: false, primaryBusy: "false",
     secondary: null, openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: false,
     account: "Course: Anatomy",
-    detail: "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome.",
+    detail: "The Morrow app and Morrow Bridge versions do not match. Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.",
   });
   assert.equal(page.hidden("#setup-guide"), true);
   await page.click("#primary");
@@ -246,14 +251,67 @@ test("a version-mismatched Bridge exposes only setup recovery", async () => {
   assert.deepEqual(page.messages("morrow_connect_course_prepare"), []);
 });
 
-test("the popup states when it last saw the course site, or that it cannot say", async () => {
+// Connect Morrow pairs in one step. The popup asks for it with nothing else, never asks Chrome for
+// access to whatever site the active tab shows, and moves on once the worker answers.
+test("Connect Morrow pairs in one step and asks Chrome for no site access", async () => {
+  let status = connection();
+  const page = await openPopup({
+    status: () => status,
+    tabs: [{ id: 5, url: "https://mail.example.com/inbox", active: true }],
+    handlers: {
+      morrow_pair: () => {
+        status = connection({ paired: true, connecting: true });
+        return { paired: true };
+      },
+      morrow_connect_course_prepare: ({ tabId }) => ({ id: "intent-1", tabId, origins: ["https://mail.example.com/*"] }),
+    },
+  });
+  assert.equal(view(page).primary, "Connect Morrow");
+  await page.click("#primary");
+  assert.deepEqual(page.messages("morrow_pair"), [{ type: "morrow_pair" }]);
+  assert.deepEqual(page.messages("morrow_connect_course_prepare"), []);
+  assert.deepEqual(page.permissionCalls, []);
+  assert.equal(page.hidden("#error"), true);
+  await page.waitFor(() => view(page).connection === "Connecting…", "the popup never showed the new connection");
+});
+
+// A Bridge loaded from a folder Morrow did not set up cannot pair, and the popup says which folder to load.
+test("a Bridge Morrow cannot confirm names the Bridge folder to load", async () => {
+  const page = await openPopup({
+    status: () => connection(),
+    handlers: { morrow_pair: () => ({ ok: false, code: "bridge_pairing_folder_unconfirmed", error: "bridge_pairing_folder_unconfirmed" }) },
+  });
+  await page.click("#primary");
+  assert.equal(page.hidden("#error"), false);
+  assert.match(page.text("#error"), /Show Bridge folder/);
+  assert.match(page.text("#error"), /Connect Morrow again/);
+});
+
+test("a Bridge whose version Morrow refused offers the setup guide, not a new connection", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: false, authenticationFailed: false, versionMismatch: true, runtimeHealthy: false, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
+    handlers: { morrow_open_setup: () => ({ opened: true }) },
+  });
+  assert.equal(view(page).connection, "Reload needed");
+  assert.equal(view(page).primary, "Open setup guide");
+  assert.equal(view(page).primaryDisabled, false);
+  assert.equal(view(page).detail, "The Morrow app and Morrow Bridge versions do not match. Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.");
+  await page.click("#primary");
+  assert.deepEqual(page.messages("morrow_open_setup"), [{ type: "morrow_open_setup" }]);
+  assert.deepEqual(page.messages("morrow_pair"), []);
+});
+
+// The Bridge records lastSeenAt only when a course or its site is connected, so the line names that
+// time as the connection time. The Connection line above it says whether the course is reachable now.
+test("the popup states when the course was connected, or that it cannot say", async () => {
   const page = await openPopup({ status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }) });
-  assert.equal(page.query("#account-last-checked").getAttribute("datetime"), new Date(LAST_SEEN).toISOString());
-  assert.match(page.text("#account-last-checked"), /^Last checked \S/);
+  assert.equal(page.query("#account-connected-at").getAttribute("datetime"), new Date(LAST_SEEN).toISOString());
+  assert.match(page.text("#account-connected-at"), /^Connected on \S/);
+  assert.doesNotMatch(page.text("#account-connected-at"), /checked/i);
 
   const undated = await openPopup({ status: () => connection({ paired: true, connected: true, bindings: [binding({ lastSeenAt: undefined })], bindingCount: 1, siteAnchors: [] }) });
-  assert.equal(undated.text("#account-last-checked"), "Last checked time is not available");
-  assert.equal(undated.query("#account-last-checked").getAttribute("datetime"), null);
+  assert.equal(undated.text("#account-connected-at"), "Connection time is not available");
+  assert.equal(undated.query("#account-connected-at").getAttribute("datetime"), null);
 });
 
 test("Connect this course asks Chrome for that one address, then opens course selection", async () => {
@@ -407,7 +465,7 @@ test("Disconnect says plainly when Chrome still holds site access", async () => 
   await page.click("#disconnect");
   assert.deepEqual(page.messages("morrow_disconnect"), [{ type: "morrow_disconnect" }]);
   assert.equal(page.hidden("#notice"), false);
-  assert.equal(page.text("#notice"), "Morrow is disconnected. Chrome site access still needs removal in this extension's settings.");
+  assert.equal(page.text("#notice"), "Morrow is disconnected. Chrome kept site access for your learning platform. Remove it on the Chrome extensions page under Morrow Bridge site access.");
   assert.equal(page.hidden("#error"), true);
 
   permissionsRevoked = true;

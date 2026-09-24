@@ -1,4 +1,4 @@
-import { isAbsolute, join } from "node:path";
+import { isAbsolute } from "node:path";
 import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { type CatalogTool, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
@@ -32,7 +32,7 @@ export const canvasCourseFileUploadInputSchema = z.strictObject({
   folder_id: canvasId.optional(),
   upload_tool: z.string().regex(/^canvas_[a-z0-9_]{1,160}$/).optional(),
   upload_arguments: z.record(z.string().regex(/^[a-z_]{1,40}$/), uploadId).optional(),
-  material_path: z.string().min(11).max(4096),
+  material_path: z.string().min(1).max(4096),
 }).refine((input) => input.folder_id !== undefined
   ? input.course_id !== undefined && input.upload_tool === undefined && input.upload_arguments === undefined
   : input.upload_tool !== undefined && input.upload_arguments !== undefined, {
@@ -98,12 +98,18 @@ export function contentTypeForCanvasFile(filename: string): string {
   } as Record<string, string>)[extension || ""] || "application/octet-stream";
 }
 
+/**
+ * Reads one material named by its path inside the folder the assistant works
+ * in. Desktop runs every assistant in the educator's Materials folder, and a
+ * developer's assistant in its project, so that folder is the materials
+ * folder, as it is for Moodle files. Hidden files and folders are refused.
+ */
 export async function readWorkspaceMaterial(materialPath: string, workspaceRoot: string): Promise<{ filename: string; bytes: Buffer }> {
   if (typeof materialPath !== "string" || isAbsolute(materialPath)
-    || !/^materials\/(?:[A-Za-z0-9][A-Za-z0-9 ._()-]{0,159}\/)*[A-Za-z0-9][A-Za-z0-9 ._()-]{0,159}$/.test(materialPath)) {
-    throw new Error("Choose a material in this assistant's project materials folder.");
+    || !/^(?:[A-Za-z0-9][A-Za-z0-9 ._()-]{0,159}\/)*[A-Za-z0-9][A-Za-z0-9 ._()-]{0,159}$/.test(materialPath)) {
+    throw new Error("Choose a file in this assistant's materials folder, named by its path inside that folder, such as syllabus.pdf.");
   }
-  return await readWorkspaceFile(materialPath, workspaceRoot, join(workspaceRoot, "materials"));
+  return await readWorkspaceFile(materialPath, workspaceRoot);
 }
 
 export function registerCanvasCourseFileUploadTool(
@@ -113,7 +119,7 @@ export function registerCanvasCourseFileUploadTool(
 ): void {
   server.registerTool("morrow_plan_canvas_file_upload", {
     title: "Prepare a Canvas file upload for review",
-    description: "Prepare one canonical material from this assistant's project materials folder for one Canvas upload target: a course folder (course_id and folder_id), or any Canvas upload route (upload_tool and upload_arguments), such as a course's files, a group's or a person's files, an assignment or quiz submission, a submission comment, or a rubric CSV import. Morrow freezes the file name, size, SHA-256, target, signed-in session, and content type for review. File bytes stay private until one person approves this exact operation. Files are limited to 1 MiB. This tool does not upload a file.",
+    description: "Prepare one file from this assistant's materials folder, the folder it works in, for one Canvas upload target. Name the file by its path inside that folder, such as syllabus.pdf. The target is a course folder (course_id and folder_id), or any Canvas upload route (upload_tool and upload_arguments), such as a course's files, a group's or a person's files, an assignment or quiz submission, a submission comment, or a rubric CSV import. Morrow freezes the file name, size, SHA-256, target, signed-in session, and content type for review. File bytes stay private until one person approves this exact operation. Files are limited to 1 MiB. This tool does not upload a file.",
     inputSchema: canvasCourseFileUploadInputSchema,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, async (input, context) => {

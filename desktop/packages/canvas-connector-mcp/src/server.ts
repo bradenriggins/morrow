@@ -10,9 +10,25 @@ import {
   PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
   type CanvasConnectorRuntime,
 } from "./runtime.js";
-const fromJsonSchema = (schema: JsonObject, additionalLearnerIdentifierFields: readonly string[] = []) => (
-  validateJsonSchema(sourcePrivacyInputSchema(schema, additionalLearnerIdentifierFields))
-);
+type JsonInputSchema = ReturnType<typeof validateJsonSchema>;
+
+// Every connection builds this server again, and the catalog names more than a
+// thousand tools, so compiling every input validator up front held the first
+// connection for seconds. A tool's validator is compiled when its input is first
+// checked; the published schema is the same object either way.
+const fromJsonSchema = (schema: JsonObject, additionalLearnerIdentifierFields: readonly string[] = []): JsonInputSchema => {
+  const exact = sourcePrivacyInputSchema(schema, additionalLearnerIdentifierFields);
+  let compiled: JsonInputSchema | null = null;
+  const standard = () => (compiled ??= validateJsonSchema(exact))["~standard"];
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "mcp",
+      jsonSchema: { input: () => exact, output: () => exact },
+      validate: (data: unknown) => standard().validate(data),
+    },
+  } as JsonInputSchema;
+};
 
 
 export function canvasConnectorSummary(value: JsonObject): string {
@@ -50,7 +66,7 @@ export function canvasConnectorSummary(value: JsonObject): string {
     return `Morrow confirmed the ${platform} change with a fresh ${platform} check.`;
   }
   if (verification?.status === "mismatch") {
-    return `Morrow could not confirm this change because ${platform} returned a different result. Ask your assistant to check the existing request. Do not repeat this change.`;
+    return `Morrow read ${platform} again after this change, and ${platform} does not hold the approved result. The change failed. Do not repeat this change.`;
   }
   return "Morrow could not confirm this change. Ask your assistant to check the existing request. Do not repeat this change.";
 }
@@ -281,6 +297,13 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
       z.strictObject({
         ...privateChatBase,
         action: z.literal("reply_and_listen"),
+        assistantReply: z.string().min(1).max(100_000),
+        sourceBindingId: z.string().min(1).max(160).regex(/^[A-Za-z0-9_.:@-]+$/),
+        courseId: z.string().regex(/^[1-9][0-9]{0,18}$/),
+      }),
+      z.strictObject({
+        ...privateChatBase,
+        action: z.literal("reply_at_limit"),
         assistantReply: z.string().min(1).max(100_000),
         sourceBindingId: z.string().min(1).max(160).regex(/^[A-Za-z0-9_.:@-]+$/),
         courseId: z.string().regex(/^[1-9][0-9]{0,18}$/),

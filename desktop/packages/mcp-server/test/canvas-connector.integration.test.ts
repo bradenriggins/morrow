@@ -95,6 +95,22 @@ async function approveBatch(server: LoopbackApprovalServer, url: string): Promis
   expect(response.status).toBe(200);
 }
 
+/** Calls morrow_operation_wait the way an assistant does, through the full MCP server. */
+async function waitThroughServer(runtime: MorrowRuntime, args: JsonObject): Promise<JsonObject> {
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = serveStdio(() => createFullMorrowServer(runtime), { transport: serverTransport });
+  const client = new Client({ name: "morrow-wait", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
+  try {
+    await client.connect(clientTransport);
+    const result = await client.callTool({ name: "morrow_operation_wait", arguments: args });
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    return result.structuredContent as JsonObject;
+  } finally {
+    await client.close();
+    await server.close();
+  }
+}
+
 describe("Canvas connector gateway path", () => {
   /**
    * One connector process, one bridge connection and one course connection
@@ -222,6 +238,7 @@ describe("Canvas connector gateway path", () => {
     let pagePlanOperationId = "";
     let pageContentGuard: JsonObject;
     let conversationId = "";
+    let learnerLeftCourse = false;
 
     /** Waits for the connector to take up the course connections just sent. */
     const bindingsApplied = () => new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
@@ -296,7 +313,7 @@ describe("Canvas connector gateway path", () => {
               : command.toolName === "canvas_list_quiz_items"
                 ? command.arguments.assignment_id === "77" ? quizItems : [{ ...quizItems[3], id: "8" }]
               : command.toolName === "canvas_list_users_in_course_users"
-                ? [{ id: "9001", name: "Jane Doe", email: "jane.doe@example.edu", login_id: "jdoe" }]
+                ? learnerLeftCourse ? [] : [{ id: "9001", name: "Jane Doe", email: "jane.doe@example.edu", login_id: "jdoe" }]
               : command.toolName === "canvas_get_single_user"
                 ? { id: command.arguments.id, name: "Jane Doe", email: "jane.doe@example.edu", login_id: "jdoe" }
               : command.toolName === "canvas_update_course_settings"
@@ -712,6 +729,31 @@ describe("Canvas connector gateway path", () => {
       }
     }, CASE_TIMEOUT_MS);
 
+    it("refuses to turn on, from a conversation, an Edit action that removes content", async () => {
+      const removal = { id: "module_item_removal", group: "Canvas · Modules", label: "Remove a module item", description: "Remove one module item.", availability: "edit", destructive: true, tier: "destructive" };
+      const supportedAction = { id: "action:canvas:canvas_update_create_page_courses", group: "Canvas · Pages", label: "Update/create page", description: "Update a page.", availability: "edit" };
+      activeEditOptions = [removal, supportedAction];
+      bridge!.updateBindings([{ ...binding(), courseName: "Biology", editCategories: [removal, supportedAction]
+        .map((category) => ({ id: category.id, label: category.label, description: category.description })) }]);
+      await bindingsApplied();
+      try {
+        const refusal = runtime.prepareBrowserEditAccess("edit", [{ sourceBindingId, enabledCategories: [removal.id, supportedAction.id] }]);
+        await expect(refusal).rejects.toBeInstanceOf(EditCategoryUnavailableError);
+        await expect(refusal).rejects.toMatchObject({
+          categoryId: removal.id,
+          reason: "Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.",
+        });
+        const prepared = await runtime.prepareBrowserEditAccess("edit", [{ sourceBindingId, enabledCategories: [supportedAction.id] }]);
+        expect(prepared.selections[0]?.enabledCategories.map((category) => category.id)).toEqual([supportedAction.id]);
+        // Returning the course to Plan never names a category, so it stays open.
+        expect((await runtime.prepareBrowserEditAccess("plan", [{ sourceBindingId }])).mode).toBe("plan");
+      } finally {
+        activeEditOptions = [];
+        bridge!.updateBindings([binding()]);
+        await bindingsApplied();
+      }
+    }, CASE_TIMEOUT_MS);
+
     it("carries a Bridge edit option's WI-3.1 facts into the prepared Edit access selection", async () => {
       const factfulAction = {
         id: "action:canvas:canvas_update_create_page_courses",
@@ -843,6 +885,11 @@ describe("Canvas connector gateway path", () => {
       expect(JSON.stringify(pagePlan)).not.toContain(lesson.body);
       pagePlanOperationId = savedPagePlan.operationId;
       pageContentGuard = savedPagePlan.plan.arguments._morrow.canvas_content_guard;
+      // Edit allows this change without a review, and nothing sends it until the assistant does.
+      const waited = await waitThroughServer(morrow, { operation_id: pagePlanOperationId, max_wait_seconds: 5 });
+      expect(waited).toMatchObject({ state: "approved", waited: { timedOut: false } });
+      expect(waited.attention).toEqual(["Edit already allows this change, and nothing has sent it yet. Send it with morrow_operation_dispatch. If it belongs to a group, run the group with morrow_batch_run instead."]);
+      expect(writeCommands).toBe(0);
     }, CASE_TIMEOUT_MS);
 
     it("plans image-alt repairs for a page, an assignment, a discussion and a New Quiz item", async () => {
@@ -1363,6 +1410,59 @@ describe("Canvas connector gateway path", () => {
       await bindingsApplied();
     }, CASE_TIMEOUT_MS);
 
+    it("settles an approved private Inbox message as not sent when its student left the course before it was sent", async () => {
+      const roster = await runtime.call("canvas_list_users_in_course_users", {
+        course_id: "42",
+        enrollment_type: ["student"],
+        enrollment_state: ["active", "invited", "completed", "inactive"],
+        morrow_max_pages: 50,
+        _morrow: { source_binding_id: sourceBindingId },
+      });
+      const learnerToken = /Student A[1-9][0-9]*/.exec(JSON.stringify(roster))?.[0];
+      expect(learnerToken).toBeTruthy();
+      const [plannerClientTransport, plannerServerTransport] = InMemoryTransport.createLinkedPair();
+      const plannerServer = serveStdio(() => createFullMorrowServer(morrow), { transport: plannerServerTransport });
+      const plannerClient = new Client(
+        { name: "morrow-canvas-inbox-left-course-planner", version: "1" },
+        { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+      );
+      let plan: JsonObject;
+      try {
+        await plannerClient.connect(plannerClientTransport);
+        plan = await plannerClient.callTool({
+          name: "morrow_plan_canvas_conversation",
+          arguments: {
+            action: "create",
+            source_binding_id: sourceBindingId,
+            course_id: "42",
+            recipient_tokens: [learnerToken!],
+            subject: "Lab make-up",
+            body: "Your lab make-up is on Friday.",
+          },
+        }) as unknown as JsonObject;
+      } finally {
+        await plannerClient.close();
+        await plannerServer.close();
+      }
+      expect(plan.isError, JSON.stringify(plan)).not.toBe(true);
+      const id = operationId(plan);
+      expect(runtime.effects.get(id)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
+      learnerLeftCourse = true;
+      let dispatched: JsonObject;
+      try {
+        dispatched = await runtime.dispatchOperation(id);
+      } finally {
+        learnerLeftCourse = false;
+      }
+      // Canvas no longer lists the student, so Morrow cannot say who the message is for. Nothing
+      // was sent, and the request says so instead of waiting as a change that may have landed.
+      expect(dispatched.structuredContent, JSON.stringify(dispatched)).toMatchObject({ effectState: "failed" });
+      expect((dispatched.structuredContent as { attention: string[] }).attention).toContain("dispatch_failed_before_send");
+      expect(runtime.effects.get(id)).toMatchObject({ state: "failed" });
+      expect(runtime.hasActiveWork()).toBe(false);
+      expect(writeCommands).toBe(4);
+    }, CASE_TIMEOUT_MS);
+
     it("plans a Canvas object change and a site change that name no course, and sends the site change once approved", async () => {
       // A section route names a section, not a course. The Bridge proves the section's course before
       // the change is sent, so the gateway plans it without a course of its own.
@@ -1762,7 +1862,18 @@ describe("Canvas connector gateway path", () => {
       });
       expect(editBatch).not.toHaveProperty("approvalUrl");
       const editBatchId = String((editBatch.batch as JsonObject).batchId);
-      await runtime.batchRun({ batchId: editBatchId, maxChildren: 2 });
+      // No person reviewed these changes, and nothing sends them until the assistant runs the batch,
+      // so the wait ends at once and names that call instead of saying a person approved them.
+      expect(runtime.batchApprovalStatus(editBatchId)).toMatchObject({ batch: { state: "planned" }, approval: "edit", applying: false });
+      const unstarted = await waitThroughServer(runtime, { batch_id: editBatchId, max_wait_seconds: 5 });
+      expect(unstarted).toMatchObject({ waited: { timedOut: false } });
+      expect(unstarted.attention).toEqual(["Edit already allows these changes, and nothing has sent them yet. Run them with morrow_batch_run."]);
+      await runtime.batchRun({ batchId: editBatchId, maxChildren: 1 });
+      expect(runtime.batchApprovalStatus(editBatchId)).toMatchObject({ batch: { state: "running", pendingChildren: 1 }, approval: "edit", applying: false });
+      const betweenWindows = await waitThroughServer(runtime, { batch_id: editBatchId, max_wait_seconds: 5 });
+      expect(betweenWindows).toMatchObject({ waited: { timedOut: false } });
+      expect(betweenWindows.attention).toEqual(["Nothing is running this group now. Run its remaining requests with morrow_batch_run."]);
+      await runtime.batchRun({ batchId: editBatchId, maxChildren: 1 });
       expect(runtime.batchGet({ batchId: editBatchId }).batch).toMatchObject({ state: "completed" });
       expect(writeCommands).toBe(4);
 
@@ -1780,6 +1891,7 @@ describe("Canvas connector gateway path", () => {
       const mixedId = String((mixed.batch as JsonObject).batchId);
       expect(mixed.approvalUrl).toBeTruthy();
       expect(runtime.batchGet({ batchId: mixedId }).batch).toMatchObject({ state: "planned", pendingChildren: 2 });
+      expect(runtime.batchApprovalStatus(mixedId)).toMatchObject({ approval: "awaiting_approval", applying: false });
       expect(writeCommands).toBe(4);
 
       confirmed = false;
@@ -1811,6 +1923,7 @@ describe("Canvas connector gateway path", () => {
       });
       const queuedId = String((queued.batch as JsonObject).batchId);
       runtime.approveBatch(queuedId);
+      expect(runtime.batchApprovalStatus(queuedId)).toMatchObject({ batch: { state: "planned" }, approval: "approved", applying: false });
       let releaseWindow!: () => void;
       const heldWindow = runtime.batchScheduler.run("hold-window", () => new Promise<void>((resolve) => {
         releaseWindow = resolve;
@@ -1819,11 +1932,206 @@ describe("Canvas connector gateway path", () => {
       const shutdown = new AbortController();
       const queuedWork = runtime.runApprovedBatch(queuedId, shutdown.signal);
       await expect.poll(() => runtime.batchScheduler.health().waitingWindows).toBe(1);
+      // Approved work that waits for its window is still Morrow's to apply, so the wait keeps going.
+      expect(runtime.batchApprovalStatus(queuedId)).toMatchObject({ batch: { state: "planned" }, approval: "approved", applying: true });
+      const queuedWait = await waitThroughServer(runtime, { batch_id: queuedId, max_wait_seconds: 1 });
+      expect(queuedWait).toMatchObject({ waited: { timedOut: true } });
+      expect(queuedWait.attention).toEqual(["The person approved. Morrow is still applying what they approved. Call morrow_operation_wait again to wait for the result."]);
       shutdown.abort();
       releaseWindow();
       await Promise.all([heldWindow, queuedWork]);
       expect(writeCommands).toBe(5);
       expect(runtime.batchGet({ batchId: queuedId }).batch).toMatchObject({ state: "paused", pendingChildren: 1 });
+    } finally {
+      await bridge?.close();
+      await runtime.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, CASE_TIMEOUT_MS);
+
+  it("records a connector batch change whose fresh read proved Canvas holds another result as failed, and pauses the batch", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-canvas-connector-batch-mismatch-"));
+    const port = await reserveLoopbackPort();
+    const runtime = await MorrowRuntime.connect(connectorConfig(directory, port), {
+      statePath: join(directory, "morrow.sqlite3"),
+      batchKeyPath: join(directory, "batch.key"),
+    });
+    const browserCatalogDigest = bridgeCatalogDigestForTests(resolve("../.."));
+    const binding = (courseId: string) => ({
+      sourceBindingId: `canvas:test-account:${courseId}`,
+      provider: "canvas" as const,
+      origin: "https://school.instructure.com",
+      courseId,
+      principalFingerprint: "c".repeat(64),
+      sessionGeneration: 1,
+      catalogDigest: browserCatalogDigest,
+      runtimeVerified: true,
+    });
+    let bridge: BridgeTestClient | undefined;
+    try {
+      bridge = await connectBridgeTestClient({
+        port,
+        token: "gateway-connector-secret-".repeat(3),
+        extensionId: "a".repeat(32),
+        catalogDigest: browserCatalogDigest,
+        bindings: [binding("41"), binding("42")],
+      });
+      let writeCommands = 0;
+      bridge.onCommand((command) => {
+        if (command.kind === "ui_state") {
+          bridge?.respond(command, {});
+          return;
+        }
+        if (command.kind === "invoke_write") {
+          writeCommands += 1;
+          // Canvas answered the change, and the Bridge's fresh read proved Canvas holds another value.
+          bridge?.respond(command, {
+            schema: "morrow.canvas-browser-result.v1",
+            ok: true,
+            sent: true,
+            status: 200,
+            data: { id: String(command.arguments?.course_id), hide_final_grades: false },
+            verification: {
+              schema: "morrow.browser-verification.v1",
+              status: "mismatch",
+              strategy: "fresh-target-read",
+              readTool: "canvas_get_a_single_course_courses",
+              evidence: "field_mismatch:hide_final_grades",
+            },
+          });
+          return;
+        }
+        const id = String(command.arguments?.id);
+        bridge?.respond(command, { schema: "morrow.canvas-browser-result.v1", ok: true, sent: true, status: 200, data: { id, name: `Course ${id}` } });
+      });
+
+      const created = await runtime.batchCreate({
+        name: "Hide final grades",
+        mode: "stage_writes",
+        concurrency: 1,
+        courseSet: { source: "explicit", courseIds: ["41", "42"], complete: true },
+        operations: ["41", "42"].map((courseId) => ({
+          childId: `course:${courseId}`,
+          courseId,
+          tool: "canvas_update_course_settings",
+          sourceBindingId: `canvas:test-account:${courseId}`,
+          arguments: { course_id: courseId, hide_final_grades: true },
+        })),
+      });
+      const batchId = String((created.batch as JsonObject).batchId);
+      const approvalUrl = String(created.approvalUrl);
+      await approveBatch(runtime.approval, approvalUrl);
+      await expect.poll(async () => (await (await fetch(`${approvalUrl}/status`)).json()).active).toBe(false);
+
+      expect(writeCommands).toBe(1);
+      const [first] = runtime.batchResultsPage({ batchId, limit: 10 }).children as JsonObject[];
+      expect(runtime.gateway.operationGet(String(first!.gatewayOperationId))).toMatchObject({ state: "failed", verificationStatus: "mismatch" });
+      const result = runtime.batchGet({ batchId });
+      expect(result.batch).toMatchObject({ state: "paused", pendingChildren: 1 });
+      expect(result.sourceSettlement).toMatchObject({
+        failedNoEffect: 0,
+        failedEffectPossible: 1,
+        inspectionRequired: 0,
+        unknown: 0,
+        requiresAttention: true,
+      });
+      expect(runtime.batchResultsPage({ batchId, limit: 10 }).children).toMatchObject([
+        { childId: "course:41", state: "failed", gatewayOperationState: "failed" },
+        { childId: "course:42", state: "pending" },
+      ]);
+      expect(runtime.sourceSettlements.get(batchId, "course:41")).toMatchObject({ state: "failed_effect_possible" });
+      expect(runtime.batchApprovalStatus(batchId)).toMatchObject({ states: { 0: "Did not save as approved", 1: "Not started" } });
+    } finally {
+      await bridge?.close();
+      await runtime.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, CASE_TIMEOUT_MS);
+
+  it("pauses a connector batch whose Canvas answer was lost and keeps that change as one that may have been saved", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-canvas-connector-batch-lost-"));
+    const port = await reserveLoopbackPort();
+    const runtime = await MorrowRuntime.connect(connectorConfig(directory, port), {
+      statePath: join(directory, "morrow.sqlite3"),
+      batchKeyPath: join(directory, "batch.key"),
+    });
+    const browserCatalogDigest = bridgeCatalogDigestForTests(resolve("../.."));
+    const binding = (courseId: string) => ({
+      sourceBindingId: `canvas:test-account:${courseId}`,
+      provider: "canvas" as const,
+      origin: "https://school.instructure.com",
+      courseId,
+      principalFingerprint: "c".repeat(64),
+      sessionGeneration: 1,
+      catalogDigest: browserCatalogDigest,
+      runtimeVerified: true,
+    });
+    let bridge: BridgeTestClient | undefined;
+    try {
+      bridge = await connectBridgeTestClient({
+        port,
+        token: "gateway-connector-secret-".repeat(3),
+        extensionId: "a".repeat(32),
+        catalogDigest: browserCatalogDigest,
+        bindings: [binding("41"), binding("42")],
+      });
+      let writeCommands = 0;
+      bridge.onCommand((command) => {
+        if (command.kind === "ui_state") {
+          bridge?.respond(command, {});
+          return;
+        }
+        if (command.kind === "invoke_write") {
+          writeCommands += 1;
+          // Morrow Bridge sent the change and Canvas never answered, so Canvas may have saved it.
+          bridge?.respondProblem(command, {
+            schema: "morrow.bridge.problem.v1",
+            code: "write_outcome_unknown",
+            message: "Canvas did not answer this change, so it may have been saved.",
+            recoverable: false,
+          });
+          return;
+        }
+        const id = String(command.arguments?.id);
+        bridge?.respond(command, { schema: "morrow.canvas-browser-result.v1", ok: true, sent: true, status: 200, data: { id, name: `Course ${id}` } });
+      });
+
+      const created = await runtime.batchCreate({
+        name: "Hide final grades",
+        mode: "stage_writes",
+        concurrency: 1,
+        courseSet: { source: "explicit", courseIds: ["41", "42"], complete: true },
+        operations: ["41", "42"].map((courseId) => ({
+          childId: `course:${courseId}`,
+          courseId,
+          tool: "canvas_update_course_settings",
+          sourceBindingId: `canvas:test-account:${courseId}`,
+          arguments: { course_id: courseId, hide_final_grades: true },
+        })),
+      });
+      const batchId = String((created.batch as JsonObject).batchId);
+      const approvalUrl = String(created.approvalUrl);
+      await approveBatch(runtime.approval, approvalUrl);
+      await expect.poll(async () => (await (await fetch(`${approvalUrl}/status`)).json()).active).toBe(false);
+
+      expect(writeCommands).toBe(1);
+      const result = runtime.batchGet({ batchId });
+      expect(result.batch).toMatchObject({ state: "paused", pendingChildren: 1 });
+      expect(result.sourceSettlement).toMatchObject({
+        outcome: "inspection_required",
+        failedNoEffect: 0,
+        inspectionRequired: 1,
+        terminal: false,
+        requiresAttention: true,
+      });
+      expect(runtime.batchResultsPage({ batchId, limit: 10 }).children).toMatchObject([
+        { childId: "course:41", state: "unknown", gatewayOperationState: "applied_or_unknown" },
+        { childId: "course:42", state: "pending" },
+      ]);
+      expect(runtime.batchApprovalStatus(batchId)).toMatchObject({ states: { 0: "Needs checking", 1: "Not started" } });
+      const view = await (await fetch(approvalUrl)).text();
+      expect(view).toContain("<span data-operation-status>Needs checking</span>");
+      expect(view).not.toContain("<span data-operation-status>Did not finish</span>");
     } finally {
       await bridge?.close();
       await runtime.close();
@@ -2150,17 +2458,20 @@ describe("Canvas connector gateway path", () => {
         effectState: "applied_or_unknown",
       });
 
-      // A close-out needs a person's confirmation and the exact digest of a
-      // fresh Morrow read. Neither half alone closes anything.
-      const withoutPerson = await runtime.closeUnresolvedOperation(uncertainId, "b".repeat(64), false);
-      expect(withoutPerson.isError).toBe(true);
-      expect(withoutPerson.structuredContent).toMatchObject({ data: { code: "person_confirmation_required" } });
-      const withoutRead = await runtime.closeUnresolvedOperation(uncertainId, "b".repeat(64), true);
+      // A close-out needs the exact digest of a fresh Morrow read and the person's own click on
+      // the change's page. The assistant's request alone closes nothing.
+      const withoutRead = await runtime.requestPersonClose(uncertainId, "b".repeat(64));
       expect(withoutRead.isError).toBe(true);
       expect(withoutRead.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
+      const noDigest = await runtime.requestPersonClose(uncertainId, undefined);
+      expect(noDigest.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
+      expect(runtime.personCloseAvailable(uncertainId)).toBe(false);
+      expect((await runtime.confirmPersonClose(uncertainId)).structuredContent).toMatchObject({
+        data: { code: "observed_state_not_from_fresh_read" },
+      });
       expect(runtime.effects.get(uncertainId).state).toBe("applied_or_unknown");
 
-      const duringDispatchClose = await runtime.closeUnresolvedOperation(uncertainId, duringDispatchState, true);
+      const duringDispatchClose = await runtime.requestPersonClose(uncertainId, duringDispatchState);
       expect(duringDispatchClose.isError).toBe(true);
       expect(duringDispatchClose.structuredContent).toMatchObject({
         data: { code: "observed_state_not_from_fresh_read" },
@@ -2181,7 +2492,7 @@ describe("Canvas connector gateway path", () => {
       });
       expect(wrongCourseRead.isError, JSON.stringify(wrongCourseRead)).not.toBe(true);
       const wrongCourseState = ((wrongCourseRead._meta as JsonObject)["io.morrow/gateway"] as JsonObject).upstreamResultSha256;
-      const wrongCourseClose = await runtime.closeUnresolvedOperation(uncertainId, String(wrongCourseState), true);
+      const wrongCourseClose = await runtime.requestPersonClose(uncertainId, String(wrongCourseState));
       expect(wrongCourseClose.isError).toBe(true);
       expect(wrongCourseClose.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
 
@@ -2192,7 +2503,7 @@ describe("Canvas connector gateway path", () => {
       });
       expect(wrongConnectionRead.isError, JSON.stringify(wrongConnectionRead)).not.toBe(true);
       const wrongConnectionState = ((wrongConnectionRead._meta as JsonObject)["io.morrow/gateway"] as JsonObject).upstreamResultSha256;
-      const wrongConnectionClose = await runtime.closeUnresolvedOperation(uncertainId, String(wrongConnectionState), true);
+      const wrongConnectionClose = await runtime.requestPersonClose(uncertainId, String(wrongConnectionState));
       expect(wrongConnectionClose.isError).toBe(true);
       expect(wrongConnectionClose.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
       expect(runtime.effects.get(uncertainId).state).toBe("applied_or_unknown");
@@ -2205,7 +2516,7 @@ describe("Canvas connector gateway path", () => {
       });
       expect(failedExactRead.isError).toBe(true);
       const failedExactState = ((failedExactRead._meta as JsonObject)["io.morrow/gateway"] as JsonObject).upstreamResultSha256;
-      const failedExactClose = await runtime.closeUnresolvedOperation(uncertainId, String(failedExactState), true);
+      const failedExactClose = await runtime.requestPersonClose(uncertainId, String(failedExactState));
       expect(failedExactClose.isError).toBe(true);
       expect(failedExactClose.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
       expect(runtime.effects.get(uncertainId).state).toBe("applied_or_unknown");
@@ -2219,7 +2530,18 @@ describe("Canvas connector gateway path", () => {
       const observedState = ((freshRead._meta as JsonObject)["io.morrow/gateway"] as JsonObject).upstreamResultSha256;
       expect(observedState).toMatch(/^[0-9a-f]{64}$/);
 
-      const closed = await runtime.closeUnresolvedOperation(uncertainId, String(observedState), true);
+      const requested = await runtime.requestPersonClose(uncertainId, String(observedState));
+      expect(requested.isError, JSON.stringify(requested)).not.toBe(true);
+      expect(requested.structuredContent).toMatchObject({
+        phase: "person_close_requested",
+        effectState: "applied_or_unknown",
+        data: { schema: "morrow.operation-person-close-request.v1", readTool: "canvas_show_page_courses" },
+      });
+      expect(runtime.effects.get(uncertainId).state).toBe("applied_or_unknown");
+      expect(runtime.personCloseAvailable(uncertainId)).toBe(true);
+
+      // The person's own click on the change's page, signed by Morrow Bridge, closes it.
+      const closed = await runtime.confirmPersonClose(uncertainId);
       expect(closed.isError, JSON.stringify(closed)).not.toBe(true);
       expect(closed.structuredContent).toMatchObject({
         effectState: "closed_by_person",

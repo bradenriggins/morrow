@@ -32,7 +32,7 @@ const TYPES = {
   ".svg": "image/svg+xml",
   ".ttf": "font/ttf"
 };
-const WIDTHS = [1180, 1000, 900, 760, 700, 440, 320];
+const WIDTHS = [1180, 1000, 940, 900, 760, 700, 440, 320];
 const BASE = {
   lifecycle: "assistant_ready",
   assistants: [{ id: "codex", title: "ChatGPT", tier: "primary", supported: true, detected: true, configured: true, connected: true, selected: true }],
@@ -103,10 +103,10 @@ function serveInstaller() {
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
 }
 
-async function openSetup(browser, platform, state) {
+async function openSetup(browser, platform, state, failures = {}) {
   const page = await browser.newPage();
   page.on("pageerror", (error) => assert.fail(`the renderer failed: ${error.message}`));
-  await page.addInitScript(([snapshot, reported]) => {
+  await page.addInitScript(([snapshot, reported, refused]) => {
     window.__morrowTestClock = 100_000;
     window.__morrowInvocations = [];
     Date.now = () => window.__morrowTestClock;
@@ -115,7 +115,10 @@ async function openSetup(browser, platform, state) {
       platform: reported,
       invoke: async (...input) => {
         window.__morrowInvocations.push(input);
-        return { schema: "morrow.installer-result.v1", ok: true, state: snapshot };
+        const error = refused[input[0]];
+        return error
+          ? { schema: "morrow.installer-result.v1", ok: false, state: snapshot, error }
+          : { schema: "morrow.installer-result.v1", ok: true, state: snapshot };
       },
       subscribeUpdates(listener) {
         updateListener = listener;
@@ -123,7 +126,7 @@ async function openSetup(browser, platform, state) {
         return () => { if (updateListener === listener) updateListener = null; };
       }
     };
-  }, [state, platform]);
+  }, [state, platform, failures]);
   await page.goto(INDEX);
   await page.waitForSelector("#action-content:not([hidden])");
   return page;
@@ -327,6 +330,30 @@ try {
   }
   console.log("paths   a long Bridge or Materials folder path wraps inside its row at 320px");
 
+  // The three example requests share one layout at every width: the Copy
+  // button sits at the right edge of each row beside its text, and only the
+  // narrowest windows put every button under its text together.
+  const examples = await openSetup(browser, "darwin", COURSE_CONNECTED);
+  for (const width of WIDTHS) {
+    await examples.setViewportSize({ width, height: 900 });
+    const rows = await examples.evaluate(() => [...document.querySelectorAll(".prompt")].map((row) => {
+      const box = row.getBoundingClientRect();
+      const text = row.querySelector(".prompt-text").getBoundingClientRect();
+      const button = row.querySelector("button").getBoundingClientRect();
+      return { below: button.top >= text.bottom - 0.5, rightGap: box.right - button.right, textInside: text.right <= box.right + 0.5 };
+    }));
+    assert.equal(rows.length, 3, `three example requests at ${width}px`);
+    const below = rows.map((row) => row.below);
+    assert.ok(below.every((value) => value === below[0]), `the Copy buttons must share one placement at ${width}px, not ${JSON.stringify(below)}`);
+    assert.equal(below[0], width <= 440, `the Copy buttons sit ${width <= 440 ? "under" : "beside"} their text at ${width}px`);
+    if (!below[0]) {
+      const gaps = rows.map((row) => row.rightGap);
+      assert.ok(Math.max(...gaps) - Math.min(...gaps) <= 0.5, `the Copy buttons must share one right edge at ${width}px, not ${JSON.stringify(gaps)}`);
+    }
+    for (const row of rows) assert.equal(row.textInside, true, `an example request stays inside its row at ${width}px`);
+    console.log(`${String(width).padStart(4)}px  examples Copy ${below[0] ? "under" : "beside"} every request`);
+  }
+
   // A Copy button says Copied for about 2 seconds, and a screen reader hears it once.
   const copying = await openSetup(browser, "darwin", COURSE_CONNECTED);
   const copyButton = copying.locator('[data-action="copy-example-prompt"]').first();
@@ -348,6 +375,39 @@ try {
   assert.ok(shownFor >= 1_500 && shownFor <= 3_500, `Copied showed for ${shownFor}ms`);
   assert.equal(await copying.locator("#copy-status").textContent(), "");
   console.log(`copy    the chosen Copy button said Copied for ${shownFor}ms and announced it once`);
+
+  // A step started on Settings that fails shows its problem on Settings, in
+  // the same column as the Settings panels, at the default and narrowest window.
+  const refusal = { code: "assistant_config_busy", message: "The assistant is using its settings file.", recovery: "Quit the assistant, then try again. Morrow changed nothing." };
+  for (const width of [940, 320]) {
+    const settings = await openSetup(browser, "darwin", COURSE_CONNECTED, { "installer:remove-assistant": refusal });
+    await settings.setViewportSize({ width, height: 720 });
+    await settings.click("#nav-settings");
+    await settings.click('[data-action="remove-assistant"]');
+    await settings.waitForSelector("#problem:not([hidden])");
+    const shown = await settings.evaluate(() => {
+      const problem = document.querySelector("#problem").getBoundingClientRect();
+      const panel = document.querySelector("#updates-panel").getBoundingClientRect();
+      return {
+        text: document.querySelector("#problem").textContent,
+        width: problem.width,
+        height: problem.height,
+        inView: problem.top >= 0 && problem.bottom <= window.innerHeight,
+        left: Math.abs(problem.left - panel.left),
+        right: Math.abs(problem.right - panel.right),
+        sideways: document.documentElement.scrollWidth <= window.innerWidth
+      };
+    });
+    assert.match(shown.text, /The assistant is using its settings file\./);
+    assert.ok(shown.width > 0 && shown.height > 0, `the Settings problem must render at ${width}px, not in a ${shown.width}x${shown.height} box`);
+    assert.equal(shown.inView, true, `the Settings problem must be in view at ${width}px`);
+    assert.ok(shown.left <= 0.5 && shown.right <= 0.5, `the Settings problem must share the Settings panels' edges at ${width}px`);
+    assert.equal(shown.sideways, true, `the Settings problem must not scroll the window sideways at ${width}px`);
+    await settings.click("#nav-home");
+    const onHome = await settings.evaluate(() => document.querySelector("#problem").getBoundingClientRect().height);
+    assert.ok(onHome > 0, `the problem stays in view after returning Home at ${width}px`);
+    console.log(`${String(width).padStart(4)}px  problem  a failed Settings step shows its problem on Settings (${shown.width.toFixed(0)}x${shown.height.toFixed(0)})`);
+  }
 
   const unknown = await openSetup(browser, undefined, WELCOME);
   assert.equal(await unknown.locator("#windows-note").isVisible(), false);

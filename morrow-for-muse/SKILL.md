@@ -1,6 +1,6 @@
 # Morrow for Muse: Canvas connector (skill bundle)
 
-You are operating the Morrow for Muse connector, v0.4.0. It lets an educator
+You are operating the Morrow for Muse connector, v0.4.1. It lets an educator
 work their Canvas courses through their Muse agent. The educator signs in
 once through the Canvas Login Helper; every Canvas operation then runs
 through the educator's own browser-owned session. No password, token, or
@@ -25,7 +25,14 @@ One script, idempotent (safe to run twice):
 bash install.sh
 ```
 
-It checks python3 (>= 3.11; 3.10 refused, security EOL Oct 2026), locates Chromium, probes egress
+It checks python3 (>= 3.11; 3.10 refused, security EOL Oct 2026) and
+warns when the `cryptography` package is missing (without it, every
+student-data request is refused: working by name and the course
+roster; student names in course content are hidden
+without labels, and a change whose text still carries a hidden name is
+refused; if the educator asks for one of those, tell them the operator
+must run `python3 -m pip install --require-hashes -r
+requirements-optional.txt` in this tree), locates Chromium, probes egress
 (`transport/egress.py`: authenticated proxy, bare proxy, or direct),
 creates the effective `MORROW_HOME` state layout, creates
 `helper/profile/` on first install (an existing profile is never wiped,
@@ -68,13 +75,21 @@ only when it reports `"logged_in": false` (genuine reauthentication
 need), or once for the first onboarding below. Never open it
 preemptively and never on every run: a healthy session needs no page.
 
-1. Make sure `CANVAS_BASE` is set to the educator's Canvas host
-   (e.g. `https://myschool.instructure.com`), either in the environment
-   or in the tree's `helper/env` (the legacy global `~/.morrow/env` is
-   honored for `CANVAS_BASE` only). There is no default tenant; the
-   helper refuses to start on the placeholder.
-2. Start the helper if the installer has not already:
-   `bash helper/keepalive.sh` (from this tree).
+1. Write the educator's Canvas address to the tree's `helper/env` as
+   `CANVAS_BASE=https://...` (e.g. `https://myschool.instructure.com`),
+   after confirming it with them. When the host does not end in
+   `.instructure.com`, confirm with the educator that it is their
+   school's Canvas, then add
+   `CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=<exact host>` too. There is no
+   default tenant; the helper refuses to start on the placeholder.
+2. Start the helper by running the installer again: `bash install.sh`
+   (from this tree). It first checks the address: a placeholder, an
+   address that does not load, or a Canvas error page stops it with a
+   plain reason. Tell the educator what it said, ask for the address
+   again, and fix `helper/env`. Only then does it start the helper.
+   Never start the helper for the first time with
+   `helper/keepalive.sh`: it skips that check, so a mistyped address
+   shows the educator a sign-in page that cannot load.
    Do not hand-launch `helper/server.py` directly: it sources
    `<tree>/helper/env` itself, so it fails without `CANVAS_BASE`
    exported in the shell or the tree env file, and the production-port
@@ -88,7 +103,7 @@ preemptively and never on every run: a healthy session needs no page.
    keeps it up: from cron when the machine has cron, otherwise from a
    supervised background loop (`helper/supervisor.py`; the Muse VM has
    no cron daemon). After a reboot on a machine without cron, run
-   `bin/morrow start` (any `morrow` command also restarts the loop).
+   `bin/morrow start` (any `bin/morrow` command also restarts the loop).
    The connector's Chromium IS the helper's Chromium: one profile
    (`helper/profile/`), one browser, one CDP port. Never launch a second
    one; a launcher that finds 19223 live attaches to it.
@@ -116,7 +131,17 @@ preemptively and never on every run: a healthy session needs no page.
    writes are refused until the account is pinned. To disconnect, tell the educator
    what will be removed, get their yes in chat, then run
    `bin/morrow disconnect --yes` (without a terminal, a run without
-   `--yes` changes nothing and says so).
+   `--yes` changes nothing and says so). To reconnect after a
+   disconnect, rerun `bash install.sh` in this tree, then steps 3 and 4.
+
+Sign-out without disconnecting: there is no command that signs the
+educator out. When they ask to sign out of Canvas, show them the
+helper page and tell them to use Canvas's own menu there: Account,
+then Logout. `/status` then reports `"logged_in": false`: that is the
+sign-out they asked for, not a failure. When they want to sign back
+in, show the helper page again; if writes were paused while they were
+signed out, run `reauth/state_machine.py resume` after they sign in
+(see the lifecycle below).
 
 ## Reading /status: the fields and what they mean
 
@@ -173,16 +198,17 @@ a fresh profile): never a dead session, never a re-sign-in case. Check
 The session is durable-but-expirable. When it dies mid-operation the
 run stops loudly instead of writing through a half-dead session:
 
-1. **Detect.** A 401 `{"status":"unauthenticated"}` on the API lane, a
-   redirect to `/login` on the browser lane, or a classified re-auth
-   signal on the Moodle lane. The dead session is marked sticky: the
+1. **Detect.** Canvas answers a request with a 401
+   `{"status":"unauthenticated"}` or a redirect to its `/login` page.
+   The dead session is marked sticky: the
    first ambiguous write raises uncertain, and every later call on the
    same session refuses immediately without another provider call.
 2. **Halt.** A write halt is imposed (`write_halt` under `MORROW_HOME`);
    every write refuses while it stands.
 3. **Quarantine.** The in-flight op is parked in the quarantine ledger
    (`quarantine.jsonl`); nothing is retried against the dead session.
-   The educator is notified with the true paused-op count.
+   The educator is notified with the true count of paused changes, and
+   told which of them may already be in Canvas.
 4. **Verified resume.** The educator signs in again through the login
    helper's own browser tab (never the agent, never credentials to the
    agent). The agent runs `reauth/state_machine.py resume`: it reads
@@ -196,24 +222,34 @@ run stops loudly instead of writing through a half-dead session:
    then `state_machine.py pin --confirm-account "<their words>"`, then
    `resume` again. A pin record that is unreadable or loosely
    permissioned also refuses; it is never read as "no pin".
+   Then run `python3 reauth/state_machine.py notify`: it prints the
+   notice the helper page shows (what was paused, and what waits for
+   the educator's approval) and clears it. Tell the educator what it
+   says in plain words. With nothing waiting, resume clears the notice
+   itself and `notify` prints that none is pending.
 5. **Per-op re-approval.** Each quarantined op needs the educator's
    explicit approval (`reauth/state_machine.py approve --op-id <id>
    --authorization "<educator's verbatim approval words>"`; the
    authorization is required, the agent cannot self-approve, W6-P2-A5)
    before it may be re-dispatched; the executor refuses quarantined and
    awaiting-approval ops. Ops never approved stay quarantined forever.
-   Nothing auto-resumes, ever.
+   Nothing auto-resumes, ever. A Plan-mode write (plan-write and
+   approve-write) is retried as a new write instead: after `resume`,
+   run plan-write again for the same change, show the educator the new
+   `approval_display`, and ask them to approve it. approve-write on the
+   old op id is refused, because its approval was already used.
+   A change that was already on its way to Canvas when the session
+   ended (`state_machine.py status` shows `write_sent=True`) may
+   already be in Canvas, and its op id is used up: it is never sent
+   again. Read the item back with a live-proven read, tell the educator
+   what Canvas has, and prepare the change again only when that read
+   shows it is not there and the educator says so. `approve` on such an
+   op only takes it off the paused list; it sends nothing.
 
 `session.json.prev` (the superseded session record used for principal
 pinning) exists only between a re-auth start and its successful
 completion: it is retained on failed or mismatched recovery and deleted
 only after verified resume.
-
-**PAT lane 401.** A 401 on the token HTTPS lane means the provider
-rejected the personal access token (revoked, expired, or invalid; the
-401 alone does not prove which). Re-signing in through the login helper
-cannot fix this: mint a fresh token in the provider admin console and
-configure it again.
 
 ## Dispatching operations
 
@@ -223,7 +259,7 @@ Reads (no approval needed):
 PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py catalog \
   --name canvas_get_course_settings --method GET \
   --path /api/v1/courses/{course_id}/settings \
-  --class read --backend chromium --canvas-base "$CANVAS_BASE" \
+  --class read --backend chromium \
   --params '{"course_id": 89585}'
 ```
 
@@ -236,11 +272,14 @@ unrecognized files on the next install/upgrade.)
 `proof-battery/OPERATION_CATALOG.md`.)
 
 `catalog` takes `--name`, `--method`, `--path` (path template),
-`--class read|write|plan`, `--params` (JSON), `--body` (a JSON object:
-the write's request body, which the post-write readback compares
-against; values may reference params as `"params.<name>"`),
-`--backend chromium`, and `--canvas-base` (or the `CANVAS_BASE` env
-var). The CLI always runs the shipped `pack/pack.json`; there is no
+`--class read|write|plan`, `--params` (JSON), `--body` (a JSON object,
+or a JSON array of objects for the bulk date update: the write's
+request body, which the post-write readback compares against; values
+may reference params as `"params.<name>"`),
+and `--backend chromium`. The executor reads the Canvas address from
+the tree's `helper/env` (a `CANVAS_BASE` exported in the shell wins);
+`--canvas-base <url>` overrides it, before or after the command. The
+CLI always runs the shipped `pack/pack.json`; there is no
 pack override. A write result's `outcome` is `verified` (a readback
 confirmed it) or `unverified` (Canvas said success and nothing
 confirmed it): relay `unverified` to the educator as unconfirmed, never
@@ -255,15 +294,26 @@ a frozen plan, an approval record, or a course resolution by hand:
 
 1. `plan-write` prepares the write and sends nothing. It reads the
    course from Canvas (the course name the educator will see comes from
-   Canvas, not from you), builds the frozen plan and the approval bound
-   to the exact request (method, path, query, and body), and prints
-   `approval_display`: the op, the course (id and Canvas name), the
-   exact body that will be sent, the params, expiry, and whether the
-   change can be undone.
+   Canvas, not from you) and, when the write names a page, assignment,
+   module, quiz, discussion, or item bank, reads that object too, so
+   the approval names it by its title (for example: Delete the
+   assignment "Week 3 Quiz"), never only by its number. If the object cannot be read,
+   nothing is prepared: check the id with the educator. It builds the
+   frozen plan and the approval bound to the exact request (method,
+   path, query, and body), and prints `approval_display`: in plain
+   words, the course (as Canvas names it), the change, every value that
+   will be sent (dates in the educator's time zone: their `timezone`
+   setting, else the course's, else UTC, always named), whether Morrow
+   can undo it, and how to approve. It also prints `audit_detail`: the
+   same request as the method, path, JSON body, params, and integrity
+   codes, for reviewers. `approve-write` reads the object again and
+   refuses, sending nothing, if it was renamed or replaced since.
 2. Show the educator `approval_display` exactly as printed (it is
    produced by `dispatch/approval_display.py`) and ask them to approve
-   it. Change nothing between showing it and sending it: a changed
-   request, params, or course is refused.
+   it. Never relay `audit_detail`: it is the technical record of the
+   same request, not something the educator reads. Change nothing
+   between showing it and sending it: a changed request, params, or
+   course is refused.
 3. When the educator approves, in any words ("Yes" is enough), run
    `approve-write` with their reply verbatim. It signs that reply, then
    sends the write through every gate and prints the result. An
@@ -289,22 +339,26 @@ PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py plan-write \
   --path '/api/v1/courses/{course_id}/pages/{url_or_id}' \
   --params '{"course_id": "89585", "url_or_id": "week-1"}' \
   --body '{"wiki_page": {"title": "Week 1 Overview"}}' \
-  --backend chromium --canvas-base "$CANVAS_BASE" \
-  --user-id "$MORROW_USER_ID" --conversation-id "$MORROW_CONVERSATION_ID"
+  --backend chromium \
+  --conversation-id "<this conversation's id>"
 ```
 
 It prints one JSON object: `op_id`, `course` (`id`, `name`, `term`),
-`approval_display`, `expires_at`, and `message`. You show
-`approval_display` (it names the course as Canvas does, for example
-"Biology 101", and the body `{"wiki_page": {"title": "Week 1
-Overview"}}`). The educator replies "Yes, do it". You run:
+`approval_display`, `audit_detail`, `expires_at`, and `message`. You
+show `approval_display` (it names the course as Canvas does, for
+example "Biology 101", and the new value "Title: Week 1 Overview").
+The educator replies "Yes, do it". You run:
 
 ```
 PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py approve-write \
   --op-id <op_id from plan-write> --authorization "Yes, do it" \
-  --backend chromium --canvas-base "$CANVAS_BASE" \
-  --user-id "$MORROW_USER_ID" --conversation-id "$MORROW_CONVERSATION_ID"
+  --backend chromium \
+  --conversation-id "<this conversation's id>"
 ```
+
+Replace each `<...>` placeholder whole, angle brackets included:
+`--op-id` takes the bare `op_id` plan-write printed, and its `message`
+spells out the exact command.
 
 The result's `outcome` is `verified` or `unverified` (relay
 `unverified` as unconfirmed, never as done). The course resolution is
@@ -318,6 +372,23 @@ educator (lower `confidence` below 0.9 without their confirmation is
 refused as ambiguous, never guessed). `plan-write` and `approve-write`
 also work in edit mode.
 
+A deletion asks first even in edit mode while the educator's
+`confirm_destructive_writes` setting is on ("always confirm
+deletions"). A change that replaces a list is a deletion too, because
+Canvas deletes what is not on the new list: the course's blackout
+dates, its timetable events, a module's date overrides, and an
+assignment change that sends `assignment_overrides`. Tell them exactly
+what will be deleted and get their yes, then do one of these:
+
+- Show the deletion with `plan-write` and run `approve-write` with
+  their reply. Their reply confirms the deletion it approved.
+- Run the `catalog` deletion with `--destructive-confirmed "<their
+  reply, verbatim>"`.
+
+Never pass `--destructive-confirmed` without the educator's reply to
+that exact deletion. Without a yes the deletion is refused and nothing
+is deleted.
+
 Every write is refused while `~/.morrow/write_halt` exists.
 
 The lower-level path (`catalog --plan <file> --approval <file>`, built
@@ -325,44 +396,48 @@ with `dispatch/admission.py` `mint_approval` / `sign_approval`) stays
 for proof drivers and scripts; use the two commands above instead.
 
 Only operations marked `live-proven` in
-`proof-battery/OPERATION_CATALOG.md` dispatch, with one exception, the
-`--allow-unproven` exception: a catalog row marked `pending` (never
-tried live) dispatches only when the caller passes `--allow-unproven`
-AND the approval is an educator-signed v2 approval carrying
-`allow_unproven: true`, bound to that exact operation and its
-parameters, single use. The educator must sign it; the agent cannot.
-It reaches `pending` rows only: rows marked `failed`, `unsupported`,
-`excluded`, or `evidence-hold`, unknown operations, never-dispatch
-routes, and learner-data rows are refused with or without it. It does
-not skip write approval, the frozen plan, or any other gate.
+`proof-battery/OPERATION_CATALOG.md` dispatch. There is no exception
+and no override: rows marked `pending`, `failed`, `unsupported`,
+`excluded`, or `evidence-hold`, and unknown operations, are refused
+even when the educator asks and even with a signed approval. Tell the
+educator plainly that Morrow does not do that task yet, and offer a
+live-proven task that gets them close, if there is one.
 
-Entry manifests: `execute --entry <manifest.json> --params '{...}'`
-dispatches a manifest entry the same way. `undo` runs an entry's undo
-block as a new, separately journaled operation. An undo is its own
-write: in plan mode it needs its own educator approval, minted for
-`dispatch.executor.undo_approval_subject(entry, params, of_op_id)`
-(bound to the undo action and the object it targets). The undo target
-comes ONLY from the journaled receipt of `--of-op-id`: that op must be
-a completed write of the same entry with the same params, and a
-`--result` that disagrees with its journaled receipt is refused
-(`UndoTargetMismatch`). The approval display shows the exact undo
-method, path, and target. The
-forward write's approval never admits its undo, and a DELETE undo asks
-for deletion confirmation in edit mode when `confirm_destructive_writes`
-is on. `--dry-run` journals nothing, in either mode.
+A live-proven route is refused the same way when the request sends a
+field whose effect is not in this version: making a page the course
+home page (`front_page` true on a page create or update), choosing the
+course home page (`default_view` on a course update), deleting,
+concluding, publishing, or unpublishing the whole course (`event` or
+`offer` on a course update), publishing a New
+Quiz (`published` true on a New Quiz create or update, or on the
+assignment or module item of a New Quiz; Morrow reads the assignment or
+module item first to check), a graded discussion
+(`submission_types` holding `discussion_topic` on an assignment create
+or update), and a question group that draws from a classic question
+bank (`assessment_question_bank_id`). Leave the field out, and tell the educator to make that
+change in Canvas themselves.
+
+Undo: this release has no automatic undo. Every write's
+`approval_display` says "Morrow cannot undo this change automatically",
+and every write result carries `"undo_available": false`. The
+executor's manifest and undo commands refuse every entry in this
+release (the pack pins none), so never run them. When the educator
+wants a change reversed, prepare the reverse change as a new write
+(for example, rename the page back) with `plan-write`, or run it
+directly in edit mode, and tell them it is a new change, not an undo.
+`--dry-run` journals nothing, in either mode.
 
 ## Governance (not optional)
 
 - Frozen plans: a write's plan digest must match the action exactly.
 - Admission: `dispatch/admission.py` enforces the live-proven catalog.
   Only operations marked `live-proven` in
-  `proof-battery/OPERATION_CATALOG.md` dispatch; the only exception is
-  the educator-signed `--allow-unproven` override for `pending` rows
-  described above. Learner-data operations (any operation whose
+  `proof-battery/OPERATION_CATALOG.md` dispatch, with no exception and
+  no override. Learner-data operations (any operation whose
   response carries people; see SCOPE.md) dispatch only on the Chromium
   lane with the encrypted learner vault, where every receipt is
   de-identified (see "Privacy" below); anywhere else they are refused
-  (`LearnerDataGated`), and `--allow-unproven` cannot override that.
+  (`LearnerDataGated`).
 - Journaling: a dispatch journals more than one record. Reads journal a
   `wal="claimed"` record before provider work, then a completion record;
   writes journal an fsynced `wal="pending"` claim, then a `wal="complete"`
@@ -374,8 +449,11 @@ is on. `--dry-run` journals nothing, in either mode.
   journaled release under the caller's op id (the op id stays reusable,
   and absence of a completion record is not evidence of failure);
   pre-claim death journals nothing at all. The approval was already
-  consumed before the network call, so a retry needs a freshly signed
-  approval AND the educator re-signing in through the login helper.
+  used before the network call, so a retry waits for the educator to
+  sign in again through the login helper and for `resume`; then run
+  plan-write again and ask the educator for a new approval. Approving
+  the same change again is allowed: single use applies to one signed
+  approval, not to one kind of change.
   Known limitation: in a multi-step write, steps that completed before
   the death applied real effects with only a claim record journaled
   (ambiguous write failure journals the claim plus an audit record under
@@ -409,7 +487,7 @@ both modes.
   lapses to plan mode.
 - Turning edit off means plan everywhere: `default_mode` goes back to
   plan and every grant and per-conversation override is cleared
-  (`morrow mode set plan`, which runs
+  (`bin/morrow mode set plan`, which runs
   `modes.state.switch_mode(user_id, "plan")`). It applies at once, with
   no confirmation round trip.
 - You decide what the educator means; no Morrow code reads the
@@ -421,7 +499,7 @@ both modes.
   request. Relay the command's `message`: it states the true resulting
   mode, read back after the change.
 - Changing the saved default ends every per-conversation override:
-  `morrow mode set edit` (or `plan`) without `--this-conversation`
+  `bin/morrow mode set edit` (or `plan`) without `--this-conversation`
   takes effect in every conversation at once, including one that had
   its own mode. A per-conversation override ("use plan mode for this
   conversation", "use edit mode for this conversation") set after that
@@ -446,8 +524,12 @@ both modes.
   need approval in either mode, and edit never surfaces per-write
   approval, including for destructive writes. `confirm_destructive_writes`
   is an opt-in guardrail (default off, matching the model; the
-  educator can turn it on: `morrow settings set
-  confirm_destructive_writes true`).
+  educator can turn it on: `bin/morrow settings set
+  confirm_destructive_writes true`). While it is on, an edit-mode
+  deletion runs only with the educator's yes to that deletion:
+  `approve-write` with their reply, or `catalog` with
+  `--destructive-confirmed "<their reply>"` (see "Dispatching
+  operations").
 - You change the mode or a setting only because the educator asked
   for it. The command takes effect when you call it (there is no
   second confirmation call); relay its `message`, which says what the
@@ -459,20 +541,24 @@ both modes.
   the tree, and survive restarts and reinstalls.
 - Commands (the CLI prints one JSON object with `ok`, `status`, `mode`,
   and `message`; the Python API in `settings/commands.py` returns the
-  same dict). `--user-id` defaults to `MORROW_USER_ID` and
-  `--conversation-id` to `MORROW_CONVERSATION_ID`:
-  - `morrow mode status --user-id U --conversation-id C`: the mode in
-    force and where it comes from.
-  - `morrow mode set plan --user-id U --conversation-id C`: edit off,
-    plan everywhere.
-  - `morrow mode set plan --this-conversation ...`: plan for this
+  same dict). Run each one from this tree's root: `bin/morrow` is not
+  on PATH, so a bare `morrow` is "command not found". Pass this
+  conversation's id as `--conversation-id C` to each one (see "Where the
+  two ids come from" below):
+  - `bin/morrow mode status --conversation-id C`: the mode in force and
+    where it comes from.
+  - `bin/morrow mode set plan --conversation-id C`: edit off, plan
+    everywhere.
+  - `bin/morrow mode set plan --this-conversation ...`: plan for this
     conversation only.
-  - `morrow mode set edit ...` (add `--this-conversation` for this
+  - `bin/morrow mode set edit ...` (add `--this-conversation` for this
     conversation only): edit mode takes effect at once. The result says
     that writes now apply without asking until edit mode is turned off;
     relay it.
-  - `morrow settings show|get KEY|set KEY VALUE`: booleans are `true`
-    or `false`. A set takes effect at once and is journaled. "Stop
+  - `bin/morrow settings show|get KEY|set KEY VALUE`: booleans are `true`
+    or `false` (`on`/`off` and `yes`/`no` work too). A refused value
+    names the words the setting accepts. A set takes effect at once and
+    is journaled. "Stop
     asking me to confirm deletions" is `settings set
     confirm_destructive_writes false`; "always confirm deletions" is
     `... true`.
@@ -480,30 +566,43 @@ both modes.
     its integrity check: tell the educator they are in plan mode and
     relay the repair steps in `message`.
 - Failed-students question ("who failed last week's quiz", "which
-  students scored under 70%"): run `morrow query --course C --quiz
-  last-week|this-week`, with at most one of `--below-percent N`,
-  `--below-points N`, or `--letter-f` when the educator named a
-  threshold. You choose the arguments from what the educator said; if
-  they mean a quiz that is not last week's or this week's, ask which
-  quiz first. Names in the result are de-identified (a student the
-  educator named in this conversation shows by that name next to the
-  label).
-- Every dispatch must carry the educator's identity for the mode gate:
-  pass `--user-id` and `--conversation-id` to `dispatch/executor.py`
-  (or set `MORROW_USER_ID` and `MORROW_CONVERSATION_ID`). Without a
-  user id the write gate is plan (every write needs approval). Without
-  a conversation id, per-conversation edit overrides cannot apply and
-  any plan override makes the write plan.
+  students scored under 70%"): not in this version. Reading quiz
+  scores (the submissions and grades rows) has not been tested on a
+  real Canvas course, so those rows are not live-proven and Morrow
+  refuses them. `bin/morrow query` refuses the question at once (mode
+  `catalog-not-proven`), before it reads anything or asks for a time
+  zone. Tell the educator plainly that this version cannot answer it,
+  and do not try to answer it another way: the submissions and
+  gradebook catalog rows are refused too. They can see scores in
+  Canvas's own Gradebook.
+- Where the two ids come from. The user id is the educator's
+  signed-in Canvas account: every command uses the account pinned at
+  first sign-in (`canvas:<account id>@<Canvas host>`), so the educator
+  has one id in every conversation and you never pass `--user-id`
+  (it and `MORROW_USER_ID` override the account, for scripted setups
+  only). Before an account is pinned there is no user id: every write
+  needs approval, and `bin/morrow mode` and `bin/morrow settings` change
+  nothing until the educator signs in. The conversation id is yours to
+  make: at the start of each Muse conversation, make one new
+  conversation id (a random UUID, for example from `python3 -c
+  'import uuid; print(uuid.uuid4())'`) and pass it as
+  `--conversation-id` to every Morrow command in that conversation
+  (`dispatch/executor.py`, `bin/morrow mode`, `bin/morrow settings`,
+  `bin/morrow students find`). Never reuse a
+  conversation id in another conversation, and never use a fixed one:
+  "edit mode for this conversation" and the names the educator typed
+  belong to it, so a reused id carries them into the next
+  conversation. Without a conversation id, per-conversation edit
+  overrides cannot apply and any plan override makes the write plan.
 - Other knobs, all user-settable: `verbosity` (concise | balanced |
-  detailed, default balanced), `write_approval_style` (per_write |
-  batched, default per_write), `failure_verbosity` (concise | detailed,
+  detailed, default balanced), `failure_verbosity` (concise | detailed,
   default detailed), `proactivity` (reactive | suggestive, default
-  reactive), `read_confirmations` (bool, default off),
-  `work_summary` (brief | full, default full),
-  `auto_cleanup_test_objects` (bool, default on),
-  `default_course_id` (course id or empty, default empty),
-  `timezone` (IANA name or empty, default empty),
-  `confirm_bulk_actions` (bool, default on). Educator docs:
+  reactive), `read_confirmations` (bool, default off), `work_summary`
+  (brief | full, default full), `default_course_id` (the Canvas
+  course number, or empty; default empty), and `timezone` (IANA name
+  or empty, default empty; approvals show dates in it). Every one of these except
+  `timezone` is an instruction to you: read it with `bin/morrow settings
+  show` and follow it as you work; no code enforces it. Educator docs:
   `settings/README.md`.
 
 ## v1 capability scope
@@ -516,8 +615,16 @@ sequence steps of 11 run on those rows). The catalog row is the unit of truth: a
 marked live-proven does not dispatch. Absolutely refused on every
 tenant, with no override flag: never-dispatch routes (the standing
 exclusions: announcements, messages to people, support tickets,
-subaccount-affecting operations), catalog-unsupported rows, failed
-rows, evidence-hold rows (including New Quiz create, C-286), and
+subaccount-affecting operations; any request that sets
+`is_announcement` on any route, and creating an announcement external
+feed, are refused as announcements; any request that sets
+`notify_of_update`, which notifies every student of the change, or
+`as_user_id`, which makes Canvas act as that person, is refused on any
+route), catalog-unsupported rows, failed
+rows, evidence-hold rows (course delete or conclude, C-108, also when
+sent as `event` on a course update; the four
+Item Bank quiz-entry routes; and the discussion writes C-139 create,
+C-167 update, C-141 delete, and C-238 date change), and
 learner-data rows on any lane that cannot de-identify them (the raw
 HTTPS lane, or no `cryptography`); on the Chromium lane with the
 encrypted vault, live-proven learner-data rows dispatch de-identified
@@ -534,8 +641,8 @@ relay, and every row not marked live-proven. Full declaration:
 - `install.sh`: the idempotent installer (Chromium locate, egress probe,
   `~/.morrow` layout, `helper/profile/` creation without ever wiping it,
   keepalive supervision (cron, or the background loop without cron),
-  helper launch, one-time onboarding notice, all 23
-  selftests, the secrets gate).
+  helper launch, the sign-in notice (repeats until sign-in completes),
+  all 23 selftests, the secrets gate).
 - `transport/`: the Chromium lane (`local_chromium.py`, `chromium_session.py`,
   `egress.py`, `proxy_forwarder.py`) and its selftests.
 - `dispatch/`: the governed executor, the admission gate, the policy, selftests.
@@ -587,7 +694,7 @@ beyond the examples above:
   memory-only rule); marks every unproven surface as NOT IMPLEMENTED
   or PENDING.
 - `knowledge/privacy-ferpa.md`: index of the privacy layer (learner
-  vault tokenization, when de-id applies, the opt-out override rule);
+  vault tokenization, when de-id applies, and why nothing turns it off);
   it indexes, never duplicates, the layer under `privacy/`.
 - `knowledge/api-catalog-guide.md`: the two catalogs (the 1137-op
   desktop research catalog vs the 457-row dispatch catalog), the
@@ -610,8 +717,8 @@ beyond the examples above:
 ## Privacy: student de-identification (default on)
 
 For the educator, in plain English: whenever the connector reads
-student data (rosters, enrollments, submissions, grades, analytics),
-what comes back from Canvas is de-identified before the agent or the
+student data (in this version, the course roster), what comes back
+from Canvas is de-identified before the agent or the
 journal sees it: names, emails, logins, SIS ids, and Canvas user ids
 (including the ones inside links) become a stable label like
 `Student A1`. The label is the same every time, so you can follow one
@@ -634,10 +741,10 @@ the educator asks): Morrow cannot intercept what the educator types to
 Muse, so names the educator types reach the Muse model, because the
 educator typed them. Morrow keeps every other student identifier in
 LMS records (every name the educator did not type, every email, login,
-SIS id, and Canvas id) out of what the model and the journal see. Two
-exceptions, below under Honest limitations: a name lookup confirms
-enrollment, and course content (a page body, an announcement, a
-discussion post) reaches the model as written.
+SIS id, and Canvas id) out of what the model and the journal see,
+in course content too (a page body, an assignment description, a quiz
+question). One exception, below under Honest limitations: a name
+lookup confirms enrollment.
 
 For the agent: people-bearing catalog rows (the `[LEARNER-DATA]` rows
 and every route whose response carries people) dispatch only on the
@@ -668,16 +775,48 @@ agent-visible or journaled. Anywhere else (the raw HTTPS lane, or no
   named author the roster cannot resolve (a teacher on a submission
   comment) projects to `Staff`.
 
+### Course content (pages, assignments, quizzes)
+
+Course content can name a student too, so before the executor reads or
+changes anything in a course on the Chromium lane it reads the course's
+whole student roster (every enrollment state, and students whose
+enrollment was deleted). If that read fails, nothing in the course is
+read or changed (`CourseRosterUnavailable`); tell the educator plainly
+and retry once. Every result from that course then comes back with each
+student's label plus a marker that names the form it replaced:
+
+- `Student A3`: the full name. `Student A3 (first name)`,
+  `(last name)`, `(name, last name first)`, `(email)`, `(login)`,
+  `(SIS id)`, `(user id)`, `(other name)`: the other forms.
+  `(joined name)`: the name written as one token, as in a page's web
+  address (`jane-doe-iep`) or a file name (`Jane_Doe_essay.pdf`).
+- `Student A3 or Student A4 (first name)`: a form two students share.
+- `Student A7 (as written)`: text that already read like a label.
+  It is not a student.
+
+When you save content back (a page body, a title, a description), keep
+every label and its marker exactly as you read it: Morrow puts back the
+exact text each one stood for, so "Jane" stays "Jane" and an email
+stays an email. A label you write yourself with no marker goes to Canvas
+as the student's full name. A label the course never issued is refused
+before anything is sent (`LearnerLabelUnresolved`). A word that only
+looks like a student's name is labeled too ("Brown v. Board" in a course
+with a student named Brown reads `Student A4 (last name) v. Board`); it
+is restored exactly when saved back, so never "correct" it. Without the
+`cryptography` package there are no labels: names read as `[hidden:
+student name]`, and a change whose text still carries one is refused;
+leave that part out, or ask the educator to write it.
+
 ### Working by name (the flow you run)
 
 The educator names students; you never guess which one they mean.
 
-1. The educator names a student. Run
-   `morrow students find --course C "<the name exactly as the educator
-   typed it>"` (pass `--conversation-id`, or set
-   `MORROW_CONVERSATION_ID`; add `--canvas-base` or `CANVAS_BASE`).
-   It reads the course roster through the login helper and prints one
-   JSON object.
+1. The educator names a student. Run `bin/morrow students find --course C
+   --conversation-id <this conversation's id> "<the name exactly as the
+   educator typed it>"`. It checks that the helper is signed in to the
+   Canvas account pinned at first sign-in (a different account is
+   refused before anything is read, and writes pause), then reads the
+   course roster through the login helper and prints one JSON object.
 2. `status: resolved`: one student matched. Use `student` (the
    label) or `shown_as` ("Jane Doe (Student A3)") wherever a write
    needs that student. From now on in this conversation, outputs show
@@ -691,6 +830,13 @@ The educator names students; you never guess which one they mean.
 4. `status: not_found`: no student matched. Tell the educator, and ask
    them to check the spelling or say whether to include inactive or
    concluded enrollments (`--include-inactive`, `--include-concluded`).
+   `status: refused` or `error`: nothing was looked up. Relay
+   `message` and follow `next_step`; `correlation_id` is the reference.
+   A course Canvas cannot find (mode `canvas-not-found`) has the wrong
+   number: find the course by name and run the lookup again with its
+   number.
+   `--course` takes only the course's Canvas number, never its SIS
+   form: find the course by name (canvas_list_courses) first.
 5. Write by label: put the label (or the `shown_as` form) where the
    operation takes a student, as a path parameter (`--params
    '{"user_id": "Student A3", ...}'`) or in the body (`--body
@@ -706,17 +852,12 @@ The educator names students; you never guess which one they mean.
    the educator named, labels for everyone else). Never try to learn
    or state the real name behind a label the educator did not name.
 
-Names the educator did not type are never shown to you. The only other
-way to see real names is an educator reveal: a sealed record
-(`dispatch.admission.mint_pii_reveal(tenant, course_id,
-"<educator's verbatim words>", channel="educator-chat")`), for ONE
-course, lasting at most 30 minutes, journaled with the educator's
-words, passed to the executor with `--pii-reveal <file>`. Mint it only
-when the educator asks, in their own words, to see real student names
-for that course; never on your own initiative and never for a driver
-channel. A file, an environment variable, or a setting reveals nothing
-(the old consent file is retired). Never call
-`vault.lookup()` or `Deidentifier.lookup()` from an agent path.
+Names the educator did not type are never shown to you, and nothing
+turns de-identification off: no record, flag, file, environment
+variable, or setting. When the educator asks who a label is, ask which
+student they have in mind and run `students find` with that name: the
+label that comes back tells them whether it is the same student. Never
+call `vault.lookup()` or `Deidentifier.lookup()` from an agent path.
 
 Deletion is the educator's, and it is complete: `python3 -c "from
 privacy import executor_wire; print(executor_wire.purge_tenant('<tenant
@@ -735,10 +876,14 @@ whole profile); per-tenant purge cannot scope the profile (its stores
 mix tenants). The uninstall script removes everything including the
 whole profile, and warns that bytes already held open by other
 processes cannot be revoked by unlinking (close agent sessions
-first). The legacy purge/wipe commands
-(`python3 -m privacy.pseudonym purge|wipe`,
-`python3 -m privacy.learner_vault purge|wipe`) cover only their own
-legacy state and are not shipped in the distribution. Full policy:
+first). The same deletions run from the command line:
+`python3 -m privacy.executor_wire purge --tenant <tenant base>`,
+`purge-course --tenant <tenant base> --course-id <id>`, and
+`purge-all` (add `--full` to wipe the whole browser profile). The
+legacy `python3 -m privacy.pseudonym purge|wipe` and
+`python3 -m privacy.learner_vault purge|wipe` commands also ship, but
+they cover only their own older state; use the `executor_wire`
+commands for the educator's deletion. Full policy:
 `privacy/FERPA_POLICY.md`.
 
 Honest limitations (not defects, but know them):
@@ -750,17 +895,49 @@ Honest limitations (not defects, but know them):
 - Nicknames: aliases derive from roster fields only, so a nickname
   the roster never mentions (for example "Bobby" for rostered
   "Robert J. Smith") survives redaction in free text.
-- Course content is not de-identified: a page body, announcement,
-  discussion post, or file that names a student ("Congrats to Jane
-  Doe") reaches the model as written, even when Morrow has labeled that
-  student elsewhere. Only people records in LMS responses (rosters,
-  submissions, authors, editors) are projected.
+- A name written with a grammatical ending that changes the word is
+  not labeled: a name matches only as a whole word, so "Annas" for
+  Anna in German, "Марии" for Мария in Russian, and "Łukasza" for
+  Łukasz in Polish reach you as written.
+- Course content is labeled through the course roster, so a name the
+  roster does not know is not labeled: a nickname (above), or someone
+  who was never a student in the course.
+- A name in lowercase is labeled only when it is the full name, the
+  email, the login, or the name joined as one token (a lowercase first
+  or last name alone is often an ordinary word). A page's web address
+  (`url`, `html_url`) and a file name that hold the full name show it
+  as `Student A3 (joined name N)`: keep it exactly as you read it, and
+  use it as `url_or_id` to read or change that page; Morrow puts back
+  the real address. A first or last name alone in lowercase there
+  (`janes-reading-log`) is not labeled.
+- A course's own name is labeled with that course's roster wherever
+  Morrow names the course (a course read, the course list, approvals,
+  messages), so a course named for a student (an independent study)
+  shows the student's label. On the course list, a course whose student
+  list Morrow could not read is listed by its number with the name
+  `(name not shown: Morrow could not check it for student names)`.
+  Name that course to the educator by its number.
 - A name lookup confirms enrollment: when `students find` returns a
   label for a name, it confirms that a student with that name is
   enrolled in the course, even if the educator never typed that name
   (an agent guess). Nothing technical prevents a guess; every lookup
   is journaled (course, conversation, outcome, and a keyed digest of
   the name, never the name), so guesses can be reviewed afterwards.
+
+## Getting help
+
+When the educator asks how to reach Morrow, or a failure message
+does not explain what went wrong, give them this:
+
+- Email hello@meetmorrow.app, or see meetmorrow.app/support.
+- Include the Morrow for Muse version: run `bin/morrow version` from
+  this tree and give them its first line (`morrow <version>`); the
+  helper's `/status` reports the same number as `helper_version`.
+  Include the step that failed and what they expected to happen.
+- Never include student information: no student names or labels,
+  records, grades, or screenshots that show students, and never a
+  password or sign-in detail. Tell the educator to leave these out of
+  the email too.
 
 ## Never
 
@@ -791,19 +968,23 @@ When integrity checks fail, follow these procedures. Each is
 fail-closed and tells you what to do when it cannot proceed.
 
 **Backup/restore (W6-P1-1):** `python3 -m dispatch.state_backup create
-<dir>` (store encrypted), `verify <dir>`, `restore <dir> --yes`.
-Restore preserves the generation high-water mark and writes a restore
-marker; the journal stays fail-closed until `journal-reconcile`.
+<dir>` (store encrypted) prints the backup folder it made,
+`<dir>/morrow-backup-<time>`; pass that folder to `verify` and to
+`restore <folder> --yes`. Restore preserves the generation high-water
+mark and writes a restore marker; the journal stays fail-closed until
+`python3 -m dispatch.executor journal-reconcile --yes`.
 
 **Journal secret lost (W6-P1-3):** Reconcile in-flight ops against the
 provider FIRST, then `python3 -m dispatch.executor
-journal-recover-secret --yes --reason "..."` (min 20 chars). This
-re-keys under a new secret, preserving op_id replay protection with
-provenance downgraded to operator attestation.
+journal-recover-secret --yes --reason "secret lost; in-flight ops
+checked in Canvas"`: the reason says what you checked, in 20
+characters or more. This re-keys under a new secret, preserving op_id
+replay protection with provenance downgraded to operator attestation.
 
 **Missing archives (W6-P1-4):** The executor fails closed naming the
-missing archives. Restore from backup, then `journal-reconcile`. Do
-not re-claim op_ids meanwhile.
+missing archives. Restore from backup, then `python3 -m
+dispatch.executor journal-reconcile --yes`. Do not re-claim op_ids
+meanwhile.
 
 **Retired seal (W6-P1-5):** `python3 -m dispatch.executor retired-seal
 --yes` adopts a pre-seal legacy retired set explicitly.

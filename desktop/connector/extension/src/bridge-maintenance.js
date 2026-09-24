@@ -206,6 +206,17 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     }
   }
 
+  /**
+   * The challenge id and secret in this Bridge folder's active-folder marker. Morrow wrote them
+   * into the Bridge folder it set up, so a Bridge loaded from any other folder has none, and no
+   * HTTP request can read them.
+   */
+  async function activeFolderSecret() {
+    const current = await identity();
+    const proof = await activeFolderProof(current);
+    return { extensionId: current.extensionId, challengeId: proof.challengeId, nonce: proof.nonce };
+  }
+
   async function loadFence() {
     let stored;
     try { stored = await chromeApi.storage.local.get(FENCE_KEY); } catch { fail("bridge_quiesce_fence_unavailable"); }
@@ -497,5 +508,5 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     return await readback();
   }
 
-  return Object.freeze({ beginWrite, finishWrite, commit, control, readback, resume, status });
+  return Object.freeze({ activeFolderSecret, beginWrite, finishWrite, commit, control, readback, resume, status });
 }

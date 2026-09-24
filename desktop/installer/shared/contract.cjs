@@ -20,9 +20,11 @@ const RETENTION_IDS = new Set([
   "backups",
   "bridge",
   "materials",
+  "previous_materials",
   "blackboard_credentials",
   "blackboard_configuration",
-  "assistant_configuration"
+  "assistant_configuration",
+  "claude_desktop_extension"
 ]);
 /**
  * Every error the renderer can be shown, with the exact message and recovery
@@ -80,7 +82,7 @@ const PUBLIC_ERRORS = Object.freeze({
   },
   assistant_not_connected: {
     message: "Morrow has not heard from your assistant yet.",
-    recovery: "Quit the assistant completely, open it again, and start a new chat. Then select the Check button that names your assistant."
+    recovery: "Quit the assistant completely, then open it again as the steps on this screen say. Then select the Check button that names your assistant."
   },
   assistant_connection_unconfirmed: {
     message: "Morrow could not check your assistant yet.",
@@ -115,8 +117,8 @@ const PUBLIC_ERRORS = Object.freeze({
     recovery: "Wait for that change to finish, then start this step again."
   },
   runtime_other_client_connected: {
-    message: "Another assistant is connected to Morrow.",
-    recovery: "Close the other assistant, then start this step again. Morrow changed nothing."
+    message: "An assistant is using Morrow right now.",
+    recovery: "Quit each assistant that uses Morrow, then start this step again. Morrow changed nothing."
   },
   bridge_delivery_unavailable: {
     message: "Morrow Bridge is not available from the Chrome Web Store yet.",
@@ -126,17 +128,44 @@ const PUBLIC_ERRORS = Object.freeze({
     message: "Morrow could not show the Morrow Bridge folder.",
     recovery: "Close Morrow and open it again, then select Show Bridge folder. If Morrow still cannot show it, reinstall Morrow."
   },
+  materials_folder_unavailable: {
+    message: "Morrow could not open the materials folder.",
+    recovery: "Select Copy path and open that folder yourself, or select Change folder to choose another one."
+  },
+  // The runtime refuses this folder as its workspace, so no assistant could start Morrow in it.
+  materials_folder_too_broad: {
+    message: "Morrow cannot use a whole drive, your home folder, or a folder that holds your home folder.",
+    recovery: "Choose a folder inside your home folder for your course materials, such as one in Documents."
+  },
+  materials_folder_morrow_data: {
+    message: "That folder holds Morrow's own files.",
+    recovery: "Choose another folder for your course materials, such as one in Documents."
+  },
+  first_read_failed: {
+    message: "Morrow could not read your course.",
+    recovery: "Open the course in Chrome and make sure you are signed in, then select Check connection again."
+  },
+  bridge_reload_unconfirmed: {
+    message: "Chrome has not reloaded Morrow Bridge yet.",
+    recovery: "In Chrome, open Manage Extensions and select Reload on Morrow Bridge, then select Check Bridge."
+  },
   bridge_check_failed: {
     message: "Morrow could not confirm Morrow Bridge.",
     recovery: "Select Repair Morrow, then load or reload the Bridge folder in Chrome and select Check Bridge."
   },
+  // The Update panel offers only Update Bridge, so this names only that control
+  // and the Reload control Chrome shows.
+  bridge_update_failed: {
+    message: "Morrow could not update Morrow Bridge.",
+    recovery: "In Chrome, open Manage Extensions and select Reload on Morrow Bridge. Then return here and select Update Bridge again."
+  },
   blackboard_configuration_invalid: {
     message: "Morrow could not save the Blackboard connection.",
-    recovery: "Check the Blackboard web address, the application key and secret from your administrator, and the account ID, then save again."
+    recovery: "Check the Blackboard web address and the application key and secret from your administrator, then save again."
   },
   blackboard_course_selection_invalid: {
     message: "Morrow could not save that Blackboard course.",
-    recovery: "Check the course ID in the course web address. It looks like _45_1. Your Blackboard connection was left as it was."
+    recovery: "Select Check status, then select Allow Morrow or Remove on that course again. Your Blackboard connection was left as it was."
   },
   blackboard_removal_failed: {
     message: "Morrow could not remove that Blackboard connection.",
@@ -202,12 +231,20 @@ function installerState(input) {
     detected: assistant.detected === true,
     configured: assistant.configured === true,
     pending: assistant.pending === true,
+    // Claude Desktop connected, and Morrow is still confirming the Claude app
+    // that started it. The launcher keeps asking until it can say.
+    checking: assistant.checking === true,
     // The assistant's own Morrow session reached the runtime at least once since
     // it was set up. Until then the assistant has not reloaded its settings.
     connected: assistant.connected === true,
     selected: assistant.selected === true,
     needsWorkspace: assistant.needsWorkspace === true,
     supported: assistant.supported === true,
+    // The project folder a project-scoped assistant (Claude Code, Gemini CLI)
+    // was set up in, which is where that assistant reads Morrow's entry, and
+    // whether that folder is gone. `null` for every other assistant.
+    projectFolder: publicFile(assistant.projectFolder),
+    projectFolderMissing: assistant.projectFolderMissing === true && publicFile(assistant.projectFolder) !== null,
   }));
   return {
     schema: "morrow.installer-state.v1",
@@ -225,6 +262,11 @@ function installerState(input) {
     materialsFolder: typeof input.materialsFolder === "string" && input.materialsFolder.length > 0 && input.materialsFolder.length <= 4096
       ? input.materialsFolder
       : null,
+    // The folder Morrow was using when it is gone, so setup can name it and
+    // offer the step that fixes it. `isDefault` marks Morrow's own folder, the
+    // only one Morrow makes again. `null` while the folder is there, and before
+    // any assistant is set up, because setup itself makes the default folder.
+    materialsFolderMissing: materialsFolderMissing(input.materialsFolderMissing),
     runtime: { status: input.runtimeStatus },
     bridge: {
       delivery: input.bridgeDelivery,
@@ -259,6 +301,12 @@ function installerState(input) {
       completed: input.firstPreview?.completed === true
     }
   };
+}
+
+function materialsFolderMissing(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || typeof value.path !== "string" || value.path.length === 0 || value.path.length > 4096) return null;
+  return { path: value.path, isDefault: value.isDefault === true };
 }
 
 function blackboardSnapshot(value) {

@@ -7,6 +7,7 @@ import {
   BRIDGE_SCHEMAS,
   MAX_BRIDGE_MESSAGE_BYTES,
   bridgeAuthenticationProofPayload,
+  bridgePairingProofPayload,
   parseBridgeJson,
   serializeBridgeMessage,
   type BridgeCommand,
@@ -369,6 +370,68 @@ describe("LoopbackBridgeServer", () => {
     expect(server.health()).toMatchObject({ connected: false, extensionId: null, bindingCount: 0 });
   });
 
+  // A different Morrow or Morrow Bridge version is fixed by an update and a reload, not by a new
+  // connection approval, so it closes with its own reason.
+  it("names a version mismatch apart from a refused identity", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+    });
+    servers.push(server);
+    const address = await server.start();
+    const refusal = async (fields: { runtimeRevision?: string; catalogDigest?: string; extensionId?: string }) => {
+      const socket = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, {
+        origin: `chrome-extension://${extensionId}`,
+      });
+      sockets.push(socket);
+      await once(socket, "open");
+      const closed = once(socket, "close");
+      socket.send(serializeBridgeMessage({
+        schema: BRIDGE_SCHEMAS.authenticate,
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        clientNonce: randomBytes(32).toString("hex"),
+        extensionId,
+        runtimeRevision: revision,
+        catalogDigest: digest,
+        sentAt: Date.now(),
+        ...fields,
+      }));
+      const [code, reason] = await closed;
+      return `${code} ${reason.toString()}`;
+    };
+    await expect(refusal({ runtimeRevision: "8".repeat(40) })).resolves.toBe("4403 bridge_version_mismatch");
+    await expect(refusal({ catalogDigest: "b".repeat(64) })).resolves.toBe("4403 bridge_version_mismatch");
+    await expect(refusal({ extensionId: "b".repeat(32) })).resolves.toBe("4403 bridge_identity_refused");
+  });
+
+  it("tells its owner each time a Bridge connection becomes active, after the ready answer", async () => {
+    const activations: boolean[] = [];
+    const server: LoopbackBridgeServer = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+      onActivated: () => {
+        activations.push(server.health().connected);
+        throw new Error("an owner failure never ends the connection it follows");
+      },
+    });
+    servers.push(server);
+    const first = await connect(server, []);
+    expect(activations).toEqual([true]);
+    const firstClosed = once(first, "close");
+    first.close();
+    await firstClosed;
+    const second = await connect(server, []);
+    expect(activations).toEqual([true, true]);
+    expect(second.readyState).toBe(WebSocket.OPEN);
+    expect(server.health()).toMatchObject({ connected: true });
+  });
+
   it("refuses a binary WebSocket frame even when its bytes contain valid Bridge JSON", async () => {
     const server = new LoopbackBridgeServer({
       token,
@@ -721,140 +784,158 @@ describe("LoopbackBridgeServer", () => {
     expect(calls).toBe(1);
   });
 
-  it("pairs one exact Chrome extension without copying the local token", async () => {
+  /**
+   * The Bridge folder Morrow set up carries a secret no HTTP request can read, and the Bridge
+   * proves it holds that secret only after the educator selects Connect Morrow in the popup.
+   */
+  const folderSecret = {
+    challengeId: "morrow-0123456789abcdef0123456789abcdef",
+    nonce: randomBytes(32).toString("base64url"),
+    extensionId,
+  };
+
+  function pairingProof(
+    nonce: string,
+    pairing: { pairingId: string; challenge: string },
+    activeFolderChallengeId = folderSecret.challengeId,
+    proofExtensionId = extensionId,
+  ): string {
+    return createHmac("sha256", Buffer.from(nonce, "utf8"))
+      .update(bridgePairingProofPayload({ pairingId: pairing.pairingId, challenge: pairing.challenge, extensionId: proofExtensionId, activeFolderChallengeId }))
+      .digest("base64url");
+  }
+
+  async function pairingServer(options: Partial<ConstructorParameters<typeof LoopbackBridgeServer>[0]> = {}) {
     const server = new LoopbackBridgeServer({
       token,
       expectedRuntimeRevision: revision,
       expectedCatalogDigest: digest,
       port: 0,
       pairingEnabled: true,
+      pairingSecret: () => folderSecret,
+      ...options,
     });
     servers.push(server);
     const address = await server.start();
+    const base = `http://${address.host}:${address.port}${address.path}`;
     const origin = `chrome-extension://${extensionId}`;
-    const created = await fetch(`http://${address.host}:${address.port}${address.path}/pair`, {
+    const request = async (id = extensionId) => fetch(`${base}/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: `chrome-extension://${id}` },
+      body: JSON.stringify({ extensionId: id, catalogDigest: digest, runtimeRevision: revision }),
+    });
+    const confirm = async (pairing: { confirmUrl: string }, body: unknown) => fetch(pairing.confirmUrl, {
       method: "POST",
       headers: { "content-type": "application/json", origin },
-      body: JSON.stringify({ extensionId, catalogDigest: digest, runtimeRevision: revision }),
+      body: typeof body === "string" || body instanceof Uint8Array ? body : JSON.stringify(body),
     });
+    return { server, address, base, origin, request, confirm };
+  }
+
+  it("pairs a Bridge that proves it holds its folder secret, and hands it the token once", async () => {
+    const approved: string[] = [];
+    const { server, base, request, confirm } = await pairingServer({ onPairApproved: (id) => { approved.push(id); } });
+    const created = await request();
     expect(created.status).toBe(201);
-    const pairing = await created.json() as { approvalUrl: string; statusUrl: string };
-    const decision = await fetch(`${pairing.approvalUrl}/decision`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", origin: new URL(pairing.approvalUrl).origin },
-      body: "decision=approve",
-      redirect: "manual",
+    const pairing = await created.json() as { schema: string; pairingId: string; challenge: string; confirmUrl: string; expiresAt: number };
+    expect(pairing).toEqual({
+      schema: "morrow.bridge.pairing.v2",
+      pairingId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      challenge: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      confirmUrl: `${base}/pair/${pairing.pairingId}/confirm`,
+      expiresAt: expect.any(Number),
     });
-    expect(decision.status).toBe(303);
-    const status = await fetch(pairing.statusUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin },
-      body: JSON.stringify({ extensionId }),
-    });
-    expect(await status.json()).toMatchObject({ status: "approved", token });
-    const page = await fetch(pairing.approvalUrl);
-    expect(await page.text()).toContain("Chrome connection approved");
-    await fetch(`${pairing.approvalUrl}/decision`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", origin: new URL(pairing.approvalUrl).origin },
-      body: "decision=deny",
-    });
-    const unchanged = await fetch(pairing.statusUrl, { headers: { origin } });
-    expect(await unchanged.json()).toMatchObject({ status: "approved" });
-    const expired = await fetch(pairing.approvalUrl.replace(/[0-9a-f-]{36}$/, "00000000-0000-0000-0000-000000000000"), { headers: { accept: "text/html" } });
-    expect(expired.status).toBe(404);
-    expect(await expired.text()).toContain("Start a new connection");
+    expect(JSON.stringify(pairing)).not.toContain(token);
+
+    const confirmed = await confirm(pairing, { extensionId, activeFolderChallengeId: folderSecret.challengeId, proof: pairingProof(folderSecret.nonce, pairing) });
+    expect(confirmed.status).toBe(200);
+    expect(await confirmed.json()).toEqual({ schema: "morrow.bridge.pairing-result.v2", status: "approved", token });
+    expect(approved).toEqual([extensionId]);
+    await connect(server);
+    expect(server.health()).toMatchObject({ connected: true, extensionId });
+
+    const again = await confirm(pairing, { extensionId, activeFolderChallengeId: folderSecret.challengeId, proof: pairingProof(folderSecret.nonce, pairing) });
+    expect(again.status).toBe(404);
+    expect(JSON.stringify(await again.json())).not.toContain(token);
   });
 
-  it("refuses malformed UTF-8 before pairing status identity classification", async () => {
-    const server = new LoopbackBridgeServer({
-      token,
-      expectedRuntimeRevision: revision,
-      expectedCatalogDigest: digest,
-      port: 0,
-      pairingEnabled: true,
-    });
-    servers.push(server);
-    const address = await server.start();
-    const origin = `chrome-extension://${extensionId}`;
-    const created = await fetch(`http://${address.host}:${address.port}${address.path}/pair`, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin },
-      body: JSON.stringify({ extensionId, catalogDigest: digest, runtimeRevision: revision }),
-    });
-    const pairing = await created.json() as { statusUrl: string };
-    const malformed = Buffer.concat([
-      Buffer.from(`{"extensionId":"${extensionId}`),
-      Buffer.from([0xff]),
-      Buffer.from('"}'),
-    ]);
-    const status = await fetch(pairing.statusUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin },
-      body: malformed,
-    });
+  it("refuses a pairing a local program confirms over HTTP without the folder secret", async () => {
+    const approved: string[] = [];
+    const { server, base, origin, request, confirm } = await pairingServer({ onPairApproved: (id) => { approved.push(id); } });
+    const pairing = await (await request()).json() as { pairingId: string; challenge: string; confirmUrl: string };
+    // A program that sets every header a browser would, and guesses at the secret.
+    const forged = await confirm(pairing, { extensionId, activeFolderChallengeId: folderSecret.challengeId, proof: pairingProof(randomBytes(32).toString("base64url"), pairing) });
+    expect(forged.status).toBe(403);
+    const refusal = await forged.json();
+    expect(refusal).toEqual({ error: "pairing_proof_refused" });
+    // The request is spent: the real proof cannot be tried after a wrong one.
+    const late = await confirm(pairing, { extensionId, activeFolderChallengeId: folderSecret.challengeId, proof: pairingProof(folderSecret.nonce, pairing) });
+    expect(late.status).toBe(404);
+    for (const response of [late]) expect(JSON.stringify(await response.json())).not.toContain(token);
+    expect(approved).toEqual([]);
+
+    // A proof for one pairing, or for another folder challenge, confirms nothing else.
+    const first = await (await request()).json() as { pairingId: string; challenge: string; confirmUrl: string };
+    const second = await (await request()).json() as { pairingId: string; challenge: string; confirmUrl: string };
+    expect(second.pairingId).not.toBe(first.pairingId);
+    expect(second.challenge).not.toBe(first.challenge);
+    expect((await confirm(second, { extensionId, activeFolderChallengeId: folderSecret.challengeId, proof: pairingProof(folderSecret.nonce, first) })).status).toBe(403);
+    expect((await confirm(first, { extensionId, activeFolderChallengeId: "morrow-ffffffffffffffffffffffffffffffff", proof: pairingProof(folderSecret.nonce, first, "morrow-ffffffffffffffffffffffffffffffff") })).status).toBe(403);
+    expect(approved).toEqual([]);
+
+    // The routes that approved a pairing and read back its token over HTTP are gone.
+    for (const [path, method] of [[`/pair/${pairing.pairingId}`, "GET"], [`/pair/${pairing.pairingId}/decision`, "POST"], [`/pair/${pairing.pairingId}/status`, "GET"], [`/pair/${pairing.pairingId}/status`, "POST"]] as const) {
+      const response = await fetch(`${base}${path}`, {
+        method,
+        headers: { origin: path.endsWith("decision") ? new URL(base).origin : origin, "content-type": "application/x-www-form-urlencoded" },
+        ...(method === "POST" ? { body: path.endsWith("decision") ? "decision=approve" : JSON.stringify({ extensionId }) } : {}),
+        redirect: "manual",
+      });
+      expect(response.status).toBe(404);
+      expect(await response.text()).not.toContain(token);
+    }
+    expect(server.health().connected).toBe(false);
+  });
+
+  it("pairs only the Bridge that Morrow set up, and nothing while Morrow has no Bridge folder", async () => {
+    const other = "b".repeat(32);
+    const pinned = await pairingServer();
+    const refusedId = await pinned.request(other);
+    expect(refusedId.status).toBe(403);
+    expect(await refusedId.json()).toEqual({ error: "extension_identity_refused" });
+
+    let secret: typeof folderSecret | null = null;
+    const unset = await pairingServer({ pairingSecret: async () => secret });
+    const early = await unset.request();
+    expect(early.status).toBe(409);
+    expect(await early.json()).toEqual({ error: "pairing_folder_unconfirmed" });
+    secret = folderSecret;
+    const pairing = await (await unset.request()).json() as { pairingId: string; challenge: string; confirmUrl: string };
+    secret = null;
+    const gone = await unset.confirm(pairing, { extensionId, activeFolderChallengeId: folderSecret.challengeId, proof: pairingProof(folderSecret.nonce, pairing) });
+    expect(gone.status).toBe(409);
+    expect(await gone.json()).toEqual({ error: "pairing_folder_unconfirmed" });
+
+    const absent = await pairingServer({ pairingSecret: undefined });
+    expect((await absent.request()).status).toBe(409);
+  });
+
+  it("refuses malformed UTF-8 in a pairing confirmation", async () => {
+    const { request, confirm } = await pairingServer();
+    const pairing = await (await request()).json() as { confirmUrl: string };
+    const malformed = Buffer.concat([Buffer.from(`{"extensionId":"${extensionId}`), Buffer.from([0xff]), Buffer.from('"}')]);
+    const status = await confirm(pairing, malformed);
     expect(status.status).toBe(400);
     expect(await status.json()).toEqual({ error: "invalid_request" });
   });
 
-  it("reuses a pending pairing request for the same extension", async () => {
-    const server = new LoopbackBridgeServer({
-      token,
-      expectedRuntimeRevision: revision,
-      expectedCatalogDigest: digest,
-      port: 0,
-      pairingEnabled: true,
-    });
-    servers.push(server);
-    const address = await server.start();
-    const origin = `chrome-extension://${extensionId}`;
-    const request = () => fetch(`http://${address.host}:${address.port}${address.path}/pair`, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin },
-      body: JSON.stringify({ extensionId, catalogDigest: digest, runtimeRevision: revision }),
-    });
-    const first = await request();
-    const second = await request();
-    expect(first.status).toBe(201);
-    expect(second.status).toBe(200);
-    expect((await second.json() as { pairingId: string }).pairingId)
-      .toBe((await first.json() as { pairingId: string }).pairingId);
-  });
-
-  it("keeps pairing pending when durable approval fails", async () => {
-    let approvals = 0;
-    const server = new LoopbackBridgeServer({
-      token,
-      expectedRuntimeRevision: revision,
-      expectedCatalogDigest: digest,
-      port: 0,
-      pairingEnabled: true,
-      onPairApproved: async () => {
-        approvals += 1;
-        if (approvals === 1) throw new Error("state unavailable");
-      },
-    });
-    servers.push(server);
-    const address = await server.start();
-    const origin = `chrome-extension://${extensionId}`;
-    const created = await fetch(`http://${address.host}:${address.port}${address.path}/pair`, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin },
-      body: JSON.stringify({ extensionId, catalogDigest: digest, runtimeRevision: revision }),
-    });
-    const pairing = await created.json() as { approvalUrl: string; statusUrl: string };
-    const decide = () => fetch(`${pairing.approvalUrl}/decision`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", origin: new URL(pairing.approvalUrl).origin },
-      body: "decision=approve",
-      redirect: "manual",
-    });
-    expect((await decide()).status).toBe(500);
-    const stillPending = await fetch(pairing.statusUrl, { headers: { origin } });
-    expect(await stillPending.json()).toMatchObject({ status: "pending" });
-    expect((await decide()).status).toBe(303);
-    const approved = await fetch(pairing.statusUrl, { headers: { origin } });
-    expect(await approved.json()).toMatchObject({ status: "approved", token });
+  it("hands out no token when the durable approval fails", async () => {
+    const { server, request, confirm } = await pairingServer({ onPairApproved: async () => { throw new Error("state unavailable"); } });
+    const pairing = await (await request()).json() as { pairingId: string; challenge: string; confirmUrl: string };
+    const failed = await confirm(pairing, { extensionId, activeFolderChallengeId: folderSecret.challengeId, proof: pairingProof(folderSecret.nonce, pairing) });
+    expect(failed.status).toBe(500);
+    expect(await failed.json()).toEqual({ error: "pairing_approval_failed" });
+    expect(server.health().extensionId).toBeNull();
   });
 
   it("disconnects a client that misses two heartbeat intervals", async () => {
@@ -1343,6 +1424,53 @@ describe("LoopbackBridgeServer", () => {
       ok: false,
       problem: { code: "request_cancelled_before_dispatch" },
     });
+    expect(writes).toBe(0);
+    expect(server.health().pendingCount).toBe(0);
+  });
+
+  // The write is sent only after its Edit permission is read. A permission read that never answers,
+  // or a Bridge that disconnects during it, leaves the write unsent, so its outcome is known.
+  it.each([
+    ["the permission read reaches its deadline", (_socket: WebSocket) => undefined],
+    ["the Bridge disconnects during the permission read", (socket: WebSocket) => socket.terminate()],
+  ])("reports a write as not sent when %s", async (_name, onOptionsRead) => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+      callTimeoutMs: 300,
+    });
+    servers.push(server);
+    const socket = await connect(server, [editableCanvasBinding()]);
+    let writes = 0;
+    socket.on("message", (raw) => {
+      const message = parseBridgeJson(raw.toString()) as { schema?: string; kind?: string } | undefined;
+      if (message?.schema !== BRIDGE_SCHEMAS.command) return;
+      if (message.kind === "edit_policy_options_get") onOptionsRead(socket);
+      else writes += 1;
+    });
+    const failure = await server.invoke({
+      kind: "invoke_write",
+      toolName: "canvas_update_create_page_courses",
+      operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page",
+      sourceBindingId: "canvas-course-42",
+      arguments: { course_id: "42", url_or_id: "week-1", morrow_page_guard: pageGuard },
+      outerGrant: {
+        planDigest: digest,
+        approvalGrantDigest: "b".repeat(64),
+        effectReceiptId: "effect:permission-read-unanswered",
+        dispatchAttempt: 1 as const,
+        gatewayProcessId: "gateway:12345678",
+        authorization: { kind: "edit_scope" as const, policyDigest: "c".repeat(64), policyRevision: 1 },
+      },
+      timeoutMs: 5_000,
+    }).then(() => undefined, (error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(BridgeUnavailableError);
+    expect(failure).not.toBeInstanceOf(BridgeOutcomeUnknownError);
+    expect((failure as Error).message).toBe("Morrow could not read the current Edit permission for this course, so it did not send the change. Create a fresh plan from the current binding.");
     expect(writes).toBe(0);
     expect(server.health().pendingCount).toBe(0);
   });

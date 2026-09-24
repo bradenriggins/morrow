@@ -42,7 +42,7 @@ const createInputSchema = z.strictObject({
   course_id: canvasId,
   quiz_id: canvasId.describe("The Canvas assignment ID of the New Quiz."),
   item: itemPayload.describe("The complete new question, in the shape Canvas returns one: entry_type, entry, and optional points_possible and position."),
-  material_path: z.string().min(11).max(4096).optional().describe("For a Hot Spot only, a PNG, JPEG, or GIF in this assistant's project materials folder. Do not supply interaction_data.image_url; Morrow obtains the reviewed upload URL during the one approved operation."),
+  material_path: z.string().min(1).max(4096).optional().describe("For a Hot Spot only, a PNG, JPEG, or GIF in this assistant's materials folder, the folder it works in, named by its path inside that folder, such as cell.png. Do not supply interaction_data.image_url; Morrow obtains the reviewed upload URL during the one approved operation."),
   requested_item_id: canvasId.optional().describe("An item id you want to reuse. Morrow refuses it when the quiz still holds it. Canvas assigns the id of a created question."),
 });
 

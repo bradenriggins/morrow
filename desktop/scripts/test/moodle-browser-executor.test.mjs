@@ -6,7 +6,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import { executeMoodleInPage } from "../../connector/extension/src/moodle-executor.js";
 
 const listOperation = {
@@ -761,7 +761,7 @@ test("Moodle discovery includes a fresh verified current course without dropping
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Discovery test server did not bind a port");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=99`);
@@ -875,7 +875,7 @@ test("Moodle discovery maps shortname, favourite, visible and category name to c
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Discovery fields test server did not bind a port");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=99`);
@@ -915,7 +915,7 @@ test("Moodle executor verifies a hidden IMS content package without opening it",
   const form = (itemId, add) => `<!doctype html><body><form method="post" action="/course/modedit.php?${add ? "add=imscp&amp;course=2&amp;sectionid=7&amp;return=0" : "update=99&amp;return=0"}"><input name="${add ? "course" : "update"}" value="${add ? "2" : "99"}"><input name="${add ? "add" : "course"}" value="${add ? "imscp" : "2"}"><input name="modulename" value="imscp"><input name="section" value="4"><input name="return" value="0"><input name="name" value="${add ? "" : "IMS package"}"><input name="visible" value="${add ? "1" : "0"}"><input name="revision" value="1"><textarea name="introeditor[text]"></textarea><input name="introeditor[format]" value="1"><input name="keepold" value="-1"><input class="filepickerhidden" type="hidden" id="id_package" name="package" value="${itemId}"><input type="submit" name="submitbutton2" value="Save changes and return to course"><input name="sesskey" value="synthetic-session"></form><script>M.form_filepicker.init(Y, ${JSON.stringify(picker(itemId))});</script></body>`;
   const state = () => JSON.stringify([{ data: JSON.stringify({ course: { id: 2, fullname: "IMS course" }, section: [{ id: 7, number: 4, title: "IMS section", component: "", visible: true, hasrestrictions: false }], cm: created ? [{ id: 99, module: "imscp", sectionid: 7, name: created.name, visible: false }] : [] }) }]);
   const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, (request, response) => { const url = new URL(request.url || "/", origin); requests.push(`${request.method} ${url.pathname}${url.search}`); if (url.pathname === "/course/view.php") return response.end('<body class="path-course course-2">'); if (url.pathname === "/lib/ajax/service.php") { request.resume(); return request.on("end", () => response.end(state())); } if (url.pathname === "/repository/draftfiles_ajax.php") { const chunks=[]; request.on("data",x=>chunks.push(x)); return request.on("end",()=>{const item=new URLSearchParams(Buffer.concat(chunks).toString()).get("itemid"); const draft=drafts.get(item); response.setHeader("content-type","application/json"); response.end(JSON.stringify(draft ? {filecount:1,list:[{filename,filepath:"/",type:"zip",size:bytes.length,sortorder:1,mimetype:"application/zip"}],tree:{children:[]}} : {filecount:0,list:[],tree:{children:[]}}));}); } if (url.pathname === "/repository/repository_ajax.php") { const chunks=[]; request.on("data",x=>chunks.push(x)); return request.on("end",()=>{const item=Buffer.concat(chunks).toString("latin1").match(/name="itemid"\r\n\r\n([0-9]+)/)?.[1]; drafts.set(item,bytes); response.setHeader("content-type","application/json"); response.end(JSON.stringify({id:Number(item),file:filename,url:`${origin}/draftfile.php/3/user/draft/${item}/${filename}`}));}); } if (url.pathname.startsWith("/draftfile.php/")) { const draft=drafts.get(url.pathname.split("/")[5]); response.setHeader("content-length",draft.length); return response.end(draft); } if (url.pathname === "/pluginfile.php/77/mod_imscp/backup/1/package.zip") { response.setHeader("content-length",bytes.length); return response.end(bytes); } if (url.pathname === "/course/modedit.php" && request.method === "GET") return response.end(url.searchParams.get("add") === "imscp" ? form("100",true) : created && url.searchParams.get("update") === "99" ? form("101",false) : ""); if (url.pathname === "/course/modedit.php") { const chunks=[]; request.on("data",x=>chunks.push(x)); return request.on("end",()=>{const values=new URLSearchParams(Buffer.concat(chunks).toString());posts.push(values);created={name:values.get("name")};response.writeHead(303,{location:"/course/view.php?id=2"}).end();}); } response.writeHead(404).end(); });
-  let browser; let context; try { await new Promise((resolve,reject)=>server.listen(0,"127.0.0.1",error=>error?reject(error):resolve())); const address=server.address(); origin=`https://127.0.0.1:${address.port}`; browser=await chromium.launch({headless:true,executablePath:chromium.executablePath()}); context=await browser.newContext({ignoreHTTPSErrors:true}); const page=await context.newPage(); await page.goto(`${origin}/course/view.php?id=2`); await page.evaluate(wwwroot=>{globalThis.M={cfg:{wwwroot,sesskey:"synthetic-session",userId:3,courseId:2}};},origin); const binding={origin,siteUrl:`${origin}/`,principalId:"3",courseId:"2"}; const base={mode:"execute",binding,expiresAt:Date.now()+60_000}; assert.equal((await executeInBrowser(page,{...base,operation:imscpReadOperation,arguments:{course_id:2,module_id:99}})).error,"moodle_form_target_invalid"); const prepared=await executeInBrowser(page,{...base,operation:imscpCreationReadOperation,arguments:{course_id:2,section_id:7}}); assert.equal(prepared.ok,true,JSON.stringify(prepared)); const unsafeName=Buffer.from("../after-manifest.txt","utf8"); const unsafeContent=Buffer.from("bad","utf8"); const unsafeLocal=Buffer.alloc(30+unsafeName.length+unsafeContent.length); unsafeLocal.writeUInt32LE(0x04034b50,0); unsafeLocal.writeUInt16LE(20,4); unsafeLocal.writeUInt32LE(unsafeContent.length,18); unsafeLocal.writeUInt32LE(unsafeContent.length,22); unsafeLocal.writeUInt16LE(unsafeName.length,26); unsafeName.copy(unsafeLocal,30); unsafeContent.copy(unsafeLocal,30+unsafeName.length); const unsafeCentral=Buffer.alloc(46+unsafeName.length); unsafeCentral.writeUInt32LE(0x02014b50,0); unsafeCentral.writeUInt16LE(20,4); unsafeCentral.writeUInt16LE(20,6); unsafeCentral.writeUInt32LE(unsafeContent.length,20); unsafeCentral.writeUInt32LE(unsafeContent.length,24); unsafeCentral.writeUInt16LE(unsafeName.length,28); unsafeCentral.writeUInt32LE(local.length,42); unsafeName.copy(unsafeCentral,46); const unsafeEnd=Buffer.alloc(22); unsafeEnd.writeUInt32LE(0x06054b50,0); unsafeEnd.writeUInt16LE(2,8); unsafeEnd.writeUInt16LE(2,10); unsafeEnd.writeUInt32LE(central.length+unsafeCentral.length,12); unsafeEnd.writeUInt32LE(local.length+unsafeLocal.length,16); const unsafeBytes=Buffer.concat([local,unsafeLocal,central,unsafeCentral,unsafeEnd]); const unsafeManifest={filename,size_bytes:unsafeBytes.length,sha256:createHash("sha256").update(unsafeBytes).digest("hex")}; const unsafe=await executeInBrowser(page,{...base,operation:imscpCreationWriteOperation,arguments:{course_id:2,section_id:7,name:"IMS package",...unsafeManifest,expected_digest:prepared.snapshot_digest},privateAttachment:{schema:"morrow.private-file-attachment.v1",handle:"file:imscp-unsafe",manifest:unsafeManifest,bytes_base64:unsafeBytes.toString("base64")}}); assert.deepEqual(unsafe,{ok:false,sent:false,error:"moodle_imscp_package_manifest_invalid"}); assert.equal(posts.length,0); assert.equal(requests.some(x=>x.startsWith("POST /repository/repository_ajax.php")),false); const result=await executeInBrowser(page,{...base,operation:imscpCreationWriteOperation,arguments:{course_id:2,section_id:7,name:"IMS package",...manifest,expected_digest:prepared.snapshot_digest},privateAttachment:{schema:"morrow.private-file-attachment.v1",handle:"file:imscp-1",manifest,bytes_base64:bytes.toString("base64")}}); assert.equal(result.ok,true,JSON.stringify(result)); assert.equal(posts.length,1); assert.equal(posts[0].get("package"),"100"); assert.equal(posts[0].get("visible"),"0"); assert.ok(requests.includes("GET /pluginfile.php/77/mod_imscp/backup/1/package.zip?forcedownload=1")); assert.equal(requests.some(x=>x.startsWith("GET /mod/imscp/view.php")),false); } finally { await context?.close(); await browser?.close(); await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve())); rmSync(directory,{recursive:true,force:true}); }
+  let browser; let context; try { await new Promise((resolve,reject)=>server.listen(0,"127.0.0.1",error=>error?reject(error):resolve())); const address=server.address(); origin=`https://127.0.0.1:${address.port}`; browser=await launchTestChromium(); context=await browser.newContext({ignoreHTTPSErrors:true}); const page=await context.newPage(); await page.goto(`${origin}/course/view.php?id=2`); await page.evaluate(wwwroot=>{globalThis.M={cfg:{wwwroot,sesskey:"synthetic-session",userId:3,courseId:2}};},origin); const binding={origin,siteUrl:`${origin}/`,principalId:"3",courseId:"2"}; const base={mode:"execute",binding,expiresAt:Date.now()+60_000}; assert.equal((await executeInBrowser(page,{...base,operation:imscpReadOperation,arguments:{course_id:2,module_id:99}})).error,"moodle_form_target_invalid"); const prepared=await executeInBrowser(page,{...base,operation:imscpCreationReadOperation,arguments:{course_id:2,section_id:7}}); assert.equal(prepared.ok,true,JSON.stringify(prepared)); const unsafeName=Buffer.from("../after-manifest.txt","utf8"); const unsafeContent=Buffer.from("bad","utf8"); const unsafeLocal=Buffer.alloc(30+unsafeName.length+unsafeContent.length); unsafeLocal.writeUInt32LE(0x04034b50,0); unsafeLocal.writeUInt16LE(20,4); unsafeLocal.writeUInt32LE(unsafeContent.length,18); unsafeLocal.writeUInt32LE(unsafeContent.length,22); unsafeLocal.writeUInt16LE(unsafeName.length,26); unsafeName.copy(unsafeLocal,30); unsafeContent.copy(unsafeLocal,30+unsafeName.length); const unsafeCentral=Buffer.alloc(46+unsafeName.length); unsafeCentral.writeUInt32LE(0x02014b50,0); unsafeCentral.writeUInt16LE(20,4); unsafeCentral.writeUInt16LE(20,6); unsafeCentral.writeUInt32LE(unsafeContent.length,20); unsafeCentral.writeUInt32LE(unsafeContent.length,24); unsafeCentral.writeUInt16LE(unsafeName.length,28); unsafeCentral.writeUInt32LE(local.length,42); unsafeName.copy(unsafeCentral,46); const unsafeEnd=Buffer.alloc(22); unsafeEnd.writeUInt32LE(0x06054b50,0); unsafeEnd.writeUInt16LE(2,8); unsafeEnd.writeUInt16LE(2,10); unsafeEnd.writeUInt32LE(central.length+unsafeCentral.length,12); unsafeEnd.writeUInt32LE(local.length+unsafeLocal.length,16); const unsafeBytes=Buffer.concat([local,unsafeLocal,central,unsafeCentral,unsafeEnd]); const unsafeManifest={filename,size_bytes:unsafeBytes.length,sha256:createHash("sha256").update(unsafeBytes).digest("hex")}; const unsafe=await executeInBrowser(page,{...base,operation:imscpCreationWriteOperation,arguments:{course_id:2,section_id:7,name:"IMS package",...unsafeManifest,expected_digest:prepared.snapshot_digest},privateAttachment:{schema:"morrow.private-file-attachment.v1",handle:"file:imscp-unsafe",manifest:unsafeManifest,bytes_base64:unsafeBytes.toString("base64")}}); assert.deepEqual(unsafe,{ok:false,sent:false,error:"moodle_imscp_package_manifest_invalid"}); assert.equal(posts.length,0); assert.equal(requests.some(x=>x.startsWith("POST /repository/repository_ajax.php")),false); const result=await executeInBrowser(page,{...base,operation:imscpCreationWriteOperation,arguments:{course_id:2,section_id:7,name:"IMS package",...manifest,expected_digest:prepared.snapshot_digest},privateAttachment:{schema:"morrow.private-file-attachment.v1",handle:"file:imscp-1",manifest,bytes_base64:bytes.toString("base64")}}); assert.equal(result.ok,true,JSON.stringify(result)); assert.equal(posts.length,1); assert.equal(posts[0].get("package"),"100"); assert.equal(posts[0].get("visible"),"0"); assert.ok(requests.includes("GET /pluginfile.php/77/mod_imscp/backup/1/package.zip?forcedownload=1")); assert.equal(requests.some(x=>x.startsWith("GET /mod/imscp/view.php")),false); } finally { await context?.close(); await browser?.close(); await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve())); rmSync(directory,{recursive:true,force:true}); }
 });
 
 const scormReadOperation = { key: "moodle.form.course.modedit.scorm.read.v1", toolName: "moodle_get_scorm", provider: "moodle", readOnly: true };
@@ -964,7 +964,7 @@ test("Moodle executor verifies a hidden local SCORM package without launching it
   try {
     await new Promise((resolve, reject) => server.listen(0, "127.0.0.1", (error) => error ? reject(error) : resolve()));
     const address = server.address(); origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() }); context = await browser.newContext({ ignoreHTTPSErrors: true }); const page = await context.newPage();
+    browser = await launchTestChromium(); context = await browser.newContext({ ignoreHTTPSErrors: true }); const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=2`); await page.evaluate((wwwroot) => { globalThis.M = { cfg: { wwwroot, sesskey: "synthetic-session", userId: 3, courseId: 2 } }; }, origin);
     const binding = { origin, siteUrl: `${origin}/`, principalId: "3", courseId: "2" }; const base = { mode: "execute", binding, expiresAt: Date.now() + 60_000 };
     const prepared = await executeInBrowser(page, { ...base, operation: scormCreationReadOperation, arguments: { course_id: 2, section_id: 7 } });
@@ -1537,7 +1537,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Moodle test server did not bind a port");
     const origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=1`);
@@ -2890,7 +2890,7 @@ test("Moodle executor reads supported Quiz question forms and holds Question ban
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Question-authoring test server did not bind a port");
     const origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=2`);
@@ -3205,7 +3205,7 @@ test("Moodle executor verifies bounded Forum and Choice forms over HTTPS", async
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Forum and Choice test server did not bind a port");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=2`);
@@ -3333,7 +3333,7 @@ test("Moodle executor verifies bounded Book chapters and Lesson settings over HT
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Book and Lesson test server did not bind a port");
     const origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=2`);
@@ -3495,7 +3495,7 @@ test("Moodle executor verifies hidden Glossary, Wiki, Feedback, and Database set
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Settings test server did not bind a port");
     const origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=2`);
@@ -3621,7 +3621,7 @@ test("Moodle refuses a form mutation when revalidation completes after the comma
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Moodle deadline server did not bind a port");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=2`);
@@ -3760,7 +3760,7 @@ test("Moodle Resource file creation verifies native bytes and refuses a mismatch
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Resource test server did not bind a port");
     origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=2`);
@@ -3924,7 +3924,7 @@ test("Moodle Folder recursively lists native drafts and verifies one hidden stag
   try {
     await new Promise((resolve, reject) => server.listen(0, "127.0.0.1", (error) => error ? reject(error) : resolve()));
     const address = server.address(); if (!address || typeof address === "string") throw new Error("Folder test server did not bind a port"); origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() }); context = await browser.newContext({ ignoreHTTPSErrors: true }); const page = await context.newPage(); await page.goto(`${origin}/course/view.php?id=2`); await page.evaluate((wwwroot) => { globalThis.M = { cfg: { wwwroot, sesskey: "synthetic-session", userId: 3, courseId: 2 } }; }, origin);
+    browser = await launchTestChromium(); context = await browser.newContext({ ignoreHTTPSErrors: true }); const page = await context.newPage(); await page.goto(`${origin}/course/view.php?id=2`); await page.evaluate((wwwroot) => { globalThis.M = { cfg: { wwwroot, sesskey: "synthetic-session", userId: 3, courseId: 2 } }; }, origin);
     const binding = { origin, siteUrl: `${origin}/`, principalId: "3", courseId: "2" };
     const base = { mode: "execute", binding, expiresAt: Date.now() + 60_000 };
     const folderSettings = await executeInBrowser(page, { ...base, operation: folderReadOperation, arguments: { course_id: 2, module_id: 50 } });
@@ -4191,7 +4191,7 @@ test("Moodle executor writes the complete Quiz settings scope and Quiz overrides
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Quiz test server did not bind a port");
     const origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${origin}/course/view.php?id=2`);
@@ -4494,7 +4494,7 @@ async function withFixtureServer(prefix, handler, callback) {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("fixture server did not bind a port");
     state.origin = `https://127.0.0.1:${address.port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    browser = await launchTestChromium();
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     await page.goto(`${state.origin}/course/view.php?id=2`);

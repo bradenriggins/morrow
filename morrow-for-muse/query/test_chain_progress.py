@@ -28,6 +28,8 @@ class FakeReader:
         self.assignments = assignments
 
     def get_paginated(self, path):
+        if path.split("?", 1)[0].endswith(("/users", "/enrollments")):
+            return 200, [], None  # the course roster the chain reads first
         if "/quizzes" in path:
             return 200, self.quizzes, None
         if "/assignments" in path:
@@ -63,7 +65,7 @@ def _run(progress):
     return C.run_query(
         "89585", "last_week", reader=_reader(), now_utc=NOW, synthetic_rows=SYNTH,
         tenant_base="https://school.example.edu",
-        progress=progress)
+        progress=progress, timezone="America/Chicago")
 
 
 def test_stage_order():

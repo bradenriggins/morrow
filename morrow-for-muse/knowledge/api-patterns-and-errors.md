@@ -28,7 +28,8 @@ Write bodies use Canvas's nested contract per surface:
   selftests still encode the `{"discussion_topic": {...}}` wrapper,
   and only one discussion write is live-proven through the Chromium
   lane (C-238, discussion date_details PUT 204, 2026-09-21 write
-  battery; SCOPE.md withholds discussion writes from v1). The flat
+  battery; SCOPE.md withholds discussion writes from v1, and the
+  admission policy holds them). The flat
   shape is the production-verified contract; the executor unwraps
   one nesting level for readback comparison and prevalidation but
   sends the body unchanged, so a wrapped body still hits D-009.
@@ -61,10 +62,15 @@ what an agent sees:
   dispatch programmatically through `dispatch_catalog_op(...)` with
   `extra={"query": {"per_page": 100, "page": 2}}`.
 
-Treat any list receipt as partial unless you paged through it
-yourself. For audit-grade verification (e.g. "is the deleted object
-absent"), the terminal member GET or the follow-up readback matters,
-not the list length.
+The Chromium lane paginates for you: every catalog list read follows
+Canvas's `Link rel="next"` up to 20 pages and merges them into one
+list. When more pages remain after that bound (or a page dies
+mid-walk), the result is marked partial (the
+`x-morrow-pagination-partial` header; the receipt keeps the
+`truncated` flag) and the executor says so loudly; it never hands you
+a partial list as if it were complete. For audit-grade verification
+(e.g. "is the deleted object absent"), the terminal member GET or the
+follow-up readback matters, not the list length.
 
 ## Pre-dispatch guardrails (shipped in the executor)
 
@@ -193,7 +199,8 @@ news, which is exactly why they keep biting.
 - **No PUT on New Quiz paths.** Update is PATCH. The executor guards
   this (`guard_new_quiz_request`).
 - **Bulk assignment date update** takes a bare array body; the object
-  wrapper 400s (C-37 evidence).
+  wrapper 400s (C-37 evidence). Pass the array as `--body`
+  (`[{"id": 5, "all_dates": [{"base": true, "due_at": "..."}]}]`).
 - **Batch override update** needs `assignment_id` in the body; without
   it the first attempt 400'd (C-36 evidence).
 - **Unshare (bank shares)**: no unshare via DELETE (404s). Unshare is

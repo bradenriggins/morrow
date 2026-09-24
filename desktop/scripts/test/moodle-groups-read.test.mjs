@@ -5,7 +5,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { launchTestChromium } from "./lib/chromium-launch.mjs";
 import { executeMoodleCourseGroupsInPage } from "../../connector/extension/src/moodle-groups-read.js";
 
 const OP = { key: "moodle.page.group.membership_map.read.v1", toolName: "moodle_get_course_groups", provider: "moodle", readOnly: true };
@@ -53,7 +53,7 @@ test("Moodle group map uses the core group list and native GET member read with 
   });
   try {
     await new Promise((resolve, reject) => server.listen(0, "127.0.0.1", (error) => error ? reject(error) : resolve())); origin = `https://127.0.0.1:${server.address().port}`;
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() }); const page = await browser.newPage({ ignoreHTTPSErrors: true }); await page.goto(`${origin}/course/view.php?id=2`);
+    browser = await launchTestChromium(); const page = await browser.newPage({ ignoreHTTPSErrors: true }); await page.goto(`${origin}/course/view.php?id=2`);
     const run = (args = { course_id: 2 }, expiresAt = Date.now() + 60_000) => page.evaluate(executeMoodleCourseGroupsInPage, JSON.stringify({ operation: OP, arguments: args, binding: { origin, siteUrl: `${origin}/`, principalId: "3", courseId: "2" }, expiresAt }));
     const memberCount = () => requests.filter((request) => request.path === "/group/index.php").length;
     const fixtureCount = () => requests.filter((request) => request.path !== "/favicon.ico").length;

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import test, { after } from "node:test";
 import { clearExtensionGlobals, loadExtensionPage } from "./lib/extension-dom.mjs";
+import { PROBLEM_CODES, problemText } from "../../connector/extension/src/bridge-problem-copy.js";
 import {
   canvasProtectedRoster,
   protectLocalRequest,
@@ -192,11 +193,244 @@ test("local protection matches a rostered name written without its accents, on b
   assert.equal(accented, asserted);
 });
 
+// A leading title or a family-name particle is prose, not a reference to one student: "Dr."
+// in the educator's words names the course's teacher, so neither word may be replaced with a
+// student's label and come back as that student's name on the write path.
+test("a leading title or a family-name particle never stands for a rostered student", () => {
+  const honorifics = [
+    { id: 771, name: "Dr. Jane Doe", sortable_name: "Doe, Jane" },
+    { id: 772, name: "Ms. Ada Frizzle" },
+    { id: 773, name: "Ana van der Berg" },
+    { id: 774, name: "Van Nguyen" },
+  ];
+  const protectTitles = (text, assertedIdentifiers = []) => protectLocalRequest({
+    sourceBindingId: "canvas:course-89585", courseId: "89585", text, assertedIdentifiers,
+    roster: sourceProtectedRoster(honorifics), rosterComplete: true, rosterFreshAt: NOW, now: NOW,
+  });
+  const teacher = "Dr. Smith will collect the homework. Ms. Brown graded it.";
+  assert.equal(protectTitles(teacher).protectedText, teacher);
+  assert.equal(protectTitles("Van and Der asked a question.").protectedText, "Van and Der asked a question.");
+  // A capitalized word that matched nobody inside a sentence still asks, as "Der" here;
+  // the title itself is not a name question.
+  assert.deepEqual(protectTitles("Van and Der asked a question.").unmatchedNames, ["Der"]);
+  assert.doesNotMatch(protectTitles("Ask Dr. Smith to send it.").protectedText, /Student A/u);
+  // The students' own names still replace, with or without the title or particle.
+  assert.doesNotMatch(protectTitles("Ask Dr. Jane Doe to submit.").protectedText, /Jane|Doe/u);
+  assert.doesNotMatch(protectTitles("Ask Ms. Ada Frizzle to submit.").protectedText, /Frizzle/u);
+  assert.doesNotMatch(protectTitles("Ask Ana van der Berg and Berg to submit.").protectedText, /Berg/u);
+  assert.doesNotMatch(protectTitles("Ask Nguyen and Van Nguyen to submit.").protectedText, /Nguyen/u);
+});
+
+// Both learner boundaries read one roster the same way: the Bridge for what the educator types,
+// the gateway for what a tool result carries.
+const SCRIPT_ROSTER = [
+  { id: 721, name: "王小明" },
+  { id: 722, name: "佐藤 花子" },
+  { id: 723, name: "김민준" },
+  { id: 724, name: "محمد علي" },
+  { id: 725, name: "דוד כהן" },
+  { id: 726, name: "สมชาย ใจดี" },
+  { id: 727, name: "Ada Lovelace" },
+  { id: 731, name: "Sean O'Brien" },
+  { id: 732, name: "Maria D'Angelo" },
+  { id: 733, name: "Ana Smith-Jones" },
+  { id: 734, name: "İlkay Yıldız" },
+  { id: 735, name: "José García" },
+  { id: 736, name: "Liam O’Neil" },
+  { id: 741, name: "Łukasz Wałęsa" },
+  { id: 742, name: "Søren Kierkegaard" },
+  { id: 743, name: "Đorđe Jovanović" },
+  { id: 745, name: "Đặng Thu Hà" },
+  { id: 746, name: "Guðrún Þórsdóttir" },
+  { id: 747, name: "Lætitia Cœur" },
+  { id: 748, name: "Jürgen Weiß" },
+  { id: 753, name: "欧阳小红" },
+  { id: 754, name: "남궁민수" },
+  { id: 755, name: "田中太郎" },
+];
+const SCRIPT_CASES = [
+  ["我同意王小明的看法", "我同意<721>的看法"],
+  ["请看王小明的作业。", "请看<721>的作业。"],
+  ["佐藤花子さんの課題を見てください。", "<722>さんの課題を見てください。"],
+  ["花子さんの課題を確認して。", "<722>さんの課題を確認して。"],
+  ["김민준의 과제를 확인해 주세요.", "<723>의 과제를 확인해 주세요."],
+  ["김 민준 학생", "<723> 학생"],
+  ["أرسل ملاحظة لمحمد علي اليوم.", "أرسل ملاحظة ل<724> اليوم."],
+  ["שלח הודעה לדוד כהן היום.", "שלח הודעה ל<725> היום."],
+  ["ช่วยตรวจงานของสมชายหน่อย", "ช่วยตรวจงานของ<726>หน่อย"],
+  ["请看Ada Lovelace的作业。", "请看<727>的作业。"],
+  ["Please review Ada Lovelace's essay.", "Please review <727>'s essay."],
+  ["ADALOVELACE and ADAS stay as written.", "ADALOVELACE and ADAS stay as written."],
+  ["Sean O’Brien submitted the lab.", "<731> submitted the lab."],
+  ["Please check O’Brien’s draft.", "Please check <731>’s draft."],
+  ["Maria DʼAngelo and D＇Angelo and D`Angelo and D´Angelo asked.", "<732> and <732> and <732> and <732> asked."],
+  ["Ana Smith‑Jones wrote this. Smith–Jones replied.", "<733> wrote this. <733> replied."],
+  ["İlkay Yıldız submitted late. İlkay asked.", "<734> submitted late. <734> asked."],
+  ["Jose Garcia submitted late. Garcia asked.", "<735> submitted late. <735> asked."],
+  ["Liam O'Neil asked.", "<736> asked."],
+  ["Łukasz Wałęsa submitted late.", "<741> submitted late."],
+  ["Lukasz Walesa submitted late. Walesa asked.", "<741> submitted late. <741> asked."],
+  ["Soren Kierkegaard asked. Soren replied.", "<742> asked. <742> replied."],
+  ["Dorde Jovanovic asked. Dorde replied.", "<743> asked. <743> replied."],
+  ["Ilkay Yildiz submitted late. Please ask Yildiz.", "<734> submitted late. Please ask <734>."],
+  ["Dang Thu Ha asked.", "<745> asked."],
+  ["Gudrun Thorsdottir asked.", "<746> asked."],
+  ["Laetitia Coeur asked.", "<747> asked."],
+  ["Jurgen Weiss asked. Weiss replied.", "<748> asked. <748> replied."],
+  ["请提醒小明交作业。", "请提醒<721>交作业。"],
+  ["민준에게 과제를 알려 주세요.", "<723>에게 과제를 알려 주세요."],
+  ["小红交了作业，欧阳也交了。", "<753>交了作业，<753>也交了。"],
+  ["민수 학생", "<754> 학생"],
+  ["太郎さんと田中さん", "<755>さんと<755>さん"],
+  ["王老师和김 선생님", "王老师和김 선생님"],
+];
+
+function protectScripts(text, assertedIdentifiers = []) {
+  return protectLocalRequest({
+    sourceBindingId: "canvas:course-1", courseId: "1", text, assertedIdentifiers,
+    roster: sourceProtectedRoster(SCRIPT_ROSTER), rosterComplete: true, rosterFreshAt: NOW, now: NOW,
+  });
+}
+
+function byStudent(text, labels) {
+  const ids = new Map(Object.entries(labels).map(([id, label]) => [label, id]));
+  // Private Chat sends NFKC text, so the gateway result is compared in that form too.
+  return text.normalize("NFKC").replace(/Student A[1-9][0-9]*/gu, (label) => `<${ids.get(label) ?? "?"}>`);
+}
+
+test("local protection replaces a name in every script and spelling a person writes it in", () => {
+  for (const [text, expected] of SCRIPT_CASES) {
+    const result = protectScripts(text);
+    assert.equal(byStudent(result.protectedText, result.labelsById), expected.normalize("NFKC"), text);
+    assert.deepEqual(result.unmatchedNames, [], text);
+  }
+  // The educator lists the students the message names, in the script the roster writes them.
+  assert.equal(byStudent(protectScripts("请看王小明的作业。", ["王小明"]).protectedText, protectScripts("请看王小明的作业。", ["王小明"]).labelsById), "请看<721>的作业。");
+  const korean = protectScripts("김민준의 과제를 확인해 주세요.", ["김민준"]);
+  assert.equal(byStudent(korean.protectedText, korean.labelsById), "<723>의 과제를 확인해 주세요.");
+  const curly = protectScripts("Please check O’Brien’s draft.", ["O'Brien"]);
+  assert.equal(byStudent(curly.protectedText, curly.labelsById), "Please check <731>’s draft.");
+});
+
+test("the gateway and Morrow Bridge replace the same names in the same places", async () => {
+  const { LearnerRoster, LearnerVault, redactKnownLearnerText } = await import("../../packages/gateway-core/dist/privacy.js");
+  const scope = { canvasOrigin: "https://canvas.example.test", account: "1", course: "1", principal: "instructor:7", profile: "private-full" };
+  const learnerRoster = new LearnerRoster();
+  learnerRoster.register(scope, SCRIPT_ROSTER.map(({ id, name }) => ({ id: String(id), name })));
+  const context = { learnerRoster, learnerVault: new LearnerVault(":memory:"), learnerScope: scope };
+  const labels = Object.fromEntries(SCRIPT_ROSTER.map(({ id, name }) => [String(id), redactKnownLearnerText(name, context)]));
+  for (const [text, expected] of SCRIPT_CASES) {
+    assert.equal(byStudent(redactKnownLearnerText(text, context), labels), expected.normalize("NFKC"), text);
+  }
+});
+
+// Both boundaries match a rostered name only as a whole word. Russian, Polish, German, and other
+// languages write a name with an ending that changes the word, so that form reaches the assistant
+// as written. The learner privacy limits must say so, and must say where Private Chat asks.
+const ENDING_ROSTER = [
+  { id: 741, name: "Мария Иванова" },
+  { id: 742, name: "Łukasz Nowak" },
+  { id: 743, name: "Anna Schmidt" },
+];
+const ENDING_FORMS = ["Напишите Марии Ивановой.", "Sprawdź pracę Łukasza Nowaka.", "Bitte lies Annas Aufsatz."];
+
+function protectEndings(text) {
+  return protectLocalRequest({
+    sourceBindingId: "canvas:course-1", courseId: "1", text, assertedIdentifiers: [],
+    roster: sourceProtectedRoster(ENDING_ROSTER), rosterComplete: true, rosterFreshAt: NOW, now: NOW,
+  });
+}
+
+test("a name written with a grammatical ending passes through as written, as the learner privacy limits say", async () => {
+  const { LearnerRoster, LearnerVault, redactKnownLearnerText } = await import("../../packages/gateway-core/dist/privacy.js");
+  const scope = { canvasOrigin: "https://canvas.example.test", account: "1", course: "1", principal: "instructor:7", profile: "private-full" };
+  const learnerRoster = new LearnerRoster();
+  learnerRoster.register(scope, ENDING_ROSTER.map(({ id, name }) => ({ id: String(id), name })));
+  const context = { learnerRoster, learnerVault: new LearnerVault(":memory:"), learnerScope: scope };
+  for (const { name } of ENDING_ROSTER) assert.match(redactKnownLearnerText(`Bitte lies ${name}.`, context), /^Bitte lies Student A\d+\.$/u, name);
+  for (const text of ENDING_FORMS) {
+    assert.equal(redactKnownLearnerText(text, context), text, text);
+    const bridge = protectEndings(text);
+    assert.equal(bridge.protectedText, text.normalize("NFKC"), text);
+    assert.notDeepEqual(bridge.unmatchedNames, [], `Private Chat asks about a capitalized unknown name inside a sentence: ${text}`);
+  }
+  // One capitalized word that starts a sentence is sent as written, whether it is an ending form or a nickname.
+  for (const text of ["Марии нужно помочь.", "Łukasza nie było.", "Bobby did well."]) {
+    const bridge = protectEndings(text);
+    assert.equal(bridge.protectedText, text.normalize("NFKC"), text);
+    assert.deepEqual(bridge.unmatchedNames, [], text);
+  }
+
+  const limitations = readFileSync(new URL("LIMITATIONS.md", root), "utf8");
+  const start = limitations.indexOf("\n## Learner privacy");
+  const privacy = limitations.slice(start, limitations.indexOf("\n## ", start + 1)).replace(/\s+/g, " ");
+  assert.match(privacy, /A name written with a grammatical ending[^.]*passes through as written/u);
+  for (const form of ["Марии", "Łukasza", "Annas"]) assert.ok(privacy.includes(form), `LIMITATIONS.md must give ${form} as an example`);
+  assert.match(privacy, /matches no student stops the message until the educator sends it again, unless it is one word that starts a sentence/u);
+});
+
+// A follow-up such as "Make it shorter" names no student, so it needs no list. The roster still
+// protects every student detail the text holds, listed or not.
+test("a message that lists no student is protected by the class list alone", () => {
+  assert.equal(protectCourse("Make it shorter and friendlier.", []).protectedText, "Make it shorter and friendlier.");
+  assert.match(protectCourse("Now write one for Jane Doe too.", []).protectedText, /^Now write one for Student A\d+ too\.$/u);
+  assert.match(protectCourse("Copy jane.doe@school.edu on it.", []).protectedText, /^Copy Student A\d+ on it\.$/u);
+  assert.throws(() => protectCourse("Copy someone@else.edu on it.", []), /protected_request_identifier_unknown/u);
+  assert.deepEqual(protectCourse("Ask Bobby Smith to review it.", []).unmatchedNames, ["Bobby Smith"]);
+  // A list that is given is still checked entry by entry.
+  assert.throws(() => protectCourse("Make it shorter.", ["Jane Doe"]), /protected_request_assertion_missing/u);
+});
+
 test("local protection replaces a rostered platform id written after a person word or bare", () => {
   const result = protectCourse("Jane Doe is user 98765 and 55123", ["Jane Doe"]);
   assert.doesNotMatch(result.protectedText, /98765|55123/u);
   assert.match(result.protectedText, /^(Student A\d+) is user \1 and Student A\d+$/u);
   assert.equal(protectCourse("Jane Doe scored 44 in module 44001", ["Jane Doe"]).protectedText.endsWith("in module 44001"), true);
+});
+
+// A student number or a numeric login names one student as surely as the platform id does.
+const NUMBERED_COURSE = [
+  { id: 98765, name: "Jane Doe", sortable_name: "Doe, Jane", login_id: "jdoe", email: "jane.doe@school.edu", sis_user_id: "20231234" },
+  { id: 55123, name: "José García", sortable_name: "García, José", login_id: "70011222", email: "jgarcia@school.edu", sis_user_id: "20239876" },
+  { id: 44001, name: "Will Grant", sortable_name: "Grant, Will", login_id: "wgrant", integration_id: "30004444" },
+];
+
+function protectNumbered(text, assertedIdentifiers) {
+  return protectLocalRequest({
+    sourceBindingId: "canvas:course-1", courseId: "1", text, assertedIdentifiers,
+    roster: canvasProtectedRoster(NUMBERED_COURSE, [], "1"), rosterComplete: true, rosterFreshAt: NOW, now: NOW,
+  });
+}
+
+test("local protection replaces a rostered student number or numeric login the educator did not list", () => {
+  const cases = [
+    ["Jane Doe and 98765 both missed the lab.", /^(Student A\d+) and \1 both missed the lab\.$/u],
+    ["Jane Doe and 20239876 both missed the lab.", /^Student A\d+ and Student A\d+ both missed the lab\.$/u],
+    ["Jane Doe and 70011222 both missed the lab.", /^Student A\d+ and Student A\d+ both missed the lab\.$/u],
+    ["Jane Doe's student number is 20231234.", /^(Student A\d+)'s student number is \1\.$/u],
+    ["Jane Doe and student 30004444 need more time.", /^Student A\d+ and student Student A\d+ need more time\.$/u],
+  ];
+  for (const [text, expected] of cases) {
+    const result = protectNumbered(text, ["Jane Doe"]);
+    assert.match(result.protectedText, expected, text);
+    assert.doesNotMatch(result.protectedText, /98765|20239876|70011222|20231234|30004444/u, text);
+  }
+  const garcia = protectNumbered("Jane Doe and 20239876 both missed the lab.", ["Jane Doe"]);
+  const login = protectNumbered("Jane Doe and 70011222 both missed the lab.", ["Jane Doe"]);
+  assert.equal(garcia.protectedText, login.protectedText, "a student number and a login of one student get one label");
+  // A number written after a course word stays a course number.
+  assert.equal(protectNumbered("Jane Doe is in section 20239876.", ["Jane Doe"]).protectedText.endsWith("in section 20239876."), true);
+});
+
+test("local protection refuses a number that is an identifier of two different students", () => {
+  const shared = [
+    { id: 98765, name: "Jane Doe", sortable_name: "Doe, Jane", sis_user_id: "55123" },
+    { id: 55123, name: "José García", sortable_name: "García, José" },
+  ];
+  assert.throws(() => protectLocalRequest({
+    sourceBindingId: "canvas:course-1", courseId: "1", text: "Jane Doe and 55123 both missed the lab.", assertedIdentifiers: ["Jane Doe"],
+    roster: canvasProtectedRoster(shared, [], "1"), rosterComplete: true, rosterFreshAt: NOW, now: NOW,
+  }), /protected_request_identifier_ambiguous/);
 });
 
 test("local protection does not turn common words that match a lone name part into labels", () => {
@@ -209,11 +443,23 @@ test("local protection does not turn common words that match a lone name part in
   assert.doesNotMatch(surname, /Grant/u);
 });
 
+test("local protection takes the family name before a suffix such as Jr. and leaves the suffix as written", () => {
+  const suffixed = sourceProtectedRoster([{ id: 7, name: "Marisol Okonkwo Jr." }, { id: 8, name: "Henry Ford II" }]);
+  const protectSuffixed = (text, assertedIdentifiers) => protectLocalRequest({
+    sourceBindingId: "canvas:course-1", courseId: "1", text, assertedIdentifiers,
+    roster: suffixed, rosterComplete: true, rosterFreshAt: NOW, now: NOW,
+  }).protectedText;
+  assert.match(protectSuffixed("Okonkwo and Ford presented.", ["Okonkwo", "Ford"]), /^Student A\d+ and Student A\d+ presented\.$/u);
+  assert.match(protectSuffixed("Henry Ford II presented on World War II.", ["Henry Ford II"]), /^Student A\d+ presented on World War II\.$/u);
+});
+
 test("local protection reports name-like words it could not match instead of passing them silently", () => {
   const nickname = protectCourse("Jane Doe (goes by Janey) and Bobby Smith are failing", ["Jane Doe"]);
   assert.deepEqual(nickname.unmatchedNames, ["Janey", "Bobby Smith"]);
   const typo = protectCourse("Jane Doe and Mia Chenn", ["Jane Doe"]);
   assert.deepEqual(typo.unmatchedNames, ["Chenn"]);
+  // The educator confirms the whole name, not the part after its apostrophe or hyphen.
+  assert.deepEqual(protectCourse("Jane Doe, Liam O’Neil, and Ana Smith‑Lopez", ["Jane Doe"]).unmatchedNames, ["Liam O’Neil", "Ana Smith\u2010Lopez"]);
   const sentenceStart = protectCourse("Will you check Jane Doe? Grant needs one too.", ["Jane Doe"]);
   assert.deepEqual(sentenceStart.unmatchedNames, ["Will", "Grant"]);
   assert.deepEqual(protectCourse("\"Will you check Jane Doe?\"\nGrant asked.", ["Jane Doe"]).unmatchedNames, ["Will", "Grant"]);
@@ -437,6 +683,57 @@ test("Private Chat takes each student's label from the gateway and shows the edu
   assert.equal(api.privateChatStatus().messages.length, 0);
 });
 
+// The gateway sends the last reply a session allows as reply_at_limit. The Bridge shows it, ends the
+// chat, and takes no further message, so no educator message is left without an answer.
+test("Private Chat shows the last reply at the limit, ends the chat, and takes no further message", async () => {
+  const { api, sent, command } = privateChatWorker();
+  await api.handlePrivateChatExchange(command({ action: "listen" }));
+  const submitted = api.submitPrivateChatMessage("canvas:course-1", "Extend Jane Doe's due date.", ["Jane Doe"]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await api.handlePrivateChatExchange(command({
+    action: "labels", sourceBindingId: "canvas:course-1", courseId: "1", labelsById: { 98765: "Student A1" },
+  }));
+  await submitted;
+  await api.handlePrivateChatExchange(command({
+    action: "reply_at_limit", sourceBindingId: "canvas:course-1", courseId: "1",
+    assistantReply: "Student A1 now has until Friday.",
+  }));
+  const ended = sent.at(-1);
+  assert.equal(ended.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(ended.result)), { schema: "morrow.private-chat.exchange.v1", status: "closed" });
+  const status = JSON.parse(JSON.stringify(api.privateChatStatus()));
+  assert.equal(status.ended, true);
+  assert.equal(status.transportAvailable, false);
+  assert.deepEqual(status.messages.map((entry) => entry.text), ["Extend Student A1's due date.", "Student A1 now has until Friday."]);
+  await assert.rejects(api.submitPrivateChatMessage("canvas:course-1", "One more thing for Jane Doe.", ["Jane Doe"]), /private_chat_start_required/u);
+  const before = sent.length;
+  await api.handlePrivateChatExchange(command({
+    action: "reply_and_listen", sourceBindingId: "canvas:course-1", courseId: "1", assistantReply: "Another reply.",
+  }));
+  assert.equal(sent.length, before + 1);
+  assert.equal(sent.at(-1).failure.code, "private_chat_scope_changed");
+  assert.equal(api.privateChatStatus().messages.length, 2);
+
+  // A new Private Chat the assistant starts replaces the ended one instead of reporting it busy.
+  const next = command({ action: "listen" });
+  next.arguments.sessionId = "session-87654321";
+  await api.handlePrivateChatExchange(next);
+  const restarted = JSON.parse(JSON.stringify(api.privateChatStatus()));
+  assert.equal(restarted.ended, false);
+  assert.equal(restarted.transportAvailable, true);
+  assert.deepEqual(restarted.messages, []);
+});
+
+test("Private Chat sends a follow-up that names no student with no list", async () => {
+  const { api, sent, command } = privateChatWorker();
+  await api.handlePrivateChatExchange(command({ action: "listen" }));
+  assert.deepEqual(JSON.parse(JSON.stringify(await api.submitPrivateChatMessage("canvas:course-1", "Make it shorter and friendlier.", []))), { status: "sent" });
+  const message = sent.at(-1);
+  assert.equal(message.ok, true);
+  assert.equal(message.result.status, "message");
+  assert.equal(message.result.protectedText, "Make it shorter and friendlier.");
+});
+
 test("Private Chat asks the educator to confirm name-like words it could not match before sending", async () => {
   const { api, sent, command } = privateChatWorker();
   await api.handlePrivateChatExchange(command({ action: "listen" }));
@@ -492,4 +789,124 @@ test("the drawer shows the educator real names and asks before sending unmatched
   await page.click("#private-chat-send");
   assert.deepEqual(page.messages("morrow_private_chat_send")[1].confirmedNames, ["Bobby Smith"]);
   assert.equal(page.query("#private-chat-message").value, "");
+});
+
+// After a send the chat keeps running while the assistant answers. It is not a chat that needs starting.
+test("the drawer says a sent message waits for the assistant's reply, and asks to start a chat only when none exists", async () => {
+  const binding = { sourceBindingId: "canvas:course-89585", provider: "canvas", origin: "https://canvas.example.edu", courseId: "89585", courseName: "Biology", runtimeVerified: true, editPolicyRevision: 0 };
+  const client = { id: "session-12345678", name: "Claude Desktop", protocolVersion: "2026-07-28", sampling: true, pushSampling: false };
+  const sent = {
+    schema: "morrow.private-chat.status.v1", transportAvailable: false, waitingForMessage: false, clients: [client],
+    messages: [{ role: "user", text: "Review Student A1's missing work.", parts: [{ text: "Review " }, { name: "Michaela Brook", label: "Student A1" }, { text: "'s missing work." }] }],
+    sourceBindingId: binding.sourceBindingId, courseId: "89585", code: "private_chat_start_required",
+  };
+  const none = { schema: "morrow.private-chat.status.v1", transportAvailable: false, waitingForMessage: false, clients: [], messages: [], code: "private_chat_start_required" };
+  let privateChat = sent;
+  const page = await loadExtensionPage("settings/settings.html", {
+    handlers: { morrow_edit_policy_status: () => ({ bindings: [binding], catalogDigest: "c".repeat(64), siteAnchors: [], bindingLimit: 500, privateChat }) },
+  });
+  await page.click("#private-chat-open");
+  assert.equal(page.text("#private-chat-status"), "Sent. Waiting for the assistant's reply. Keep this drawer open.");
+  assert.equal(page.query("#private-chat-message").disabled, true);
+  privateChat = none;
+  await page.click("#refresh");
+  await page.waitFor(() => page.text("#private-chat-status") !== "Sent. Waiting for the assistant's reply. Keep this drawer open.", "the drawer kept the waiting line after the chat ended");
+  assert.equal(page.text("#private-chat-status"), "Ask the connected assistant to start Morrow Private Chat. Keep this drawer open while you chat.");
+  // A chat that reached its message limit keeps its last reply in view and says how to continue.
+  privateChat = { ...sent, ended: true, messages: [...sent.messages, { role: "assistant", text: "Student A1 has two missing labs.", parts: [{ name: "Michaela Brook", label: "Student A1" }, { text: " has two missing labs." }] }] };
+  await page.click("#refresh");
+  await page.waitFor(() => page.text("#private-chat-status").startsWith("This Private Chat"), "the drawer did not show that the chat ended");
+  assert.equal(page.text("#private-chat-status"), "This Private Chat reached its message limit. Close this drawer, then ask your assistant to start a new Private Chat.");
+  assert.equal(page.query("#private-chat-message").disabled, true);
+  assert.match(page.text("#private-chat-history"), /Michaela Brook has two missing labs\./u);
+});
+
+// A send that fails names what happened and the one step that helps, and keeps the message and the
+// list, so the educator can send again once that step is done.
+test("the drawer names why a message was not sent, and keeps it for the next try", async () => {
+  const binding = { sourceBindingId: "canvas:course-1", provider: "canvas", origin: "https://canvas.example.edu", courseId: "1", courseName: "Biology", runtimeVerified: true, editPolicyRevision: 0 };
+  const privateChat = {
+    schema: "morrow.private-chat.status.v1", transportAvailable: true,
+    clients: [{ id: "assistant-1", name: "Desktop assistant", protocolVersion: "2025-06-18", sampling: true, pushSampling: true }],
+  };
+  let answer = null;
+  const page = await loadExtensionPage("settings/settings.html", {
+    handlers: {
+      morrow_edit_policy_status: () => ({ bindings: [binding], catalogDigest: "c".repeat(64), siteAnchors: [], bindingLimit: 500, privateChat }),
+      morrow_private_chat_send: () => answer(),
+      morrow_private_chat_close: () => ({ status: "closed" }),
+    },
+  });
+  await page.click("#private-chat-open");
+  await page.type("#private-chat-identifiers", "Maria");
+  await page.type("#private-chat-message", "How is Maria doing?");
+  for (const code of ["private_chat_course_unavailable", "private_chat_roster_incomplete", "protected_request_identifier_unknown",
+    "protected_request_identifier_ambiguous", "protected_request_assertion_missing", "protected_request_existing_label_refused",
+    "private_chat_exchange_changed", "private_chat_scope_change_refused", "private_chat_message_invalid", "private_chat_send_failed"]) {
+    assert.ok(PROBLEM_CODES.includes(code), `${code} has no copy of its own`);
+    answer = () => ({ ok: false, code, error: code });
+    await page.click("#private-chat-send");
+    assert.equal(page.text("#private-chat-status"), problemText(code), code);
+    assert.equal(page.text("#announcement"), problemText(code), code);
+    assert.equal(page.query("#private-chat-message").value, "How is Maria doing?", code);
+    assert.equal(page.query("#private-chat-identifiers").value, "Maria", code);
+  }
+  answer = () => { throw new Error("Extension context invalidated."); };
+  await page.click("#private-chat-send");
+  assert.equal(page.text("#private-chat-status"), problemText("bridge_extension_reloaded"));
+  // The copy names a real next step for each state, and no two states share one.
+  assert.match(problemText("private_chat_course_unavailable"), /open the course/i);
+  assert.match(problemText("private_chat_exchange_changed"), /start Private Chat again/);
+});
+
+// The student list is for the students a message names. A message that names none sends with an
+// empty list; the drawer asks only for a course and a message.
+test("the drawer sends a message that lists no student, and still asks for a course and a message", async () => {
+  const binding = { sourceBindingId: "canvas:course-1", provider: "canvas", origin: "https://canvas.example.edu", courseId: "1", courseName: "Biology", runtimeVerified: true, editPolicyRevision: 0 };
+  const privateChat = {
+    schema: "morrow.private-chat.status.v1", transportAvailable: true,
+    clients: [{ id: "assistant-1", name: "Desktop assistant", protocolVersion: "2025-06-18", sampling: true, pushSampling: true }],
+  };
+  const page = await loadExtensionPage("settings/settings.html", {
+    handlers: {
+      morrow_edit_policy_status: () => ({ bindings: [binding], catalogDigest: "c".repeat(64), siteAnchors: [], bindingLimit: 500, privateChat }),
+      morrow_private_chat_send: () => ({ status: "sent" }),
+      morrow_private_chat_close: () => ({ status: "closed" }),
+    },
+  });
+  await page.click("#private-chat-open");
+  await page.click("#private-chat-send");
+  assert.equal(page.messages("morrow_private_chat_send").length, 0);
+  assert.equal(page.text("#private-chat-status"), "Choose a course and enter a message.");
+  await page.type("#private-chat-message", "Make it shorter and friendlier.");
+  await page.click("#private-chat-send");
+  assert.deepEqual(page.messages("morrow_private_chat_send"), [{
+    type: "morrow_private_chat_send", sourceBindingId: "canvas:course-1", text: "Make it shorter and friendlier.", assertedIdentifiers: [],
+  }]);
+  assert.match(page.text('label[for="private-chat-identifiers"] small'), /leave this empty/u);
+});
+
+// Rich-text editors and word processors write a name as character references or
+// with invisible format characters, and a student with two family names is
+// addressed by either surname. Morrow Bridge replaces the same names the
+// gateway replaces, so both boundaries read alike.
+test("local protection replaces a name written with references, invisible characters, or as a compound family name", () => {
+  const ada = { id: 3, name: "Ada Lovelace" };
+  const jose = { id: 9, name: "José García López", sortable_name: "García López, José" };
+  const combined = roster([jose, ada]);
+
+  // Invisible format characters a word processor leaves in pasted text. The
+  // gateway decodes character references; the drawer text is typed, not HTML.
+  assert.equal(protect("Ada Love\u00adlace presented.", [], { roster: combined }), "Student A1 presented.");
+  assert.equal(protect("Ada Love\u200blace presented.", [], { roster: combined }), "Student A1 presented.");
+
+  // Either surname alone, and both surnames without the given name, name the student.
+  assert.equal(protect("García submitted late.", [], { roster: combined }), "Student A2 submitted late.");
+  assert.equal(protect("López submitted late.", [], { roster: combined }), "Student A2 submitted late.");
+  assert.equal(protect("García López submitted late.", [], { roster: combined }), "Student A2 submitted late.");
+  // A name joined by an underscore or a hyphen, as a page address or a file name is.
+  assert.equal(protect("ada-lovelace-reflection", [], { roster: combined }), "Student A1-reflection");
+  assert.equal(protect("Lovelace_Ada_feedback.docx", [], { roster: combined }), "Student A1_feedback.docx");
+  // The educator can list a bare surname.
+  assert.equal(protect("Please remind García to submit.", ["García"], { roster: combined }), "Please remind Student A2 to submit.");
 });

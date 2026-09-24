@@ -8,8 +8,9 @@ configured CDP port (LOGIN_HELPER_CDP_PORT, default 19223).
 
 Session contract parity with dispatch.executor.SessionStore:
 
-  base_for(provider)   Canvas base URL from CANVAS_BASE env, the explicit
-                       base_url override, or the browser lane state. Any
+  base_for(provider)   Canvas base URL from the explicit base_url
+                       override, CANVAS_BASE (the environment, then the
+                       tree's helper/env), or the browser lane state. Any
                        other provider raises SessionMissing: this lane serves
                        the Canvas tenant only.
   slot_secret(slot)    Always raises SessionMissing. The educator's browser
@@ -104,15 +105,47 @@ class ChromiumSessionDead(ex.ExecutorError):
     attempted. Nothing is journaled, so the op_id stays reusable."""
 
 
-class PrincipalMismatch(ex.ExecutorError):
+# The refusals below happen before the lane's fetch. They subclass
+# WriteNotAttempted because the executor marks a write attempted before it
+# calls the lane: that class is how it learns nothing was sent, releases
+# the claim, and journals nothing as possibly applied. Each keeps its own
+# class name, which the failure catalog matches for its plain message.
+
+class PrincipalMismatch(ex.WriteNotAttempted):
     """The Canvas account signed in to the helper browser is not the
     pinned account. Nothing was sent; the re-auth write halt stands
     until the pinned account signs back in (reauth resume)."""
 
 
-class PrincipalNotPinned(ex.ExecutorError):
+class PrincipalNotPinned(ex.WriteNotAttempted):
     """No Canvas account is pinned (or the pin store cannot be trusted),
     so a write cannot prove it runs as the educator. Nothing was sent."""
+
+
+class AccountCheckFailed(ex.WriteNotAttempted):
+    """The check of which Canvas account is signed in to the helper got
+    no account back. Nothing was sent."""
+
+
+class CsrfWriteNotSent(ex.WriteNotAttempted):
+    """The helper's Canvas page had no _csrf_token cookie, so the page
+    refused to send the write (local_chromium.CsrfTokenMissing). Nothing
+    was sent."""
+
+
+class HelperNotReached(ex.WriteNotAttempted):
+    """The helper browser could not be started, attached, or checked for
+    this session's first call. Nothing was sent."""
+
+
+class ItemBanksNotReached(ex.WriteNotAttempted):
+    """The Item Banks lane failed before its page-context call was
+    dispatched (tool lookup, launch, token, course scope). Nothing was
+    sent."""
+
+
+class RequestNotSendable(ex.WriteNotAttempted):
+    """The lane cannot encode this request body. Nothing was sent."""
 
 
 # Final muse audit M3: the signed-in account is compared with the pinned
@@ -249,8 +282,11 @@ def _decode_body(body_bytes, headers):
     """Recover the transport-level body from the executor's body_bytes.
 
     Returns (data, as_json). The executor JSON-encodes dict bodies by
-    default, so JSON objects round-trip as JSON; explicit form-encoded
-    bodies decode back to a flat field dict.
+    default, so JSON objects round-trip as JSON, and so does the bulk
+    date update's array of objects; explicit form-encoded bodies decode
+    back to their [key, value] pairs, in order and with every repeated
+    key. A body the lane cannot encode raises WriteNotAttempted: it is
+    refused before anything is sent.
     """
     if body_bytes is None:
         return None, False
@@ -262,17 +298,53 @@ def _decode_body(body_bytes, headers):
     if ctype == "application/x-www-form-urlencoded":
         pairs = urllib.parse.parse_qsl(
             body_bytes.decode("utf-8"), keep_blank_values=True)
-        return dict(pairs), False
+        return [[k, v] for k, v in pairs], False
     try:
         obj = json.loads(body_bytes.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
-        raise ex.ExecutorError(
+        raise RequestNotSendable(
             "chromium backend cannot encode a non-JSON request body; "
-            "failing closed")
+            "nothing was sent") from None
     if isinstance(obj, dict):
         return obj, True
-    raise ex.ExecutorError(
-        "chromium backend needs a JSON object request body; failing closed")
+    if isinstance(obj, list) and obj and all(
+            isinstance(item, dict) for item in obj):
+        return obj, True
+    raise RequestNotSendable(
+        "chromium backend sends a JSON object or a JSON array of objects "
+        "as the request body; nothing was sent")
+
+
+_QUERY_SCALARS = (str, int, float, bool)
+
+
+def _query_pairs(data, as_json):
+    """The [key, value] query pairs of a GET or DELETE, whose parameters
+    ride in the query string. A list value is one pair per item
+    (include[]=a&include[]=b), as Canvas reads it; a None value is left
+    out. A value with no query form (an object, or a list holding an
+    object, a list, or None) raises RequestNotSendable."""
+    if not as_json:
+        return data
+    if not isinstance(data, dict):
+        raise RequestNotSendable(
+            "chromium backend sends a GET or DELETE's parameters in the "
+            "query string, and a JSON array has no query form; nothing was "
+            "sent")
+    pairs = []
+    for key, value in data.items():
+        values = value if isinstance(value, list) else [value]
+        if value is None:
+            continue
+        for item in values:
+            if not isinstance(item, _QUERY_SCALARS):
+                raise RequestNotSendable(
+                    "chromium backend sends a GET or DELETE's parameters "
+                    "in the query string, and %r holds a value with no "
+                    "query form (%s); nothing was sent"
+                    % (key, type(item).__name__))
+            pairs.append([key, ex._form_scalar(item)])
+    return pairs
 
 
 class ChromiumSession:
@@ -359,9 +431,10 @@ class ChromiumSession:
             rsm.impose_halt(
                 detection,
                 reason="chromium session death (%s)"
-                % (self._dead_cause_key or "unknown"))
+                % (self._dead_cause_key or "unknown"),
+                cause="session_expired")
             rsm.quarantine_session(self._dead_cause_key, detection)
-            rsm.write_notify_expired(len(rsm.quarantined_ops()))
+            rsm.write_notify_expired(rsm.paused_ops())
         except Exception:
             pass
 
@@ -384,22 +457,29 @@ class ChromiumSession:
     def load(cls, base_url=None):
         """Resolve the tenant base without touching the browser.
 
-        Precedence: explicit base_url, CANVAS_BASE env, browser lane state.
-        Fails closed when none is configured; the tenant is never hardcoded.
+        Precedence: explicit base_url, CANVAS_BASE (the environment, then
+        this tree's helper/env, as config/tree_config resolves it for
+        every agent command), browser lane state. Fails closed when none
+        is configured; the tenant is never hardcoded.
 
         W4-P2-27: the resolved dispatch tenant is bound to the helper's
         configured tenant here, in the session-load path: when the lane
         state records the tenant the browser is actually signed into and
         the resolved base differs from it, the load is refused loudly
         (TenantBindingMismatch naming both tenants).
+
+        After bin/morrow disconnect it refuses (CanvasDisconnected)
+        before the browser, the helper, or Canvas is touched.
         """
-        base = (base_url or os.environ.get("CANVAS_BASE")
+        from config import disconnect, tree_config
+        disconnect.refuse_if_disconnected()
+        base = (base_url or tree_config.canvas_base()
                 or _lane_state_base())
         if not base:
             raise ex.SessionMissing(
                 "chromium backend needs a Canvas base URL: pass base_url, "
-                "set CANVAS_BASE, or onboard the browser lane state "
-                "(~/.morrow/browser_lane.json)")
+                "set CANVAS_BASE in this tree's helper/env, or onboard the "
+                "browser lane state (~/.morrow/browser_lane.json)")
         verify_helper_tenant_binding(base)
         return cls(base)
 
@@ -558,7 +638,7 @@ class ChromiumSession:
             raise self._dead_exc("no live session when checking the "
                                  "signed-in account")
         except Exception as exc:
-            raise ex.ExecutorError(
+            raise AccountCheckFailed(
                 "chromium backend: could not confirm which Canvas account "
                 "is signed in (%s); nothing was sent" % type(exc).__name__)
         try:
@@ -567,7 +647,7 @@ class ChromiumSession:
             me = None
         live_id = me.get("id") if isinstance(me, dict) else None
         if live_id in (None, ""):
-            raise ex.ExecutorError(
+            raise AccountCheckFailed(
                 "chromium backend: GET %s did not return the signed-in "
                 "account (HTTP %s); nothing was sent"
                 % (_PRINCIPAL_PATH, status))
@@ -576,7 +656,8 @@ class ChromiumSession:
                 rsm.impose_halt({"signal": "principal_mismatch",
                                  "cause": "different_account_signed_in"},
                                 reason="a different Canvas account is "
-                                       "signed in to the helper")
+                                       "signed in to the helper",
+                                cause="account_mismatch")
             except Exception:
                 pass
             name = str(pin.get("name") or "").strip() or "the pinned account"
@@ -614,7 +695,14 @@ class ChromiumSession:
                   file=sys.stderr)
 
     def close(self):
-        """Stop the Chromium this session launched, if it launched one.
+        """Close this session's Item Banks tabs, then stop the Chromium
+        this session launched, if it launched one.
+
+        Every cached SDK session is closed first, whatever the launcher:
+        on the helper browser (which is never stopped) its tab would
+        otherwise stay open running the Item Banks app, which the
+        idle-tab reaper does not close, and its credential would stay in
+        memory.
 
         P2-12: stops ONLY launchers this process started itself. An attached
         launcher (this tree's helper browser, launcher.attached is
@@ -622,6 +710,12 @@ class ChromiumSession:
         proc, which is None when start() attached to the running helper.
         Defensive getattr: test doubles may define only start().
         """
+        sdk_sessions, self._sdk_sessions = self._sdk_sessions, {}
+        for sdk in sdk_sessions.values():
+            try:
+                sdk.close()
+            except Exception:
+                pass
         launcher = self._launcher
         if launcher is None:
             return
@@ -678,7 +772,8 @@ class ChromiumSession:
         Same retry discipline as the canvas-origin path: reads retry
         transport errors and 408/429/500/502/503/504; writes retry ONLY on
         transport failures that prove the provider never saw the request
-        (W2-P0-1) and raise UncertainWrite otherwise; other 4xx fail fast.
+        (W2-P0-1) and raise UncertainWrite otherwise; other 4xx and 5xx
+        fail fast (a write's 5xx is uncertain).
         Launch/token failures mean no provider call was attempted, so they
         are hard failures, never uncertain writes (the op_id stays
         meaningful, like SessionDead). A dead SDK session is sticky and
@@ -691,7 +786,7 @@ class ChromiumSession:
         """
         course_id = self._sdk_course_id
         if course_id is None:
-            raise ex.ExecutorError(
+            raise ItemBanksNotReached(
                 "Item Banks SDK lane needs params.course_id: the LTI "
                 "launch that mints the banks.build token is course-scoped; "
                 "refusing rather than launching in the wrong course")
@@ -733,7 +828,7 @@ class ChromiumSession:
                 self._mark_session_dead(exc)
                 raise self._dead_exc("Item Banks SDK session died")
             except ibsdk.ItemBankSdkError as exc:
-                raise ex.ExecutorError(
+                raise ItemBanksNotReached(
                     "Item Banks SDK lane failed (%s); no provider call "
                     "was attempted" % exc)
             except Exception as exc:  # noqa: BLE001 - transport-level failure
@@ -769,7 +864,7 @@ class ChromiumSession:
                             continue
                     raise ex.ExecutorError(
                         "SDK read transport failed: %s" % exc)
-            if status in ex.RETRYABLE_STATUSES:
+            if status in ex.RETRYABLE_STATUSES or status >= 500:
                 if is_write:
                     raise ex.UncertainWrite(
                         "SDK write returned HTTP %s; effect state unknown, "
@@ -777,6 +872,10 @@ class ChromiumSession:
                         attempts=attempts,
                         evidence=[{"method": method, "url": path,
                                    "status": status, "attempts": attempts}])
+                if status not in ex.RETRYABLE_STATUSES:
+                    raise ex.ProviderHttpError(
+                        status, "provider error, not retried",
+                        body=body_text)
                 if attempts < ex.MAX_ATTEMPTS:
                     ex._backoff_sleep(attempts - 1)
                     continue
@@ -989,7 +1088,13 @@ class ChromiumSession:
         (W2-P1-6); bodies are truncated at max_bytes in page context
         (W2-P2-8); 429s honor Retry-After on reads (W2-P2-7).
         """
-        transport = self._ensure_transport()
+        try:
+            transport = self._ensure_transport()
+        except ChromiumSessionDead:
+            raise
+        except Exception as exc:
+            raise HelperNotReached(
+                "%s; nothing was sent" % exc) from exc
         base = self._base
         # W2-P0-9: exact-origin check, never a prefix match. The old
         # url.startswith(base) let a sibling host (tenant.evil.com)
@@ -1014,6 +1119,12 @@ class ChromiumSession:
                                           headers, is_write,
                                           max_bytes=max_bytes)
         data, as_json = _decode_body(body_bytes, headers)
+        if data is not None and method.upper() in ("GET", "DELETE"):
+            query = urllib.parse.urlencode(
+                [tuple(pair) for pair in _query_pairs(data, as_json)])
+            if query:
+                path += ("&" if "?" in path else "?") + query
+            data, as_json = None, False
         if max_bytes is None:
             max_bytes = ex.DEFAULT_MAX_BYTES
 
@@ -1028,6 +1139,10 @@ class ChromiumSession:
                 # A completed provider call proves the session was live
                 # (W4-P2-4 taxonomy evidence).
                 self._had_live_session = True
+            except lc.CsrfTokenMissing as exc:
+                if is_write:
+                    raise CsrfWriteNotSent(str(exc)) from exc
+                raise ex.ExecutorError("read transport failed: %s" % exc)
             except lc.SessionDead as exc:
                 # W2-P0-4: a dead session DURING a write is ambiguous --
                 # the page may have executed the write before the socket
@@ -1083,7 +1198,10 @@ class ChromiumSession:
                             ex._backoff_sleep(attempts - 1)
                             continue
                     raise ex.ExecutorError("read transport failed: %s" % exc)
-            if status in ex.RETRYABLE_STATUSES:
+            # Every 5xx is a provider failure, never a success: a CDN in
+            # front of Canvas answers 520-526 while the origin may still
+            # apply a write.
+            if status in ex.RETRYABLE_STATUSES or status >= 500:
                 if is_write:
                     # W2-P0-1: a 429/5xx WITH a response is uncertain for
                     # a write (the provider may have applied it before
@@ -1100,6 +1218,10 @@ class ChromiumSession:
                         detail, attempts=attempts,
                         evidence=[{"method": method, "url": path,
                                    "status": status, "attempts": attempts}])
+                if status not in ex.RETRYABLE_STATUSES:
+                    raise ex.ProviderHttpError(
+                        status, "provider error, not retried",
+                        body=body_text)
                 if attempts < ex.MAX_ATTEMPTS:
                     # W2-P2-7: honor the provider's Retry-After on 429.
                     delay = ex._retry_after_delay(api_headers) \

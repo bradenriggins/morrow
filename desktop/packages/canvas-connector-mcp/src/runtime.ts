@@ -333,7 +333,7 @@ function failedProblem(
     || (["canvas_request_not_sent", "canvas_binding_required", "canvas_content_guard_unavailable", "moodle_binding_required", "moodle_expected_digest_required", "moodle_binding_course_mismatch", "course_binding_required", "course_binding_course_mismatch", "course_binding_mismatch", "course_scope_required",
       "canvas_semantic_target_course_mismatch", "canvas_semantic_target_input_refused", "canvas_semantic_target_resolution_stale",
       "multi_context_object_not_supported", "stale_bridge_command", "operation_catalog_mismatch",
-      "edit_policy_authorization_invalid", "edit_policy_stale", "edit_policy_guard_ambiguous", "edit_policy_rule_refused",
+      "edit_policy_authorization_invalid", "edit_policy_stale", "edit_policy_guard_ambiguous", "edit_policy_rule_refused", "edit_policy_page_missing",
       "edit_policy_canvas_content_guard_required", "edit_policy_canvas_content_guard_refused", "edit_policy_page_guard_required",
       "edit_policy_item_bank_guard_required", "edit_policy_fields_refused", "new_quiz_settings_review_required", "new_quiz_lifecycle_review_required", "new_quiz_effect_review_required",
       "private_attachment_refused", "request_cancelled_before_dispatch",
@@ -414,6 +414,7 @@ export class CanvasConnectorRuntime {
     const canvasBrowserCatalog = loadCanvasBrowserCatalog();
     const moodleCatalog = loadMoodleBrowserCatalog();
     const catalogDigest = bridgeCatalogDigest(catalog, canvasBrowserCatalog, moodleCatalog);
+    let runtime: CanvasConnectorRuntime | undefined;
     const bridge = new LoopbackBridgeServer({
       token: config.token,
       expectedRuntimeRevision: config.runtimeRevision,
@@ -421,7 +422,9 @@ export class CanvasConnectorRuntime {
       allowedExtensionIds: config.allowedExtensionIds,
       port: config.port,
       pairingEnabled: true,
+      pairingSecret: config.pairingSecret,
       onPairApproved: config.approveExtensionId,
+      onActivated: () => runtime?.resendUiState(),
     });
     try {
       await bridge.start();
@@ -431,7 +434,8 @@ export class CanvasConnectorRuntime {
       // The Morrow that holds the port is not touched.
       if (!(error instanceof BridgePortInUseError)) throw error;
     }
-    return new CanvasConnectorRuntime(catalog, canvasBrowserCatalog, moodleCatalog, bridge);
+    runtime = new CanvasConnectorRuntime(catalog, canvasBrowserCatalog, moodleCatalog, bridge);
+    return runtime;
   }
 
   health(): JsonObject {
@@ -527,10 +531,27 @@ export class CanvasConnectorRuntime {
    * Pushes the present list of reviews waiting for the person to the Bridge
    * popup (D1b). The Bridge never opens one of these by itself.
    */
+  /**
+   * The newest review list and approval key Morrow asked this connector to
+   * show. It is kept even when no Bridge is connected, so the next connection
+   * receives the present state rather than none. Learner names are not kept:
+   * a Bridge forgets them when it disconnects, and Morrow sends them again
+   * only when a review page shows them again.
+   */
+  private latestUiState: BridgeUiState | null = null;
+
+  resendUiState(): void {
+    const uiState = this.latestUiState;
+    if (!uiState) return;
+    void this.bridge.invoke({ kind: "ui_state", uiState, operationId: `ui-state:${randomUUID()}` }).catch(() => undefined);
+  }
+
   async uiState(input: BridgeUiState): Promise<JsonObject> {
     let uiState: BridgeUiState;
     try {
       uiState = normalizeBridgeUiState(input);
+      const { learnerNames: _learnerNames, ...withoutNames } = uiState;
+      this.latestUiState = withoutNames;
     } catch {
       return {
         schema: "morrow.browser-ui-state.v1",

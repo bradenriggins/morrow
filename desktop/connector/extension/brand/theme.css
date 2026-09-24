@@ -127,8 +127,8 @@ a { color: var(--action); text-decoration-thickness: from-font; text-underline-o
 a:hover { color: var(--action-hover); }
 summary { list-style: none; cursor: pointer; min-height: 44px; }
 summary::-webkit-details-marker { display: none; }
-/* A drawn chevron, not a mask image: the pairing page's CSP refuses data: images, which left its
-   disclosures with no marker at all. */
+/* A drawn chevron, not a mask image, so a page whose content security policy refuses data: images
+   still gives its disclosures a marker. */
 summary::before {
   content: "";
   display: inline-block;

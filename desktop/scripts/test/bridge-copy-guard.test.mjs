@@ -124,7 +124,7 @@ test("the popup, settings, and setup guide carry no decorative eyebrow label", (
 test("the settings page states its headings without a label above each one", () => {
   const settings = readFileSync(new URL("connector/extension/settings/settings.html", root), "utf8");
   assert.deepEqual(eyebrowLabels(settings), []);
-  assert.match(settings, /<h1>Courses and access<\/h1>/);
+  assert.match(settings, /<h1>Plan and Edit settings<\/h1>/);
   assert.match(settings, /<h2 id="courses-title">Your courses<\/h2>/);
   assert.doesNotMatch(settings, /id="site-discovery-title"/);
   assert.match(settings, /<h3 id="file-storage-title">Course file access<\/h3>/);
@@ -132,6 +132,19 @@ test("the settings page states its headings without a label above each one", () 
   // The order between choosing courses and choosing access is stated as a constraint the reader
   // can act on, so no "Step 1" or "Step 2" label is needed to carry it.
   assert.match(settings, /Select courses, then choose Edit to review the available actions\./);
+});
+
+// The popup, the setup guide, and the error copy send the educator to "Plan and Edit settings", so the
+// page they land on carries that exact name in its tab title and its heading.
+test("the settings page carries the name every link to it uses", () => {
+  const read = (path) => readFileSync(new URL(path, root), "utf8");
+  const settings = read("connector/extension/settings/settings.html");
+  const name = "Plan and Edit settings";
+  assert.match(read("connector/extension/popup/popup.html"), new RegExp(`id="editing-settings"[^>]*>Open ${name}<`));
+  assert.match(read("connector/extension/onboarding/onboarding.html"), new RegExp(`id="open-settings"[^>]*>Open ${name}<`));
+  assert.match(read("connector/extension/src/bridge-problem-copy.js"), new RegExp(`Open ${name}`));
+  assert.match(settings, new RegExp(`<title>Morrow Bridge: ${name}</title>`));
+  assert.match(settings, new RegExp(`<h1>${name}</h1>`));
 });
 
 test("current setup surfaces use three stages and platform-specific course actions", () => {
@@ -198,7 +211,11 @@ test("the approval pages carry no decorative eyebrow label", async () => {
  * Renders the pairing pages a person sees when Morrow asks for the Chrome connection: the page
  * that asks, the page after the answer, and the page a used or expired link opens.
  */
-async function pairingPages() {
+/**
+ * What the Bridge server answers for a pairing a person would once have approved on a page. Pairing
+ * now happens in the Morrow Bridge popup alone, so the server serves no page for it.
+ */
+async function pairingAnswers() {
   const extensionId = "a".repeat(32);
   const catalogDigest = "a".repeat(64);
   const runtimeRevision = "7".repeat(40);
@@ -208,6 +225,7 @@ async function pairingPages() {
     expectedCatalogDigest: catalogDigest,
     port: 0,
     pairingEnabled: true,
+    pairingSecret: () => ({ challengeId: "morrow-0123456789abcdef0123456789abcdef", nonce: "n".repeat(43), extensionId }),
   });
   try {
     const address = await server.start();
@@ -218,42 +236,21 @@ async function pairingPages() {
       body: JSON.stringify({ extensionId, catalogDigest, runtimeRevision }),
     });
     assert.equal(created.status, 201);
-    const { approvalUrl } = await created.json();
-    const html = { accept: "text/html" };
-    const asked = await (await fetch(approvalUrl, { headers: html })).text();
-    await fetch(`${approvalUrl}/decision`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", origin: new URL(approvalUrl).origin },
-      body: "decision=approve",
-    });
-    return {
-      asked,
-      answered: await (await fetch(approvalUrl, { headers: html })).text(),
-      unavailable: await (await fetch(
-        approvalUrl.replace(/[0-9a-f-]{36}$/, "00000000-0000-0000-0000-000000000000"),
-        { headers: html },
-      )).text(),
-    };
+    const { pairingId } = await created.json();
+    const page = await fetch(`http://${address.host}:${address.port}${address.path}/pair/${pairingId}`, { headers: { accept: "text/html" } });
+    return { status: page.status, contentType: page.headers.get("content-type"), body: await page.text() };
   } finally {
     await server.close();
   }
 }
 
-test("the Chrome pairing pages carry no decorative eyebrow label", async () => {
-  const pages = await pairingPages();
-  for (const [name, html] of Object.entries(pages)) {
-    refuseDecorativeEyebrows(`the pairing ${name} page`, html);
-    assert.deepEqual(eyebrowLabels(html), []);
-  }
-  // Proves the pages really rendered, so an empty read cannot pass the check above.
-  assert.match(pages.asked, /<section class="outcome"><h1>Connect Morrow to Chrome<\/h1>/);
-  assert.match(pages.answered, /<section class="outcome"><h1>Chrome connection approved<\/h1>/);
-  assert.match(pages.unavailable, /<section class="outcome"><h1>Start a new connection<\/h1>/);
-  // This connection carries Canvas and Moodle. Blackboard uses the local REST connection instead.
-  assert.match(pages.asked, /work with Canvas and Moodle through this Chrome extension/);
-  assert.match(pages.answered, /Open a signed-in Canvas or Moodle course in Chrome\./);
-  assert.match(pages.answered, /shows Connect this course/);
-  assert.doesNotMatch(pages.answered, /Connect Canvas|Connect Moodle/, "the popup has no such buttons");
+test("pairing is a Morrow Bridge popup step with no page of its own", async () => {
+  const answer = await pairingAnswers();
+  assert.equal(answer.status, 404);
+  assert.match(answer.contentType, /^application\/json/);
+  assert.doesNotMatch(answer.body, /<html|Allow connection/i);
+  const popup = readFileSync(new URL("../../connector/extension/popup/popup-view.js", import.meta.url), "utf8");
+  assert.match(popup, /Select Connect Morrow to connect this extension to Morrow\. Connecting does not approve changes to your courses\./);
 });
 
 test("the approval result page states the result without a label above it", async () => {

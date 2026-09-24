@@ -36,7 +36,14 @@ set -u
 
 TREE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TREE_REAL="$(readlink -f "${TREE}" 2>/dev/null || printf '%s' "${TREE}")"
-HELPER_PORT="${LOGIN_HELPER_PORT:-8901}"
+# The helper port resolves as helper/keepalive.sh resolves it: the
+# environment, then this tree's helper/env, then the default. A tree
+# that pins its own port there must be stopped on that port.
+HELPER_PORT="${LOGIN_HELPER_PORT:-}"
+if [ -z "${HELPER_PORT}" ] && [ -f "${TREE}/helper/env" ]; then
+  HELPER_PORT="$(grep -E '^[[:space:]]*LOGIN_HELPER_PORT=' "${TREE}/helper/env" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d "[:space:]\"'")"
+fi
+HELPER_PORT="${HELPER_PORT:-8901}"
 MORROW_HOME="${MORROW_HOME:-${HOME}/.morrow}"
 # Round-4 L3: the profile is the one keepalive.sh always uses
 # (<tree>/helper/profile; keepalive ignores LOGIN_HELPER_PROFILE_DIR).
@@ -75,9 +82,15 @@ for _a in "$@"; do
 done
 unset _a
 # Session material a disconnect removes (the educator's records stay).
-DISCONNECT_PATHS="${PROFILE_DIR} ${MORROW_HOME}/browser_lane.json ${MORROW_HOME}/browser_lane.json.lock ${MORROW_HOME}/session.json ${MORROW_HOME}/session.json.prev ${MORROW_HOME}/principal_pin.json ${MORROW_HOME}/browser-pending ${MORROW_HOME}/browser-briefs"
+# Arrays, always expanded quoted: a tree or MORROW_HOME path may hold
+# spaces.
+DISCONNECT_PATHS=("${PROFILE_DIR}" "${MORROW_HOME}/browser_lane.json"
+  "${MORROW_HOME}/browser_lane.json.lock" "${MORROW_HOME}/session.json"
+  "${MORROW_HOME}/session.json.prev" "${MORROW_HOME}/principal_pin.json"
+  "${MORROW_HOME}/browser-pending" "${MORROW_HOME}/browser-briefs")
 
-die() { printf 'UNINSTALL FAIL: %s\n' "$1" >&2; exit 1; }
+if [ "${MODE}" = "disconnect" ]; then STOP_PREFIX="DISCONNECT STOPPED"; else STOP_PREFIX="UNINSTALL STOPPED"; fi
+die() { printf '%s: %s\n' "${STOP_PREFIX}" "$1" >&2; exit 1; }
 note() { printf '%s\n' "$1"; }
 
 pid_holding_port() {
@@ -235,7 +248,7 @@ note "Morrow for Muse disconnect. This will:"
 note "  1. stop the helper (port ${HELPER_PORT}) and its Chromium, if running"
 note "  2. stop the keepalive background loop and remove the keepalive cron entries (otherwise keepalive relaunches the signed-in helper within 5 minutes)"
 note "  3. delete the Canvas session material:"
-for _p in ${DISCONNECT_PATHS}; do note "          ${_p}"; done
+for _p in "${DISCONNECT_PATHS[@]}"; do note "          ${_p}"; done
 note "  It keeps this install, your settings, the audit journal, and the learner vault."
 note ""
 else
@@ -245,7 +258,7 @@ note "  2. stop the keepalive background loop and remove the keepalive cron entr
 note "  3. delete: ${TREE}"
 note "          ${MORROW_HOME}"
 note "          ${PROFILE_DIR}"
-note "          ${VAULT_PATH} (+ .key; the learner source vault, honoring MORROW_SOURCE_VAULT_PATH)"
+note "          ${VAULT_PATH} with its key, echo store, and lock files (the learner source vault, honoring MORROW_SOURCE_VAULT_PATH)"
 note "          upgrade backups ${TREE}.bak-* (incl. .PARTIAL) and failed trees ${TREE}.failed-*"
 # W6-P2-D3: the open-file-descriptor caveat must be acted on BEFORE the
 # destructive step, so it prints here (ahead of confirmation, and
@@ -269,16 +282,28 @@ if [ "${CONFIRM}" = "1" ]; then
     else
       _yes_cmd="scripts/uninstall.sh --yes"
     fi
-    die "nothing was changed: there is no terminal to type \"yes\" in. Ask the educator to confirm, then run ${_yes_cmd}"
+    die "not confirmed, so nothing was changed. There is no terminal to type \"yes\" in: ask the educator to confirm, then run ${_yes_cmd}"
   fi
   printf 'Type "yes" to continue: '
   read -r _ans
-  [ "${_ans}" = "yes" ] || die "aborted by user"
+  [ "${_ans}" = "yes" ] || die "not confirmed, so nothing was changed"
 fi
 
 # -- 1. stop the processes -------------------------------------------------
 step_n=1
 note "--- ${step_n}. stopping processes"
+if [ "${MODE}" = "disconnect" ]; then
+  # W-muse-ux3 (2026-09-23): record the disconnect before anything is
+  # deleted, so agent-side commands (students find, the failed-students
+  # chain, every Chromium-lane dispatch) refuse with canvas-disconnected
+  # instead of helper-down ("your Canvas sign-in is not affected", false
+  # here) whose next step would relaunch the helper. install.sh clears
+  # this marker when it reconnects. Same resolution as the transport:
+  # MORROW_HOME, then the install-time tree id in .morrow-tree-id.
+  PYTHONDONTWRITEBYTECODE=1 python3 "${TREE}/config/disconnect.py" mark \
+    || die "could not record the disconnect in the tree state dir"
+  note "disconnect recorded: nothing reconnects until install.sh runs again"
+fi
 # The keepalive background loop goes first, so it cannot relaunch the
 # helper while the helper is being stopped.
 if [ -f "${TREE}/helper/supervisor.py" ]; then
@@ -438,13 +463,13 @@ unset _l _cmd _tok _t _v _mine _cron_new _after _leftover
 
 if [ "${MODE}" = "disconnect" ]; then
   note "--- 3. deleting the Canvas session material"
-  for _p in ${DISCONNECT_PATHS}; do
+  for _p in "${DISCONNECT_PATHS[@]}"; do
     case "${_p}" in
       ""|"/"|"${HOME}"|"${HOME}/."|"${MORROW_HOME}"|"${TREE}") die "refusing to delete unsafe path: ${_p}" ;;
     esac
   done
   _DISC_FAILED=0
-  for _p in ${DISCONNECT_PATHS}; do
+  for _p in "${DISCONNECT_PATHS[@]}"; do
     if [ -e "${_p}" ] || [ -L "${_p}" ]; then
       if rm -rf "${_p}" 2>/dev/null; then
         note "deleted: ${_p}"
@@ -456,7 +481,7 @@ if [ "${MODE}" = "disconnect" ]; then
   done
   [ "${_DISC_FAILED}" = "0" ] || die "one or more session paths could not be deleted; see above"
   note "--- 4. verifying"
-  for _p in ${DISCONNECT_PATHS}; do
+  for _p in "${DISCONNECT_PATHS[@]}"; do
     if [ -e "${_p}" ] || [ -L "${_p}" ]; then
       printf 'STILL PRESENT: %s\n' "${_p}" >&2
       _DISC_FAILED=1
@@ -476,6 +501,7 @@ _CRON_EOF
   note ""
   note "Disconnected. The helper is stopped, keepalive will not restart it, and the"
   note "Canvas sign-in on this machine is deleted. Morrow can no longer reach Canvas."
+  note "Every Canvas command will say you disconnected it until you reconnect."
   note "To reconnect: run 'bash install.sh' from ${TREE}, then sign in on the helper page."
   exit 0
 fi
@@ -483,6 +509,26 @@ fi
 # -- 3. delete the paths ---------------------------------------------------
 step_n=3
 note "--- ${step_n}. deleting install paths"
+# The vault's files are more than the vault itself: privacy/core.py locks
+# "<path>.lock", privacy/name_echo.py stores the echo store (the names the
+# educator typed) beside the vault as "<vault>.echo" with its own ".lock",
+# and an interrupted write leaves the staged temp: ".<basename>.tmp-<pid>-<hex>"
+# for the vault, and ".<basename>.key.tmp-<pid>-<hex>" / ".<basename>.echo.tmp-<pid>-<hex>"
+# for the key and the echo store (privacy/core.py _replace_exact_file). A
+# "<vault>*" glob would also match unrelated files in the vault's directory
+# (vault.jsonl, vault.json-old), so the known siblings and the whole
+# ".<basename>.*.tmp-*" family are enumerated explicitly. Everything in the
+# family must be deleted and verified, or "Gone: the learner source vault" is false.
+_VAULT_FAMILY=("${VAULT_PATH}" "${VAULT_PATH}.key" "${VAULT_PATH}.lock" \
+  "${VAULT_PATH}.echo" "${VAULT_PATH}.echo.lock")
+_VAULT_BASE="$(basename "${VAULT_PATH}")"
+while IFS= read -r -d '' _t; do
+  _VAULT_FAMILY+=("${_t}")
+done < <(find "$(dirname "${VAULT_PATH}")" -maxdepth 1 \
+  \( -name ".${_VAULT_BASE}.tmp-*" \
+     -o -name ".${_VAULT_BASE}.*.tmp-*" \) \
+  -print0 2>/dev/null)
+unset _t _VAULT_BASE
 # W4-P0-4/W4-P0-5/W4-P2-11: purge browser transient state (pending
 # envelopes holding raw provider payloads, brief files) through the
 # package's own purge_transient_state() before the blunt rm, so
@@ -492,7 +538,7 @@ note "--- ${step_n}. deleting install paths"
 # this uninstall deletes the journal tree immediately after (nothing
 # can dangle); the privacy CLIs use the safe default that skips
 # in-flight envelopes.
-_TRANSIENT_DIRS="${MORROW_HOME}/browser-pending ${MORROW_HOME}/browser-briefs"
+_TRANSIENT_DIRS=("${MORROW_HOME}/browser-pending" "${MORROW_HOME}/browser-briefs")
 if [ -d "${MORROW_HOME}/browser-pending" ] || [ -d "${MORROW_HOME}/browser-briefs" ]; then
   if _purge_out="$(PYTHONDONTWRITEBYTECODE=1 python3 -c \
       'import sys; sys.path.insert(0, sys.argv[1]); from transport.browser_backend import purge_transient_state; print(purge_transient_state(force=True))' \
@@ -503,7 +549,7 @@ if [ -d "${MORROW_HOME}/browser-pending" ] || [ -d "${MORROW_HOME}/browser-brief
     note "${_purge_out}"
   fi
 fi
-for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${VAULT_PATH}" "${VAULT_PATH}.key" ${_TRANSIENT_DIRS}; do
+for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${_VAULT_FAMILY[@]}" "${_TRANSIENT_DIRS[@]}"; do
   case "${_p}" in
     ""|"/"|"${HOME}"|"${HOME}/.") die "refusing to delete unsafe path: ${_p}" ;;
   esac
@@ -528,7 +574,7 @@ _delete_path() {
   fi
 }
 _REMOVED=""; _DELETE_FAILED=0
-for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${VAULT_PATH}" "${VAULT_PATH}.key" ${_TRANSIENT_DIRS}; do
+for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${_VAULT_FAMILY[@]}" "${_TRANSIENT_DIRS[@]}"; do
   _delete_path "${_p}"
 done
 # W4-P1-6: the installer leaves upgrade backups behind
@@ -548,7 +594,7 @@ unset _b _p
 step_n=4
 note "--- ${step_n}. verifying removal"
 _FAILED=0
-for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${VAULT_PATH}" "${VAULT_PATH}.key" ${_TRANSIENT_DIRS}; do
+for _p in "${TREE}" "${MORROW_HOME}" "${PROFILE_DIR}" "${_VAULT_FAMILY[@]}" "${_TRANSIENT_DIRS[@]}"; do
   if [ -e "${_p}" ] || [ -L "${_p}" ]; then
     printf 'STILL PRESENT: %s\n' "${_p}" >&2
     _FAILED=1
@@ -576,8 +622,7 @@ note ""
 # W4-P1-6: the final summary enumerates what was ACTUALLY removed.
 note "Uninstall complete. Removed:"
 printf '%s' "${_REMOVED}" | sed 's/^/  /'
-note "Gone: the tree, the state dir, the profile, upgrade backups, and failed trees."
-note "Uninstall complete. Gone: the tree, ${MORROW_HOME}, the browser profile, the learner source vault (${VAULT_PATH} + .key), browser transient state (pending envelopes, briefs), the cron entries, and the running processes."
+note "Gone: the tree, ${MORROW_HOME}, the browser profile, every file of the learner source vault (${VAULT_PATH} with its key, echo store, and lock files), browser transient state (pending envelopes, briefs), upgrade backups, failed trees, the cron entries, and the running processes."
 note ""
 note "(The W4-P2-12 open-file-descriptor caveat printed before confirmation"
 note "still applies: the 'verified gone' checks above cover the filesystem,"

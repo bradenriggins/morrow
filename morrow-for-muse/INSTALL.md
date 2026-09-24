@@ -2,9 +2,10 @@
 
 This document is for the operator installing the connector on a Muse
 VM. If you are an educator who wants to use Morrow, you do not install
-anything: open Muse and say "Connect my Canvas account", then follow
-the conversation (`content/setup-guide.md` is the educator walkthrough
-and `FIRST_RUN.md` is the agent's first-hour checklist).
+anything: open Muse and say "Set up Morrow for Muse by following
+https://meetmorrow.app/morrow-for-muse", then follow the conversation
+(`content/setup-guide.md` is the educator walkthrough and
+`FIRST_RUN.md` is the agent's first-hour checklist).
 
 This document takes you from a fresh Muse VM to a verified Canvas
 connection. Every step is executable as written; nothing here assumes
@@ -15,64 +16,107 @@ prior knowledge of the project.
 - A Muse VM (the connector runs on the VM Meta provisions for you).
 - The platform Chromium present. The installer looks for it at
   `/opt/meta-chromium/chrome`, which ships in the Muse VM image. If your
-  VM does not provide it, place a Chromium binary at
-  `transport/chromium/chrome` inside this tree before installing.
-- Python 3.11 or newer (`python3 --version`). The tree is stdlib-only;
-  nothing needs pip. (Python 3.10 is refused: it reaches security
-  end-of-life in October 2026 per PEP 619.)
+  VM does not provide it, name another Chromium (version 152.0.7977.82 or newer) in the
+  tree's `helper/env` before you run `install.sh` (step 2): create the
+  file with the line `CHROMIUM_BIN=/path/to/chrome`. The installer
+  keeps an existing `helper/env`, and the helper and Morrow read the
+  same line. Do not put a Chromium inside the tree: install step 2
+  refuses any file the release does not ship.
+- Python 3.11 or newer (`python3 --version`). (Python 3.10 is refused:
+  it reaches security end-of-life in October 2026 per PEP 619.)
+- The Python package `cryptography` for anything that touches student
+  data: finding a student by name and reading the course roster.
+  Morrow keeps student names and ids in an encrypted learner vault,
+  and the vault needs this package.
+  Without it the install works and Morrow refuses all student data.
+  Course content still works, but student names in it are hidden
+  without labels, so a change that would save a hidden name back is
+  refused. Step 2 below installs it hash-pinned from the release
+  (`python3 -m pip`, so pip must be available). Install step 1 checks
+  for it and prints a warning (repeated at the end) when it is missing
+  or older than the pinned version. Everything else in the tree is
+  Python's standard library.
+- `unzip`, to unpack the release (step 1).
 - The command-line tools the installer and keepalive use: `curl`, `ss`,
   `pgrep`, `flock`, and `openssl` (the helper's TLS selftest makes a
   throwaway certificate). Install step 1 stops and names a missing
   curl, ss, pgrep, or flock. `crontab` is optional: without cron (the
   Muse VM image runs no cron daemon), keepalive runs as a supervised
   background loop instead (step 7).
-- Network egress from the VM to your Canvas tenant: direct, or via the
-  VM's `https_proxy`/`HTTPS_PROXY` (authenticated or not). The installer
-  probes this and tells you which mode it found.
+- Network egress from the VM, direct or via the VM's
+  `https_proxy`/`HTTPS_PROXY` (authenticated or not). To use Morrow:
+  your Canvas tenant. The installer probes this and tells you which
+  mode it found. To install this unpublished candidate, the source
+  repository must already be on the VM; step 1 builds the package from
+  that checkout. Step 2's `pip` needs `pypi.org` and
+  `files.pythonhosted.org` to find and download the student-data
+  package.
 - Your Canvas tenant URL (e.g. `https://myschool.instructure.com`) and
   the ability to sign in to it yourself (your SSO/MFA, on your phone).
 
-## Step 1: get the release and unzip it
+## Step 1: get the package and unzip it
 
-The release is `morrow-muse-connector-<version>.zip` (this version:
-`morrow-muse-connector-0.4.0.zip`). Download it from the `muse/v0.4.0`
-GitHub release:
-
-```
-curl -fLO https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.0/morrow-muse-connector-0.4.0.zip
-```
-
-If you have the source repository instead of a release zip, build the
-zip from it (Python 3, git):
+Morrow for Muse 0.4.1 is not published yet, so its GitHub release file
+is not available. If you have the source repository, build the zip from
+it (Python 3, git):
 
 ```
 cd <repo>/morrow-for-muse
 python3 scripts/carve.py --zip
-# -> <repo>/dist/morrow-muse-connector-0.4.0.zip
+# -> <repo>/dist/morrow-muse-connector-0.4.1.zip
 ```
 
 `scripts/carve.py` (in the source repository only, not shipped in the
 release) builds the installable tree from the files git tracks:
 it leaves out the dev-only surface (live-test drivers, proof evidence,
 Moodle research code), writes `pack/carve-manifest.json` (the SHA-256
-of every shipped file, which install step 2 verifies), and refuses to
-publish unless the secrets gate passes on the result. Do not run
-`install.sh` directly in a repository checkout: it has no carve manifest
-and step 2 refuses it on purpose.
+of every shipped file, which install step 2 verifies, and the commit
+the files came from), and refuses to publish unless the secrets gate
+passes on the result. With `--zip` it also refuses to start while a
+file under `morrow-for-muse/` or the repository's `LICENSE` has a
+change that is not committed, so the zip always matches one commit.
+Do not run `install.sh` directly in a repository checkout: it has no
+carve manifest and step 2 refuses it on purpose.
 
-Unzip the release into the skills directory:
+Unzip the release into the skills directory. Run these commands from
+the folder that holds the zip. Running them again is safe: they update
+an existing `morrow-canvas` tree in place and keep `helper/env` and the
+sign-in in `helper/profile/`.
 
 ```
 mkdir -p ~/workspace/skills
-unzip morrow-muse-connector-0.4.0.zip -d ~/workspace/skills/
-mv ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas
+rm -rf ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas/morrow-muse-connector
+unzip -q morrow-muse-connector-0.4.1.zip -d ~/workspace/skills/
+cd ~/workspace/skills
+if [ -d morrow-canvas ]; then
+  cp -R morrow-muse-connector/. morrow-canvas/
+  rm -rf morrow-muse-connector
+else
+  mv morrow-muse-connector morrow-canvas
+fi
 cd ~/workspace/skills/morrow-canvas
 ```
+
+The same commands install and upgrade. On an upgrade they copy the
+unpacked release into `~/workspace/skills/morrow-canvas` and then
+remove the unpacked folder, so a second run never puts one tree inside
+another. What an installed tree holds that the release does not
+ship stays: your `helper/env`, your signed-in session
+(`helper/profile/`), and the tree id (`.morrow-tree-id`).
 
 Everything below assumes you are in the tree root
 (`~/workspace/skills/morrow-canvas/`).
 
-## Step 2: run install.sh
+## Step 2: install the student-data package, then run install.sh
+
+First install the `cryptography` package the learner vault needs (see
+Prerequisites), hash-pinned from the tree:
+
+```
+python3 -m pip install --require-hashes -r requirements-optional.txt
+```
+
+Then run the installer:
 
 ```
 bash install.sh
@@ -88,17 +132,23 @@ it does, in order:
    `PYTHONDONTWRITEBYTECODE=1` so no `__pycache__/` is written into
    the tree.
 2. **Integrity and upgrade.** Verifies the tree against
-   `pack/carve-manifest.json` (every shipped file's SHA-256). On a
+   `pack/carve-manifest.json` (every shipped file's SHA-256). Mints the
+   tree's stable id (`.morrow-tree-id`) on the first install. Logs and
+   other runtime files live in the tree's state dir,
+   `~/.morrow/trees/<tree id>/`, never in the tree; logs an older
+   release left in `helper/` are moved there (loudly logged). On a
    version change (see `pack/version.txt`), backs up the existing tree
    (excluding `helper/profile/`) to a timestamped directory outside
    the tree, then removes stale files from the old version that the new
-   manifest no longer lists (loudly logged). Migrates keepalive cron
-   entries from other trees so exactly one entry (this tree's) remains.
-   Records the installed version and manifest under the effective
+   manifest no longer lists (loudly logged). Updates only this tree's
+   keepalive cron entry; entries that belong to other installed trees
+   are kept (see step 7). Records the installed version and manifest under the effective
    `MORROW_HOME`.
-3. **Chromium locate.** Checks `/opt/meta-chromium/chrome` (ships in
-   the Muse VM image), then `transport/chromium/chrome`. Fails with a
-   diagnostic if none is executable.
+3. **Chromium locate.** Uses `CHROMIUM_BIN` when it is set (in the
+   environment, or in `helper/env`), otherwise
+   `/opt/meta-chromium/chrome` (ships in the Muse VM image). The
+   binary must report Chromium 152.0.7977.82 or newer. Fails with a diagnostic
+   naming what it tried.
 4. **Egress probe.** Runs the egress probe: an authenticated proxy from
    the environment, else a bare proxy, else one quick direct TLS
    handshake to your tenant host (or `example.com` when `CANVAS_BASE`
@@ -133,8 +183,10 @@ it does, in order:
 8. **Secrets gate.** Runs `scripts/verify-no-secrets.sh` against the
    tree, enforcing `pack/deny-list.txt` (no profiles, logs, session
    material, secret-shaped content, or non-example tenant hostnames).
-   Runs BEFORE the helper launches, so a dirty tree never starts a
-   browser. Any violation fails the install.
+   Your live sign-in in `helper/profile/` is left out, and your own
+   Canvas address may appear in `helper/env`; every other check still
+   reads `helper/env`. Runs BEFORE the helper launches, so a dirty
+   tree never starts a browser. Any violation fails the install.
 9. **Selftest suites.** Runs all 23 selftest suites from this tree
    (transport, dispatch, privacy, helper, reauth). Any failure fails the
    install and names the suite. Test scratch is removed afterwards.
@@ -181,18 +233,21 @@ authentication. A compromised or malicious process running as your
 user is equivalent to use of the proxy credential. Do not run
 untrusted code as the same user on the install VM.
 
-Optional dependency: the learner-privacy vault's file-backed
-encryption needs the `cryptography` package, installed hash-pinned:
+The `cryptography` package (see Prerequisites): the encrypted learner
+vault needs it, installed hash-pinned:
 
-    pip install -r requirements-optional.txt
+    python3 -m pip install --require-hashes -r requirements-optional.txt
 
 The file pins `cryptography==50.0.1` (plus its `cffi`/`pycparser`
 closure) with `--require-hashes`, so pip verifies every downloaded
 artifact against the published SHA-256 hashes before installing;
 a tampered mirror fails the install loudly instead of silently.
-Without the package, file-backed vault operations refuse with a
-clear error; in-memory vaults, redaction, and all other privacy
-features work normally.
+Without the package (or with a version older than the pin), every
+student-data request is refused with a clear message: finding a
+student by name and reading the course roster. Student names in course content are hidden without
+labels, and a change that would save a hidden name back is refused.
+Nothing about students is ever sent to the assistant unprotected.
+Everything that does not touch student data works normally.
 
 ## Step 3: set your tenant
 
@@ -200,7 +255,7 @@ features work normally.
 nano helper/env
 ```
 
-Uncomment and set the line:
+Uncomment (or add) and set the line:
 
 ```
 CANVAS_BASE=https://myschool.instructure.com
@@ -234,16 +289,21 @@ curl -sf http://127.0.0.1:8901/status
 You should see JSON with your Canvas URL and `"logged_in": true` once
 you have signed in (step 5).
 
-If `CANVAS_BASE` was not set during the install, start the helper now:
+If `CANVAS_BASE` was not set during the install, set it in
+`helper/env` (step 3), then run the installer again. It checks that the
+address loads and is not a Canvas error page, then starts the helper:
 
 ```
 cd ~/workspace/skills/morrow-canvas
-bash helper/keepalive.sh
+bash install.sh
 ```
 
-(If you set `CANVAS_BASE` in `helper/env`, keepalive.sh sources
-that file (the legacy global `~/.morrow/env` is honored for
-`CANVAS_BASE` only). Do not hand-launch `helper/server.py` directly: it
+(Do not start the helper for the first time with
+`helper/keepalive.sh`: it skips that address check. keepalive.sh keeps
+an already-checked helper running, and it sources the tree's
+`helper/env` (the legacy global `~/.morrow/env` is honored for
+`CANVAS_BASE` only). Do not hand-launch
+`helper/server.py` directly: it
 sources `<tree>/helper/env` itself, so it fails without `CANVAS_BASE`
 exported in the shell or the tree env file, and the production-port
 guard treats a bare launch on the production ports with the live
@@ -296,24 +356,26 @@ You should see JSON with your Canvas URL and `"logged_in": true`.
 cd ~/workspace/skills/morrow-canvas
 PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py catalog \
   --name users_self --method GET --path /api/v1/users/self \
-  --class read --backend chromium --canvas-base "$CANVAS_BASE"
+  --class read --backend chromium
 ```
 
 (The `PYTHONDONTWRITEBYTECODE=1` prefix keeps Python from writing
 `__pycache__` into the tree, which the installer's integrity gate
 would reject on the next install.)
 
-Expect a JSON result naming you (id, name, email). This tenant's
-`/users/self` response carries no `login_id` field; email is the
-account identifier. Confirm the principal
-is you before asking for anything else. This proves the full path:
+Expect a JSON result naming you: your own Canvas id and name (which
+other fields appear depends on your school's Canvas settings). Confirm
+the account is yours before asking for anything else. This proves the full path:
 executor governance, the Chromium lane, your session, your tenant.
 
 ## Dispatching real work
 
-Reads need nothing further. Writes need a frozen plan (`--plan`) and an
-educator-signed approval (`--approval`); see `SKILL.md` for the
-governance rules. The v1 capability scope is declared in `SCOPE.md`:
+Reads need nothing further. In plan mode (the default), a write waits
+for the educator: the agent runs `plan-write`, shows the educator the
+change in plain words, and runs `approve-write` with their reply
+(`SKILL.md`, "Dispatching operations"). In edit mode, writes run
+without asking (deletions ask only when the educator turned on
+deletion confirmations). The v1 capability scope is declared in `SCOPE.md`:
 the live-proven Canvas core only.
 
 ## Disconnect (keep the install)
@@ -367,19 +429,37 @@ reliably end the helper's separate session.
 
 ## Upgrading
 
-Unzip the new release over the tree (or into a fresh directory) and
-rerun `install.sh`. The installer:
+Get the new release zip as in Step 1, run the Step 1 commands again
+from the folder that holds it (with the new file name), then run Step 2
+again from the tree: `pip` first, then
+
+```
+bash install.sh
+```
+
+The Step 1 commands copy the new release over the existing
+`~/workspace/skills/morrow-canvas` tree in place, which keeps your
+Canvas address, your sign-in, and the tree id. Do not unzip into a
+fresh directory: `helper/env` and the sign-in in `helper/profile/` live
+inside the tree, so a fresh tree starts without the Canvas address, and
+the educator must sign in again. The copy replaces the previous
+release's files before the installer runs, so the installer cannot
+bring the previous release back. The installer:
 
 - Verifies the tree against `pack/carve-manifest.json` (SHA-256 of
   every shipped file) before touching anything.
 - On a version change (see `pack/version.txt`), backs up the existing
   tree to a timestamped directory outside the tree (excluding
   `helper/profile/`), then removes stale files the new version no
-  longer ships (loudly logged). If the install fails midway, it
-  restores from the backup, but ONLY from a verified-complete backup:
+  longer ships (loudly logged). The backup is the tree as the
+  installer found it: the new release plus any files the previous
+  release left behind. If the install fails midway, it restores that
+  backup, which undoes the installer's own changes (the tree still
+  holds the new release), but ONLY from a verified-complete backup:
   the installer records a per-path SHA-256 manifest of the backup at
   backup time and re-verifies it with `sha256sum -c` before any
-  restore. A backup
+  restore. Fix what failed and run `bash install.sh` again to finish
+  the upgrade. A backup
   interrupted mid-write (e.g. disk full) is NEVER restored over the
   tree; the tree is left in place, the partial backup is quarantined
   as `<tree>.bak-<ts>.PARTIAL`, and the failure names the recovery
@@ -389,9 +469,9 @@ rerun `install.sh`. The installer:
   entry), itemized, instead of leaving a half-install.
 - Never overwrites `helper/env` or wipes `helper/profile/`: your
   tenant config and authenticated session survive.
-- Migrates keepalive cron entries from old trees so exactly one entry
-  (the new tree's) remains. The old tree's keepalive can no longer
-  SIGKILL the new server. The cron entry shell-quotes the tree path,
+- Updates only this tree's keepalive cron entry and keeps the entries
+  that belong to other installed trees, so each tree keeps its own
+  supervision. The cron entry shell-quotes the tree path,
   so trees under paths with spaces work. Two installers running at
   once serialize their cron updates, so neither tree's entry is lost.
 
@@ -414,12 +494,16 @@ than shipped on trust; the manifest (`pack/carve-manifest.json`) is the
 integrity source of truth.
 
 Tree-scoping: configuration lives in the tree's own `helper/env`
-(`CANVAS_BASE` and optional profile/port/production pins); runtime
-state (keepalive lock, op journal, version marker) lives under the
-effective `MORROW_HOME`. The legacy global `~/.morrow/env` is honored
-for `CANVAS_BASE` only. After upgrading from a pre-tree-scoping
-release, move any `LOGIN_HELPER_*` vars from `~/.morrow/env` into
-`helper/env`.
+(`CANVAS_BASE` and optional profile/port/production pins). The helper,
+keepalive, and every agent command (`bin/morrow`, the executor, and
+`reauth/state_machine.py`) read it there; a value exported in the
+shell wins. Runtime state (keepalive lock, op journal, version marker,
+and the logs: `keepalive.log`, `server.log`, and the keepalive
+background loop's `keepalive-supervisor.log`) lives under the
+effective `MORROW_HOME`, in `trees/<tree id>/` for this tree's own
+files. The legacy global `~/.morrow/env` is honored for `CANVAS_BASE`
+only. After upgrading from a pre-tree-scoping release, move any
+`LOGIN_HELPER_*` vars from `~/.morrow/env` into `helper/env`.
 
 ## Backup, restore, and migration
 
@@ -461,26 +545,24 @@ journal, the vault key, the helper token, the env files, and the
 browser profile. Do not run untrusted code as the same user on a
 machine holding an educator's Morrow state.
 
-## Moodle lane: HTTPS is mandatory
-
-The Moodle lane refuses a plaintext `http://` base before any session
-or cookie is created: session cookies and credentials would otherwise
-cross the network unencrypted. Use `https://`. The escape hatch
-`MOODLE_BASE_ALLOW_HTTP=1` exists for test fixtures and LAN-only
-deployments only; never set it for a real tenant.
-
 ## Troubleshooting
 
-- `install.sh` fails at **egress probe**: the VM cannot reach any tenant.
-  Check `https_proxy`/`HTTPS_PROXY`, or ask your admin about egress.
+- `install.sh` fails at **egress probe**: the VM cannot reach your
+  Canvas address (the probe handshakes with the `CANVAS_BASE` host from
+  `helper/env`, or `example.com` when it is not set yet). Check the
+  address for a typo, then `https_proxy`/`HTTPS_PROXY`, or ask your
+  admin about egress.
 - Helper exits with "no Canvas tenant configured": `CANVAS_BASE` is unset
   or still the `example.instructure.com` placeholder. Set it in
   `helper/env` (or the legacy `~/.morrow/env`, or the environment).
 - `users/self` fails with a session error: the helper's Chromium holds no
   live session. Re-run step 5 (sign in again through the helper).
-- The executor refuses a write: expected without `--plan` and
-  `--approval`, or while `~/.morrow/write_halt` exists. That is the
-  governance working; see `SKILL.md`.
+- The executor refuses a write: in plan mode a write runs only
+  through `plan-write` and `approve-write` with the educator's reply,
+  and every write is refused while `~/.morrow/write_halt` exists
+  (after an expired sign-in: the educator signs in again on the helper
+  page, then `reauth/state_machine.py resume`). That is the governance
+  working; see `SKILL.md`.
 
 ## Recovery runbooks (W6-P2-9)
 
@@ -496,26 +578,30 @@ Create a backup before any risky operation:
 python3 -m dispatch.state_backup create /path/to/backup-dir
 ```
 
-The backup contains every HMAC/AES secret in plaintext. Store it
-encrypted. Never store backups unencrypted.
+It makes a new folder inside the one you name and prints it, for
+example `/path/to/backup-dir/morrow-backup-20260923T205434Z`. The
+commands below take that printed folder, shown here as
+`morrow-backup-<time>`. The backup contains every HMAC/AES secret in
+plaintext. Store it encrypted. Never store backups unencrypted.
 
 Verify a backup (checks manifest + sha256 of every file):
 
 ```
-python3 -m dispatch.state_backup verify /path/to/backup-dir
+python3 -m dispatch.state_backup verify /path/to/backup-dir/morrow-backup-<time>
 ```
 
 Restore (fail-closed: verifies first, preserves the generation
 high-water mark, writes the restore marker):
 
 ```
-python3 -m dispatch.state_backup restore /path/to/backup-dir --yes
+python3 -m dispatch.state_backup restore /path/to/backup-dir/morrow-backup-<time> --yes
 ```
 
-After a restore, the journal is fail-closed until you reconcile:
+After a restore, the journal is fail-closed until you reconcile.
+Reconcile in-flight ops against the provider first, then run:
 
 ```
-python3 -m dispatch.executor journal-reconcile
+python3 -m dispatch.executor journal-reconcile --yes
 ```
 
 ### Journal secret lost or corrupted (W6-P1-3)
@@ -547,7 +633,7 @@ missing archives. Do NOT re-claim op_ids meanwhile. Restore the
 archives from backup, then run:
 
 ```
-python3 -m dispatch.executor journal-reconcile
+python3 -m dispatch.executor journal-reconcile --yes
 ```
 
 ### Retired set seal (W6-P1-5)

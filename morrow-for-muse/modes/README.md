@@ -127,7 +127,7 @@ hook needs for its audit block and usage journaling.
 
 `dispatch/admission.py::check_mode_authority(entry, params, approval,
 mode_ctx)` sits in the `admit()` gate chain behind the optional
-`mode_ctx` parameter. The full harness contract:
+`mode_ctx` parameter. The full contract:
 
 ```python
 mode_ctx = {"user_id": "<id>",
@@ -141,10 +141,17 @@ mode_ctx = {"user_id": "<id>",
 admit(entry, params, tenant_base=..., mode_ctx=mode_ctx)
 ```
 
-The Muse harness supplies `user_id` (env `MORROW_USER_ID`) and
-`conversation_id` (env `MORROW_CONVERSATION_ID`) for every dispatch;
-`dispatch_entry`, `dispatch_catalog_op`, and `dispatch_undo` all accept
-and forward `mode_ctx`. Missing `user_id` fails closed to the legacy
+No harness sets either id; the executor CLI fills them.
+`user_id` is `--user-id`, else `MORROW_USER_ID`, else the Canvas
+account pinned at first sign-in, as `canvas:<account id>@<Canvas host>`
+(`config/identity.default_user_id`, which `bin/morrow mode`, `bin/morrow
+settings`, and `bin/morrow query` use too), so one educator has one id in
+every conversation. `conversation_id` is `--conversation-id`, else
+`MORROW_CONVERSATION_ID`: SKILL.md tells the agent to make a new one at
+the start of each Muse conversation and pass it to every command in
+that conversation. `dispatch_entry`, `dispatch_catalog_op`, and
+`dispatch_undo` all accept and forward `mode_ctx`. Missing `user_id`
+(no flag, no variable, no pinned account) fails closed to the legacy
 plan-mode approval path.
 
 - Reads: `(None, None)`, unchanged.
@@ -191,9 +198,12 @@ lives inside the deploy tree. `user_id` is restricted to
   identity, reason (explicit revoke, `switch_mode:plan`, or
   `superseded by grant <id>`).
 - `mode.write_admitted`: one per edit-mode write admitted under a
-  grant (or standing): entry, course_id, op_id, grant id/revision,
+  grant (or standing): entry, course_id, for_op_id, grant id/revision,
   educator identity, resolution confidence when supplied.
-- `mode.write_refused`: one per mode refusal with the reason code.
+- `mode.write_refused`: one per mode refusal with the reason code and
+  for_op_id. Both name the op as `for_op_id`, never `op_id`: the gate
+  runs before the executor claims the op id, and an `op_id` field
+  would reserve it, so the claim would refuse the op as already sent.
 - `mode.switched_to_plan`: switch events with the revoked-grant count,
   the cleared-override count, and whether the standing default changed.
 
@@ -208,8 +218,8 @@ lives inside the deploy tree. `user_id` is restricted to
 - Keys: `"default_mode"` (`"plan"` | `"edit"`; standing default),
   `"verbosity"`, `"confirm_destructive_writes"` (bool; destructive
   writes in edit mode need explicit confirmation),
-  `"write_approval_style"`, `"failure_verbosity"`, `"proactivity"`,
-  `"read_confirmations"`.
+  `"failure_verbosity"`, `"proactivity"`, `"read_confirmations"`,
+  `"work_summary"`, `"default_course_id"`, `"timezone"`.
 - `settings.effective_mode(user_id, conversation_id)` delegates to
   `modes.state.current_mode`: one resolver, no second authority.
 - `end_conversation(...)` clears the persisted override and revokes
@@ -221,7 +231,7 @@ lives inside the deploy tree. `user_id` is restricted to
   the settings audit; the safe direction needs no confirmation). It
   returns the re-resolved mode, so callers report what is in force.
   The typed commands in `settings/commands.py` (`mode_set`,
-  `mode_status`, `setting_set`; CLI `morrow mode ...` and `morrow
+  `mode_status`, `setting_set`; CLI `bin/morrow mode ...` and `bin/morrow
   settings ...`) are the agent's entry point. No code parses the
   educator's words: the agent decides what the educator means.
 
@@ -251,11 +261,15 @@ mode-aware message.
 
 ## Tests
 
-`modes/test_modes.py` (pytest, stdlib only in the package) plus
 `modes/test_modes_integration.py` (modes + settings + admission gate,
-real packages, no fakes). Run from the deploy tree root:
+real packages, no fakes) is one of the install suites and keeps itself
+out of the live home. Run it from the deploy tree root:
 
-    python3 -m pytest modes/test_modes.py modes/test_modes_integration.py -q
+    python3 modes/test_modes_integration.py
+
+The unit tests, `modes/test_modes.py`, stay in the source
+repository and are not in the release: they need that repository's
+conftest.py to stay out of the live home.
 
 Test state roots live under `modes/.test-state/` and
 `modes/.selftest-work/` (never `/tmp`) and are removed after the run.

@@ -3,13 +3,12 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-// Windows' real ACL and file-system operations run measurably slower than the
-// same calls on macOS: this suite's win32-only paths were never exercised for
-// real on a Windows host until they had real fixtures, and installer-controller
-// .test.cjs alone needed more than 60s once they were. Both budgets stay wide
-// margins above what was actually observed, not a bare minimum.
-const FILE_TIMEOUT_MS = process.platform === "win32" ? 240_000 : 60_000;
-const SUITE_TIMEOUT_MS = process.platform === "win32" ? 600_000 : 300_000;
+// Windows' real ACL and file-system operations are much slower than the same
+// calls on macOS. The Windows installer-controller suite passed 84 tests before
+// reaching its four-minute per-file limit, so keep the Windows budgets above
+// that measured runtime while retaining a hard process boundary.
+const FILE_TIMEOUT_MS = process.platform === "win32" ? 600_000 : 60_000;
+const SUITE_TIMEOUT_MS = process.platform === "win32" ? 900_000 : 300_000;
 const DEPENDENCY_TIMEOUT_MS = 30_000;
 
 function usage() {
@@ -54,7 +53,8 @@ async function main() {
   assertPassed(await runNode([path.join("test", "require-dependencies.cjs")], "installer dependency check", DEPENDENCY_TIMEOUT_MS), DEPENDENCY_TIMEOUT_MS);
   const files = testFiles();
   if (mode === "--suite") {
-    assertPassed(await runNode(["--test", "--test-concurrency=2", ...files], "full installer test suite", SUITE_TIMEOUT_MS), SUITE_TIMEOUT_MS);
+    const concurrency = process.platform === "win32" ? 1 : 2;
+    assertPassed(await runNode(["--test", `--test-concurrency=${concurrency}`, ...files], "full installer test suite", SUITE_TIMEOUT_MS), SUITE_TIMEOUT_MS);
     return;
   }
   for (const file of files) {

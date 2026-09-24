@@ -13,12 +13,10 @@ The extension uses the Canvas session that the user already opened in Chrome. It
 ## User interaction
 
 1. The user starts Morrow through an MCP client.
-2. The user selects **Connect Morrow** in the extension.
-3. Morrow opens a local connection page bound to that request.
-4. The user selects **Allow connection**.
-5. The user opens an exact signed-in Canvas course.
-6. The user selects **Connect Canvas course**.
-7. Chrome asks for access to that Canvas site and any supported New Quizzes site open within the tab.
+2. The user selects **Connect Morrow** in the extension. Morrow sends a one-time challenge, and the extension signs it with the secret in the active-folder marker of the Bridge folder Morrow set up. Morrow checks that proof against its own record of the folder and only then hands the extension its connection token. No page opens, and a request made over HTTP alone pairs nothing.
+3. The user opens an exact signed-in Canvas course.
+4. The user selects **Connect Canvas course**.
+5. Chrome asks for access to that Canvas site and any supported New Quizzes site open within the tab.
 
 The extension popup shows the Morrow connection separately from the saved Canvas connection and its last check time. **Disconnect Morrow** removes pairing state, bindings, the course file access opt-in, and receipt replay state. It requests removal of optional HTTPS permissions and warns if Chrome cannot remove them.
 

@@ -5,6 +5,7 @@ const fsConstants = require("node:fs").constants;
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const { AsyncLocalStorage } = require("node:async_hooks");
 const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const { ASSISTANTS, errorDetails, installerState } = require("./contract.cjs");
@@ -22,6 +23,32 @@ const RESTART_REFUSALS = Object.freeze({
 
 function restartRefusalCode(reason) {
   return (typeof reason === "string" && RESTART_REFUSALS[reason]) || "active_or_uncertain_operations";
+}
+
+/**
+ * Whether the runtime reports a Bridge connected right now: true, false, or
+ * "unknown" when this monitor cannot say.
+ */
+function reportedBridgeConnection(monitor) {
+  let connected;
+  try { connected = monitor?.snapshot?.()?.health?.bridgeConnected; } catch { connected = undefined; }
+  return typeof connected === "boolean" ? connected : "unknown";
+}
+
+// A refusal that already names what holds Morrow keeps its own words when an
+// update of a connected Bridge stops. Any other failure is the update failing.
+const NAMED_MAINTENANCE_REFUSALS = new Set([
+  "runtime_repair_required",
+  "active_or_uncertain_operations",
+  "runtime_request_in_flight",
+  "runtime_change_running",
+  "runtime_other_client_connected"
+]);
+
+function bridgeUpdateRefusal(error) {
+  // The Bridge refuses to pause while it is in the middle of course work.
+  if (error?.code === "bridge_quiesce_busy") return errorDetails("active_or_uncertain_operations");
+  return errorDetails(NAMED_MAINTENANCE_REFUSALS.has(error?.code) ? error.code : "bridge_update_failed");
 }
 const { DATA_REMOVAL_SCHEMA, freshRecord, insideDirectory, inspectRecord, readPrivateRegularFile, retentionSnapshot } = require("./state-policy.cjs");
 const {
@@ -47,10 +74,15 @@ const {
   isCurrentClaudeDesktopSetup,
   prepareClaudeDesktopBundle,
   processAlive,
+  resolveClaudeDesktopLauncher,
 } = require("./claude-desktop.cjs");
-const { processMatchesRecordedLifetime } = require("./process-lifetime.cjs");
+const {
+  WINDOWS_POWERSHELL_TIMEOUT_MS,
+  processMatchesRecordedLifetime,
+  windowsPowerShellPath,
+} = require("./process-lifetime.cjs");
 const { blackboardPaths, blackboardTenantIdFromBaseUrl, configureBlackboard, readBlackboardHealth, removeBlackboardData, removeBlackboardTenant, selectBlackboardCourses } = require("./blackboard.cjs");
-const { detectAssistantApplication, detectAssistantCommand } = require("./assistant-app-detection.cjs");
+const { detectAssistantApplication, detectAssistantCommand, detectGeminiCli } = require("./assistant-app-detection.cjs");
 const { detectWindowsCodexPackage } = require("./windows-appx-detection.cjs");
 const { parseStrictJson } = require("./strict-utf8.cjs");
 const {
@@ -302,9 +334,8 @@ async function readMacApplicationBundleIdentifier(applicationPath) {
 
 async function runWindowsPowerShell(script) {
   if (process.platform !== "win32") return null;
-  const executable = path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  return readCommandOutput(executable, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
-    timeoutMs: 3_000,
+  return readCommandOutput(windowsPowerShellPath(), ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+    timeoutMs: WINDOWS_POWERSHELL_TIMEOUT_MS,
     maxBytes: 8 * 1024
   });
 }
@@ -351,7 +382,7 @@ async function detectAssistant(assistant) {
     readBundleIdentifier: readMacApplicationBundleIdentifier
   })) return true;
   if (assistant.id === "claude-code") return commandFound("claude");
-  if (assistant.id === "gemini-cli") return commandFound("gemini");
+  if (assistant.id === "gemini-cli") return detectGeminiCli();
   if (assistant.id === "codex") return commandFound("codex");
   return false;
 }
@@ -529,6 +560,15 @@ function configuredProject(assistant, home, target) {
   return clientConfigTarget(assistant, home, project) === target ? { project } : null;
 }
 
+/**
+ * Whether the project folder an assistant was set up in is still a folder.
+ * client-config cannot write into a folder that is gone, and Morrow never
+ * makes one again: the educator may have deleted it on purpose.
+ */
+async function projectFolderPresent(project) {
+  return fs.stat(project).then((info) => info.isDirectory(), () => false);
+}
+
 class InstallerController {
   constructor(deps) {
     this.app = deps.app;
@@ -577,6 +617,7 @@ class InstallerController {
     this.discoverBlackboardConnection = deps.discoverBlackboardConnection || ((input) => this.readBlackboardConnection(input));
     this.desktopMutationInProgress = null;
     this.desktopMutationGuard = null;
+    this.desktopMutationScope = new AsyncLocalStorage();
     this.dataRemovalInProgress = null;
     this.dataRemovalGuard = null;
     this.dataRemoval = null;
@@ -640,14 +681,18 @@ class InstallerController {
     }
     await mkdirPrivate(this.paths.state);
     const stateDirectory = await fs.lstat(this.paths.state);
+    // Mode bits describe the file system this process runs on, as the record
+    // read through readPrivateRegularFile already assumes.
     if (!stateDirectory.isDirectory() || stateDirectory.isSymbolicLink()
-      || (this.platform !== "win32" && (stateDirectory.mode & 0o077) !== 0)) {
+      || (process.platform !== "win32" && (stateDirectory.mode & 0o077) !== 0)) {
       throw new Error("record_directory_invalid");
     }
   }
 
+  // A folder flush is a POSIX file-system call: Windows refuses it, whatever
+  // platform this controller serves. Every folder flush here asks the host.
   async syncInstallerStateDirectory() {
-    if (this.platform === "win32") return;
+    if (process.platform === "win32") return;
     const directory = await fs.open(this.paths.state, fsConstants.O_RDONLY);
     try { await directory.sync(); } finally { await directory.close(); }
   }
@@ -786,7 +831,7 @@ class InstallerController {
     if (!backupDirectory.isDirectory() || backupDirectory.isSymbolicLink()) {
       throw new Error("record_backup_directory_invalid");
     }
-    if (this.platform !== "win32") {
+    if (process.platform !== "win32") {
       const flags = fsConstants.O_RDONLY
         | (typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0)
         | (typeof fsConstants.O_DIRECTORY === "number" ? fsConstants.O_DIRECTORY : 0);
@@ -827,7 +872,7 @@ class InstallerController {
       handle = null;
       await fs.rename(temporary, this.recordPath);
       renamed = true;
-      if (this.platform !== "win32") {
+      if (process.platform !== "win32") {
         const directory = await fs.open(this.paths.state, fsConstants.O_RDONLY);
         try { await directory.sync(); } finally { await directory.close(); }
       }
@@ -860,7 +905,7 @@ class InstallerController {
     } else {
       await fs.rm(this.recordPath, { force: true });
     }
-    if (this.platform !== "win32") {
+    if (process.platform !== "win32") {
       for (const directoryPath of [backups, this.paths.state]) {
         const directory = await fs.open(directoryPath, fsConstants.O_RDONLY);
         try { await directory.sync(); } finally { await directory.close(); }
@@ -1059,6 +1104,34 @@ class InstallerController {
   }
 
   /**
+   * The folder Morrow was using when it is gone, or null. Before any assistant
+   * is set up the default folder is not missing: assistant setup makes it.
+   */
+  materialsFolderMissing(record, materials) {
+    if (materials) return null;
+    const candidate = this.workspace || record.materialsFolder || this.paths.defaultMaterials;
+    const isDefault = candidate === this.paths.defaultMaterials;
+    const configured = record.configured && typeof record.configured === "object" ? Object.keys(record.configured).length > 0 : false;
+    return isDefault && !configured ? null : { path: candidate, isDefault };
+  }
+
+  /**
+   * Makes Morrow's own default materials folder again, empty, after it was
+   * deleted while an assistant is set up to use it. The assistants already
+   * name that exact folder, so none of them is written. A folder the person
+   * chose is never made again: it may be on a drive that is not connected, and
+   * an empty folder in its place would hide the real one.
+   */
+  async restoreMaterialsFolder() {
+    const refused = this.locationAdmission() || this.maintenanceAdmission();
+    if (refused) throw errorDetails(refused);
+    const record = await this.record();
+    if (await this.effectiveWorkspace(record)) return;
+    if (this.materialsFolderMissing(record, null)?.isDefault !== true) throw errorDetails("setup_failed");
+    await mkdirPrivate(this.paths.defaultMaterials);
+  }
+
+  /**
    * Creates the default materials folder only as part of the explicit assistant
    * setup transaction. State reads stay observational, including after a new
    * process starts with all app-owned data removed.
@@ -1088,6 +1161,7 @@ class InstallerController {
     });
     if (result.canceled || result.filePaths.length !== 1) return false;
     const materials = await canonicalDirectory(result.filePaths[0]);
+    await this.admitMaterialsFolder(materials);
     return this.withDesktopMutation(async (transaction) => {
       const record = await this.record();
       // Read what the change has to write before it writes anything, so a record
@@ -1120,6 +1194,61 @@ class InstallerController {
   }
 
   /**
+   * Refuses a materials folder Morrow cannot work in, before anything is
+   * written: a folder the runtime refuses as its workspace, which no assistant
+   * could start Morrow in, and a folder that is, holds, or sits inside one of
+   * Morrow's own folders. Morrow's own default Materials folder is allowed.
+   */
+  async admitMaterialsFolder(materials) {
+    if (await this.workspaceRefusedByRuntime(materials)) throw errorDetails("materials_folder_too_broad");
+    const userData = this.paths.userData;
+    const realUserData = await fs.realpath(userData).catch(() => userData);
+    // The Blackboard connection file and its credential folder live in the home
+    // folder, outside the user-data folder. The connection file names its
+    // secret files, so a materials folder that holds them makes the secret a
+    // file the assistant could name.
+    const blackboard = blackboardPaths(this.home, "default");
+    const owned = [
+      this.paths.state, this.paths.bridgeDirectory, this.paths.assistantBackups, this.paths.windowData,
+      blackboard.configDirectory, blackboard.credentialDirectory
+    ];
+    for (const folder of owned) {
+      const places = [...await this.pathForms(folder), path.join(realUserData, path.relative(userData, folder))];
+      if (places.some((place) => insideDirectory(place, materials) || insideDirectory(materials, place))) {
+        throw errorDetails("materials_folder_morrow_data");
+      }
+    }
+  }
+
+  /**
+   * Whether the runtime refuses `folder` as its workspace, by the runtime's own
+   * rule: a whole drive, the home folder, or a folder that holds the home folder.
+   */
+  async workspaceRefusedByRuntime(folder) {
+    await this.ensureRuntime();
+    const module = await import(pathToFileURL(path.join(path.dirname(this.paths.server), "local-owner-maintenance.js")).href);
+    if (typeof module.workspaceRootTooBroad !== "function") throw errorDetails("runtime_repair_required");
+    return module.workspaceRootTooBroad(folder) === true;
+  }
+
+  /**
+   * The folder a maintenance guard fences: the materials folder, or Morrow's
+   * own folder when there is none or the runtime refuses the one recorded. No
+   * runtime can run in a folder the runtime refuses, and a guard on that folder
+   * is never granted, so fencing it would refuse every later step.
+   */
+  async fencedWorkspace(materials) {
+    if (materials && !await this.workspaceRefusedByRuntime(materials)) return materials;
+    return canonicalDirectory(this.paths.userData);
+  }
+
+  /** A path as written and, when it exists, as the disk resolves it. */
+  async pathForms(value) {
+    const real = await fs.realpath(value).catch(() => null);
+    return real && real !== path.resolve(value) ? [path.resolve(value), real] : [path.resolve(value)];
+  }
+
+  /**
    * The configuration file each configured assistant is set up through, refused
    * when the record names a file that does not rebuild from this computer. The
    * refusal is the same one repair uses for a record it cannot act on.
@@ -1139,10 +1268,13 @@ class InstallerController {
   /**
    * Writes the materials folder into every assistant this installation
    * configured, so each assistant starts Morrow in the exact folder Morrow
-   * uses. Each client file is replaced only while its complete bytes still
-   * match the digest Morrow recorded. The installer record changes only after
-   * every assistant was written and read back. A failure restores each earlier
-   * file only if nothing else changed it after Morrow's write.
+   * uses. Morrow finds its own entry in each settings file by its marker and
+   * rewrites only that entry, so the rest of the file stays as the assistant
+   * or the person left it. An assistant whose project folder is gone is left
+   * out, and setup names that folder and offers Remove. The installer record
+   * changes only after every assistant was written and read back. A failure
+   * restores each earlier file only if nothing else changed it after Morrow's
+   * write.
    */
   async bindConfiguredAssistants(bindings, materials) {
     const staged = [];
@@ -1152,6 +1284,7 @@ class InstallerController {
           staged.push(await this.stageClaudeDesktopSetup(assistant, entry, materials));
           continue;
         }
+        if (project && !await projectFolderPresent(project)) continue;
         const installed = await this.installClientConfiguration(assistant, entry.target, project, materials, {
           rebind: true,
           updateRecord: false
@@ -1283,13 +1416,11 @@ class InstallerController {
       }
       return status;
     };
-    if (writeRequired && !this.desktopMutationGuard) {
+    if (writeRequired) {
       status = await this.withDesktopMutation(async (transaction) => {
         await transaction.stopRuntime();
         return writeBridge();
       });
-    } else if (writeRequired) {
-      status = await writeBridge();
     }
     // Rollback copies an interrupted update left behind. A failed prune must
     // not block startup; the next start repeats it.
@@ -1459,9 +1590,14 @@ class InstallerController {
       const monitor = await this.bridgeMonitor();
       if (record.manualChromeReloadRequired) return this.completePendingBridgeUpdate(record, monitor);
       if (comparison <= 0) return record;
-      const status = await this.currentBridgeStatus(record, monitor);
-      if (status.installType !== "development") return record;
-      return this.stageBridgeUpdate(record, release, monitor);
+      if (reportedBridgeConnection(monitor) === false) return this.replaceUnconnectedBridge();
+      try {
+        const status = await this.currentBridgeStatus(record, monitor);
+        if (status.installType !== "development") return record;
+        return await this.stageBridgeUpdate(record, release, monitor);
+      } catch (error) {
+        throw bridgeUpdateRefusal(error);
+      }
     })();
     this.bridgeReconciliation = pending;
     try {
@@ -1469,6 +1605,25 @@ class InstallerController {
     } finally {
       if (this.bridgeReconciliation === pending) this.bridgeReconciliation = null;
     }
+  }
+
+  /**
+   * Replaces an older app-owned Bridge folder with the sealed release while the
+   * runtime reports no Bridge connected: Chrome has not loaded the folder, or
+   * Chrome is closed. No Bridge runs these files for Morrow, so there is nothing
+   * to pause or reload, and this is the replacement Repair makes. The new folder
+   * carries a new active-folder challenge, so a Chrome that loads it proves
+   * again which folder it loaded. It holds the runtime's maintenance lease, so
+   * it is refused while an assistant or an approved change is using Morrow.
+   */
+  async replaceUnconnectedBridge() {
+    return this.withDesktopMutation(async () => {
+      await this.discardUnusableBridgeInstallation();
+      this.bridgeInitialization = null;
+      this.bridgeInstallation = null;
+      await initializeBridgeDirectory({ ...this.bridgeReleaseOptions(), initialChallenge: this.bridgeChallenge() });
+      return this.verifiedBridgeInstallation();
+    }, { fromBridgeReconciliation: true });
   }
 
   async ensureBridgeDirectory() {
@@ -1522,6 +1677,7 @@ class InstallerController {
       const record = await this.record();
       const materials = await this.workspaceForAssistantSetup(record);
       if (!materials) throw errorDetails("workspace_required");
+      if (await this.workspaceRefusedByRuntime(materials)) throw errorDetails("materials_folder_too_broad");
       await transaction.stopRuntime();
       try {
         await this.ensureRuntime();
@@ -1646,11 +1802,9 @@ class InstallerController {
   }
 
   /**
-   * Removes Morrow's own entry from one assistant configuration file and keeps
-   * the rest of that file as it is. It writes only while the file on disk is
-   * still exactly the file Morrow wrote, so an edit made after that is refused
-   * and the file is left untouched. The file is read again afterwards: the
-   * removal is proven by what that file says, not by the write call.
+   * One assistant configuration file without Morrow's own entry, found by its
+   * marker, with the rest of the file kept as it is. `null` when the file holds
+   * no Morrow entry. A `morrow` entry Morrow did not write is refused.
    */
   async configurationWithoutMorrow(assistant, content, target = null) {
     const module = await this.clientConfigModule().catch(() => { throw errorDetails("setup_failed"); });
@@ -1676,6 +1830,13 @@ class InstallerController {
     }
   }
 
+  /**
+   * Removes Morrow's own entry from one assistant configuration file and keeps
+   * the rest of that file as it is, including edits made after Morrow wrote it.
+   * The write is refused when the file changes while Morrow writes it. The
+   * file is read again afterwards: the removal is proven by what that file
+   * says, not by the write call.
+   */
   async removeClientConfiguration(assistant, entry, recordBefore, recordAfter) {
     const target = entry?.target;
     if (typeof target !== "string" || !path.isAbsolute(target) || typeof entry.sha256 !== "string") throw errorDetails("setup_failed");
@@ -1705,9 +1866,34 @@ class InstallerController {
       recordBeforeSha256: installerRecordDigest(recordBefore, this.home),
       recordAfterSha256: installerRecordDigest(recordAfter, this.home),
     });
-    await this.writeAssistantConfiguration(target, next, beforeSha256);
-    await this.confirmAssistantConfigurationRemoved(assistant, target, afterSha256);
+    try {
+      await this.writeAssistantConfiguration(target, next, beforeSha256);
+      await this.confirmAssistantConfigurationRemoved(assistant, target, afterSha256);
+    } catch (error) {
+      // The recovery record is for a process that ends mid-removal. While the
+      // file still holds Morrow's entry, the removal did not happen and the
+      // record was never changed, so nothing is left for Repair to finish.
+      if (await this.morrowEntryRemains(assistant, target) === true) {
+        await this.clearAssistantRemovalTombstone(tombstone).catch(() => {});
+      }
+      throw error;
+    }
     return tombstone;
+  }
+
+  /**
+   * Whether one assistant settings file still holds Morrow's own entry, from
+   * what the file says now: true or false, or null when Morrow cannot tell.
+   * A file that is gone holds no entry.
+   */
+  async morrowEntryRemains(assistant, target) {
+    try {
+      const content = await readConfigurationFile(target);
+      if (content === null) return await fs.lstat(target).then(() => null, () => false);
+      return await this.configurationWithoutMorrow(assistant, content.toString("utf8"), target) !== null;
+    } catch {
+      return null;
+    }
   }
 
   async assistantConfigurationGeneration(target, expectedSha256) {
@@ -1822,8 +2008,9 @@ class InstallerController {
     if (!assistant || assistant.id === "claude-desktop") throw new Error("assistant_removal_recovery_required");
 
     const recordSha256 = installerRecordDigest(record, this.home);
+    // The record is committed only after the file was read back without
+    // Morrow's entry. Whatever the assistant wrote into its file since is its own.
     if (recordSha256 === tombstone.recordAfterSha256) {
-      await this.confirmAssistantConfigurationRemoved(assistant, tombstone.target, tombstone.afterSha256);
       await this.clearAssistantRemovalTombstone(tombstone);
       return record;
     }
@@ -1840,19 +2027,26 @@ class InstallerController {
       throw new Error("assistant_removal_recovery_required");
     }
 
-    const current = await readConfigurationFile(tombstone.target);
-    if (current === null) throw new Error("assistant_removal_recovery_required");
-    const currentSha256 = fileHash(current);
-    if (currentSha256 === tombstone.beforeSha256) {
-      const next = await this.configurationWithoutMorrow(assistant, current.toString("utf8"), tombstone.target);
-      if (next === null || fileHash(Buffer.from(next, "utf8")) !== tombstone.afterSha256) {
-        throw new Error("assistant_removal_recovery_required");
-      }
-      await this.writeAssistantConfiguration(tombstone.target, next, tombstone.beforeSha256);
-    } else if (currentSha256 !== tombstone.afterSha256) {
-      throw new Error("assistant_removal_recovery_required");
+    // The assistant may have rewritten its file since the removal began, so
+    // what the file says now decides, not the digests the removal recorded.
+    let remains = await this.morrowEntryRemains(assistant, tombstone.target);
+    if (remains === true) {
+      try {
+        const current = await readConfigurationFile(tombstone.target);
+        const next = current === null ? null
+          : await this.configurationWithoutMorrow(assistant, current.toString("utf8"), tombstone.target);
+        if (next !== null) {
+          await this.writeAssistantConfiguration(tombstone.target, next, fileHash(current));
+          await this.confirmAssistantConfigurationRemoved(assistant, tombstone.target, fileHash(Buffer.from(next, "utf8")));
+        }
+      } catch {}
+      remains = await this.morrowEntryRemains(assistant, tombstone.target);
     }
-    await this.confirmAssistantConfigurationRemoved(assistant, tombstone.target, tombstone.afterSha256);
+    if (remains !== false) {
+      // The removal did not happen. The assistant stays listed and can be removed again.
+      await this.clearAssistantRemovalTombstone(tombstone);
+      return record;
+    }
 
     await this.writeRecord(recordAfter);
     const committed = await this.readInstallerRecord();
@@ -1887,7 +2081,7 @@ class InstallerController {
   }
 
   async syncClaudeSetupDirectory() {
-    if (this.platform === "win32") return;
+    if (process.platform === "win32") return;
     const setupRoot = path.join(await fs.realpath(this.paths.state), "ClaudeDesktop");
     const directory = await fs.open(setupRoot, fsConstants.O_RDONLY);
     try { await directory.sync(); } finally { await directory.close(); }
@@ -2169,7 +2363,7 @@ class InstallerController {
     return this.appLocation() === "ok" ? null : "app_location_unsupported";
   }
 
-  maintenanceAdmission({ pendingBridgeUpdate = false } = {}) {
+  maintenanceAdmission({ pendingBridgeUpdate = false, fromBridgeReconciliation = false } = {}) {
     // A staged Bridge update keeps its own lease until Chrome reloads the Bridge. Finishing that
     // update is the one step that lease exists for, so it does not count as other work here.
     const ownBridgeLease = pendingBridgeUpdate && this.bridgeLeaseId !== null
@@ -2177,7 +2371,7 @@ class InstallerController {
     if ((this.restartLeases.size !== 0 && !ownBridgeLease) || (this.bridgeLeaseId !== null && !ownBridgeLease)
       || this.dataRemovalInProgress !== null || this.dataRemovalGuard !== null
       || this.desktopMutationInProgress !== null || this.desktopMutationGuard !== null
-      || this.bridgeReconciliation !== null) return "active_or_uncertain_operations";
+      || (this.bridgeReconciliation !== null && !fromBridgeReconciliation)) return "active_or_uncertain_operations";
     return null;
   }
 
@@ -2346,7 +2540,8 @@ class InstallerController {
    * assistant file this installation configured, so each one points at this
    * copy of Morrow and its materials folder, including after Morrow moved.
    * Morrow replaces only an entry that carries its own marker: a server of
-   * that name someone else wrote is reported and left exactly as it is.
+   * that name someone else wrote is reported and left exactly as it is. A
+   * Claude Code or Gemini CLI setup whose project folder is gone is skipped.
    * Claude Desktop is configured by an approval inside that application, so
    * repair leaves it to the person and does not open another application.
    */
@@ -2361,8 +2556,11 @@ class InstallerController {
       if (!entry || assistant.id === "claude-desktop") continue;
       const located = configuredProject(assistant, this.home, entry.target);
       if (!located) continue;
+      // Setup names a project folder that is gone and offers Remove; the other assistants are still repaired.
+      if (located.project && !await projectFolderPresent(located.project)) continue;
       const materials = await this.effectiveWorkspace(record);
       if (!materials) throw errorDetails("workspace_required");
+      if (await this.workspaceRefusedByRuntime(materials)) throw errorDetails("materials_folder_too_broad");
       await this.installClientConfiguration(assistant, entry.target, located.project, materials, {
         rebind: await exists(entry.target),
         keepSelection: true
@@ -2375,33 +2573,69 @@ class InstallerController {
    * Removing the Morrow application removes the application only, so this is
    * what stays on this computer until a person removes it here.
    */
-  retention(record) {
+  /** The places this installation keeps data that are on this computer now. */
+  async retention(record) {
     const configured = record?.configured && typeof record.configured === "object" && !Array.isArray(record.configured) ? record.configured : {};
     const assistantConfigurations = ASSISTANTS.flatMap((assistant) => {
       const target = configured[assistant.id]?.target;
       return typeof target === "string" && path.isAbsolute(target) ? [{ title: assistant.title, path: target }] : [];
     });
     const blackboard = blackboardPaths(this.home, "default");
-    return retentionSnapshot({
+    const materials = this.workspace || record?.materialsFolder || this.paths.defaultMaterials;
+    const snapshot = retentionSnapshot({
       platform: this.platform,
       userData: this.paths.userData,
       state: this.paths.state,
       backups: this.paths.assistantBackups,
+      windowData: this.paths.windowData,
       bridge: this.paths.bridgeDirectory,
       // The materials folder this installation uses, named without creating it.
-      materials: this.workspace || record?.materialsFolder || this.paths.defaultMaterials,
+      materials,
+      previousMaterials: await this.earlierDefaultMaterials(materials),
       blackboardCredentials: blackboard.credentialDirectory,
       blackboardConfiguration: blackboard.config,
       assistantConfigurations,
+      claudeDesktopExtension: await this.claudeDesktopExtensionFolder(),
       removal: this.dataRemoval
     });
+    const present = await Promise.all(snapshot.locations.map((location) => fs.lstat(location.path).then(() => true, () => false)));
+    return { ...snapshot, locations: snapshot.locations.filter((_location, index) => present[index]) };
+  }
+
+  /**
+   * The default Materials folder that assistant setup made, when the person has
+   * since chosen another folder, or null. It keeps whatever was put in it. A
+   * default folder inside the chosen one belongs to the chosen folder.
+   */
+  async earlierDefaultMaterials(materials) {
+    const fallback = this.paths.defaultMaterials;
+    if (materials === fallback) return null;
+    const earlier = await fs.realpath(fallback).catch(() => null);
+    if (!earlier) return null;
+    const inUse = await fs.realpath(materials).catch(() => path.resolve(materials));
+    return insideDirectory(inUse, earlier) ? null : fallback;
+  }
+
+  /**
+   * The folder where Claude Desktop keeps its own copy of the Morrow extension,
+   * or null when Claude Desktop has none on this computer.
+   */
+  async claudeDesktopExtensionFolder() {
+    try {
+      const location = await resolveClaudeDesktopLauncher({ platform: this.platform, homeDirectory: this.home });
+      if (!location) return null;
+      const pathApi = this.platform === "win32" ? path.win32 : path.posix;
+      return pathApi.dirname(pathApi.dirname(location.physical));
+    } catch {
+      return null;
+    }
   }
 
   /**
    * Removes the Morrow data this installation owns. It runs only after an
    * explicit confirmation that names every path, it removes only the places
-   * inside Morrow's own user-data folder and the Blackboard credential folder,
-   * and it reports what is gone by reading each path again rather than from the
+   * inside Morrow's own user-data folder, the Blackboard credential folder, and
+   * the Blackboard configuration file, and it reports what is gone by reading each path again rather than from the
    * removal calls. It never removes an assistant's own configuration file.
    *
    * Removing the application itself is a step of this computer, not of Morrow.
@@ -2421,7 +2655,8 @@ class InstallerController {
 
   async runDataRemoval(parent) {
     const record = await this.record();
-    const retention = this.retention(record);
+    const retention = await this.retention(record);
+    const bridgeLoaded = await this.bridgeLoadedInChrome(this.bridgeInstallation, this.runtimeMonitor?.snapshot?.() ?? null) === true;
     const removable = retention.locations.filter((location) => location.removable === true);
     const kept = retention.locations.filter((location) => location.removable !== true);
     const keptPaths = kept.map((location) => location.path);
@@ -2431,7 +2666,7 @@ class InstallerController {
     });
     const guard = await this.acquireDataRemovalGuard();
     this.dataRemovalGuard = guard;
-    if (!await this.confirmDataRemoval(parent, removable, kept, entries)) {
+    if (!await this.confirmDataRemoval(parent, removable, kept, entries, bridgeLoaded)) {
       await this.releaseDataRemovalGuard(guard);
       this.dataRemoval = { schema: DATA_REMOVAL_SCHEMA, status: "cancelled", removed: [], remaining: [], kept: keptPaths };
       return this.dataRemoval;
@@ -2451,9 +2686,17 @@ class InstallerController {
       // State contains the durable maintenance guard. Removing it last keeps
       // every runtime start fenced throughout all earlier mutations.
       const blackboard = blackboardPaths(this.home, "default");
-      const ordered = removable
-        .filter((location) => location.path !== blackboard.config && location.path !== blackboard.credentialDirectory)
-        .sort((left, right) => Number(left.path === this.paths.state) - Number(right.path === this.paths.state));
+      // A place that holds one Morrow keeps is left where it is and reported as
+      // still there, so removing it never deletes what the list says stays.
+      const keptPlaces = (await Promise.all(keptPaths.map((kept) => this.pathForms(kept)))).flat();
+      const holdsKept = async (location) => (await this.pathForms(location.path))
+        .some((place) => keptPlaces.some((kept) => insideDirectory(place, kept)));
+      const ordered = [];
+      for (const location of removable) {
+        if (location.path === blackboard.config || location.path === blackboard.credentialDirectory) continue;
+        if (!await holdsKept(location)) ordered.push(location);
+      }
+      ordered.sort((left, right) => Number(left.path === this.paths.state) - Number(right.path === this.paths.state));
       for (const location of ordered) {
         // A path Morrow cannot remove must not stop the rest. The readback below
         // reports the result; this call does not.
@@ -2511,10 +2754,11 @@ class InstallerController {
     let record = null;
     try { record = await this.record(); } catch {}
     const candidate = this.workspace || record?.materialsFolder || this.paths.defaultMaterials;
+    let materials = null;
     if (await exists(candidate)) {
-      try { return await canonicalDirectory(candidate); } catch {}
+      try { materials = await canonicalDirectory(candidate); } catch {}
     }
-    return canonicalDirectory(this.paths.userData);
+    return this.fencedWorkspace(materials);
   }
 
   /** Acquires authority from a live owner, or proves that no owner is running. */
@@ -2540,7 +2784,7 @@ class InstallerController {
     }
     const active = await this.acquireRestartLease();
     if (active?.status !== "granted" || typeof active.leaseId !== "string") {
-      throw errorDetails("active_or_uncertain_operations");
+      throw errorDetails(restartRefusalCode(active?.reason));
     }
     const activeWorkspace = this.runtimeWorkspace ? await canonicalDirectory(this.runtimeWorkspace) : workspaceRoot;
     return { kind: "owner", leaseId: active.leaseId, journalPath, workspaceRoot: activeWorkspace, module };
@@ -2573,9 +2817,18 @@ class InstallerController {
     if (this.desktopMutationGuard === guard) this.desktopMutationGuard = null;
   }
 
-  /** Serializes one file mutation under exact owner maintenance authority. */
-  async withDesktopMutation(action) {
-    const refused = this.maintenanceAdmission();
+  /**
+   * Serializes one file mutation under exact owner maintenance authority. A
+   * Bridge reconciliation that makes the mutation itself passes
+   * `fromBridgeReconciliation`, so its own marker does not refuse it. A step
+   * that runs inside a mutation its own call chain already holds, as repair's
+   * Bridge rebuild does, joins that mutation; any other caller is refused while
+   * the guard is held.
+   */
+  async withDesktopMutation(action, { fromBridgeReconciliation = false } = {}) {
+    const held = this.desktopMutationScope.getStore();
+    if (held?.active === true) return action(held.transaction);
+    const refused = this.maintenanceAdmission({ fromBridgeReconciliation });
     if (refused) throw errorDetails(refused);
     const pending = (async () => {
       let guard = await this.acquireDesktopMutationGuard();
@@ -2587,9 +2840,11 @@ class InstallerController {
           this.desktopMutationGuard = stopped;
         }
       });
+      const scope = { active: true, transaction };
       try {
-        return await action(transaction);
+        return await this.desktopMutationScope.run(scope, () => action(transaction));
       } finally {
+        scope.active = false;
         await this.releaseDesktopMutationGuard(guard);
       }
     })();
@@ -2614,7 +2869,7 @@ class InstallerController {
 
   async acquireDataRemovalGuard() {
     const record = await this.record();
-    const workspaceRoot = await this.effectiveWorkspace(record) || await canonicalDirectory(this.paths.userData);
+    const workspaceRoot = await this.fencedWorkspace(await this.effectiveWorkspace(record));
     const stateDirectory = await this.canonicalStateDirectory();
     const journalPath = path.join(stateDirectory, "morrow.sqlite3");
     const module = await this.localOwnerMaintenanceModule();
@@ -2624,7 +2879,9 @@ class InstallerController {
     }
     const lease = module.acquireStoppedLocalOwnerMaintenanceLease(journalPath, { holderPid: process.pid, workspaceRoot });
     if (!lease || typeof lease.leaseId !== "string" || typeof lease.leaseToken !== "string") {
-      throw errorDetails("active_or_uncertain_operations");
+      // A live owner that refused names the condition it holds; waiting never
+      // ends an open assistant, so the person is told what to close instead.
+      throw errorDetails(restartRefusalCode(active?.reason));
     }
     return { kind: "stopped", leaseId: lease.leaseId, leaseToken: lease.leaseToken, journalPath, workspaceRoot, module };
   }
@@ -2661,7 +2918,7 @@ class InstallerController {
    * button and not the button the Escape key answers with, and any other
    * answer, including a dialog Morrow cannot read, is not a confirmation.
    */
-  async confirmDataRemoval(parent, removable, kept, entries = []) {
+  async confirmDataRemoval(parent, removable, kept, entries = [], bridgeLoaded = false) {
     const lines = (locations) => locations.map((location) => `- ${location.label}: ${location.path}`);
     const answer = await this.dialog.showMessageBox(parent, {
       type: "warning",
@@ -2672,8 +2929,13 @@ class InstallerController {
         "Morrow will remove:",
         ...lines(removable),
         ...(kept.length ? ["", "Morrow will not remove:", ...lines(kept)] : []),
+        ...(kept.some((location) => location.id === "claude_desktop_extension")
+          ? ["", "Claude Desktop keeps its own copy of the Morrow extension. Remove Morrow in Claude Desktop under Settings, Extensions."]
+          : []),
         "",
-        "This cannot be undone. Chrome loaded Morrow Bridge from the Bridge folder, so remove Morrow Bridge in Chrome as well."
+        bridgeLoaded && this.bridgeDelivery === "developer_temporary"
+          ? "This cannot be undone. Chrome loaded Morrow Bridge from the Bridge folder, so remove Morrow Bridge in Chrome as well."
+          : "This cannot be undone. If you added Morrow Bridge in Chrome, remove it there as well."
       ].join("\n"),
       buttons: ["Cancel", "Remove data"],
       defaultId: 0,
@@ -2754,6 +3016,13 @@ class InstallerController {
     return this.runRuntimeLifecycle(async () => {
       if (!materials || !await exists(this.paths.upstreams)) return null;
       try { await this.ensureRuntime(); } catch { return null; }
+      // A runtime started in a folder its own rule refuses exits before it answers.
+      let refused = true;
+      try { refused = await this.workspaceRefusedByRuntime(materials); } catch {}
+      if (refused) {
+        await this.closeRuntimeMonitorNow();
+        return null;
+      }
       const mcpRuntime = await this.mcpRuntimeVerification;
       if (!this.runtimeMonitor || this.runtimeWorkspace !== materials) {
         await this.closeRuntimeMonitorNow();
@@ -2795,8 +3064,9 @@ class InstallerController {
   async firstSafeRead() {
     const materials = await this.effectiveWorkspace();
     const runtime = await this.runtimeSnapshot(materials);
-    if (runtime.firstPreview.available !== "yes" || !this.runtimeMonitor) return runtime;
-    await this.runtimeMonitor.firstSafeRead();
+    if (runtime.firstPreview.available !== "yes" || !this.runtimeMonitor) throw errorDetails("first_read_failed");
+    const read = await this.runtimeMonitor.firstSafeRead();
+    if (read?.completed !== true) throw errorDetails("first_read_failed");
     return this.runtimeMonitor.snapshot();
   }
 
@@ -3029,14 +3299,18 @@ class InstallerController {
         : null;
       const present = claude ? claude.installed === true : await this.assistantConfigurationPresent(assistant, entry, materials);
       const moved = !claude && present !== true && await this.assistantEntryMoved(assistant, entry);
+      const projectFolder = entry && assistant.needsProject ? configuredProject(assistant, this.home, entry.target)?.project ?? null : null;
       return {
         moved,
         ...assistant,
+        projectFolder,
+        projectFolderMissing: projectFolder !== null && !await projectFolderPresent(projectFolder),
         detected: await this.detectedAssistant(assistant),
         configured: present,
         // Claude Desktop counts as configured only after its session connected.
         connected: present === true && (assistant.id === "claude-desktop" || connectedIds.has(assistant.id)),
         pending: assistant.id === "claude-desktop" && entry && present !== true,
+        checking: claude?.checking === true,
         selected: record.selectedAssistantId === assistant.id,
         needsWorkspace: true
       };
@@ -3099,6 +3373,7 @@ class InstallerController {
       selectedAssistantId: requestedAssistant?.id || null,
       workspaceSelected: record.materialsFolder !== undefined,
       materialsFolder: materials,
+      materialsFolderMissing: this.materialsFolderMissing(record, materials),
       runtimeStatus: currentRuntimeStatus,
       bridgeDelivery: this.bridgeDelivery,
       bridgeFolderReady: bridgeInstallation?.installed === true,
@@ -3112,7 +3387,7 @@ class InstallerController {
       selectedCourseName: bridge.courseName,
       firstPreviewCourseName: bridge.firstReadCourseName,
       blackboard: await this.blackboardHealth(),
-      retention: this.retention(record),
+      retention: await this.retention(record),
       updates,
       firstPreview: {
         available: runtime.firstPreview.available === "yes",
@@ -3137,6 +3412,18 @@ class InstallerController {
     } catch {
       throw errorDetails("bridge_folder_unavailable");
     }
+  }
+
+  /**
+   * Opens the materials folder Morrow uses. The default one is inside a folder
+   * macOS and Windows hide from the file manager, so Morrow opens it for the
+   * person. It never creates the folder: only assistant setup does.
+   */
+  async revealMaterialsFolder() {
+    const folder = await this.effectiveWorkspace().catch(() => null);
+    if (!folder) throw errorDetails("materials_folder_unavailable");
+    const failure = await Promise.resolve(this.shell.openPath(folder)).catch((error) => String(error?.message || error || "failed"));
+    if (failure) throw errorDetails("materials_folder_unavailable");
   }
 }
 

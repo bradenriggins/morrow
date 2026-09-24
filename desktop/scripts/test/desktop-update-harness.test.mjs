@@ -433,8 +433,10 @@ test("a corrupted artifact reports update_verification_failed and reaches neithe
 // passes none), and nothing in this path calls request.abort(). Reproducibly, across two
 // independently verified attempts to widen the timing margin (neither changed the
 // outcome), this never reaches its cancelled state within 30s under Linux CI, despite
-// passing locally on macOS every time. Morrow's desktop app never ships on Linux. Left
-// running on darwin and win32, where it matters and where it passes; skipped on linux
+// passing locally on macOS every time. Morrow's desktop app never ships on Linux. CI runs this
+// file on darwin only (the check-desktop-macos job); win32 CI runs the installer suites and two
+// node tests, not this file. Left running on darwin (CI macOS job), where it matters and where
+// it passes; skipped on linux
 // rather than guessed at further, pending a live investigation on that platform.
 test("a cancelled download returns to available with download_cancelled", {
   skip: process.platform === "linux" ? "unresolved Linux-only timing gap in electron-updater's cooperative cancellation check; see comment above" : false

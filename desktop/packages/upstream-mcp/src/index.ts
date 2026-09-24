@@ -70,6 +70,14 @@ export interface UpstreamCallOptions {
 
 export type StdioUpstreamHealth = GatewaySourceHealth;
 
+/** The source was not connected, so this call sent nothing and was not retried. */
+export class UpstreamNotDispatchedError extends Error {
+  constructor(readonly upstreamId: string) {
+    super(`Upstream ${upstreamId} disconnected before dispatch`);
+    this.name = "UpstreamNotDispatchedError";
+  }
+}
+
 const UPSTREAM_STDERR_LIMIT = 8_000;
 const UPSTREAM_MAX_BUFFER_SIZE = 16 * 1024 * 1024;
 interface ExactSupervision {
@@ -482,9 +490,7 @@ export class StdioMcpUpstream {
   ): Promise<unknown> {
     let client = this.client;
     if (!client) {
-      if (!options.safeToRetry) {
-        throw new Error(`Upstream ${this.id} disconnected before dispatch`);
-      }
+      if (!options.safeToRetry) throw new UpstreamNotDispatchedError(this.id);
       await this.startConnection(true);
       client = this.client;
     }

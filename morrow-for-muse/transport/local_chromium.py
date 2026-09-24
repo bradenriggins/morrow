@@ -183,15 +183,16 @@ def morrow_home():
     return _mh()
 
 
-def tree_state_dir():
-    """Per-tree runtime state dir (keepalive lock, journals). Not the
-    package tree (no runtime residue in shipped installs) and not the
-    bare ~/.morrow root (no cross-tree contention). Honors
-    MORROW_TREE_STATE_DIR when set."""
+def tree_state_dir(root=None):
+    """Per-tree runtime state dir (keepalive lock and logs, journals,
+    helper token). Not the package tree (no runtime residue in shipped
+    installs) and not the bare ~/.morrow root (no cross-tree
+    contention). Honors MORROW_TREE_STATE_DIR when set. root defaults
+    to the tree this module ships in."""
     override = os.environ.get("MORROW_TREE_STATE_DIR")
     if override:
         return override
-    return os.path.join(morrow_home(), "trees", tree_id())
+    return os.path.join(morrow_home(), "trees", tree_id(root))
 
 
 def tree_helper_profile_dir():
@@ -205,21 +206,29 @@ def tree_helper_profile_dir():
     return os.path.join(tree_root(), "helper", "profile")
 
 
-def _int_env(name, default):
-    try:
-        return int(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
+def _tree_setting(name, default=None):
+    """One of this tree's settings: the environment, then helper/env
+    (config/tree_config.py, the order keepalive.sh and the helper use)."""
+    _tree_root_on_path()
+    from config import tree_config  # noqa: E402
+    return tree_config.setting(name, default)
+
+
+def _tree_int(name, default):
+    _tree_root_on_path()
+    from config import tree_config  # noqa: E402
+    return tree_config.int_setting(name, default)
 
 
 def tree_cdp_port(default=HELPER_CDP_PORT):
-    """This tree's Chromium identity label. LOGIN_HELPER_CDP_PORT wins;
-    defaults to the historical HELPER_CDP_PORT only when unset.
+    """This tree's Chromium identity label. LOGIN_HELPER_CDP_PORT (the
+    environment, then helper/env) wins; defaults to the historical
+    HELPER_CDP_PORT only when unset.
 
     W4-P0-3: with --remote-debugging-pipe there is no CDP TCP port; the
     number survives only as the tree's identity label (forwarder-port
     derivation, CDP client labeling). It opens nothing."""
-    return _int_env("LOGIN_HELPER_CDP_PORT", default)
+    return _tree_int("LOGIN_HELPER_CDP_PORT", default)
 
 
 def _tree_version():
@@ -237,8 +246,9 @@ def _tree_version():
 
 
 def tree_helper_port(default=8901):
-    """This tree's helper HTTP port. LOGIN_HELPER_PORT wins."""
-    return _int_env("LOGIN_HELPER_PORT", default)
+    """This tree's helper HTTP port: LOGIN_HELPER_PORT from the
+    environment, then helper/env."""
+    return _tree_int("LOGIN_HELPER_PORT", default)
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +292,8 @@ def _helper_tls_context():
     Returns (scheme, ssl_context_or_None). HTTPS is used exactly when
     the server's TLS mode is on: LOGIN_HELPER_TLS_CERT and
     LOGIN_HELPER_TLS_KEY both set and both files exist (the same
-    condition helper/server.py uses to wrap its listener). The loopback
+    condition helper/server.py uses to wrap its listener; read from the
+    environment, then helper/env, as the server reads them). The loopback
     cert is typically self-signed, so verification pins to the
     configured cert file itself as the trust anchor: only that exact
     certificate validates. LOGIN_HELPER_TLS_INSECURE=1 skips
@@ -290,12 +301,12 @@ def _helper_tls_context():
     set, cert file missing) stays on plain HTTP: never silently mix
     schemes.
     """
-    cert = os.environ.get("LOGIN_HELPER_TLS_CERT", "")
-    key = os.environ.get("LOGIN_HELPER_TLS_KEY", "")
+    cert = _tree_setting("LOGIN_HELPER_TLS_CERT", "")
+    key = _tree_setting("LOGIN_HELPER_TLS_KEY", "")
     if not (cert and key and os.path.isfile(cert)
             and os.path.isfile(key)):
         return "http", None
-    if os.environ.get("LOGIN_HELPER_TLS_INSECURE", "") == "1":
+    if _tree_setting("LOGIN_HELPER_TLS_INSECURE", "") == "1":
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -631,26 +642,38 @@ def _is_unauthenticated(body):
         str(doc.get("status") or "").lower() == "unauthenticated"
 
 
-def _looks_like_login_page(body):
+def _parses_as_json(text):
+    try:
+        json.loads(text)
+    except ValueError:
+        return False
+    return True
+
+
+def _looks_like_login_page(body, content_type=None):
     """True when body is an HTML login page, even with HTTP 200.
 
     W2-P0-10: the old check only caught redirects and /login in the
     final URL; an IdP that serves the login form with status 200 passed
-    silently as valid API data. Markers are deliberately HTML-shaped so
-    a JSON API body that merely mentions "login" is never flagged:
+    silently as valid API data. Markers count only in an HTML document
+    (a doctype or <html> open tag, or a text/html answer that is not
+    JSON). API data is JSON, and a course page, quiz question, or post
+    in it can show the sign-in form's markup, so a JSON body is never a
+    sign-in page. In the document:
     - Canvas's login-form field namespace (pseudonym_session), or
-    - an HTML document (doctype / <html> open tag) containing a
-      password field, or a login/sign-in <title>.
+    - a password field, or a login/sign-in <title>.
     """
     if not isinstance(body, str) or not body:
         return False
     lowered = body[:8192].lower()
-    if "pseudonym_session" in lowered:
-        return True
-    stripped = lowered.lstrip()
+    stripped = lowered.lstrip("\ufeff \t\r\n")
     if not (stripped.startswith("<!doctype html")
             or stripped.startswith("<html")):
-        return False
+        if "text/html" not in str(content_type or "").lower() \
+                or _parses_as_json(body):
+            return False
+    if "pseudonym_session" in lowered:
+        return True
     if 'type="password"' in lowered or "type='password'" in lowered:
         return True
     title = re.search(r"<title[^>]*>(.*?)</title>", lowered, re.DOTALL)
@@ -2183,16 +2206,27 @@ _API_JS = r"""(async () => {
   };
   const headers = {'Accept': 'application/json',
                    'X-Requested-With': 'XMLHttpRequest'};
+  // One pair per list item (include[]=a&include[]=b): URLSearchParams
+  // would join an array into one comma-separated value.
+  const encode = (d) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of (Array.isArray(d) ? d : Object.entries(d))) {
+      for (const x of (Array.isArray(v) ? v : [v])) {
+        if (x !== null && x !== undefined) qs.append(k, x);
+      }
+    }
+    return qs.toString();
+  };
   let url = path, body = null;
   if (data && (method === 'GET' || method === 'DELETE')) {
-    const qs = new URLSearchParams(data).toString();
+    const qs = encode(data);
     if (qs) url += (url.includes('?') ? '&' : '?') + qs;
   } else if (data) {
     if (asJson) {
       body = JSON.stringify(data);
       headers['Content-Type'] = 'application/json';
     } else {
-      body = new URLSearchParams(data).toString();
+      body = encode(data);
       headers['Content-Type'] = 'application/x-www-form-urlencoded';
     }
   }
@@ -2238,8 +2272,10 @@ _API_JS = r"""(async () => {
     let truncated = false;
     let link = null;
     let retryAfter = null;
+    let contentType = null;
     try { link = r.headers.get('link'); } catch (e) { link = null; }
     try { retryAfter = r.headers.get('retry-after'); } catch (e) { retryAfter = null; }
+    try { contentType = r.headers.get('content-type'); } catch (e) { contentType = null; }
     const reader = r.body ? r.body.getReader() : null;
     if (reader) {
       try {
@@ -2272,8 +2308,8 @@ _API_JS = r"""(async () => {
       text = new TextDecoder("utf-8", {fatal: false}).decode(bodyBytes);
     }
     return {status: r.status, url: r.url, body: text, link: link,
-            retryAfter: retryAfter, truncated: truncated,
-            redirected: false};
+            retryAfter: retryAfter, contentType: contentType,
+            truncated: truncated, redirected: false};
   };
   let res = await attempt();
   return JSON.stringify(res);
@@ -2413,10 +2449,12 @@ class LocalChromiumTransport:
         the page truncates before the body crosses into Python memory,
         so Python never holds more than max_bytes of any one response).
 
-        `data` is a flat dict of form fields. GET/DELETE encode it into the
-        query string; POST/PUT form-encode the body with the CSRF header,
-        unless as_json is true, in which case the body goes as
-        application/json (for executor-built JSON bodies, which may nest).
+        `data` is a dict of form fields (a list value is one pair per
+        item, include[]=a&include[]=b) or a list of [key, value] pairs, in
+        order. GET/DELETE encode it into the query string; POST/PUT
+        form-encode the body with the CSRF header, unless as_json is true,
+        in which case the body goes as application/json (for
+        executor-built JSON bodies, which may nest).
         The CSRF token is harvested inside page-context JS and never enters
         Python memory; only (status, url, body) come back.
 
@@ -2425,8 +2463,9 @@ class LocalChromiumTransport:
         tab settled on the tenant origin - never the page's default
         realm. A page that replaces window.fetch cannot forge the
         result. The world is cached per tab and recreated when its
-        execution context dies (navigation); a lost context retries once
-        with a fresh world.
+        execution context dies (navigation). A read retries once with a
+        fresh world; a change retries only when its world was gone before
+        the program ran, and otherwise raises ApiCallMaybeSent.
         """
         tab = _tab or self._tenant_tab()
         tab_id = (tab or {}).get("id")
@@ -2441,12 +2480,20 @@ class LocalChromiumTransport:
             raw = self.cdp.evaluate(tab, js, await_promise=True,
                                     timeout=timeout, context_id=context_id)
         except (RuntimeError, CDPError) as exc:
-            if "context" not in str(exc).lower() \
-                    and "navigated or closed" not in str(exc):
+            text = str(exc)
+            if "context" not in text.lower() \
+                    and "navigated or closed" not in text:
                 raise
-            # The world's execution context died (navigation, crash):
-            # recreate once and retry. Anything else propagates.
+            # The world's execution context died (navigation, crash).
             self._api_worlds.pop(tab_id, None)
+            # A world that was already gone refused the program before it
+            # ran. Any other context loss can land after the fetch left
+            # the browser, so only a read runs again.
+            if method.upper() != "GET" and _STALE_WORLD not in text:
+                raise ApiCallMaybeSent(
+                    "%s %s: the tab navigated or closed while the request "
+                    "was in flight (%s); Canvas may have received it, so "
+                    "it is not sent again" % (method.upper(), url, text))
             context_id = self._new_api_world(tab)
             raw = self.cdp.evaluate(tab, js, await_promise=True,
                                     timeout=timeout, context_id=context_id)
@@ -2470,7 +2517,7 @@ class LocalChromiumTransport:
                 "Canvas redirected the API call to a login page; the "
                 "browser session is dead (sign in again through the "
                 "login helper).")
-        if "/login" in (resp.get("url") or ""):
+        if _is_sign_in_path(resp.get("url")):
             raise SessionDead(
                 "Canvas served a login page for the API call; the "
                 "browser session is dead (sign in again through the "
@@ -2479,7 +2526,8 @@ class LocalChromiumTransport:
         # /login in the final URL) is a dead session too. Detect
         # login-page markers in the body and raise loudly instead of
         # returning the HTML as if it were valid API data.
-        if _looks_like_login_page(resp.get("body")):
+        if _looks_like_login_page(resp.get("body"),
+                                  resp.get("contentType")):
             raise SessionDead(
                 "Canvas served a login page (HTTP %s) for the API call; "
                 "the browser session is dead (sign in again through the "
@@ -2498,6 +2546,24 @@ class LocalChromiumTransport:
             headers["x-morrow-truncated"] = (
                 "body truncated at %s bytes" % max_bytes)
         return resp["status"], headers, resp["body"]
+
+
+# CDP's answer when Runtime.evaluate names a world that no longer exists:
+# the program never started.
+_STALE_WORLD = "Cannot find context with specified id"
+
+
+def _is_sign_in_path(url):
+    """True when url is Canvas's own sign-in page (/login or /login/...),
+    never a course page whose address merely starts with "login"."""
+    path = urllib.parse.urlsplit(str(url or "")).path
+    return path == "/login" or path.startswith("/login/")
+
+
+class ApiCallMaybeSent(RuntimeError):
+    """A change's page-context program lost its tab mid-call: the fetch
+    may have reached Canvas, so it is never sent again. The caller
+    treats it as an uncertain write."""
 
 
 class SessionDead(RuntimeError):
@@ -2591,11 +2657,13 @@ def default_binary():
     /opt/meta-chromium/chrome ships in the Muse VM image (Meta-provided,
     boot-reconciled), so the connector does not bundle its own copy. A
     connector-local build under transport/chromium/ or vendor/chromium/
-    is honored first if present (dev override). CHROMIUM_BIN, when set,
-    wins over every probe: it must point at an executable file whose
-    --version reports a sane Chromium/Google Chrome version at or above
-    the floor (W4-P2-17); a bad value fails fast instead of silently
-    falling through to a different browser.
+    is honored first if present (dev override; an installed tree
+    refuses both). CHROMIUM_BIN, when set in the environment or in this
+    tree's helper/env (the order every tree setting uses), wins over
+    every probe: it must point at an executable file whose --version
+    reports a sane Chromium/Google Chrome version at or above the floor
+    (W4-P2-17); a bad value fails fast instead of silently falling
+    through to a different browser.
 
     W4-P2-22: the override is never silent (logged loudly), and the
     resolved path + version are always printed so the operator knows
@@ -2604,7 +2672,7 @@ def default_binary():
     explicit path plus the --version probe.
     """
     here = os.path.dirname(os.path.abspath(__file__))
-    override = (os.environ.get("CHROMIUM_BIN") or "").strip()
+    override = (_tree_setting("CHROMIUM_BIN") or "").strip()
     if override:
         # W4-P2-22: an explicit CHROMIUM_BIN is fail-fast, never silent
         # fall-through. When the operator names a binary, a bad value
@@ -2647,8 +2715,9 @@ def default_binary():
     raise RuntimeError(
         "no Chromium binary found: every candidate was missing, not "
         "executable, or failed the version gate (minimum %s). Tried: %s; "
-        "install Chromium or set CHROMIUM_BIN to an explicit path ... see "
-        "INSTALL.md" % (_MIN_CHROMIUM_VERSION_STR, "; ".join(tried)))
+        "set CHROMIUM_BIN=<path> in the environment or in this tree's "
+        "helper/env (INSTALL.md, Prerequisites)"
+        % (_MIN_CHROMIUM_VERSION_STR, "; ".join(tried)))
 
 
 def default_profile_dir():

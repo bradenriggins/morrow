@@ -34,7 +34,7 @@ they become agent-visible or journaled:
   when the educator deletes the file; a fresh run mints a fresh
   vault. There is no automatic expiry; the educator owns deletion.
 - The raw provider payload stays in a 0600 pending envelope only so
-  internal machinery (deferred verify, undo) can resolve result
+  internal machinery (deferred verify) can resolve result
   references, and the envelope is deleted when the op completes.
 - The educator's own profile (`/users/self`) is explicitly not
   learner data and is never de-identified, so principal
@@ -47,7 +47,7 @@ they become agent-visible or journaled:
 
 ## Working by name
 
-The educator names a student; the agent runs `morrow students find
+The educator names a student; the agent runs `bin/morrow students find
 --course C "<name as typed>"` (`learners/find.py`), confirms any
 ambiguous or close-spelling match with the educator (never picks),
 and writes by label. The executor resolves the label to the real
@@ -65,10 +65,20 @@ SKILL.md "Working by name"; policy: `privacy/FERPA_POLICY.md`.
   re-identifiable by the data holder.
 - Nicknames: aliases derive from roster fields only. A nickname the
   roster never mentions survives redaction in free text.
-- Unseen learners: free text (a group name, a collaboration title) is
-  redacted for learners the receipt carries or the vault already
-  labeled for that course. A name Morrow has never seen in that course
-  stays raw until a roster read labels it.
+- A name written with a grammatical ending that changes the word is
+  not labeled: a name matches only as a whole word, so "Annas" for
+  Anna in German or "Марии" for Мария in Russian passes through.
+- Course content is labeled through the course roster, so a name the
+  roster does not know (a nickname, someone never enrolled) is not.
+- A lowercase first or last name alone is not labeled (it is often an
+  ordinary word), so a page's web address (`url`, `html_url`) made from
+  a title with only one of them can carry it. The full name joined as
+  one token (`jane-doe`, `Jane_Doe`, `JaneDoe`, `doe.jane`) is labeled
+  as `(joined name N)` and goes back exactly as written.
+- A course's own name is labeled with that course's roster wherever
+  Morrow names the course, so an independent study named for its
+  student shows the student's label. On the course list, a course whose
+  roster cannot be read is listed by its number with its name withheld.
 
 ## When de-id applies
 
@@ -79,6 +89,19 @@ catalog rows plus the structural rule in
 overrides, date details, revisions, and more; `/users/self`
 excepted).
 
+Course content too: before the executor reads or changes anything in a
+course on the Chromium lane, it reads the course's whole student roster
+(every enrollment state, and deleted enrollments) and fails closed when
+it cannot. Every course-scoped result (and every Item Bank result, with
+the roster of the course the Item Banks launch is bound to) comes back
+with each student's label and a marker naming the form it replaced:
+`Student A3`, `Student A3 (first name)`, `(last name)`, `(name, last
+name first)`, `(email)`, `(login)`, `(SIS id)`, `(user id)`, `(other
+name)`; text that only reads like a label is marked `(as written)`.
+Saved back, each marker returns the exact text it stood for
+(`privacy/course_content.py`). Without `cryptography` the forms read as
+`[hidden: student name]` and a write carrying one is refused.
+
 ## Current enforcement (do not work around it)
 
 People-bearing operations dispatch only on the Chromium lane with the
@@ -86,10 +109,9 @@ encrypted learner vault (the optional `cryptography` package). There
 the executor projects every receipt in `dispatch_entry`'s success path
 before anything is agent-visible or journaled. Everywhere else (the
 raw HTTPS lane, or no `cryptography`) they are refused
-(`LearnerDataGated` in `dispatch/admission.py`), and an
-educator-signed `--allow-unproven` cannot override that (it is an
-absolute check, alongside never-dispatch, unsupported, and
-evidence-hold). Only `live-proven` rows dispatch.
+(`LearnerDataGated` in `dispatch/admission.py`); nothing overrides
+that (it is an absolute check, alongside never-dispatch, unsupported,
+and evidence-hold). Only `live-proven` rows dispatch.
 
 Practical consequences for agents:
 - Never paste learner names, emails, logins, or SIS ids from the LMS
@@ -100,14 +122,13 @@ Practical consequences for agents:
 - Never mint a persistent API token from a session, and never exceed
   the educator's own account permissions.
 
-## Educator reveal rule
+## No reveal
 
 **Owned by the FERPA policy (`privacy/FERPA_POLICY.md`).**
-De-id applies by default to all learner-bearing results. The only
-reveal is a sealed educator record (`dispatch.admission.mint_pii_reveal`):
-the educator's verbatim request, the educator-chat channel, ONE
-course, at most 30 minutes, journaled. A file, an environment
-variable, or a setting reveals nothing. Consult
+De-id applies to all learner-bearing results, always. Nothing reveals
+real names to the agent: no record, flag, file, environment variable,
+or setting. To tell the educator who a label is, ask which student they
+have in mind and run `students find` with that name. Consult
 `privacy/FERPA_POLICY.md`; do not invent another rule.
 
 ## Related reading
@@ -117,7 +138,6 @@ variable, or a setting reveals nothing. Consult
 - `privacy/boundary.py` (the boundary contract; docstring first)
 - `privacy/core.py` (the engine and the encrypted vault)
 - `dispatch/admission.py` (`LearnerDataGated`, the refusal side of
-  the gate; `mint_pii_reveal` / `check_pii_reveal`, the educator
-  reveal)
-- `learners/find.py` (`morrow students find`) and
+  the gate)
+- `learners/find.py` (`bin/morrow students find`) and
   `privacy/name_echo.py` (working by name)

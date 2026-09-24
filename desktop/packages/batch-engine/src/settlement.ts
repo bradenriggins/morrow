@@ -437,10 +437,14 @@ export class BatchSourceSettlementStore {
     });
   }
 
+  /**
+   * `failed` is a change that never reached the provider, `unknown` one that may have, and
+   * `failed_effect_possible` one that reached it while a fresh read proved it holds another result.
+   */
   markDispatchResult(
     batchIdValue: string,
     childIdValue: string,
-    state: "failed" | "unknown",
+    state: "failed" | "unknown" | "failed_effect_possible",
     gatewayOperationId?: string,
   ): BatchSourceSettlementRecord {
     const batchId = exactIdentifier(batchIdValue, "batch id");
@@ -448,7 +452,9 @@ export class BatchSourceSettlementStore {
     const gateway = optionalIdentifier(gatewayOperationId, "gateway operation id");
     const settlementState: BatchSourceSettlementState = state === "unknown"
       ? "inspection_required"
-      : "failed_no_effect";
+      : state === "failed_effect_possible"
+        ? "failed_effect_possible"
+        : "failed_no_effect";
     const now = this.instant();
     return this.transaction(() => {
       this.get(batchId, childId);

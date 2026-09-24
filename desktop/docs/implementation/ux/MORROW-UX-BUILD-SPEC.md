@@ -69,7 +69,7 @@ I made each decision from what Morrow says about itself. Sources: `docs/brand/MO
 | D1a | May the Bridge open Canvas or Moodle when work needs a closed site? | **Yes, by default, with no consent step.** A setting turns it off. The Bridge says what it did. | P3 and P1. A tab is mechanics. It gives Morrow no new data and no new permission, because the person already connected the course and allowed the site. A consent prompt in the middle of a task is the worst moment for it. |
 | D1b | May the Bridge open the review page by itself? | **No.** The assistant gives one link, named after the change. The Bridge popup lists the reviews that wait. | P5 and P6 (calm). A tab that takes focus while the person reads the assistant is not calm. A click on the link moves the person to Chrome at the correct moment. It also prevents two tabs for one review. |
 | D2 | Is a one-switch level allowed? | **Yes. Its name is "Routine edits".** The included bundles are always listed under the switch. | P8 and P2. The level is Morrow's own idea of Edit, made visible. |
-| D2a | What is in "Routine edits"? | **Only edits to things that exist: text, titles, order, file names, alternative text.** It never creates, publishes, removes, posts, or changes a date, points or a setting. | P4 and P7. F29: Canvas does not document the publish state of a new page, so creation cannot be called safe. A date change sends a notice to learners in Canvas. |
+| D2a | What is in "Routine edits"? | **Only edits to things that exist: text, titles, module item links, order, indent, where modules, items and files sit, and alternative text, plus new folders.** It never creates anything other than a folder, publishes, removes, posts, or changes a date, points or a course setting. | P4 and P7. F29: Canvas does not document the publish state of a new page, so creation cannot be called safe. A date change sends a notice to learners in Canvas. |
 | D2b | May a date change skip review at all? | **Yes, but only from "do not ask again" on a date review.** Never from the switch. | P4. The teacher sees one real date change first and then decides. A batch of dates is one review, so the cost of review is one click. |
 | D3 | How long does "do not ask again" last? | **Superseded: Edit is not timed. A grant, including "do not ask again", stays until the educator returns the course to Plan. `expiresInMs` is refused on the wire. The original decision follows.** **4 hours, shown as a clock time.** The switch also starts at 4 hours. The course detail can change it to one of the five times. A new kind never moves the end time later. | One work session. Half the exposure of 8 hours. Morrow's own default for a grant from the assistant is 30 minutes, so its instinct is short. |
 | D4 | May a change be approved in the assistant's native form? | **No. Not built.** WI-2.7 is removed. | P4: "review the exact change in Morrow". One place to approve, with the before and after values, the risks and the checked result. The native form can show none of these. |
@@ -429,7 +429,7 @@ Release batch R4. Needs R3.
 - **Files.** `settings/settings.js`, `popup/popup.js`.
 - **Behavior.** The level sets `enabledCategories` to each option with `routine === true` for that connection, through the present `morrow_edit_policy_save` message. The time starts at 4 hours (D3). No protocol change.
 - **Always visible (P2).** Under the switch, list each included bundle by its label, with "Remove" beside each. The list is never behind a disclosure.
-- **Text.** "Routine edits" with the sentence: "Morrow edits text, titles, the order of modules and items, file names and alternative text without another approval. It always asks before it creates, publishes, removes, posts, or changes a date, points or a setting."
+- **Text.** "Routine edits" with the sentence: "Morrow edits text and titles, changes module item links and how they open, reorders, indents and moves modules, items and files, creates folders, and adds alternative text without another approval. It always asks before it creates anything other than a folder, publishes, removes, posts, or changes a date, points or a course setting."
 
 ### WI-4.6 The "always ask" rule is a test, not a promise
 
@@ -452,7 +452,7 @@ Release batch R5. Bridge only. Needs R3. WI-5.1 can ship earlier.
 ### WI-5.2 Page structure
 
 - **File.** `settings/settings.html`.
-- Title and `h1`: "Courses and access". Order: banner (WI-1.4), "Your courses", then "Browser permissions and rules" (the present "Course file access" and "Access rules" panels, plus WI-1.2), then Private Chat as now.
+- Title and `h1`: **Superseded 2026-09-22: the page is titled "Plan and Edit settings", the name the popup, the setup guide, the error copy and the website already send the educator to.** Before: "Courses and access". Order: banner (WI-1.4), "Your courses", then "Browser permissions and rules" (the present "Course file access" and "Access rules" panels, plus WI-1.2), then Private Chat as now.
 - Remove the "Find courses" block. Start discovery when the page opens for each signed-in site. Keep a "Refresh" button.
 
 ### WI-5.3 The course list
@@ -700,7 +700,7 @@ The reference is the model "Moment 4: return and oversee" and the model "Customi
 - **Remove.** `PAGE_SIZE`, the page navigation, the two-view switch (`state.view`), `renderAnchors` and the "Find courses" block, `renderCategories`, `renderCategoryGroup`.
 - **Add to `state`.** `filters: { q, platform, term, scope }`, `selectMode: boolean`, `openCourses: Set`, `openAreas: Set`, `openKinds: Set`, `courseMeta: Map`.
 - **New render functions.** `renderBanner`, `renderCourseToolbar`, `renderCourseList`, `renderCourseRow`, `renderCourseDetail`, `renderBulkBar`, `renderCustomize`, `renderArea`, `renderKind`, `renderSummaryBar`. Each returns markup from state. A checkbox change updates counts and mixed states in place and does not call `renderCustomize` again.
-- **Markup.** One `h1` "Courses and access". Each list part is an `h2`. A course row is a `div` with a `button` that carries `aria-expanded` and `aria-controls`. A detail is a `div` with that id. A mixed checkbox sets `indeterminate = true` and `aria-checked="mixed"`.
+- **Markup.** One `h1` "Plan and Edit settings" (superseded 2026-09-22; before: "Courses and access"). Each list part is an `h2`. A course row is a `div` with a `button` that carries `aria-expanded` and `aria-controls`. A detail is a `div` with that id. A mixed checkbox sets `indeterminate = true` and `aria-checked="mixed"`.
 - **Text.** Use the exact strings in this spec and in the models. Each mode name appears with its meaning (D7).
 - **Proof.** New cases in `scripts/test/settings-page.test.mjs` for: search by code, the scope counts, a bulk level change for a Canvas and a Moodle course together, "select all" that leaves removal off, a mixed state, the summary sentence, and no second render on a checkbox change. Then `pnpm test:connector:browser` and `node scripts/ux/census.mjs --check`.
 

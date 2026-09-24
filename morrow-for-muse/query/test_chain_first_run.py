@@ -25,6 +25,14 @@ from query import chain as C  # noqa: E402
 from query import live_read as LR  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _submissions_row_proven(monkeypatch):
+    """These checks come after the submissions row's catalog check
+    (test_chain_catalog_gate.py): run them as on the day a live battery
+    proves that row."""
+    monkeypatch.setattr(C, "_require_live_proven", lambda *a: None)
+
+
 class _BoomReader:
     def __init__(self, *a, **k):
         raise AssertionError("LiveReader must not initialize before "
@@ -47,7 +55,11 @@ class _FailingReader:
 
 def _run_no_tenant(monkeypatch, **kw):
     monkeypatch.setattr(C._live_read, "LiveReader", _BoomReader)
-    monkeypatch.setattr(C._live_read, "TENANT_BASE", "")
+    monkeypatch.setattr(C._live_read, "tenant_base", lambda: "")
+    # Synthetic rows skip the live-proven gate that now refuses a live
+    # failed-students run before the tenant check, so the tenant and
+    # health classification paths stay testable (chain.py 2026-09-23).
+    kw.setdefault("synthetic_rows", [])
     with pytest.raises(ChainFailure) as ei:
         C.run_query("89585", "last_week", tenant_base=None, **kw)
     return ei.value
@@ -66,11 +78,12 @@ def test_missing_tenant_message_names_next_step(monkeypatch):
 def _run_failing_health(monkeypatch, message):
     monkeypatch.setattr(C._live_read, "LiveReader",
                         lambda *a, **k: _FailingReader(message))
-    monkeypatch.setattr(C._live_read, "TENANT_BASE",
-                        "https://school.example.edu")
+    monkeypatch.setattr(C._live_read, "tenant_base",
+                        lambda: "https://school.example.edu")
     with pytest.raises(ChainFailure) as ei:
         C.run_query("89585", "last_week",
-                    tenant_base="https://school.example.edu")
+                    tenant_base="https://school.example.edu",
+                    synthetic_rows=[])
     return ei.value
 
 
@@ -103,7 +116,7 @@ def test_main_exits_two_with_mode_line(monkeypatch, capsys):
 
     monkeypatch.setattr(C, "run_query", boom)
     rc = C.main(["--quiz", "last-week",
-                 "--course", "89585", "--tenant",
+                 "--course", "89585", "--canvas-base",
                  "https://school.example.edu"])
     assert rc == 2
     out = capsys.readouterr().out

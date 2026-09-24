@@ -1,31 +1,15 @@
-import {
-  CLIENT_CAPABILITIES_META_KEY,
-  acceptedContent,
-  inputRequired,
-  inputResponse,
-  type CallToolResult,
-  type InputRequiredResult,
-  type McpServer,
-  type ServerContext,
-} from "@modelcontextprotocol/server";
-import { isJsonObject, sha256Json, type JsonObject } from "@morrow/contracts";
+import { type CallToolResult, type McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
+import { confirmedEditAccess, EditAccessReviewUnavailableError } from "./edit-access-review.js";
 import { EditCategoryUnavailableError } from "./runtime.js";
 import type {
   BrowserEditAccessPrepared,
   BrowserEditAccessResult,
-  BrowserEditAccessSelection,
   BrowserEditAccessSelectionInput,
   GatewayRuntime,
 } from "./runtime.js";
 
 const sourceBindingId = z.string().regex(/^[A-Za-z0-9_.:@-]{1,160}$/);
-const confirmationSchema = z.strictObject({ confirm: z.literal(true) });
-const confirmationRequestSchema = {
-  type: "object" as const,
-  properties: { confirm: { type: "boolean" as const, description: "Enable this exact Edit scope." } },
-  required: ["confirm"],
-};
 const inputSchema = z.discriminatedUnion("mode", [
   z.strictObject({
     mode: z.literal("edit"),
@@ -42,16 +26,6 @@ const inputSchema = z.discriminatedUnion("mode", [
 
 type Input = z.infer<typeof inputSchema>;
 
-export type EditAccessRequestState = {
-  readonly workflow: "morrow.edit-access.v1";
-  readonly inputDigest: string;
-  readonly prepared: BrowserEditAccessPrepared;
-};
-
-export interface EditAccessStateMinter {
-  mint(payload: EditAccessRequestState, context: ServerContext): Promise<string>;
-}
-
 function problem(code: string, message: string): CallToolResult {
   return {
     content: [{ type: "text", text: message }],
@@ -67,95 +41,8 @@ function selections(input: Input): readonly BrowserEditAccessSelectionInput[] {
   }));
 }
 
-function supportsForm(context: ServerContext, server: McpServer): boolean {
-  const capabilities = context.mcpReq.envelope
-    ? (context.mcpReq.envelope as JsonObject)[CLIENT_CAPABILITIES_META_KEY]
-    : server.server.getClientCapabilities();
-  return isJsonObject(capabilities) && isJsonObject(capabilities.elicitation);
-}
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
-
-function labelList(categories: readonly { readonly label: string }[]): string {
-  const labels = [...new Set(categories.map((category) => category.label))];
-  return labels.length > 6 ? `${labels.slice(0, 6).join(", ")}, and ${plural(labels.length - 6, "more action")}` : labels.join(", ");
-}
-
-// The settings page states these two facts before it saves the same grant. The native form is the
-// whole consent here, so it states them in the same words.
-function flaggedText(prepared: BrowserEditAccessPrepared): string {
-  const categories = [...new Map(prepared.selections
-    .flatMap((selection) => [...selection.enabledCategories])
-    .map((category) => [category.id, category])).values()];
-  const destructive = categories.filter((category) => category.destructive);
-  const unchecked = categories.filter((category) => category.unchecked);
-  return [
-    destructive.length ? `${plural(destructive.length, "selected action")} ${destructive.length === 1 ? "removes" : "remove"} course content: ${labelList(destructive)}.` : "",
-    unchecked.length ? `Morrow cannot check the saved result for ${plural(unchecked.length, "selected action")}: ${labelList(unchecked)}. Morrow reports those results as unconfirmed.` : "",
-  ].filter(Boolean).join(" ");
-}
-
-function confirmationMessage(prepared: BrowserEditAccessPrepared): string {
-  const courses = prepared.selections.map((selection) => {
-    const categories = labelList(selection.enabledCategories);
-    return `${selection.courseName} (course ${selection.courseId}, ${selection.site}; ${categories})`;
-  }).join("\n");
-  const flagged = flaggedText(prepared);
-  const message = `Enable Morrow Edit access for these exact current course connections:\n${courses}\n\n${flagged ? `${flagged}\n\n` : ""}Edit stays on for these courses until you return them to Plan in Morrow Bridge. Confirm this Edit scope.`;
-  if (message.length > 24_000) throw new Error("The selected courses exceed one confirmation form. Select fewer exact course connections.");
-  return message;
-}
-
-function sameCategoryIds(left: readonly { readonly id: string }[], right: unknown): boolean {
-  return Array.isArray(right) && right.length === left.length
-    && left.every((category, index) => right[index] === category.id);
-}
-
-function currentBindingMatches(selection: BrowserEditAccessSelection, binding: JsonObject | undefined): boolean {
-  const site = selection.provider === "canvas" ? binding?.origin : binding?.siteUrl;
-  return binding?.sourceBindingId === selection.sourceBindingId
-    && binding.provider === selection.provider
-    && binding.courseId === selection.courseId
-    && site === selection.site
-    && binding.principalFingerprint === selection.principalFingerprint
-    && binding.sessionGeneration === selection.sessionGeneration
-    && binding.catalogDigest === selection.catalogDigest
-    && binding.runtimeVerified === true;
-}
-
-function actualSelection(selection: BrowserEditAccessSelection, result: BrowserEditAccessResult): JsonObject {
-  const binding = result.bindings.find((candidate) => candidate.sourceBindingId === selection.sourceBindingId);
-  const permission = binding && isJsonObject(binding.editPermission) ? binding.editPermission : null;
-  const actualMode = !binding ? "unavailable" : permission ? "edit" : "plan";
-  const revision = binding?.editPolicyRevision;
-  const expiresAt = permission?.expiresAt;
-  const confirmed = result.outcome === "received" && currentBindingMatches(selection, binding) && (selection.enabledCategories.length > 0
-    ? permission?.sourceBindingId === selection.sourceBindingId
-      && permission.revision === selection.expectedPolicyRevision + 1
-      && permission.catalogDigest === selection.catalogDigest
-      // A grant has no end time. Only a grant saved before that rule carries one, and it counts
-      // only while that time is still ahead.
-      && (expiresAt === undefined || (typeof expiresAt === "number" && Number.isSafeInteger(expiresAt) && expiresAt > Date.now()))
-      && sameCategoryIds(selection.enabledCategories, permission.enabledCategories)
-    : !permission && (revision === selection.expectedPolicyRevision || revision === selection.expectedPolicyRevision + 1));
-  return {
-    sourceBindingId: selection.sourceBindingId,
-    provider: selection.provider,
-    courseId: selection.courseId,
-    courseName: selection.courseName,
-    site: selection.site,
-    requestedMode: selection.enabledCategories.length ? "edit" : "plan",
-    actualMode,
-    ...(Number.isSafeInteger(revision) ? { editPolicyRevision: revision } : {}),
-    confirmed,
-  };
-}
-
 function resultFor(prepared: BrowserEditAccessPrepared, result: BrowserEditAccessResult): CallToolResult {
-  const actual = prepared.selections.map((selection) => actualSelection(selection, result));
-  const allConfirmed = result.outcome === "received" && actual.every((selection) => selection.confirmed === true);
+  const { allConfirmed, selections: actual } = confirmedEditAccess(prepared, result);
   return {
     content: [{ type: "text", text: allConfirmed
       ? `Morrow confirmed ${prepared.mode === "edit" ? "Edit" : "Plan"} access for every selected course connection.`
@@ -172,108 +59,53 @@ function resultFor(prepared: BrowserEditAccessPrepared, result: BrowserEditAcces
   };
 }
 
-async function currentNoChange(runtime: GatewayRuntime, prepared: BrowserEditAccessPrepared): Promise<CallToolResult> {
-  try {
-    const current = await runtime.prepareBrowserEditAccess(prepared.mode, prepared.selections.map((selection) => ({
-      sourceBindingId: selection.sourceBindingId,
-      ...(prepared.mode === "edit" ? { enabledCategories: selection.enabledCategories.map((category) => category.id) } : {}),
-    })));
-    return {
-      content: [{ type: "text", text: "Morrow left the current course access unchanged." }],
-      structuredContent: {
-        schema: "morrow.edit-access.v1",
-        ok: true,
-        mode: current.mode,
-        outcome: "not_sent",
-        selections: current.selections.map((selection) => ({
-          sourceBindingId: selection.sourceBindingId,
-          courseId: selection.courseId,
-          courseName: selection.courseName,
-          site: selection.site,
-          editPolicyRevision: selection.expectedPolicyRevision,
-          currentStateRead: true,
-        })),
-      },
-    };
-  } catch {
-    return problem("edit_access_current_state_unavailable", "Morrow left access unchanged, but could not read the current course connections.");
-  }
-}
-
-export function registerEditAccessTool(
-  server: McpServer,
-  runtime: GatewayRuntime,
-  codec: EditAccessStateMinter,
-): void {
+export function registerEditAccessTool(server: McpServer, runtime: GatewayRuntime): void {
   server.registerTool("morrow_request_edit_access", {
     title: "Set selected course access",
-    description: "Ask the connected client to show one native confirmation form before Morrow enables Edit for exact current course connections and selected categories. Set Plan to revoke selected Edit access with a fresh current readback.",
+    description: "Ask the person to turn on Edit for exact current course connections and selected kinds of change. Morrow opens a review page and returns its link; Edit turns on only when the person selects Turn on Edit there in Chrome with Morrow Bridge connected. The kinds join the Edit each course already has. Give them the link, then call morrow_operation_wait with edit_access_id. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings. Set Plan to return selected courses to Plan at once, with a fresh current readback.",
     inputSchema,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, async (input, context): Promise<CallToolResult | InputRequiredResult> => {
-    const state = context.mcpReq.requestState<EditAccessRequestState>();
-    if (!state) {
-      if (Object.keys(context.mcpReq.inputResponses ?? {}).length || context.mcpReq.droppedInputResponseKeys?.length) {
-        return problem("edit_access_state_missing", "Morrow could not verify this confirmation. Start a new access request.");
+  }, async (input): Promise<CallToolResult> => {
+    let prepared: BrowserEditAccessPrepared;
+    try {
+      prepared = await runtime.prepareBrowserEditAccess(input.mode, selections(input));
+    } catch (error) {
+      if (error instanceof EditCategoryUnavailableError) {
+        return {
+          content: [{ type: "text", text: `Morrow cannot grant Edit access for ${error.categoryId}. ${error.reason}` }],
+          isError: true,
+          structuredContent: {
+            schema: "morrow.edit-access.v1",
+            ok: false,
+            code: "edit_access_category_unavailable",
+            category: error.categoryId,
+            reason: error.reason,
+          },
+        };
       }
-      let prepared: BrowserEditAccessPrepared;
+      return problem("edit_access_preflight_refused", "Morrow could not verify every selected current course connection.");
+    }
+    if (input.mode === "plan") {
       try {
-        prepared = await runtime.prepareBrowserEditAccess(input.mode, selections(input));
-      } catch (error) {
-        if (error instanceof EditCategoryUnavailableError) {
-          return {
-            content: [{ type: "text", text: `Morrow cannot grant Edit access for ${error.categoryId}. ${error.reason}` }],
-            isError: true,
-            structuredContent: {
-              schema: "morrow.edit-access.v1",
-              ok: false,
-              code: "edit_access_category_unavailable",
-              category: error.categoryId,
-              reason: error.reason,
-            },
-          };
-        }
-        return problem("edit_access_preflight_refused", "Morrow could not verify every selected current course connection.");
-      }
-      if (input.mode === "plan") {
-        try {
-          return resultFor(prepared, await runtime.applyBrowserEditAccess(prepared));
-        } catch {
-          return problem("edit_access_plan_refused", "Morrow could not set Plan access because the selected current course connection changed.");
-        }
-      }
-      if (!supportsForm(context, server)) {
-        return problem("edit_access_form_unsupported", "This client cannot show Morrow's required native confirmation form. Morrow kept access unchanged.");
-      }
-      let message: string;
-      try {
-        message = confirmationMessage(prepared);
+        return resultFor(prepared, await runtime.applyBrowserEditAccess(prepared));
       } catch {
-        return problem("edit_access_confirmation_too_large", "The selected courses do not fit one native confirmation form. Select fewer current course connections.");
+        return problem("edit_access_plan_refused", "Morrow could not set Plan access because the selected current course connection changed.");
       }
-      const next: EditAccessRequestState = {
-        workflow: "morrow.edit-access.v1",
-        inputDigest: sha256Json(input),
-        prepared,
-      };
-      return inputRequired({
-        inputRequests: { edit_access: inputRequired.elicit({ message, requestedSchema: confirmationRequestSchema }) },
-        requestState: await codec.mint(next, context),
-      });
-    }
-
-    if (state.workflow !== "morrow.edit-access.v1" || state.inputDigest !== sha256Json(input) || state.prepared.mode !== "edit") {
-      return problem("edit_access_state_stale", "The selected access request changed. Start a new access request.");
-    }
-    const response = inputResponse(context.mcpReq.inputResponses, "edit_access");
-    const confirmed = acceptedContent(context.mcpReq.inputResponses, "edit_access", confirmationSchema);
-    if (context.mcpReq.droppedInputResponseKeys?.length || response.kind !== "elicit" || response.action !== "accept" || !confirmed) {
-      return currentNoChange(runtime, state.prepared);
     }
     try {
-      return resultFor(state.prepared, await runtime.applyBrowserEditAccess(state.prepared));
-    } catch {
-      return problem("edit_access_state_stale", "The selected current course connection changed before confirmation. Morrow did not set access.");
+      const review = runtime.createEditAccessReview(prepared);
+      return {
+        content: [{
+          type: "text",
+          text: `Morrow opened an Edit access review. Give the person this link: ${String(review.approvalUrl)} Edit turns on only when they select Turn on Edit there in Chrome with Morrow Bridge connected. Then call morrow_operation_wait with edit_access_id ${String(review.editAccessId)}.`,
+        }],
+        structuredContent: review,
+      };
+    } catch (error) {
+      if (error instanceof EditAccessReviewUnavailableError) {
+        return problem("edit_access_review_unavailable", "Morrow cannot show its Edit access review on this computer, so Morrow kept access unchanged.");
+      }
+      return problem("edit_access_review_refused", "Morrow could not open an Edit access review. Morrow kept access unchanged.");
     }
   });
 }

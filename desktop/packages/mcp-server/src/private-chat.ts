@@ -3,6 +3,8 @@ import {
   CLIENT_CAPABILITIES_META_KEY,
   inputRequired,
   inputResponse,
+  SdkError,
+  SdkErrorCode,
   type CallToolResult,
   type CreateMessageRequestParams,
   type InputRequiredResult,
@@ -11,7 +13,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
-import type { GatewayRuntime } from "./runtime.js";
+import { PrivateChatBridgeProblemError, PrivateChatWaitEndedError, type GatewayRuntime } from "./runtime.js";
 
 const inputSchema = z.strictObject({});
 const sampleSchema = z.object({
@@ -35,6 +37,15 @@ export type PrivateChatRequestState = {
 };
 
 const CONTINUATION_TTL_MS = 10 * 60 * 1_000;
+/**
+ * How long a legacy-era client has to answer one sampling request. A client may first ask the
+ * person to allow sampling, and the reply can be long, so the SDK's 60-second request default
+ * would end the chat after the educator's message was already taken. This matches the SDK's own
+ * per-leg wait for input required results.
+ */
+const LEGACY_REPLY_TIMEOUT_MS = 10 * 60_000;
+/** The assistant replies one Private Chat session allows. The last one ends the chat. */
+const REPLY_LIMIT = 100;
 const MAX_CONTINUATION_CLAIMS = 2_048;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -61,6 +72,17 @@ export class PrivateChatContinuationLedger {
 }
 
 class PrivateChatError extends Error {}
+
+/** The step for each Morrow Bridge reason an educator can act on. */
+const BRIDGE_PROBLEM_TEXT: Readonly<Record<string, string>> = Object.freeze({
+  bridge_unavailable: "Morrow Bridge is not connected to Morrow. Open Chrome and open the Morrow Bridge popup, which shows the step that connects it. Then ask the assistant to start Private Chat again.",
+  bridge_port_in_use: "Another Morrow is already connected to Morrow Bridge, so this Morrow cannot open Private Chat. Close the other Morrow, or use one Morrow for all your assistants.",
+  bridge_outcome_unknown: "Morrow Bridge stopped answering, so Morrow ended Private Chat. Close the Private Chat drawer if it is still open, then ask the assistant to start Private Chat again.",
+  bridge_request_capacity: "Morrow Bridge is busy with its current requests. Ask the assistant to start Private Chat again after they finish.",
+  private_chat_busy: "Another Private Chat is already open in Morrow Bridge. Close that Private Chat drawer, then ask the assistant to start Private Chat again.",
+});
+const BRIDGE_PROBLEM_OTHER_TEXT = "Morrow Bridge could not continue this Private Chat. Close the Private Chat drawer if it is still open, then ask the assistant to start Private Chat again.";
+class PrivateChatReplyTimeoutError extends Error {}
 function requireChat(value: unknown, message: string): asserts value {
   if (!value) throw new PrivateChatError(message);
 }
@@ -98,6 +120,20 @@ function resultClosed(state: Pick<PrivateChatRequestState, "sessionId" | "turns"
   };
 }
 
+function resultLimitReached(state: PrivateChatRequestState): CallToolResult {
+  return {
+    content: [{ type: "text", text: `Private Chat reached its ${REPLY_LIMIT}-message limit, so Morrow ended the chat after the last reply. To continue, the educator closes the drawer and asks you to start a new Private Chat.` }],
+    structuredContent: {
+      schema: "morrow.private-chat.v1",
+      status: "limit_reached",
+      sessionId: state.sessionId,
+      sourceBindingId: state.sourceBindingId,
+      courseId: state.courseId,
+      turns: state.turns,
+    },
+  };
+}
+
 function stateFromMessage(exchange: JsonObject, assistantName: string): PrivateChatRequestState {
   requireChat(exchange.status === "message"
     && typeof exchange.sessionId === "string"
@@ -123,10 +159,15 @@ function stateForNextRound(state: PrivateChatRequestState): PrivateChatRequestSt
   };
 }
 
+/**
+ * Delivers the assistant's reply. It listens for the educator's next message
+ * unless this reply is the last one the session allows: then the Bridge shows it
+ * and ends the chat, so no message is taken that could not be answered.
+ */
 async function nextExchange(runtime: GatewayRuntime, state: PrivateChatRequestState, reply: string, signal: AbortSignal) {
   return runtime.privateChatExchange({
     schema: "morrow.private-chat.exchange.v1",
-    action: "reply_and_listen",
+    action: state.turns + 1 >= REPLY_LIMIT ? "reply_at_limit" : "reply_and_listen",
     sessionId: state.sessionId,
     assistantName: state.assistantName,
     assistantReply: reply,
@@ -143,7 +184,7 @@ export function registerPrivateChatTool(
 ): void {
   server.registerTool("morrow_private_chat", {
     title: "Start Morrow Private Chat",
-    description: "Open the Morrow Bridge Private Chat drawer and relay a conversation about one connected course through client sampling. Before each message reaches the assistant, the Bridge checks it against a fresh, complete course roster and replaces each student name, email, login, and platform id it matches with that student's course label, the same label Morrow tool results use. Name-like words that match no student are sent only after the person confirms them. The person sees student names in the drawer; the assistant receives labels only. The person closes the drawer to end and clear the session.",
+    description: "Open the Morrow Bridge Private Chat drawer and relay a conversation about one connected course through client sampling. Before each message reaches the assistant, the Bridge checks it against a fresh, complete course roster and replaces each student name, email, login, and platform id it matches with that student's course label, the same label Morrow tool results use. Capitalized name-like words that match no student are sent only after the person confirms them; a name that matches no student in a script with no capital letters, such as Chinese or Korean, is sent as written. The person sees student names in the drawer; the assistant receives labels only. The person closes the drawer to end and clear the session.",
     inputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, async (_input, context): Promise<CallToolResult | InputRequiredResult> => {
@@ -174,7 +215,7 @@ export function registerPrivateChatTool(
         state = stateFromMessage(exchange, assistantName);
       } else {
         requireChat(state.workflow === "morrow.private-chat.v1" && state.assistantName === assistantName
-          && state.turns >= 0 && state.turns < 100 && state.messages.length === state.turns * 2 + 1,
+          && state.turns >= 0 && state.turns < REPLY_LIMIT && state.messages.length === state.turns * 2 + 1,
           "The Private Chat session state is invalid or belongs to another assistant.");
       }
 
@@ -204,6 +245,7 @@ export function registerPrivateChatTool(
           messages: [...state.messages, { role: "assistant", text: reply }],
           turns: state.turns + 1,
         };
+        if (replied.turns >= REPLY_LIMIT) return resultLimitReached(replied);
         if (next.status === "closed") return resultClosed(replied);
         requireChat(next.status === "message" && next.sessionId === state.sessionId
           && next.sourceBindingId === state.sourceBindingId && next.courseId === state.courseId
@@ -217,11 +259,27 @@ export function registerPrivateChatTool(
       }
 
       for (;;) {
-        requireChat(state.turns < 100, "Private Chat reached its 100-message limit. Close the drawer and start a new session.");
-        const response = sampleSchema.parse(await context.mcpReq.requestSampling(samplingRequest(state)));
+        let sampled: unknown;
+        try {
+          sampled = await context.mcpReq.requestSampling(samplingRequest(state), {
+            relatedRequestId: context.mcpReq.id,
+            timeout: LEGACY_REPLY_TIMEOUT_MS,
+            resetTimeoutOnProgress: true,
+            onprogress: () => {},
+            signal: context.mcpReq.signal,
+          });
+        } catch (error) {
+          // The SDK reports a cancelled request with the timeout code too, so a cancel is not a late reply.
+          if (error instanceof SdkError && error.code === SdkErrorCode.RequestTimeout && !context.mcpReq.signal.aborted) {
+            throw new PrivateChatReplyTimeoutError();
+          }
+          throw error;
+        }
+        const response = sampleSchema.parse(sampled);
         const reply = response.content.text;
         const next = await nextExchange(runtime, state, reply, context.mcpReq.signal);
         state = { ...state, messages: [...state.messages, { role: "assistant", text: reply }], turns: state.turns + 1 };
+        if (state.turns >= REPLY_LIMIT) return resultLimitReached(state);
         if (next.status === "closed") return resultClosed(state);
         requireChat(next.status === "message" && next.sessionId === state.sessionId
           && next.sourceBindingId === state.sourceBindingId && next.courseId === state.courseId
@@ -229,10 +287,15 @@ export function registerPrivateChatTool(
         state = { ...state, messages: [...state.messages, { role: "user", text: next.protectedText }] };
       }
     } catch (error) {
+      const bridgeCode = error instanceof PrivateChatBridgeProblemError && Object.hasOwn(BRIDGE_PROBLEM_TEXT, error.code) ? error.code : undefined;
       return {
         isError: true,
-        content: [{ type: "text", text: `Private Chat unavailable. ${error instanceof PrivateChatError ? error.message : "Morrow could not validate the local relay or assistant response."}` }],
-        structuredContent: { schema: "morrow.problem.v1", code: "private_chat_unavailable" },
+        content: [{ type: "text", text: `Private Chat unavailable. ${error instanceof PrivateChatError ? error.message
+          : error instanceof PrivateChatWaitEndedError ? "No message was sent in time, so Morrow stopped waiting and cleared the drawer. Ask the assistant to start Private Chat again."
+            : error instanceof PrivateChatReplyTimeoutError ? `The assistant did not reply within ${LEGACY_REPLY_TIMEOUT_MS / 60_000} minutes, so Morrow stopped Private Chat. Close the Private Chat drawer, then ask the assistant to start Private Chat again.`
+              : error instanceof PrivateChatBridgeProblemError ? (bridgeCode ? BRIDGE_PROBLEM_TEXT[bridgeCode] : BRIDGE_PROBLEM_OTHER_TEXT)
+                : "Morrow could not validate the local relay or assistant response."}` }],
+        structuredContent: { schema: "morrow.problem.v1", code: "private_chat_unavailable", ...(bridgeCode ? { sourceCode: bridgeCode } : {}) },
       };
     }
   });

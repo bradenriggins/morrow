@@ -331,6 +331,17 @@ class DomInputElement extends DomElement {
   }
 }
 
+// A textarea's value starts as its own text, as in a browser, until a person or the page sets it.
+class DomTextAreaElement extends DomElement {
+  get value() {
+    return this.currentValue ?? this.textContent;
+  }
+
+  set value(value) {
+    this.currentValue = String(value);
+  }
+}
+
 class DomSelectElement extends DomElement {
   constructor(tag, attributes, ownerDocument) {
     super(tag, attributes, ownerDocument);
@@ -373,6 +384,7 @@ function createElement(tag, attributes, ownerDocument) {
   const name = String(tag).toLowerCase();
   if (name === "input") return new DomInputElement(name, attributes, ownerDocument);
   if (name === "select") return new DomSelectElement(name, attributes, ownerDocument);
+  if (name === "textarea") return new DomTextAreaElement(name, attributes, ownerDocument);
   if (name === "option") return new DomOptionElement(name, attributes, ownerDocument);
   return new DomElement(name, attributes, ownerDocument);
 }

@@ -15,7 +15,9 @@ Proves, standalone (exit 0 on success, loud non-zero on failure):
 5. The REAL executor CLI funnel (dispatch/executor.py __main__) wires
    through the translator: a failing CLI run exits 2 with the
    structured JSON on stderr (mode_id, correlation_id, four anchors,
-   escalate, labeled engineering detail).
+   escalate, labeled engineering detail). The run fails before it
+   claims any write, so the mode is unknown-nothing-sent: the message
+   says nothing was sent, never that a change might have been made.
 
 Synthetic evidence only: no provider calls, no live writes.
 """
@@ -66,14 +68,14 @@ def _csrf_raw_error():
 def main():
     # ---- 1. 422-CSRF through the agent-facing error path. ----
     payload = agent_error_payload(
-        "create assignment in Biology 101", _csrf_raw_error())
+        "creating an assignment in Biology 101", _csrf_raw_error())
     _check(payload["mode_id"] == "canvas-csrf-422-writes-only",
            "expected canvas-csrf-422-writes-only, got %r"
            % payload["mode_id"])
     for anchor in ANCHORS:
         _check(anchor in payload["message"],
                "message missing anchor %r" % anchor)
-    _check(payload["attempted"] == "create assignment in Biology 101",
+    _check(payload["attempted"] == "creating an assignment in Biology 101",
            "attempted field wrong: %r" % payload["attempted"])
     _check(isinstance(payload["escalate"], bool),
            "escalate must be a bool")
@@ -147,18 +149,24 @@ def main():
            % cli_payload.get("error"))
     _check("detail" not in cli_payload,
            "'detail' must be gone: raw text is never the primary message")
-    _check(cli_payload.get("mode_id") == "unknown",
-           "CLI unknown mode expected, got %r" % cli_payload.get("mode_id"))
-    _check(cli_payload.get("escalate") is True,
-           "CLI unknown must escalate")
+    _check(cli_payload.get("mode_id") == "unknown-nothing-sent",
+           "CLI unknown-nothing-sent mode expected, got %r"
+           % cli_payload.get("mode_id"))
+    _check("might have made a change" not in cli_payload.get("message", ""),
+           "a failure before any write claim says a change might exist")
+    _check("hello@meetmorrow.app" in cli_payload.get("message", ""),
+           "an unrecognized failure must give the support address")
     _check(re.fullmatch(r"[0-9a-f]{12}",
                         cli_payload.get("correlation_id") or ""),
            "CLI payload needs a correlation id")
     for anchor in ANCHORS:
         _check(anchor in cli_payload.get("message", ""),
                "CLI message missing anchor %r" % anchor)
-    _check(cli_payload.get("attempted") == "execute /nonexistent-entry.json",
+    # The educator reads plain words, never the command line or a path.
+    _check(cli_payload.get("attempted") == "the task you asked for",
            "CLI attempted field wrong: %r" % cli_payload.get("attempted"))
+    _check("nonexistent-entry" not in cli_payload.get("message", ""),
+           "CLI message repeats a command-line value")
     _check(str(cli_payload.get("engineering_detail", "")).startswith(
         ENGINEERING_LABEL),
         "CLI engineering detail must carry the untrusted-data label")

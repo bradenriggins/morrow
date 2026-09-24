@@ -86,15 +86,15 @@ describe("Bridge handshake", () => {
     });
   }, 15_000);
 
-  it("refuses a wrong catalog digest with close code 4403 inside the deadline", async () => {
+  it("refuses a wrong catalog digest as a version mismatch with close code 4403 inside the deadline", async () => {
     await withBridge(async (port) => {
       const startedAt = Date.now();
       const refused = connectBridgeTestClient({
         port, token: TOKEN, extensionId: EXTENSION_ID, catalogDigest: WRONG_CATALOG_DIGEST, bindings: BINDINGS,
       });
       await expect(refused).rejects.toThrow(BridgeClosedError);
-      await expect(refused).rejects.toMatchObject({ code: 4403, reason: "bridge_identity_refused" });
-      await expect(refused).rejects.toThrow(/4403 bridge_identity_refused/);
+      await expect(refused).rejects.toMatchObject({ code: 4403, reason: "bridge_version_mismatch" });
+      await expect(refused).rejects.toThrow(/4403 bridge_version_mismatch/);
       expect(Date.now() - startedAt).toBeLessThan(BRIDGE_TEST_WAIT_MS);
     });
   }, 15_000);
@@ -109,13 +109,13 @@ describe("Bridge handshake", () => {
     });
   }, 15_000);
 
-  it("refuses a wrong runtime revision with close code 4403", async () => {
+  it("refuses a wrong runtime revision as a version mismatch with close code 4403", async () => {
     await withBridge(async (port) => {
       const refused = connectBridgeTestClient({
         port, token: TOKEN, extensionId: EXTENSION_ID, catalogDigest: CATALOG_DIGEST, bindings: BINDINGS,
         runtimeRevision: "1.0.0-rc.1",
       });
-      await expect(refused).rejects.toMatchObject({ code: 4403, reason: "bridge_identity_refused" });
+      await expect(refused).rejects.toMatchObject({ code: 4403, reason: "bridge_version_mismatch" });
     });
   }, 15_000);
 

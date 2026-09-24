@@ -6,17 +6,19 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const {
+  WINDOWS_POWERSHELL_TIMEOUT_MS,
   parseUnixProcessStartTimes,
   parseWindowsProcessStartTimes,
   processAlive,
   readBoundedCommandOutput,
   readProcessStartTimes,
+  windowsPowerShellPath,
   windowsProcessStartQuery,
 } = require("./process-lifetime.cjs");
 const { inspectRecord, readPrivateRegularFile } = require("./state-policy.cjs");
 const { parseStrictJson } = require("./strict-utf8.cjs");
 
-const RECEIPT_SCHEMA = "morrow.claude-desktop-connection.v4";
+const RECEIPT_SCHEMA = "morrow.claude-desktop-connection.v5";
 const SETUP_SCHEMA = "morrow.claude-desktop-setup.v3";
 const INSTALLER_RECORD_READ_LIMIT = 64 * 1024;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -295,7 +297,7 @@ function launcherSource(configuration) {
 const fs = require("node:fs");
 const crypto = require("node:crypto");
 const path = require("node:path");
-const { spawn, spawnSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const config = ${JSON.stringify(configuration)};
 const fileLimits = ${JSON.stringify(FILE_LIMITS)};
 const launcherPath = fs.realpathSync(__filename);
@@ -427,39 +429,98 @@ function setupCurrent() {
       && fileMatches("runtimeManifest") && fileMatches("node") && fileMatches("serverEntry") && fileMatches("upstreams");
   } catch { return false; }
 }
-function macClaudeProof() {
+// The proof names the signed Claude app this launcher runs under. It runs
+// beside the connection, so messages keep flowing while it runs, and one runs
+// at a time. An answer that is late, cut short, or malformed is "unverified":
+// the receipt then claims no Claude process, and the launcher asks again.
+const PROOF_WINDOWS_TIMEOUT_MS = ${WINDOWS_POWERSHELL_TIMEOUT_MS};
+const PROOF_STEP_TIMEOUT_MS = 2000;
+const PROOF_OUTPUT_LIMIT = 65536;
+const PROOF_RETRY_FIRST_MS = 2000;
+const PROOF_RETRY_LONGEST_MS = 300000;
+const UNVERIFIED = Object.freeze({ state: "unverified" });
+let activeProof = null;
+function proofCommand(command, args, timeoutMs) {
+  return new Promise((resolve) => {
+    let proofChild;
+    try {
+      proofChild = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    } catch { resolve(null); return; }
+    activeProof = proofChild;
+    const stdout = [];
+    const stderr = [];
+    let bytes = 0;
+    let settled = false;
+    const settle = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (activeProof === proofChild) activeProof = null;
+      resolve(value);
+    };
+    const abandon = () => {
+      try { proofChild.kill("SIGKILL"); } catch {}
+      settle(null);
+    };
+    const timer = setTimeout(abandon, timeoutMs);
+    const collect = (list) => (chunk) => {
+      bytes += chunk.length;
+      if (bytes > PROOF_OUTPUT_LIMIT) { abandon(); return; }
+      list.push(chunk);
+    };
+    proofChild.stdout.on("data", collect(stdout));
+    proofChild.stderr.on("data", collect(stderr));
+    proofChild.once("error", () => settle(null));
+    proofChild.once("close", (code) => settle(code === null ? null : {
+      code, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8")
+    }));
+  });
+}
+async function macClaudeProof() {
   let pid = process.ppid;
   for (let depth = 0; depth < 16 && Number.isSafeInteger(pid) && pid > 1; depth += 1) {
-    const answer = spawnSync("/bin/ps", ["-o", "pid=,ppid=,comm=", "-p", String(pid)], { encoding: "utf8", timeout: 2000, maxBuffer: 65536 });
-    const match = /^\\s*([0-9]+)\\s+([0-9]+)\\s+(.+?)\\s*$/.exec(answer.status === 0 ? answer.stdout : "");
-    if (!match) return null;
+    const answer = await proofCommand("/bin/ps", ["-o", "pid=,ppid=,comm=", "-p", String(pid)], PROOF_STEP_TIMEOUT_MS);
+    if (!answer) return UNVERIFIED;
+    const match = /^\\s*([0-9]+)\\s+([0-9]+)\\s+(.+?)\\s*$/.exec(answer.code === 0 ? answer.stdout : "");
+    if (!match) return { state: "complete", proof: null };
     const executablePath = match[3];
     if (/\\/Claude\\.app\\/Contents\\/MacOS\\/Claude$/.test(executablePath)) {
-      const signature = spawnSync("/usr/bin/codesign", ["-dv", "--verbose=4", executablePath], { encoding: "utf8", timeout: 2000, maxBuffer: 65536 });
-      const detail = String(signature.stdout || "") + String(signature.stderr || "");
-      if (signature.status === 0 && /(?:^|\\n)Identifier=com\\.anthropic\\.claudefordesktop(?:\\n|$)/.test(detail)
+      const signature = await proofCommand("/usr/bin/codesign", ["-dv", "--verbose=4", executablePath], PROOF_STEP_TIMEOUT_MS);
+      if (!signature) return UNVERIFIED;
+      const detail = signature.stdout + signature.stderr;
+      if (signature.code === 0 && /(?:^|\\n)Identifier=com\\.anthropic\\.claudefordesktop(?:\\n|$)/.test(detail)
         && /(?:^|\\n)TeamIdentifier=Q6L2SF6YDW(?:\\n|$)/.test(detail)) {
-        return { platform: "darwin", processId: Number(match[1]), executablePath,
-          bundleId: "com.anthropic.claudefordesktop", teamId: "Q6L2SF6YDW" };
+        return { state: "complete", proof: { platform: "darwin", processId: Number(match[1]), executablePath,
+          bundleId: "com.anthropic.claudefordesktop", teamId: "Q6L2SF6YDW" } };
       }
     }
     pid = Number(match[2]);
   }
-  return null;
+  return { state: "complete", proof: null };
 }
-function windowsClaudeProof() {
+async function windowsClaudeProof() {
   const powershell = path.win32.join(process.env.SystemRoot || "C:\\\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   const script = [
     "$ErrorActionPreference='Stop'", "$current=" + process.ppid, "$depth=0", "$answer=$null",
     "while($current -gt 1 -and $depth -lt 16){$p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$current);if($null -eq $p){break};if($p.Name -ieq 'Claude.exe'){$s=Get-AuthenticodeSignature -LiteralPath $p.ExecutablePath;if($s.Status -eq 'Valid' -and $s.SignerCertificate.Subject -match 'Anthropic'){$answer=[pscustomobject]@{platform='win32';processId=[int]$p.ProcessId;executablePath=[string]$p.ExecutablePath;signerThumbprint=[string]$s.SignerCertificate.Thumbprint};break}};$current=[int]$p.ParentProcessId;$depth++}",
     "if($null -ne $answer){$answer|ConvertTo-Json -Compress}"
   ].join(";");
-  const answer = spawnSync(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-    { encoding: "utf8", timeout: 3000, maxBuffer: 65536, windowsHide: true });
-  try { return answer.status === 0 && answer.stdout.trim() ? JSON.parse(answer.stdout) : null; } catch { return null; }
+  const answer = await proofCommand(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], PROOF_WINDOWS_TIMEOUT_MS);
+  if (!answer || answer.code !== 0) return UNVERIFIED;
+  const text = answer.stdout.trim();
+  if (!text) return { state: "complete", proof: null };
+  let proof;
+  try { proof = JSON.parse(text); } catch { return UNVERIFIED; }
+  if (!exactObject(proof, ["platform", "processId", "executablePath", "signerThumbprint"]) || proof.platform !== "win32"
+    || !Number.isSafeInteger(proof.processId) || proof.processId < 1
+    || typeof proof.executablePath !== "string" || proof.executablePath.length < 1 || proof.executablePath.length > 4096
+    || typeof proof.signerThumbprint !== "string" || !/^[A-Fa-f0-9]{40,64}$/.test(proof.signerThumbprint)) return UNVERIFIED;
+  return { state: "complete", proof };
 }
 function claudeProcessProof() {
-  return process.platform === "darwin" ? macClaudeProof() : process.platform === "win32" ? windowsClaudeProof() : null;
+  if (process.platform === "darwin") return macClaudeProof();
+  if (process.platform === "win32") return windowsClaudeProof();
+  return Promise.resolve({ state: "complete", proof: null });
 }
 if (!setupCurrent()) {
   process.stderr.write("Morrow setup changed. Open Morrow and set up Claude Desktop again.\\n");
@@ -475,7 +536,11 @@ const child = spawn(config.nodePath, [config.serverEntryPath], {
 let initializeId;
 let clientInfo;
 let protocolVersion;
-let connected = false;
+let connectedAt;
+let proofStarted = false;
+let proofRunning = false;
+let proofRetryTimer;
+let proofRetryMs = PROOF_RETRY_FIRST_MS;
 let finishing = false;
 let terminateTimer;
 let forceTimer;
@@ -520,24 +585,41 @@ observe(process.stdin, (message) => {
       clientInfo = { name: reported.name, version: reported.version };
     }
   }
-  if (!connected && !finishing && protocolVersion && message.method === "notifications/initialized" && message.id === undefined) recordConnection();
+  if (!proofStarted && !finishing && protocolVersion && message.method === "notifications/initialized" && message.id === undefined) {
+    proofStarted = true;
+    connectedAt = new Date().toISOString();
+    checkClaudeProcess();
+  }
 });
 observe(child.stdout, (message) => {
   if (protocolVersion || initializeId === undefined || message?.jsonrpc !== "2.0" || message.id !== initializeId || message.error
     || typeof message.result?.protocolVersion !== "string" || typeof message.result?.serverInfo?.name !== "string") return;
   protocolVersion = message.result.protocolVersion;
 });
-function recordConnection() {
+function checkClaudeProcess() {
+  if (proofRunning || finishing) return;
+  proofRunning = true;
+  claudeProcessProof().catch(() => UNVERIFIED).then((result) => {
+    proofRunning = false;
+    if (finishing) return;
+    recordConnection(result);
+    if (result.state !== "unverified") return;
+    proofRetryTimer = setTimeout(() => { proofRetryTimer = undefined; checkClaudeProcess(); }, proofRetryMs);
+    proofRetryTimer.unref();
+    proofRetryMs = Math.min(proofRetryMs * 2, PROOF_RETRY_LONGEST_MS);
+  });
+}
+function recordConnection(result) {
   if (!setupCurrent()) return;
+  const complete = result.state === "complete";
   const receipt = { schema: ${JSON.stringify(RECEIPT_SCHEMA)}, installationId: config.installationId,
     launcherPath, launcherSha256, protocolVersion, launcherPid: process.pid, proxyPid: child.pid,
-    connectedAt: new Date().toISOString(), claudeProcess: claudeProcessProof() };
+    connectedAt, claudeProcessCheck: complete ? "complete" : "unverified", claudeProcess: complete ? result.proof : null };
   if (clientInfo) receipt.clientInfo = clientInfo;
   const temporary = config.receiptPath + ".tmp-" + process.pid;
   try {
     fs.writeFileSync(temporary, JSON.stringify(receipt) + "\\n", { mode: 0o600, flag: "wx" });
     fs.renameSync(temporary, config.receiptPath);
-    connected = true;
   } catch { try { fs.unlinkSync(temporary); } catch {} }
 }
 function clearOwnReceipt() {
@@ -567,6 +649,8 @@ function terminateTree(force) {
   try { child.kill(force ? "SIGKILL" : "SIGTERM"); } catch {}
 }
 function finish(code) {
+  if (proofRetryTimer) clearTimeout(proofRetryTimer);
+  if (activeProof) { try { activeProof.kill("SIGKILL"); } catch {} }
   if (terminateTimer) clearTimeout(terminateTimer);
   if (forceTimer) clearTimeout(forceTimer);
   if (finalTimer) clearTimeout(finalTimer);
@@ -761,12 +845,16 @@ async function isCurrentClaudeDesktopSetup(setup, expected = {}) {
   return true;
 }
 
-function boundedCommand(executable, argumentsValue) {
+function boundedCommand(executable, argumentsValue, timeoutMs = 3_000) {
   return readBoundedCommandOutput(executable, argumentsValue, {
-    timeoutMs: 3_000,
+    timeoutMs,
     maxBytes: 64 * 1024,
     includeStderr: true,
   });
+}
+
+function powerShellCommand(script) {
+  return boundedCommand(windowsPowerShellPath(), ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], WINDOWS_POWERSHELL_TIMEOUT_MS);
 }
 
 async function processAncestry(startPid, platform) {
@@ -780,9 +868,8 @@ async function processAncestry(startPid, platform) {
       if (!match) return null;
       record = { processId: Number(match[1]), parentProcessId: Number(match[2]), executablePath: match[3] };
     } else if (platform === "win32") {
-      const powershell = path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
       const script = `$p=Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}';if($null-ne$p){[pscustomobject]@{processId=[int]$p.ProcessId;parentProcessId=[int]$p.ParentProcessId;executablePath=[string]$p.ExecutablePath}|ConvertTo-Json -Compress}`;
-      const answer = await boundedCommand(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script]);
+      const answer = await powerShellCommand(script);
       try { record = JSON.parse(answer || ""); } catch { return null; }
     } else {
       return null;
@@ -802,10 +889,9 @@ async function verifyClaudeExecutableIdentity(proof, platform, executable) {
       || !/(?:^|\n)TeamIdentifier=Q6L2SF6YDW(?:\n|$)/.test(detail)) return false;
   } else if (platform === "win32") {
     if (typeof proof.signerThumbprint !== "string" || !/^[A-Fa-f0-9]{40,64}$/.test(proof.signerThumbprint)) return false;
-    const powershell = path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
     const escaped = executable.replace(/'/g, "''");
     const script = `$s=Get-AuthenticodeSignature -LiteralPath '${escaped}';if($s.Status-eq'Valid'){[pscustomobject]@{subject=[string]$s.SignerCertificate.Subject;thumbprint=[string]$s.SignerCertificate.Thumbprint}|ConvertTo-Json -Compress}`;
-    const answer = await boundedCommand(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script]);
+    const answer = await powerShellCommand(script);
     let signature;
     try { signature = JSON.parse(answer || ""); } catch { return false; }
     if (typeof signature?.subject !== "string" || !/Anthropic/i.test(signature.subject)
@@ -856,7 +942,9 @@ async function inspectClaudeDesktopConnection(setup, options = {}) {
     || !Number.isSafeInteger(receipt.proxyPid) || receipt.proxyPid < 1
     || !Number.isFinite(Date.parse(receipt.connectedAt)) || Date.parse(receipt.connectedAt) > Date.now()
     || typeof receipt.protocolVersion !== "string" || !receipt.protocolVersion
-    || !SHA256.test(receipt.launcherSha256 || "")) return unavailable;
+    || !SHA256.test(receipt.launcherSha256 || "")
+    || (receipt.claudeProcessCheck !== "complete" && receipt.claudeProcessCheck !== "unverified")
+    || (receipt.claudeProcessCheck === "unverified" && receipt.claudeProcess !== null)) return unavailable;
   try {
     const metadata = await readClaudeDesktopSetup(setup);
     if (!metadata || metadata.launcherSha256 !== receipt.launcherSha256
@@ -879,6 +967,12 @@ async function inspectClaudeDesktopConnection(setup, options = {}) {
     if (reportedPath !== installedPath && !sameCanonicalPath(receipt.launcherPath, location.declared, platform)) return unavailable;
     if ((await boundedDigest(installedPath, FILE_LIMITS.launcher)).sha256 !== receipt.launcherSha256) return unavailable;
     const running = await recordedProcessesRunning(receipt, options);
+    // The launcher could not yet prove the Claude app it runs under, and asks
+    // again while it runs. Until it answers, the connection is being checked,
+    // not missing. A closed launcher cannot answer, so its receipt proves nothing.
+    if (receipt.claudeProcessCheck === "unverified") {
+      return running === true ? { installed: false, running: true, checking: true } : unavailable;
+    }
     const verifyProcess = options.verifyClaudeProcessProof || verifyClaudeProcessProof;
     if (await verifyProcess(receipt, { platform, running, readProcessAncestry: options.readProcessAncestry }) !== true) return unavailable;
     return { installed: true, running };

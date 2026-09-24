@@ -162,22 +162,28 @@ def _bool_validator(value):
                                       % (value,))
 
 
+# The executor's numbered-course rule (dispatch/executor.py
+# _COURSE_NUMBER_RE): every course dispatch refuses anything else.
+_COURSE_NUMBER_RE = re.compile(r"[1-9][0-9]{0,19}")
+# What versions before 0.4.1 accepted as a default course id.
+_OLD_COURSE_ID_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
 def _course_id_validator(value):
     if not isinstance(value, str):
         raise SettingsValidationError("must be a string, got %r" % (value,))
     if value == "":
         return  # no default course: the agent asks when it needs one
-    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", value):
+    if not _COURSE_NUMBER_RE.fullmatch(value):
         raise SettingsValidationError(
-            "must be empty or 1-64 chars of letters, digits, underscore, "
-            "dot, or dash; got %r" % (value,))
+            "must be empty or a Canvas course number; got %r" % (value,))
 
 
 def _timezone_validator(value):
     if not isinstance(value, str):
         raise SettingsValidationError("must be a string, got %r" % (value,))
     if value == "":
-        return  # unset: the agent asks or falls back to the course default
+        return  # unset: the course or Canvas profile zone applies
     try:
         from zoneinfo import available_timezones
         zones = available_timezones()
@@ -208,28 +214,18 @@ SETTINGS_SCHEMA = {
         "consequential": False,
         "description": (
             "How much the agent says while working: concise, balanced, "
-            "or detailed."),
+            "or detailed. A preference the assistant follows as it works "
+            "with you."),
     },
     "confirm_destructive_writes": {
         "default": False,
         "validate": _bool_validator,
         "consequential": True,
         "description": (
-            "When true, deletes and other destructive writes ask "
-            "for confirmation even in edit mode. Defaults to false: "
-            "edit mode does not ask per write; that is the entire "
-            "difference from plan mode. Turn it on only if you want "
-            "the extra guardrail."),
-    },
-    "write_approval_style": {
-        "default": "per_write",
-        "validate": _enum_validator({"per_write", "batched"}),
-        "consequential": True,
-        "description": (
-            "'per_write': one approval ceremony per write. 'batched': a "
-            "single approval ceremony may cover a listed set of writes "
-            "in one validated plan; the educator still approves the "
-            "whole set before anything runs."),
+            "When true, deletes ask for confirmation even in edit "
+            "mode. Defaults to false: edit mode does not ask per "
+            "write; that is the entire difference from plan mode. Turn "
+            "it on only if you want the extra guardrail."),
     },
     "failure_verbosity": {
         "default": "detailed",
@@ -238,7 +234,8 @@ SETTINGS_SCHEMA = {
         "description": (
             "'detailed' failure reports include what was attempted, the "
             "evidence, and recovery options. 'concise' keeps to what "
-            "failed and the next step."),
+            "failed and the next step. A preference the assistant follows "
+            "as it works with you."),
     },
     "proactivity": {
         "default": "reactive",
@@ -246,16 +243,18 @@ SETTINGS_SCHEMA = {
         "consequential": False,
         "description": (
             "'reactive': the agent only does what is asked. 'suggestive': "
-            "it may suggest follow-up actions unprompted."),
+            "it may suggest follow-up actions unprompted. A preference the "
+            "assistant follows as it works with you."),
     },
     "read_confirmations": {
         "default": False,
         "validate": _bool_validator,
         "consequential": False,
         "description": (
-            "Verbosity preference only. Reads never need approval; when "
-            "true the agent narrates what it is about to read before "
-            "reading it, when false it just reads."),
+            "Reads never need approval; when true the agent narrates what "
+            "it is about to read before reading it, when false it just "
+            "reads. A preference the assistant follows as it works with "
+            "you."),
     },
     "work_summary": {
         "default": "full",
@@ -264,28 +263,23 @@ SETTINGS_SCHEMA = {
         "description": (
             "How the agent reports completed work. 'brief': one short "
             "line per task. 'full': every change listed. In edit mode "
-            "this summary is your oversight, so 'full' is the default."),
-    },
-    "auto_cleanup_test_objects": {
-        "default": True,
-        "validate": _bool_validator,
-        "consequential": False,
-        "description": (
-            "When true, temporary objects the agent creates to verify "
-            "something works (proof pages, test items) are deleted when "
-            "the check is done instead of left behind."),
+            "this summary is your oversight, so 'full' is the default. A "
+            "preference the assistant follows as it works with you."),
     },
     "default_course_id": {
         "default": "",
         "validate": _course_id_validator,
         "consequential": True,
         "description": (
-            "Your go-to course id. When you do not name a course, the "
-            "agent starts here without an extra check, as long as it is "
-            "unambiguous; it asks only when the target is genuinely "
-            "ambiguous or conflicts. Plan/Edit mode still governs write "
-            "approval as usual. Empty means no default: the agent asks. "
-            "Consequential because it steers where writes land."),
+            "Your go-to course, as its Canvas course number (the number "
+            "in the course's Canvas address). When you do not name a "
+            "course, the agent starts here without an extra check, as "
+            "long as it is unambiguous; it asks only when the target is "
+            "genuinely ambiguous or conflicts. Plan/Edit mode still governs "
+            "write approval as usual. Empty means no default: the agent "
+            "asks. "
+            "Consequential because it steers where writes land. A "
+            "preference the assistant follows as it works with you."),
     },
     "timezone": {
         "default": "",
@@ -294,18 +288,9 @@ SETTINGS_SCHEMA = {
         "description": (
             "Your timezone for date math ('last week's quiz', due-date "
             "windows). An IANA name like 'America/Denver'; empty means "
-            "unset, and the agent asks or falls back to the course "
-            "default."),
-    },
-    "confirm_bulk_actions": {
-        "default": True,
-        "validate": _bool_validator,
-        "consequential": True,
-        "description": (
-            "When true, actions that touch many students or items at "
-            "once (mass messages, bulk edits) ask for confirmation "
-            "first, even in edit mode. The educator can turn it off, "
-            "but only explicitly."),
+            "unset: Morrow then uses the course's time zone in Canvas, "
+            "then your Canvas profile's, and asks you when neither is "
+            "set."),
     },
 }
 
@@ -431,11 +416,18 @@ def _read_doc_locked(user_id):
     stored = doc["settings"]
     # Forward-compat: unknown stored keys are preserved, not rejected.
     # Known keys must validate, or the file is corrupt.
-    for key, value in stored.items():
+    for key, value in list(stored.items()):
         if key in SETTINGS_SCHEMA:
             try:
                 SETTINGS_SCHEMA[key]["validate"](value)
             except SettingsValidationError as exc:
+                if key == "default_course_id" and isinstance(value, str) \
+                        and _OLD_COURSE_ID_RE.fullmatch(value):
+                    # Saved by an older version that took any token. No
+                    # dispatch can use it, so it reads as no default; the
+                    # file stays trusted and the educator keeps their mode.
+                    del stored[key]
+                    continue
                 raise SettingsCorrupt(
                     "settings file %s holds invalid value for %r (%s); "
                     "refusing to guess." % (path, key, exc))

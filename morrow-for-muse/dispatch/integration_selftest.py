@@ -17,7 +17,8 @@ and the removed hooks must stay absent.
   3. catalog_descriptor_to_entry accepts the "plan" effect class.
   4. The retired two-phase browser lane is gone from the CLI: no
      `complete` subcommand, no --backend browser, chromium is default.
-  5. catalog --help documents --allow-unproven.
+  5. catalog --help offers no override for an operation that is not
+     live-proven.
 
 No network, no Chromium, no session. Fakes only.
 """
@@ -139,8 +140,8 @@ out = subprocess.run(
      "catalog", "--help"], capture_output=True, text=True)
 check("cli: catalog --backend offers only https and chromium",
       "{https,chromium}" in out.stdout, out.stdout[:300])
-check("cli: catalog documents --allow-unproven",
-      "--allow-unproven" in out.stdout, out.stdout[:300])
+check("cli: catalog offers no override for an unproven operation",
+      "unproven" not in out.stdout.lower(), out.stdout[:300])
 src = src_ex
 check("cli: --backend default is chromium",
       'p.add_argument("--backend", default="chromium", choices=("https", "chromium")' in src)

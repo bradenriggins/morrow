@@ -3,7 +3,7 @@ import { sha256Json, type JsonObject } from "@morrow/contracts";
 import { describe, expect, it } from "vitest";
 import { newQuizLifecycleWriteSchema } from "../../canvas-connector-mcp/src/server.js";
 import { planNewQuizCreate, planNewQuizDelete } from "../src/new-quiz-lifecycle.js";
-import type { GatewayRuntime } from "../src/runtime.js";
+import { newQuizLifecycleRecoveryVerification, type GatewayRuntime } from "../src/runtime.js";
 
 const catalog = JSON.parse(readFileSync(new URL("../../../artifacts/canvas-api/canvas-api-catalog.json", import.meta.url), "utf8"));
 const writeNames = new Set(["canvas_create_new_quiz", "canvas_delete_new_quiz"]);
@@ -96,5 +96,53 @@ describe("New Quiz lifecycle planner", () => {
       source_binding_id: sourceBindingId, course_id: "42", quiz: { instructions: "x".repeat(100_001) },
     });
     expect(refused.isError).toBe(true);
+  });
+});
+
+// A change whose answer was lost is settled later from the complete course New Quiz list. The list
+// proves a mismatch only when it lacks the approved result. A list that holds it and also changed
+// in another way, a second copy Chrome sent on its own or a colleague's change at the same moment,
+// cannot single this change out, so it stays unconfirmed and keeps its hold.
+describe("New Quiz lifecycle recovery", () => {
+  const schema = "morrow.browser-verification.v1";
+  const create = { kind: "create" as const, beforeIds: ["77"], requestedQuiz: { title: "Cell check" }, getTool: "canvas_get_new_quiz" };
+  const remove = { kind: "delete" as const, beforeIds: ["77", "78"], targetId: "77" };
+
+  it.each([
+    { name: "one new quiz holding the approved result", afterIds: ["77", "90"], saved: { id: "90", title: "Cell check" },
+      expected: { status: "verified", evidence: "complete_course_quiz_list_and_created_quiz_reread_after_restart" } },
+    { name: "two new quizzes", afterIds: ["77", "90", "91"], saved: { id: "90", title: "Cell check" },
+      expected: { status: "unconfirmed", reason: "new_quiz_duplicate_effect_suspected" } },
+    { name: "the approved quiz saved while another was removed", afterIds: ["90"], saved: { id: "90", title: "Cell check" },
+      expected: { status: "unconfirmed", reason: "new_quiz_list_changed_concurrently" } },
+    { name: "a new quiz Morrow could not read", afterIds: ["77", "90"], saved: null,
+      expected: { status: "unconfirmed", reason: "new_quiz_created_read_unavailable" } },
+    { name: "no new quiz", afterIds: ["77"], saved: null,
+      expected: { status: "mismatch", reason: "new_quiz_create_membership_mismatch" } },
+    { name: "one new quiz holding another title", afterIds: ["77", "90"], saved: { id: "90", title: "Other" },
+      expected: { status: "mismatch", reason: "new_quiz_create_readback_mismatch" } },
+    { name: "one new quiz holding another title while another was removed", afterIds: ["90"], saved: { id: "90", title: "Other" },
+      expected: { status: "mismatch", reason: "new_quiz_create_readback_mismatch" } },
+  ])("settles a create with $name", async ({ afterIds, saved, expected }) => {
+    const reads: string[] = [];
+    const verification = await newQuizLifecycleRecoveryVerification(create, "new-quiz-lifecycle-create", afterIds, async (quizId) => {
+      reads.push(quizId);
+      return saved;
+    });
+    expect(verification).toEqual({ schema, strategy: "new-quiz-lifecycle-create", ...expected });
+    expect(reads).toEqual(afterIds.filter((id) => id !== "77").length === 1 ? afterIds.filter((id) => id !== "77") : []);
+  });
+
+  it.each([
+    { name: "exactly the target removed", afterIds: ["78"], expected: { status: "verified", evidence: "complete_course_new_quiz_list_reread_after_restart" } },
+    { name: "the target removed and another quiz added", afterIds: ["78", "91"], expected: { status: "unconfirmed", reason: "new_quiz_list_changed_concurrently" } },
+    { name: "the target and another quiz removed", afterIds: [], expected: { status: "unconfirmed", reason: "new_quiz_list_changed_concurrently" } },
+    { name: "the target still listed", afterIds: ["77", "78"], expected: { status: "mismatch", reason: "new_quiz_delete_readback_mismatch" } },
+    { name: "the target still listed while another quiz was removed", afterIds: ["77"], expected: { status: "mismatch", reason: "new_quiz_delete_readback_mismatch" } },
+  ])("settles a delete with $name", async ({ afterIds, expected }) => {
+    const verification = await newQuizLifecycleRecoveryVerification(remove, "new-quiz-lifecycle-delete", afterIds, async () => {
+      throw new Error("a delete reads no quiz");
+    });
+    expect(verification).toEqual({ schema, strategy: "new-quiz-lifecycle-delete", ...expected });
   });
 });

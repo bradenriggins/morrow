@@ -49,8 +49,10 @@ CLI:
   python3 settings/commands.py settings get KEY --user-id U
   python3 settings/commands.py settings set KEY VALUE --user-id U
   (bin/morrow mode ... and bin/morrow settings ... run the same thing.)
-  --user-id defaults to MORROW_USER_ID and --conversation-id to
-  MORROW_CONVERSATION_ID. Output is one JSON object; exit 0 when ok.
+  --user-id defaults to MORROW_USER_ID, then the Canvas account pinned
+  at first sign-in (config/identity.default_user_id); --conversation-id
+  defaults to MORROW_CONVERSATION_ID. Output is one JSON object; exit 0
+  when ok.
 
 No em dashes anywhere in the messages: commas, colons, or parentheses
 only.
@@ -65,6 +67,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 ".."))
+from config.identity import default_user_id  # noqa: E402
 from modes import state as mode_state  # noqa: E402
 from settings.store import (  # noqa: E402
     SETTINGS_SCHEMA,
@@ -90,25 +93,75 @@ _SETTING_LABELS = {
     "default_mode": "Default mode",
     "verbosity": "Verbosity",
     "confirm_destructive_writes": "Deletion confirmations",
-    "write_approval_style": "Write approval style",
     "failure_verbosity": "Failure report detail",
     "proactivity": "Proactivity",
     "read_confirmations": "Read confirmations",
-    "auto_cleanup_test_objects": "Auto-clean test objects",
-    "confirm_bulk_actions": "Bulk action confirmations",
     "default_course_id": "Default course",
     "timezone": "Timezone",
     "work_summary": "Work summary detail",
 }
 
-_NOT_TIMED = ("Edit mode has no time limit: it stays on until you turn it "
-              "off.")
+# What the agent relays after a setting change: the change in the
+# educator's words (the schema descriptions are written for developers).
+_SETTING_SENTENCES = {
+    "verbosity": {
+        "concise": "I will keep my updates short while I work.",
+        "balanced": "I will give you updates of normal length while I "
+                    "work.",
+        "detailed": "I will give you detailed updates while I work.",
+    },
+    "failure_verbosity": {
+        "detailed": "When something fails, I will tell you what I tried, "
+                    "what I found, and your options.",
+        "concise": "When something fails, I will tell you only what "
+                   "failed and the next step.",
+    },
+    "proactivity": {
+        "reactive": "I will do only what you ask.",
+        "suggestive": "I will do what you ask, and I may also suggest "
+                      "next steps.",
+    },
+    "work_summary": {
+        "brief": "When I finish, I will give you one short line per task.",
+        "full": "When I finish, I will list every change I made.",
+    },
+    "confirm_destructive_writes": {
+        True: "Deletion confirmations are on: in edit mode, deletions "
+              "still ask you first.",
+        False: "Deletion confirmations are off: in edit mode, deletions "
+               "will not ask you first.",
+    },
+    "read_confirmations": {
+        True: "I will tell you what I am about to read before I read it. "
+              "Reads still never need your approval.",
+        False: "I will read without telling you first. Reads never need "
+               "your approval.",
+    },
+}
+
+# When a value is refused: the words the command accepts, each with its
+# meaning in the educator's words.
+_BOOLEAN_CHOICES = "true (on) or false (off)"
+_SETTING_CHOICES = {
+    "default_mode": "plan (changes wait for your OK) or edit (changes "
+                    "apply without asking)",
+    "verbosity": "concise (short updates), balanced (updates of normal "
+                 "length), or detailed (detailed updates)",
+    "failure_verbosity": "concise (only what failed and the next step) or "
+                         "detailed (what I tried, what I found, and your "
+                         "options)",
+    "proactivity": "reactive (only what you ask) or suggestive "
+                   "(suggestions too)",
+    "work_summary": "brief (one short line per task) or full (every "
+                    "change listed)",
+    "confirm_destructive_writes": _BOOLEAN_CHOICES,
+    "read_confirmations": _BOOLEAN_CHOICES,
+}
+_BOOLEAN_WORDS = {"true": True, "on": True, "yes": True,
+                  "false": False, "off": False, "no": False}
 
 
 def _friendly_value(key, value):
-    if key == "write_approval_style":
-        return {"per_write": "one per write",
-                "batched": "batched"}.get(value, value)
     if isinstance(value, bool):
         return "on" if value else "off"
     if isinstance(value, str) and value == "" and key in (
@@ -143,15 +196,14 @@ def _destructive_note(user_id):
         changed = bool(list_settings(user_id)
                        ["confirm_destructive_writes"]["changed"])
     except Exception:
-        return ("I could not read your deletion-confirmation setting, so "
-                "check it with 'settings show' before relying on it.")
+        return ("I could not read your deletion confirmation setting; ask "
+                "me to show your settings before you rely on it.")
     if guard:
-        return ("Deletion confirmations are on, so deletes and other "
-                "destructive writes will still ask you first.")
+        return ("Deletions will still ask you first, because deletion "
+                "confirmations are on.")
     origin = "you turned them off" if changed else "that is the default"
-    return ("Deletion confirmations are off (%s), so deletes and other "
-            "destructive writes will not ask either. You can turn "
-            "deletion confirmations on at any time." % origin)
+    return ("Deletions will not ask either: deletion confirmations are off "
+            "(%s), and you can turn them on at any time." % origin)
 
 
 def _edit_sources(user_id, conversation_id):
@@ -311,7 +363,8 @@ def mode_set(user_id, mode, conversation_id=None, this_conversation=False,
     """Set the educator's mode. See the module docstring for the table."""
     if mode not in ("plan", "edit"):
         return _error(user_id, conversation_id,
-                      "Mode must be 'plan' or 'edit'; nothing changed.")
+                      "Nothing changed: the mode can only be %s."
+                      % _SETTING_CHOICES["default_mode"])
     if this_conversation and not conversation_id:
         return _error(user_id, conversation_id,
                       "A mode for this conversation needs the conversation "
@@ -327,12 +380,10 @@ def mode_set(user_id, mode, conversation_id=None, this_conversation=False,
             return _result("done", user_id, conversation_id,
                            "You are in plan mode. " + _repair_hint(user_id),
                            settings_untrusted=True)
-        return _result(
-            "done", user_id, conversation_id,
-            "Done: for this conversation you are in %s mode. %s"
-            % (_safe_mode(user_id, conversation_id),
-               _status_message(user_id, conversation_id,
-                               _safe_mode(user_id, conversation_id))))
+        status = _status_message(user_id, conversation_id,
+                                 _safe_mode(user_id, conversation_id))
+        return _result("done", user_id, conversation_id,
+                       "Done: " + status[:1].lower() + status[1:])
     # The agent calls this because the educator asked for edit mode.
     try:
         ended = [] if this_conversation else sorted(
@@ -355,20 +406,29 @@ def mode_set(user_id, mode, conversation_id=None, this_conversation=False,
         return _error(user_id, conversation_id,
                       "Edit mode did not take effect: " + _status_message(
                           user_id, conversation_id, now))
-    where = ("in this conversation, until you turn edit mode off, this "
-             "conversation ends, or you start a different conversation"
-             if this_conversation else
-             "in every conversation, until you turn edit mode off%s"
-             % (" (the per-conversation mode you had set in %d "
-                "conversation%s has ended)"
-                % (len(ended), "" if len(ended) == 1 else "s")
-                if ended else ""))
-    return _result(
-        "done", user_id, conversation_id,
-        "Done: you are in edit mode now. Writes apply without asking you "
-        "first %s. %s %s Reads never need approval. This change is "
-        "journaled. %s" % (where, _NOT_TIMED, _destructive_note(user_id),
-                           _status_message(user_id, conversation_id, now)))
+    if this_conversation:
+        lead = ("Done: you now have an edit override for this "
+                "conversation. Changes here apply without asking you "
+                "first. It has no time limit: it stays on until you turn "
+                "it off, this conversation ends, or you start a different "
+                "conversation.")
+        try:
+            if get_setting(user_id, "default_mode") == "edit":
+                lead += (" Your saved default is edit mode too, so your "
+                         "other conversations are in edit mode as well.")
+        except Exception:
+            pass
+    else:
+        lead = ("Done: edit mode is on in every conversation. Changes "
+                "apply without asking you first. Edit mode has no time "
+                "limit: it stays on until you turn it off.")
+        if ended:
+            lead += (" The per-conversation mode you had set in %d "
+                     "conversation%s has ended."
+                     % (len(ended), "" if len(ended) == 1 else "s"))
+    return _result("done", user_id, conversation_id,
+                   "%s %s Reads never need approval."
+                   % (lead, _destructive_note(user_id)))
 
 
 # ---------------------------------------------------------------------------
@@ -423,9 +483,10 @@ def setting_set(user_id, key, value, educator=None, conversation_id=None):
     label = _SETTING_LABELS.get(key, key)
     try:
         SETTINGS_SCHEMA[key]["validate"](value)
-    except SettingsValidationError as exc:
+    except SettingsValidationError:
         return _error(user_id, conversation_id,
-                      "%s was not changed: %s." % (label, exc))
+                      "%s was not changed: %s" % (
+                          label, _refused_value_reason(key, value)))
     try:
         # The agent calls this because the educator asked for the change.
         set_setting(user_id, key, value, educator_confirmed=True,
@@ -440,26 +501,57 @@ def setting_set(user_id, key, value, educator=None, conversation_id=None):
         return _error(user_id, conversation_id,
                       "%s was not changed: %s" % (label, exc))
     return _result("done", user_id, conversation_id,
-                   "Done: %s is now %s. %s" % (
-                       label, _friendly_value(key, now),
-                       SETTINGS_SCHEMA[key]["description"]),
+                   "Done: %s" % _setting_sentence(key, now),
                    key=key, value=now)
+
+
+def _setting_sentence(key, value):
+    """What a setting's new value means for the educator, in one or
+    two sentences."""
+    if key == "default_course_id":
+        if value:
+            return ("When you do not name a course, I will use course %s. "
+                    "If it is not clear which course you mean, I will "
+                    "still ask." % value)
+        return "When you do not name a course, I will ask which one you mean."
+    if key == "timezone":
+        if value:
+            return ('I will use the %s time zone for dates like "last '
+                    'week".' % value)
+        return ('For dates like "last week", I will use the course\'s time '
+                "zone, then your Canvas profile's, and ask you if neither "
+                "is set.")
+    sentence = _SETTING_SENTENCES.get(key, {}).get(value)
+    if sentence:
+        return sentence
+    return "%s is now %s." % (_SETTING_LABELS.get(key, key),
+                              _friendly_value(key, value))
+
+
+def _refused_value_reason(key, value):
+    if key == "timezone":
+        return ('"%s" is not a time zone name I know. Use a name like '
+                "America/Denver." % value)
+    if key == "default_course_id":
+        return "use the course number from Canvas, like 12345."
+    if key in _SETTING_CHOICES:
+        return "the choices are %s." % _SETTING_CHOICES[key]
+    return "that value is not one Morrow accepts."
 
 
 def parse_setting_value(key, raw):
     """A CLI string as the typed value the schema wants for key.
 
-    Booleans accept exactly "true"/"false"; every other setting is a
-    string validated by the schema itself.
+    Booleans accept true/false, on/off, and yes/no; every other setting
+    is a string validated by the schema itself.
     """
     if key in SETTINGS_SCHEMA and isinstance(
             SETTINGS_SCHEMA[key]["default"], bool):
-        if raw == "true":
-            return True
-        if raw == "false":
-            return False
+        word = raw.strip().lower()
+        if word in _BOOLEAN_WORDS:
+            return _BOOLEAN_WORDS[word]
         raise SettingsValidationError(
-            "%s takes true or false, got %r" % (key, raw))
+            "%s takes %s, got %r" % (key, _BOOLEAN_CHOICES, raw))
     return raw
 
 
@@ -469,13 +561,13 @@ def parse_setting_value(key, raw):
 
 def _parser():
     p = argparse.ArgumentParser(
-        prog="morrow",
+        prog="bin/morrow",
         description="Typed Plan/Edit mode and settings commands. The agent "
                     "decides what the educator means and calls these.")
     sub = p.add_subparsers(dest="group", required=True)
 
     def ids(sp):
-        sp.add_argument("--user-id", default=os.environ.get("MORROW_USER_ID"))
+        sp.add_argument("--user-id", default=None)
         sp.add_argument("--conversation-id",
                         default=os.environ.get("MORROW_CONVERSATION_ID"))
 
@@ -503,10 +595,15 @@ def _parser():
 
 def main(argv=None):
     args = _parser().parse_args(argv)
+    args.user_id = args.user_id or default_user_id()
     if not args.user_id:
         print(json.dumps({"ok": False, "status": "error", "mode": "plan",
-                          "message": "No user id: pass --user-id or set "
-                                     "MORROW_USER_ID."}))
+                          "message": "Nothing changed: Morrow keeps your "
+                                     "mode and settings with your Canvas "
+                                     "account, and it has not confirmed "
+                                     "which account is yours yet. Sign in "
+                                     "to Canvas on the helper page "
+                                     "first."}))
         return 2
     try:
         if args.group == "mode" and args.action == "status":
@@ -521,9 +618,12 @@ def main(argv=None):
         else:
             try:
                 value = parse_setting_value(args.key, args.value)
-            except SettingsValidationError as exc:
+            except SettingsValidationError:
                 out = _error(args.user_id, args.conversation_id,
-                             "Nothing changed: %s." % exc)
+                             "Nothing changed: %s can only be %s."
+                             % (_SETTING_LABELS.get(args.key, args.key),
+                                _SETTING_CHOICES.get(args.key,
+                                                     _BOOLEAN_CHOICES)))
             else:
                 out = setting_set(args.user_id, args.key, value,
                                   conversation_id=args.conversation_id)

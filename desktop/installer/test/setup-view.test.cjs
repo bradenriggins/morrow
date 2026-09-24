@@ -105,7 +105,7 @@ const CASES = [
     name: "a course is verified and the first read is not ready",
     state: state({ ...PAIRED, runtimeVerifiedCourseCount: 1, selectedCourseName: "BIOL 101" }),
     current: "Course",
-    title: "Your selected course is connected."
+    title: "Morrow cannot read your course yet."
   },
   {
     name: "the first read is ready",
@@ -186,7 +186,9 @@ test("the course stage carries course selection through the first read", async (
   const { progress } = await view;
   const firstRead = (overrides) => progress(state({ ...PAIRED, runtimeVerifiedCourseCount: 1, selectedCourseName: "BIOL 101", ...overrides }))
     .find((step) => step.label === "Course");
-  assert.equal(firstRead({}).detail, "BIOL 101; first read not started");
+  // A course Morrow cannot read yet, including after a read failed, asks for the
+  // course in Chrome; it never claims the read has simply not started.
+  assert.equal(firstRead({}).detail, "Open your course in Chrome");
   assert.equal(firstRead({ firstPreview: { available: true } }).detail, "BIOL 101; first read ready");
   assert.equal(firstRead({ firstPreview: { available: true, completed: true } }).detail, "BIOL 101; first read complete");
   assert.equal(firstRead({ firstPreview: { available: true, completed: true } }).status, "done");

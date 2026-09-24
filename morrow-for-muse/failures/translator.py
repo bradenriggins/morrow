@@ -24,6 +24,7 @@ Stdlib only.
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from collections import defaultdict
@@ -88,6 +89,45 @@ _PROVIDER_HINT_RES = (
 
 # HTTP status smuggled inside free-text error messages (e.g. BrowserOpFailed).
 _HTTP_STATUS_RE = re.compile(r"\bHTTP\s+(\d{3})\b", re.IGNORECASE)
+
+# A provider's validation words are untrusted data: long numbers (LMS
+# user ids) and email addresses in them never reach the agent.
+_LONG_NUMBER_RE = re.compile(r"\d{5,}")
+_EMAIL_RE = re.compile(r"[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+")
+_VALIDATION_LIMIT = 300
+
+
+def _validation_messages(body_text):
+    """"field: message" pairs from a Canvas validation error body
+    ({"errors": {"title": [{"message": ...}]}}, {"errors": [{"message":
+    ...}]}, or {"message": ...}), cleaned and bounded; "" when the body
+    carries none."""
+    try:
+        doc = json.loads(body_text)
+    except (TypeError, ValueError):
+        return ""
+    found = []
+    errors = doc.get("errors") if isinstance(doc, dict) else None
+    if isinstance(errors, dict):
+        for field, items in errors.items():
+            for item in items if isinstance(items, list) else [items]:
+                text = item.get("message") if isinstance(item, dict) \
+                    else item
+                if isinstance(text, str) and text.strip():
+                    found.append("%s: %s" % (str(field).replace("_", " "),
+                                             text))
+    elif isinstance(errors, list):
+        for item in errors:
+            text = item.get("message") if isinstance(item, dict) else item
+            if isinstance(text, str) and text.strip():
+                found.append(text)
+    elif isinstance(doc, dict) and isinstance(doc.get("message"), str):
+        found.append(doc["message"])
+    text = "; ".join(" ".join(t.split()) for t in found)
+    text = _EMAIL_RE.sub("[email]", _LONG_NUMBER_RE.sub("[number]", text))
+    if len(text) > _VALIDATION_LIMIT:
+        text = text[:_VALIDATION_LIMIT - 3] + "..."
+    return text
 
 
 class _SafeDict(defaultdict):
@@ -221,7 +261,12 @@ def _coerce_evidence(raw_error) -> dict:
         status = getattr(exc, "status", None)
         if isinstance(status, int) and not isinstance(status, bool):
             evidence["http_status"] = status
-        for attr in ("route_path", "provider"):
+        # nothing_sent: dispatch/executor.py main marks a failure raised
+        # before it claimed a write. catalog_*: the live-proven row a
+        # CatalogNameMismatch names.
+        for attr in ("route_path", "provider", "operation_kind",
+                     "halt_cause", "nothing_sent", "catalog_name",
+                     "catalog_method", "catalog_path"):
             value = getattr(exc, attr, None)
             if value is not None:
                 evidence[attr] = value
@@ -252,6 +297,9 @@ def _coerce_evidence(raw_error) -> dict:
             evidence["uncertain_write"] = True
         if class_name in _WRITE_NOT_ATTEMPTED_NAMES:
             evidence["write_not_attempted"] = True
+        if class_name == "PreparedWriteMissing":
+            evidence["prepared_write_used"] = bool(
+                getattr(exc, "already_used", False))
         # Mode-system admission refusals (modes/ package, workstream A;
         # ModeSettingsTamper is the settings/ package, workstream B).
         # Sets a machine-checkable flag and merges scalar exception
@@ -369,6 +417,17 @@ def _coerce_evidence(raw_error) -> dict:
             request_id = _header(headers, "x-request-context-id")
             if request_id:
                 evidence["request_id"] = str(request_id)
+
+        # validation_messages: what the provider said when it refused
+        # the request (any 4xx without the CSRF marker): a refused
+        # value, a permission refusal, or an item it could not find.
+        status = evidence.get("http_status")
+        if isinstance(status, int) and 400 <= status < 500 \
+                and "unprocessable_content" not in evidence["body_text"] \
+                and "validation_messages" not in evidence:
+            messages = _validation_messages(evidence["body_text"])
+            if messages:
+                evidence["validation_messages"] = messages
     except Exception:
         # Normalization must never crash translation; partial evidence stands.
         pass
@@ -501,6 +560,47 @@ def _body_snippet(evidence: dict, limit=240) -> str:
     return text or "(no error text captured)"
 
 
+def _yes_no(value):
+    return "yes" if value else "no"
+
+
+def _known_facts(evidence: dict) -> str:
+    """The facts the evidence carries, for the structured fallback, in
+    the educator's words. A fact the evidence does not carry is left
+    out, never printed as unknown; the exception class stays in the
+    labeled engineering detail."""
+    facts = []
+    if evidence.get("http_status") is not None:
+        facts.append("the service answered with code %s"
+                     % evidence["http_status"])
+    request_id = evidence.get("request_id") \
+        or evidence.get("x_request_context_id")
+    if request_id:
+        facts.append("request number %s" % request_id)
+    for key, label in (("session_logged_in", "signed in"),
+                       ("chromium_alive", "helper browser running"),
+                       ("write_halt_active", "changes paused")):
+        if evidence.get(key) is not None:
+            facts.append("%s: %s" % (label, _yes_no(evidence[key])))
+    if evidence.get("attempt_count") is not None:
+        facts.append("%s attempts" % evidence["attempt_count"])
+    if evidence.get("op_id"):
+        facts.append("change record %s" % evidence["op_id"])
+    return "; ".join(facts) or "nothing Morrow could name"
+
+
+def _sentence(text):
+    return str(text or "").strip().rstrip(".").strip()
+
+
+def next_step_text(entry) -> str:
+    """The entry's auto action and escalation rule as one next step,
+    each ending in exactly one period."""
+    return "%s. Escalate when: %s." % (
+        _sentence(entry.get("auto_action", "")),
+        _sentence(entry.get("escalate_when", "engineering asks")))
+
+
 def match_catalog(catalog: Catalog, evidence: dict):
     """Best matching catalog entry for evidence, or None.
 
@@ -521,8 +621,11 @@ def match_catalog(catalog: Catalog, evidence: dict):
 def translate(operation, raw_error, catalog=None, catalog_path=None) -> TranslatedError:
     """Translate a raw failure into a specific, actionable message.
 
-    operation: human name of what was attempted (e.g. "create assignment
-    in Biology 101"). catalog: a loaded Catalog, or catalog_path for the
+    operation: what was attempted, as a phrase in the educator's words
+    that every message template reads correctly ("creating an
+    assignment in Biology 101", "reading the assignments in course
+    101"), never an op id or an internal name. catalog: a loaded
+    Catalog, or catalog_path for the
     loader. Returns a TranslatedError carrying the mode id, the four
     message parts as fields, and the fully rendered agent_message.
 
@@ -593,6 +696,15 @@ def translate(operation, raw_error, catalog=None, catalog_path=None) -> Translat
         "undated": evidence.get("undated", "(unknown)"),
         "unpublished": evidence.get("unpublished", "(unknown)"),
         "nearest_public": evidence.get("nearest_public") or "(none listed)",
+        # Provider validation refusals (a 400/422 with an errors body).
+        "validation_messages": evidence.get("validation_messages")
+        or "(no reason given)",
+        # The structured fallback: only the facts the evidence carries.
+        "known_evidence": _known_facts(evidence),
+        "where": (" on %s" % (evidence.get("tenant")
+                              or evidence.get("tenant_base"))
+                  if evidence.get("tenant") or evidence.get("tenant_base")
+                  else ""),
     })
     auto_action = entry.get("auto_action", "")
     context["auto_action"] = auto_action
@@ -601,8 +713,7 @@ def translate(operation, raw_error, catalog=None, catalog_path=None) -> Translat
     meaning = entry.get("root_cause", "")
     if is_not:
         meaning = "%s %s" % (meaning, is_not)
-    next_step = "%s. Escalate when: %s." % (
-        auto_action, entry.get("escalate_when", "engineering asks"))
+    next_step = next_step_text(entry)
     severity = entry.get("severity_hint", "medium")
     escalate = (
         entry.get("fallback") is True

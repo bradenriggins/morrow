@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE_PATH = resolve(ROOT, "packages/mcp-server/src/quiz-item-payload.ts");
@@ -21,7 +21,10 @@ export function generatedNewQuizItemPayloadContract() {
   const scriptSource = source.replace(/^export\s+(?=(?:function|const)\b)/gm, "");
   const transpiled = ts.transpileModule(scriptSource, {
     compilerOptions: {
-      module: ts.ModuleKind.None,
+      // The source is an ES module with its exports removed. Treating it as a module keeps the
+      // emit free of the "use strict" prologue a script would get, so the embedded copy matches.
+      module: ts.ModuleKind.Preserve,
+      moduleDetection: ts.ModuleDetectionKind.Force,
       target: ts.ScriptTarget.ES2022,
       removeComments: true,
     },

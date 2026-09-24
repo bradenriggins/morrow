@@ -77,22 +77,39 @@ describe("Canvas reviewed file admission", () => {
     }
   });
 
-  it("admits only a real nonempty file below the project materials folder", async () => {
-    const root = await mkdtemp(join(tmpdir(), "morrow-canvas-material-"));
-    const materials = join(root, "materials");
+  it("admits a real nonempty file anywhere in the materials folder the assistant works in, and nothing outside it", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "morrow-canvas-material-"));
+    // Desktop runs the assistant in its Materials folder, so that folder is the workspace root.
+    const root = join(parent, "Materials");
     try {
-      await mkdir(materials);
-      const bytes = Buffer.from("exact canonical material");
-      await writeFile(join(materials, "guide.txt"), bytes);
-      await writeFile(join(root, "outside.txt"), "private content");
-      await symlink(join(root, "outside.txt"), join(materials, "linked.txt"));
+      await mkdir(join(root, "Week 1"), { recursive: true });
+      await mkdir(join(root, "materials"));
+      const syllabus = Buffer.from("syllabus placed directly in the Materials folder");
+      const notes = Buffer.from("notes in a folder inside it");
+      const guide = Buffer.from("a project that keeps a materials folder");
+      await writeFile(join(root, "syllabus.pdf"), syllabus);
+      await writeFile(join(root, "Week 1", "notes.txt"), notes);
+      await writeFile(join(root, "materials", "guide.txt"), guide);
+      await writeFile(join(root, ".env"), "hidden settings");
+      await writeFile(join(parent, "outside.txt"), "private content");
+      await symlink(join(parent, "outside.txt"), join(root, "linked.txt"));
       const workspaceRoot = await realpath(root);
-      await expect(readWorkspaceMaterial("materials/guide.txt", workspaceRoot)).resolves.toEqual({ filename: "guide.txt", bytes });
-      for (const value of ["guide.txt", "../outside.txt", "materials/../outside.txt", "materials/linked.txt", "/tmp/guide.txt"]) {
-        await expect(readWorkspaceMaterial(value, workspaceRoot)).rejects.toThrow();
+      await expect(readWorkspaceMaterial("syllabus.pdf", workspaceRoot)).resolves.toEqual({ filename: "syllabus.pdf", bytes: syllabus });
+      await expect(readWorkspaceMaterial("Week 1/notes.txt", workspaceRoot)).resolves.toEqual({ filename: "notes.txt", bytes: notes });
+      await expect(readWorkspaceMaterial("materials/guide.txt", workspaceRoot)).resolves.toEqual({ filename: "guide.txt", bytes: guide });
+      for (const value of ["../outside.txt", "materials/../syllabus.pdf", "./syllabus.pdf", ".env", "linked.txt", "missing.pdf", "/tmp/guide.txt"]) {
+        await expect(readWorkspaceMaterial(value, workspaceRoot), value).rejects.toThrow();
       }
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts a material named by its path inside the materials folder", () => {
+    for (const material_path of ["q1.pdf", "syllabus.pdf", "Week 1/notes.txt", "materials/guide.txt"]) {
+      expect(canvasCourseFileUploadInputSchema.safeParse({
+        source_binding_id: "canvas:course-42", course_id: 42, folder_id: 71, material_path,
+      }).success, material_path).toBe(true);
     }
   });
 

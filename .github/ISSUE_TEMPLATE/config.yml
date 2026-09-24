@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://meetmorrow.app/security
+    about: Email hello@meetmorrow.app instead of opening an issue. Do not include student information.
+  - name: Get help with setup, a connection, or a course change
+    url: https://meetmorrow.app/support
+    about: Step-by-step help for Morrow Desktop and Morrow for Muse. Do not post student information in an issue.

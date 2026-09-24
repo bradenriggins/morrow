@@ -7,6 +7,7 @@ import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { isDesktopRendererSmokeReceipt } from "./lib/desktop-renderer-smoke.mjs";
+import { pnpmCommand } from "./lib/pnpm-command.mjs";
 import { createWindowsSmokeBindingFromPackage, windowsSmokeObservation } from "./lib/windows-smoke-evidence.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -149,12 +150,12 @@ function isWindowsUpgradeReceipt(value, { commit, installerSha256 }) {
     && /^[a-f0-9]{64}$/.test(value.newApplication?.sha256)
     && value.newApplication?.fileVersion === RELEASE_VERSION
     && value.newApplication?.productVersion === `${RELEASE_VERSION}.0`
-    && value.newApplication?.productName === "Morrow"
+    && value.newApplication?.productName === "Morrow Desktop"
     && value.newApplication?.companyName === "Braden Riggins"
-    && value.newApplication?.fileDescription === "Morrow"
+    && value.newApplication?.fileDescription === "Morrow Desktop"
     && value.newApplication?.signatureStatus === "NotSigned"
     && value.newApplication?.signerCertificate === null
-    && value.registration?.displayName === `Morrow ${RELEASE_VERSION}`
+    && value.registration?.displayName === `Morrow Desktop ${RELEASE_VERSION}`
     && value.registration?.displayVersion === RELEASE_VERSION
     && value.registration?.publisher === "Braden Riggins"
     && value.uninstall?.completed === true
@@ -274,7 +275,8 @@ export function validateTestOutput({
 }
 
 function run(id, args, { commit, windowsEvidenceDirectory }) {
-  const result = spawnSync("pnpm", args, {
+  const pnpm = pnpmCommand();
+  const result = spawnSync(pnpm.command, [...pnpm.args, ...args], {
     cwd: root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],

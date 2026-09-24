@@ -188,6 +188,16 @@ function focusSettingsTransition() {
   return document.activeElement === setupManagementTitle;
 }
 
+/** Focuses the first Settings heading whose section is on screen. */
+function focusSettingsHeading() {
+  for (const [section, heading] of [[setupManagementPanel, setupManagementTitle], [updatesPanel, updatesTitle], [blackboardPanel, blackboardSummary], [retentionPanel, retentionSummary]]) {
+    if (section.hidden) continue;
+    heading.focus();
+    if (document.activeElement === heading) return true;
+  }
+  return false;
+}
+
 function applyBusy() {
   setupMain.setAttribute("aria-busy", String(busy));
   refreshButton.disabled = busy;
@@ -563,7 +573,7 @@ function render(current) {
   state = current;
   if (!chosenAssistantId && current?.selectedAssistantId) chosenAssistantId = current.selectedAssistantId;
   const view = current ? actionView(current, { chosenAssistantId, platform: API?.platform || null, bridgeWaitExpired: bridgeWaitExpired(current) }) : loadAttempted ? setupUnavailableView() : null;
-  headerStatus.textContent = current || !view ? statusSummary(current) : view.summary;
+  headerStatus.textContent = view ? view.summary : statusSummary(current);
   loading.hidden = Boolean(view);
   actionContent.hidden = !view;
   renderWelcome(current);
@@ -611,7 +621,7 @@ function showCopied(text) {
 }
 
 function markCopied() {
-  for (const button of actionBody.querySelectorAll("[data-action]")) {
+  for (const button of [...actionBody.querySelectorAll("[data-action]"), ...setupManagementBody.querySelectorAll("[data-action]")]) {
     if (button.dataset.action !== "copy-example-prompt") continue;
     if (button.dataset.prompt === copiedText) {
       button.dataset.copyLabel ??= button.textContent;
@@ -709,7 +719,12 @@ async function handleAction(event) {
     return;
   }
   if (action === "open-settings") {
+    // Manage sits in the Home view it hides, so focus moves to the first
+    // Settings heading on screen instead of falling to the page.
+    userActionFocusPending = false;
+    heldFocusKey = null;
     setActiveView("settings");
+    focusSettingsHeading();
     return;
   }
   if (action === "choose-workspace") {
@@ -742,8 +757,14 @@ async function handleAction(event) {
     else render(state);
     return;
   }
-  if (action === "reveal-bridge-folder") {
-    const next = await invoke("installer:reveal-bridge-folder");
+  if (action === "restore-materials-folder") {
+    const next = await invoke("installer:restore-materials-folder");
+    if (next) render(next);
+    else render(state);
+    return;
+  }
+  if (action === "reveal-bridge-folder" || action === "reveal-materials-folder") {
+    const next = await invoke(action === "reveal-materials-folder" ? "installer:reveal-materials-folder" : "installer:reveal-bridge-folder");
     if (next) render(next);
     else render(state);
     return;
@@ -961,8 +982,11 @@ async function submitBlackboard(event) {
       blackboardForm.reset();
       fillStoredBlackboardIdentity(blackboardTenant(state));
     } else {
+      // Every field passed its rule before saving, and Morrow empties the
+      // secret itself, so no field has a message: the problem states why.
       blackboardSecret.value = "";
-      showFieldProblems(blackboardConnectionFields);
+      blackboardProblemsShown = false;
+      clearFieldProblems(blackboardConnectionFields);
     }
     renderBlackboardReplacement(blackboardTenant(state));
   }

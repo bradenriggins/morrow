@@ -22,7 +22,9 @@ and undo. It turns the launch blockers into enforced refusals:
 Admission policy lives in dispatch/admission_policy.json (machine-readable,
 generated from proof-battery/OPERATION_CATALOG.md plus the standing
 proof-directive exclusions). The gate matches entry names against the tool-name lists and scans
-every request URL the entry would hit against the URL-substring lists.
+every request URL the entry would hit against the URL-substring lists,
+and every request's query and body for the never-dispatch request flags
+(is_announcement: Morrow for Muse never posts an announcement).
 
 Approval records (v2): JSON, either supplied as a dict or read from
 ~/.morrow/approvals/<op_id>.json. Fields:
@@ -37,19 +39,19 @@ Approval records (v2): JSON, either supplied as a dict or read from
      "authorization": "<verbatim educator authorization basis>",
      "channel": "<'educator-chat' | 'driver'>",
      "sig": "<HMAC-SHA256 tamper seal over the other fields>"}
-Optional field: "allow_unproven": true authorizes one dispatch of a
-catalog operation that is NOT marked live-proven in
-proof-battery/OPERATION_CATALOG.md (the F-2 override lane; the executor
-passes --allow-unproven). The field is set before sign_approval, so the
-seal covers it; a record without allow_unproven: true can never
-authorize an unproven op, and the field authorizes nothing else. Unknown
-operations (not in the catalog at all) cannot be overridden.
+No field of an approval lets a catalog operation that is not marked
+live-proven in proof-battery/OPERATION_CATALOG.md run: the executor's
+catalog provenance gate refuses it before any approval is read.
 The gate recomputes the op digest from the actual dispatch (entry name,
 canonical params, tenant base, and the exact request: method, path,
 query, and body) and refuses on any mismatch, so one approval
 authorizes exactly one request on one tenant. Approvals expire
-(time-boxed, max 24h TTL) and are single-use: a consumed op_digest is
-recorded under ~/.morrow/approvals/consumed.json and refused on replay.
+(time-boxed, max 24h TTL) and are single-use: each minted record
+carries a random approval_id under the seal, and its use key (the
+op_digest bound to that approval_id) is recorded under
+~/.morrow/approvals/consumed.json and refused on replay. A new approval
+of the same change (a new plan-write and a new educator reply) has a new
+approval_id and is admitted.
 Only "educator" is accepted as the approver; the agent cannot
 self-approve. v1 records (no digest binding, no expiry, no category) are
 retired and refused outright.
@@ -68,7 +70,7 @@ import secrets
 import stat
 import sys
 import unicodedata
-import uuid
+import urllib.parse
 
 # W4-P1-17: the morrow state root has ONE source of truth
 # (config/paths.morrow_home, honoring MORROW_HOME). Every hardcoded
@@ -281,47 +283,44 @@ def _url_hits_any(url: str, substrings: list) -> str | None:
     return None
 
 
-# W3-P1-45: bare learner tokens scanned in query/body signal texts (and in
-# the query-augmented URL templates). URL-shaped policy substrings cannot
-# see include[]=enrollments because no "/" precedes the value; these
-# tokens close that hole. The plural resource nouns are the Canvas
-# collection names; the singular _id forms catch identifier parameters
-# (student_ids, user_id) that carry learner references in bodies.
+# W3-P1-45: bare learner tokens scanned in query/body blocks. The plural
+# resource nouns are the Canvas collection names; the singular _id forms
+# catch identifier parameters (student_ids, user_id) that carry learner
+# references. include[]=assignment_visibility makes an assignment read
+# list the ids of the students who can see each assignment.
+# Final-sweep finding (2026-09-23): the tokens are matched against
+# query/body KEYS and the VALUES of include[] only, never against free
+# text values (a title, body, description, message, or name), and the
+# /users/self exception applies to URLs only.
 _QUERY_BODY_LEARNER_TOKENS = ("enrollments", "students", "users",
-                              "student_id", "user_id")
+                              "student_id", "user_id",
+                              "assignment_visibility")
+# A query or body key naming a learner record or learner identifier.
+# The singular forms are key-only: as values they are Canvas include[]=
+# names or prose words, not identifiers.
+_LEARNER_KEY_TOKENS = ("user", "users", "student", "students",
+                       "enrollment", "enrollments", "user_id", "user_ids",
+                       "student_id", "student_ids", "assignment_visibility")
+# A compound identifier parameter is one form key that ENDS in a person
+# id (observed_user_id, previous_user_id, last_attended_user_id), and a
+# leading setting word does not make it a setting ("hide_student_ids"
+# is a person id list; "hide_from_students" is not a person key).
+_COMPOUND_LEARNER_ID_KEY_RE = re.compile(
+    r"(?:^|_)(?:user|student)_ids?$", re.IGNORECASE)
 
 
-# A JSON object key naming a learner record or learner identifier
-# ("user", "student", "enrollment", with optional _id/_ids suffix). The
-# substring tokens above catch learner tokens in VALUES (include[]=...);
-# this catches them as KEYS, so a body like {"user": {...}} is gated
-# without gating prose that merely mentions the word "user".
-_LEARNER_KEY_RE = re.compile(
-    r'"(?:user|users|student|students|enrollment|enrollments)'
-    r'(?:_ids?)?"\s*:')
+# A JSON object key naming a learner record or learner identifier is
+# caught by the key-token scan in _learner_key_hit (above).
 
 
-def _canonical_signal(obj) -> str:
-    """Canonical text form of a query/body block for substring scanning."""
-    if obj is None:
-        return ""
-    if isinstance(obj, str):
-        return obj
-    try:
-        return json.dumps(obj, sort_keys=True, default=str,
-                          ensure_ascii=True)
-    except (TypeError, ValueError):
-        return str(obj)
-
-
-def _payload_signal_texts(entry: dict) -> list:
-    """Canonical JSON of the request and multi-step query/body blocks.
+def _payload_signal_values(entry: dict) -> list:
+    """The raw request and multi-step query/body values.
 
     W3-P1-45: query/body content is merged into synthetic catalog entries
     (executor catalog_descriptor_to_entry) but was never scanned by the
-    learner-data gate. These texts close that hole.
+    learner-data gate. These values close that hole.
     """
-    texts = []
+    values = []
     try:
         blocks = [entry.get("request") or {}]
     except AttributeError:
@@ -336,8 +335,74 @@ def _payload_signal_texts(entry: dict) -> list:
         if not isinstance(block, dict):
             continue
         for key in ("query", "body"):
-            texts.append(_canonical_signal(block.get(key)))
-    return [t for t in texts if t]
+            value = block.get(key)
+            if value:
+                values.append(value)
+    return values
+
+
+def _learner_key_hit(value) -> str | None:
+    """First learner-data signal in a query or body block, or None.
+
+    Matches the learner tokens against the block's KEYS (form keys such
+    as assignment_override[student_ids][] and compound identifier keys
+    such as observed_user_id included) and against the VALUES of
+    include / include[] only. Free-text values (a title, body,
+    description, message, or name) are course content, never a learner
+    signal. A string block is read as JSON or as form-encoded pairs; a
+    nested string value that is itself pre-encoded JSON is parsed and
+    scanned the same way (its keys are keys, never educator copy).
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if text[:1] in ("{", "["):
+            try:
+                return _learner_key_hit(json.loads(text))
+            except ValueError:
+                pass
+        pairs = urllib.parse.parse_qsl(text.lstrip("?"),
+                                       keep_blank_values=True)
+        return _learner_key_hit([{k: v} for k, v in pairs])
+    if isinstance(value, list):
+        for item in value:
+            hit = _learner_key_hit(item)
+            if hit:
+                return hit
+        return None
+    if not isinstance(value, dict):
+        return None
+    for key, child in value.items():
+        parts = _FORM_KEY_PART_RE.findall(str(key))
+        hit = next((p for p in parts if p in _LEARNER_KEY_TOKENS), None)
+        if not hit and _COMPOUND_LEARNER_ID_KEY_RE.search(str(key)):
+            # A compound identifier parameter (observed_user_id, the
+            # Canvas planner and missing-submissions reads) is a whole
+            # form key, not a bracketed part.
+            hit = "compound learner id key"
+        if hit:
+            return "learner key %r" % key
+        if "include" in parts:
+            named = child if isinstance(child, list) else [child]
+            for item in named:
+                if not isinstance(item, str):
+                    continue
+                lowered = item.lower()
+                for token in _QUERY_BODY_LEARNER_TOKENS:
+                    if token in lowered:
+                        return "learner token %r in include[]" % token
+        if isinstance(child, (dict, list)):
+            hit = _learner_key_hit(child)
+            if hit:
+                return hit
+        if isinstance(child, str) and child.lstrip()[:1] in ("{", "["):
+            # A pre-encoded JSON value (a step that carries a JSON string
+            # for the next call) holds keys, not free text: parse it and
+            # scan the parsed keys the same way. Plain prose never starts
+            # with a brace or bracket, so educator copy is never scanned.
+            hit = _learner_key_hit(child)
+            if hit:
+                return hit
+    return None
 
 
 def _url_segment_hit(url: str, segments: list, suffixes: list) -> str | None:
@@ -364,11 +429,12 @@ def _learner_signal_hit(entry: dict, policy: dict) -> str | None:
 
     Scans, in order: the catalog row's own [LEARNER-DATA] flag
     (W3-P0-5/W3-P0-9: authoritative per-row classification, fires even
-    when no URL substring matches); the URL templates with their query
-    templates appended (whole path segments naming a people resource
-    first, then the substring net); and the canonical request/multi-step query/body
-    texts (W3-P1-45). The /users/self educator exception still exempts
-    the educator's own record from URL-derived signals.
+    when no URL substring matches); the URL templates (whole path
+    segments naming a people resource first, then the substring net,
+    then the learner tokens, with the /users/self educator exception
+    applying to URLs only); and the request/multi-step query/body
+    blocks, keys and include[] values only (W3-P1-45, final sweep
+    2026-09-23).
     """
     # The catalog flag is authoritative for the row: a flagged row touches
     # learner data no matter what its URL template looks like.
@@ -380,50 +446,167 @@ def _learner_signal_hit(entry: dict, policy: dict) -> str | None:
     segments = ld.get("url_segments", [])
     suffixes = ld.get("url_segment_suffixes", [])
 
-    def scan(text, is_url=False):
-        lowered = (text or "").lower()
+    for url in extract_urls(entry):
+        lowered = (url or "").lower()
         if any(exc.lower() in lowered for exc in exceptions):
-            return None
-        if is_url:
-            hit = _url_segment_hit(text, segments, suffixes)
-            if hit:
-                return hit
-        hit = _url_hits_any(text, substrings)
+            continue
+        hit = _url_segment_hit(url, segments, suffixes)
+        if hit:
+            return hit
+        hit = _url_hits_any(url, substrings)
         if hit:
             return hit
         for token in _QUERY_BODY_LEARNER_TOKENS:
             if token in lowered:
                 return "learner token %r" % token
-        if _LEARNER_KEY_RE.search(text or ""):
-            return "learner key"
-        return None
-
-    for url in extract_urls(entry):
-        hit = scan(url, is_url=True)
-        if hit:
-            return hit
-    for text in _payload_signal_texts(entry):
-        hit = scan(text)
+    for value in _payload_signal_values(entry):
+        hit = _learner_key_hit(value)
         if hit:
             return hit
     return None
 
 
+_FALSE_FLAG_TEXT = frozenset({"", "0", "false", "f", "no", "n", "off"})
+_FORM_KEY_PART_RE = re.compile(r"[A-Za-z0-9_]+")
+
+
+def _flag_is_false(value) -> bool:
+    """True only for a value Canvas reads as false. Anything else, a
+    params reference included, may turn the flag on."""
+    if value is None or isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return value == 0
+    if isinstance(value, str):
+        return value.strip().lower() in _FALSE_FLAG_TEXT
+    return False
+
+
+def _flag_set_in(value, flags) -> str | None:
+    """The first flag in flags that a query or body sets to anything but
+    false, or None.
+
+    Flags are matched as keys, including form keys such as
+    "discussion_topic[is_announcement]", never inside text values, so a
+    page body that mentions a flag is not a request to set it. A string
+    query or body is read as JSON or as form-encoded pairs.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if text[:1] in ("{", "["):
+            try:
+                return _flag_set_in(json.loads(text), flags)
+            except ValueError:
+                pass
+        pairs = urllib.parse.parse_qsl(text.lstrip("?"),
+                                       keep_blank_values=True)
+        return _flag_set_in([{k: v} for k, v in pairs], flags)
+    if isinstance(value, list):
+        for item in value:
+            hit = _flag_set_in(item, flags)
+            if hit:
+                return hit
+        return None
+    if isinstance(value, dict):
+        for key, child in value.items():
+            parts = _FORM_KEY_PART_RE.findall(str(key))
+            flag = next((p for p in parts if p in flags), None)
+            if flag and not _flag_is_false(child):
+                return flag
+            if isinstance(child, (dict, list)):
+                hit = _flag_set_in(child, flags)
+                if hit:
+                    return hit
+    return None
+
+
+def _request_flag_hit(entry: dict, flags) -> str | None:
+    """The first never-dispatch request flag any request block of the
+    entry sets: in its query, its body, or its URL's own query string."""
+    if not flags:
+        return None
+    for value in (entry or {}).values():
+        blocks = [value] if isinstance(value, dict) else \
+            [v for v in value if isinstance(v, dict)] \
+            if isinstance(value, list) else []
+        for block in blocks:
+            if not block.get("url"):
+                continue
+            url_query = urllib.parse.urlsplit(str(block["url"])).query
+            for part in (block.get("query"), block.get("body"), url_query):
+                hit = _flag_set_in(part, flags) if part else None
+                if hit:
+                    return hit
+    return None
+
+
+_READ_METHODS = ("GET", "HEAD")
+
+
+def _url_blocks(entry: dict):
+    """(block, url with query) for every request-issuing block, the same
+    blocks extract_urls scans."""
+    for value in (entry or {}).values():
+        if isinstance(value, dict):
+            blocks = [value]
+        elif isinstance(value, list):
+            blocks = [v for v in value if isinstance(v, dict)]
+        else:
+            continue
+        for block in blocks:
+            if block.get("url"):
+                yield block, _url_with_query(block)
+
+
+def _block_reads_only(block: dict) -> bool:
+    return str(block.get("method") or "GET").upper() in _READ_METHODS \
+        and not isinstance(block.get("browser"), dict)
+
+
+def _entry_reads_only(entry: dict) -> bool:
+    """True only when the entry is a read and every block it sends is a
+    GET or HEAD request."""
+    return entry.get("effects") == "read" and all(
+        _block_reads_only(block) for block, _url in _url_blocks(entry))
+
+
+def _never_dispatch_refusal(message, entry):
+    refusal = NeverDispatch(message)
+    # For the failure translator: a refused read is told as a read.
+    refusal.operation_kind = "read" if _entry_reads_only(entry) else "write"
+    return refusal
+
+
 def check_never_dispatch(entry: dict, policy: dict) -> None:
-    """Refuse standing-excluded and catalog-excluded operations. No override."""
+    """Refuse standing-excluded and catalog-excluded operations. No override.
+
+    url_substrings refuse every request to a matching URL.
+    write_url_substrings refuse only changes: any request that is not a
+    GET or HEAD, and every request of an entry that is not a read."""
     name = entry.get("name") or ""
     nd = policy.get("never_dispatch", {})
     if name in nd.get("tool_names", []):
-        raise NeverDispatch(
+        raise _never_dispatch_refusal(
             "operation %r is on the never-dispatch list (catalog excluded / "
-            "standing exclusion); it cannot be dispatched by any caller" % name)
-    for url in extract_urls(entry):
+            "standing exclusion); it cannot be dispatched by any caller. "
+            "Nothing was sent." % name, entry)
+    changes = entry.get("effects") != "read"
+    for block, url in _url_blocks(entry):
         hit = _url_hits_any(url, nd.get("url_substrings", []))
+        if not hit and (changes or not _block_reads_only(block)):
+            hit = _url_hits_any(url, nd.get("write_url_substrings", []))
         if hit:
-            raise NeverDispatch(
+            raise _never_dispatch_refusal(
                 "operation %r targets a never-dispatch URL pattern %r "
                 "(standing exclusion: messages to people, support tickets, "
-                "subaccount-affecting operations)" % (name, hit))
+                "subaccount-affecting operations). Nothing was sent."
+                % (name, hit), entry)
+    flags = nd.get("request_flags") or {}
+    flag = _request_flag_hit(entry, flags)
+    if flag:
+        raise _never_dispatch_refusal(
+            "operation %r sets %s, which %s. Nothing was sent."
+            % (name, flag, flags[flag]), entry)
 
 
 def check_unsupported(entry: dict, policy: dict) -> None:
@@ -435,12 +618,85 @@ def check_unsupported(entry: dict, policy: dict) -> None:
             "exists; refusing to dispatch" % name)
 
 
+def _field_values(value, field):
+    """Every value a query or body sends under a key named field,
+    including form keys such as "course[default_view]". A string query
+    or body is read as JSON or as form-encoded pairs; text values are
+    never searched for keys."""
+    if isinstance(value, str):
+        text = value.strip()
+        if text[:1] in ("{", "["):
+            try:
+                return _field_values(json.loads(text), field)
+            except ValueError:
+                pass
+        pairs = urllib.parse.parse_qsl(text.lstrip("?"),
+                                       keep_blank_values=True)
+        return _field_values([{k: v} for k, v in pairs], field)
+    found = []
+    if isinstance(value, list):
+        for item in value:
+            found.extend(_field_values(item, field))
+    elif isinstance(value, dict):
+        for key, child in value.items():
+            if field in _FORM_KEY_PART_RE.findall(str(key)):
+                found.append(child)
+            elif isinstance(child, (dict, list)):
+                found.extend(_field_values(child, field))
+    return found
+
+
+def _holds_word(value, word) -> bool:
+    if isinstance(value, (list, tuple)):
+        return any(_holds_word(v, word) for v in value)
+    if isinstance(value, str):
+        return word in re.split(r"[\s,]+", value.strip().lower())
+    return False
+
+
+def _request_field_hit(entry: dict, rules) -> dict | None:
+    """The first request_fields rule a request block of the entry meets."""
+    for value in (entry or {}).values():
+        blocks = [value] if isinstance(value, dict) else \
+            [v for v in value if isinstance(v, dict)] \
+            if isinstance(value, list) else []
+        for block in blocks:
+            if not block.get("url"):
+                continue
+            key = _route_key(block.get("method"), block.get("url"))
+            url_query = urllib.parse.urlsplit(str(block["url"])).query
+            for rule in rules:
+                if key is None or key != _route_key(rule.get("method"),
+                                                    rule.get("path")):
+                    continue
+                values = []
+                for part in (block.get("query"), block.get("body"),
+                             url_query):
+                    if part:
+                        values.extend(_field_values(part, rule["field"]))
+                when = rule.get("when")
+                if when == "present" and values:
+                    return rule
+                if when == "true" and any(not _flag_is_false(v)
+                                          for v in values):
+                    return rule
+                if when == "contains" and any(
+                        _holds_word(v, str(rule.get("value")).lower())
+                        for v in values):
+                    return rule
+    return None
+
+
 def check_evidence_holds(entry: dict, policy: dict) -> None:
     """Refuse operations that are not yet live-proven through Morrow for Muse.
 
     Tenant-independent: the refusal applies identically on every tenant.
     When a disposable live battery proves the complete path for a held
     operation, it is removed from the hold list and admitted on all tenants.
+    A live-proven route is refused too when its request sends a field
+    whose effect is not in this version (evidence_holds.request_fields:
+    the course home page, deleting or concluding the course, publishing
+    a New Quiz, a graded discussion, a classic question bank).
     """
     name = entry.get("name") or ""
     holds = policy.get("evidence_holds", {}) or {}
@@ -450,6 +706,13 @@ def check_evidence_holds(entry: dict, policy: dict) -> None:
         raise EvidenceHold(
             "operation %r is on evidence hold: %s; refused on every tenant "
             "until a live battery proves the complete path" % (name, reason))
+    rule = _request_field_hit(
+        entry, (holds.get("request_fields") or {}).get("rules") or ())
+    if rule:
+        raise EvidenceHold(
+            "operation %r sends %s: that %s; refused on every tenant until "
+            "a live battery proves it. Nothing was sent."
+            % (name, rule["field"], rule["why"]))
 
 
 def check_learner_data(entry: dict, policy: dict, vault_ready: bool) -> None:
@@ -867,6 +1130,40 @@ def _render_path(url_template: str, params: dict) -> str:
     return _SLOT_RE.sub(fill, path)
 
 
+# The course segment of a rendered Canvas or New Quizzes path. A slot
+# left unfilled ({id}) is not a course.
+_COURSE_SEGMENT_RE = re.compile(
+    r"/api/(?:quiz/)?v1/courses/([^/?#{}]+)(?=[/?#]|$)")
+
+
+def write_target_course_id(entry: dict, params: dict) -> str | None:
+    """The course a request targets.
+
+    The course is the /courses/<id> segment of the rendered request
+    path (the request URL, then each multi_step URL), whatever the slot
+    is called: PUT /api/v1/courses/{id} targets course {id} just as
+    /api/v1/courses/{course_id}/pages/... targets {course_id}.
+    params.course_id is the fallback for routes whose path names no
+    course (Item Bank and other non-course URLs). The course-resolution
+    guard, the provider identity GET, the approval target, and the mode
+    journal all read the course from here."""
+    urls = []
+    request = entry.get("request") if isinstance(entry, dict) else None
+    if isinstance(request, dict) and request.get("url"):
+        urls.append(str(request["url"]))
+    steps = entry.get("multi_step") if isinstance(entry, dict) else None
+    for step in steps or []:
+        if isinstance(step, dict) and step.get("url"):
+            urls.append(str(step["url"]))
+    for url in urls:
+        match = _COURSE_SEGMENT_RE.search(_render_path(url, params))
+        if match:
+            return match.group(1)
+    if isinstance(params, dict) and params.get("course_id") is not None:
+        return str(params["course_id"])
+    return None
+
+
 def request_subject(entry: dict, params: dict) -> dict:
     """The exact request an approval covers: method, URL template, the
     rendered path, query, and body (param references resolved), plus
@@ -922,7 +1219,7 @@ def op_digest_of(entry_name: str, params: dict, tenant_base: str | None,
 
 
 def mint_approval(entry: dict, params: dict, tenant_base: str | None = None,
-                  ttl_seconds: int = 3600, allow_unproven: bool = False,
+                  ttl_seconds: int = 3600,
                   target_identity: dict | None = None) -> dict:
     """Build an UNSIGNED v2 approval record (by=None).
 
@@ -931,17 +1228,13 @@ def mint_approval(entry: dict, params: dict, tenant_base: str | None = None,
     sign_approval() with the verbatim authorization basis. This function
     never sets by itself: an unsigned record is refused by the gate.
 
-    allow_unproven=True stamps the record as a catalog-provenance
-    override (F-2): dispatching an unproven catalog op still requires
-    the educator's signature, and the flag is bound by the tamper seal
-    like every other field, so the agent cannot self-authorize it.
-
     target_identity (W4-P0-11) is the human-meaningful write target the
     educator reviewed: {"course_id": ..., "course_name": ..., "term":
     ...}. It is stamped into the record (and covered by the tamper
     seal) alongside the tenant, so the reviewing educator sees the
-    target they are signing for. course_id falls back to
-    params.course_id when the caller does not name it explicitly.
+    target they are signing for. course_id falls back to the course
+    the request path targets (write_target_course_id) when the caller
+    does not name it explicitly.
     """
     if ttl_seconds <= 0 or ttl_seconds > MAX_APPROVAL_TTL_SECONDS:
         raise ValueError("ttl_seconds must be within (0, %d]"
@@ -957,6 +1250,10 @@ def mint_approval(entry: dict, params: dict, tenant_base: str | None = None,
         "op": entry.get("name"),
         "op_digest": op_digest_of(entry.get("name"), params, tenant_base,
                                   category, request=subject),
+        # Single use is per approval, not per change: the educator may
+        # approve the same change again (rename, revert, rename). The
+        # seal covers the id, so one signed record is still single-use.
+        "approval_id": secrets.token_hex(16),
         "category": category,
         "params_digest": canonical_params_digest(params),
         # Round-4 H1: the exact request this approval covers, for the
@@ -970,19 +1267,19 @@ def mint_approval(entry: dict, params: dict, tenant_base: str | None = None,
     # W4-P0-11: human-readable write target for the reviewing educator.
     # Covered by the tamper seal like every other field.
     declared_target = dict(target_identity) if isinstance(target_identity, dict) else {}
-    if declared_target.get("course_id") is None and isinstance(params, dict):
-        if params.get("course_id") is not None:
-            declared_target["course_id"] = params.get("course_id")
+    if declared_target.get("course_id") is None:
+        write_cid = write_target_course_id(entry, params)
+        if write_cid is not None:
+            declared_target["course_id"] = write_cid
     target_block = {}
     if tenant_base:
         target_block["tenant"] = tenant_base
-    for key in ("course_id", "course_name", "term"):
+    for key in ("course_id", "course_name", "term", "object_slot",
+                "object_name"):
         if declared_target.get(key) is not None:
             target_block[key] = declared_target[key]
     if target_block:
         record["target"] = target_block
-    if allow_unproven:
-        record["allow_unproven"] = True
     return record
 
 
@@ -1027,9 +1324,10 @@ def sign_approval(record: dict, authorization: str,
     two questions.
 
     Before asking for either authorization, show the educator the full
-    payload with dispatch.approval_display.render_approval_display
-    (W6-P1-A1): op, category, target, expiry, the complete canonical
-    params, and the undo-availability disclosure (W6-P1-H1).
+    payload with dispatch.approval_display.render_educator_display
+    (W6-P1-A1): in plain words, the course, the change, every value
+    that will be sent, and the undo-availability disclosure (W6-P1-H1).
+    render_approval_display is the audit detail of the same request.
 
     Honest trust statement: this function runs in the agent's process,
     so it cannot cryptographically prove the authorization string came
@@ -1093,114 +1391,6 @@ def sign_approval(record: dict, authorization: str,
     return _seal_record(record)
 
 
-# ---------------------------------------------------------------------------
-# Educator PII reveal (round-4 privacy audit H2)
-#
-# The reveal record is the ONLY way to see real student names from an LMS
-# read. It rides the same educator channel as write approvals: the
-# educator's verbatim words, the ceremony channel, and the machine-held
-# HMAC seal. It is scoped to one course on one tenant and expires within
-# PII_REVEAL_MAX_MINUTES. A consent file is not a consent channel: an
-# agent can write a file.
-# ---------------------------------------------------------------------------
-
-PII_REVEAL_MAX_MINUTES = 30
-
-
-def _journal_reveal(record: dict) -> None:
-    try:
-        from dispatch.executor import journal_append
-    except ImportError:  # run with dispatch/ itself on sys.path
-        from executor import journal_append
-    journal_append(record)
-
-
-def mint_pii_reveal(tenant_base: str, course_id, authorization: str,
-                    channel: str, minutes: int = 15) -> dict:
-    """Seal an educator reveal for ONE course on ONE tenant.
-
-    authorization is the educator's verbatim request (any non-empty
-    reply); channel is "educator-chat" when
-    it was captured from the educator's own reply, "driver" otherwise
-    (driver records are refused at use). minutes is 1 to
-    PII_REVEAL_MAX_MINUTES. The mint is journaled (who, which course,
-    the verbatim words, the expiry). Same honest trust statement as
-    sign_approval: this runs in the agent's process, so a fabricated
-    educator-chat citation is a detectable lie in the journal, not a
-    prevented one.
-    """
-    if not isinstance(authorization, str) or \
-            len(authorization.strip()) < APPROVAL_AUTH_MIN_LEN:
-        raise ValueError(
-            "a PII reveal needs the educator's verbatim request (any "
-            "non-empty request)")
-    if channel not in ("educator-chat", "driver"):
-        raise ValueError("reveal channel must be 'educator-chat' or "
-                         "'driver', got %r" % (channel,))
-    if isinstance(minutes, bool) or not isinstance(minutes, int) or \
-            not 1 <= minutes <= PII_REVEAL_MAX_MINUTES:
-        raise ValueError("a PII reveal lasts 1 to %d minutes, got %r"
-                         % (PII_REVEAL_MAX_MINUTES, minutes))
-    course = str(course_id or "").strip()
-    if not course:
-        raise ValueError("a PII reveal names exactly one course")
-    now = datetime.datetime.now(datetime.timezone.utc)
-    record = {
-        "kind": "pii_reveal",
-        "reveal_id": uuid.uuid4().hex,
-        "by": "educator",
-        "authorization": authorization.strip(),
-        "channel": channel,
-        "tenant": _normalize_target_tenant(tenant_base),
-        "course_id": course,
-        "issued_at": now.isoformat(),
-        "expires_at": (now + datetime.timedelta(minutes=minutes))
-        .isoformat(),
-    }
-    sealed = _seal_record(record)
-    _journal_reveal({"wal": "audit", "event": "privacy.pii_reveal_issued",
-                     "reveal_id": record["reveal_id"],
-                     "tenant": record["tenant"],
-                     "course_id": course, "channel": channel,
-                     "authorization": record["authorization"],
-                     "issued_at": record["issued_at"],
-                     "expires_at": record["expires_at"]})
-    return sealed
-
-
-def check_pii_reveal(record, tenant_base: str, course_id) -> bool:
-    """True when a sealed educator reveal applies to this course read.
-
-    Raises ApprovalMismatch for a record that is not a valid, unexpired,
-    educator-chat reveal (tampered, driver channel, expired, too long).
-    Returns False for a valid reveal of a different course or tenant:
-    that read stays de-identified.
-    """
-    if not isinstance(record, dict) or record.get("kind") != "pii_reveal":
-        raise ApprovalMismatch("the PII reveal is not a reveal record")
-    _verify_seal(record)
-    if record.get("by") != "educator":
-        raise ApprovalMismatch("the PII reveal was not issued by the "
-                               "educator")
-    if record.get("channel") != "educator-chat":
-        raise ApprovalMismatch(
-            "the PII reveal was not captured in the educator's own chat "
-            "(channel %r); only an educator-chat reveal shows names"
-            % (record.get("channel"),))
-    issued = _parse_time(record.get("issued_at"), "issued_at")
-    expires = _parse_time(record.get("expires_at"), "expires_at")
-    now = datetime.datetime.now(datetime.timezone.utc)
-    if expires - issued > datetime.timedelta(
-            minutes=PII_REVEAL_MAX_MINUTES):
-        raise ApprovalMismatch("the PII reveal lasts longer than %d "
-                               "minutes" % PII_REVEAL_MAX_MINUTES)
-    if not issued - datetime.timedelta(minutes=5) <= now < expires:
-        raise ApprovalMismatch("the PII reveal has expired; the educator "
-                               "must ask again")
-    return (record.get("tenant") == _normalize_target_tenant(tenant_base)
-            and str(record.get("course_id")) == str(course_id))
-
-
 def _parse_time(value, field: str) -> datetime.datetime:
     try:
         dt = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
@@ -1255,9 +1445,9 @@ def _write_consumed_seal() -> None:
 
 
 def _load_consumed() -> dict:
-    # W5-P1-3: the membership checks in check_write_approval,
-    # check_unproven_override, and reverify_approval each parsed the
-    # whole file (~3 parses per admit). Cache in process keyed on
+    # W5-P1-3: the membership checks in check_write_approval and
+    # reverify_approval each parsed the whole file (several parses per
+    # admit). Cache in process keyed on
     # (mtime_ns, size); the file changes only under _record_consumed's
     # flock, so the common path is one stat() per admit instead of a
     # full parse. CONSUMED_PATH is read at call time (not bound as a
@@ -1387,8 +1577,28 @@ def _prune_consumed_dict(consumed: dict):
     return kept, dropped
 
 
-def _record_consumed(op_digest: str) -> None:
-    """Mark an approval's op_digest consumed (single-use). Fails closed.
+def _use_key(record: dict) -> str:
+    """The consumed-set key of one signed approval: its op_digest bound
+    to its own approval_id. A record minted before approval ids existed
+    is keyed by its op_digest alone."""
+    digest = record.get("op_digest")
+    approval_id = record.get("approval_id")
+    if not approval_id:
+        return digest
+    return hashlib.sha256(("morrow-approval-use-v1\n%s\n%s"
+                           % (digest, approval_id)).encode("utf-8")
+                          ).hexdigest()
+
+
+def approval_used(record: dict | None) -> bool:
+    """True when this signed approval record was already consumed."""
+    if not isinstance(record, dict) or not record.get("op_digest"):
+        return False
+    return _use_key(record) in _load_consumed()
+
+
+def _record_consumed(use_key: str) -> None:
+    """Mark an approval's use key consumed (single-use). Fails closed.
 
     The read-modify-write runs under an exclusive inter-process lock
     (fcntl.flock on a lock file beside the consumed set), so two
@@ -1404,7 +1614,7 @@ def _record_consumed(op_digest: str) -> None:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
         try:
             consumed = _load_consumed()
-            if op_digest in consumed:
+            if use_key in consumed:
                 raise ApprovalMismatch(
                     "approval for this op was already consumed; refusing "
                     "replay")
@@ -1412,7 +1622,7 @@ def _record_consumed(op_digest: str) -> None:
             # (parsed ~3x and fully rewritten per dispatch) stays
             # bounded instead of growing forever.
             consumed, _dropped = _prune_consumed_dict(consumed)
-            consumed[op_digest] = datetime.datetime.now(
+            consumed[use_key] = datetime.datetime.now(
                 datetime.timezone.utc).isoformat()
             tmp = CONSUMED_PATH + ".tmp"
             try:
@@ -1583,7 +1793,7 @@ def check_write_approval(entry: dict, params: dict, approval: dict | None,
     audit = _verify_record_binding(entry, params, record, tenant_base,
                                    provenance,
                                    require_educator_channel=require_educator_channel)
-    if audit["op_digest"] in _load_consumed():
+    if _use_key(record) in _load_consumed():
         raise ApprovalMismatch(
             "approval for %r was already consumed; approvals are single-use"
             % entry.get("name"))
@@ -1604,16 +1814,16 @@ def _verify_record_target(record: dict, params: dict,
     this dispatch (W4-P0-11). Raises ApprovalMismatch when the record's
     tenant or course_id disagrees with the dispatch's.
 
-    W4-P0-11 hardening: a course-scoped write (params carry course_id)
-    MUST carry a target block naming the reviewed tenant, course_id,
-    and course_name; a record without one is refused, not admitted on
-    trust. Non-course writes may omit the block, but when present it is
+    W4-P0-11 hardening: a course-scoped write (its path targets a
+    course, see write_target_course_id) MUST carry a target block
+    naming the reviewed tenant, course_id, and course_name; a record
+    without one is refused, not admitted on trust. Non-course writes may omit the block, but when present it is
     still cross-checked. The course_name/term comparison against the
     frozen plan and the provider-verified identity happens in the
     executor's verify_write_target_identity, which has both; admission
     binds the block to the dispatch's tenant and course here."""
     target = record.get("target")
-    params_cid = params.get("course_id") if isinstance(params, dict) else None
+    params_cid = write_target_course_id(entry, params)
     if not isinstance(target, dict) or not target:
         if params_cid is not None:
             raise ApprovalMismatch(
@@ -1662,9 +1872,8 @@ def _verify_record_binding(entry: dict, params: dict, record: dict,
     slip through the production path.
 
     Consumption is deliberately left to the caller: check_write_approval
-    enforces single-use for writes, and check_unproven_override enforces
-    it for catalog overrides, so a record that authorizes both is still
-    burned exactly once by the dispatcher's persist/consume ordering.
+    enforces single-use for writes, and the dispatcher burns the record
+    exactly once by its persist/consume ordering.
     """
     _verify_seal(record)
     if record.get("by") != "educator":
@@ -1754,68 +1963,8 @@ def _verify_record_binding(entry: dict, params: dict, record: dict,
     return audit
 
 
-def check_unproven_override(entry: dict, params: dict, approval: dict | None,
-                            tenant_base: str | None = None,
-                            require_educator_channel: bool = True):
-    """Enforce the F-2 unproven-catalog override.
-
-    A catalog operation that is NOT marked live-proven in
-    proof-battery/OPERATION_CATALOG.md may still dispatch, but only when
-    the educator explicitly authorized THIS unproven op: the signed v2
-    approval record must carry allow_unproven: true (sealed by
-    sign_approval like every other field). The record is otherwise held
-    to the exact same binding as a write approval: educator-signed,
-    verbatim authorization, op name, category, time validity, op_digest
-    and params_digest bound to this dispatch, and single-use.
-
-    The allow_unproven flag authorizes only the catalog-provenance
-    question. It does not relax any other gate: for writes the record
-    must ALSO pass check_write_approval in the normal admission path,
-    and never-dispatch / unsupported / evidence-hold / learner-data
-    refusals cannot be overridden at all. Unknown operations (not in the
-    catalog) are refused by the catalog gate before this is reached and
-    cannot be overridden.
-
-    Returns (audit_block, signed_record) for the journal and for
-    persist_signed_record(); the audit block carries allow_unproven: true
-    so the journal shows the override explicitly.
-
-    This function CHECKS ONLY and never mutates; the dispatcher persists
-    and consumes the record after every gate has passed, exactly like a
-    write approval.
-    """
-    record, provenance = load_approval(None, approval)
-    if record is None:
-        raise WriteApprovalMissing(
-            "operation %r is not marked live-proven in the catalog; dispatch "
-            "needs an educator-signed v2 approval record carrying "
-            "allow_unproven: true (pass approval=<record> or place it at %s)"
-            % (entry.get("name"),
-               os.path.join(APPROVALS_DIR, "<op_id>.json")))
-    if not isinstance(record, dict) or record.get("version") != APPROVAL_VERSION:
-        raise ApprovalMismatch(
-            "approval for %r is not a v%d record; v1 approvals (no digest "
-            "binding, no expiry, no category) are retired and refused"
-            % (entry.get("name"), APPROVAL_VERSION))
-    if record.get("allow_unproven") is not True:
-        raise ApprovalMismatch(
-            "operation %r is not marked live-proven in the catalog, and the "
-            "signed approval record does not carry allow_unproven: true; the "
-            "educator must explicitly authorize this unproven op"
-            % entry.get("name"))
-    audit = _verify_record_binding(entry, params, record, tenant_base,
-                                   provenance,
-                                   require_educator_channel=require_educator_channel)
-    audit["allow_unproven"] = True
-    if audit["op_digest"] in _load_consumed():
-        raise ApprovalMismatch(
-            "unproven override for %r was already consumed; overrides are "
-            "single-use" % entry.get("name"))
-    return audit, record
-
-
 def consume_approval(record: dict | None) -> None:
-    """Mark an approval's op_digest consumed (single-use).
+    """Mark one signed approval consumed (single-use, by its use key).
 
     Call AFTER persist_signed_record(record, op_id) and only after every
     dispatch gate has passed (write halt, frozen plan, duplicate op id,
@@ -1838,7 +1987,7 @@ def consume_approval(record: dict | None) -> None:
     if not isinstance(digest, str) or not digest:
         raise ApprovalMismatch(
             "cannot consume an approval record with no op_digest")
-    _record_consumed(digest)
+    _record_consumed(_use_key(record))
 
 
 def persist_signed_record(record: dict, op_id: str | None) -> None:
@@ -2005,7 +2154,7 @@ def reverify_approval(entry: dict, params: dict, tenant_base: str | None,
             "persisted approval op_digest does not match this complete "
             "(entry, params, tenant, request); completing something other "
             "than what was approved is refused")
-    if expected_digest not in _load_consumed():
+    if _use_key(record) not in _load_consumed():
         raise ApprovalMismatch(
             "approval for op %s was never consumed at dispatch; refusing "
             "to complete an unadmitted write" % (op_id,))
@@ -2023,15 +2172,58 @@ def reverify_approval(entry: dict, params: dict, tenant_base: str | None,
     }
 
 
+_ROUTE_SLOT_RE = re.compile(r"\{[^{}/]*\}")
+
+
+def _route_key(method, url):
+    """(METHOD, path) with every {slot} and number as "{}", or None. A
+    template's leading {canvas_base}, a real URL's origin, and the query
+    are dropped."""
+    text = str(url or "")
+    if text.startswith("{"):
+        text = text[text.find("}") + 1:] if "}" in text else ""
+    path = urllib.parse.urlsplit(text).path
+    if not path:
+        return None
+    path = _ROUTE_SLOT_RE.sub("{}", path)
+    path = re.sub(r"(?<=/)[0-9]+(?=/|$)", "{}", path).rstrip("/")
+    return str(method or "").upper(), path
+
+
+def _deletes_by_replacing(request: dict) -> bool:
+    """True when the request replaces a list and Canvas deletes every
+    item not on it (admission_policy.json deletes_by_replacing)."""
+    rules = load_policy().get("deletes_by_replacing") or {}
+    key = _route_key(request.get("method"), request.get("url"))
+    if key is None:
+        return False
+    if any(_route_key(r.get("method"), r.get("path")) == key
+           for r in rules.get("routes") or ()):
+        return True
+    url_query = urllib.parse.urlsplit(str(request.get("url") or "")).query
+    for rule in rules.get("body_fields") or ():
+        if _route_key(rule.get("method"), rule.get("path")) != key:
+            continue
+        fields = {rule.get("field"): True}
+        if any(part and _flag_set_in(part, fields)
+               for part in (request.get("query"), request.get("body"),
+                            url_query)):
+            return True
+    return False
+
+
 def _is_destructive(entry: dict) -> bool:
-    """True when the entry destroys data: HTTP DELETE, or an entry
-    explicitly marked destructive. Destructive writes are the one
+    """True when the entry destroys data: HTTP DELETE, a live-proven
+    write that replaces a list (Canvas deletes what is not on it), or an
+    entry explicitly marked destructive. Destructive writes are the one
     category where the educator's confirm_destructive_writes setting
     can still surface a confirmation inside edit mode."""
     if entry.get("destructive") is True:
         return True
     request = entry.get("request") or {}
-    return str(request.get("method", "")).upper() == "DELETE"
+    if str(request.get("method", "")).upper() == "DELETE":
+        return True
+    return _deletes_by_replacing(request)
 
 
 def _destructive_confirmation_required(user_id) -> bool:
@@ -2072,8 +2264,9 @@ def check_mode_authority(entry: dict, params: dict,
         bound. Returns (mode_audit_block, None): there is no signed
         record to persist, so the dispatcher's persist_signed_record /
         consume_approval calls are no-ops, exactly like reads.
-      - destructive writes (HTTP DELETE, or entries marked
-        destructive) in edit mode: admitted only with a recorded
+      - destructive writes (HTTP DELETE, a write that replaces a list
+        and deletes what is not on it, or entries marked destructive)
+        in edit mode: admitted only with a recorded
         educator confirmation for that action
         (mode_ctx["destructive_confirmed"]) while the educator's
         confirm_destructive_writes setting is on (off by default).
@@ -2106,7 +2299,7 @@ def check_mode_authority(entry: dict, params: dict,
     ctx = mode_ctx if isinstance(mode_ctx, dict) else {}
     user_id = ctx.get("user_id")
     entry_name = entry.get("name")
-    course_id = params.get("course_id") if isinstance(params, dict) else None
+    course_id = write_target_course_id(entry, params)
     resolution = ctx.get("course_resolution")
     conversation_id = ctx.get("conversation_id")
     if not user_id:
@@ -2286,9 +2479,10 @@ Build an educator-signed v2 approval record in Python:
                                      ttl_seconds=3600,
                                      target_identity={"course_id": ...,
                                                       "course_name": ...})
-    # Show the educator the FULL payload first (W6-P1-A1):
+    # Show the educator the FULL payload first (W6-P1-A1), in plain
+    # words (render_approval_display is the audit detail):
     from dispatch import approval_display
-    print(approval_display.render_approval_display(record, params,
+    print(approval_display.render_educator_display(record, params,
                                                    entry=entry))
     # ... educator replies with explicit authorization ...
     signed = admission.sign_approval(

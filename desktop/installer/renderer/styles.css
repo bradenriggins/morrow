@@ -182,7 +182,8 @@ h3 { margin: 0; font-size: 0.875rem; font-weight: 700; letter-spacing: -.015em; 
 .instructions li { position: relative; min-height: 23px; padding-left: var(--space-6); color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; counter-increment: instruction; }
 .instructions li::before { position: absolute; top: 0; left: 0; display: grid; width: 22px; height: 22px; place-items: center; border-radius: var(--radius-pill); background: var(--surface-sunken); color: var(--text-secondary); content: counter(instruction); font-size: 0.8125rem; font-weight: 700; line-height: 1; }
 .instructions strong { color: var(--text); font-weight: 700; }
-.prompt { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-sunken); color: var(--text); font-size: 0.875rem; font-weight: 600; line-height: 1.45; }
+/* The request wraps inside its own column, so every row keeps its Copy button at the same right edge. */
+.prompt { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-sunken); color: var(--text); font-size: 0.875rem; font-weight: 600; line-height: 1.45; }
 .home-status { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
 .home-status-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-3); min-height: 44px; padding: var(--space-1) var(--space-1) var(--space-1) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); }
 .home-status-label { color: var(--text); font-size: 0.875rem; font-weight: 700; line-height: 1.4; }
@@ -191,13 +192,16 @@ h3 { margin: 0; font-size: 0.875rem; font-weight: 700; letter-spacing: -.015em; 
 #setup-management-body { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
 .materials-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); }
 .materials-row > :first-child { flex: 1 1 240px; min-width: 0; }
+/* Three actions beside the text would squeeze it, so the text keeps the full row and the actions sit under it. */
+.materials-row-stacked > :first-child { flex-basis: 100%; }
 .materials-row p { margin-top: 3px; font-size: 0.8125rem; line-height: 1.45; }
 /* A folder path can be one unbroken word longer than the window, so it may break at any character. */
 .path-text { overflow-wrap: anywhere; }
 .optional-setup { margin-top: 0; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-sunken); }
 .optional-setup summary { display: flex; align-items: center; min-height: 44px; padding: var(--space-3) var(--space-4); color: var(--text-secondary); cursor: pointer; font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
 .optional-setup .materials-row { margin: 0 var(--space-3) var(--space-3); background: var(--surface); }
-.problem { margin-top: var(--space-4); padding: var(--space-3); border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border)); border-radius: var(--radius-control); background: color-mix(in srgb, var(--danger) 7%, var(--surface)); color: var(--danger); font-size: 0.8125rem; line-height: 1.45; }
+/* Home and Settings share one problem region, so a step started on either view reports there. */
+.problem { grid-column: 2; margin-top: var(--space-4); padding: var(--space-3); border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border)); border-radius: var(--radius-control); background: color-mix(in srgb, var(--danger) 7%, var(--surface)); color: var(--danger); font-size: 0.8125rem; line-height: 1.45; }
 .problem strong { display: block; color: var(--text); }
 .problem p { margin: 3px 0 0; }
 
@@ -262,7 +266,8 @@ h3 { margin: 0; font-size: 0.875rem; font-weight: 700; letter-spacing: -.015em; 
   .action-panel { grid-column: 1; min-height: 0; padding: var(--space-4); }
   .action-body { gap: var(--space-3); margin-top: var(--space-4); }
   .info-box, .blocked-box { padding: var(--space-3) var(--space-3); }
-  #setup-management-panel, .updates-panel, .blackboard-panel, .retention-panel, .support { grid-column: 1; }
+  .problem, #setup-management-panel, .updates-panel, .blackboard-panel, .retention-panel, .support { grid-column: 1; }
+  .problem { margin-top: 0; }
   .blackboard-form { grid-template-columns: minmax(0, 1fr); }
   .blackboard-form label { min-height: 0; }
 }
@@ -283,6 +288,7 @@ h3 { margin: 0; font-size: 0.875rem; font-weight: 700; letter-spacing: -.015em; 
   .action-panel { padding: var(--space-4); border-radius: var(--radius-panel); }
   .assistant-list { grid-template-columns: 1fr; }
   .support-list li { grid-template-columns: minmax(0, 1fr); }
+  .prompt { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {

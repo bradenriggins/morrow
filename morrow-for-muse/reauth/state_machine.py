@@ -391,7 +391,44 @@ def is_write_halted():
     return os.path.exists(HALT_PATH)
 
 
-def impose_halt(detection, reason="session_expiry"):
+# The causes the re-auth machinery records in the halt file. Each is
+# lifted by a verified resume once the pinned account is signed in.
+HALT_CAUSES = ("session_expired", "account_mismatch")
+
+# Halt files written before the cause field existed (0.4.0) name their
+# cause only in the reason text.
+_LEGACY_ACCOUNT_MISMATCH_REASON = (
+    "a different Canvas account is signed in to the helper")
+
+
+def halt_cause():
+    """Why writes are paused, from the cause the halt file records:
+    "session_expired" (the Canvas session died), "account_mismatch" (a
+    different Canvas account signed in to the helper), "manual" for a
+    halt file placed any other way (or unreadable), None when writes
+    are not paused."""
+    if not os.path.exists(HALT_PATH):
+        return None
+    try:
+        with open(HALT_PATH) as f:
+            info = json.load(f) or {}
+        cause = info.get("cause")
+        reason = str(info.get("reason") or "")
+    except (ValueError, OSError, AttributeError):
+        return "manual"
+    if cause is not None:
+        return cause if cause in HALT_CAUSES else "manual"
+    if reason == "session_expiry" or reason.startswith(
+            "chromium session death"):
+        return "session_expired"
+    if reason == _LEGACY_ACCOUNT_MISMATCH_REASON:
+        return "account_mismatch"
+    return "manual"
+
+
+def impose_halt(detection, reason="session_expiry", cause="session_expired"):
+    if cause not in HALT_CAUSES:
+        raise ValueError("unknown halt cause %r" % (cause,))
     # W4-P2-5: a fresh death ages out any superseded session.json.prev
     # left behind by an earlier incomplete re-auth cycle before the new
     # halt is recorded. Fresh .prev files (younger than the threshold)
@@ -400,6 +437,7 @@ def impose_halt(detection, reason="session_expiry"):
     age_out_stale_prev()
     _write_json(HALT_PATH, {"halted_at": _now(),
                             "reason": reason,
+                            "cause": cause,
                             "detection": detection})
     set_state(EXPIRED, detection)
 
@@ -572,11 +610,17 @@ def _ledger_append(entry):
         _maybe_compact_ledger_locked()
 
 
-def quarantine_op(op_id, action, summary="", detection=None):
-    """Append an in-flight op to the quarantine ledger. Never auto-retries."""
+def quarantine_op(op_id, action, summary="", detection=None,
+                  write_sent=False):
+    """Append an in-flight op to the quarantine ledger. Never auto-retries.
+
+    write_sent is True when the change was already on its way to Canvas
+    as the session ended: Canvas may hold it, and its op id is used up,
+    so it is checked in the course and prepared again, never resent."""
     entry = {"kind": "op", "op_id": op_id, "action": action,
              "summary": summary[:200], "status": "quarantined",
              "quarantined_at": _now(), "reason": "session_expiry",
+             "write_sent": bool(write_sent),
              "detection": detection or {}}
     _ledger_append(entry)
     return entry
@@ -720,6 +764,19 @@ def quarantined_ops():
     except FileNotFoundError:
         pass
     return ops
+
+
+def paused_ops():
+    """The changes still waiting on the educator: one entry per op id,
+    its newest, when that status is quarantined or awaiting_approval.
+    The session_death records of past incidents are history, not
+    paused changes."""
+    newest = {}
+    for entry in quarantined_ops():
+        if (entry.get("kind") or "op") == "op":
+            newest[str(entry.get("op_id"))] = entry
+    return [entry for entry in newest.values()
+            if entry.get("status") in ("quarantined", "awaiting_approval")]
 
 
 def mark_ops_awaiting_approval():
@@ -1047,10 +1104,13 @@ def read_live_principal(base=None):
         raise PrincipalPinError(
             "the login helper reports no signed-in Canvas session; sign "
             "in through the helper page first")
-    base = (base or os.environ.get("CANVAS_BASE") or "").rstrip("/")
+    from config import tree_config
+    base = (base or tree_config.canvas_base()).rstrip("/")
     if not base:
         raise PrincipalPinError(
-            "CANVAS_BASE is not set; pass --base or set it in helper/env")
+            "no Canvas base URL: CANVAS_BASE is not set in this tree's "
+            "helper/env (%s) or the environment; set it there, or pass "
+            "--base" % tree_config.env_file_path())
     from dispatch import executor as ex
     from transport import chromium_session as cs
     sess = cs.ChromiumSession(base)
@@ -1145,7 +1205,7 @@ def verified_resume_after_manual_signin(principal_id, principal_name="",
     # incomplete rig/drill cycle may have left one behind; a completed
     # recovery is the right moment to sweep it.
     age_out_stale_prev()
-    write_notify_resumed(len(quarantined_ops()))
+    write_notify_resumed(paused_ops())
     print("verified resume (manual sign-in): principal id=%s matches the "
           "pinned account, halt lifted, %d op(s) awaiting fresh per-op "
           "approval" % (principal_id, moved))
@@ -1206,15 +1266,53 @@ def _session_summary():
             pin.get("id") if pin.get("id") is not None else "?")
 
 
-def write_notify_expired(n_quarantined):
+def _split_paused(paused):
+    """(changes that may already be in Canvas, changes never sent)."""
+    sent = sum(1 for op in paused if op.get("write_sent"))
+    return sent, len(paused) - sent
+
+
+def _changes(n):
+    return "1 change" if n == 1 else "%d changes" % n
+
+
+def _may_be_in_canvas_text(n, resumed):
+    one = n == 1
+    text = "%s may already be in Canvas. " % _changes(n)
+    if resumed:
+        text += "Morrow checks the course to see if %s there" % (
+            "it is" if one else "they are")
+    else:
+        text += ("The connection ended while Morrow was sending %s, so "
+                 "Morrow cannot tell if Canvas saved %s. Morrow will not "
+                 "send %s again on its own. Morrow checks the course first"
+                 % (("it",) * 3 if one else ("them",) * 3))
+    return text + (", and asks for your OK before it prepares %s again.\n"
+                   % ("the change" if one else "any of them"))
+
+
+def write_notify_expired(paused):
+    """paused: the changes still waiting on the educator (paused_ops())."""
     base, name, pid = _session_summary()
+    sent, unsent = _split_paused(paused)
+    lines = ""
+    if sent:
+        lines += _may_be_in_canvas_text(sent, resumed=False)
+    if unsent == 1:
+        lines += ("1 change was stopped before Morrow sent it, so it did "
+                  "not change anything in Canvas. It waits for your OK "
+                  "before Morrow sends it.\n")
+    elif unsent:
+        lines += ("%d changes were stopped before Morrow sent them, so "
+                  "they did not change anything in Canvas. Each one waits "
+                  "for your OK before Morrow sends it.\n" % unsent)
+    if not paused:
+        lines = "No change was in progress, so nothing was paused.\n"
     text = (
         "Morrow: your Canvas connection expired.\n\n"
         f"The session for {name} (id {pid}) on {base} is no longer valid.\n"
-        f"{n_quarantined} in-progress operation(s) were paused and saved. "
-        "Nothing was lost and nothing was retried.\n\n"
-        "Next step: sign in to Canvas again in the browser when prompted, "
-        "then confirm each paused operation before it resumes.\n"
+        + lines
+        + "\nNext step: sign in to Canvas again on the helper page.\n"
     )
     os.makedirs(STORE_DIR, mode=0o700, exist_ok=True)
     with open(NOTIFY_PATH, "w") as f:
@@ -1222,14 +1320,32 @@ def write_notify_expired(n_quarantined):
     os.chmod(NOTIFY_PATH, 0o600)
 
 
-def write_notify_resumed(n_ops):
+def write_notify_resumed(paused):
+    """paused: the changes still waiting on the educator (paused_ops())."""
+    if not paused:
+        # Nothing waits on the educator, so the helper page has nothing
+        # left to tell them.
+        try:
+            os.remove(NOTIFY_PATH)
+        except FileNotFoundError:
+            pass
+        return
     base, name, pid = _session_summary()
+    sent, unsent = _split_paused(paused)
+    lines = ""
+    if sent:
+        lines += _may_be_in_canvas_text(sent, resumed=True)
+    if unsent == 1:
+        lines += ("1 change that was not sent is waiting for your OK. "
+                  "Nothing is sent without it.\n")
+    elif unsent:
+        lines += ("%d changes that were not sent are waiting for your OK. "
+                  "Nothing is sent without your OK on each one.\n" % unsent)
     text = (
         "Morrow: your Canvas connection is back.\n\n"
         f"The session for {name} (id {pid}) on {base} was verified as the "
         "same account.\n"
-        f"{n_ops} paused operation(s) are waiting for your approval before "
-        "they resume. Nothing will run without your OK on each one.\n"
+        + lines
     )
     with open(NOTIFY_PATH, "w") as f:
         f.write(text)
@@ -1279,10 +1395,10 @@ def write_notify_escalation(detail):
 def on_expiry_detected(detection, simulated=False):
     """Full expiry handling: halt, quarantine placeholder, notify."""
     impose_halt(detection)
-    write_notify_expired(len(quarantined_ops()))
+    write_notify_expired(paused_ops())
     tag = " (SIMULATED)" if simulated else ""
     print(f"expiry detected{tag}: state={EXPIRED}, write halt imposed, "
-          f"notify.txt written, {len(quarantined_ops())} op(s) quarantined")
+          f"notify.txt written, {len(paused_ops())} op(s) quarantined")
 
 
 def reauth():
@@ -1398,7 +1514,7 @@ def _complete_reauth(old_principal, new_principal):
     except OSError:
         pass
     lift_halt()
-    write_notify_resumed(len(quarantined_ops()))
+    write_notify_resumed(paused_ops())
     print(f"verified resume: principal id={new_principal.get('id')} pinned, "
           f"halt lifted, {moved} op(s) awaiting fresh per-action approval")
     return True
@@ -1448,10 +1564,30 @@ def cmd_quarantine():
           f"(writes_allowed={allowed}; {reason})")
 
 
+def _write_was_sent(op_id):
+    """True when op_id's newest ledger entry says its write was sent."""
+    sent = False
+    for entry in quarantined_ops():
+        if (entry.get("kind") or "op") == "op" \
+                and str(entry.get("op_id")) == str(op_id):
+            sent = bool(entry.get("write_sent"))
+    return sent
+
+
+def approval_refusal_evidence(op_id, status):
+    """The failure translator's evidence for an approve refused because
+    the op is not awaiting approval. Approving never sends a change."""
+    return {"error": "ApprovalRefused",
+            "quarantine_status": status or "none",
+            "nothing_sent": True,
+            "detail": "op_id=%s is not awaiting_approval (status=%s)"
+                      % (op_id, status)}
+
+
 def cmd_approve():
     op_id = _arg("--op-id", None)
     authorization = _arg("--authorization", None)
-    if not op_id or not authorization:
+    if not op_id or not (authorization or "").strip():
         print('usage: state_machine.py approve --op-id <op_id> '
               '--authorization "the educator\'s verbatim approval words"')
         print("W6-P2-A5: the educator must actually say the words; the "
@@ -1462,25 +1598,33 @@ def cmd_approve():
     except ValueError as exc:
         # Agent-facing error funnel: the agent sees the translated
         # four-part message, never the raw refusal text.
+        exc.nothing_sent = True
         try:
             from failures.funnel import agent_error_text
-            print(agent_error_text("approve quarantined op %s" % op_id, exc))
+            print(agent_error_text("approving a paused change", exc))
         except Exception:
             print(f"refused: {exc}")
         return False
     if ok:
-        print(f"approved op_id={op_id} for re-dispatch")
+        if _write_was_sent(op_id):
+            print(f"approved op_id={op_id}. This change may already be in "
+                  "Canvas and its op id is used up, so it is never sent "
+                  "again. Read the item back with a live-proven read and "
+                  "tell the educator what Canvas has. Prepare the change "
+                  "again (plan-write, or catalog in Edit mode) only when "
+                  "that read shows it is not there and the educator says "
+                  "so.")
+        else:
+            print(f"approved op_id={op_id} for re-dispatch")
         return True
+    status = op_quarantine_status(op_id)
     try:
         from failures.funnel import agent_error_text
-        print(agent_error_text(
-            "approve quarantined op %s" % op_id,
-            {"error": "ApprovalRefused",
-             "detail": "op_id=%s is not awaiting_approval (status=%s)"
-                       % (op_id, op_quarantine_status(op_id))}))
+        print(agent_error_text("approving a paused change",
+                               approval_refusal_evidence(op_id, status)))
     except Exception:
         print(f"refused: op_id={op_id} is not awaiting_approval "
-              f"(status={op_quarantine_status(op_id)})")
+              f"(status={status})")
     return False
 
 
@@ -1503,7 +1647,7 @@ def cmd_notify():
     except OSError as exc:
         try:
             from failures.funnel import agent_error_text
-            print(agent_error_text("read educator notification", exc))
+            print(agent_error_text("reading the notice about paused changes", exc))
         except Exception:
             print(f"could not read the educator notification: {exc}")
         return False
@@ -1586,7 +1730,8 @@ def cmd_status():
             print(f"kind={kind} op_id={op.get('op_id')} "
                   f"status={op.get('status')} action={op.get('action')}"
                   + (f" cause={op.get('cause')}" if kind == "session_death"
-                     else ""))
+                     else "")
+                  + (" write_sent=True" if op.get("write_sent") else ""))
     print(f"write_halt={is_write_halted()} state={get_state()}")
     # W4-P2-3: surface the pre-expiry horizon on every status view so
     # the educator sees the warning before the session dies.

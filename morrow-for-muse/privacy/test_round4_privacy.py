@@ -14,9 +14,9 @@ probe_nocrypto.py, and the funnel output capture):
       must become the label, whatever the route is called.
   H2. The agent could turn de-identification off by itself: any 0600
       file at <tree-state-dir>/educator_pii_reveal with a 12+ character
-      reason revealed every name, unscoped and permanently. Reveal now
-      needs an educator-sealed record, scoped to one course, with a
-      short expiry; the file is not a consent channel any more.
+      reason revealed every name, unscoped and permanently. The file is
+      not a consent channel any more (and since the final sweep of
+      2026-09-22 nothing reveals names: privacy/test_no_name_reveal.py).
   L1. Labels followed first-read order, so a roster read in
       alphabetical order leaked each student's alphabetical rank.
       New labels are assigned in keyed-hash order inside the course;
@@ -92,10 +92,10 @@ def _project(name, path, params, payload, method="GET", lane_context=None):
     url = ex.render_template(entry["request"]["url"], {"canvas_base": BASE},
                              params)
     view = ex._projection_entry(entry, url, payload)
-    out, reveal = wire.project_learner_result(
+    out = wire.project_learner_result(
         view, {"receipt": payload, "truncated": False, "bytes_received": 0},
         BASE, lane_context=lane_context, error_cls=RuntimeError)
-    return out["receipt"], reveal
+    return out["receipt"]
 
 
 # ---------------------------------------------------------------- H1 --
@@ -105,7 +105,7 @@ def test_submission_urls_carry_the_label_not_the_raw_id(vault):
             "preview_url": BASE + "/courses/1/assignments/3/submissions/"
                                   "98765?preview=1&version=2",
             "html_url": BASE + "/courses/1/assignments/3/submissions/98765"}]
-    out, _ = _project(*SUBS, {"course_id": 1, "assignment_id": 3}, sub)
+    out = _project(*SUBS, {"course_id": 1, "assignment_id": 3}, sub)
     assert _leaks(out) == [], out
     assert "Student%20A1" in out[0]["html_url"], out
     assert out[0]["html_url"].startswith(BASE + "/courses/1/assignments/3/")
@@ -116,7 +116,7 @@ def test_enrollment_grades_url_carries_the_label(vault):
         "id": 1, "user_id": 98765, "type": "StudentEnrollment",
         "grades": {"html_url": BASE + "/courses/1/grades/98765",
                    "current_score": 41.0}}]), dict(BOB)]
-    out, _ = _project(*USERS, {"course_id": 1}, roster)
+    out = _project(*USERS, {"course_id": 1}, roster)
     assert _leaks(out) == [], out
     grades = out[0]["enrollments"][0]["grades"]["html_url"]
     assert grades.startswith(BASE + "/courses/1/grades/Student%20A"), grades
@@ -127,7 +127,7 @@ def test_query_value_and_unusual_route_carry_the_label(vault):
                 "url": BASE + "/courses/1/gradebook/speed_grader"
                               "?assignment_id=3&student_id=98765",
                 "other": BASE + "/api/v1/courses/1/anything/98765/x"}]
-    out, _ = _project(*SUBS, {"course_id": 1, "assignment_id": 3}, payload)
+    out = _project(*SUBS, {"course_id": 1, "assignment_id": 3}, payload)
     assert _leaks(out) == [], out
     assert "assignment_id=3" in out[0]["url"]
     assert "/courses/1/" in out[0]["other"]
@@ -147,74 +147,9 @@ def _write_consent_file():
 
 def test_an_agent_written_consent_file_reveals_nothing(vault):
     _write_consent_file()
-    out, reveal = _project(*USERS, {"course_id": 1}, [dict(JANE)])
-    assert reveal is None
+    out = _project(*USERS, {"course_id": 1}, [dict(JANE)])
     assert _leaks(out) == [], out
     assert not hasattr(wire, "consent_path")
-
-
-@pytest.fixture
-def signing(vault, monkeypatch):
-    from dispatch import admission
-    monkeypatch.setattr(admission, "SECRETS_DIR",
-                        os.path.join(vault, "secrets"))
-    monkeypatch.setattr(admission, "SIGNING_KEY_PATH",
-                        os.path.join(vault, "secrets", "signing.key"))
-    monkeypatch.delenv("MORROW_APPROVAL_SIGNING_KEY", raising=False)
-    return admission
-
-
-REVEAL_WORDS = ("please show me the real names for course 1 while I "
-                "review grades with my TA")
-
-
-def test_sealed_educator_reveal_is_course_scoped(signing):
-    rec = signing.mint_pii_reveal(BASE, "1", REVEAL_WORDS,
-                                  channel="educator-chat")
-    out, reveal = _project(*USERS, {"course_id": 1}, [dict(JANE)],
-                           lane_context={"pii_reveal": rec})
-    assert reveal and reveal["revealed_by"] == "educator-sealed-record"
-    assert reveal["course_id"] == "1"
-    assert "Jane Doe" in json.dumps(out)
-    # The same record does not reveal a different course.
-    out2, reveal2 = _project(*USERS, {"course_id": 2}, [dict(JANE)],
-                             lane_context={"pii_reveal": rec})
-    assert reveal2 is None and _leaks(out2) == []
-
-
-def test_reveal_refuses_driver_channel_expired_and_tampered(signing):
-    import datetime
-    with pytest.raises(ValueError):
-        signing.mint_pii_reveal(BASE, "1", "   ", "educator-chat")
-    with pytest.raises(ValueError):
-        signing.mint_pii_reveal(BASE, "1", REVEAL_WORDS, "educator-chat",
-                                minutes=24 * 60)
-    driver = signing.mint_pii_reveal(BASE, "1", REVEAL_WORDS, "driver")
-    with pytest.raises(RuntimeError):
-        _project(*USERS, {"course_id": 1}, [dict(JANE)],
-                 lane_context={"pii_reveal": driver})
-    rec = signing.mint_pii_reveal(BASE, "1", REVEAL_WORDS, "educator-chat")
-    tampered = dict(rec, course_id="2")
-    with pytest.raises(RuntimeError):
-        _project(*USERS, {"course_id": 2}, [dict(JANE)],
-                 lane_context={"pii_reveal": tampered})
-    expired = dict(rec)
-    past = (datetime.datetime.now(datetime.timezone.utc)
-            - datetime.timedelta(minutes=1)).isoformat()
-    expired["expires_at"] = past
-    expired = signing._seal_record(
-        {k: v for k, v in expired.items() if k != "seal"})
-    with pytest.raises(RuntimeError):
-        _project(*USERS, {"course_id": 1}, [dict(JANE)],
-                 lane_context={"pii_reveal": expired})
-
-
-def test_reveal_mint_is_journaled_without_names(signing, monkeypatch):
-    seen = []
-    monkeypatch.setattr(signing, "_journal_reveal", seen.append)
-    signing.mint_pii_reveal(BASE, "1", REVEAL_WORDS, "educator-chat")
-    assert seen and seen[0]["event"] == "privacy.pii_reveal_issued"
-    assert seen[0]["course_id"] == "1"
 
 
 # ---------------------------------------------------------------- L1 --
@@ -225,19 +160,19 @@ def test_labels_do_not_follow_alphabetical_order(vault):
              "Jo James", "Kai King", "Lu Long"]
     roster = [{"id": 1000 + i, "name": n, "login_id": "u%d" % i}
               for i, n in enumerate(names)]
-    out, _ = _project(*USERS, {"course_id": 1}, roster)
+    out = _project(*USERS, {"course_id": 1}, roster)
     numbers = [int(r["id"][len("Student A"):]) for r in out]
     assert sorted(numbers) == list(range(1, 13))
     assert numbers != sorted(numbers), numbers
 
 
 def test_existing_labels_stay_stable_when_new_learners_arrive(vault):
-    first, _ = _project(*USERS, {"course_id": 1},
-                        [{"id": 1001, "name": "Jane Doe", "login_id": "j"}])
+    first = _project(*USERS, {"course_id": 1},
+                     [{"id": 1001, "name": "Jane Doe", "login_id": "j"}])
     assert first[0]["id"] == "Student A1"
     roster = [{"id": 1000 + i, "name": "Person %s" % chr(65 + i),
                "login_id": "p%d" % i} for i in range(8)]
-    out, _ = _project(*USERS, {"course_id": 1}, roster)
+    out = _project(*USERS, {"course_id": 1}, roster)
     by_id = {1000 + i: r["id"] for i, r in enumerate(out)}
     assert by_id[1001] == "Student A1"
 
@@ -253,7 +188,7 @@ def test_revision_teacher_editor_with_html_url_projects(vault):
         "id": 5, "anonymous_id": "5", "display_name": "Teach Er",
         "avatar_image_url": "https://x/images/thumbnails/5/q",
         "html_url": BASE + "/courses/1/users/5", "pronouns": None}}]
-    out, _ = _project(*REVS, {"course_id": 1, "url_or_id": "p"}, payload)
+    out = _project(*REVS, {"course_id": 1, "url_or_id": "p"}, payload)
     assert _leaks(out) == [], out
     assert out[0]["revision_id"] == 3
 
@@ -261,7 +196,7 @@ def test_revision_teacher_editor_with_html_url_projects(vault):
 def test_assignments_with_submission_project(vault):
     payload = [{"id": 3, "name": "Essay",
                 "submission": {"id": 11, "user_id": 98765, "score": 3}}]
-    out, _ = _project("canvas_list_assignments_assignments",
+    out = _project("canvas_list_assignments_assignments",
                       "/api/v1/courses/{course_id}/assignments",
                       {"course_id": 1}, payload)
     assert _leaks(out) == [], out
@@ -328,9 +263,8 @@ def test_people_ops_open_on_the_projecting_lane(name, method, path):
     pytest.importorskip("cryptography")
     from dispatch import executor as ex
     entry = ex.catalog_descriptor_to_entry(name, method, path)
-    status, _ = ex._catalog_provenance_gate(
-        entry, name, method, path, {}, "canvas", approval=None,
-        allow_unproven=False, session=_Browser())
+    status = ex._catalog_provenance_gate(
+        entry, name, method, path, {}, session=_Browser())
     assert status == "live-proven"
 
 
@@ -342,13 +276,11 @@ def test_people_ops_stay_refused_without_a_projection_point(
     entry = ex.catalog_descriptor_to_entry(name, method, path)
     with pytest.raises(LearnerDataGated):
         ex._catalog_provenance_gate(
-            entry, name, method, path, {}, "canvas", approval=None,
-            allow_unproven=False, session=_Raw())
+            entry, name, method, path, {}, session=_Raw())
     monkeypatch.setattr(core, "AESGCM", None)
     with pytest.raises(LearnerDataGated) as info:
         ex._catalog_provenance_gate(
-            entry, name, method, path, {}, "canvas", approval=None,
-            allow_unproven=False, session=_Browser())
+            entry, name, method, path, {}, session=_Browser())
     assert "has not landed" not in str(info.value)
     assert "cryptography" in str(info.value)
 
@@ -361,9 +293,6 @@ def test_pending_people_ops_stay_refused_on_the_projecting_lane():
         "canvas_get_course_level_student_summary_data", "GET",
         "/api/v1/courses/{course_id}/analytics/student_summaries")
     entry = ex.catalog_descriptor_to_entry(name, method, path)
-    from dispatch.admission import WriteApprovalMissing
-    with pytest.raises((LearnerDataGated, ex.CatalogNotProven,
-                        WriteApprovalMissing)):
+    with pytest.raises((LearnerDataGated, ex.CatalogNotProven)):
         ex._catalog_provenance_gate(
-            entry, name, method, path, {}, "canvas", approval=None,
-            allow_unproven=True, session=_Browser())
+            entry, name, method, path, {}, session=_Browser())

@@ -288,7 +288,12 @@ def _t_verify_forwarder_holder_not_forwarder_refused():
 
 
 def _t_proc_environ_real():
-    # _proc_environ reads the real /proc for a live process.
+    # _proc_environ reads the real /proc for a live process. Linux only:
+    # the Muse VM has /proc, and a host without it has nothing to read.
+    if not os.path.isdir("/proc/self"):
+        print("skip proc-environ-real (this host has no /proc)")
+        return
+
     def _run():
         env = lc._proc_environ(os.getpid())
         assert isinstance(env, dict) and env, "must parse own environ"
@@ -528,9 +533,14 @@ def _t_proxy_generic_call_methods_allowlisted():
             assert ("def %s(" % name) in inspect.getsource(lc.ProxyCDP), \
                 "ProxyCDP must shadow %s (dedicated route)" % name
         via_generic = set()
-        for rel in ("local_chromium.py", "item_bank_sdk.py",
-                    os.path.join("..", "session", "cdp.py"),
-                    os.path.join("..", "session", "capture.py")):
+        sources = ["local_chromium.py", "item_bank_sdk.py",
+                   os.path.join("..", "session", "cdp.py")]
+        # The rig-only header capture is left out of the release
+        # (scripts/carve.py DEV_ONLY), where this suite also ships.
+        capture = os.path.join("..", "session", "capture.py")
+        if os.path.exists(os.path.join(HERE, capture)):
+            sources.append(capture)
+        for rel in sources:
             text = open(os.path.join(HERE, rel)).read()
             via_generic |= set(re.findall(
                 r'\.call\(\s*(?:[a-z_]+\s*,\s*)?"([A-Za-z]+\.[A-Za-z]+)"',
@@ -890,8 +900,8 @@ def _t_api_js_origin_scoped():
 def _t_api_js_no_token_echo():
     # The session rides first-party cookies (no Authorization header is
     # ever set), and the returned envelope is a fixed key allowlist:
-    # {status, url, body, link, retryAfter, truncated, redirected,
-    #  csrf_missing}. The csrf_missing boolean is the only signal that
+    # {status, url, body, link, retryAfter, contentType, truncated,
+    #  redirected, csrf_missing}. The csrf_missing boolean is the only signal that
     # may cross back about the token (W4-CSRF fail-closed); the token
     # value itself never does. Request headers and document.cookie
     # must never cross back.
@@ -905,7 +915,8 @@ def _t_api_js_no_token_echo():
         envelope = js[finals[-1]:finals[-1] + 300]
         keys = set(re.findall(r"(\w+)\s*:", envelope))
         assert keys <= {"status", "url", "body", "link", "retryAfter",
-                        "truncated", "redirected", "csrf_missing"}, keys
+                        "contentType", "truncated", "redirected",
+                        "csrf_missing"}, keys
         assert "headers" not in keys and "cookie" not in keys
     check("api-js-no-token-echo", _run)
 
@@ -1164,11 +1175,15 @@ def _t_verify_helper_holder_unreachable():
 
 def _t_tree_profile_default():
     def _run():
-        def _go():
+        # config.selftest_home points the profile at scratch; this
+        # read-only check needs it unset.
+        saved = os.environ.pop("LOGIN_HELPER_PROFILE_DIR", None)
+        try:
             assert lc.tree_helper_profile_dir() == os.path.join(
                 lc.tree_root(), "helper", "profile")
-        _with_env({k: v for k, v in os.environ.items()
-                   if k != "LOGIN_HELPER_PROFILE_DIR"}, _go)
+        finally:
+            if saved is not None:
+                os.environ["LOGIN_HELPER_PROFILE_DIR"] = saved
     check("tree-profile-default", _run)
 
 
@@ -1541,15 +1556,28 @@ def _mk_test_launcher(d, name):
     return launcher, bin_path
 
 
-def _assert_no_cmdline_fragment(fragment, what):
+def _command_lines():
+    """[(pid, command line bytes)] of every process: from /proc where the
+    host has it, else from ps (macOS)."""
+    if not os.path.isdir("/proc/self"):
+        out = subprocess.run(["ps", "-axww", "-o", "pid=,command="],
+                             capture_output=True, check=True).stdout
+        return [tuple(line.strip().split(b" ", 1)) for line in
+                out.splitlines() if b" " in line.strip()]
+    found = []
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
         try:
             with open("/proc/%s/cmdline" % pid, "rb") as fh:
-                data = fh.read()
+                found.append((pid, fh.read()))
         except (FileNotFoundError, PermissionError):
             continue
+    return found
+
+
+def _assert_no_cmdline_fragment(fragment, what):
+    for pid, data in _command_lines():
         if fragment.encode() in data:
             raise AssertionError(
                 "orphaned %s still running: pid %s" % (what, pid))
@@ -1658,6 +1686,10 @@ def _t_looks_like_login_page():
             "</body></html>")
         assert not lc._looks_like_login_page('{"courses": []}')
         assert not lc._looks_like_login_page('{"message": "login ok"}')
+        # API data that shows the sign-in form's field names is data.
+        assert not lc._looks_like_login_page(
+            '{"body": "<code>pseudonym_session[unique_id]</code>"}',
+            "text/html")
     check("looks-like-login-page", _run)
 
 
