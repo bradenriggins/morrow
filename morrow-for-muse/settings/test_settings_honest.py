@@ -14,11 +14,21 @@ still loads, and they are ignored.
 
 The remaining settings are either enforced by Morrow's code or are
 preferences the assistant follows, and the docs say which.
+
+Round-2 finding muse-ux-r2-default-course-accepts-non-number
+(2026-09-23, written before the fix): default_course_id accepted any
+1-64 character token, so "abc" was saved and confirmed ("I will use
+course abc"), while its own refusal asked for "the course number from
+Canvas" and every course dispatch refuses a course that is not a
+number. It now takes a Canvas course number or nothing. A value an
+older version saved still loads (the educator keeps their mode) and
+reads as no default course.
 """
 
 import json
 import os
 import sys
+import uuid
 
 import pytest
 
@@ -91,3 +101,33 @@ def test_the_deletion_setting_claims_only_deletions():
         text = " ".join(fh.read().split())
     assert "other destructive writes" not in text
     assert "deletes and destructive writes" not in text
+
+
+@pytest.mark.parametrize("value", ["abc", "BIO101", "sis_course_id:BIO101",
+                                   "0101", "12 345", "1" * 21, "12.5"])
+def test_the_default_course_is_a_canvas_course_number(value):
+    user = "course-number-%s" % uuid.uuid4().hex
+    out = commands.setting_set(user, "default_course_id", value)
+    assert out["status"] == "error", out
+    assert "course number from Canvas" in out["message"], out
+    assert store.get_setting(user, "default_course_id") == ""
+
+
+def test_a_canvas_course_number_is_saved():
+    out = commands.setting_set("course-number-ok", "default_course_id",
+                               "89585")
+    assert out["status"] == "done", out
+    assert "course 89585" in out["message"]
+
+
+def test_an_older_default_course_that_is_not_a_number_reads_as_none():
+    user = "course-number-legacy"
+    store.set_setting(user, "default_mode", "edit", educator_confirmed=True)
+    path = store._settings_path(user)
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    doc["settings"]["default_course_id"] = "BIO101"
+    store._write_doc_atomic(path, doc)
+    assert store.get_setting(user, "default_mode") == "edit"
+    assert store.get_setting(user, "default_course_id") == ""
+    assert store.list_settings(user)["default_course_id"]["value"] == ""

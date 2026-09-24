@@ -600,9 +600,9 @@ both modes.
   detailed, default balanced), `failure_verbosity` (concise | detailed,
   default detailed), `proactivity` (reactive | suggestive, default
   reactive), `read_confirmations` (bool, default off), `work_summary`
-  (brief | full, default full), `default_course_id` (course id or
-  empty, default empty), and `timezone` (IANA name or empty, default
-  empty; the failed-students query uses it). Every one of these except
+  (brief | full, default full), `default_course_id` (the Canvas
+  course number, or empty; default empty), and `timezone` (IANA name
+  or empty, default empty; the failed-students query uses it). Every one of these except
   `timezone` is an instruction to you: read it with `bin/morrow settings
   show` and follow it as you work; no code enforces it. Educator docs:
   `settings/README.md`.
