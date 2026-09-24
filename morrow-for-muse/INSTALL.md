@@ -43,9 +43,14 @@ prior knowledge of the project.
   curl, ss, pgrep, or flock. `crontab` is optional: without cron (the
   Muse VM image runs no cron daemon), keepalive runs as a supervised
   background loop instead (step 7).
-- Network egress from the VM to your Canvas tenant: direct, or via the
-  VM's `https_proxy`/`HTTPS_PROXY` (authenticated or not). The installer
-  probes this and tells you which mode it found.
+- Network egress from the VM, direct or via the VM's
+  `https_proxy`/`HTTPS_PROXY` (authenticated or not). To use Morrow:
+  your Canvas tenant. The installer probes this and tells you which
+  mode it found. To install and upgrade: `github.com` and
+  `release-assets.githubusercontent.com` (step 1 downloads the release
+  from GitHub, which sends the download to that host), and `pypi.org`
+  and `files.pythonhosted.org` (step 2's `pip` finds the student-data
+  package on pypi.org and downloads it from files.pythonhosted.org).
 - Your Canvas tenant URL (e.g. `https://myschool.instructure.com`) and
   the ability to sign in to it yourself (your SSO/MFA, on your phone).
 
