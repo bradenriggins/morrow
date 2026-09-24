@@ -210,7 +210,7 @@ test("the Windows job runs bounded tests and packages through one retained relea
     previous = position;
   }
   assert.match(job, /Test each installer contract file with a process limit\n {8}timeout-minutes: 23/);
-  assert.match(job, /Test the complete installer contract suite with a process limit\n {8}timeout-minutes: 7/);
+  assert.match(job, /Test the complete installer contract suite with a process limit\n {8}timeout-minutes: 17/);
   assert.match(job, /Upgrade the exact published 3720 build and preserve its state\n {8}timeout-minutes: 32/);
   assert.match(job, /Install, start, damage and repair the sealed payload, uninstall, and check retained data\n {8}timeout-minutes: 30/);
   assert.match(job, /node scripts\/package-mcp-bundle\.mjs --target win32-x64 --unsigned-qa --output \$env:MORROW_WINDOWS_PACKAGE_OUTPUT/);

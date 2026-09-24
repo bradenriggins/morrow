@@ -232,6 +232,7 @@ def rig():
     env = {"PATH": os.path.join(work, "bin"), "HOME": home,
            "MORROW_HOME": os.path.join(home, ".morrow"),
            "CHROMIUM_BIN": chrome, "LANG": "C.UTF-8", "MORROW_CRON": "0",
+           "MORROW_INSTALL_TEST_SHOW_SELFTEST_FAILURES": "1",
            "PROC_ROOT": os.path.join(work, "proc"),
            "https_proxy": "http://muse:proxy@127.0.0.1:9"}
     rig = {"tree": out, "env": env, "home": env["MORROW_HOME"],

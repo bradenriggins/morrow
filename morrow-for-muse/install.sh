@@ -1022,7 +1022,11 @@ step "9/10 selftest suites"
 # runs the same script on the carved release tree. Its scratch lives
 # under .selftest-work/, which is removed below (and by rollback on
 # failure).
-_SUITES_OUT="$(bash "${TREE}/scripts/install-suites.sh")"
+if [ "${MORROW_INSTALL_TEST_SHOW_SELFTEST_FAILURES:-0}" = "1" ]; then
+  _SUITES_OUT="$(bash "${TREE}/scripts/install-suites.sh" --show-failures)"
+else
+  _SUITES_OUT="$(bash "${TREE}/scripts/install-suites.sh")"
+fi
 _SUITES_RC=$?
 if [ "${_SUITES_RC}" -ne 0 ]; then
   _FAILED="$(printf '%s\n' "${_SUITES_OUT}" | sed -n 's/^FAIL //p' \

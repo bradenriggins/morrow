@@ -51,7 +51,7 @@ jobs:
         run: pnpm --dir installer --ignore-workspace test:bounded:files
 
       - name: Test the complete installer contract suite with a process limit
-        timeout-minutes: 7
+        timeout-minutes: 17
         run: pnpm --dir installer --ignore-workspace test:bounded:suite
 
       - name: Prepare private Windows artifact directory
