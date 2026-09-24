@@ -379,7 +379,7 @@ The app keeps the same window for the rest of the installation's life. It carrie
 - The Mac and Windows releases are unsigned, as required for this release. A quarantined download of the macOS app passes `codesign --verify --deep --strict` and is refused by Gatekeeper only for the missing notarization, which is the state that offers Open Anyway in Privacy & Security. The Windows installer carries no Authenticode signature, so SmartScreen shows More info and Run anyway. Neither dialog has been walked by hand on a fresh machine.
 - Complete live-course setup through the final installed app is still open. The native startup and repair checks use isolated application state.
 - Automatic signed updates have not been tested or enabled. They are outside this unsigned release.
-- Morrow Bridge has no Chrome Web Store listing. The temporary Developer-mode step is the only route, and reloading the unpacked Bridge in Chrome always needs a person.
+- Morrow Bridge has no Chrome Web Store listing. The temporary Developer-mode step is the only route, and loading the unpacked Bridge in Chrome the first time needs a person. Later the app updates the unpacked Bridge and asks it to reload itself; it never opens or automates Chrome's extensions page.
 
 See [current limits](LIMITATIONS.md) for the complete list. The exact saved receipt for each desktop result, and each result that has no receipt, is listed in the [completion goal](docs/implementation/MORROW-1.0-COMPLETION-GOAL.md).
 
