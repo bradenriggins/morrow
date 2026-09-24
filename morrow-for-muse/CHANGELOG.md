@@ -288,8 +288,10 @@ Installing and the docs:
 - The first-run checklist starts with your install; the test-only
   steps moved to the install test.
 - The release no longer ships old code that nothing uses (the retired
-  form relay) or internal review notes, and the docs no longer mention
-  Moodle or ask for a Canvas token.
+  form relay) or internal review notes. The install guide no longer
+  describes a Moodle connection, and the assistant's instructions no
+  longer describe one or ask for a Canvas token. Both name Moodle only
+  as not in this version.
 - The release no longer includes the developer tests. Run from an
   installed copy, they wrote to Morrow's own records, and Morrow then
   refused to make changes until the records were restored. The
@@ -362,9 +364,10 @@ Installing and the docs:
 - The documented `python3 dispatch/executor.py` runs even when the
   computer's Python has another package named `dispatch` (on a Mac,
   PyObjC ships one). Every executor command failed there.
-- The shipped `transport/local_chromium_selftest.py` runs in the
-  release: its allowlist check no longer opens a file the release
-  leaves out.
+- The release no longer includes 15 test scripts that no install step
+  ran, among them `transport/local_chromium_selftest.py`, which failed
+  in the release. They run in the source repository's automated checks
+  instead.
 - The installer's own notes match the install guide: upgrade by
   copying the new release over the installed folder (a new folder
   loses your Canvas address and sign-in), and 3 backups are kept.
