@@ -554,7 +554,9 @@ both modes.
     that writes now apply without asking until edit mode is turned off;
     relay it.
   - `bin/morrow settings show|get KEY|set KEY VALUE`: booleans are `true`
-    or `false`. A set takes effect at once and is journaled. "Stop
+    or `false` (`on`/`off` and `yes`/`no` work too). A refused value
+    names the words the setting accepts. A set takes effect at once and
+    is journaled. "Stop
     asking me to confirm deletions" is `settings set
     confirm_destructive_writes false`; "always confirm deletions" is
     `... true`.

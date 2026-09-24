@@ -139,16 +139,26 @@ _SETTING_SENTENCES = {
     },
 }
 
-# The choices, in the educator's words, when a value is refused.
+# When a value is refused: the words the command accepts, each with its
+# meaning in the educator's words.
+_BOOLEAN_CHOICES = "true (on) or false (off)"
 _SETTING_CHOICES = {
-    "default_mode": "plan or edit",
-    "verbosity": "short, normal, or detailed updates",
-    "failure_verbosity": "short or detailed failure reports",
-    "proactivity": "only what you ask, or suggestions too",
-    "work_summary": "one short line per task, or every change listed",
-    "confirm_destructive_writes": "on or off",
-    "read_confirmations": "on or off",
+    "default_mode": "plan (changes wait for your OK) or edit (changes "
+                    "apply without asking)",
+    "verbosity": "concise (short updates), balanced (updates of normal "
+                 "length), or detailed (detailed updates)",
+    "failure_verbosity": "concise (only what failed and the next step) or "
+                         "detailed (what I tried, what I found, and your "
+                         "options)",
+    "proactivity": "reactive (only what you ask) or suggestive "
+                   "(suggestions too)",
+    "work_summary": "brief (one short line per task) or full (every "
+                    "change listed)",
+    "confirm_destructive_writes": _BOOLEAN_CHOICES,
+    "read_confirmations": _BOOLEAN_CHOICES,
 }
+_BOOLEAN_WORDS = {"true": True, "on": True, "yes": True,
+                  "false": False, "off": False, "no": False}
 
 
 def _friendly_value(key, value):
@@ -353,7 +363,8 @@ def mode_set(user_id, mode, conversation_id=None, this_conversation=False,
     """Set the educator's mode. See the module docstring for the table."""
     if mode not in ("plan", "edit"):
         return _error(user_id, conversation_id,
-                      "Mode must be 'plan' or 'edit'; nothing changed.")
+                      "Nothing changed: the mode can only be %s."
+                      % _SETTING_CHOICES["default_mode"])
     if this_conversation and not conversation_id:
         return _error(user_id, conversation_id,
                       "A mode for this conversation needs the conversation "
@@ -531,17 +542,16 @@ def _refused_value_reason(key, value):
 def parse_setting_value(key, raw):
     """A CLI string as the typed value the schema wants for key.
 
-    Booleans accept exactly "true"/"false"; every other setting is a
-    string validated by the schema itself.
+    Booleans accept true/false, on/off, and yes/no; every other setting
+    is a string validated by the schema itself.
     """
     if key in SETTINGS_SCHEMA and isinstance(
             SETTINGS_SCHEMA[key]["default"], bool):
-        if raw == "true":
-            return True
-        if raw == "false":
-            return False
+        word = raw.strip().lower()
+        if word in _BOOLEAN_WORDS:
+            return _BOOLEAN_WORDS[word]
         raise SettingsValidationError(
-            "%s takes true or false, got %r" % (key, raw))
+            "%s takes %s, got %r" % (key, _BOOLEAN_CHOICES, raw))
     return raw
 
 
@@ -613,7 +623,7 @@ def main(argv=None):
                              "Nothing changed: %s can only be %s."
                              % (_SETTING_LABELS.get(args.key, args.key),
                                 _SETTING_CHOICES.get(args.key,
-                                                     "on or off")))
+                                                     _BOOLEAN_CHOICES)))
             else:
                 out = setting_set(args.user_id, args.key, value,
                                   conversation_id=args.conversation_id)
