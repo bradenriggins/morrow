@@ -122,6 +122,28 @@ test("every page that states a version names the Morrow product it belongs to", 
   assert.deepEqual(titles, ["desktop: Morrow Desktop X.Y.Z", "muse: Morrow for Muse X.Y.Z"], "each release title names its product");
 });
 
+// The root README and docs/products.md send readers to desktop/README.md for Morrow Desktop. Written
+// before the fix (final sweep 2026-09-23): that page was titled "# Morrow" and never said "Morrow
+// Desktop", pages called the product "the Morrow desktop app", and Morrow for Muse documents called
+// it "the desktop Morrow".
+test("the Morrow Desktop start page and every page that names the product call it Morrow Desktop", () => {
+  const readme = read("README.md");
+  assert.equal(readme.split("\n", 1)[0], "# Morrow Desktop", "desktop/README.md is titled with the product's name");
+  const opening = readme.split(/\n{2,}/).find((paragraph) => !/^(?:#|\[!\[)/.test(paragraph)) || "";
+  assert.match(opening, /^Morrow Desktop, the app for Mac and Windows, /, "desktop/README.md opens with the product's name");
+
+  const repositoryRoot = new URL("../", root);
+  const listed = spawnSync("git", ["-C", fileURLToPath(repositoryRoot), "ls-files", "-z", "--", "*.md", "*.html"], { encoding: "utf8" });
+  assert.equal(listed.status, 0, listed.stderr);
+  const pages = listed.stdout.split("\0").filter((path) => path && !INTERNAL_RECORDS.test(path));
+  const misnamed = pages.flatMap((page) => {
+    const text = readFileSync(new URL(page, repositoryRoot), "utf8");
+    return [...text.matchAll(/\bMorrow\s+desktop\b|\b[Dd]esktop\s+Morrow\b/g)]
+      .map((match) => `${page}:${text.slice(0, match.index).split("\n").length} "${collapse(match[0])}"`);
+  });
+  assert.deepEqual(misnamed, [], "the desktop product is Morrow Desktop");
+});
+
 // The newest section of CHANGELOG.md becomes the text of the GitHub release that
 // meetmorrow.app/download links to (docs/versioning.md step 4), so educators read it. Technical items
 // sit under a last "Technical notes" subsection; everything above it is in plain words.

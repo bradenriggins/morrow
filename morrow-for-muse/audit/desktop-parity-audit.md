@@ -1,8 +1,8 @@
-# Desktop Morrow to Morrow for Muse: Parity Audit
+# Morrow Desktop to Morrow for Muse: Parity Audit
 
 **Date:** 2026-09-20
 **Auditor:** Hermes (read-only audit; the desktop tree was never modified)
-**Source:** `~/workspace/morrow-fix` (desktop Morrow worktree, Mac repo, read-only)
+**Source:** `~/workspace/morrow-fix` (Morrow Desktop worktree, Mac repo, read-only)
 **Target:** `~/workspace/morrow-for-muse-deploy` (Muse product)
 
 Braden's worry was direct: the desktop was three parts (desktop app, bridge, MCP server) and the Muse version is one connector with no MCP. This audit maps every part and every subsystem, names exactly what made it across and what did not, and ranks the gaps.

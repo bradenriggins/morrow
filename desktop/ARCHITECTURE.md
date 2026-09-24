@@ -3,7 +3,7 @@
 Morrow is one local operations layer between an MCP-compatible AI client and a course platform. Canvas and Moodle work through a signed-in Chrome session. Blackboard works through the official Anthology Learn REST API with a local credential and no browser, and no live Blackboard tenant has been tested. [LIMITATIONS.md](LIMITATIONS.md) holds the canonical platform sentence and the evidence for each platform.
 
 ```text
-Morrow desktop app
+Morrow Desktop
   writes the client configuration, verifies the sealed MCP payload,
   delivers Morrow Bridge, writes the optional Blackboard tenant file
                          |
@@ -131,7 +131,7 @@ Learner identities are redacted inside this child before any result leaves it. W
 
 ### Desktop app and installer
 
-The Morrow desktop app is an Electron application in `installer/`. It sets Morrow up, repairs it, and updates it. It is not in the request path: no assistant request passes through it.
+Morrow Desktop is an Electron application in `installer/`. It sets Morrow up, repairs it, and updates it. It is not in the request path: no assistant request passes through it.
 
 It owns:
 

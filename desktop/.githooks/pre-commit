@@ -1,7 +1,12 @@
 #!/bin/sh
-# Runs the test suite of each product this commit changes, as the path filters
-# in .github/workflows/ci.yml do: a product's directory, the workflows, and the
-# root files that product's tests read (desktop/scripts/test/lib/ci-path-filters.mjs).
+# Runs what CI (.github/workflows/ci.yml) runs for the staged paths: the
+# repository text gates on every commit, and each product's suite steps when
+# the change matches that product's path filter, which
+# desktop/scripts/test/lib/ci-path-filters.mjs reproduces from the workflow.
+# It runs the suite commands, not the dependency installs that prepare them
+# and not the browser harnesses, which need a display this machine may not
+# have. scripts/test/pre-commit-hook.test.mjs holds both sides to ci.yml, so
+# they cannot drift.
 # Install once, from the repository root: git config core.hooksPath desktop/.githooks
 set -eu
 
@@ -10,14 +15,26 @@ STAGED=$(git diff --cached --name-only)
 GIT_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars)
 unset $GIT_LOCAL_ENV_VARS
 
+# check-repository has no path filter: the text gates read every tracked file.
+(cd "$REPO_ROOT" && node --test desktop/scripts/test/no-em-dash.test.mjs desktop/scripts/test/product-claims.test.mjs desktop/scripts/test/repository-policy.test.mjs desktop/scripts/test/ci-path-filters.test.mjs)
+
 if printf '%s\n' "$STAGED" | grep -Eq '^(desktop/|\.github/|\.gitattributes$|docs/versioning\.md$)'; then
-  (cd "$REPO_ROOT/desktop" && pnpm test)
+  # check-desktop's suite step: pnpm check runs the dependency audit, the
+  # generated checks, and the suites (pnpm test ends with the installer suites).
+  (cd "$REPO_ROOT/desktop" && pnpm check)
 fi
 
 if printf '%s\n' "$STAGED" | grep -Eq '^(morrow-for-muse/|\.github/|\.gitattributes$|\.gitignore$|LICENSE$)'; then
-  # The Muse learner-privacy tests need 'cryptography' and skip without
-  # it; the suite then ends with a loud warning. MORROW_MUSE_PYTHON picks
-  # a python that has it (pip install -r morrow-for-muse/requirements-optional.txt).
+  # check-muse's four suite steps in order. The learner-privacy pytest tests
+  # need 'cryptography' and skip without it; MORROW_MUSE_PYTHON picks a python
+  # that has it (pip install -r morrow-for-muse/requirements-optional.txt).
+  # $RUNNER_TEMP becomes a fresh directory here, removed with the commit.
   MUSE_PYTHON=${MORROW_MUSE_PYTHON:-python3}
-  (cd "$REPO_ROOT/morrow-for-muse" && "$MUSE_PYTHON" -m pytest -q)
+  MUSE_TEMP=$(mktemp -d "${TMPDIR:-/tmp}/morrow-pre-commit-muse.XXXXXX")
+  trap 'rm -rf "$MUSE_TEMP"' EXIT
+  cd "$REPO_ROOT/morrow-for-muse"
+  "$MUSE_PYTHON" -m pytest -q
+  bash scripts/dev-suites.sh --show-failures
+  python3 scripts/carve.py --out "$MUSE_TEMP/morrow-muse-connector"
+  bash "$MUSE_TEMP/morrow-muse-connector/scripts/install-suites.sh" --show-failures
 fi

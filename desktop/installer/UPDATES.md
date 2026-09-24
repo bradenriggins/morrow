@@ -1,6 +1,6 @@
 # Desktop update maintainer guide
 
-This guide defines the update boundary for the packaged Morrow desktop app. It
+This guide defines the update boundary for the packaged Morrow Desktop app. It
 does not publish a release. The fixed future provider is GitHub repository
 `bradenriggins/morrow-downloads`, channel `latest`, with feed ID
 `morrow-github-stable`. The repository has no signed public release yet, so the

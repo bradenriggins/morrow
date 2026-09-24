@@ -1,7 +1,7 @@
 # Student privacy boundary
 
-Faithful Python port of the desktop Morrow source privacy boundary
-(historical provenance: the desktop Morrow monorepo, not shipped in this package):
+Faithful Python port of the Morrow Desktop source privacy boundary
+(historical provenance: the Morrow Desktop monorepo, not shipped in this package):
 
 - `origin-morrow/packages/gateway-core/src/source-mcp-privacy.ts`
 - `origin-morrow/packages/gateway-core/src/privacy.ts` (1,585 lines)
