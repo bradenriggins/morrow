@@ -24,8 +24,9 @@ before anything was sent: a task name that is not the tested request,
 a never-dispatch read, three paused-change approvals, and an
 unrecognized failure before a write was claimed), less the 14 modes
 retired on 2026-09-23 for lanes that do not ship (Moodle, the raw HTTPS
-lane's access token, the form and browser-task lanes): 95 entries at
-failures/catalog.json.
+lane's access token, the form and browser-task lanes), plus the
+educator-disconnect mode and the a11y-target-not-covered mode: 97
+entries at failures/catalog.json.
 """
 import os as _home_os, sys as _home_sys  # noqa: E401
 _home_sys.path.insert(0, _home_os.path.join(
@@ -53,8 +54,8 @@ def _check(cond, reason):
 
 def main():
     catalog = load_catalog()
-    _check(len(catalog.entries) == 95,
-           "expected 95 merged entries, got %d" % len(catalog.entries))
+    _check(len(catalog.entries) == 97,
+           "expected 97 merged entries, got %d" % len(catalog.entries))
     _check(catalog.by_id["unknown"].get("fallback") is True,
            "unknown entry must be the fallback")
 

@@ -66,7 +66,10 @@ def _bindir(bindir, work):
     """Every tool on PATH except crontab and curl; python3 is this
     interpreter; stubs for ss and flock where the machine lacks them
     (macOS); a curl that answers the Canvas address probe from a file
-    and passes every other call to the real curl."""
+    and passes every other call to the real curl; and a CDP-capable
+    fake Chromium so the helper the installer launches can actually
+    come up (install.sh fails the install when the helper does not,
+    and a helper whose Chromium cannot start never serves /status)."""
     os.makedirs(bindir)
     for name in ("python3", "python"):
         path = os.path.join(bindir, name)
@@ -104,10 +107,96 @@ done
 exec "%s" "$@"
 """ % (page, page, real_curl))
     os.chmod(os.path.join(bindir, "curl"), 0o755)
+    # keepalive's identity helpers read /proc; the rig points PROC_ROOT
+    # at a scratch /proc (the tree's own test seam) so the holder proof
+    # can find the pipe browser this rig launches on any platform. The
+    # helper server's identity (exact server.py argv element + cwd) is
+    # recorded by the python3 wrapper: keepalive's kill path proves the
+    # port holder is this tree's server before it kills it.
+    proc_root = os.path.join(work, "proc")
+    os.makedirs(proc_root)
+    with open(os.path.join(bindir, "python3"), "w") as fh:
+        fh.write("""#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    */helper/server.py)
+      d="$PROC_ROOT/$$"
+      mkdir -p "$d"
+      : > "$d/cmdline"
+      for x in "$@"; do printf '%%s\\0' "$x" >> "$d/cmdline"; done
+      ln -sfn "$PWD" "$d/cwd"
+      break ;;
+  esac
+done
+exec "%s" "$@"
+""" % sys.executable)
+    os.chmod(os.path.join(bindir, "python3"), 0o755)
     chrome = os.path.join(bindir, "fake-chromium")
     with open(chrome, "w") as fh:
-        fh.write('#!/bin/sh\nif [ "$1" = "--version" ]; then '
-                 'echo "Chromium 152.0.7977.90"; exit 0; fi\nexit 1\n')
+        fh.write('#!/usr/bin/env python3\n'
+                 'import json, os, select, sys, time\n'
+                 'if sys.argv[1:] and sys.argv[1] == "--version":\n'
+                 '    print("Chromium 152.0.7977.90")\n'
+                 '    sys.exit(0)\n'
+                 '# The pipe CDP fake: reads CDP on fd 3, answers on fd 4.\n'
+                 '# Records its argv in the rig\'s fake /proc so keepalive\'s\n'
+                 '# pipe-holder proof can verify the browser identity.\n'
+                 '_proc = os.environ.get("PROC_ROOT")\n'
+                 '_mydir = os.path.join(_proc, str(os.getpid())) if _proc else None\n'
+                 'if _mydir:\n'
+                 '    os.makedirs(_mydir, exist_ok=True)\n'
+                 '    with open(os.path.join(_mydir, "cmdline"), "wb") as _fh:\n'
+                 '        _fh.write(b"\\0".join(a.encode() for a in sys.argv) + b"\\0")\n'
+                 'def _rm():\n'
+                 '    if _mydir:\n'
+                 '        import shutil\n'
+                 '        shutil.rmtree(_mydir, ignore_errors=True)\n'
+                 '_url = "about:blank"\n'
+                 'def _answer(method, params):\n'
+                 '    global _url\n'
+                 '    if method == "Target.getTargets":\n'
+                 '        return {"targetInfos": [{"targetId": "tab-1",\n'
+                 '                                 "type": "page", "title": "",\n'
+                 '                                 "url": _url, "attached": True}]}\n'
+                 '    if method == "Target.createTarget":\n'
+                 '        return {"targetId": "tab-1"}\n'
+                 '    if method == "Target.attachToTarget":\n'
+                 '        return {"sessionId": "s-1"}\n'
+                 '    if method == "Page.navigate":\n'
+                 '        _url = (params or {}).get("url") or _url\n'
+                 '        return {"frameId": "f-1", "loaderId": "l-1"}\n'
+                 '    if method == "Network.getCookies":\n'
+                 '        return {"cookies": [{"name": "canvas_session",\n'
+                 '                             "domain": ".instructure.com",\n'
+                 '                             "expires": time.time() + 86400 * 30}]}\n'
+                 '    if method == "Runtime.evaluate":\n'
+                 '        expr = (params or {}).get("expression", "")\n'
+                 '        value = (json.dumps({"href": _url})\n'
+                 '                 if "location.href" in expr else "")\n'
+                 '        return {"result": {"type": "string", "value": value}}\n'
+                 '    return {}\n'
+                 '_buf = b""\n'
+                 'try:\n'
+                 '    while True:\n'
+                 '        if not select.select([3], [], [], 5)[0]:\n'
+                 '            continue\n'
+                 '        chunk = os.read(3, 65536)\n'
+                 '        if not chunk:\n'
+                 '            break\n'
+                 '        _buf += chunk\n'
+                 '        while b"\\0" in _buf:\n'
+                 '            _msg, _buf = _buf.split(b"\\0", 1)\n'
+                 '            if not _msg.strip():\n'
+                 '                continue\n'
+                 '            _req = json.loads(_msg)\n'
+                 '            _res = _answer(_req.get("method", ""),\n'
+                 '                           _req.get("params") or {})\n'
+                 '            os.write(4, json.dumps(\n'
+                 '                {"id": _req.get("id"), "result": _res}).encode()\n'
+                 '                + b"\\0")\n'
+                 'finally:\n'
+                 '    _rm()\n')
+        os.chmod(chrome, 0o755)
     os.chmod(chrome, 0o755)
     assert shutil.which("crontab", path=bindir) is None
     return chrome, page
@@ -143,6 +232,7 @@ def rig():
     env = {"PATH": os.path.join(work, "bin"), "HOME": home,
            "MORROW_HOME": os.path.join(home, ".morrow"),
            "CHROMIUM_BIN": chrome, "LANG": "C.UTF-8", "MORROW_CRON": "0",
+           "PROC_ROOT": os.path.join(work, "proc"),
            "https_proxy": "http://muse:proxy@127.0.0.1:9"}
     rig = {"tree": out, "env": env, "home": env["MORROW_HOME"],
            "page": page}

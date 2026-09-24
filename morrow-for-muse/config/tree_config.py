@@ -17,10 +17,10 @@ keepalive.sh and helper/server.py use:
 normalize_tenant_base() is the tenant rule the packet requires the
 installer and the helper to share (muse UX audit 3, item
 muse-ux3/installer-probes-before-tenant-rules): install.sh validates
-CANVAS_BASE with it BEFORE the curl probe, so a pasted
-https://user:pw@host, an http:// address, a private IP literal, or an
-unconfirmed custom domain fails the install with the helper's plain
-reason instead of being sent to the network.
+CANVAS_BASE with it BEFORE the curl probe, so a pasted address that
+embeds an account and password, an http:// address, a private IP
+literal, or an unconfirmed custom domain fails the install with the
+helper's plain reason instead of being sent to the network.
 
 Stdlib only.
 """

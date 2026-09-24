@@ -1071,12 +1071,12 @@ else
   # Muse UX audit 3 (2026-09-23): the helper's tenant rule runs BEFORE
   # the network probe, from the shared validator in
   # config/tree_config.py (the same function the helper uses). A pasted
-  # https://user:pw@host, an http:// address, a private IP literal, or
-  # an unconfirmed custom domain now fails the install with the
-  # helper's plain reason instead of being sent to the network (the old
-  # probe sent embedded credentials over plain HTTP and reached
-  # addresses the helper then refused, with no reason on the helper's
-  # later refusal).
+  # address that embeds an account and password, an http:// address, a
+  # private IP literal, or an unconfirmed custom domain now fails the
+  # install with the helper's plain reason instead of being sent to the
+  # network (the old probe sent embedded credentials over plain HTTP
+  # and reached addresses the helper then refused, with no reason on
+  # the helper's later refusal).
   _TENANT_CHECK="$(cd / && python3 -c "
 import sys
 sys.path.insert(0, '${TREE}')

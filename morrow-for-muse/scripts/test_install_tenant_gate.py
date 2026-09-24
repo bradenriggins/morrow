@@ -5,13 +5,14 @@ helper that will not come up fails the install.
 Failure modes this suite pins down (written before the fix; muse UX
 audit 3, finding muse-ux3/installer-probes-before-tenant-rules):
   1. install.sh step 10 checked only placeholders, then ran curl
-     against CANVAS_BASE. A pasted https://user:pw@host sent embedded
-     credentials to the network in the probe, an http:// address was
-     fetched over plain HTTP, a private IP literal was probed, and an
-     unconfirmed custom domain was probed and then refused by the
-     helper with only "WARNING: the helper did not come up" and
-     "Install complete" (exit 0). INSTALL.md step 3 promises the rules
-     are enforced by the installer and the helper before any probe.
+     against CANVAS_BASE. A pasted address that embeds an account and
+     password sent those credentials to the network in the probe, an
+     http:// address was fetched over plain HTTP, a private IP literal
+     was probed, and an unconfirmed custom domain was probed and then
+     refused by the helper with only "WARNING: the helper did not come
+     up" and "Install complete" (exit 0). INSTALL.md step 3 promises
+     the rules are enforced by the installer and the helper before any
+     probe.
   2. A keepalive failure at step 10 left the install "complete": the
      agent had no plain reason to relay.
 
