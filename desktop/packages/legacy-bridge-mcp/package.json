@@ -8,7 +8,9 @@
   "bin": {
     "morrow-legacy-bridge-mcp": "./dist/index.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist",
@@ -16,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.1.0",
     "@morrow/bridge-loopback": "workspace:*",
     "@morrow/bridge-protocol": "workspace:*",
     "@morrow/contracts": "workspace:*",
@@ -24,7 +26,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "ws": "^8.18.3",
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "ws": "^8.18.3"
   }
 }

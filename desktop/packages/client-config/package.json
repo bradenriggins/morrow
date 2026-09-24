@@ -25,7 +25,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/client": "2.1.0",
     "@morrow/contracts": "workspace:*",
     "smol-toml": "1.9.0"
   }
