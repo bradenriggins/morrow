@@ -368,7 +368,8 @@ def test_a_sign_in_that_died_at_the_roster_read_arms_the_resign_in_flow(
         monkeypatch):
     armed = []
     monkeypatch.setattr(ex, "_on_session_death",
-                        lambda op_id, name, evidence: armed.append(name))
+                        lambda op_id, name, evidence, write_sent=False:
+                        armed.append((name, write_sent)))
 
     class Dead(Canvas):
         def raw_request(self, method, url, headers, body, is_write=False,
@@ -378,7 +379,7 @@ def test_a_sign_in_that_died_at_the_roster_read_arms_the_resign_in_flow(
     session = Dead()
     with pytest.raises(ChromiumSessionDead):
         _show(session)
-    assert armed == ["canvas_show_page_courses"]
+    assert armed == [("canvas_show_page_courses", False)]
     assert ("GET", "/api/v1/courses/1/pages/week-1") not in session.paths()
 
 
