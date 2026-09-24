@@ -385,9 +385,10 @@ Installing and the docs:
 - The documented `python3 dispatch/executor.py` runs even when the
   computer's Python has another package named `dispatch` (on a Mac,
   PyObjC ships one). Every executor command failed there.
-- The shipped `transport/local_chromium_selftest.py` runs in the
-  release: its allowlist check no longer opens a file the release
-  leaves out.
+- The browser test `transport/local_chromium_selftest.py` is no longer
+  in the release. It runs in the source repository's checks
+  (`scripts/dev-suites.sh`) instead, and its allowlist check no longer
+  opens a file the release leaves out.
 - The installer's own notes match the install guide: upgrade by
   copying the new release over the installed folder (a new folder
   loses your Canvas address and sign-in), and 3 backups are kept.
