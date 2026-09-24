@@ -1,16 +1,14 @@
 # Dev-only dependencies for Morrow for Muse (exact pins, hash-locked 2026-09-21).
 #
-# DEV-ONLY, NEVER SHIPPED. These packages are imported only by
-# source-tree modules that the carve pipeline excludes from the carved
-# distribution (verified: the dist-wide AST import sweep shows no
-# `requests` import, and `moodle/`, `lanes/`, `qr-proof/` are absent
-# from the dist). Nothing in this file may ever be added to the
-# shipped surface or to requirements-optional.txt; the educator's
-# install stays stdlib-only (+ the optional hash-pinned cryptography).
+# This lock file is development-only and is never shipped. Requests is a
+# runtime dependency for the Moodle lane and is also pinned in
+# requirements-optional.txt. OpenCV is used only by the dev-only QR proof
+# tool and must not be added to the shipped package.
 #
 #   requests: the Moodle lane (moodle/session.py, moodle/login.py,
 #     moodle/probe.py, moodle/reauth.py) and the lane detector
-#     (lanes/detect.py). Pinned 2.34.2 (latest on PyPI 2026-09-21).
+#     (lanes/detect.py). Pinned 2.34.2 (latest on PyPI 2026-09-24); the
+#     runtime copy is in requirements-optional.txt.
 #   opencv-python-headless: qr-proof/qr_proof.py only (`cv2.imread`
 #     + QRCodeDetector on educator-supplied screenshots). Kept as the
 #     executable record of the QR-bootstrapped mobile OAuth proof.

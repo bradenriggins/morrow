@@ -7,8 +7,8 @@ https://meetmorrow.app/morrow-for-muse", then follow the conversation
 (`content/setup-guide.md` is the educator walkthrough and
 `FIRST_RUN.md` is the agent's first-hour checklist).
 
-This document takes you from a fresh Muse VM to a verified Canvas
-connection. Every step is executable as written; nothing here assumes
+This document takes you from a fresh Muse VM to a verified Canvas or
+Moodle connection. Every step is executable as written; nothing here assumes
 prior knowledge of the project.
 
 ## Prerequisites
@@ -24,6 +24,10 @@ prior knowledge of the project.
   refuses any file the release does not ship.
 - Python 3.11 or newer (`python3 --version`). (Python 3.10 is refused:
   it reaches security end-of-life in October 2026 per PEP 619.)
+- The Moodle session lane needs `requests`. Install it from the included,
+  hash-locked `requirements-optional.txt` in step 2.
+- Use an HTTPS Moodle address. `MOODLE_BASE_ALLOW_HTTP=1` is for test
+  fixtures or LAN-only development, never for a real school account.
 - The Python package `cryptography` for anything that touches student
   data: finding a student by name and reading the course roster.
   Morrow keeps student names and ids in an encrypted learner vault,
@@ -34,8 +38,8 @@ prior knowledge of the project.
   refused. Step 2 below installs it hash-pinned from the release
   (`python3 -m pip`, so pip must be available). Install step 1 checks
   for it and prints a warning (repeated at the end) when it is missing
-  or older than the pinned version. Everything else in the tree is
-  Python's standard library.
+  or older than the pinned version. The Moodle lane uses `requests`;
+  other runtime code uses Python's standard library.
 - `unzip`, to unpack the release (step 1).
 - The command-line tools the installer and keepalive use: `curl`, `ss`,
   `pgrep`, `flock`, and `openssl` (the helper's TLS selftest makes a
@@ -46,21 +50,21 @@ prior knowledge of the project.
 - Network egress from the VM, direct or via the VM's
   `https_proxy`/`HTTPS_PROXY` (authenticated or not). The installer
   needs `github.com` and `release-assets.githubusercontent.com` to
-  download the connector, your Canvas tenant, and `pypi.org` and
-  `files.pythonhosted.org` to install the student-data package. It
-  probes the Canvas tenant and tells you which mode it found.
-- Your Canvas tenant URL (e.g. `https://myschool.instructure.com`) and
-  the ability to sign in to it yourself (your SSO/MFA, on your phone).
+  download the connector, your Canvas or Moodle site, and `pypi.org` and
+  `files.pythonhosted.org` to install the optional runtime packages. It
+  probes the Canvas tenant when Canvas is configured.
+- The URL for your Canvas or Moodle site and the ability to sign in to it
+  yourself (your school sign-in and MFA, if required).
 
 ## Step 1: get the package and unzip it
 
-Download the Morrow for Muse 0.4.1 package:
+Download the Morrow for Muse 0.4.2 package:
 
 ```
-curl -fL -o morrow-muse-connector-0.4.1.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.1/morrow-muse-connector-0.4.1.zip
+curl -fL -o morrow-muse-connector-0.4.2.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.2/morrow-muse-connector-0.4.2.zip
 ```
 
-The `muse/v0.4.1` release page lists the same package. Do not install
+The `muse/v0.4.2` release page lists the same package. Do not install
 Morrow from another source.
 
 Unzip the release into the skills directory. Run these commands from
@@ -71,7 +75,7 @@ sign-in in `helper/profile/`.
 ```
 mkdir -p ~/workspace/skills
 rm -rf ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas/morrow-muse-connector
-unzip -q morrow-muse-connector-0.4.1.zip -d ~/workspace/skills/
+unzip -q morrow-muse-connector-0.4.2.zip -d ~/workspace/skills/
 cd ~/workspace/skills
 if [ -d morrow-canvas ]; then
   cp -R morrow-muse-connector/. morrow-canvas/
@@ -92,10 +96,10 @@ ship stays: your `helper/env`, your signed-in session
 Everything below assumes you are in the tree root
 (`~/workspace/skills/morrow-canvas/`).
 
-## Step 2: install the student-data package, then run install.sh
+## Step 2: install the optional runtime packages, then run install.sh
 
-First install the `cryptography` package the learner vault needs (see
-Prerequisites), hash-pinned from the tree:
+Install the hash-pinned packages before using the Moodle lane or Canvas
+student-data features:
 
 ```
 python3 -m pip install --require-hashes -r requirements-optional.txt
@@ -360,8 +364,9 @@ for the educator: the agent runs `plan-write`, shows the educator the
 change in plain words, and runs `approve-write` with their reply
 (`SKILL.md`, "Dispatching operations"). In edit mode, writes run
 without asking (deletions ask only when the educator turned on
-deletion confirmations). The v1 capability scope is declared in `SCOPE.md`:
-the live-proven Canvas core only.
+deletion confirmations). The provider scope is declared in `SCOPE.md`.
+Canvas catalog operations and the Moodle session lane have separate
+capability evidence.
 
 ## Disconnect (keep the install)
 

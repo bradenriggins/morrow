@@ -1,8 +1,13 @@
-# Optional dependencies for Morrow for Muse (exact pins, tested 2026-09-21).
+# Optional dependencies for Morrow for Muse (exact pins, tested 2026-09-24).
 #
-# install.sh and every selftest pass without these packages, but all
-# student-data work needs them. install.sh step 1 warns when they are
-# missing.
+# Canvas course-content work by student name needs cryptography. The
+# Moodle session lane needs requests. Install this file before using
+# either feature. install.sh and every selftest pass without these
+# packages.
+#
+#   requests: Moodle's session-authenticated API and form lane. The
+#     cookie jar and sesskey stay in memory; nothing writes their values.
+#     Latest stable release on PyPI when packaged: 2.34.2.
 #
 #   cryptography: the encrypted learner vault (privacy/core.py). Without
 #   it, Morrow refuses everything that touches student data (finding a
@@ -46,6 +51,22 @@
 # every --hash line below, then re-run the carve smoke so the dist is
 # validated against the new pin (W4-P2-21).
 --require-hashes
+requests==2.34.2 \
+    --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
+    --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
+charset-normalizer==3.5.1 \
+    --hash=sha256:c7b742bf31c88566b4bb6335a7f393bb322e580b6bb98df7bd0c25e6e3519ce8 \
+    --hash=sha256:b9af956078716df40d985fb0dfeb2c2120c5ca92ba4ff4b388acfd01cdc14d08 \
+    --hash=sha256:6117b84ea48435e5356dc737f5121485c30920ba43375fa7b434fd753df0eac3
+idna==3.20 \
+    --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c \
+    --hash=sha256:a7db850025b95ded1eae8a46181a1a6c56c92c96f0e2b005d9ff8dc0210cab44
+urllib3==2.8.0 \
+    --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \
+    --hash=sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63
+certifi==2026.7.22 \
+    --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775 \
+    --hash=sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55
 cryptography==50.0.1 \
     --hash=sha256:5dd9bda1c12b4162f6ff568eeb5e0ff956c28d14406e875cfe8a63a2d414ff20 \
     --hash=sha256:b8f852c65863251b9e3a1b8c150ce21e59b522dbb6a7d4bc80e680d38388e986 \

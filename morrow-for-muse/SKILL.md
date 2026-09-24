@@ -1,12 +1,22 @@
-# Morrow for Muse: Canvas connector (skill bundle)
+# Morrow for Muse: Canvas and Moodle connector (skill bundle)
 
-You are operating the Morrow for Muse connector, v0.4.1. It lets an educator
-work their Canvas courses through their Muse agent. The educator signs in
-once through the Canvas Login Helper; every Canvas operation then runs
-through the educator's own browser-owned session. No password, token, or
-cookie ever passes through you. v1 is Canvas-only.
+You are operating the Morrow for Muse connector, v0.4.2. It lets an educator
+work with Canvas or Moodle through their Muse agent. Canvas uses the Canvas
+Login Helper and the educator's browser-owned session. Moodle uses the
+separate session lane in `moodle/`. Never ask for, print, log, or store a
+password, cookie, sesskey, or token.
 
-## The one lane rule
+## Provider routing
+
+Use the course's actual platform. For Canvas, follow the Chromium lane below.
+For Moodle, read `moodle/README.md` and `moodle/SKILL.md` before connecting
+or dispatching an operation. Do not send Moodle operations through the Canvas
+executor. Keep student-level Moodle data out of Muse; calculate only the
+minimum approved aggregate needed for an answer. Each lane has its own
+capability evidence. Moodle proof does not prove a Canvas operation, or the
+reverse.
+
+## The Canvas lane rule
 
 Chromium is the ONLY lane for Canvas reads and writes. Every operation
 dispatches through `dispatch/executor.py` with `--backend chromium`, which
@@ -631,9 +641,10 @@ encrypted vault, live-proven learner-data rows dispatch de-identified
 (see "Privacy" below; fixture-proven, not yet live-proven end to end).
 Item Bank IB- rows marked live-proven
 dispatch through the executor's Item Banks SDK lane (see SCOPE.md for
-which ones). Out for v1: Moodle, Blackboard (an
-honestly-disclosed roadmap item, not a ship criterion), the retired form
-relay, and every row not marked live-proven. Full declaration:
+which ones). Out for v1: Blackboard (an honestly-disclosed roadmap item,
+not a ship criterion), the retired form relay, and every Canvas row not
+marked live-proven. Moodle uses its separate lane and site-level capability
+probe. Full declaration:
 `SCOPE.md`. Do not imply capabilities beyond it.
 
 ## What the tree holds
@@ -654,6 +665,8 @@ relay, and every row not marked live-proven. Full declaration:
   `live_behavior_check.py` (the manual live proof: session persistence
   across restarts, single-Chromium, dead-session redirect, and the
   plugin-attachment proof).
+- `moodle/`: the HTTPS Moodle session lane, capability probe, and
+  reauthentication rules. Read `moodle/SKILL.md` for its operation flow.
 - `content/`: educator-facing consent, setup, and revocation pages.
 - `proof-battery/OPERATION_CATALOG.md`: the op catalog with proof statuses.
 - `pack/`: `pack.json` (chromium lane pinned) and `deny-list.txt`.

@@ -152,7 +152,8 @@ rows (all pending or excluded), so the catalog gate refuses them.
 Learner-data gated: the family would dispatch only on the Chromium
 lane with the encrypted vault. See `knowledge/privacy-ferpa.md`.
 
-Moodle: proven in a sandbox, not packaged. **NOT IMPLEMENTED** here.
+Moodle has a separate packaged session lane. Follow `moodle/SKILL.md` and
+`SCOPE.md`; do not route Moodle operations through the Canvas catalog.
 Blackboard: no implementation exists. **NOT IMPLEMENTED** here (see
 `knowledge/blackboard-recovery.md` for the research status).
 

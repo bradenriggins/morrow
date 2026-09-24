@@ -5,12 +5,12 @@
 #    Like a release build, it refuses uncommitted changes under
 #    morrow-for-muse/, so commit the work under test first.
 # 2. Builds a Linux container that looks like the Muse VM: user `hatch`,
-#    Chromium at /opt/meta-chromium/chrome, curl/ss/pgrep/flock/crontab,
-#    and an authenticated https_proxy in the environment.
+#    Chromium at /opt/meta-chromium/chrome, curl/ss/pgrep/flock, no cron
+#    daemon, and an authenticated https_proxy in the environment.
 # 3. In a scratch HOME inside the container: unzips the release, runs
-#    install.sh, runs it again (idempotence), checks the keepalive cron
-#    entry, runs `bin/morrow disconnect --yes`, checks the entry and the
-#    profile are gone, then runs scripts/uninstall.sh --yes.
+#    install.sh, runs it again (idempotence), checks the active keepalive
+#    supervisor, runs `bin/morrow disconnect --yes`, checks supervision
+#    and the profile stop, then runs scripts/uninstall.sh --yes.
 # 4. Writes the full transcript to <repo>/dist/install-e2e.log and exits
 #    non-zero on the first failed step.
 #
@@ -72,13 +72,22 @@ docker run --rm --security-opt seccomp=unconfined \
     bash install.sh
     step "install.sh (rerun, idempotent)"
     bash install.sh
-    step "keepalive cron entry present exactly once"
-    crontab -l
-    [ "$(crontab -l | grep -c "helper/keepalive.sh")" = "1" ]
+    step "keepalive supervision is active"
+    CRON_NOW="$(crontab -l 2>/dev/null || true)"
+    if printf "%s\n" "$CRON_NOW" | grep -q "helper/keepalive.sh"; then
+      [ "$(printf "%s\n" "$CRON_NOW" | grep -c "helper/keepalive.sh")" = "1" ]
+      SUPERVISION="cron"
+    else
+      python3 helper/supervisor.py status | tee /dev/stderr | python3 -c "import json,sys; s=json.load(sys.stdin); assert s.get(\"method\") == \"loop\" and s.get(\"installed\") and s.get(\"running\"), s"
+      SUPERVISION="loop"
+    fi
     [ -d helper/profile ]
     step "bin/morrow disconnect --yes"
     python3 bin/morrow disconnect --yes
     ! crontab -l 2>/dev/null | grep -q "helper/keepalive.sh"
+    if [ "$SUPERVISION" = "loop" ]; then
+      python3 helper/supervisor.py status | tee /dev/stderr | python3 -c "import json,sys; s=json.load(sys.stdin); assert not s.get(\"installed\") and not s.get(\"running\"), s"
+    fi
     [ ! -e helper/profile ]
     [ -d ~/.morrow ]
     step "scripts/uninstall.sh --yes"

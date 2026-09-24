@@ -1,9 +1,13 @@
-# Moodle session lane (Morrow Direct)
+# Moodle session lane (Morrow for Muse)
 
-Live-proven against `https://sandbox.moodledemo.net` (Moodle 5.2, the
-official public demo; teacher account, published demo credentials).
-Proof: `../proof-battery/evidence/moodle-wave2/journal/moodle.jsonl`
-(the wave-2 live journal) and `../proof-battery/LEDGER.md` (M-W1, M-W2).
+This lane ships in Morrow for Muse 0.4.2 as a separate Moodle connection
+path. The root `SKILL.md` routes Moodle requests here; `INSTALL.md`
+explains the shared, hash-locked runtime dependencies.
+
+Live-proven against the official Moodle 5.2 public demo. Current
+operation statuses are in `../proof-battery/OPERATION_CATALOG.md`.
+Detailed sandbox journals and proof drivers stay in the source repository
+and are not included in the educator package.
 
 ## What this lane is
 
@@ -64,15 +68,10 @@ The bootstrap/discovery layer couples to these deployment details:
   bootstrap this way at all.
 - `probe.py` behavioral-tests the function set per tenant, but these
   bootstrap assumptions still have to hold first.
-- `proof_run.py`: the live write battery: reads, frozen plan, form-path
-  discussion create, frozen readback, form-path undo, verify-gone, with
-  before-state snapshot and leftover cleanup. Full cleanup verified.
-  (Lives at `../proof-battery/evidence/moodle-wave2/proof_run2.py`; the
-  name in this directory is historical.)
-- `journal/` is NOT kept here: live JSONL receipts live at
-  `../proof-battery/evidence/moodle-wave2/journal/moodle.jsonl`
-  (append-only by convention). Shapes, statuses, lengths, IDs only:
-  no cookie values, no sesskey values, no passwords, ever.
+- The live write battery verifies reads, a frozen plan, a forum-discussion
+  create, readback, undo, and absence. Its receipts stay in the source
+  repository. Runtime journals are local to the configured journal
+  directory and contain bounded receipts, not cookie or password values.
 - The live write batteries live in
   `../proof-battery/evidence/moodle-wave2/` (`proof_run2.py`,
   `discover_wave2.py` and friends), not in this directory.

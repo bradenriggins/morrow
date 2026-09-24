@@ -27,7 +27,7 @@
       "secret": false
     }
   },
-  "description": "Product pin set for Morrow for Muse. v1 ships the Chromium lane with no multi-step manifest entries: `entries` is intentionally empty (fail-closed: `execute --entry` refuses every entry name until entries are pinned here with sha256 verified against in-dist manifests). NOTE (2026-09-21): the 14 sha256 pins that used to live here were REMOVED, not re-pointed, because every pinned path pointed OUTSIDE the carved tree (../provision/manifests/*, ../catalog/a11y/*, ../../gap-audit/f13-test-manifest.json). In the shipped artifact those pins were unverifiable by the educator and protected nothing; shipping them implied a guarantee the dist could not keep.",
+  "description": "Product pin set for Morrow for Muse. Canvas operations use the Chromium lane. Moodle uses the separate HTTPS session lane in moodle/ and its site-level capability probe. There are no multi-step Canvas manifest entries: `entries` is intentionally empty (fail-closed: `execute --entry` refuses every entry name until entries are pinned here with sha256 verified against in-dist manifests). NOTE (2026-09-21): the 14 sha256 pins that used to live here were REMOVED, not re-pointed, because every pinned path pointed OUTSIDE the carved tree (../provision/manifests/*, ../catalog/a11y/*, ../../gap-audit/f13-test-manifest.json). In the shipped artifact those pins were unverifiable by the educator and protected nothing; shipping them implied a guarantee the dist could not keep.",
   "entries": [],
   "entry_count": 0,
   "governance": {
@@ -42,10 +42,11 @@
       "Session death: nothing is journaled; unjournaled op ids (never consumed) stay reusable. A retry needs a freshly signed approval and re-sign-in through the login helper.",
       "Write halt: if ~/.morrow/write_halt exists, all writes refuse.",
       "Fail closed: 4xx fails fast; uncertain writes are never retried.",
+      "Provider routing: Canvas catalog operations use the Chromium executor; Moodle operations use the separate moodle/ session lane and its site-level capability probe. Never route one provider through the other provider's executor.",
       "Learner data: operations whose responses carry people dispatch only on the Chromium lane with the encrypted learner vault, de-identified before the agent or the journal sees them; every other lane refuses them. Nothing is gated or restricted by tenant (parity law).",
-      "Scope: v1 is Canvas-only. Blackboard is an honestly-disclosed roadmap item, not a ship criterion."
+      "Scope: v1 includes the Canvas connector and separate Moodle session lane. Blackboard is an honestly-disclosed roadmap item, not a ship criterion."
     ]
   },
   "name": "morrow-for-muse-product",
-  "version": "0.4.1"
+  "version": "0.4.2"
 }
