@@ -49,6 +49,11 @@ let updateController = null;
 let updateSubscription = null;
 let updatesStarted = false;
 const rendererSmokeReceipt = requestedArgument("morrow-renderer-smoke-receipt");
+const rendererSmokeDiagnostic = rendererSmokeReceipt && testRoot
+  ? path.join(path.dirname(rendererSmokeReceipt), "renderer-diagnostic.json")
+  : null;
+const rendererSmokeStages = [];
+let rendererSmokeDiagnosticWrite = Promise.resolve();
 let rendererSmokeWindowReady = false;
 let rendererSmokeStateDelivered = false;
 let rendererSmokeStateRendered = false;
@@ -368,6 +373,19 @@ function rendererSmokeRequestIsValid() {
     && !requestedArgument("morrow-smoke-receipt");
 }
 
+function recordRendererSmokeStage(stage, detail = null) {
+  if (!rendererSmokeDiagnostic || !rendererSmokeRequestIsValid()) return;
+  rendererSmokeStages.push(detail === null ? { stage } : { stage, detail });
+  if (rendererSmokeStages.length > 30) rendererSmokeStages.shift();
+  const snapshot = {
+    schema: "morrow.desktop-renderer-smoke-diagnostic.v1",
+    stages: rendererSmokeStages
+  };
+  rendererSmokeDiagnosticWrite = rendererSmokeDiagnosticWrite
+    .then(() => fs.writeFile(rendererSmokeDiagnostic, `${JSON.stringify(snapshot)}\n`, { mode: 0o600 }))
+    .catch(() => {});
+}
+
 function completeRendererSmokeIfReady() {
   if (!rendererSmokeReceipt || !rendererSmokeWindowReady || !rendererSmokeStateRendered || rendererSmokeCompletion) return;
   rendererSmokeCompletion = writeSmokeReceipt(rendererSmokeReceipt, {
@@ -577,6 +595,22 @@ async function createWindow() {
       webSecurity: true
     }
   });
+  if (rendererSmokeReceipt) {
+    window.webContents.on("dom-ready", () => recordRendererSmokeStage("dom_ready"));
+    window.webContents.on("did-finish-load", () => recordRendererSmokeStage("load_finished"));
+    window.webContents.on("did-fail-load", (_event, errorCode) => {
+      recordRendererSmokeStage("load_failed", Number.isInteger(errorCode) ? errorCode : null);
+    });
+    window.webContents.on("render-process-gone", (_event, details) => {
+      const reasons = new Set(["clean-exit", "abnormal-exit", "killed", "crashed", "oom", "launch-failed", "integrity-failure"]);
+      recordRendererSmokeStage("render_process_gone", reasons.has(details?.reason) ? details.reason.trim() : "other");
+    });
+    window.webContents.on("console-message", (_event, level) => {
+      if (level >= 2) recordRendererSmokeStage("console_error");
+    });
+    window.webContents.on("unresponsive", () => recordRendererSmokeStage("unresponsive"));
+    recordRendererSmokeStage("window_created");
+  }
   mainWindow = window;
   window.once("closed", () => { if (mainWindow === window) mainWindow = null; });
   window.webContents.on("will-navigate", (event) => event.preventDefault());
@@ -767,13 +801,16 @@ async function startMorrow(lifecycle) {
   // other read, including the one on window focus, uses what Morrow already read.
   ipcMain.handle("installer:get-state", async (event, ...input) => {
     trusted(event);
+    if (rendererSmokeReceipt) recordRendererSmokeStage("state_requested");
     const result = await respond({ recheckAssistants: input[0]?.recheckAssistants === true });
+    if (rendererSmokeReceipt) recordRendererSmokeStage("state_replied");
     if (rendererSmokeReceipt) rendererSmokeStateDelivered = true;
     return result;
   });
   ipcMain.handle("installer:renderer-ready", async (event, ...input) => {
     trusted(event);
     noInput(input);
+    if (rendererSmokeReceipt) recordRendererSmokeStage("renderer_ready");
     markRendererSmokeStateRendered();
   });
   ipcMain.handle("installer:choose-workspace", async (event) => {

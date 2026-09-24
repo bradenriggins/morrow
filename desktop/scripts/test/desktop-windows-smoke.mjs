@@ -467,13 +467,24 @@ async function startInstalledMorrow(application, { testRoot, receiptPath, label 
 }
 
 async function startInstalledRenderer(application, { testRoot, receiptPath }) {
-  ensureSuccess(await run(application, [
+  const result = await run(application, [
     `--morrow-test-root=${testRoot}`,
     `--morrow-renderer-smoke-receipt=${receiptPath}`
   ], {
     timeoutMs: APP_TIMEOUT_MS,
     environment: { ...process.env, MORROW_INSTALLER_TEST_MODE: "1" }
-  }), "Installed Morrow renderer startup");
+  });
+  if (result.code !== 0) {
+    let diagnostic = null;
+    try {
+      const candidate = JSON.parse(await readFile(join(dirname(receiptPath), "renderer-diagnostic.json"), "utf8"));
+      if (candidate.schema === "morrow.desktop-renderer-smoke-diagnostic.v1" && Array.isArray(candidate.stages)) {
+        diagnostic = candidate.stages;
+      }
+    } catch { /* The diagnostic is supplementary to the smoke failure. */ }
+    const detail = [result.stderr, result.stdout].filter(Boolean).join("\n").slice(0, MAX_OUTPUT_BYTES);
+    throw new Error(`Installed Morrow renderer startup failed with exit ${result.code ?? "unknown"}${result.signal ? ` (${result.signal})` : ""}${detail ? `:\n${detail}` : ""}${diagnostic ? `\nRenderer stages: ${JSON.stringify(diagnostic)}` : ""}`);
+  }
   return waitForReceipt(receiptPath, RECEIPT_TIMEOUT_MS);
 }
 
