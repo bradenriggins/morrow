@@ -78,7 +78,7 @@ docker run --rm --security-opt seccomp=unconfined \
       [ "$(printf "%s\n" "$CRON_NOW" | grep -c "helper/keepalive.sh")" = "1" ]
       SUPERVISION="cron"
     else
-      python3 helper/supervisor.py status | tee /dev/stderr | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s["method"] == "loop" and s["installed"] and s["running"], s'
+      python3 helper/supervisor.py status | tee /dev/stderr | python3 -c "import json,sys; s=json.load(sys.stdin); assert s.get(\"method\") == \"loop\" and s.get(\"installed\") and s.get(\"running\"), s"
       SUPERVISION="loop"
     fi
     [ -d helper/profile ]
@@ -86,7 +86,7 @@ docker run --rm --security-opt seccomp=unconfined \
     python3 bin/morrow disconnect --yes
     ! crontab -l 2>/dev/null | grep -q "helper/keepalive.sh"
     if [ "$SUPERVISION" = "loop" ]; then
-      python3 helper/supervisor.py status | tee /dev/stderr | python3 -c 'import json,sys; s=json.load(sys.stdin); assert not s["installed"] and not s["running"], s'
+      python3 helper/supervisor.py status | tee /dev/stderr | python3 -c "import json,sys; s=json.load(sys.stdin); assert not s.get(\"installed\") and not s.get(\"running\"), s"
     fi
     [ ! -e helper/profile ]
     [ -d ~/.morrow ]
