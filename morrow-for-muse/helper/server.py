@@ -1169,16 +1169,28 @@ class HelperBrowser:
         # educator's session to network interception; file:, data:,
         # javascript:, and other exotic schemes are never legitimate
         # helper navigation targets. Raises ValueError otherwise.
+        # Muse UX audit 3 (2026-09-23): the URL must also be this
+        # tenant. The session browser holds the Canvas sign-in, so a
+        # navigation to any other HTTPS host (a vanity address, a
+        # lookalike domain) leaves the session uncountable by status()
+        # and lets the page drive the browser off the tenant playbook.
         if not isinstance(url, str) or not url:
             raise ValueError("refusing empty navigation target")
         try:
-            scheme = urllib.parse.urlsplit(url).scheme.lower()
+            split = urllib.parse.urlsplit(url)
+            scheme = split.scheme.lower()
         except ValueError:
             raise ValueError("refusing malformed navigation target")
         if scheme != "https":
             raise ValueError(
                 "refusing non-HTTPS navigation target: only https:// "
                 "targets are allowed")
+        if self.base_url and split.netloc \
+                and not url.startswith(self.base_url):
+            raise ValueError(
+                "refusing navigation off the Canvas tenant %s; the "
+                "helper's browser goes to your Canvas sign-in only" %
+                self.base_url.rstrip("/"))
         with self._lock:
             self.cdp.navigate(self.tab, url)
 

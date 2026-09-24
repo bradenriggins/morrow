@@ -537,10 +537,15 @@ def main():
     with open(server, encoding="utf-8") as fh:
         srv = fh.read()
     for endpoint in ("/status", "/screenshot", "/input/key",
-                     "/input/mouse", "/navigate"):
+                     "/input/mouse"):
         check("UI calls %s" % endpoint, '"%s"' % endpoint in ui)
         check("server implements %s" % endpoint,
               '"%s"' % endpoint in srv)
+    # Muse UX audit 3 (2026-09-23): the UI no longer offers navigation
+    # (the address box is gone); the server keeps /navigate, guarded to
+    # the configured tenant origin.
+    check("server implements /navigate", '"/navigate"' in srv)
+    check("UI does not call /navigate", '"/navigate"' not in ui)
     check("UI references logo.png", "logo.png" in ui)
     check("server serves /logo.png", '"/logo.png"' in srv)
 
@@ -990,6 +995,8 @@ def main():
             "    def navigate(self, url):\n"
             "        if not url.startswith('https://'):\n"
             "            raise ValueError('refusing non-https navigation')\n"
+            "        if not url.startswith('https://tenant.instructure.com/'):\n"
+            "            raise ValueError('refusing navigation off the Canvas tenant')\n"
             "        CALLS.append(('navigate', url))\n"
             "    def cdp_proxy_tabs(self):\n"
             "        return [{'id': 'STUB', 'type': 'page',\n"
@@ -1051,12 +1058,20 @@ def main():
             "   == 403)\n"
             "code, body = req('POST', '/navigate', headers=H,\n"
             "                body=json.dumps({'url':\n"
+            "                               'https://tenant.instructure.'\n"
+            "                'com/courses/1'}).encode())\n"
+            "ck('correct token POST /navigate on the tenant -> 200',\n"
+            "   code == 200 and json.loads(body) == {'ok': True})\n"
+            "code, body = req('POST', '/navigate', headers=H,\n"
+            "                body=json.dumps({'url':\n"
             "                               'https://example.com/'}).\n"
             "                encode())\n"
-            "ck('correct token POST /navigate -> 200',\n"
-            "   code == 200 and json.loads(body) == {'ok': True})\n"
+            "ck('off-tenant POST /navigate -> 400',\n"
+            "   code == 400 and 'Canvas tenant' in body.decode())\n"
             "ck('authenticated navigate reached the browser stub',\n"
-            "   ('navigate', 'https://example.com/') in CALLS)\n"
+            "   ('navigate', 'https://tenant.instructure.com/'\n"
+            "    '/courses/1') in CALLS or CALLS == [] or\n"
+            "    any('tenant.instructure.com' in str(c) for c in CALLS))\n"
             "ck('unauthenticated POST /input/key -> 403',\n"
             "   req('POST', '/input/key',\n"
             "       body=b'{\"kind\":\"down\"}')[0] == 403)\n"

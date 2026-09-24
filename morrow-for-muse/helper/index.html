@@ -64,19 +64,12 @@
     max-width: 34vw;
   }
 
-  #controls { display: flex; gap: 8px; align-items: center; }
-  #controls input {
-    background: #0e1020; color: var(--text);
-    border: 1px solid #3a4166; border-radius: 8px;
-    padding: 8px 10px; width: 240px; font-size: 13px;
-  }
-  #controls input:focus { outline: none; border-color: var(--morrow-blue); }
-  #controls button, .btn {
+  .btn {
     background: var(--morrow-blue); color: #fff; border: 0;
     border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 600;
     cursor: pointer;
   }
-  #controls button:hover, .btn:hover { filter: brightness(1.1); }
+  .btn:hover { filter: brightness(1.1); }
 
   /* ---------- signed-in banner ---------- */
   #done-banner {
@@ -143,7 +136,6 @@
 
   @media (max-width: 700px) {
     #url { display: none; }
-    #controls input { width: 150px; }
     .brand .sub { display: none; }
   }
 </style>
@@ -159,10 +151,6 @@
   </div>
   <span id="badge">checking&hellip;</span>
   <span id="url"></span>
-  <span id="controls">
-    <input id="tenant" placeholder="https://canvas.yourschool.edu" spellcheck="false" aria-label="Canvas site address">
-    <button id="go" type="button">Go</button>
-  </span>
 </header>
 
 <div id="done-banner" role="status">
@@ -195,9 +183,6 @@
   var noticeEl = document.getElementById("session-notice");
   var noticeBody = document.getElementById("session-notice-body");
   var urlEl = document.getElementById("url");
-  var errEl = document.getElementById("err");
-  var tenantInput = document.getElementById("tenant");
-  var goBtn = document.getElementById("go");
 
   // W3-P0-7: the server injects this tree's launch token into the
   // __HELPER_TOKEN__ placeholder when it serves this page. Every
@@ -348,49 +333,8 @@
     e.preventDefault();
     postKey("up", e.key, e.code, e.keyCode);
   });
-  // Note: no blur refocus here. Clicking the tenant field, badge, or header
-  // must not steal focus back mid-typing; clicking the stage image refocuses.
-
-  // --- tenant switcher: type a Canvas base URL, we navigate there ---
-  function goTenant() {
-    var raw = tenantInput.value.trim().replace(/\/+$/, "");
-    if (!raw) {
-      showErr("Enter your Canvas site address, like canvas.yourschool.edu.");
-      return;
-    }
-    var host = raw.replace(/^https?:\/\//i, "");
-    // Must be a plausible hostname (optional :port); no spaces, no path.
-    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d+)?$/i.test(host)) {
-      showErr("That does not look like a valid Canvas address. Type just the hostname, like canvas.yourschool.edu.");
-      return;
-    }
-    // Warn when the host does not look like a real Canvas tenant.
-    var bare = host.split(":")[0].toLowerCase();
-    if (bare.indexOf(".") === -1 ||
-        bare === "myschool" ||
-        bare === "canvas.instructure.com" ||
-        /(^|\.)example\./.test(bare) ||
-        bare === "example") {
-      showErr("That address does not look like your school\u2019s Canvas site. Use your school\u2019s Canvas hostname, like canvas.yourschool.edu.");
-      return;
-    }
-    clearErr();
-    var base = raw;
-    if (!/^https?:\/\//i.test(base)) base = "https://" + base;
-    fetch("/navigate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json",
-                 "X-Helper-Token": HELPER_TOKEN },
-      body: JSON.stringify({ url: base })
-    }).then(function () { stage.focus(); })
-      .catch(function (e) { showErr("Navigate failed: " + e.message); });
-  }
-  goBtn.addEventListener("click", goTenant);
-  tenantInput.addEventListener("keydown", function (e) {
-    if (e.key === "Enter") goTenant();
-    e.stopPropagation(); // don't forward the tenant box keystrokes to Canvas
-  });
-  tenantInput.addEventListener("keyup", function (e) { e.stopPropagation(); });
+  // Note: no blur refocus here. Clicking the badge or header must not
+  // steal focus back mid-typing; clicking the stage image refocuses.
 
   stage.focus();
 })();
