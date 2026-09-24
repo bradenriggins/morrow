@@ -104,11 +104,6 @@ Changes to your courses:
 - Discussion changes are refused until they are tested through the
   browser Morrow uses today; they were tested only through an older,
   retired route.
-- The question "who failed last week's quiz" is not in this version.
-  Reading quiz scores has not been tested on a real Canvas course, so
-  Morrow now says so at once. In 0.4.0 the docs offered it, and Morrow
-  read the course's students and quizzes, and could ask for your time
-  zone, before it refused. You can see scores in Canvas's Gradebook.
 - Morrow does only tasks we have tested on a real Canvas course, with
   no exception. In 0.4.0, the assistant could offer to run a task we
   had not tested if you approved it, although the consent page said

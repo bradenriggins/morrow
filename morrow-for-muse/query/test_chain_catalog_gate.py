@@ -165,6 +165,6 @@ def test_no_doc_offers_the_question_while_it_is_refused(capsys):
              for claim in AVAILABLE_CLAIMS
              if claim.lower() in " ".join(text.split()).lower()]
     assert found == []
-    assert "not in this version" in shown["bin/morrow --help"]
+    assert "not available in this version" in shown["bin/morrow --help"]
     skill = " ".join(shown["SKILL.md"].split())
     assert 'students scored under 70%"): not in this version' in skill
