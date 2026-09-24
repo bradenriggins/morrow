@@ -21,8 +21,7 @@ Student privacy:
 - Privacy fix: student names in course content are hidden too. In
   0.4.0, a page, an assignment description, or a quiz question that
   named a student reached the assistant as written. Now the assistant
-  sees the student's label there and in quiz titles, including the
-  quiz titles in the answer to "who failed last week's quiz". To do
+  sees the student's label there and in quiz titles. To do
   that, Morrow first reads the course's student list, and if it
   cannot, it reads and changes nothing in the course. When the
   assistant saves the content back, Morrow puts the real text back in:

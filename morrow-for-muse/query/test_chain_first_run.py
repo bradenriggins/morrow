@@ -48,6 +48,10 @@ class _FailingReader:
 def _run_no_tenant(monkeypatch, **kw):
     monkeypatch.setattr(C._live_read, "LiveReader", _BoomReader)
     monkeypatch.setattr(C._live_read, "tenant_base", lambda: "")
+    # Synthetic rows skip the live-proven gate that now refuses a live
+    # failed-students run before the tenant check, so the tenant and
+    # health classification paths stay testable (chain.py 2026-09-23).
+    kw.setdefault("synthetic_rows", [])
     with pytest.raises(ChainFailure) as ei:
         C.run_query("89585", "last_week", tenant_base=None, **kw)
     return ei.value
@@ -70,7 +74,8 @@ def _run_failing_health(monkeypatch, message):
                         lambda: "https://school.example.edu")
     with pytest.raises(ChainFailure) as ei:
         C.run_query("89585", "last_week",
-                    tenant_base="https://school.example.edu")
+                    tenant_base="https://school.example.edu",
+                    synthetic_rows=[])
     return ei.value
 
 

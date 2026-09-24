@@ -476,7 +476,7 @@ def t_translator():
               "not one it can run" in e.translated.agent_message)
     try:
         C.run_query("89585", "last_week", reader=FakeReader([], []), now_utc=NOW,
-                    tenant_base=_TEST_TENANT, timezone=CHI)
+                    tenant_base=_TEST_TENANT, timezone=CHI, synthetic_rows=[])
         check("tr/chainfailure-no-match", False, "no raise")
     except C.ChainFailure as e:
         check("tr/chainfailure-no-match",
@@ -490,7 +490,7 @@ def t_translator():
 
     try:
         C.run_query("89585", "last_week", reader=_BoomReader([], []), now_utc=NOW,
-                    tenant_base=_TEST_TENANT, timezone=CHI)
+                    tenant_base=_TEST_TENANT, timezone=CHI, synthetic_rows=[])
         check("tr/chainfailure-read-error", False, "no raise")
     except C.ChainFailure as e:
         check("tr/chainfailure-read-error",
@@ -502,8 +502,10 @@ def t_translator():
     # main()'s except clause catches ChainFailure: the old clause
     # caught TranslatedError (a dataclass, not an exception) and
     # raised TypeError whenever an error was in flight. Exercise the
-    # real CLI: no helper token file here, so the read fails closed,
-    # the CLI must print the translated message and exit 2.
+    # real CLI: the live-proven gate refuses the failed-students query
+    # before any Canvas read (the submissions read is not proven in
+    # this version), so the CLI must print the translated message and
+    # exit 2.
     import subprocess as _sp
     _proc = _sp.run(
         [sys.executable, os.path.join(_TREE_ROOT, "query", "chain.py"),
@@ -512,7 +514,7 @@ def t_translator():
         cwd=_TREE_ROOT, capture_output=True, text=True, timeout=120)
     check("tr/cli-exit-2", _proc.returncode == 2,
           "exit %s: %s" % (_proc.returncode, _proc.stderr[-200:]))
-    check("tr/cli-mode", "query-live-read-failed" in _proc.stdout,
+    check("tr/cli-mode", "catalog-not-proven" in _proc.stdout,
           _proc.stdout[-200:])
 
 

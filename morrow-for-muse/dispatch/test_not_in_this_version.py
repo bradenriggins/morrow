@@ -522,3 +522,36 @@ def test_a_course_event_is_refused_by_every_command(edit_mode, monkeypatch,
     assert code != 0 and "EvidenceHold" in out, out
     assert _writes(session) == []
     assert state["workflow_state"] == "available"
+
+
+def test_the_failed_students_query_is_documented_as_not_in_this_version():
+    # muse/query/chain.py failed-students (final sweep 2026-09-23,
+    # written before the fix): C-419 (the submissions read) is pending
+    # [LEARNER-DATA], so the query can never run live, while SKILL.md,
+    # INSTALL.md, install.sh, and CHANGELOG 0.4.1 presented it as a
+    # working capability. The query refuses before it reads anything,
+    # and the docs must say so, not offer it.
+    def read(*parts):
+        with open(os.path.join(TREE, *parts), encoding="utf-8") as fh:
+            return " ".join(fh.read().split())
+
+    skill = read("SKILL.md")
+    assert "who failed last week's quiz" in skill
+    assert "not in this version" in skill
+    assert "bin/morrow query --course" not in skill, (
+        "SKILL.md offers the failed-students query as a working "
+        "capability while C-419 is not live-proven")
+    # The lists of what cryptography enables name only the capabilities
+    # that work: no failed-students question, no grades, no submissions.
+    for doc in ("INSTALL.md", "install.sh"):
+        text = read(doc)
+        assert "the failed-students question" not in text, doc
+        assert "rosters, grades" not in text, doc
+        assert "and submissions" not in text, doc
+    changelog = read("CHANGELOG.md")
+    release_041 = changelog.split("## 0.4.1 (2026-09-23)")[1] \
+        .split("## 0.4.0")[0]
+    assert "who failed last week's quiz" not in release_041, (
+        "CHANGELOG 0.4.1 still claims the failed-students answer")
+    morrow = read("bin", "morrow")
+    assert "not available in this version" in morrow

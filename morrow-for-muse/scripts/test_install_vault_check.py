@@ -117,9 +117,14 @@ def test_install_warns_when_cryptography_is_missing(carved):
     assert WARNING in head, head
     assert "cryptography" in head
     assert INSTALL_CMD in head
-    for feature in ("by name", "failed", "grades",
+    for feature in ("by name", "rosters",
                     "names in course pages are hidden"):
         assert feature in head, (feature, head)
+    # The failed-students question is not in this version (its
+    # submissions read is not live-proven), so the warning no longer
+    # offers it as what cryptography enables.
+    for offered in ("failed-students", "grades", "submissions"):
+        assert offered not in head, (offered, head)
 
 
 def _vault_ready():
