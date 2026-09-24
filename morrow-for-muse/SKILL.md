@@ -207,7 +207,8 @@ run stops loudly instead of writing through a half-dead session:
    every write refuses while it stands.
 3. **Quarantine.** The in-flight op is parked in the quarantine ledger
    (`quarantine.jsonl`); nothing is retried against the dead session.
-   The educator is notified with the true paused-op count.
+   The educator is notified with the true count of paused changes, and
+   told which of them may already be in Canvas.
 4. **Verified resume.** The educator signs in again through the login
    helper's own browser tab (never the agent, never credentials to the
    agent). The agent runs `reauth/state_machine.py resume`: it reads
@@ -237,6 +238,13 @@ run stops loudly instead of writing through a half-dead session:
    run plan-write again for the same change, show the educator the new
    `approval_display`, and ask them to approve it. approve-write on the
    old op id is refused, because its approval was already used.
+   A change that was already on its way to Canvas when the session
+   ended (`state_machine.py status` shows `write_sent=True`) may
+   already be in Canvas, and its op id is used up: it is never sent
+   again. Read the item back with a live-proven read, tell the educator
+   what Canvas has, and prepare the change again only when that read
+   shows it is not there and the educator says so. `approve` on such an
+   op only takes it off the paused list; it sends nothing.
 
 `session.json.prev` (the superseded session record used for principal
 pinning) exists only between a re-auth start and its successful
@@ -546,7 +554,9 @@ both modes.
     that writes now apply without asking until edit mode is turned off;
     relay it.
   - `bin/morrow settings show|get KEY|set KEY VALUE`: booleans are `true`
-    or `false`. A set takes effect at once and is journaled. "Stop
+    or `false` (`on`/`off` and `yes`/`no` work too). A refused value
+    names the words the setting accepts. A set takes effect at once and
+    is journaled. "Stop
     asking me to confirm deletions" is `settings set
     confirm_destructive_writes false`; "always confirm deletions" is
     `... true`.
@@ -590,9 +600,9 @@ both modes.
   detailed, default balanced), `failure_verbosity` (concise | detailed,
   default detailed), `proactivity` (reactive | suggestive, default
   reactive), `read_confirmations` (bool, default off), `work_summary`
-  (brief | full, default full), `default_course_id` (course id or
-  empty, default empty), and `timezone` (IANA name or empty, default
-  empty; the failed-students query uses it). Every one of these except
+  (brief | full, default full), `default_course_id` (the Canvas
+  course number, or empty; default empty), and `timezone` (IANA name
+  or empty, default empty; the failed-students query uses it). Every one of these except
   `timezone` is an instruction to you: read it with `bin/morrow settings
   show` and follow it as you work; no code enforces it. Educator docs:
   `settings/README.md`.
@@ -801,8 +811,10 @@ The educator names students; you never guess which one they mean.
 
 1. The educator names a student. Run `bin/morrow students find --course C
    --conversation-id <this conversation's id> "<the name exactly as the
-   educator typed it>"`. It reads the course roster through the login
-   helper and prints one JSON object.
+   educator typed it>"`. It checks that the helper is signed in to the
+   Canvas account pinned at first sign-in (a different account is
+   refused before anything is read, and writes pause), then reads the
+   course roster through the login helper and prints one JSON object.
 2. `status: resolved`: one student matched. Use `student` (the
    label) or `shown_as` ("Jane Doe (Student A3)") wherever a write
    needs that student. From now on in this conversation, outputs show
@@ -818,6 +830,9 @@ The educator names students; you never guess which one they mean.
    concluded enrollments (`--include-inactive`, `--include-concluded`).
    `status: refused` or `error`: nothing was looked up. Relay
    `message` and follow `next_step`; `correlation_id` is the reference.
+   A course Canvas cannot find (mode `canvas-not-found`) has the wrong
+   number: find the course by name and run the lookup again with its
+   number.
    `--course` takes only the course's Canvas number, never its SIS
    form: find the course by name (canvas_list_courses) first.
 5. Write by label: put the label (or the `shown_as` form) where the

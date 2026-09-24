@@ -109,7 +109,6 @@ ONBOARDED_SENTINEL="${MORROW_HOME}/onboarded"
 INSTALLED_VERSION_FILE="${MORROW_HOME}/installed-version"
 INSTALLED_MANIFEST_FILE="${MORROW_HOME}/installed-manifest.json"
 CRON_MARKER="# morrow-muse-connector-keepalive"
-HELPER_PORT="${LOGIN_HELPER_PORT:-8901}"
 
 # P0-14: no Python step of this installer may write bytecode into the
 # tree. The import probes (steps 3-4) also run with cwd outside the tree
@@ -1049,6 +1048,8 @@ if [ -f "${TREE_ENV_FILE}" ]; then
   # shellcheck disable=SC1090
   . "${TREE_ENV_FILE}"
 fi
+# Read after helper/env: keepalive starts the helper on the port pinned there.
+HELPER_PORT="${LOGIN_HELPER_PORT:-8901}"
 if [ -z "${CANVAS_BASE:-}" ] && [ -f "${LEGACY_ENV_FILE}" ]; then
   # Legacy global env: CANVAS_BASE only (W2-P1-27).
   _LEGACY_CB="$(sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}CANVAS_BASE=\(.*\)/\2/p' "${LEGACY_ENV_FILE}" | tail -1)"

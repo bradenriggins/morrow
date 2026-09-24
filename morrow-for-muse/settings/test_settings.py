@@ -935,10 +935,12 @@ class Lane4HardeningTest(unittest.TestCase):
                                   educator_confirmed=True)
 
     def test_new_settings_boundaries_accepted(self):
-        store.set_setting(self.user, "default_course_id", "a" * 64,
+        # The longest Canvas course number the executor accepts.
+        longest = "1" + "9" * 19
+        store.set_setting(self.user, "default_course_id", longest,
                           educator_confirmed=True)
         self.assertEqual(store.get_setting(self.user, "default_course_id"),
-                         "a" * 64)
+                         longest)
         store.set_setting(self.user, "default_course_id", "",
                           educator_confirmed=True)
         self.assertEqual(store.get_setting(self.user, "default_course_id"),

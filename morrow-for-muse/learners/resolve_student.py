@@ -535,12 +535,23 @@ def _parse_link_next(headers):
     return None
 
 
+class RosterHttpError(RuntimeError):
+    """Canvas answered a list read with a non-2xx status. status and body
+    are Canvas's own answer, so the caller can say what it means."""
+
+    def __init__(self, status, url, body):
+        super().__init__("roster fetch failed: HTTP %d at %r" % (status, url))
+        self.status = status
+        self.body = (body or "")[:2000]
+
+
 def fetch_paginated(fetcher, first_url, *, max_pages=100):
     """Follow a Canvas paginated list. Returns (items, pages_fetched).
 
     fetcher(url) -> (status:int, headers:dict, body_text:str).
-    Non-2xx raises RuntimeError (fail-closed: a partial roster must
-    never resolve). A non-list body raises RuntimeError.
+    Non-2xx raises RosterHttpError, a RuntimeError (fail-closed: a
+    partial roster must never resolve). A non-list body raises
+    RuntimeError.
     """
     items = []
     url = first_url
@@ -555,8 +566,7 @@ def fetch_paginated(fetcher, first_url, *, max_pages=100):
         status, headers, body_text = fetcher(url)
         pages += 1
         if not (200 <= status < 300):
-            raise RuntimeError(
-                "roster fetch failed: HTTP %d at %r" % (status, url))
+            raise RosterHttpError(status, url, body_text)
         try:
             body = json.loads(body_text) if body_text else []
         except ValueError:
@@ -599,8 +609,68 @@ def users_url(tenant_base, course_id, *, per_page=100):
     return "%s/api/v1/courses/%s/users?%s" % (base, course_id, query)
 
 
+class PrincipalMismatch(RuntimeError):
+    """The helper is signed in to a Canvas account other than the pinned
+    one. Nothing was read, and writes are paused."""
+
+
+class PrincipalNotPinned(RuntimeError):
+    """The record of the pinned Canvas account cannot be trusted, so the
+    signed-in account cannot be checked. Nothing was read."""
+
+
+class AccountCheckFailed(RuntimeError):
+    """Reading which Canvas account is signed in gave no account back.
+    Nothing was read."""
+
+
+def check_signed_in_account(fetcher, tenant_base):
+    """Refuse unless the helper browser is signed in as the pinned
+    account, as the Chromium lane refuses (transport/chromium_session.py
+    _verify_principal). With no account pinned yet there is nothing to
+    compare, so reads run, as they do on that lane. A different account
+    pauses writes (the re-auth write halt) before the refusal."""
+    from reauth import state_machine as rsm
+    try:
+        pin = rsm.pinned_principal()
+    except rsm.PrincipalPinError as exc:
+        raise PrincipalNotPinned(
+            "the record of the pinned Canvas account cannot be trusted "
+            "(%s); nothing was read" % exc)
+    if pin is None:
+        return
+    status, _headers, body = fetcher(
+        check_tenant_base(tenant_base) + "/api/v1/users/self")
+    if status == 401 and "unauthenticated" in (body or ""):
+        raise HelperSignedOut(
+            "GET /api/v1/users/self answered 401 unauthenticated")
+    try:
+        me = json.loads(body) if status == 200 else None
+    except ValueError:
+        me = None
+    live_id = me.get("id") if isinstance(me, dict) else None
+    if live_id in (None, ""):
+        raise AccountCheckFailed(
+            "GET /api/v1/users/self did not return the signed-in account "
+            "(HTTP %s); nothing was read" % status)
+    if str(live_id) != str(pin.get("id")):
+        try:
+            rsm.impose_halt({"signal": "principal_mismatch",
+                             "cause": "different_account_signed_in"},
+                            reason="a different Canvas account is signed "
+                                   "in to the helper",
+                            cause="account_mismatch")
+        except Exception:
+            pass
+        raise PrincipalMismatch(
+            "the Canvas account signed in to the helper is not the pinned "
+            "account; nothing was read, and writes are paused")
+
+
 def fetch_course_candidates(fetcher, tenant_base, course_id, *, per_page=100):
-    """Fetch and normalize the student candidate pool for a course."""
+    """Fetch and normalize the student candidate pool for a course, after
+    the check that the pinned account is the one signed in."""
+    check_signed_in_account(fetcher, tenant_base)
     raw_users, pages = fetch_paginated(
         fetcher, users_url(tenant_base, course_id, per_page=per_page))
     candidates = []

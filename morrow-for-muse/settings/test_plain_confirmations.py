@@ -11,12 +11,20 @@ audit 2026-09-22):
      "Consequential because it steers where writes land".
   3. A refused value relayed the validator's text ("must be one of
      ['balanced', ...], got 'loud'", "unknown IANA timezone").
+  4. (round-2 finding muse-ux-r2-settings-refusal-names-refused-values)
+     a refusal named choices the same command refused: booleans "can
+     only be on or off" while only true and false were accepted, and
+     verbosity "short, normal, or detailed updates" while only concise,
+     balanced, and detailed were. Every refusal now names the words the
+     command accepts, each with its plain meaning, and booleans accept
+     on/off and yes/no as well as true/false.
 Each change now answers in one short message the educator can read:
 what changed and what it means for them, each fact once.
 
 Hermetic: MORROW_HOME is a tmp dir (conftest isolates HOME).
 """
 
+import json
 import re
 
 import pytest
@@ -98,7 +106,7 @@ def test_every_setting_change_is_one_plain_message(cmd, key, value, words):
 
 
 @pytest.mark.parametrize("key,value,words", [
-    ("verbosity", "loud", "short, normal, or detailed"),
+    ("verbosity", "loud", "concise (short updates)"),
     ("timezone", "Mars/Olympus", "America/Denver"),
     ("default_course_id", "12 345", "course number"),
 ])
@@ -110,3 +118,33 @@ def test_a_refused_value_is_explained_plainly(cmd, key, value, words):
     assert words in message, message
     for word in ("IANA", "must be one of", "got '", "chars of"):
         assert word not in message, (word, message)
+
+
+def _cli(cmd, capsys, *argv):
+    code = cmd.main(list(argv) + ["--user-id", "u1"])
+    out = json.loads(capsys.readouterr().out)
+    return code, out
+
+
+# Every word a refusal offers must be one the same command accepts. The
+# refusal names each accepted word followed by its meaning in brackets.
+@pytest.mark.parametrize("key", sorted([
+    "default_mode", "verbosity", "failure_verbosity", "proactivity",
+    "work_summary", "confirm_destructive_writes", "read_confirmations"]))
+def test_every_choice_a_refusal_names_is_accepted(cmd, capsys, key):
+    code, out = _cli(cmd, capsys, "settings", "set", key, "loud")
+    assert code != 0 and out["status"] == "error", out
+    offered = re.findall(r"([a-z]+) \(", out["message"])
+    assert len(offered) >= 2, out["message"]
+    for word in offered:
+        code, done = _cli(cmd, capsys, "settings", "set", key, word)
+        assert code == 0 and done["status"] == "done", (word, done)
+
+
+@pytest.mark.parametrize("word,value", [
+    ("on", True), ("off", False), ("yes", True), ("no", False),
+    ("true", True), ("false", False)])
+def test_booleans_take_the_educators_words(cmd, capsys, word, value):
+    code, out = _cli(cmd, capsys, "settings", "set", "read_confirmations",
+                     word)
+    assert code == 0 and out["value"] is value, out

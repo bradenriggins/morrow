@@ -195,8 +195,8 @@
       "severity_hint": "low",
       "root_cause": "Canvas answers 404 when the course, page, assignment, or other item in the request does not exist at that address: it was deleted, its address changed (a renamed page gets a new address), or the id is wrong. The executor fails fast on a 4xx: nothing was saved, and the op id is released.",
       "is_not": "This is not an expired sign-in, not a permission refusal, and not a change that might have applied.",
-      "agent_message": "What was attempted: {operation}. What the evidence showed: Canvas could not find it (status 404), and said: {validation_messages} (reference {correlation_id}). What this means: nothing changed in Canvas. The item may have been deleted or renamed, or the course or item number is wrong. What happens next: I can look the item up again in the course and try again with what I find. A change still needs your approval first.",
-      "auto_action": "Tell the educator nothing changed; list that kind of item in the course again to find its current id or address (a renamed page has a new address), then prepare the request again; never resend the same request",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Canvas could not find it (status 404), and said: {validation_messages} (reference {correlation_id}). What this means: nothing changed in Canvas. The course number or the item's number may be wrong, or the item was deleted or renamed. What happens next: I will look up the course and the item again by name, and try again with what I find. A change still needs your approval first.",
+      "auto_action": "Tell the educator nothing changed. When Canvas could not find the course itself (its student list answered 404), the course number is wrong: find the course by name (canvas_list_courses) and use the number from there. Otherwise list that kind of item in the course again to find its current id or address (a renamed page has a new address). Then prepare the request again; never resend the same request",
       "escalate_when": "never; Canvas found nothing at that address and nothing changed",
       "signature": {
         "provider": "canvas",
@@ -757,7 +757,7 @@
       "severity_hint": "high",
       "root_cause": "Verified in code: dispatch/executor.py _read_course_roster_first reads the course's whole student list (every enrollment state, and deleted enrollments) before a Chromium-lane dispatch reads or changes anything in the course, so student names in course content can be replaced by labels. When that read fails (a Canvas error, a partial list, or a malformed record), the dispatch refuses before the course is touched.",
       "is_not": "This is not an expired sign-in (that is its own message) and not a refusal of the task itself. Nothing in the course was read or changed.",
-      "agent_message": "What was attempted: I tried {operation}. What the evidence showed: before Morrow reads or changes anything in a course, it reads the course's student list so it can hide student names in what Canvas returns, and that list could not be read this time. What this means: nothing in the course was read or changed, so no student name reached me. What happens next: I will try once more. If it fails again, check that your Canvas account can open the People page of this course; Morrow needs that to keep student names hidden.",
+      "agent_message": "What was attempted: I tried {operation}. What the evidence showed: before Morrow reads or changes anything in a course, it reads the course's student list so it can hide student names in what Canvas returns, and that list could not be read this time (reference {correlation_id}). What this means: nothing in the course was read or changed, so no student name reached me. What happens next: I will try once more. If it fails again, check that your Canvas account can open the People page of this course; Morrow needs that to keep student names hidden.",
       "auto_action": "Retry the same request once; never read the course another way while the student list is unreadable.",
       "escalate_when": "Surface to the educator when a retry fails, with the People page check.",
       "signature": {
@@ -773,6 +773,7 @@
       "signature_notes": "evidence: \"dispatch/executor.py CourseRosterUnavailable from _read_course_roster_first\"; gate: \"CourseRosterUnavailable\"",
       "severity_hint_inventory": "provider",
       "placeholders": [
+        "correlation_id",
         "operation"
       ]
     },

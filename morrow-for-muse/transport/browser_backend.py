@@ -111,12 +111,13 @@ from config.paths import morrow_home  # noqa: E402
 from item_bank_sdk import _is_quiz_api_host  # noqa: E402
 
 
-def _on_browser_session_death(op_id, entry_name, evidence):
+def _on_browser_session_death(op_id, entry_name, evidence, write_sent=False):
     """W4-P2-1: run the re-auth state machine when the browser lane
     detects session death: impose the write halt, quarantine the op,
     write the educator notification. Called after detection and before
     the BrowserSessionDead raise, so the run stops instead of writing
     through a half-dead session. Best effort: never masks the raise.
+    write_sent is True when the write already reached Canvas.
     """
     try:
         from reauth import state_machine as _rsm
@@ -129,7 +130,8 @@ def _on_browser_session_death(op_id, entry_name, evidence):
     except Exception:
         pass
     try:
-        _rsm.quarantine_op(op_id, entry_name, str(evidence)[:200])
+        _rsm.quarantine_op(op_id, entry_name, str(evidence)[:200],
+                           write_sent=write_sent)
     except Exception:
         pass
 from privacy import learner_vault as _vault  # noqa: E402
@@ -2917,7 +2919,8 @@ def complete_browser_verify(op_id, report_text, lane_state=None,
         _on_browser_session_death(
             op_id, (entry or {}).get("name", "browser_verify"),
             "browser session died during the verify phase; the write "
-            "itself already returned 2xx (see the pending file)")
+            "itself already returned 2xx (see the pending file)",
+            write_sent=True)
         raise BrowserSessionDead(
             "browser session died during the verify phase; the write itself "
             "already returned 2xx (see the pending file), re-run verify with "

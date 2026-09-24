@@ -330,7 +330,8 @@ def test_verify_session_death_is_uncertain_with_the_uncertain_message(
     # armed instead of arming it for every later test.
     armed = []
     monkeypatch.setattr(ex, "_on_session_death",
-                        lambda op_id, name, evidence: armed.append(op_id))
+                        lambda op_id, name, evidence, write_sent=False:
+                        armed.append((op_id, write_sent)))
 
     def handler(m, u, b):
         if m == "POST":
@@ -349,7 +350,9 @@ def test_verify_session_death_is_uncertain_with_the_uncertain_message(
     rec = ex.find_journal_op("11111111-1111-4111-8111-111111111111")
     assert rec.get("uncertain") is True
     assert rec.get("verification") == "uncertain"
-    assert armed == ["11111111-1111-4111-8111-111111111111"]
+    # The write was sent before the session died: the paused change is
+    # recorded as one Canvas may already hold.
+    assert armed == [("11111111-1111-4111-8111-111111111111", True)]
 
 
 def test_proven_verify_mismatch_is_failed_and_not_uncertain():

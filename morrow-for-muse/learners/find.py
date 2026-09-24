@@ -103,6 +103,30 @@ def _helper_failure(course_id, exc):
     return _failure("error", course_id, evidence)
 
 
+def _roster_failure(course_id, exc):
+    """The funnel's evidence for a roster read that failed. Canvas's own
+    answer for the course reaches the educator: 404 means Canvas has no
+    such course for this account (the number may be wrong), 401 or 403
+    that the account may not open it. Anything else is the course's
+    student list that could not be read."""
+    status = getattr(exc, "status", None)
+    body = getattr(exc, "body", "") or ""
+    if status == 401 and "unauthenticated" in body:
+        return {"error": "SessionDead", "provider": "helper",
+                "session_dead_signal": True,
+                "detail": "the student list read answered 401 "
+                          "unauthenticated"}
+    if status in (401, 403, 404):
+        return {"error": "ProviderHttpError", "provider": "canvas",
+                "http_status": status, "operation_kind": "read",
+                "body_text": body,
+                "detail": "the student list of course %s answered HTTP %s"
+                          % (course_id, status)}
+    return {"error": "CourseRosterUnavailable",
+            "detail": "the student list of course %s could not be read: "
+                      "%s" % (course_id, exc)}
+
+
 def _tokens(text):
     return set(rs.fuzzy_key(text).split())
 
@@ -287,10 +311,14 @@ def _find_student(fetcher, tenant_base, course_id, query, *,
     try:
         candidates, _ev = rs.fetch_course_candidates(fetcher, tenant_base,
                                                      course_id)
+    except (rs.PrincipalMismatch, rs.PrincipalNotPinned) as exc:
+        return _failure("refused", course_id, exc)
+    except rs.AccountCheckFailed as exc:
+        return _failure("error", course_id, exc)
+    except rs.HelperSignedOut as exc:
+        return _helper_failure(course_id, exc)
     except Exception as exc:
-        return _failure("error", course_id, {
-            "error": "LiveReadError", "provider": "canvas",
-            "detail": "the course roster read failed: %s" % exc})
+        return _failure("error", course_id, _roster_failure(course_id, exc))
     label_for = rs.vault_label_for(tenant_base, course_id, candidates) \
         if candidates else (lambda uid: None)
     states = set(rs.ACTIVE_STATES)

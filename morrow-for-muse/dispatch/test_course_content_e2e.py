@@ -232,7 +232,7 @@ def test_only_the_students_named_are_labeled_in_the_vault():
 # -- 3 ------------------------------------------------------------------------
 
 def test_when_the_roster_cannot_be_read_nothing_in_the_course_is_read():
-    session = Canvas(roster_status=403)
+    session = Canvas(roster_status=500)
     with pytest.raises(ex.CourseRosterUnavailable) as info:
         _show(session)
     assert ("GET", "/api/v1/courses/1/pages/week-1") not in session.paths()
@@ -241,6 +241,29 @@ def test_when_the_roster_cannot_be_read_nothing_in_the_course_is_read():
     from failures.translator import translate
     tr = translate("reading the page Week 1", info.value)
     assert tr.mode_id == "course-roster-unavailable", tr.mode_id
+
+
+# Round-2 finding muse-ux-r2-wrong-course-never-not-found (written before
+# the fix): every roster failure, a 404 for a course number that does
+# not exist included, became course-roster-unavailable ("I will try once
+# more"), so the agent retried a course number that cannot work. Canvas's
+# own answer for the course now reaches the educator: 404 is not found
+# (the course number is wrong), 401 and 403 are not permitted.
+@pytest.mark.parametrize("status,mode", [
+    (404, "canvas-not-found"), (403, "canvas-not-permitted"),
+    (401, "canvas-not-permitted")])
+def test_canvas_refusing_the_course_itself_is_said_plainly(status, mode):
+    session = Canvas(roster_status=status)
+    with pytest.raises(ex.ProviderHttpError) as info:
+        _show(session)
+    assert ("GET", "/api/v1/courses/1/pages/week-1") not in session.paths()
+    assert "student list of course 1" in str(info.value)
+    from failures.translator import translate
+    tr = translate("reading the page Week 1", info.value)
+    assert tr.mode_id == mode, tr.mode_id
+    assert "try once more" not in tr.agent_message
+    if status == 404:
+        assert "course number" in tr.agent_message
 
 
 # -- 4 ------------------------------------------------------------------------
@@ -368,7 +391,8 @@ def test_a_sign_in_that_died_at_the_roster_read_arms_the_resign_in_flow(
         monkeypatch):
     armed = []
     monkeypatch.setattr(ex, "_on_session_death",
-                        lambda op_id, name, evidence: armed.append(name))
+                        lambda op_id, name, evidence, write_sent=False:
+                        armed.append((name, write_sent)))
 
     class Dead(Canvas):
         def raw_request(self, method, url, headers, body, is_write=False,
@@ -378,7 +402,7 @@ def test_a_sign_in_that_died_at_the_roster_read_arms_the_resign_in_flow(
     session = Dead()
     with pytest.raises(ChromiumSessionDead):
         _show(session)
-    assert armed == ["canvas_show_page_courses"]
+    assert armed == [("canvas_show_page_courses", False)]
     assert ("GET", "/api/v1/courses/1/pages/week-1") not in session.paths()
 
 

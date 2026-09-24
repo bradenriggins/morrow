@@ -36,7 +36,14 @@ set -u
 
 TREE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TREE_REAL="$(readlink -f "${TREE}" 2>/dev/null || printf '%s' "${TREE}")"
-HELPER_PORT="${LOGIN_HELPER_PORT:-8901}"
+# The helper port resolves as helper/keepalive.sh resolves it: the
+# environment, then this tree's helper/env, then the default. A tree
+# that pins its own port there must be stopped on that port.
+HELPER_PORT="${LOGIN_HELPER_PORT:-}"
+if [ -z "${HELPER_PORT}" ] && [ -f "${TREE}/helper/env" ]; then
+  HELPER_PORT="$(grep -E '^[[:space:]]*LOGIN_HELPER_PORT=' "${TREE}/helper/env" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d "[:space:]\"'")"
+fi
+HELPER_PORT="${HELPER_PORT:-8901}"
 MORROW_HOME="${MORROW_HOME:-${HOME}/.morrow}"
 # Round-4 L3: the profile is the one keepalive.sh always uses
 # (<tree>/helper/profile; keepalive ignores LOGIN_HELPER_PROFILE_DIR).

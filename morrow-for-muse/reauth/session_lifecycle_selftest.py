@@ -244,9 +244,7 @@ def t_session_death_quarantine():
     rsm.impose_halt(detection,
                     reason="chromium session death (session_ended)")
     rsm.quarantine_session("session_ended", detection)
-    n_ops = len([o for o in rsm.quarantined_ops()
-                 if o.get("kind", "op") == "op"])
-    rsm.write_notify_expired(n_ops)
+    rsm.write_notify_expired(rsm.paused_ops())
     check("sess-quar: halt active after wiring",
           rsm.check_write_allowed()[0] is False)
     check("sess-quar: halt reason names the taxonomy cause",

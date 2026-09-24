@@ -162,15 +162,21 @@ def _bool_validator(value):
                                       % (value,))
 
 
+# The executor's numbered-course rule (dispatch/executor.py
+# _COURSE_NUMBER_RE): every course dispatch refuses anything else.
+_COURSE_NUMBER_RE = re.compile(r"[1-9][0-9]{0,19}")
+# What versions before 0.4.1 accepted as a default course id.
+_OLD_COURSE_ID_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
 def _course_id_validator(value):
     if not isinstance(value, str):
         raise SettingsValidationError("must be a string, got %r" % (value,))
     if value == "":
         return  # no default course: the agent asks when it needs one
-    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", value):
+    if not _COURSE_NUMBER_RE.fullmatch(value):
         raise SettingsValidationError(
-            "must be empty or 1-64 chars of letters, digits, underscore, "
-            "dot, or dash; got %r" % (value,))
+            "must be empty or a Canvas course number; got %r" % (value,))
 
 
 def _timezone_validator(value):
@@ -265,11 +271,13 @@ SETTINGS_SCHEMA = {
         "validate": _course_id_validator,
         "consequential": True,
         "description": (
-            "Your go-to course id. When you do not name a course, the "
-            "agent starts here without an extra check, as long as it is "
-            "unambiguous; it asks only when the target is genuinely "
-            "ambiguous or conflicts. Plan/Edit mode still governs write "
-            "approval as usual. Empty means no default: the agent asks. "
+            "Your go-to course, as its Canvas course number (the number "
+            "in the course's Canvas address). When you do not name a "
+            "course, the agent starts here without an extra check, as "
+            "long as it is unambiguous; it asks only when the target is "
+            "genuinely ambiguous or conflicts. Plan/Edit mode still governs "
+            "write approval as usual. Empty means no default: the agent "
+            "asks. "
             "Consequential because it steers where writes land. A "
             "preference the assistant follows as it works with you."),
     },
@@ -408,11 +416,18 @@ def _read_doc_locked(user_id):
     stored = doc["settings"]
     # Forward-compat: unknown stored keys are preserved, not rejected.
     # Known keys must validate, or the file is corrupt.
-    for key, value in stored.items():
+    for key, value in list(stored.items()):
         if key in SETTINGS_SCHEMA:
             try:
                 SETTINGS_SCHEMA[key]["validate"](value)
             except SettingsValidationError as exc:
+                if key == "default_course_id" and isinstance(value, str) \
+                        and _OLD_COURSE_ID_RE.fullmatch(value):
+                    # Saved by an older version that took any token. No
+                    # dispatch can use it, so it reads as no default; the
+                    # file stays trusted and the educator keeps their mode.
+                    del stored[key]
+                    continue
                 raise SettingsCorrupt(
                     "settings file %s holds invalid value for %r (%s); "
                     "refusing to guess." % (path, key, exc))

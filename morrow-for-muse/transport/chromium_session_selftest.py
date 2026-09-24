@@ -182,8 +182,9 @@ class _FakeRsm:
     def on_expiry_detected(self, detection, simulated=False):
         self.calls.append(("on_expiry_detected", detection, simulated))
 
-    def quarantine_op(self, op_id, action, summary="", detection=None):
-        self.calls.append(("quarantine_op", op_id, action))
+    def quarantine_op(self, op_id, action, summary="", detection=None,
+                      write_sent=False):
+        self.calls.append(("quarantine_op", op_id, action, write_sent))
 
     def write_notify_stale(self, n):
         self.calls.append(("write_notify_stale", n))
