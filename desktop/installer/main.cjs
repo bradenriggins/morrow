@@ -400,8 +400,16 @@ function completeRendererSmokeIfReady() {
 
 function markRendererSmokeWindowReady(window) {
   if (!rendererSmokeReceipt) return;
-  if (window.isDestroyed() || typeof window.isVisible !== "function" || window.isVisible() !== true) return;
+  if (window.isDestroyed()) {
+    recordRendererSmokeStage("window_not_ready", "destroyed");
+    return;
+  }
+  if (typeof window.isVisible !== "function" || window.isVisible() !== true) {
+    recordRendererSmokeStage("window_not_ready", "not_visible");
+    return;
+  }
   rendererSmokeWindowReady = true;
+  recordRendererSmokeStage("window_visible");
   completeRendererSmokeIfReady();
 }
 
@@ -621,6 +629,12 @@ async function createWindow() {
     if (window.isDestroyed()) {
       if (mainWindow === window) mainWindow = null;
       return null;
+    }
+    if (rendererSmokeReceipt) {
+      window.once("show", () => {
+        recordRendererSmokeStage("window_show_event");
+        markRendererSmokeWindowReady(window);
+      });
     }
     window.show();
     markRendererSmokeWindowReady(window);
