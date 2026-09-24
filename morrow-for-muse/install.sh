@@ -1032,7 +1032,11 @@ if [ "${_SUITES_RC}" -ne 0 ]; then
   _FAILED="$(printf '%s\n' "${_SUITES_OUT}" | sed -n 's/^FAIL //p' \
     | tr '\n' ' ')"
   [ -n "${_FAILED}" ] || _FAILED="scripts/install-suites.sh (exit ${_SUITES_RC}) "
-  fail "selftest" "${_FAILED}failed; run 'bash scripts/install-suites.sh --show-failures' from ${TREE} for details"
+  if [ "${MORROW_INSTALL_TEST_SHOW_SELFTEST_FAILURES:-0}" = "1" ]; then
+    fail "selftest" "${_FAILED}failed; suite output follows:"$'\n'"${_SUITES_OUT}"
+  else
+    fail "selftest" "${_FAILED}failed; run 'bash scripts/install-suites.sh --show-failures' from ${TREE} for details"
+  fi
 fi
 note "ok: ${_SUITES_OUT##*$'\n'}"
 unset _SUITES_OUT _SUITES_RC _FAILED
