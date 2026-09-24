@@ -31,6 +31,11 @@ sweep 2026-09-22):
      8901/19223. An agent that followed them on an educator's Muse
      computer would split the helper from the state and ports SKILL.md
      uses. Those steps belong to the dev-only install test.
+  8. SKILL.md's file list called the installer's sign-in notice a
+     "one-time onboarding notice", and FIRST_RUN.md and the
+     troubleshooting playbook called it one-time too, while SKILL.md's
+     install section (and install.sh) repeat it on every run until
+     sign-in completes (final sweep 2026-09-23).
 """
 
 import contextlib
@@ -231,3 +236,18 @@ def test_the_documented_mode_command_runs_from_the_tree_root(tmp_path):
     # 2) with its JSON message; it is found and it runs.
     assert proc.returncode != 127, proc.stderr
     assert json.loads(proc.stdout)["message"]
+
+
+def test_no_agent_page_calls_the_sign_in_notice_one_time():
+    for rel in ("SKILL.md", "FIRST_RUN.md", "INSTALL.md",
+                "knowledge/troubleshooting-playbook.md"):
+        text = _flat(rel)
+        assert not re.search(r"one-time (?:onboarding |sign-in )?notice",
+                             text), rel
+    assert "the sign-in notice (repeats until sign-in completes)" in \
+        _flat("SKILL.md")
+    with open(os.path.join(TREE, "install.sh"), encoding="utf-8") as fh:
+        install = fh.read()
+    # The installer writes the sentinel that stops the notice only after
+    # a signed-in session with stored cookies.
+    assert '"logged_in=true profile_has_cookies=true"' in install

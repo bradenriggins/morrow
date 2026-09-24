@@ -54,7 +54,7 @@ Say "use edit mode", "use edit mode for this conversation", or "turn off edit mo
 
 Your connection needs regular activity to stay alive, and a few ordinary things end it: signing out of Canvas inside the helper browser, your admin ending sessions, or your school's single sign-on logging you out in the background. Logging out on your laptop or phone does not end the helper's own session, because Canvas sessions are per-device. None of these are errors; they are re-authentication events.
 
-When it happens, Morrow notices the expired connection, stops any new changes immediately, tells you in plain language that your Canvas sign-in expired and that nothing was lost, and walks you through signing in once more on the helper page. After sign-in it checks that it is still you before resuming anything, and paused work resumes only with your fresh approval.
+When it happens, Morrow notices the expired connection, stops any new changes immediately, and tells you in plain language that your Canvas sign-in expired. It also tells you what happened to any change that was in progress. A change Morrow had not sent yet did not change anything in Canvas, and it waits for your OK before Morrow sends it. A change Morrow was sending when the connection ended may already be in Canvas, so Morrow does not send it again on its own: it checks the course first and asks for your OK before it prepares that change again. Then it walks you through signing in once more on the helper page, and after you sign in it checks that it is still you before it makes any change again.
 
 ## If something goes wrong during setup
 

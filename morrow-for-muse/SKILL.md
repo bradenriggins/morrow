@@ -645,8 +645,8 @@ relay, and every row not marked live-proven. Full declaration:
 - `install.sh`: the idempotent installer (Chromium locate, egress probe,
   `~/.morrow` layout, `helper/profile/` creation without ever wiping it,
   keepalive supervision (cron, or the background loop without cron),
-  helper launch, one-time onboarding notice, all 23
-  selftests, the secrets gate).
+  helper launch, the sign-in notice (repeats until sign-in completes),
+  all 23 selftests, the secrets gate).
 - `transport/`: the Chromium lane (`local_chromium.py`, `chromium_session.py`,
   `egress.py`, `proxy_forwarder.py`) and its selftests.
 - `dispatch/`: the governed executor, the admission gate, the policy, selftests.
@@ -698,7 +698,7 @@ beyond the examples above:
   memory-only rule); marks every unproven surface as NOT IMPLEMENTED
   or PENDING.
 - `knowledge/privacy-ferpa.md`: index of the privacy layer (learner
-  vault tokenization, when de-id applies, the opt-out override rule);
+  vault tokenization, when de-id applies, and why nothing turns it off);
   it indexes, never duplicates, the layer under `privacy/`.
 - `knowledge/api-catalog-guide.md`: the two catalogs (the 1137-op
   desktop research catalog vs the 457-row dispatch catalog), the

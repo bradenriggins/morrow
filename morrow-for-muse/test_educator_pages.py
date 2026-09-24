@@ -37,6 +37,10 @@ Failure modes this suite pins down (written before the fix; final sweep
      or "Марии" for Мария, reaches the assistant as written, and neither
      the policy, the consent page, nor the 0.4.1 notes said so (final
      sweep 2026-09-23).
+  7. consent.md said whether Morrow asks before a change "depends on
+     your mode, and only the mode decides". The "always confirm
+     deletions" setting also makes Morrow ask before a deletion in edit
+     mode (final sweep 2026-09-23).
 """
 
 import os
@@ -96,6 +100,13 @@ def test_consent_says_what_happens_after_a_change():
     assert "cannot undo a change automatically" in text
     for outcome in ("saved as asked", "could not confirm", "did not work"):
         assert outcome in text, outcome
+
+
+def test_consent_names_the_setting_that_asks_before_deletions():
+    text = _flat("content/consent.md")
+    assert "only the mode decides" not in text
+    assert ('In edit mode, you can also turn on "always confirm '
+            'deletions" so deletions still ask first.') in text
 
 
 def test_sign_out_is_done_on_the_helper_page_with_canvas_menu():
