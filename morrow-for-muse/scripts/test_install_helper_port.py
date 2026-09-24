@@ -17,6 +17,7 @@ so no helper starts and nothing leaves the machine.
 
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -65,6 +66,14 @@ def world(tmp_path):
     (tree / "helper" / "env").write_text(
         "CANVAS_BASE=https://school.instructure.com\n"
         "LOGIN_HELPER_PORT=18911\n")
+    # The step-10 tenant gate imports the tree's shared validator
+    # (config.tree_config, which pulls in config.paths), so the fake
+    # tree carries the real modules.
+    cfg = tree / "config"
+    cfg.mkdir()
+    for name in ("tree_config.py", "paths.py"):
+        shutil.copy(os.path.join(TREE, "config", name),
+                    str(cfg / name))
     _executable(str(tree / "helper" / "keepalive.sh"),
                 '#!/bin/bash\nexit "${FAKE_KEEP_RC}"\n')
     bindir = tmp_path / "bin"
