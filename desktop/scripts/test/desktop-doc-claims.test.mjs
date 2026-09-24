@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, posix } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -71,16 +71,26 @@ function writePayloadFile(payload, relative, content) {
 /**
  * Repository paths a document names inside backticks or a Markdown link, with
  * any trailing `:line` or `:line-line` reference removed. A path holding a
- * placeholder (`<version>`, `*`, `$`) is not a real path and is skipped.
+ * placeholder (`<version>`, `*`, `$`) is not a real path and is skipped. A
+ * Markdown link that leaves the desktop product, read from `doc`'s folder, is
+ * kept as `../<path>`, a file at the repository root.
  */
-function namedPaths(text) {
+function namedPaths(text, doc = "") {
   const found = new Map();
   const candidates = [
-    ...[...text.matchAll(/`([^`\n]+)`/g)].map(([, value]) => value),
-    ...[...text.matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map(([, value]) => value),
+    ...[...text.matchAll(/`([^`\n]+)`/g)].map(([, value]) => ({ raw: value, link: false })),
+    ...[...text.matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map(([, value]) => ({ raw: value, link: true })),
   ];
-  for (const raw of candidates) {
-    const target = raw.split("#")[0].replace(/:\d+(?:-\d+)?$/, "").replace(/^(?:\.\.\/)+/, "");
+  for (const { raw, link } of candidates) {
+    let target = raw.split("#")[0].replace(/:\d+(?:-\d+)?$/, "");
+    if (link && doc && target.startsWith("../")) {
+      const resolved = posix.normalize(posix.join(posix.dirname(doc), target));
+      if (resolved.startsWith("../") && !resolved.startsWith("../../") && !/[<>*$\s]/.test(resolved)) {
+        if (!found.has(resolved)) found.set(resolved, text.slice(0, text.indexOf(raw)).split("\n").length);
+        continue;
+      }
+    }
+    target = target.replace(/^(?:\.\.\/)+/, "");
     if (!target.includes("/") || /[<>*$\s]/.test(target)) continue;
     const first = target.split("/")[0];
     if (!REPOSITORY_ROOTS.has(first) && !LOCAL_EVIDENCE_ROOTS.has(first)) continue;
@@ -223,7 +233,7 @@ function artifactNames(config, platform, block, version) {
 test("every repository path the desktop documents name exists", () => {
   const missing = [];
   for (const doc of DOCS) {
-    for (const [target, line] of namedPaths(read(doc))) {
+    for (const [target, line] of namedPaths(read(doc), doc)) {
       if (LOCAL_EVIDENCE_ROOTS.has(target.split("/")[0])) continue;
       if (!present(target)) missing.push(`${doc}:${line} -> ${target}`);
     }
@@ -309,6 +319,23 @@ test("the README names the desktop artifacts the build configuration actually pr
   assert.match(readme, /Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature/,
     "README.md must state that nothing carries an Apple identity and that the macOS app is ad-hoc signed");
   assert.equal(typeof config.afterPack, "function", "the unsigned macOS bundle must be ad-hoc sealed after packing");
+});
+
+// electron-builder.config.cjs takes its target platform from MORROW_TARGET_PLATFORM
+// or the host, and `VAR=value command` does not run in PowerShell or cmd. Only the
+// package script sets that platform, checks the payload and the Authenticode table,
+// and writes the receipt.json the Windows smoke test requires.
+test("the Windows guide builds with the one command that writes the receipt the Windows smoke test needs", () => {
+  const guide = flat("installer/WINDOWS-DEPLOYMENT.md");
+  assert.match(read("installer/electron-builder.config.cjs"), /const targetPlatform = process\.env\.MORROW_TARGET_PLATFORM \|\| process\.platform;/);
+  assert.match(read("scripts/package-mcp-bundle.mjs"), /writeFileSync\(resolve\(staging, "receipt\.json"\)/);
+  assert.match(read("scripts/test/desktop-windows-smoke.mjs"), /packageReceipt: parsed\.get\("--package-receipt"\)/);
+  assert.ok(guide.includes("node scripts/package-mcp-bundle.mjs --target win32-x64 --unsigned-release --output <new absolute folder>"),
+    "the guide must build with the package script");
+  assert.doesNotMatch(guide, /package:win|--prepare-desktop-payload|MORROW_INSTALLER_PAYLOAD|MORROW_SIGNED_RELEASE/,
+    "the guide must not offer the builder step that skips the receipt and the final checks");
+  assert.match(guide, /`Morrow-<version>-win-x64\.exe` and `receipt\.json`/);
+  assert.match(guide, /\]\(\.\.\/\.\.\/docs\/versioning\.md\)/, "the guide must link the release procedure that smoke-tests that exact installer");
 });
 
 test("the README names the Bridge ZIP the package script writes and no Bridge version the manifest does not carry", () => {

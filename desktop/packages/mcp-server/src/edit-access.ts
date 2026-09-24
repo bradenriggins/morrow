@@ -62,7 +62,7 @@ function resultFor(prepared: BrowserEditAccessPrepared, result: BrowserEditAcces
 export function registerEditAccessTool(server: McpServer, runtime: GatewayRuntime): void {
   server.registerTool("morrow_request_edit_access", {
     title: "Set selected course access",
-    description: "Ask the person to turn on Edit for exact current course connections and selected kinds of change. Morrow opens a review page and returns its link; Edit turns on only when the person selects Turn on Edit there in Chrome with Morrow Bridge connected. Give them the link, then call morrow_operation_wait with edit_access_id. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings. Set Plan to return selected courses to Plan at once, with a fresh current readback.",
+    description: "Ask the person to turn on Edit for exact current course connections and selected kinds of change. Morrow opens a review page and returns its link; Edit turns on only when the person selects Turn on Edit there in Chrome with Morrow Bridge connected. The kinds join the Edit each course already has. Give them the link, then call morrow_operation_wait with edit_access_id. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings. Set Plan to return selected courses to Plan at once, with a fresh current readback.",
     inputSchema,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async (input): Promise<CallToolResult> => {

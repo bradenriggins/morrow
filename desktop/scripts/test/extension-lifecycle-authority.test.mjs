@@ -680,6 +680,35 @@ async function policySetMergeUnionScenario() {
   assert.equal(merged.revision, 2);
 }
 
+// An Edit access review from a conversation merges. The removal and the other kind the person
+// turned on in Plan and Edit settings stay on beside the reviewed kind, while the socket still
+// cannot add a removal itself.
+async function policySetMergeKeepsSettingsGrantScenario() {
+  const value = fixture();
+  await importWorker("policy-merge-keeps-settings");
+  const socket = await authenticate(value);
+  const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
+  const editable = options.result.options.filter((candidate) => candidate.availability === "edit");
+  const removal = editable.find((candidate) => candidate.destructive === true);
+  const [kept, requested] = editable.filter((candidate) => candidate.destructive !== true);
+  assert.ok(removal && kept && requested, "fixture catalog must offer an editable removal and two other editable actions");
+  const saved = await sendRuntime(value, { type: "morrow_edit_policy_save", sourceBindingId: bindingId, enabledCategories: [removal.id, kept.id].sort() }, settingsSender());
+  assert.equal(saved.ok, true);
+  const revision = value.local.values.editPolicyRevisions[bindingId];
+  const merge = policySetCommand({
+    requestId: "request-policy-merge-keeps-settings",
+    operationId: "operation-policy-merge-keeps-settings",
+    editPolicySet: { mode: "edit", merge: true, selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: revision, enabledCategories: [requested.id] }] },
+  });
+  socket.receive(merge);
+  const result = await eventually(() => socket.sent.find((message) => message.requestId === merge.requestId));
+  assert.equal(result.ok, true);
+  assert.equal(result.result.entries[0].code, undefined);
+  assert.equal(result.result.entries[0].state, "edit");
+  assert.deepEqual(value.local.values.editPolicies[bindingId].enabledCategories, [removal.id, kept.id, requested.id].sort());
+  assert.equal(value.local.values.editPolicies[bindingId].revision, revision + 1);
+}
+
 // WI-4.2: with no active grant to merge into, a merge command ("remember this kind") starts a
 // fresh grant, and that grant has no end time.
 async function policySetMergeFreshGrantScenario() {
@@ -1937,6 +1966,7 @@ const scenarios = {
   "edit-policy-expiry": () => editPolicyCancellationScenario("expiry"),
   "policy-merge-union": policySetMergeUnionScenario,
   "policy-merge-fresh": policySetMergeFreshGrantScenario,
+  "policy-merge-keeps-settings": policySetMergeKeepsSettingsGrantScenario,
   "policy-duration-refused": policySetDurationRefusedScenario,
   "policy-destructive-refused": policySetDestructiveRefusedScenario,
   "policy-merge-legacy": policySetMergeLegacyTimedScenario,
@@ -2087,6 +2117,10 @@ test("a policy-set merge unions new categories into an active grant, and neither
 
 test("a policy-set merge with no active grant starts a fresh grant with no end time", async () => {
   await isolatedScenario("policy-merge-fresh");
+});
+
+test("a policy-set merge keeps the removal and other kinds the person turned on in Plan and Edit settings", async () => {
+  await isolatedScenario("policy-merge-keeps-settings");
 });
 
 test("a policy-set that still names a duration is refused and saves nothing", async () => {

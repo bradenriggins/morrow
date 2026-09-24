@@ -2523,6 +2523,7 @@ class InstallerController {
       return typeof target === "string" && path.isAbsolute(target) ? [{ title: assistant.title, path: target }] : [];
     });
     const blackboard = blackboardPaths(this.home, "default");
+    const materials = this.workspace || record?.materialsFolder || this.paths.defaultMaterials;
     const snapshot = retentionSnapshot({
       platform: this.platform,
       userData: this.paths.userData,
@@ -2530,7 +2531,8 @@ class InstallerController {
       backups: this.paths.assistantBackups,
       bridge: this.paths.bridgeDirectory,
       // The materials folder this installation uses, named without creating it.
-      materials: this.workspace || record?.materialsFolder || this.paths.defaultMaterials,
+      materials,
+      previousMaterials: await this.earlierDefaultMaterials(materials),
       blackboardCredentials: blackboard.credentialDirectory,
       blackboardConfiguration: blackboard.config,
       assistantConfigurations,
@@ -2539,6 +2541,20 @@ class InstallerController {
     });
     const present = await Promise.all(snapshot.locations.map((location) => fs.lstat(location.path).then(() => true, () => false)));
     return { ...snapshot, locations: snapshot.locations.filter((_location, index) => present[index]) };
+  }
+
+  /**
+   * The default Materials folder that assistant setup made, when the person has
+   * since chosen another folder, or null. It keeps whatever was put in it. A
+   * default folder inside the chosen one belongs to the chosen folder.
+   */
+  async earlierDefaultMaterials(materials) {
+    const fallback = this.paths.defaultMaterials;
+    if (materials === fallback) return null;
+    const earlier = await fs.realpath(fallback).catch(() => null);
+    if (!earlier) return null;
+    const inUse = await fs.realpath(materials).catch(() => path.resolve(materials));
+    return insideDirectory(inUse, earlier) ? null : fallback;
   }
 
   /**

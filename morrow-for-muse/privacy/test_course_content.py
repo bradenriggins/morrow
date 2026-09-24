@@ -260,9 +260,12 @@ ZOE = {"id": "80003", "name": "Zoë Müller"}
 LIAM = {"id": "80004", "name": "Liam O'Brien"}
 LIAM_CURLY = {"id": "80005", "name": "Liam O\u2019Brien"}
 LUKASZ = {"id": "80006", "name": "Łukasz Strauß"}
+GUDRUN = {"id": "80007", "name": "Guðrún Þórsdóttir"}
+MARIJA = {"id": "80008", "name": "Marija Ħili"}
 MORE_LABELS = {"80001": "Student A5", "80002": "Student A6",
                "80003": "Student A7", "80004": "Student A8",
-               "80005": "Student A9", "80006": "Student A10"}
+               "80005": "Student A9", "80006": "Student A10",
+               "80007": "Student A11", "80008": "Student A12"}
 
 
 def _one(identity):
@@ -283,6 +286,10 @@ def _restore_one(identity):
     (LIAM, "Liam O\u2019Brien and O\u2018Brien wrote.", ("Liam", "Brien")),
     (LIAM_CURLY, "Liam O'Brien wrote; O'Brien agreed.", ("Liam", "Brien")),
     (LUKASZ, "Lukasz Strauss and Strauss.", ("Lukasz", "Strauss")),
+    (LUKASZ, "Lukasz STRAUẞ wrote.", ("Lukasz", "STRAU")),
+    (GUDRUN, "Gudrun Thorsdottir asked; Gudrun replied.",
+     ("Gudrun", "Thorsdottir")),
+    (MARIJA, "Marija Hili asked; Hili agreed.", ("Marija", "Hili")),
 ])
 def test_accents_and_apostrophes_do_not_hide_a_name(identity, text,
                                                     secrets):

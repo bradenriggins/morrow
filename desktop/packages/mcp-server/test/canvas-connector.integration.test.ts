@@ -1949,6 +1949,105 @@ describe("Canvas connector gateway path", () => {
     }
   }, CASE_TIMEOUT_MS);
 
+  it("records a connector batch change whose fresh read proved Canvas holds another result as failed, and pauses the batch", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-canvas-connector-batch-mismatch-"));
+    const port = await reserveLoopbackPort();
+    const runtime = await MorrowRuntime.connect(connectorConfig(directory, port), {
+      statePath: join(directory, "morrow.sqlite3"),
+      batchKeyPath: join(directory, "batch.key"),
+    });
+    const browserCatalogDigest = bridgeCatalogDigestForTests(resolve("../.."));
+    const binding = (courseId: string) => ({
+      sourceBindingId: `canvas:test-account:${courseId}`,
+      provider: "canvas" as const,
+      origin: "https://school.instructure.com",
+      courseId,
+      principalFingerprint: "c".repeat(64),
+      sessionGeneration: 1,
+      catalogDigest: browserCatalogDigest,
+      runtimeVerified: true,
+    });
+    let bridge: BridgeTestClient | undefined;
+    try {
+      bridge = await connectBridgeTestClient({
+        port,
+        token: "gateway-connector-secret-".repeat(3),
+        extensionId: "a".repeat(32),
+        catalogDigest: browserCatalogDigest,
+        bindings: [binding("41"), binding("42")],
+      });
+      let writeCommands = 0;
+      bridge.onCommand((command) => {
+        if (command.kind === "ui_state") {
+          bridge?.respond(command, {});
+          return;
+        }
+        if (command.kind === "invoke_write") {
+          writeCommands += 1;
+          // Canvas answered the change, and the Bridge's fresh read proved Canvas holds another value.
+          bridge?.respond(command, {
+            schema: "morrow.canvas-browser-result.v1",
+            ok: true,
+            sent: true,
+            status: 200,
+            data: { id: String(command.arguments?.course_id), hide_final_grades: false },
+            verification: {
+              schema: "morrow.browser-verification.v1",
+              status: "mismatch",
+              strategy: "fresh-target-read",
+              readTool: "canvas_get_a_single_course_courses",
+              evidence: "field_mismatch:hide_final_grades",
+            },
+          });
+          return;
+        }
+        const id = String(command.arguments?.id);
+        bridge?.respond(command, { schema: "morrow.canvas-browser-result.v1", ok: true, sent: true, status: 200, data: { id, name: `Course ${id}` } });
+      });
+
+      const created = await runtime.batchCreate({
+        name: "Hide final grades",
+        mode: "stage_writes",
+        concurrency: 1,
+        courseSet: { source: "explicit", courseIds: ["41", "42"], complete: true },
+        operations: ["41", "42"].map((courseId) => ({
+          childId: `course:${courseId}`,
+          courseId,
+          tool: "canvas_update_course_settings",
+          sourceBindingId: `canvas:test-account:${courseId}`,
+          arguments: { course_id: courseId, hide_final_grades: true },
+        })),
+      });
+      const batchId = String((created.batch as JsonObject).batchId);
+      const approvalUrl = String(created.approvalUrl);
+      await approveBatch(runtime.approval, approvalUrl);
+      await expect.poll(async () => (await (await fetch(`${approvalUrl}/status`)).json()).active).toBe(false);
+
+      expect(writeCommands).toBe(1);
+      const [first] = runtime.batchResultsPage({ batchId, limit: 10 }).children as JsonObject[];
+      expect(runtime.gateway.operationGet(String(first!.gatewayOperationId))).toMatchObject({ state: "failed", verificationStatus: "mismatch" });
+      const result = runtime.batchGet({ batchId });
+      expect(result.batch).toMatchObject({ state: "paused", pendingChildren: 1 });
+      expect(result.sourceSettlement).toMatchObject({
+        failedNoEffect: 0,
+        failedEffectPossible: 1,
+        inspectionRequired: 0,
+        unknown: 0,
+        requiresAttention: true,
+      });
+      expect(runtime.batchResultsPage({ batchId, limit: 10 }).children).toMatchObject([
+        { childId: "course:41", state: "failed", gatewayOperationState: "failed" },
+        { childId: "course:42", state: "pending" },
+      ]);
+      expect(runtime.sourceSettlements.get(batchId, "course:41")).toMatchObject({ state: "failed_effect_possible" });
+      expect(runtime.batchApprovalStatus(batchId)).toMatchObject({ states: { 0: "Did not save as approved", 1: "Not started" } });
+    } finally {
+      await bridge?.close();
+      await runtime.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, CASE_TIMEOUT_MS);
+
   it("pauses a connector batch whose Canvas answer was lost and keeps that change as one that may have been saved", async () => {
     const directory = mkdtempSync(join(tmpdir(), "morrow-canvas-connector-batch-lost-"));
     const port = await reserveLoopbackPort();

@@ -108,7 +108,7 @@ import {
 } from "@morrow/operation-journal";
 import { StdioMcpUpstream, UpstreamNotDispatchedError } from "@morrow/upstream-mcp";
 import { FileStageStore, MAX_STAGED_FILE_BYTES, type FileStageBinding, type FileStageScope } from "./file-staging.js";
-import { DESTRUCTIVE_EDIT_REFUSAL, EditAccessReviews } from "./edit-access-review.js";
+import { DESTRUCTIVE_EDIT_REFUSAL, EditAccessReviews, FIELD_SELECTION_EDIT_REFUSAL } from "./edit-access-review.js";
 import { validItemBankFanOutReceipt } from "./item-bank-fan-out.js";
 import { itemBankFanOutPlanRefusal } from "./item-bank-repair.js";
 import { readExactTrustFile, readExactTrustJson } from "./exact-trust-file.js";
@@ -767,6 +767,11 @@ export interface BrowserEditAccessSelection {
   readonly catalogDigest: string;
   readonly expectedPolicyRevision: number;
   readonly enabledCategories: readonly BrowserEditAccessCategory[];
+  /**
+   * The end time of the course's current grant, when it is one saved while Edit was timed. The
+   * reviewed kinds join that grant and end with it.
+   */
+  readonly grantEndsAt?: number;
 }
 
 export interface BrowserEditAccessCategory {
@@ -781,6 +786,8 @@ export interface BrowserEditAccessCategory {
   readonly learnerVisible?: boolean;
   readonly routine?: boolean;
   readonly rememberable?: boolean;
+  /** The Bridge grants no field of this action on its own, so Edit on it changes nothing. */
+  readonly requiresFieldSelection?: true;
 }
 
 export interface BrowserEditAccessPrepared {
@@ -2075,7 +2082,7 @@ export class GatewayRuntime {
    * Edit asked for in a conversation, waiting for the person's click on Morrow's review page. The
    * review server turns one on only with Morrow Bridge's signature over that click.
    */
-  readonly editAccessReviews = new EditAccessReviews((prepared) => this.applyBrowserEditAccess(prepared));
+  readonly editAccessReviews = new EditAccessReviews((prepared, options) => this.applyBrowserEditAccess(prepared, options));
   /**
    * Who each learner label on an open review is, keyed by review path, for Morrow Bridge only.
    * An entry ends with its review: when the change is cancelled, or 15 minutes after the review
@@ -3844,6 +3851,7 @@ export class GatewayRuntime {
         || (category.learnerVisible !== undefined && typeof category.learnerVisible !== "boolean")
         || (category.routine !== undefined && typeof category.routine !== "boolean")
         || (category.rememberable !== undefined && typeof category.rememberable !== "boolean")
+        || (category.requiresFieldSelection !== undefined && category.requiresFieldSelection !== true)
         || available.has(category.id)) {
         throw new Error("The selected browser course categories changed. Read current course connections and try again.");
       }
@@ -3864,6 +3872,7 @@ export class GatewayRuntime {
           ...(category.learnerVisible !== undefined ? { learnerVisible: category.learnerVisible as boolean } : {}),
           ...(category.routine !== undefined ? { routine: category.routine as boolean } : {}),
           ...(category.rememberable !== undefined ? { rememberable: category.rememberable as boolean } : {}),
+          ...(category.requiresFieldSelection === true ? { requiresFieldSelection: true as const } : {}),
         });
       }
     }
@@ -3873,6 +3882,7 @@ export class GatewayRuntime {
         if (reason !== null) throw new EditCategoryUnavailableError(id, reason);
         // A removal is turned on only by the person in Morrow Bridge settings, never from a conversation.
         if (available.get(id)?.destructive === true) throw new EditCategoryUnavailableError(id, DESTRUCTIVE_EDIT_REFUSAL);
+        if (available.get(id)?.requiresFieldSelection === true) throw new EditCategoryUnavailableError(id, FIELD_SELECTION_EDIT_REFUSAL);
       }
     }
     const selectedIds = input.enabledCategories ? [...input.enabledCategories] : [];
@@ -3886,6 +3896,8 @@ export class GatewayRuntime {
     if (mode === "plan" && input.enabledCategories !== undefined) {
       throw new Error("Plan access does not accept Edit categories.");
     }
+    const currentGrant = mode === "edit" && isJsonObject(binding.editPermission) ? binding.editPermission : null;
+    const grantEndsAt = typeof currentGrant?.expiresAt === "number" && Number.isSafeInteger(currentGrant.expiresAt) ? currentGrant.expiresAt : undefined;
     return {
       sourceBindingId,
       provider,
@@ -3897,6 +3909,7 @@ export class GatewayRuntime {
       catalogDigest,
       expectedPolicyRevision,
       enabledCategories: enabledCategories.filter((category): category is BrowserEditAccessCategory => Boolean(category)),
+      ...(grantEndsAt !== undefined ? { grantEndsAt } : {}),
     };
   }
 
@@ -3949,8 +3962,9 @@ export class GatewayRuntime {
     if (!source || !upstream) throw new Error("The current browser connection is unavailable.");
     const command = {
       mode: prepared.mode,
-      // `merge` is for rememberKind's own grant only (WI-4.3): every other caller of this method
-      // omits it, and the Bridge still replaces the category list then (F6).
+      // `merge` adds the sent kinds to the course's current grant, so nothing the person turned on
+      // ends. rememberKind (WI-4.3) and the Edit access review send it; without it the Bridge
+      // replaces the category list (F6).
       ...(prepared.mode === "edit" && options.merge ? { merge: true as const } : {}),
       selections: prepared.selections.map((selection) => ({
         sourceBindingId: selection.sourceBindingId,

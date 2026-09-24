@@ -344,7 +344,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
     return {
       summary: "Morrow needs repair",
       title: "Repair Morrow before you connect a course.",
-      copy: "Morrow did not confirm that its local runtime is ready. No course connection or course action will start from this state.",
+      copy: "Morrow could not confirm that it is ready to work. No course connection or course action will start from this state.",
       body: '<div class="blocked-box"><strong>Setup needs repair</strong><p>Repair checks the files inside Morrow and restores what it can. It replaces the Morrow Bridge folder from the copy Morrow ships when the folder on this computer does not match it. It writes Morrow&#39;s own entry in each assistant&#39;s settings file again and leaves the rest of that file as it is. It changes nothing in your course.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
     };
   }
@@ -402,7 +402,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
     return {
       summary: "Morrow is getting ready",
       title: "Morrow is getting ready.",
-      copy: "Morrow will show the next Bridge step when its local runtime is ready. It will not open Chrome setup before then.",
+      copy: "Morrow will show the next Bridge step when it has finished starting. It will not open Chrome setup before then.",
       body: '<div class="info-box"><strong>Local setup is still in progress</strong><p>Keep Morrow open, then check status again.</p></div>',
     };
   }
@@ -418,7 +418,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
     return {
       summary: "Reload Morrow Bridge in Chrome",
       title: "Reload Morrow Bridge.",
-      copy: "Morrow staged a verified Bridge update. Chrome must reload Morrow Bridge before Morrow can check the update.",
+      copy: "Morrow put newer Bridge files in place. Chrome must reload Morrow Bridge before Morrow can check them.",
       body: '<ol class="instructions"><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>.</li><li>Find <strong>Morrow Bridge</strong> on that page and select <strong>Reload</strong>.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button><button class="secondary-button" type="button" data-action="restore-bridge">Restore previous Bridge</button></div>',
     };
   }
@@ -426,7 +426,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
     return {
       summary: "Update Morrow Bridge",
       title: "Update Morrow Bridge.",
-      copy: "This Morrow app includes newer Bridge files. Update the app-owned Bridge folder, then reload the extension in Chrome. This does not change your course.",
+      copy: "This Morrow app includes a newer Morrow Bridge. Select Update Bridge. Morrow updates the Bridge folder and asks Chrome to reload Morrow Bridge. This does not change your course.",
       body: '<div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Update Bridge</button></div>',
     };
   }
@@ -543,7 +543,7 @@ function movePanel() {
   return {
     summary: "Move Morrow to Applications",
     title: "Move Morrow to Applications.",
-    copy: "Morrow is running from the disk image or a download folder. An assistant set up from here would lose Morrow when that place goes away.",
+    copy: "Morrow is not in your Applications folder. An assistant set up from here would stop finding Morrow if this copy is moved or deleted.",
     body: '<div class="info-box"><strong>Morrow moves itself</strong><p>Morrow moves to your Applications folder and opens again from there. Then continue setup.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="move-to-applications">Move to Applications</button></div>',
   };
 }

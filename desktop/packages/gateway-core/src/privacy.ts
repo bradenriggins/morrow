@@ -531,9 +531,18 @@ function mergeLearnerIdentity(left: LearnerIdentity, right: LearnerIdentity): Le
 // Bridge replace the same names.
 const APOSTROPHE_VARIANTS = /[\u2018\u2019\u02bc\uff07\u0060\u00b4]/gu;
 const HYPHEN_VARIANTS = /[\u2010-\u2013\ufe63\uff0d]/gu;
+// Letters whose stroke or ligature is not a combining mark, so NFKD keeps them: Łukasz, Søren,
+// Đorđe, Yıldız, Guðrún, Þór, Lætitia, Cœur, Weiß. People write these names without them.
+const LETTER_FOLDS: ReadonlyMap<string, string> = new Map([
+  ["ł", "l"], ["Ł", "L"], ["ø", "o"], ["Ø", "O"], ["đ", "d"], ["Đ", "D"], ["ı", "i"], ["ħ", "h"], ["Ħ", "H"],
+  ["ŧ", "t"], ["Ŧ", "T"], ["ð", "d"], ["Ð", "D"], ["þ", "th"], ["Þ", "Th"], ["æ", "ae"], ["Æ", "AE"],
+  ["œ", "oe"], ["Œ", "OE"], ["ß", "ss"], ["ẞ", "SS"],
+]);
+const FOLDED_LETTERS = /[łŁøØđĐıħĦŧŦðÐþÞæÆœŒßẞ]/gu;
 
 function foldIdentityText(value: string): string {
   return value.replace(APOSTROPHE_VARIANTS, "'").replace(HYPHEN_VARIANTS, "-")
+    .replace(FOLDED_LETTERS, (letter) => LETTER_FOLDS.get(letter) ?? letter)
     .normalize("NFKD").replace(/\p{M}/gu, "").normalize("NFKC");
 }
 
@@ -621,6 +630,33 @@ function aliasMatches(text: string, matchers: readonly RegExp[]): Array<{ readon
 // A generational suffix ends a name but is never the family name.
 const NAME_SUFFIX = /^(?:jr|sr|ii|iii|iv|v)\.?$/u;
 
+// A Korean or Chinese roster name is often stored with no space, as 김민준 or 王小明, and a
+// Japanese one as 田中太郎. Its family name comes first: one syllable or character, or one of these
+// two-letter family names. A Japanese four-character name is two and two.
+// connector/extension/src/protected-request.js splits the same way.
+const KOREAN_TWO_SYLLABLE_FAMILY_NAMES: ReadonlySet<string> = new Set(["남궁", "황보", "제갈", "선우", "독고", "사공", "서문", "동방"]);
+const HAN_TWO_CHARACTER_FAMILY_NAMES: ReadonlySet<string> = new Set([
+  "欧阳", "歐陽", "司马", "司馬", "上官", "诸葛", "諸葛", "东方", "東方", "皇甫", "尉迟", "尉遲", "公孙", "公孫",
+  "慕容", "令狐", "长孙", "長孫", "宇文", "司徒", "夏侯", "轩辕", "軒轅", "端木", "独孤", "獨孤", "南宫", "南宮",
+  "西门", "西門", "钟离", "鍾離", "澹台", "澹臺", "呼延", "赫连", "赫連", "百里", "闻人", "聞人", "申屠", "拓跋",
+  "单于", "單于",
+]);
+
+/** The family name and the given name of a one-word Hangul or Han name, or null for any other name. */
+function unspacedNameParts(name: string): readonly [string, string] | null {
+  const points = [...name];
+  const firstTwo = points.slice(0, 2).join("");
+  let familyLength: number;
+  if (/^\p{Script=Hangul}{2,4}$/u.test(name)) {
+    familyLength = points.length >= 3 && KOREAN_TWO_SYLLABLE_FAMILY_NAMES.has(firstTwo) ? 2 : 1;
+  } else if (/^\p{Script=Han}{3,4}$/u.test(name)) {
+    familyLength = points.length === 4 || HAN_TWO_CHARACTER_FAMILY_NAMES.has(firstTwo) ? 2 : 1;
+  } else {
+    return null;
+  }
+  return [points.slice(0, familyLength).join(""), points.slice(familyLength).join("")];
+}
+
 function nameWords(value: string): string[] {
   const words = value.replace(/,/gu, " ").split(" ").filter(Boolean);
   while (words.length > 1 && NAME_SUFFIX.test(words.at(-1)!)) words.pop();
@@ -652,6 +688,11 @@ function learnerNameAliases(identity: LearnerIdentity): LearnerNameAliases {
   const aliases = new Set([name]);
   for (const part of [given, family, familyWords.at(-1) ?? ""]) {
     if ((part.match(/\p{L}/gu)?.length ?? 0) >= 2) aliases.add(part);
+  }
+  // A script with no capital letters marks no name part, so these match in any case.
+  const unspaced = !familyFirst && words.length === 1 ? unspacedNameParts(name) : null;
+  for (const part of unspaced ?? []) {
+    if ([...part].length >= 2) aliases.add(part);
   }
   if (familyFirst) aliases.add(`${familyFirst[2]} ${familyFirst[1]}`);
   else if (words.length === 2) aliases.add(`${words[1]} ${words[0]}`);

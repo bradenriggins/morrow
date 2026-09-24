@@ -13,6 +13,8 @@ This release fixes the problems a full review of Morrow found before release. Te
 - A change is approved only from Morrow Bridge in your own Chrome tab. Another program on your computer can no longer approve a change.
 - Morrow Bridge pairs with Morrow only when you select Connect Morrow, and only with a proof from the Bridge folder Morrow set up. Another program on your computer can no longer connect itself to Morrow in place of Morrow Bridge and then approve changes. The Chrome page that asked you to allow the connection is gone.
 - Edit access has no time limit. Old timed grants fall back to Plan and are never extended.
+- Turn on Edit on an Edit access review adds the kinds of change your assistant asked for to what the course already has. It used to end every other Edit choice for that course, including removals you turned on in Plan and Edit settings. After you turn Edit on, the page lists every change Morrow now makes without asking.
+- Your assistant can no longer ask for Edit on an action that can change many settings at once, such as Edit an assignment. Edit never covered those actions, and Morrow still asks before each one, but the review page used to list them as changes Morrow makes without asking.
 - A review that is waiting ends when its Morrow connection ends.
 - A change Morrow could not check is closed only by you, on its page in Chrome, with "I checked it in Canvas: close this change". Morrow Bridge confirms your own click, as for an approval. Your assistant can no longer close it for you.
 - When Morrow reads the learning platform after a change and the platform does not hold the approved result, the change shows Did not save as approved and the assistant is told it failed. Before, it showed Needs checking, as if Morrow could not read the result. A change Morrow could not compare still shows Needs checking.
@@ -22,6 +24,7 @@ This release fixes the problems a full review of Morrow found before release. Te
 - In Plan, a course's detail says that "Edit. Routine edits." turns on every routine edit, and that Customize or "do not ask again" on a review turns on a single kind.
 - When a course connection closes before a change goes out, or Morrow cannot first read the course's Edit access, Morrow says nothing was sent. It no longer says the platform may have received the change and holds that item for a check.
 - In a group of changes, a change whose answer from the learning platform was lost shows Needs checking instead of Did not finish, and the group pauses before its next change.
+- In a group of changes, a change that the learning platform did not save as approved is reported to your assistant as failed, as its review page shows, and the group pauses before its next change. It used to be reported as one that needs checking.
 - Recent changes offers a Reverse change request only for a change that was sent. A cancelled or failed request says nothing was sent, so there is nothing to undo.
 - While a review of a group of changes is open, or Morrow is applying approved work, the assistant keeps waiting. It says you approved only when you did.
 - After your computer sleeps, Chrome restarts, or Morrow Bridge reloads, the popup lists the reviews that still wait, and an open review tab can approve again.
@@ -57,6 +60,7 @@ This release fixes the problems a full review of Morrow found before release. Te
 - ChatGPT and Codex now start even when Morrow cannot. Morrow finds, repairs, and removes its own entry in their settings file and leaves the rest of the file as it was. When it cannot change the file, it says why.
 - A "Quit and reopen" step checks that the assistant really connected.
 - On a Mac, Morrow offers to move itself to Applications when it runs from somewhere else.
+- The start, repair, Bridge update, and move steps use plain words. Update Bridge says that Morrow asks Chrome to reload Morrow Bridge, and the move step says Morrow is not in your Applications folder. It used to say Morrow ran from a disk image or a download folder.
 - The exact Bridge folder is shown with a Copy button. Long folder paths wrap.
 - Morrow really checks whether Claude Desktop is installed, including Claude Desktop from the Microsoft Store on Windows.
 - Removal keeps a settings file's own permissions and refuses a read-only file.
@@ -78,6 +82,7 @@ This release fixes the problems a full review of Morrow found before release. Te
 - Blackboard error steps name only the fields and buttons the form shows. The saved connection note says a new secret needs the application key too.
 - The Windows uninstall steps name the Settings page each version shows: Installed apps, then More and Uninstall on Windows 11, and Apps & features, then Uninstall on Windows 10.
 - "What stays on this computer" lists only what is on this computer, and says which part Remove Morrow's data removes and which part Morrow never removes.
+- After Change folder, "What stays on this computer" names the Materials folder Morrow made first, and Remove Morrow's data removes it with its files. It used to leave that folder behind and say Morrow removed its data.
 - Repair Morrow finishes when Claude Desktop is set up. It used to stop with "Morrow has work in progress".
 - Morrow starts more reliably on a slow or busy computer. Its course connection starts faster, and Morrow waits the full 30 seconds its first start is allowed instead of giving up after 15.
 
@@ -92,6 +97,8 @@ This release fixes the problems a full review of Morrow found before release. Te
 - Private Chat replaces a student's ID number or a login made only of numbers, and refuses a message that still holds one.
 - A student's name is replaced inside running text in Chinese, Japanese, and Thai, with a Korean particle attached, and after a one-letter Arabic or Hebrew prefix, in Private Chat and in course text the assistant reads. Before, it reached the assistant as written.
 - A student's name is replaced when it is written with a curly apostrophe or another hyphen, as in O’Brien or Smith‑Jones, with a capital İ, or without its accents. Private Chat and course text the assistant reads now replace the same names.
+- A student's name is replaced when it is written without a letter's stroke or with a letter written as two letters, as in Lukasz for Łukasz, Soren for Søren, Dorde for Đorđe, Yildiz for Yıldız, or Weiss for Weiß. These reached the assistant as written.
+- A Chinese, Japanese, or Korean name the roster stores with no space, such as 王小明 or 김민준, is split after its family name, so the given name used alone, such as 小明 or 민준, is replaced. It reached the assistant as written.
 
 ### Interface
 

@@ -1022,6 +1022,25 @@ const PANEL_SUMMARIES = Object.freeze({
   "Your course is connected.": "First read complete"
 });
 
+// Educators read these panels on every start, during repair, and during a Bridge
+// update. They say what Morrow does in plain words and describe only what the
+// app really does: Update Bridge asks Morrow Bridge to reload itself, and the
+// move is asked for from any folder other than Applications.
+test("the start, repair, Bridge update, and move panels use plain words that match what Morrow does", () => {
+  const cases = [
+    [state({ ...READY_ASSISTANT, runtimeStatus: "uncertain" }), "Morrow will show the next Bridge step when it has finished starting. It will not open Chrome setup before then."],
+    [state({ lifecycle: "repair_required", runtimeStatus: "repair_required" }), "Morrow could not confirm that it is ready to work. No course connection or course action will start from this state."],
+    [state({ ...READY_ASSISTANT, bridgeManualChromeReloadRequired: true }), "Morrow put newer Bridge files in place. Chrome must reload Morrow Bridge before Morrow can check them."],
+    [state({ ...PAIRED, bridgeUpdateAvailable: true }), "This Morrow app includes a newer Morrow Bridge. Select Update Bridge. Morrow updates the Bridge folder and asks Chrome to reload Morrow Bridge. This does not change your course."],
+    [state({ lifecycle: "move_required", appLocation: "move_required", assistants: [{ ...CHATGPT, detected: true }] }), "Morrow is not in your Applications folder. An assistant set up from here would stop finding Morrow if this copy is moved or deleted."]
+  ];
+  for (const [current, copy] of cases) {
+    const view = actionView(current, { chosenAssistantId: "codex" });
+    assert.equal(view.copy, copy, `the "${view.title}" panel`);
+    assert.doesNotMatch(`${view.title} ${view.copy} ${view.body}`, /runtime|staged|app-owned|disk image|download folder|reload the extension/i, `the "${view.title}" panel`);
+  }
+});
+
 test("the header live region announces the same step the action panel shows, for every panel", () => {
   const panels = [
     state({ lifecycle: "move_required", appLocation: "move_required", assistants: [{ ...CHATGPT, detected: true }] }),

@@ -209,6 +209,16 @@ const SCRIPT_ROSTER = [
   { id: 734, name: "İlkay Yıldız" },
   { id: 735, name: "José García" },
   { id: 736, name: "Liam O’Neil" },
+  { id: 741, name: "Łukasz Wałęsa" },
+  { id: 742, name: "Søren Kierkegaard" },
+  { id: 743, name: "Đorđe Jovanović" },
+  { id: 745, name: "Đặng Thu Hà" },
+  { id: 746, name: "Guðrún Þórsdóttir" },
+  { id: 747, name: "Lætitia Cœur" },
+  { id: 748, name: "Jürgen Weiß" },
+  { id: 753, name: "欧阳小红" },
+  { id: 754, name: "남궁민수" },
+  { id: 755, name: "田中太郎" },
 ];
 const SCRIPT_CASES = [
   ["我同意王小明的看法", "我同意<721>的看法"],
@@ -230,6 +240,21 @@ const SCRIPT_CASES = [
   ["İlkay Yıldız submitted late. İlkay asked.", "<734> submitted late. <734> asked."],
   ["Jose Garcia submitted late. Garcia asked.", "<735> submitted late. <735> asked."],
   ["Liam O'Neil asked.", "<736> asked."],
+  ["Łukasz Wałęsa submitted late.", "<741> submitted late."],
+  ["Lukasz Walesa submitted late. Walesa asked.", "<741> submitted late. <741> asked."],
+  ["Soren Kierkegaard asked. Soren replied.", "<742> asked. <742> replied."],
+  ["Dorde Jovanovic asked. Dorde replied.", "<743> asked. <743> replied."],
+  ["Ilkay Yildiz submitted late. Please ask Yildiz.", "<734> submitted late. Please ask <734>."],
+  ["Dang Thu Ha asked.", "<745> asked."],
+  ["Gudrun Thorsdottir asked.", "<746> asked."],
+  ["Laetitia Coeur asked.", "<747> asked."],
+  ["Jurgen Weiss asked. Weiss replied.", "<748> asked. <748> replied."],
+  ["请提醒小明交作业。", "请提醒<721>交作业。"],
+  ["민준에게 과제를 알려 주세요.", "<723>에게 과제를 알려 주세요."],
+  ["小红交了作业，欧阳也交了。", "<753>交了作业，<753>也交了。"],
+  ["민수 학생", "<754> 학생"],
+  ["太郎さんと田中さん", "<755>さんと<755>さん"],
+  ["王老师和김 선생님", "王老师和김 선생님"],
 ];
 
 function protectScripts(text, assertedIdentifiers = []) {

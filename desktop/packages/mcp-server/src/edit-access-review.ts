@@ -22,6 +22,12 @@ const EDIT_ACCESS_ID = /^[A-Za-z0-9_-]{43}$/;
 /** The sentence the tool, the review page and the Bridge settings all use for a removal action. */
 export const DESTRUCTIVE_EDIT_REFUSAL = "Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.";
 
+/**
+ * Why a conversation cannot ask for an action whose Bridge option needs a field choice: its grant
+ * allows no field, so Edit on it alone would change nothing, and settings never offers it either.
+ */
+export const FIELD_SELECTION_EDIT_REFUSAL = "This action can change many different settings, so Edit does not cover it, and Morrow asks before each change. A task bundle in Morrow Bridge Plan and Edit settings may cover the change you need.";
+
 export type EditAccessReviewState =
   | "awaiting_approval"
   | "applying"
@@ -48,9 +54,9 @@ export class EditAccessReviewUnavailableError extends Error {
   }
 }
 
-function sameCategoryIds(left: readonly { readonly id: string }[], right: unknown): boolean {
-  return Array.isArray(right) && right.length === left.length
-    && left.every((category, index) => right[index] === category.id);
+/** Every reviewed kind is in the saved grant, which also keeps what the course already had. */
+function holdsCategoryIds(requested: readonly { readonly id: string }[], saved: unknown): boolean {
+  return Array.isArray(saved) && requested.every((category) => saved.includes(category.id));
 }
 
 function currentBindingMatches(selection: BrowserEditAccessSelection, binding: JsonObject | undefined): boolean {
@@ -78,7 +84,7 @@ function actualSelection(selection: BrowserEditAccessSelection, result: BrowserE
       // A grant has no end time. Only a grant saved before that rule carries one, and it counts
       // only while that time is still ahead.
       && (expiresAt === undefined || (typeof expiresAt === "number" && Number.isSafeInteger(expiresAt) && expiresAt > Date.now()))
-      && sameCategoryIds(selection.enabledCategories, permission.enabledCategories)
+      && holdsCategoryIds(selection.enabledCategories, permission.enabledCategories)
     : !permission && (revision === selection.expectedPolicyRevision || revision === selection.expectedPolicyRevision + 1));
   return {
     sourceBindingId: selection.sourceBindingId,
@@ -95,7 +101,7 @@ function actualSelection(selection: BrowserEditAccessSelection, result: BrowserE
 
 /**
  * Each selected course as the Bridge reports it after the change, and whether every one of them
- * now holds exactly the access that was asked for.
+ * now holds the access that was asked for.
  */
 export function confirmedEditAccess(prepared: BrowserEditAccessPrepared, result: BrowserEditAccessResult): {
   readonly allConfirmed: boolean;
@@ -106,6 +112,28 @@ export function confirmedEditAccess(prepared: BrowserEditAccessPrepared, result:
     allConfirmed: result.outcome === "received" && selections.every((selection) => selection.confirmed === true),
     selections,
   };
+}
+
+/** The kinds of change a course's saved grant holds, by their labels, and its end time if it has one. */
+function savedGrant(selection: BrowserEditAccessSelection, result: BrowserEditAccessResult | null): {
+  readonly actions: readonly { readonly label: string; readonly unchecked: boolean }[];
+  readonly grantEndsAt?: number;
+} | null {
+  const binding = result?.bindings.find((candidate) => candidate.sourceBindingId === selection.sourceBindingId);
+  const permission = binding && isJsonObject(binding.editPermission) ? binding.editPermission : null;
+  if (!permission || !Array.isArray(permission.enabledCategories)) return null;
+  const options = new Map<string, JsonObject>();
+  for (const option of Array.isArray(binding?.editCategories) ? binding.editCategories : []) {
+    if (isJsonObject(option) && typeof option.id === "string") options.set(option.id, option);
+  }
+  const requested = new Map(selection.enabledCategories.map((category) => [category.id, category]));
+  const actions = permission.enabledCategories.filter((id): id is string => typeof id === "string").map((id) => {
+    const option = options.get(id);
+    const label = typeof option?.label === "string" && option.label ? option.label : requested.get(id)?.label ?? id;
+    return { label, unchecked: option ? option.verification === "unchecked" : requested.get(id)?.unchecked === true };
+  });
+  const endsAt = permission.expiresAt;
+  return { actions, ...(typeof endsAt === "number" && Number.isSafeInteger(endsAt) ? { grantEndsAt: endsAt } : {}) };
 }
 
 function requestedSelections(prepared: BrowserEditAccessPrepared): JsonObject[] {
@@ -137,14 +165,17 @@ const STATE_TEXT: Readonly<Record<EditAccessReviewState, string>> = {
 export class EditAccessReviews {
   private readonly reviews = new Map<string, EditAccessReview>();
 
-  constructor(private readonly apply: (prepared: BrowserEditAccessPrepared) => Promise<BrowserEditAccessResult>) {}
+  constructor(private readonly apply: (
+    prepared: BrowserEditAccessPrepared,
+    options: { readonly merge: true },
+  ) => Promise<BrowserEditAccessResult>) {}
 
   create(prepared: BrowserEditAccessPrepared, baseUrl: string | null): JsonObject {
     if (!baseUrl) throw new EditAccessReviewUnavailableError();
     if (prepared.mode !== "edit" || prepared.selections.length === 0
       || prepared.selections.some((selection) => selection.enabledCategories.length === 0
-        || selection.enabledCategories.some((category) => category.destructive))) {
-      throw new Error("An Edit access review needs at least one selected action and no action that removes content.");
+        || selection.enabledCategories.some((category) => category.destructive || category.requiresFieldSelection === true))) {
+      throw new Error("An Edit access review needs at least one selected action, no action that removes content, and no action that needs a field choice.");
     }
     this.prune();
     if (this.reviews.size >= MAX_EDIT_ACCESS_REVIEWS) {
@@ -186,18 +217,29 @@ export class EditAccessReviews {
     };
   }
 
-  /** What the review page shows. It names courses and actions only, never a key or a grant. */
+  /**
+   * What the review page shows. It names courses and actions only, never a key or a grant. Once
+   * Edit is on, the actions are every kind the course's saved grant holds, not only the ones asked
+   * for, and an end time is named while it still applies.
+   */
   page(editAccessId: string): JsonObject {
     const review = this.current(editAccessId);
+    const pending = review.state === "awaiting_approval" || review.state === "applying";
     return {
       state: review.state,
       expiresAt: review.expiresAt,
-      selections: review.prepared.selections.map((selection) => ({
-        courseName: selection.courseName,
-        site: selection.site,
-        provider: selection.provider,
-        actions: selection.enabledCategories.map((category) => ({ label: category.label, unchecked: category.unchecked })),
-      })),
+      selections: review.prepared.selections.map((selection) => {
+        const saved = review.state === "enabled" ? savedGrant(selection, review.result) : null;
+        return {
+          courseName: selection.courseName,
+          site: selection.site,
+          provider: selection.provider,
+          actions: saved?.actions
+            ?? selection.enabledCategories.map((category) => ({ label: category.label, unchecked: category.unchecked })),
+          ...(saved?.grantEndsAt !== undefined ? { grantEndsAt: saved.grantEndsAt }
+            : pending && selection.grantEndsAt !== undefined ? { grantEndsAt: selection.grantEndsAt } : {}),
+        };
+      }),
     };
   }
 
@@ -212,12 +254,16 @@ export class EditAccessReviews {
     return { ...this.page(editAccessId), approved };
   }
 
-  /** Saves the reviewed scope in Morrow Bridge once, and keeps what the Bridge reports back. */
+  /**
+   * Saves the reviewed scope in Morrow Bridge once, and keeps what the Bridge reports back. The
+   * reviewed kinds join the course's current grant: Edit stays on until the person turns it off,
+   * so nothing they turned on in Plan and Edit settings ends here.
+   */
   async run(editAccessId: string): Promise<void> {
     const review = this.current(editAccessId);
     if (review.state !== "applying") return;
     try {
-      const result = await this.apply(review.prepared);
+      const result = await this.apply(review.prepared, { merge: true });
       const confirmed = confirmedEditAccess(review.prepared, result);
       review.result = result;
       review.selections = confirmed.selections;
