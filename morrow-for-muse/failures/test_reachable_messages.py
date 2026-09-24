@@ -149,6 +149,21 @@ def _before_the_claim(exc):
     return exc
 
 
+def _runner_error():
+    from catalog.a11y import runner
+    return runner.A11yTargetNotCovered(
+        "learner_data_gated: discussion reads are learner-data flagged "
+        "and gated by the admission policy; the audit does not run them")
+
+
+def _disconnect_refusal():
+    from config.disconnect import CanvasDisconnected
+    return CanvasDisconnected(
+        "the educator disconnected Morrow from Canvas on this computer "
+        "(bin/morrow disconnect deleted the sign-in); nothing was sent. "
+        "Rerun install.sh only when the educator asks to reconnect.")
+
+
 REACHABLE = {
     "canvas-csrf-token-missing": lambda: __import__(
         "transport.local_chromium", fromlist=["x"]).CsrfTokenMissing(
@@ -180,6 +195,8 @@ REACHABLE = {
         "entry is not pinned in the pack"),
     "caller-input-refused": lambda: ex.CallerInputError(
         "--body is not a JSON object"),
+    "a11y-target-not-covered": _runner_error,
+    "canvas-disconnected": _disconnect_refusal,
     "maintenance-confirmation-required": lambda: ex.ConfirmationRequired(
         "journal-reconcile is destructive: this re-anchors the journal. "
         "Re-run with --yes to confirm, or run this command interactively "

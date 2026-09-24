@@ -76,7 +76,7 @@ repository: `python3 catalog/a11y/a11y_parity_selftest.py` and
 | `a11y_repair.py` | `validate_repair_plan(kind, params, evidence)`: enforces every desktop planner guard against fresh audit evidence; raises `RepairPlanRefused` with a stable code. |
 | `morrow_audit_course_item.json` | Read-only audit catalog entry. 28 target kinds (12 Canvas, 16 Moodle). Effects: read. Executor wiring: wired via `catalog/a11y/runner.py` audit mode (`run_audit`); `dispatch/executor.py` deliberately carries no a11y branches per the F-17 carve. Evidence status: live-unverified. |
 | `runner.py` | A11y mode runner: audit mode (`run_audit`) and planner mode (`run_planner`). Uses the executor's public `dispatch_catalog_op` for reads only; never writes. Unknown/unwired kinds funnel through `failures/funnel.py`. |
-| `runner_selftest.py` | 23 offline checks for the runner (audit, planner, refusals, funnel, PARITY LAW). Run: `python3 catalog/a11y/runner_selftest.py` |
+| `runner_selftest.py` | 29 offline checks for the runner (audit, planner, refusals, funnel, PARITY LAW). Run: `python3 catalog/a11y/runner_selftest.py` |
 | `morrow_plan_*_image_alt_repair.json` (10) | Guarded repair planner manifests, one per desktop planner: page, assignment, discussion, classic quiz description, classic quiz question, new quiz item, new quiz choice, new quiz answer feedback, new quiz feedback, item bank question. Effects: plan (no write during planning). |
 | `build_repair_manifests.py` | Generator for the 10 repair manifests (shared guard contract in one place). |
 | `a11y_selftest.py` | 74 offline checks, in the source repository only (CI runs it through `scripts/dev-suites.sh`). Run: `python3 a11y_selftest.py` |

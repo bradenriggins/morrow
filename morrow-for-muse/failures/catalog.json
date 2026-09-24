@@ -940,6 +940,26 @@
       ]
     },
     {
+      "id": "a11y-target-not-covered",
+      "title": "The accessibility check does not cover this kind of course item",
+      "surface": "canvas",
+      "severity_hint": "low",
+      "root_cause": "Verified mechanism: the a11y runner (catalog/a11y/runner.py) validates the target kind before any session exists and refuses an unknown kind, an unwired kind, or Moodle (moodle_not_in_v1) before it reads anything. The check is read-only: nothing was sent and nothing changed.",
+      "is_not": "This is not a refused change and not an uncertain change: the accessibility check reads course items only, and it stopped before reading this one.",
+      "agent_message": "What was attempted: {operation}. What the evidence showed: Morrow's accessibility check does not cover this kind of course item yet, so it stopped before reading anything from Canvas (reference {correlation_id}). What this means: nothing was sent and nothing changed; the check just does not cover this item in this version. What happens next: I will tell you which kinds of course items the accessibility check covers today, and if you want this item checked anyway, we can look at it together in Canvas.",
+      "auto_action": "Do not run it again: the check does not cover this item kind in this version. Tell the educator which kinds the check does cover (the refusal detail lists them) and offer to look at the item together in Canvas instead.",
+      "escalate_when": "Only if the educator needs this kind of item checked and looking at it together in Canvas is not good enough.",
+      "signature": {
+        "error_class": "A11yTargetNotCovered"
+      },
+      "signature_notes": "exception: catalog/a11y/runner.py A11yTargetNotCovered (raised by _validate_target_kind for unknown, unwired, and Moodle kinds). evidence: muse UX audit 3 (2026-09-23): bin/morrow audit --target-kind rubric (and the discussion, Moodle, and unknown-kind refusals) fell through to the unknown fallback, which told the educator the task might have made a change. The runner now raises named subclasses carrying nothing_sent=True and operation_kind=read, so the refusal names this mode instead.",
+      "severity_hint_inventory": "user-action",
+      "placeholders": [
+        "operation",
+        "correlation_id"
+      ]
+    },
+    {
       "id": "helper-browser-not-reached",
       "title": "The helper browser could not be reached, so nothing was sent",
       "surface": "helper",

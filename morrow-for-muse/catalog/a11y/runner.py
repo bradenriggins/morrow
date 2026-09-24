@@ -205,7 +205,43 @@ _PLANNER_TARGET_KIND = {
 
 
 class A11yRunnerError(Exception):
-    """Named a11y runner refusal; funneled, never a traceback."""
+    """Named a11y runner refusal; funneled, never a traceback.
+
+    Every refusal here is read-only: the runner refused before it read
+    or sent anything, so the error carries nothing_sent=True and
+    operation_kind="read" for the failure funnel, and the funneled
+    message never says the task might have made a change.
+
+    Subclasses are named to match the failures catalog signatures (the
+    query chain's SessionMissing pattern):
+      CallerInputError      the command's own arguments were refused
+      A11yTargetNotCovered  the audit does not cover this target kind
+      SessionMissing        CANVAS_BASE is not set (setup step)
+    """
+
+    def __init__(self, message):
+        super().__init__(message)
+        self.code = message.split(":", 1)[0].strip()
+        self.nothing_sent = True
+        self.operation_kind = "read"
+
+
+class CallerInputError(A11yRunnerError):
+    """A command argument (--target-ids, --params, --planner) was
+    refused before anything was sent. Named to match the
+    caller-input-refused catalog signature."""
+
+
+class A11yTargetNotCovered(A11yRunnerError):
+    """The audit does not cover this target kind in v1 (unknown kind,
+    unwired kind, or Moodle). Named to match the
+    a11y-target-not-covered catalog signature."""
+
+
+class SessionMissing(A11yRunnerError):
+    """CANVAS_BASE is not set: the audit needs the educator's Canvas
+    host before it can attach the helper Chromium. Named to match the
+    setup-tenant-not-configured catalog signature."""
 
 
 def _utcnow():
@@ -234,24 +270,24 @@ def _need_chromium_session(canvas_base=None):
     from config import tree_config
     base = canvas_base or tree_config.canvas_base()
     if not base:
-        raise A11yRunnerError(
-            "CANVAS_BASE is not set in helper/env: the audit runner needs "
-            "the educator's Canvas host to attach the helper Chromium "
-            "session.")
+        raise SessionMissing(
+            "CANVAS_BASE is not set in helper/env: the audit runner "
+            "needs a Canvas base URL (the educator's Canvas host) to "
+            "attach the helper Chromium session.")
     return chromium_session.ChromiumSession.load(base_url=base)
 
 
 def _validate_target_kind(target_kind):
     """Refuse unknown or unwired target kinds before any session exists."""
     if target_kind in _MOODLE_KINDS:
-        raise A11yRunnerError(
+        raise A11yTargetNotCovered(
             "moodle_not_in_v1: Moodle is proven in a sandbox but not "
             "packaged; audit mode does not run Moodle targets in v1.")
     if target_kind in _REFUSED_KINDS:
         code, reason = _REFUSED_KINDS[target_kind]
-        raise A11yRunnerError("%s: %s" % (code, reason))
+        raise A11yTargetNotCovered("%s: %s" % (code, reason))
     if target_kind not in _WIRED_ROUTES:
-        raise A11yRunnerError(
+        raise A11yTargetNotCovered(
             "unknown_target_kind: %r is not a known audit target kind. "
             "Known kinds: %s." % (target_kind, ", ".join(sorted(
                 list(_WIRED_ROUTES) + list(_REFUSED_KINDS) + list(_MOODLE_KINDS)))))
@@ -268,14 +304,14 @@ def _read_target_html(target_kind, course_id, target_ids, session):
     target_ids = target_ids or {}
     target_id = target_ids.get(id_key)
     if not target_id:
-        raise A11yRunnerError(
+        raise CallerInputError(
             "missing_target_id: target_kind %r needs target_ids.%r." % (target_kind, id_key))
     params = {"course_id": str(course_id), path_param: str(target_id)}
     # canvas_new_quiz_item also needs the quiz's assignment id for the path.
     if target_kind == "canvas_new_quiz_item":
         quiz_id = target_ids.get("quiz_id")
         if not quiz_id:
-            raise A11yRunnerError(
+            raise CallerInputError(
                 "missing_target_id: target_kind 'canvas_new_quiz_item' needs "
                 "target_ids.quiz_id (the New Quiz assignment id) as well as "
                 "target_ids.item_id.")
@@ -358,7 +394,7 @@ def run_audit(target_kind, course_id, target_ids, provider="canvas",
     (funneled by callers) for unknown or unwired target kinds.
     """
     if provider != "canvas":
-        raise A11yRunnerError(
+        raise CallerInputError(
             "unsupported_provider: audit mode supports provider 'canvas' "
             "only; got %r." % (provider,))
     # Validate the target kind before touching any session: refusals must
@@ -405,7 +441,7 @@ def run_planner(planner_name, params, canvas_base=None, session=None):
     """
     manifest_file = _PLANNER_MANIFESTS.get(planner_name)
     if manifest_file is None:
-        raise A11yRunnerError(
+        raise CallerInputError(
             "unknown_planner: %r is not a known repair planner. Known "
             "planners: %s." % (planner_name, ", ".join(sorted(_PLANNER_MANIFESTS))))
     manifest = json.load(open(os.path.join(HERE, manifest_file), encoding="utf-8"))
@@ -418,7 +454,7 @@ def run_planner(planner_name, params, canvas_base=None, session=None):
     params = dict(params or {})
     course_id = str(params.get("course_id", ""))
     if not course_id:
-        raise A11yRunnerError("missing_course_id: planner params need course_id.")
+        raise CallerInputError("missing_course_id: planner params need course_id.")
     # Validate before touching any session: refusals must not need a browser.
     _validate_target_kind(target_kind)
 
@@ -508,9 +544,9 @@ def _parse_params(text):
     try:
         params = json.loads(text or "{}")
     except ValueError as exc:
-        raise A11yRunnerError("bad_params_json: %s" % exc)
+        raise CallerInputError("bad_params_json: %s" % exc)
     if not isinstance(params, dict):
-        raise A11yRunnerError("bad_params_json: params must be a JSON object.")
+        raise CallerInputError("bad_params_json: params must be a JSON object.")
     return params
 
 
