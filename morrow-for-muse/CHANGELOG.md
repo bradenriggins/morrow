@@ -82,6 +82,16 @@ Changes to your courses:
   notifies every student in the course. A request that would post one,
   or add a feed that posts them, is refused before anything is sent,
   and the assistant is told why in plain words.
+- Morrow never has Canvas send students a notice about a change, and
+  never acts as another person in Canvas, even when asked. A change
+  that asked Canvas to notify every student, or to act as someone
+  else, ran after your approval or in Edit mode. It is now refused
+  before anything is sent. Changing an assignment, page, or quiz
+  without a notice still works.
+- A read that asks Canvas for several extra details at once, such as
+  an assignment's due date overrides and all its dates, gets all of
+  them. Morrow sent them to Canvas as one value it did not recognize,
+  so the read came back without them and still reported success.
 - Discussion changes are refused until they are tested through the
   browser Morrow uses today; they were tested only through an older,
   retired route.
@@ -562,6 +572,11 @@ Technical notes:
   `never-dispatch-read`, `paused-change-not-resumed`,
   `paused-change-already-approved`, `paused-change-not-waiting`, and
   `unknown-nothing-sent`.
+- `dispatch/admission_policy.json` `never_dispatch.request_flags` adds
+  `notify_of_update` and `as_user_id` (Canvas masquerading), refused on
+  every route and lane before approval like `is_announcement`;
+  `privacy/executor_wire.is_learner_id_key` no longer treats
+  `as_user_id` as a learner-id position.
 - `dispatch/executor.py`: `_read_course_identity` reads the course
   roster and labels the course name and term (`_shown_course_text`, the
   C-114 projection); the plan's `target_identity` keeps
@@ -571,6 +586,11 @@ Technical notes:
   C-437 course with its own roster (`COURSE_LIST_ROSTER_MAX` 30 per
   read; a course past it, or whose roster fails, becomes
   `{"id", "name": COURSE_NAME_WITHHELD}`).
+- `transport/chromium_session.py` builds a GET or DELETE's query itself
+  (one pair per list item) and refuses a value with no query form
+  (`RequestNotSendable`); a form body decodes to ordered pairs. The
+  page program in `transport/local_chromium.py` encodes list values
+  and pairs one pair per item.
 
 ## 0.4.0 (2026-09-22)
 
