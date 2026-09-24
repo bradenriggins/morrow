@@ -173,7 +173,7 @@ live battery marks them live-proven in
   page body, an assignment description), restoring the real text when
   content is saved back (`privacy/course_content.py`). It is a privacy
   control, not a capability, and it is fixture-proven like the by-name
-  flow: the roster read (the same Canvas requests the desktop Morrow
+  flow: the roster read (the same Canvas requests Morrow Desktop
   makes) has not yet been run through this lane against a live
   course.
 - Discussions: C-139 (create), C-141 (delete), and C-167 (update) are

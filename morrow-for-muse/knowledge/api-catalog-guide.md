@@ -5,7 +5,7 @@ mixing them up is the fastest way to claim something that is not true.
 
 ## Catalog A: the desktop research catalog (NOT dispatchable)
 
-Historical provenance: `origin-morrow/` is the desktop Morrow monorepo,
+Historical provenance: `origin-morrow/` is the Morrow Desktop monorepo,
 not shipped in this package. `origin-morrow/packages/canvas-api-catalog/`
 is a TypeScript package
 (`@morrow/canvas-api-catalog@1.0.0`, 4681 lines across 6 modules) that

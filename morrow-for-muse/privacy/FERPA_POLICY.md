@@ -13,7 +13,7 @@ When a dispatched operation reads learner-bearing Canvas data (users,
 enrollments, submissions, gradebook, grades, analytics, AI
 conversations/experiences), the response passes through the source
 privacy boundary (`privacy/boundary.py`, a faithful port of the
-desktop Morrow `SourceMcpPrivacyBoundary`) before it becomes
+Morrow Desktop `SourceMcpPrivacyBoundary`) before it becomes
 agent-visible or journaled. The wired choke point is
 `dispatch/executor.py` in `dispatch_entry`'s success path, delegating
 to `privacy/executor_wire.py:project_learner_result`; the success-path

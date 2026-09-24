@@ -367,7 +367,7 @@ test("the README leads with the desktop app and keeps the archive and source rou
   const sections = headingSections(readme);
   const heading = (value) => sections.findIndex((section) => section.heading === value);
 
-  const app = heading("## The Morrow desktop app");
+  const app = heading("## The Morrow Desktop app");
   const evidence = heading("## Development and engineering evidence");
   assert.notEqual(app, -1, "README.md must carry a desktop app section");
   assert.notEqual(evidence, -1, "README.md must carry a development and engineering evidence section");
@@ -387,7 +387,7 @@ test("the README leads with the desktop app and keeps the archive and source rou
 
   // The consumer route names both parts of the product, and no other section may
   // claim to be the installation.
-  assert.match(sections[heading("## What a user installs")].text, /\*\*The Morrow desktop app\*\*/);
+  assert.match(sections[heading("## What a user installs")].text, /\*\*Morrow Desktop\*\*/);
   assert.match(sections[heading("## What a user installs")].text, /\*\*Morrow Bridge\*\*/);
 });
 

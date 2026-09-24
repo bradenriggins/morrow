@@ -86,7 +86,7 @@ INTERPRETATION = (
 RENDER_EVIDENCE_UNAVAILABLE = {
     "status": "unavailable",
     "reason": (
-        "Desktop Morrow computes render_evidence in the Morrow Bridge sandbox "
+        "Morrow Desktop computes render_evidence in the Morrow Bridge sandbox "
         "(an isolated page with CSP default-src 'none'). Morrow for Muse has no "
         "Bridge/Electron loopback on the VM, so saved-source render evidence is "
         "unavailable. Saved-source signals only; focus order, accessible names, "

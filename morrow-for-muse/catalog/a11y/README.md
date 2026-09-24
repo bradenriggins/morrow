@@ -1,6 +1,6 @@
-# Accessibility catalog (ported from desktop Morrow)
+# Accessibility catalog (ported from Morrow Desktop)
 
-This directory ports the desktop Morrow accessibility audit system
+This directory ports the Morrow Desktop accessibility audit system
 (`packages/mcp-server/src/course-audit.ts`, `page-correction.ts`,
 `item-bank-repair.ts`) into Morrow for Muse catalog entries. It is the
 missing a11y scanner: read-only signal detection plus ten guarded
