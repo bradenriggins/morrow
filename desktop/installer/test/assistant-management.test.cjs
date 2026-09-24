@@ -117,6 +117,21 @@ async function temporaryRoot() {
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, content);
   }
+  const directFiles = [];
+  const gatewayCoreRoot = path.join(appRoot, "node_modules", "@morrow", "gateway-core");
+  const gatewayCorePackage = `${JSON.stringify({ name: "@morrow/gateway-core", type: "module" })}\n`;
+  // The controller decision tests use a deterministic ACL result; gateway-core tests cover the native ACL rules.
+  const gatewayCoreEntry = [
+    "export function privateFileAccessAccepted() { return true; }",
+    "export function privateDirectoryAccessAccepted() { return true; }",
+    "export function hardenPrivateDirectory() { return true; }",
+    ""
+  ].join("\n");
+  for (const [relative, content] of [["package.json", gatewayCorePackage], ["dist/index.js", gatewayCoreEntry]]) {
+    const target = path.join(gatewayCoreRoot, relative);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, content);
+  }
   // The gateway runs as ESM from app/packages while its sealed copy under
   // app/node_modules carries the digests the manifest binds.
   const gatewayFiles = [
@@ -126,7 +141,6 @@ async function temporaryRoot() {
     ["dist/local-owner-sidecar-access.js", "sidecar fixture"]
   ];
   const dependencyFiles = [];
-  const directFiles = [];
   for (const [relative, content] of gatewayFiles) {
     const direct = path.join(appRoot, "packages", "mcp-server", relative);
     await fs.mkdir(path.dirname(direct), { recursive: true });
