@@ -82,6 +82,7 @@ async function send(toolName, args, {
   afterRows = rows(afterIds),
   item = DEFAULT_DELETE_ITEM,
   savedItem = { id: CREATED_ID, ...ESSAY_PAYLOAD, position: 1 },
+  createAnswer = { id: CREATED_ID },
   writeThrows = false,
 } = {}) {
   const keys = ["location", "document", "fetch", "chrome", "__morrowCanvasConnectorInstalled"];
@@ -103,7 +104,7 @@ async function send(toolName, args, {
         if (method !== "GET") {
           written = true;
           if (writeThrows) throw new Error("connection lost after send");
-          return json(toolName === "canvas_create_quiz_item" ? { id: CREATED_ID } : {});
+          return json(toolName === "canvas_create_quiz_item" ? createAnswer : {});
         }
         if (url.pathname === ITEMS_PATH) return json(written ? afterRows : beforeRows);
         if (url.pathname === `${ITEMS_PATH}/${ITEM_ID}`) return json(item);
@@ -304,4 +305,98 @@ test("an uncertain create response reconciles the saved item and never retries P
   assert.equal(result.recovered, true);
   assert.equal(result.verification.status, "verified");
   assert.equal(requests.filter((request) => request.method === "POST").length, 1);
+});
+
+// A list proves a mismatch only when it lacks the approved result. Chrome can send a create a
+// second time on its own after a reused connection closes, and a colleague can add or remove a
+// question at the same moment. Then the list holds the approved question and something else too,
+// which proves nothing about this one change, so it stays unconfirmed and keeps its hold.
+test("a create whose list also changed in another way is unconfirmed while the approved item is saved", async () => {
+  const cases = [
+    { name: "a second new item after the answered one", beforeIds: [], afterIds: [CREATED_ID, "100"], reason: "new_quiz_item_duplicate_effect_suspected" },
+    {
+      name: "a second new item ahead of the answered one",
+      beforeIds: [],
+      afterIds: ["100", CREATED_ID],
+      savedItem: { id: CREATED_ID, ...ESSAY_PAYLOAD, position: 2 },
+      reason: "new_quiz_item_duplicate_effect_suspected",
+    },
+    { name: "another item removed", beforeIds: [ITEM_ID], afterIds: [CREATED_ID], reason: "new_quiz_item_list_changed_concurrently" },
+  ];
+  for (const entry of cases) {
+    const { result, requests } = await send("canvas_create_quiz_item", {
+      ...CREATE_ARGS,
+      morrow_new_quiz_item_lifecycle_guard: createGuard(entry.beforeIds),
+    }, entry);
+    assert.equal(result.ok, true, entry.name);
+    assert.deepEqual(result.verification, {
+      schema: "morrow.browser-verification.v1",
+      strategy: "new-quiz-item-lifecycle",
+      status: "unconfirmed",
+      reason: entry.reason,
+    }, entry.name);
+    assert.equal(requests.filter((request) => request.method === "POST").length, 1, entry.name);
+  }
+});
+
+test("a create the fresh list proves absent is still a mismatch", async () => {
+  const cases = [
+    { name: "no new item", afterIds: [], reason: "new_quiz_item_create_membership_mismatch" },
+    { name: "the answered item is not listed", afterIds: ["100"], reason: "new_quiz_item_create_id_mismatch" },
+    {
+      name: "the answered item holds other content next to a second new item",
+      afterIds: [CREATED_ID, "100"],
+      savedItem: { id: CREATED_ID, ...ESSAY_PAYLOAD, points_possible: 5 },
+      reason: "new_quiz_item_create_readback_mismatch",
+    },
+  ];
+  for (const entry of cases) {
+    const { result } = await send("canvas_create_quiz_item", {
+      ...CREATE_ARGS,
+      morrow_new_quiz_item_lifecycle_guard: createGuard(),
+    }, { beforeIds: [], ...entry });
+    assert.equal(result.verification.status, "mismatch", entry.name);
+    assert.equal(result.verification.reason, entry.reason, entry.name);
+  }
+});
+
+test("an answer naming an item that was already listed does not single out the approved item", async () => {
+  const { result } = await send("canvas_create_quiz_item", {
+    ...CREATE_ARGS,
+    morrow_new_quiz_item_lifecycle_guard: createGuard([ITEM_ID]),
+  }, { beforeIds: [ITEM_ID], afterIds: [ITEM_ID, CREATED_ID], createAnswer: { id: ITEM_ID } });
+  assert.equal(result.verification.status, "unconfirmed");
+  assert.equal(result.verification.reason, "new_quiz_item_create_answer_not_new");
+});
+
+test("a lost create answer with two new items cannot single out the approved item and never sends again", async () => {
+  const { result, requests } = await send("canvas_create_quiz_item", {
+    ...CREATE_ARGS,
+    morrow_new_quiz_item_lifecycle_guard: createGuard(),
+  }, { beforeIds: [], afterIds: [CREATED_ID, "100"], writeThrows: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.outcomeUnknown, true);
+  assert.equal(result.verification.status, "unconfirmed");
+  assert.equal(result.verification.reason, "new_quiz_item_duplicate_effect_suspected");
+  assert.equal(requests.filter((request) => request.method === "POST").length, 1);
+});
+
+test("a delete whose target is gone while the list also changed is unconfirmed; a target still listed is a mismatch", async () => {
+  const cases = [
+    { name: "another item added", beforeIds: [ITEM_ID], afterIds: ["101"], status: "unconfirmed", reason: "new_quiz_item_list_changed_concurrently" },
+    { name: "another item removed", beforeIds: [ITEM_ID, "89"], afterIds: [], status: "unconfirmed", reason: "new_quiz_item_list_changed_concurrently" },
+    { name: "the rest reordered", beforeIds: [ITEM_ID, "89", "90"], afterIds: ["90", "89"], status: "unconfirmed", reason: "new_quiz_item_list_changed_concurrently" },
+    { name: "the target still listed next to a new item", beforeIds: [ITEM_ID], afterIds: [ITEM_ID, "101"], status: "mismatch", reason: "new_quiz_item_delete_readback_mismatch" },
+  ];
+  for (const entry of cases) {
+    const { result, requests } = await send("canvas_delete_quiz_item", {
+      course_id: COURSE_ID,
+      assignment_id: QUIZ_ID,
+      item_id: ITEM_ID,
+      morrow_new_quiz_item_lifecycle_guard: deleteGuard(entry.beforeIds),
+    }, entry);
+    assert.equal(result.verification.status, entry.status, entry.name);
+    assert.equal(result.verification.reason, entry.reason, entry.name);
+    assert.equal(requests.filter((request) => request.method === "DELETE").length, 1, entry.name);
+  }
 });
