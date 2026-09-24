@@ -61,8 +61,8 @@ Failure modes this suite pins down (written before the code):
      course file named "Jane_Doe_essay.pdf" kept the name in its
      display name and file name. The joined name is labeled now, and a
      page the agent names by its labeled address is read, prepared, and
-    changed at its real address. (Muse engine audit, 2026-09-23,
-    written before the fix.)
+     changed at its real address. (Muse engine audit, 2026-09-23,
+     written before the fix.)
  13. A read on a learner-signal route (a page revision, C-331; the
      C-328 revert response behaves the same) carried course text with
      bare labels and no form markers, and a page write whose body says
@@ -72,6 +72,14 @@ Failure modes this suite pins down (written before the code):
      the same reversible course-content projection the plain path
      gives, so every reference saves back as it was written. (Final
      sweep 2026-09-23, written before the fix.)
+ 14. A Canvas sign-in that died during a read's roster read (the
+     educator asked to show a page) was quarantined as a paused change
+     with op id None, and the helper page and `state_machine.py notify`
+     told the educator a change was stopped and waited for their OK.
+     Only a write that has an op id is parked as a paused change; a
+     read records a session_death record, the notice says nothing was
+     paused, and the agent is not asked to have the educator approve a
+     read. (Final sweep 2026-09-23, written before the fix.)
 
 The run writes a repeatable artifact of the flow to
 .selftest-work/course-content-e2e-artifact.json (labels only).
@@ -400,8 +408,8 @@ def test_a_sign_in_that_died_at_the_roster_read_arms_the_resign_in_flow(
         monkeypatch):
     armed = []
     monkeypatch.setattr(ex, "_on_session_death",
-                        lambda op_id, name, evidence, write_sent=False:
-                        armed.append((name, write_sent)))
+                        lambda op_id, name, evidence, write_sent=False,
+                        is_write=True: armed.append((name, write_sent)))
 
     class Dead(Canvas):
         def raw_request(self, method, url, headers, body, is_write=False,
@@ -775,3 +783,30 @@ def test_a_page_put_whose_body_says_students_shows_marked_text():
         out["receipt"]["body"]
     assert "(first name)" in out["receipt"]["body"], \
         out["receipt"]["body"]
+
+
+# -- 14 -----------------------------------------------------------------------
+
+def test_a_read_that_dies_at_the_roster_read_is_not_a_paused_change():
+    # The real _on_session_death runs (no stub): a read quarantined as a
+    # paused change made the helper page and `state_machine.py notify`
+    # say a change was stopped and waited for the educator's OK, and
+    # SKILL.md step 5 would have the agent ask them to approve a read.
+    from reauth import state_machine as rsm
+
+    class Dead(Canvas):
+        def raw_request(self, method, url, headers, body, is_write=False,
+                        max_bytes=None):
+            self.calls.append((method, url, None))
+            raise ChromiumSessionDead("Canvas session died")
+
+    before = len(rsm.paused_ops())
+    with pytest.raises(ChromiumSessionDead):
+        _show(Dead())
+    assert len(rsm.paused_ops()) == before
+    with open(rsm.NOTIFY_PATH, encoding="utf-8") as fh:
+        notice = fh.read()
+    assert "No change was in progress, so nothing was paused." in notice, \
+        notice
+    assert "waits for your OK" not in notice
+    rsm.lift_halt()
