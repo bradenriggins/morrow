@@ -17,9 +17,47 @@ const { createInstallerController, errorDetails, repairRequiredState } = require
 const { envelope } = require("../shared/contract.cjs");
 const { freshRecord } = require("../shared/state-policy.cjs");
 
+const fsSync = require("node:fs");
+
 function sha256(content) {
   return crypto.createHash("sha256").update(content).digest("hex");
 }
+
+// The controller imports these modules from the packaged payload, so the
+// fixture payload carries them with the functions those paths call. Nothing
+// here needs the real behavior: folders are never too broad, and no dead
+// maintenance lease is ever present.
+const MAINTENANCE_MODULE = [
+  "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+  "export function workspaceRootTooBroad() { return false; }",
+  "export function readLocalOwnerMaintenanceLease() { return null; }",
+  "export function requestLocalOwnerMaintenance() { return null; }",
+  "export function clearDeadLocalOwnerMaintenanceLease() { return true; }",
+  "export function acquireStoppedLocalOwnerMaintenanceLease() { return { leaseId: '00000000-0000-4000-8000-000000000001', leaseToken: 'morrow-stopped-maintenance-token-1234567890123456' }; }",
+  "export function replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard() { return null; }",
+  "export function removeExactLocalOwnerMaintenanceLease() { return true; }",
+  ""
+].join("\n");
+
+// A monitor that observes nothing and starts nothing, so tests never run a
+// real runtime process.
+const RUNTIME_MONITOR_MODULE = [
+  "export function createRuntimeMonitor() {",
+  "  const unobserved = {",
+  "    schema: 'morrow.installer-runtime.v1',",
+  "    health: { attempted: false, gatewayReady: 'unknown', bridgeConnected: 'unknown', canRestart: 'unknown' },",
+  "    bindings: { runtimeVerifiedCourseCount: 0, selectedCourseName: null, firstPreviewCourseName: null },",
+  "    firstPreview: { available: 'unknown', completed: false }",
+  "  };",
+  "  return {",
+  "    start: async () => unobserved,",
+  "    snapshot: () => unobserved,",
+  "    close: async () => {},",
+  "    maintenance: async () => ({ status: 'uncertain' })",
+  "  };",
+  "}",
+  ""
+].join("\n");
 
 // Claude Desktop runs on macOS and Windows. A Claude Desktop setup test uses
 // this host's own platform where Claude Desktop runs, and macOS elsewhere: a
@@ -57,6 +95,73 @@ async function temporaryRoot() {
     "}",
     ""
   ].join("\n"));
+  // The controller verifies the whole sealed payload before it acts, so the
+  // fixture payload carries every file the runtime requires, with an MCP
+  // runtime manifest that verifies against exactly these bytes.
+  const payloadRoot = path.join(root, "Payload");
+  const appRoot = path.join(payloadRoot, "app");
+  const node = process.platform === "win32"
+    ? path.join(payloadRoot, "runtime", "node", "node.exe")
+    : path.join(payloadRoot, "runtime", "node", "bin", "node");
+  const sealedFiles = [
+    [node, "fixture"],
+    [path.join(appRoot, "packages", "client-config", "dist", "cli.js"), "fixture"],
+    [path.join(appRoot, "packages", "canvas-connector-mcp", "dist", "index.js"), "fixture"],
+    [path.join(appRoot, "installer", "runtime-monitor.mjs"), RUNTIME_MONITOR_MODULE],
+    [path.join(appRoot, "installer", "process-lifetime.cjs"), "module.exports = {};\n"],
+    [path.join(appRoot, "bridge-release", "manifest.json"), "fixture"],
+    [path.join(appRoot, "bridge-release", "extension", "manifest.json"), "fixture"],
+    [path.join(appRoot, "connector", "extension", "manifest.json"), "fixture"]
+  ];
+  for (const [target, content] of sealedFiles) {
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, content);
+  }
+  // The gateway runs as ESM from app/packages while its sealed copy under
+  // app/node_modules carries the digests the manifest binds.
+  const gatewayFiles = [
+    ["package.json", `${JSON.stringify({ name: "@morrow-lms/gateway", version: "1.0.0-rc.0" })}\n`],
+    ["dist/index.js", "fixture"],
+    ["dist/local-owner-maintenance.js", MAINTENANCE_MODULE],
+    ["dist/local-owner-sidecar-access.js", "sidecar fixture"]
+  ];
+  const dependencyFiles = [];
+  const directFiles = [];
+  for (const [relative, content] of gatewayFiles) {
+    const direct = path.join(appRoot, "packages", "mcp-server", relative);
+    await fs.mkdir(path.dirname(direct), { recursive: true });
+    await fs.writeFile(direct, content);
+    const sealed = path.join(appRoot, "node_modules", "@morrow-lms", "gateway", relative);
+    await fs.mkdir(path.dirname(sealed), { recursive: true });
+    await fs.writeFile(sealed, content);
+    dependencyFiles.push({ path: `node_modules/@morrow-lms/gateway/${relative}`, bytes: Buffer.byteLength(content), sha256: sha256(content) });
+    directFiles.push({ path: `packages/mcp-server/${relative}`, bytes: Buffer.byteLength(content), sha256: sha256(content) });
+  }
+  for (const relative of [
+    "packages/client-config/dist/cli.js",
+    "packages/client-config/dist/index.js",
+    "packages/canvas-connector-mcp/dist/index.js",
+    "installer/runtime-monitor.mjs",
+    "installer/process-lifetime.cjs"
+  ]) {
+    const content = await fs.readFile(path.join(appRoot, relative));
+    directFiles.push({ path: relative, bytes: content.byteLength, sha256: sha256(content) });
+  }
+  directFiles.sort((left, right) => left.path.localeCompare(right.path));
+  const entrypoint = "fixture";
+  const manifest = {
+    schema: "morrow.mcp-runtime-manifest.v2",
+    package: { name: "@morrow-lms/gateway", version: "1.0.0-rc.0" },
+    entrypoint: { path: "packages/mcp-server/dist/index.js", bytes: Buffer.byteLength(entrypoint), sha256: sha256(entrypoint) },
+    dependencies: [{ name: "@morrow-lms/gateway", version: "1.0.0-rc.0", packageJson: dependencyFiles[0], files: dependencyFiles }],
+    directFiles
+  };
+  const manifestBytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
+  await fs.writeFile(path.join(appRoot, "mcp-runtime-manifest.json"), manifestBytes);
+  await fs.writeFile(path.join(appRoot, "package-input-manifest.json"), `${JSON.stringify({
+    schema: "morrow.desktop-package-input.v2",
+    mcpRuntime: { path: "app/mcp-runtime-manifest.json", sha256: sha256(manifestBytes) }
+  })}\n`);
   test.after(() => fs.rm(root, { recursive: true, force: true }));
   return root;
 }
@@ -84,6 +189,33 @@ async function writeFile(target, content) {
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, content);
   return sha256(await fs.readFile(target));
+}
+
+function nodeRuntimePinFor(root) {
+  const node = process.platform === "win32"
+    ? path.join(root, "Payload", "runtime", "node", "node.exe")
+    : path.join(root, "Payload", "runtime", "node", "bin", "node");
+  try {
+    return sha256(fsSync.readFileSync(node));
+  } catch {
+    return null;
+  }
+}
+
+function fixtureMcpRuntimeManifestSha256(root) {
+  try {
+    return sha256(fsSync.readFileSync(path.join(root, "Payload", "app", "mcp-runtime-manifest.json")));
+  } catch {
+    return null;
+  }
+}
+
+/** The runtime digests this fixture payload satisfies, for tests that run the real runtime verification. */
+function trustedRuntimeShas(root) {
+  return {
+    trustedMcpRuntimeManifestSha256: () => fixtureMcpRuntimeManifestSha256(root),
+    trustedMcpRuntimeNodeSha256: () => nodeRuntimePinFor(root)
+  };
 }
 
 async function claudeSetupFixture(installer, name, installationId = name) {
@@ -1024,7 +1156,8 @@ test("changing the materials folder writes the new folder into every configured 
   const codexSha256 = await writeFile(codex, `[mcp_servers.other]\ncommand = "other"\n\n${codexTable(first)}`);
   const claudeCodeSha256 = await writeFile(claudeCode, `${JSON.stringify(claudeCodeEntry(first), null, 2)}\n`);
   const { installer, calls } = controller(root, {
-    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) }
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) },
+    ...trustedRuntimeShas(root)
   });
   await installer.writeRecord({
     ...freshRecord(),
@@ -1079,7 +1212,7 @@ test("Repair skips a project assistant whose project folder is gone, and repairs
     "claude-code": { target: claudeCode, sha256: await writeFile(claudeCode, entry) },
     "gemini-cli": { target: gemini, sha256: await writeFile(gemini, entry) }
   };
-  const { installer, calls } = controller(root);
+  const { installer, calls } = controller(root, trustedRuntimeShas(root));
   await installer.writeRecord({ ...freshRecord(), materialsFolder: materials, selectedAssistantId: "claude-code", configured });
   // The educator deletes the Claude Code project folder when the term ends.
   await fs.rm(gone, { recursive: true });
@@ -1106,7 +1239,8 @@ test("changing the materials folder leaves out a project assistant whose project
     "claude-code": { target: claudeCode, sha256: await writeFile(claudeCode, `${JSON.stringify(claudeCodeEntry(first), null, 2)}\n`) }
   };
   const { installer, calls } = controller(root, {
-    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) }
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) },
+    ...trustedRuntimeShas(root)
   });
   await installer.writeRecord({ ...freshRecord(), materialsFolder: first, selectedAssistantId: "codex", configured });
   await fs.rm(gone, { recursive: true });
@@ -1170,7 +1304,8 @@ test("choosing the folder that is already in use records the choice and rewrites
   const content = codexTable(materials);
   const codexSha256 = await writeFile(codex, content);
   const { installer, calls } = controller(root, {
-    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [materials] }) }
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [materials] }) },
+    ...trustedRuntimeShas(root)
   });
   await installer.writeRecord({
     ...freshRecord(),
@@ -1213,7 +1348,8 @@ test("a foreign configured path enters record recovery before a folder change wr
   const foreign = path.join(root, "Elsewhere", ".codex", "config.toml");
   const foreignSha256 = await writeFile(foreign, codexTable(path.join(root, "Materials")));
   const { installer, calls } = controller(root, {
-    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) }
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) },
+    ...trustedRuntimeShas(root)
   });
   const stored = {
     ...freshRecord(),
@@ -1245,7 +1381,8 @@ test("a refused folder change keeps the assistant configuration and workspace re
   const codexSha256 = await writeFile(codex, original);
   const { installer } = controller(root, {
     dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) },
-    runCli: async () => ({ code: 1, stdout: "", stderr: "Refusing to replace existing Morrow server morrow" })
+    runCli: async () => ({ code: 1, stdout: "", stderr: "Refusing to replace existing Morrow server morrow" }),
+    ...trustedRuntimeShas(root)
   });
   await installer.writeRecord({
     ...freshRecord(),
@@ -1273,7 +1410,8 @@ test("a later assistant refusal rolls every earlier folder rebind back", async (
   const claudeCodeSha256 = await writeFile(claudeCode, originalClaudeCode);
   const { installer } = controller(root, {
     dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) },
-    refuseClientId: "claude"
+    refuseClientId: "claude",
+    ...trustedRuntimeShas(root)
   });
   const originalRecord = {
     ...freshRecord(),
@@ -1309,7 +1447,8 @@ test("an assistant edit made before a folder rebind is kept, and only Morrow's e
       if (changed) return;
       changed = true;
       await fs.writeFile(target, edited);
-    }
+    },
+    ...trustedRuntimeShas(root)
   });
   await installer.writeRecord({
     ...freshRecord(),
@@ -1344,7 +1483,8 @@ test("an earlier assistant edit during a later rebind prevents the workspace com
     dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) },
     beforeClientInstall: async ({ args }) => {
       if (args[2] === "claude") await fs.writeFile(codex, concurrentCodex);
-    }
+    },
+    ...trustedRuntimeShas(root)
   });
   const originalRecord = {
     ...freshRecord(),
@@ -1372,21 +1512,10 @@ test("a folder change makes the Claude Desktop extension again, for the folder t
   // folder is inside the extension Morrow generates.
   const { installer } = controller(root, {
     platform: CLAUDE_DESKTOP_PLATFORM,
-    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) }
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) },
+    ...trustedRuntimeShas(root)
   });
   for (const file of [installer.paths.node, installer.paths.server, installer.paths.upstreams]) await writeFile(file, "fixture");
-  const serverBytes = await fs.readFile(installer.paths.server);
-  await writeFile(installer.paths.mcpRuntimeManifest, `${JSON.stringify({
-    schema: "morrow.mcp-runtime-manifest.v2",
-    package: { name: "@morrow-lms/gateway", version: "1.0.0-rc.0" },
-    entrypoint: {
-      path: "packages/mcp-server/dist/index.js",
-      bytes: serverBytes.length,
-      sha256: sha256(serverBytes)
-    },
-    dependencies: [],
-    directFiles: []
-  })}\n`);
   const previousBundle = path.join(root, "UserData", "State", "ClaudeDesktop", "setup-previous", "Morrow.mcpb");
   await writeFile(previousBundle, "the bundle for the folder in use now");
   await installer.writeRecord({
