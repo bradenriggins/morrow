@@ -296,9 +296,10 @@ class LocalProcedureRefused(ExecutorError):
 
 
 class CallerInputError(ExecutorError):
-    """A command's own JSON argument (--params, --body,
-    --course-resolution) was refused before anything was sent. The text
-    is Morrow's own check, never provider data."""
+    """A command's own argument (--params, --body, --course-resolution,
+    a maintenance command's --reason) was refused before anything was
+    sent or changed. The text is Morrow's own check, never provider
+    data."""
 
 
 class ConfirmationRequired(ExecutorError):
@@ -7825,15 +7826,23 @@ def _render_dry_run(entry, params, session, pack, plan, op_id,
     kind, journals nothing, claims no op_id, and never persists or
     consumes the approval. Returns the report dict; the CLI prints it."""
     is_write = declared == "write"
+    if not is_write:
+        admission_detail = "read: no approval required"
+    elif isinstance(approval_audit, dict) \
+            and approval_audit.get("mode") == "edit":
+        admission_detail = ("admitted by Edit mode (no per-write approval); "
+                            "nothing is recorded in dry-run")
+    elif approval_audit is not None:
+        admission_detail = ("write approval verified (digest-bound, "
+                            "educator-signed, unexpired, single-use check "
+                            "passed); NOT consumed in dry-run")
+    else:
+        admission_detail = "admitted with no approval record checked"
     gates = [
         {"gate": "effect_class_derivation", "result": "pass",
          "detail": "declared %r, derived %r from the entry's blocks"
                    % (declared, derived)},
-        {"gate": "admission", "result": "pass",
-         "detail": ("write approval verified (digest-bound, educator-signed, "
-                     "unexpired, single-use check passed); NOT consumed in "
-                     "dry-run" if is_write and approval_audit is not None
-                     else "read: no approval required")},
+        {"gate": "admission", "result": "pass", "detail": admission_detail},
         {"gate": "write_halt", "result": "pass",
          "detail": "no write halt file present"},
     ]
@@ -9911,6 +9920,22 @@ def _load_approval(path: str | None) -> dict | None:
     return record
 
 
+def _repeated_approve_flags(args) -> list:
+    """The plan-write flags approve-write must repeat to reach the same
+    Canvas, session, and educator: each one given with a non-default
+    value."""
+    flags = []
+    if args.backend != "chromium":
+        flags += ["--backend", args.backend]
+        if args.session != SESSION_PATH:
+            flags += ["--session", args.session]
+    if args.canvas_base:
+        flags += ["--canvas-base", args.canvas_base]
+    if args.user_id:
+        flags += ["--user-id", args.user_id]
+    return flags
+
+
 def _mode_ctx_from_args(args) -> dict | None:
     """Build the Plan/Edit mode_ctx from CLI flags (or None).
 
@@ -10259,7 +10284,8 @@ def prepare_plan_write(name: str, method: str, path_template: str,
                        provider: str = "canvas",
                        ttl_seconds: int = 3600,
                        conversation_id: str | None = None,
-                       user_id: str | None = None) -> dict:
+                       user_id: str | None = None,
+                       approve_flags=()) -> dict:
     """Prepare one Plan-mode catalog write for the educator's approval.
 
     Runs the catalog and policy gates, reads the target course and the
@@ -10274,7 +10300,11 @@ def prepare_plan_write(name: str, method: str, path_template: str,
     form, checked against conversation_id) are stored as bare labels,
     and the plan binds each label to its vault token (final muse audit
     M1/M2): the typed name stays in the encrypted name-echo store, and
-    approve-write refuses when a label names a different issue."""
+    approve-write refuses when a label names a different issue.
+
+    The returned message gives the approve-write command to run, with
+    approve_flags (the plan-write flags approve-write must repeat, such
+    as a non-default --backend) and this conversation's id."""
     from dispatch.admission import mint_approval
     from dispatch.approval_display import (render_approval_display,
                                            render_educator_display)
@@ -10379,9 +10409,23 @@ def prepare_plan_write(name: str, method: str, path_template: str,
                     "exactly as written and ask them to approve this write. "
                     "Do not show them audit_detail: it is the technical "
                     "record of the same request, for reviewers. When they "
-                    "approve, run approve-write --op-id %s "
-                    "--authorization \"<their reply, verbatim>\"." % op_id),
+                    "approve, run %s" % _approve_write_command(
+                        op_id, conversation_id, approve_flags)),
     }
+
+
+def _approve_write_command(op_id, conversation_id, flags=()):
+    """The approve-write command, from the tree root, that sends a
+    prepared write. The educator's reply replaces its placeholder."""
+    import shlex
+    parts = ["PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py "
+             "approve-write --op-id", shlex.quote(op_id),
+             "--authorization \"<their reply, verbatim>\""]
+    parts += [shlex.quote(str(flag)) for flag in flags]
+    parts += ["--conversation-id",
+              shlex.quote(conversation_id) if conversation_id
+              else "\"<this conversation's id>\""]
+    return " ".join(parts)
 
 
 def _recheck_named_object(descriptor, target, session, pack):
@@ -10664,14 +10708,14 @@ def _chromium_session_mod():
     return chromium_session
 
 
-def _check_claim_release_reason(reason):
+def _check_operator_reason(command, reason):
     # W6-P2-D2: "OPERATOR ONLY" is enforced as far as code can: the
     # reason must be a real reconciliation note, not a stub.
     if len((reason or "").strip()) < 20:
-        raise ExecutorError(
-            "claim-release --reason must be at least 20 characters: "
-            "state what you reconciled against the provider "
-            "('fixed it' is not a reconciliation)")
+        raise CallerInputError(
+            "%s --reason must be at least 20 characters: state what you "
+            "reconciled against the provider ('fixed it' is not a "
+            "reconciliation). Nothing was changed." % command)
 
 
 def _require_destructive_confirm(command, warning, yes):
@@ -11081,7 +11125,8 @@ def _run_cli(argv=None):
                     _load_params(args.params), body, session, pack,
                     provider=args.provider,
                     conversation_id=mode_ctx.get("conversation_id"),
-                    user_id=mode_ctx.get("user_id"))
+                    user_id=mode_ctx.get("user_id"),
+                    approve_flags=_repeated_approve_flags(args))
             else:
                 out = approve_plan_write(args.op_id, args.authorization,
                                          session, pack,
@@ -11142,7 +11187,7 @@ def _run_cli(argv=None):
             args.yes)
         print(canonical(journal_reconcile()))
     elif args.command == "journal-recover-secret":
-        _check_claim_release_reason(args.reason)
+        _check_operator_reason("journal-recover-secret", args.reason)
         _require_destructive_confirm(
             "journal-recover-secret",
             "this re-keys the journal under a NEW secret and re-seals "
@@ -11168,7 +11213,7 @@ def _run_cli(argv=None):
         # needs the same explicit confirmation as the other destructive
         # commands. There is no separate operator identity on this
         # machine; the journaled forced=true record is the audit trail.
-        _check_claim_release_reason(args.reason)
+        _check_operator_reason("claim-release", args.reason)
         _require_destructive_confirm(
             "claim-release",
             "this forcibly releases a live journal claim WITHOUT the "

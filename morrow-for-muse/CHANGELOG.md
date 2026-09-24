@@ -72,6 +72,12 @@ Student privacy:
   different student in the same course given by its number. Morrow now
   refuses such a course before it reads anything, and the assistant
   asks for the course by name or by the number in its Canvas address.
+- Privacy fix: three reads showed students' Canvas user ids to the
+  assistant and kept them in Morrow's log: the due dates each student
+  has, the tags on each student, and which students can see an
+  assignment. Canvas puts those ids where Morrow did not look for
+  them. The assistant now sees each student's label there, and a read
+  that has an id Morrow cannot turn into a label is refused.
 
 Changes to your courses:
 
@@ -97,6 +103,12 @@ Changes to your courses:
   catch a New Quiz published through its assignment or module item,
   Morrow reads that item first. Make these changes in Canvas yourself
   for now.
+- Morrow can no longer delete, conclude, publish, or unpublish a whole
+  course through the course rename task. That task also took a course
+  "event", so after one approval, or in Edit mode with no question at
+  all, the assistant could delete or conclude the course, although the
+  docs said Morrow refuses that even with your approval. Only a
+  course rename was tested, so those changes are refused now.
 - The approval you read before a change is in plain words: the
   course, the change, every value that will be sent, and whether
   Morrow can undo it. A course rename and a change to the dates of
@@ -199,6 +211,9 @@ Settings and undo:
   Morrow prepares the reverse change as a new change you approve. If
   an undo is tried anyway, you are told that nothing was sent and
   nothing changed.
+- In Edit mode, a preview of a change (a dry run) says that Edit mode
+  allows it. It said your signed approval had been checked, which the
+  assistant could pass on to you as an approval you never gave.
 
 Messages:
 
@@ -270,6 +285,14 @@ Messages:
 - A read Morrow never does in this version, such as a blueprint
   course's links, is described as a read. It was described as a
   change, with an offer to help you write it.
+- After a change is prepared, the assistant is given the whole command
+  that sends it once you approve, with this conversation's id. It was
+  given only part of the command, which does not run as written.
+- The step to recover Morrow's log after its key is lost runs as the
+  assistant's instructions show it: they give a real reason of at
+  least 20 characters. A shorter reason is refused as a reason that is
+  too short, naming that step. It was reported as a failure Morrow
+  could not explain, with a note to email support.
 
 Installing and the docs:
 
@@ -366,9 +389,10 @@ Installing and the docs:
 - The documented `python3 dispatch/executor.py` runs even when the
   computer's Python has another package named `dispatch` (on a Mac,
   PyObjC ships one). Every executor command failed there.
-- The shipped `transport/local_chromium_selftest.py` runs in the
-  release: its allowlist check no longer opens a file the release
-  leaves out.
+- The browser test `transport/local_chromium_selftest.py` is no longer
+  in the release. It runs in the source repository's checks
+  (`scripts/dev-suites.sh`) instead, and its allowlist check no longer
+  opens a file the release leaves out.
 - The installer's own notes match the install guide: upgrade by
   copying the new release over the installed folder (a new folder
   loses your Canvas address and sign-in), and 3 backups are kept.
@@ -381,10 +405,15 @@ Installing and the docs:
   proxy to reach your school passed the check.
 - Installing no longer leaves an empty test folder
   (`helper/.selftest-warn-profile`) in the installed folder.
+- The install guide says what a reinstall does with the keepalive
+  schedule of another installed copy of Morrow for Muse: it keeps it,
+  and changes only this copy's entry. The guide said the reinstall
+  removed it, and contradicted its own step 7.
 - The assistant's instructions give Morrow's commands as
   `bin/morrow ...`, run from the installed folder. A bare `morrow` is
   not on the computer's command path, so those commands failed with
-  "command not found".
+  "command not found". Morrow's own help, usage lines, and hints name
+  them the same way.
 
 Technical notes:
 
@@ -403,9 +432,17 @@ Technical notes:
   and the roster read steps aside for a write the write halt refuses.
   The roster read is fixture-proven, not yet live-proven through this
   lane.
+- `privacy/executor_wire.py`: `assignment_visibility` is a person-ids
+  key (and `include[]=assignment_visibility` a learner-data signal in
+  `dispatch/admission.py`), and the effective due dates (C-112) and
+  bulk user tags (C-226) reads add the student ids they use as map
+  keys to the boundary's roster, so the boundary labels those keys. A
+  non-id key in a student position refuses the read.
 - `dispatch/admission_policy.json` 1.4.0: `never_dispatch.request_flags`
   refuses `is_announcement` on any route; `canvas_create_external_feed_courses`
-  is never-dispatch; C-139, C-141, C-167, and C-238 are evidence holds.
+  is never-dispatch; C-139, C-141, C-167, and C-238 are evidence holds;
+  `evidence_holds.request_fields` refuses `event` (any value) and
+  `offer` (true) on the course update (C-128).
 - The failure catalog gains `never-dispatch` and
   `course-roster-unavailable`; `new-quiz-create-evidence-hold` became
   the general `evidence-hold`.

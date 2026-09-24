@@ -23,7 +23,9 @@ marked `live-proven` is not a v1 claim.
 - Course read/update: get course, update course (rename, readback
   verified and restored), course settings, course tabs. Course create was
   never tested. Course delete/conclude (C-108) is on evidence hold and
-  is not a v1 claim.
+  is not a v1 claim. The same change sent through a course update is
+  refused too: `event` (delete, conclude, claim, offer, undelete) on
+  C-128, and `offer`, which publishes the course.
 - Assignment create/read/update/delete, proven 2026-09-21 through the
   Chromium lane (assignment 4045385 created with readback verification;
   delete verified with terminal GET 404).

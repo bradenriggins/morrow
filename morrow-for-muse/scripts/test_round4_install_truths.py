@@ -10,6 +10,14 @@ audit 2026-09-22):
   F2. knowledge/troubleshooting-playbook.md said install.sh "checks
       python3 >= 3.10", but install.sh refuses 3.10, so an agent
       reading it would call a 3.10 VM fine (final sweep 2026-09-23).
+  C1. INSTALL.md said the installer migrates keepalive cron entries
+      from other trees "so exactly one entry remains" and that the old
+      tree's keepalive "can no longer SIGKILL the new server". Since
+      W4-P1-12 the installer keeps every other tree's entry (it prints
+      "keeping keepalive cron entries for other tree(s)"), as step 7
+      says, so the guide contradicted itself and an operator relying
+      on a reinstall to remove an old tree's entry kept it (muse UX
+      audit round 2, 2026-09-23).
 """
 
 import os
@@ -232,3 +240,19 @@ def test_install_never_offers_keepalive_as_the_first_start():
     unset = unset[:unset.index("\nelse\n")]
     assert "rerun this installer" in unset
     assert "keepalive" not in unset
+
+
+def test_docs_say_the_installer_keeps_other_trees_cron_entries():
+    install = _read("install.sh")
+    # The installer's own behavior (W4-P1-12): other trees' entries stay.
+    assert "keeping keepalive cron entries for other tree(s)" in install
+    for rel in ("INSTALL.md", "install.sh"):
+        text = " ".join(_read(rel).split())
+        assert "exactly one entry" not in text, rel
+        assert "can no longer SIGKILL" not in text, rel
+        assert not re.search(r"(?i)migrat\w* (?:stale )?keepalive cron "
+                             r"entries|stale entries from a previous "
+                             r"tree are migrated", text), rel
+    guide = " ".join(_read("INSTALL.md").split())
+    assert "keeps the entries that belong to other installed trees" \
+        in guide

@@ -14,6 +14,13 @@ Failure modes this suite pins down (written before the fix; final sweep
   3. A folder that holds no backup, or several, is named in a plain
      message, never a traceback, and restore never picks one of
      several by itself.
+  4. (muse UX audit round 2, 2026-09-23) SKILL.md showed
+     `journal-recover-secret --yes --reason "..."`. A reason under 20
+     characters was refused as a failure Morrow does not recognize
+     (unknown-nothing-sent, "email support"), and its detail named
+     claim-release. The refusal is Morrow's own input check, it names
+     the command that was run and the 20-character rule, and every
+     documented reason is long enough to run.
 
 The commands run for real, in order, from the tree root, with no
 terminal (as the agent runs them), against a scratch MORROW_HOME under
@@ -213,3 +220,38 @@ def test_every_documented_confirm_command_passes_yes():
                 missing.append("%s: %s" % (os.path.relpath(path, TREE),
                                            " ".join(span.split())))
     assert missing == []
+
+
+REASON_COMMANDS = ("journal-recover-secret", "claim-release")
+
+
+@pytest.mark.parametrize("command", REASON_COMMANDS)
+def test_a_short_reason_is_an_input_check_that_names_the_command(scratch,
+                                                                 command):
+    extra = " --op-id 00000000-0000-4000-8000-000000000001" \
+        if command == "claim-release" else ""
+    proc = _run(scratch, "python3 -m dispatch.executor %s --yes "
+                         "--reason short%s" % (command, extra))
+    assert proc.returncode != 0
+    result = json.loads(proc.stderr.strip().splitlines()[-1])
+    assert result["mode_id"] == "caller-input-refused", result
+    detail = result["engineering_detail"]
+    assert detail.startswith("[Morrow input check]"), detail
+    assert command in detail and "20 characters" in detail, detail
+    other = [c for c in REASON_COMMANDS if c != command][0]
+    assert other not in detail, detail
+
+
+def test_every_documented_reason_is_long_enough():
+    reasons = []
+    pattern = re.compile(r"(?:%s)\b.*?--reason\s+\"([^\"]*)\""
+                         % "|".join(map(re.escape, REASON_COMMANDS)),
+                         re.DOTALL)
+    for path in _doc_paths():
+        text = open(path, encoding="utf-8").read()
+        text = text.replace("\\\n", " ")
+        for match in pattern.finditer(text):
+            reasons.append((os.path.relpath(path, TREE), match.group(1)))
+    assert reasons, "no documented --reason found"
+    assert [r for r in reasons
+            if len(" ".join(r[1].split())) < 20 or "..." in r[1]] == []

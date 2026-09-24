@@ -1006,12 +1006,13 @@ def _t_destructive_confirm():
     # W6-P2-D2: claim-release needs a real reconciliation note.
     for bad in ("", "   ", "fixed it", "released the claim"):
         try:
-            ex._check_claim_release_reason(bad)
+            ex._check_operator_reason("claim-release", bad)
             check("w6p2d2: stub reason %r refused" % bad, False,
                   "no ExecutorError raised")
         except ex.ExecutorError:
             check("w6p2d2: stub reason %r refused" % bad, True)
-    ex._check_claim_release_reason(
+    ex._check_operator_reason(
+        "claim-release",
         "reconciled op abc123 against the provider: no such page exists")
     check("w6p2d2: genuine reconciliation note accepted", True)
 _t_destructive_confirm()

@@ -2028,6 +2028,7 @@ _IDENTITY_VALUE_FIELDS = frozenset([
 _PERSON_ID_ARRAY_FIELDS = frozenset([
     "userids", "studentids", "learnerids", "recipientids",
     "participantids", "authorids", "participatinguserids",
+    "assignmentvisibility",
 ])
 _IDENTITY_RECORD_VALUE_FIELDS = frozenset([
     "id", "name", "fullname", "username", "sortablename", "shortname",

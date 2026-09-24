@@ -25,6 +25,12 @@ minlen.py):
       VerificationFailed that no catalog entry matched ("unknown").
   L5. The destructive-confirmation copy asked the educator to say what
       will be destroyed; the agent states it and asks for a yes.
+  U1. (muse UX audit round 2, 2026-09-23) SKILL.md says plan-write's
+      message spells out the exact approve-write command. It said only
+      "run approve-write --op-id <id> ...": no executor path, so the
+      copied command was not found, and no --conversation-id, which
+      SKILL.md requires on every command. The message's command runs
+      as written once the educator's reply fills its placeholder.
 
 Hermetic: fake provider session; journal, approvals, settings, and the
 signing key live in pytest's tmp_path.
@@ -367,6 +373,44 @@ def test_documented_plan_write_flow_end_to_end(monkeypatch):
                       "--user-id", USER, "--conversation-id", CONV])
     assert code != 0
     assert len(_writes(session)) == 1
+
+
+def test_plan_write_message_is_the_exact_approve_write_command(
+        monkeypatch):
+    import shlex
+    session = FakeSession(_canvas())
+    _fake_store(monkeypatch, session)
+    code, out = _cli(_plan_write_argv(APPROVED_BODY))
+    assert code == 0, out
+    prepared = json.loads(out)
+    message = prepared["message"]
+    start = message.index("PYTHONDONTWRITEBYTECODE=1 python3 ")
+    command = message[start:].rstrip(".")
+    argv = shlex.split(command)
+    assert argv[:4] == ["PYTHONDONTWRITEBYTECODE=1", "python3",
+                        "dispatch/executor.py", "approve-write"], command
+    assert argv[argv.index("--op-id") + 1] == prepared["op_id"]
+    assert argv[argv.index("--conversation-id") + 1] == CONV
+    reply = argv.index("--authorization") + 1
+    assert argv[reply] == "<their reply, verbatim>", command
+    argv[reply] = "Yes"
+    code, out = _cli(argv[3:])
+    assert code == 0, out
+    assert json.loads(out)["outcome"] == "verified"
+    assert len(_writes(session)) == 1
+
+
+def test_plan_write_message_names_the_conversation_when_it_had_none(
+        monkeypatch):
+    session = FakeSession(_canvas())
+    _fake_store(monkeypatch, session)
+    argv = _plan_write_argv(APPROVED_BODY)
+    at = argv.index("--conversation-id")
+    del argv[at:at + 2]
+    code, out = _cli(argv)
+    assert code == 0, out
+    message = json.loads(out)["message"]
+    assert "--conversation-id \"<this conversation's id>\"" in message
 
 
 def test_prepared_write_edited_after_display_is_refused(monkeypatch,

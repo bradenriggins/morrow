@@ -142,9 +142,9 @@ it does, in order:
    version change (see `pack/version.txt`), backs up the existing tree
    (excluding `helper/profile/`) to a timestamped directory outside
    the tree, then removes stale files from the old version that the new
-   manifest no longer lists (loudly logged). Migrates keepalive cron
-   entries from other trees so exactly one entry (this tree's) remains.
-   Records the installed version and manifest under the effective
+   manifest no longer lists (loudly logged). Updates only this tree's
+   keepalive cron entry; entries that belong to other installed trees
+   are kept (see step 7). Records the installed version and manifest under the effective
    `MORROW_HOME`.
 3. **Chromium locate.** Uses `CHROMIUM_BIN` when it is set (in the
    environment, or in `helper/env`), otherwise
@@ -472,9 +472,9 @@ bring the previous release back. The installer:
   entry), itemized, instead of leaving a half-install.
 - Never overwrites `helper/env` or wipes `helper/profile/`: your
   tenant config and authenticated session survive.
-- Migrates keepalive cron entries from old trees so exactly one entry
-  (the new tree's) remains. The old tree's keepalive can no longer
-  SIGKILL the new server. The cron entry shell-quotes the tree path,
+- Updates only this tree's keepalive cron entry and keeps the entries
+  that belong to other installed trees, so each tree keeps its own
+  supervision. The cron entry shell-quotes the tree path,
   so trees under paths with spaces work. Two installers running at
   once serialize their cron updates, so neither tree's entry is lost.
 

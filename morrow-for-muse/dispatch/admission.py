@@ -289,8 +289,11 @@ def _url_hits_any(url: str, substrings: list) -> str | None:
 # tokens close that hole. The plural resource nouns are the Canvas
 # collection names; the singular _id forms catch identifier parameters
 # (student_ids, user_id) that carry learner references in bodies.
+# include[]=assignment_visibility makes an assignment read list the ids
+# of the students who can see each assignment.
 _QUERY_BODY_LEARNER_TOKENS = ("enrollments", "students", "users",
-                              "student_id", "user_id")
+                              "student_id", "user_id",
+                              "assignment_visibility")
 
 
 # A JSON object key naming a learner record or learner identifier
@@ -640,8 +643,8 @@ def check_evidence_holds(entry: dict, policy: dict) -> None:
     operation, it is removed from the hold list and admitted on all tenants.
     A live-proven route is refused too when its request sends a field
     whose effect is not in this version (evidence_holds.request_fields:
-    the course home page, publishing a New Quiz, a graded discussion, a
-    classic question bank).
+    the course home page, deleting or concluding the course, publishing
+    a New Quiz, a graded discussion, a classic question bank).
     """
     name = entry.get("name") or ""
     holds = policy.get("evidence_holds", {}) or {}

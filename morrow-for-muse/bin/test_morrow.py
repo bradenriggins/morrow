@@ -8,7 +8,12 @@ Safety contract under test:
 - doctor is read-only: it performs one GET to the helper /status
   endpoint and reads tree files; it never reads or sends auth material;
 - doctor degrades cleanly (exit 1, plain message) when the helper is
-  unreachable.
+  unreachable;
+- every usage line and hint names the command as `bin/morrow`, the way
+  it runs from the installed folder. A bare `morrow` is not on the
+  computer's command path, so "run `morrow failure --list`" or "usage:
+  morrow mode set ..." sent the agent to "command not found" (muse UX
+  audit round 2, 2026-09-23).
 """
 
 import importlib.machinery
@@ -16,6 +21,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sys
 import urllib.error
 
@@ -305,3 +311,34 @@ def test_doctor_default_output_unchanged(cli, monkeypatch, capsys):
 def test_doctor_rejects_bad_args(cli, capsys):
     assert cli.main(["doctor", "--bogus"]) == 2
     assert "usage" in capsys.readouterr().err
+
+
+# A command the output tells the reader to run: a usage line, a
+# backquoted command, or an alternative after "|".
+_BARE_COMMAND_RE = re.compile(r"(?:usage:\s+|`|\|\s+)morrow\b")
+
+
+@pytest.mark.parametrize("argv, code", [
+    (["--help"], 0), (["bogus"], 2), (["failure"], 2),
+    (["failure", "--help"], 0), (["failure", "nope-xyz-123"], 1),
+    (["start", "extra"], 2), (["doctor", "--bogus"], 2),
+    (["version", "extra"], 2), (["students"], 2),
+    (["students", "find"], 2), (["disconnect", "--bogus"], 2),
+    (["mode", "set", "banana"], 2), (["mode"], 2),
+    (["settings", "get"], 2),
+])
+def test_every_hint_names_the_command_as_bin_morrow(cli, capsys, argv,
+                                                    code):
+    try:
+        got = cli.main(argv)
+    except SystemExit as exc:
+        got = exc.code
+    captured = capsys.readouterr()
+    text = captured.out + captured.err
+    assert got == code, text
+    assert _BARE_COMMAND_RE.findall(text) == [], text
+    assert "bin/morrow" in text, text
+    usage = [line for line in text.splitlines()
+             if line.lstrip().startswith("usage:")]
+    assert all(re.match(r"\s*usage:\s+bin/morrow\b", line)
+               for line in usage), usage

@@ -372,7 +372,7 @@ def _find_student(fetcher, tenant_base, course_id, query, *,
 
 def main(argv=None, fetcher=None):
     parser = argparse.ArgumentParser(
-        prog="morrow students find",
+        prog="bin/morrow students find",
         description="Resolve the name the educator typed to the student's "
                     "course label. Prints one JSON object. Read-only.")
     parser.add_argument("--course", required=True, help="Canvas course id")

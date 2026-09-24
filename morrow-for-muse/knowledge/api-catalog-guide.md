@@ -73,7 +73,8 @@ the reads are Canvas rows, 5 are Item Bank bank-level reads).
 Courses: get, update (rename, readback-verified and restored),
 settings, tabs, sections reads. Course create never tested. Course
 conclude/delete is evidence-hold (`canvas_delete_conclude_course`,
-policy-held); destructive, admission ceremony required, no v1 claim.
+policy-held, and refused when sent as `course[event]` or `offer` on a
+course update); destructive, no v1 claim.
 
 Enrollments: all pending (C-168 through C-174), learner-data gated.
 There is no enrollment write or read the agent may touch until the
