@@ -86,6 +86,24 @@ def test_live_proven_totals_in_every_doc():
     assert seen >= 4, "the docs no longer state the counts this test checks"
 
 
+# Failure mode (round-2 finding muse-ux-r2-first-run-mode-count,
+# 2026-09-23, written before the fix): FIRST_RUN.md said "every catalog
+# mode (now 88) has a fixture" while the failure catalog had 95 modes.
+def test_failure_mode_counts_in_every_doc():
+    from failures.catalog import load_catalog
+    modes = len(load_catalog().entries)
+    seen = 0
+    for rel in DOCS:
+        text = _read(rel)
+        for match in re.finditer(
+                r"catalog modes? \(now (\d+)\)|(?<![-\w])(\d+) "
+                r"(?:catalog|failure) modes\b", text):
+            seen += 1
+            stated = int(match.group(1) or match.group(2))
+            assert stated == modes, (rel, match.group(0), modes)
+    assert seen >= 1, "the docs no longer state the failure mode count"
+
+
 def test_status_breakdowns_in_the_knowledge_docs():
     counts = _counts()
     c, ib = counts["status"]["C"], counts["status"]["IB"]
