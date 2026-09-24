@@ -240,7 +240,7 @@ def rig():
     _tenant_page(rig, LOGIN_PAGE)
     try:
         rc, text = _install(rig)
-        assert rc == 0, text[-3000:]
+        assert rc == 0, text[-20000:]
         assert "CANVAS_BASE is not set yet" in text
         yield rig
     finally:
