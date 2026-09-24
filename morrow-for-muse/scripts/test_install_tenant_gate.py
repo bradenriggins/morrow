@@ -102,6 +102,35 @@ def test_a_keepalive_failure_fails_the_install():
     assert "WARNING: the helper did not come up" not in tail
 
 
+def test_a_tenant_value_with_triple_quotes_never_executes(tmp_path):
+    """Security review 2026-09-24: CANVAS_BASE was interpolated into a
+    python3 -c triple-quoted string, so a value containing ''' closed
+    the string early and executed injected Python (proven by scratch
+    script fix-muse-s3-0/inject_proof.py: the value
+    https://school.instructure.com''') ; __import__("os").system(...)
+    ; (''' ran its system call). The check passes the value as an
+    environment variable instead, so a CANVAS_BASE of any shape can
+    only reach normalize_tenant_base as data. The payload's marker is
+    a file the injected os.system call would create under the scratch
+    HOME; echoed failure text can never create it."""
+    block, _launch = _install_step10_probe()
+    stub = ('fail(){ echo "INSTALL FAIL [$1]: $2"; exit 1; }; '
+            'note(){ echo "$1"; }; ENV_FILE=helper/env; '
+            'TREE=%s\n' % TREE)
+    injected = str(tmp_path / "injection-ran")
+    bad = ("https://school.instructure.com''') ; "
+           "__import__(\"os\").system(\"touch %s\") ; ('''" % injected)
+    proc = subprocess.run(
+        ["bash", "-c", stub + "\n" + block],
+        capture_output=True, text=True,
+        env=dict(os.environ, CANVAS_BASE=bad,
+                 HOME=str(tmp_path / "home")), timeout=60)
+    out = proc.stdout + proc.stderr
+    assert not os.path.exists(injected), out
+    assert proc.returncode == 1, out
+    assert "not a Canvas address the helper accepts" in out, out
+
+
 def test_the_probe_logs_no_credentials_for_a_refused_url(tmp_path):
     """With a logging curl stub, a refused CANVAS_BASE never reaches
     curl at all (the old probe sent embedded credentials and plain

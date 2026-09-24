@@ -1077,12 +1077,17 @@ else
   # network (the old probe sent embedded credentials over plain HTTP
   # and reached addresses the helper then refused, with no reason on
   # the helper's later refusal).
-  _TENANT_CHECK="$(cd / && python3 -c "
-import sys
+  # Security review 2026-09-24: CANVAS_BASE is passed as an environment
+  # variable, never interpolated into the python source: a value
+  # containing ''' used to close the triple-quoted string early and
+  # execute injected Python (inject_proof.py under the final-sweep
+  # scratchpad).
+  _TENANT_CHECK="$(cd / && CANVAS_BASE="${CANVAS_BASE}" python3 -c "
+import os, sys
 sys.path.insert(0, '${TREE}')
 from config.tree_config import normalize_tenant_base
 try:
-    normalize_tenant_base('''${CANVAS_BASE}''')
+    normalize_tenant_base(os.environ['CANVAS_BASE'])
 except ValueError as exc:
     print(exc)
 " 2>&1)"
