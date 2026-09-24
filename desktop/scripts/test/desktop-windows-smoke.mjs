@@ -260,11 +260,14 @@ function normalizedDescriptor(value) {
 }
 
 function normalizedAppReceipt(value) {
-  const receipt = exactObject(value, ["schema", "runtime", "payload", "state", "codexConfig", "health", "runtimeTrace", "stateSecurity"]);
+  const receiptKeys = ["schema", "runtime", "payload", "state", "codexConfig", "health", "runtimeTrace", "stateSecurity"];
+  if (value && typeof value === "object" && !Array.isArray(value)
+    && Object.hasOwn(value, "smokeFailure")) receiptKeys.push("smokeFailure");
+  const receipt = exactObject(value, receiptKeys);
   const trace = exactObject(receipt.runtimeTrace, ["schema", "child", "stderrStage", "owner", "portBinding", "upstream"]);
   const upstream = exactObject(trace.upstream, ["initialize", "listTools", "readResource"]);
   const stateSecurity = exactObject(receipt.stateSecurity, ["schema", "state", "descriptor", "posix"]);
-  return {
+  const normalized = {
     schema: receipt.schema,
     runtime: exactObject(receipt.runtime, ["ready"]),
     payload: exactObject(receipt.payload, ["withinResources"]),
@@ -290,6 +293,15 @@ function normalizedAppReceipt(value) {
       posix: exactObject(stateSecurity.posix, ["stateMode", "stateOwner", "descriptorOwner"])
     }
   };
+  if (Object.hasOwn(receipt, "smokeFailure")) {
+    const failure = exactObject(receipt.smokeFailure, ["stage", "code"]);
+    if (!/^[a-z_]{1,40}$/.test(failure.stage)
+      || !/^[A-Za-z0-9_]{1,80}$/.test(failure.code)) {
+      throw new Error("Morrow smoke receipt has an invalid failure classification.");
+    }
+    normalized.smokeFailure = { stage: failure.stage, code: failure.code };
+  }
+  return normalized;
 }
 
 function assertReceipt(receipt, expected, subject) {

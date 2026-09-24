@@ -412,15 +412,19 @@ async function runDesktopSmokeIfRequested() {
   let health = { attempted: false, gatewayReady: false, bridgeConnected: false };
   let runtimeTrace = unavailableSmokeRuntimeTrace();
   let stateSecurity = unavailableSmokeStateSecurity();
+  let smokeStage = "ensure_runtime";
   try {
     await installer.ensureRuntime();
+    smokeStage = "configure_runtime";
     await installer.executeCli([
       "setup", "--repository", installer.paths.appRoot, "--upstreams", installer.paths.upstreams,
       "--node", installer.paths.node, "--state-directory", installer.paths.state, "--json"
     ]);
+    smokeStage = "resolve_workspace";
     const materials = await installer.workspaceForAssistantSetup(await installer.record());
     if (!materials) throw new Error("materials unavailable");
     if (installCodex) {
+      smokeStage = "install_codex_config";
       await installer.executeCli([
         "mcp", "install", "codex", "--scope", "user",
         "--repository", installer.paths.appRoot, "--upstreams", installer.paths.upstreams,
@@ -429,6 +433,7 @@ async function runDesktopSmokeIfRequested() {
       ]);
       configured = await exists(path.join(installer.home, ".codex", "config.toml"));
     }
+    smokeStage = "check_runtime";
     const runtime = await installer.runtimeSnapshot(materials);
     health = {
       attempted: runtime.health.attempted === true,
@@ -448,9 +453,13 @@ async function runDesktopSmokeIfRequested() {
       runtimeTrace,
       stateSecurity
     });
-  } catch {
+  } catch (error) {
     runtimeTrace = await currentSmokeRuntimeTrace().catch(() => unavailableSmokeRuntimeTrace());
     stateSecurity = await smokeStateSecurity(installer.paths, installer.userData).catch(() => unavailableSmokeStateSecurity());
+    const rawFailureCode = error && typeof error.code === "string" ? error.code
+      : error && typeof error.name === "string" ? error.name : "unclassified_error";
+    const failureCode = /^[A-Za-z0-9_]{1,80}$/.test(rawFailureCode)
+      ? rawFailureCode : "unclassified_error";
     await writeSmokeReceipt(receipt, {
       schema: "morrow.desktop-windows-smoke.v1",
       runtime: { ready: false },
@@ -459,7 +468,8 @@ async function runDesktopSmokeIfRequested() {
       codexConfig: { withinTestRoot: true, exists: false },
       health,
       runtimeTrace,
-      stateSecurity
+      stateSecurity,
+      smokeFailure: { stage: smokeStage, code: failureCode }
     }).catch(() => {});
   }
   app.quit();

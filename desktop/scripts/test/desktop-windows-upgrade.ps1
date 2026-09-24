@@ -72,7 +72,8 @@ function Assert-ReadyReceipt($Value, [string] $Label, [bool] $RequireGatewayRead
   if ($Value.schema -ne 'morrow.desktop-windows-smoke.v1' -or -not $Value.runtime.ready -or -not $Value.health.attempted `
     -or ($RequireGatewayReady -and -not $Value.health.gatewayReady)) {
     $trace = $Value.runtimeTrace | ConvertTo-Json -Depth 8 -Compress
-    throw "The $Label packaged runtime did not become ready: runtime=$($Value.runtime.ready), attempted=$($Value.health.attempted), gateway=$($Value.health.gatewayReady), trace=$trace."
+    $smokeFailure = if ($Value.smokeFailure) { $Value.smokeFailure | ConvertTo-Json -Compress } else { 'unavailable' }
+    throw "The $Label packaged runtime did not become ready: runtime=$($Value.runtime.ready), attempted=$($Value.health.attempted), gateway=$($Value.health.gatewayReady), smokeFailure=$smokeFailure, trace=$trace."
   }
   $private = $PrivateAclClassification
   $legacy = $Pinned3720LegacyAclClassification
