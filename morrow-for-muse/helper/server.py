@@ -619,84 +619,20 @@ if os.environ.get("LOGIN_HELPER_PRODUCTION") == "1":
 # launch, so count rows best-effort (immutable read, no locks taken on
 # the live DB). An unreadable file falls back to True: a Cookies file is
 # still evidence of a used profile.
+
+
 def _normalize_tenant_base(base_url):
-    # P0-7: normalize the tenant base to EXACTLY scheme://netloc/ (with a
-    # trailing slash). Paths, queries, fragments, and any deep link hiding
-    # in CANVAS_BASE are discarded: the helper always lands on the tenant
-    # origin root, and status() keeps a direct href.startswith(base_url)
-    # prefix check against that root, so sibling hostnames like
-    # tenant.instructure.com.evil.com can never match (the trailing slash
-    # makes the prefix check origin-exact).
-    #
-    # W2-P0-11: CANVAS_BASE is a server-side request primitive (the helper
-    # drives Chromium at it), so validation is strict:
-    # - absolute http(s) URL with a host (unchanged);
-    # - https required, unless CANVAS_BASE_ALLOW_HTTP=1 documents an
-    #   explicit local-dev override;
-    # - no userinfo (a URL carrying user:pass credentials is rejected);
-    # - no non-routable IP literals (loopback, link-local, RFC1918,
-    #   multicast, reserved, unspecified);
-    # - a Canvas-shaped tenant: *.instructure.com, or a self-hosted
-    #   Canvas domain the educator explicitly confirms with
-    #   CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=<that exact host>.
-    parsed = urllib.parse.urlsplit(base_url)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError(
-            "CANVAS_BASE must be an absolute http(s) URL with a host, "
-            "got %r" % (base_url,))
-    if parsed.username or parsed.password:
-        raise ValueError(
-            "CANVAS_BASE must not embed credentials (userinfo); got %r"
-            % (base_url,))
-    if parsed.scheme != "https" \
-            and os.environ.get("CANVAS_BASE_ALLOW_HTTP") != "1":
-        raise ValueError(
-            "CANVAS_BASE must be https (got %r); set "
-            "CANVAS_BASE_ALLOW_HTTP=1 for a documented local-dev override"
-            % (base_url,))
-    host = (parsed.hostname or "").lower()
-    # Placeholder rejection (first-run audit 2026-09-22): FIRST_RUN.md
-    # promises placeholder hosts fail loudly at the tenant gate. The
-    # install.sh probe rejects the doc placeholders, but the helper is
-    # the runtime gate (CANVAS_BASE can be set or changed after
-    # install), so it must reject them too. Bare instructure.com is
-    # the corporate site, never a Canvas tenant.
-    _PLACEHOLDER_HOSTS = frozenset({
-        "instructure.com",
-        "example.com",
-        "example.instructure.com",
-        "myschool.instructure.com",
-        "canvas.instructure.com",
-    })
-    _PLACEHOLDER_LABELS = frozenset({
-        "your-school", "yourschool", "your_school", "example", "myschool",
-    })
-    labels = host.split(".")
-    if host in _PLACEHOLDER_HOSTS or any(
-            lab in _PLACEHOLDER_LABELS for lab in labels):
-        raise ValueError(
-            "CANVAS_BASE looks like a placeholder (%r); set your school's "
-            "real Canvas URL, e.g. https://<your-school>.instructure.com "
-            "(got %r)" % (host, base_url))
-    try:
-        literal = ipaddress.ip_address(host)
-    except ValueError:
-        literal = None
-    if literal is not None and not literal.is_global:
-        raise ValueError(
-            "CANVAS_BASE must not point at a non-routable address "
-            "(loopback, link-local, or private); got %r" % (base_url,))
-    confirmed = os.environ.get(
-        "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", "").strip().lower()
-    if not (host == "instructure.com"
-            or host.endswith(".instructure.com")
-            or (confirmed and host == confirmed)):
-        raise ValueError(
-            "CANVAS_BASE must be a Canvas tenant (*.instructure.com); for "
-            "a self-hosted Canvas domain set "
-            "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=%s (got %r)"
-            % (host, base_url))
-    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "/", "", ""))
+    """The tenant rule, shared with install.sh (config/tree_config.py).
+
+    Moved 2026-09-23 (muse UX audit 3): install.sh validates CANVAS_BASE
+    with the same function before its curl probe, so the installer and
+    the helper cannot drift apart.
+    """
+    _troot = os.path.normpath(os.path.join(_HERE, ".."))
+    if _troot not in sys.path:
+        sys.path.insert(0, _troot)
+    from config.tree_config import normalize_tenant_base  # noqa: E402
+    return normalize_tenant_base(base_url)
 
 
 def _profile_has_cookies():

@@ -1068,6 +1068,28 @@ else
     && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?CANVAS_BASE=' "${ENV_FILE}" 2>/dev/null; then
     fail "env" "CANVAS_BASE is set in this shell but absent from ${ENV_FILE}; the keepalive cron sources only that file, so helper recovery would fail later. Add CANVAS_BASE=${_SHELL_CANVAS_BASE} to ${ENV_FILE} and rerun."
   fi
+  # Muse UX audit 3 (2026-09-23): the helper's tenant rule runs BEFORE
+  # the network probe, from the shared validator in
+  # config/tree_config.py (the same function the helper uses). A pasted
+  # https://user:pw@host, an http:// address, a private IP literal, or
+  # an unconfirmed custom domain now fails the install with the
+  # helper's plain reason instead of being sent to the network (the old
+  # probe sent embedded credentials over plain HTTP and reached
+  # addresses the helper then refused, with no reason on the helper's
+  # later refusal).
+  _TENANT_CHECK="$(cd / && python3 -c "
+import sys
+sys.path.insert(0, '${TREE}')
+from config.tree_config import normalize_tenant_base
+try:
+    normalize_tenant_base('''${CANVAS_BASE}''')
+except ValueError as exc:
+    print(exc)
+" 2>&1)"
+  if [ -n "${_TENANT_CHECK}" ]; then
+    fail "tenant" "CANVAS_BASE=${CANVAS_BASE} is not a Canvas address the helper accepts: ${_TENANT_CHECK} Fix it in ${ENV_FILE} and rerun."
+  fi
+  unset _TENANT_CHECK
   # P1-26: probe the tenant before launching the helper against it.
   # (The error-title match is apostrophe-agnostic: Canvas renders the
   # apostrophe as U+2019, so match "find your login page" bare.)
@@ -1148,8 +1170,17 @@ else:
       fi
       ;;
     *)
-      note "WARNING: the helper did not come up (keepalive exit ${KEEP_RC})."
-      note "Check ${TREE_STATE_DIR}/keepalive.log and ${TREE_STATE_DIR}/server.log, then run ${TREE}/helper/keepalive.sh by hand."
+      # Muse UX audit 3 (2026-09-23): a helper that will not come up is
+      # a failed install, not a warning followed by "Install complete":
+      # the agent needs the helper's plain reason to relay.
+      _KEEP_LOG="$(tail -c 4000 "${TREE_STATE_DIR}/keepalive.log" 2>/dev/null | tail -6)"
+      [ -n "${_KEEP_LOG}" ] && note "--- keepalive.log tail"
+      [ -n "${_KEEP_LOG}" ] && printf '%s\n' "${_KEEP_LOG}"
+      _SERVER_LOG="$(tail -c 4000 "${TREE_STATE_DIR}/server.log" 2>/dev/null | tail -6)"
+      [ -n "${_SERVER_LOG}" ] && note "--- server.log tail"
+      [ -n "${_SERVER_LOG}" ] && printf '%s\n' "${_SERVER_LOG}"
+      unset _KEEP_LOG _SERVER_LOG
+      fail "helper" "the helper did not come up (keepalive exit ${KEEP_RC}). Check ${TREE_STATE_DIR}/keepalive.log and ${TREE_STATE_DIR}/server.log for the helper's reason, fix it, and rerun this installer. Do not tell the educator the install succeeded."
       ;;
   esac
 fi
