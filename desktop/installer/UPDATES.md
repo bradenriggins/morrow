@@ -329,9 +329,12 @@ The implemented app-assisted Developer mode update contract:
 3. An authenticated local Bridge control channel that proves the exact
    extension ID and requests quiescence. It must refuse a pending review,
    approval, browser POST, active content mutation, or uncertain outcome.
-4. An atomic file swap only after quiescence. The app retains a rollback copy
-   and asks the person to reload the unpacked extension in Chrome. It does not
-   automate Chrome's extension page. After reload, the paired Bridge must return
+4. An atomic file swap only after quiescence. The app retains a rollback copy,
+   and asks the Bridge to reload itself (`chrome.runtime.reload()`). If the
+   Bridge is older than that control, cannot reload itself, or Chrome does not
+   report the new version within the wait, the app keeps the staged update and
+   asks the person to reload it on Chrome's extensions page. The app never
+   opens or automates that page. After reload, the paired Bridge must return
    the exact new version and challenge proof. Only then does the app clear the
    pending update, remove the rollback copy, and prove with a fresh `lstat` that
    the copy is gone. A removal it cannot prove is reported as
@@ -341,6 +344,10 @@ The implemented app-assisted Developer mode update contract:
    mismatched readback stays unconfirmed.
 5. A hard Store boundary: a Chrome Web Store installation is never replaced,
    reloaded, or given permissions by the desktop app.
+
+A complete update through a normal signed-in Chrome profile, including the
+self-reload, is live-unverified. The active-folder challenge is proved on an
+isolated Chrome-for-Testing profile only.
 
 Bridge maintenance is serialized by one lock file in the app's private state
 directory. The lock records the process ID and start time of the app that holds

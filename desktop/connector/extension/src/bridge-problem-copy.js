@@ -44,6 +44,31 @@ const COPY = {
     detail: "Morrow Bridge starts a connection only when you select Connect Morrow in its popup or its setup guide.",
     action: "Open the Morrow Bridge popup and select Connect Morrow.",
   },
+  bridge_pairing_response_timeout: {
+    title: "Morrow did not answer in time",
+    detail: "Morrow Bridge reached the Morrow app on this computer, and the app did not finish answering in time, so nothing was connected.",
+    action: "Check that the Morrow app is open and responding, then select Connect Morrow again.",
+  },
+  bridge_pairing_response_interrupted: {
+    title: "Connect Morrow stopped before it finished",
+    detail: "Morrow Bridge was disconnected, or course data use was no longer accepted, while it waited for the Morrow app, so nothing was connected.",
+    action: "Select Connect Morrow again when you want Morrow Bridge to connect.",
+  },
+  bridge_pairing_response_invalid: {
+    title: "Morrow Bridge could not read the answer to Connect Morrow",
+    detail: "The answer from the Morrow app's address on this computer is not in the form this Morrow Bridge uses, so nothing was connected. The Morrow app may be a different version, or another program may be answering at that address.",
+    action: "Quit and reopen the Morrow app, then select Connect Morrow again. If this continues, follow the Morrow Bridge step in the Morrow app.",
+  },
+  bridge_pairing_response_too_large: {
+    title: "The answer to Connect Morrow was too large to come from Morrow",
+    detail: "The answer from the Morrow app's address on this computer was far larger than Morrow's answer, so Morrow Bridge stopped reading it and connected nothing. Another program may be answering at that address.",
+    action: "Restart your computer, open the Morrow app, then select Connect Morrow again.",
+  },
+  bridge_pairing_superseded: {
+    title: "A newer Connect Morrow replaced this one",
+    detail: "Connect Morrow was selected again, or Morrow Bridge was disconnected, while this one waited for the Morrow app. Morrow Bridge keeps only the newest request, so this one connected nothing.",
+    action: "Open the Morrow Bridge popup to see whether Morrow is connected. If it is not, select Connect Morrow once.",
+  },
   bridge_version_mismatch: {
     title: "Morrow and Morrow Bridge versions do not match",
     detail: "The Morrow app on this computer refused the connection because it expects a different Morrow Bridge.",
@@ -68,6 +93,11 @@ const COPY = {
     title: "Morrow Bridge cannot read its own list of course actions",
     detail: "This Chrome extension is damaged or only partly updated, so it cannot say which course actions it supports.",
     action: "Reload Morrow Bridge on the Chrome extensions page, then open this page again.",
+  },
+  connector_private_contract_invalid: {
+    title: "Morrow Bridge files come from different versions",
+    detail: "Part of this Chrome extension does not match the rest, so Morrow Bridge cannot connect or run course actions.",
+    action: "Open the Morrow app and follow its Morrow Bridge step, then reload Morrow Bridge on the Chrome extensions page.",
   },
   bridge_request_failed: {
     title: "Morrow could not complete that step",
@@ -103,6 +133,11 @@ const COPY = {
     title: "Chrome did not show its access request",
     detail: "Chrome never displayed the access request, so Morrow received no answer.",
     action: "Close this popup and open it again on the signed-in course. Then select Connect this course.",
+  },
+  course_connection_superseded: {
+    title: "Another course connection replaced this one",
+    detail: "Connect this course started again, or Morrow was disconnected, before this course finished connecting, so Morrow did not connect it.",
+    action: "Open the course you want in Chrome, then select Connect this course in the Morrow Bridge popup once.",
   },
   blackboard_browser_unsupported: {
     title: "Morrow does not connect Blackboard through Chrome",

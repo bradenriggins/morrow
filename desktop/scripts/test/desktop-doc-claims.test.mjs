@@ -433,6 +433,27 @@ test("the Bridge rollback-copy claim is what the Bridge module does", async (t) 
     "installer/UPDATES.md must keep the unproven-removal state");
 });
 
+// The app asks a fenced, connected Bridge to reload itself into the staged folder and falls back to
+// the person only when that cannot finish. installer/test/installer-controller.test.cjs proves both
+// paths; this holds the documents to the same behavior.
+test("the Bridge update reload the documents describe is the one the app performs", () => {
+  const controller = read("installer/shared/installer-controller.cjs");
+  assert.match(controller, /bridgeMaintenance\(\{ action: "reload", quiesceEpoch \}\)/, "the app no longer asks the Bridge to reload itself");
+  assert.match(read("connector/extension/src/bridge-maintenance.js"), /scheduleReload\(\(\) => chromeApi\.runtime\.reload\(\)\)/,
+    "the Bridge no longer reloads itself when the app asks");
+  const manualOnly = /must reload the unpacked|always needs a person|asks the person to reload the unpacked extension|still needs a person to reload/;
+  const stale = DOCS.filter((doc) => manualOnly.test(flat(doc)));
+  assert.deepEqual(stale, [], "a document says only a person can reload an updated Bridge");
+  for (const doc of ["LIMITATIONS.md", "installer/UPDATES.md"]) {
+    const text = flat(doc);
+    assert.match(text, /asks the Bridge to reload itself \(`chrome\.runtime\.reload\(\)`\)/, `${doc} must describe the self-reload`);
+    assert.match(text, /asks the person to reload it on Chrome's extensions page/, `${doc} must keep the manual fallback`);
+    assert.match(text, /never opens or automates that page/, `${doc} must say the app does not drive Chrome's extensions page`);
+    assert.match(text, /including the self-reload, is live-unverified/, `${doc} must keep the live-unverified qualifier`);
+  }
+  assert.match(flat("README.md"), /loading the unpacked Bridge in Chrome the first time needs a person/);
+});
+
 test("the app rollback status in the update guide matches the code", () => {
   const updates = flat("installer/UPDATES.md");
   assert.match(updates, /Reacquiring the previous signed desktop artifact is \*\*not implemented\*\*\./);

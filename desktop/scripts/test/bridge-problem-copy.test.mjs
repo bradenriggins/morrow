@@ -23,18 +23,74 @@ const TECHNICAL_TERMS = /\b(?:MCP|nonce|digest|dispatch|binding|frozen)\b/i;
  * The codes a Morrow Bridge page can be handed. The service worker throws or answers with each of
  * the first group; the popup raises the second group itself; Chrome raises the third as its own
  * runtime text, which problemCode() names before the copy is read.
+ *
+ * The worker's codes are read from its source: every `new Error("code")` it raises reaches a page
+ * as that code through messageCode() unless it is one the worker answers only to the Morrow app.
+ * WORKER_ANSWER_CODES holds only the codes the worker answers without raising them that way: the
+ * pairing refusals Morrow names, the sender refusals, and the fallbacks for a failure with no code.
  */
-const WORKER_CODES = [
-  "bridge_not_connected", "bridge_pairing_refused", "bridge_pairing_folder_unconfirmed", "bridge_pairing_sender_refused",
-  "bridge_version_mismatch", "bridge_request_failed", "connector_catalog_invalid",
-  "course_tab_missing", "course_site_access_required", "course_sign_in_required", "blackboard_browser_unsupported",
-  "edit_policy_failed", "edit_policy_binding_missing", "edit_policy_binding_stale", "edit_policy_revision_stale",
-  "edit_policy_categories_invalid", "edit_policy_sender_refused",
-  "course_discovery_sender_refused", "course_discovery_anchor_missing", "course_discovery_anchor_stale",
-  "course_discovery_failed", "course_discovery_receipt_missing", "course_discovery_receipt_stale",
-  "course_discovery_complete", "course_selection_invalid", "course_selection_unavailable",
-  "course_selection_target_refused", "binding_limit_reached",
+const WORKER_THROWN_CODES = [...new Set([...worker.matchAll(/new Error\("([a-z][a-z0-9_]{2,80})"\)/g)].map(([, code]) => code))];
+const WORKER_ANSWER_CODES = [
+  "bridge_pairing_refused", "bridge_version_mismatch", "bridge_request_failed",
+  "edit_policy_failed", "edit_policy_revision_stale", "edit_policy_sender_refused", "course_discovery_sender_refused",
 ];
+
+/**
+ * A failed Private Chat send reaches the drawer as the code privateChatCode() translates it to, read
+ * here from the worker's own PRIVATE_CHAT_SEND_CODES table.
+ */
+const PRIVATE_CHAT_SEND_CODES = (() => {
+  const table = worker.match(/^const PRIVATE_CHAT_SEND_CODES = Object\.freeze\(\{\n([\s\S]*?)\n\}\);$/m);
+  assert.ok(table, "PRIVATE_CHAT_SEND_CODES is no longer a top-level table in the service worker");
+  return Object.fromEntries([...table[1].matchAll(/^\s+([a-z][a-z0-9_]+): "([a-z][a-z0-9_]+)",$/gm)].map(([, from, to]) => [from, to]));
+})();
+
+/**
+ * The codes the worker answers only to the Morrow app: the result of one Bridge command from the
+ * Morrow app, or of one course operation the assistant asked for. None reaches a Morrow Bridge page,
+ * so none needs page copy. Each names every worker function that raises it, and the test below holds
+ * the worker to that list, so the same code raised on a page's path fails here first.
+ */
+const MORROW_APP_CODES = {
+  canvas_file_content_too_large: ["boundedResponseBytes"],
+  canvas_file_content_timeout: ["boundedResponseBytes", "readCanvasCourseFileBytes"],
+  canvas_file_content_stream_invalid: ["boundedResponseBytes"],
+  canvas_file_transfer_timeout: ["executeCanvasCourseFileTransfer"],
+  canvas_hot_spot_transfer_timeout: ["executeCanvasNewQuizHotSpotCreate"],
+  canvas_pagination_resume_refused: ["claimCanvasListContinuation", "issueCanvasListContinuation"],
+  edit_policy_set_invalid: ["bridgePolicySet"],
+  edit_policy_set_stale: ["applyBridgePolicySet", "bridgePolicySet"],
+  edit_policy_options_invalid: ["bridgePolicyOptionsGet"],
+  edit_policy_options_stale: ["bridgePolicyOptionsGet"],
+  ui_state_invalid: ["bridgeUiState"],
+  ui_state_stale: ["bridgeUiState"],
+};
+
+/** The top-level worker functions that raise `code`, by the declaration each raise sits under. */
+function workerFunctionsRaising(code) {
+  const lines = worker.split("\n");
+  const found = new Set();
+  for (const [index, line] of lines.entries()) {
+    if (!line.includes(`new Error("${code}")`)) continue;
+    let owner = null;
+    for (let at = index; at >= 0 && owner === null; at -= 1) {
+      const declaration = /^(?:async )?function\*? (\w+)\(/.exec(lines[at]);
+      if (declaration) owner = declaration[1];
+      else if (at !== index && /^[^\s}]/.test(lines[at])) owner = `top-level line ${at + 1}`;
+    }
+    found.add(owner ?? "top-level line 1");
+  }
+  return [...found].sort();
+}
+
+/** The chrome.runtime.onMessage listener: every request a Morrow Bridge page sends starts here. */
+const PAGE_LISTENER = (() => {
+  const start = worker.indexOf("chrome.runtime.onMessage.addListener(");
+  assert.ok(start >= 0, "the service worker no longer listens for page requests");
+  const end = worker.indexOf("\n});\n", start);
+  assert.ok(end > start, "the page request listener does not close at the start of a line");
+  return worker.slice(start, end);
+})();
 const POPUP_CODES = ["course_tab_missing", "course_permission_denied", "course_permission_prompt_missing"];
 const SETTINGS_CODES = ["course_discovery_more_failed", "course_file_access_change_failed", "course_file_access_permission_remove_failed",
   "edit_policy_status_unreadable", "edit_policy_options_unreadable", "edit_policy_save_unconfirmed", "edit_policy_revoke_unconfirmed",
@@ -128,8 +184,34 @@ test("each code reads as its own state rather than one repeated sentence", () =>
 });
 
 test("every code bridge-18 names is explained", () => {
-  for (const code of [...WORKER_CODES, ...POPUP_CODES, ...SETTINGS_CODES, ...OPERATION_CODES]) {
+  for (const code of [...WORKER_ANSWER_CODES, ...POPUP_CODES, ...SETTINGS_CODES, ...OPERATION_CODES]) {
     assert.ok(PROBLEM_CODES.includes(code), `${code} has no copy, so a person would read the unknown-state fallback`);
+  }
+});
+
+// messageCode() hands the popup and the setup guide any code the worker raises, so a raise the copy
+// does not explain shows the educator the unknown-state fallback with an internal state name.
+test("every code the service worker raises is explained, or is one it answers only to the Morrow app", () => {
+  assert.ok(WORKER_THROWN_CODES.includes("bridge_not_connected"), "the worker's raised codes were not read from its source");
+  const unexplained = WORKER_THROWN_CODES.filter((code) => {
+    if (Object.hasOwn(MORROW_APP_CODES, code)) return false;
+    const shown = Object.hasOwn(PRIVATE_CHAT_SEND_CODES, code) ? PRIVATE_CHAT_SEND_CODES[code] : code;
+    return !PROBLEM_CODES.includes(shown);
+  });
+  assert.deepEqual(unexplained, [], "these codes reach a Morrow Bridge page as the unknown-state fallback");
+  for (const [from, to] of Object.entries(PRIVATE_CHAT_SEND_CODES)) {
+    assert.ok(PROBLEM_CODES.includes(to), `Private Chat translates ${from} to ${to}, which has no copy`);
+  }
+});
+
+test("a code the worker answers only to the Morrow app is raised only where that list says", () => {
+  for (const [code, functions] of Object.entries(MORROW_APP_CODES)) {
+    assert.ok(WORKER_THROWN_CODES.includes(code), `${code} is no longer raised in the service worker, so it leaves this list`);
+    assert.ok(!PROBLEM_CODES.includes(code), `${code} has page copy, so it is no longer one the worker answers only to the Morrow app`);
+    assert.deepEqual(workerFunctionsRaising(code), [...functions].sort(), `${code} is raised somewhere a page request may reach`);
+    for (const name of functions) {
+      assert.doesNotMatch(PAGE_LISTENER, new RegExp(`\\b${name}\\b`), `${name} runs straight from a page request, so ${code} can reach a page`);
+    }
   }
 });
 
@@ -148,7 +230,7 @@ test("every explained code is one Morrow actually raises", () => {
 });
 
 test("every code a Morrow Bridge page can receive still exists where it is raised", () => {
-  for (const code of WORKER_CODES) assert.ok(worker.includes(`"${code}"`), `${code} is no longer raised in the service worker`);
+  for (const code of WORKER_ANSWER_CODES) assert.ok(worker.includes(`"${code}"`), `${code} is no longer raised in the service worker`);
   for (const code of POPUP_CODES) {
     assert.ok(popup.includes(`"${code}"`) || worker.includes(`"${code}"`), `${code} is no longer raised in the popup`);
   }
