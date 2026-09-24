@@ -19,7 +19,7 @@ A user installs two Morrow parts:
 1. **The Morrow desktop app** runs on your computer. It carries the Morrow MCP runtime and the Node runtime that runs it, sets up the assistant you choose, and guides the rest of setup. Assistants set up from one installation share one course connection.
 2. **Morrow Bridge** is one Manifest V3 Chrome extension. It uses the Canvas or Moodle session already signed in within Chrome.
 
-The app is built for macOS on Apple silicon and for Windows on x64. It needs no separate Node.js, pnpm, or source checkout, and normal setup asks for no command and no typed path. Morrow Bridge has no Chrome Web Store listing yet, so the app guides one temporary Chrome step: it opens the exact folder Chrome must load, and you turn on Developer mode and select **Load unpacked**. [The Morrow desktop app](#the-morrow-desktop-app) states what is built and what is still unproven.
+The app is built for macOS 13 or later on Apple silicon, and for Windows 10 or Windows 11 on x64. It needs no separate Node.js, pnpm, or source checkout, and normal setup asks for no command and no typed path. Morrow Bridge has no Chrome Web Store listing yet, so the app guides one temporary Chrome step: it opens the exact folder Chrome must load, and you turn on Developer mode and select **Load unpacked**. [The Morrow desktop app](#the-morrow-desktop-app) states what is built and what is still unproven.
 
 Canvas and Moodle need no platform access token, developer key, OAuth app, hosted Morrow account, or separate approval application. Blackboard is the exception. A Blackboard administrator installs Morrow's REST application on your Learn site and chooses the Learn account it acts as. It then needs an Anthology Learn REST integration key and secret that you supply locally, and Morrow keeps that secret in a private local file, separate from the assistant configuration.
 
@@ -346,7 +346,7 @@ Morrow is one desktop application. It carries the Morrow MCP runtime, the Node r
 
 There is no Intel macOS build and no Linux build. Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature so that a downloaded copy shows the Open Anyway route instead of a damaged-app refusal. The public unsigned 1.0.5 release is available from the [Morrow downloads page](https://meetmorrow.app/download). Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
 
-You need Chrome 116 or later and one supported assistant already installed on the same computer: ChatGPT, Claude Desktop, Claude Code, or Gemini CLI.
+You need a Mac with Apple silicon and macOS 13 or later, or an x64 computer with Windows 10 or Windows 11. On that computer you also need Chrome 116 or later and one supported assistant already installed: ChatGPT, Claude Desktop, Claude Code, or Gemini CLI.
 
 ### What the app asks you to do
 

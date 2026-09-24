@@ -305,6 +305,40 @@ test("every landing paragraph that names an assistant states each assistant's li
   assert.deepEqual(problems, [], `${ASSISTANT_PROOF_RECORD} is the record of which assistant ran on a live course`);
 });
 
+// Morrow Desktop opens only where its Electron build opens. installer/electron-builder.config.cjs
+// sets no minimumSystemVersion, so the macOS floor is the LSMinimumSystemVersion in Electron's own
+// Info.plist: 13.0 in electron-v44.4.3-darwin-arm64.zip. Electron 44's electron.exe declares
+// Windows 10.0 as its minimum operating system. A new Electron major can raise either floor, so the
+// pin names the major the floors were read from. Written before the fix (final sweep 2026-09-23):
+// no repository document named a floor, while the website said macOS 13 or later.
+const DESKTOP_FLOOR = { electronMajor: 44, mac: "macOS 13 or later", windows: "Windows 10 or Windows 11" };
+const DESKTOP_FLOOR_STATEMENTS = [
+  ["../README.md", /\bMac with Apple silicon\b/],
+  ["../docs/products.md", /\bMac with Apple silicon\b/],
+  ["README.md", /^The app is built for /],
+  ["README.md", /^You need /],
+  ["LIMITATIONS.md", /^- Morrow builds for /],
+];
+
+test("every document that says where Morrow Desktop runs states the macOS and Windows floors of its build", () => {
+  const electron = JSON.parse(read("installer/package.json")).devDependencies.electron;
+  assert.equal(Number(electron.split(".")[0]), DESKTOP_FLOOR.electronMajor,
+    `installer/package.json pins Electron ${electron}: read LSMinimumSystemVersion from its Info.plist and the minimum operating system of its electron.exe, then update DESKTOP_FLOOR and the documents`);
+  assert.doesNotMatch(read("installer/electron-builder.config.cjs"), /minimumSystemVersion/,
+    "the documents take the macOS floor from Electron's Info.plist; a build that sets its own floor must state that one");
+
+  const problems = [];
+  for (const [doc, where] of DESKTOP_FLOOR_STATEMENTS) {
+    const found = paragraphs(read(doc)).filter((paragraph) => where.test(paragraph.text));
+    if (found.length === 0) problems.push(`${doc} has no paragraph matching ${where}`);
+    for (const paragraph of found) {
+      const missing = [DESKTOP_FLOOR.mac, DESKTOP_FLOOR.windows].filter((floor) => !paragraph.text.includes(floor));
+      if (missing.length > 0) problems.push(`${doc}:${paragraph.line} says where Morrow Desktop runs without: ${missing.join(", ")}`);
+    }
+  }
+  assert.deepEqual(problems, [], "an educator on an older macOS or Windows must learn it before downloading");
+});
+
 test("every repo-relative link in the claim documents resolves", () => {
   const broken = [];
   for (const doc of CLAIM_DOCS) {
