@@ -25,9 +25,9 @@ prior knowledge of the project.
 - Python 3.11 or newer (`python3 --version`). (Python 3.10 is refused:
   it reaches security end-of-life in October 2026 per PEP 619.)
 - The Python package `cryptography` for anything that touches student
-  data: finding a student by name, the failed-students question,
-  rosters, grades, and submissions. Morrow keeps student names and ids
-  in an encrypted learner vault, and the vault needs this package.
+  data: finding a student by name and reading the course roster.
+  Morrow keeps student names and ids in an encrypted learner vault,
+  and the vault needs this package.
   Without it the install works and Morrow refuses all student data.
   Course content still works, but student names in it are hidden
   without labels, so a change that would save a hidden name back is
@@ -251,8 +251,7 @@ artifact against the published SHA-256 hashes before installing;
 a tampered mirror fails the install loudly instead of silently.
 Without the package (or with a version older than the pin), every
 student-data request is refused with a clear message: finding a
-student by name, the failed-students question, rosters, grades, and
-submissions. Student names in course content are hidden without
+student by name and reading the course roster. Student names in course content are hidden without
 labels, and a change that would save a hidden name back is refused.
 Nothing about students is ever sent to the assistant unprotected.
 Everything that does not touch student data works normally.

@@ -54,8 +54,8 @@ it asks you to confirm the course instead of guessing, in either mode.
 Student names and account details are hidden from the assistant. When
 Morrow reads your course, the assistant sees labels like "Student A1"
 instead of names, emails, logins, or Canvas ID numbers (including the
-ones inside links). That covers rosters, submissions, and grades, and
-it covers course content too: a page body or an assignment description
+ones inside links). That covers the course roster, and it covers
+course content too: a page body or an assignment description
 that names a student shows the label. To do that, Morrow first reads
 the course's student list; if it cannot, it reads and changes nothing
 in the course. When the assistant saves a change to that content,

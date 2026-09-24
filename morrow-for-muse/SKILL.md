@@ -27,8 +27,8 @@ bash install.sh
 
 It checks python3 (>= 3.11; 3.10 refused, security EOL Oct 2026) and
 warns when the `cryptography` package is missing (without it, every
-student-data request is refused: working by name, the failed-students
-question, rosters, grades; student names in course content are hidden
+student-data request is refused: working by name and the course
+roster; student names in course content are hidden
 without labels, and a change whose text still carries a hidden name is
 refused; if the educator asks for one of those, tell them the operator
 must run `python3 -m pip install --require-hashes -r
@@ -565,20 +565,15 @@ both modes.
   - If a result has `settings_untrusted: true`, the settings file failed
     its integrity check: tell the educator they are in plan mode and
     relay the repair steps in `message`.
-- Failed-students question ("who failed last week's quiz", "which
-  students scored under 70%"): run `bin/morrow query --course C --quiz
-  last-week|this-week`, with at most one of `--below-percent N`,
-  `--below-points N`, or `--letter-f` when the educator named a
-  threshold. You choose the arguments from what the educator said; if
-  they mean a quiz that is not last week's or this week's, ask which
-  quiz first. Weeks are the educator's weeks: the query uses their
-  `timezone` setting, else the course's time zone in
-  Canvas, else their Canvas profile's. When the educator names a time
-  zone, pass `--timezone <IANA name>`. If none is known the query asks
-  for it (mode `query-timezone-unknown`): save their answer with
-  `bin/morrow settings set timezone <name>` and run it again. Names in the
-  result are de-identified (a student the educator named in this
-  conversation shows by that name next to the label).
+- Failed-students question ("who failed last week's quiz"): not in this
+  version. Reading quiz scores (the submissions and grades rows) has not
+  been tested on a real Canvas course, so those rows are not
+  live-proven and Morrow refuses them. `bin/morrow query` refuses the
+  question at once (mode `catalog-not-proven`), before it reads
+  anything or asks for a time zone. Tell the educator plainly that
+  this version cannot answer it, and do not try to answer it another
+  way: the submissions and gradebook catalog rows are refused too. They
+  can see scores in Canvas's own Gradebook.
 - Where the two ids come from. The user id is the educator's
   signed-in Canvas account: every command uses the account pinned at
   first sign-in (`canvas:<account id>@<Canvas host>`), so the educator
@@ -592,7 +587,7 @@ both modes.
   'import uuid; print(uuid.uuid4())'`) and pass it as
   `--conversation-id` to every Morrow command in that conversation
   (`dispatch/executor.py`, `bin/morrow mode`, `bin/morrow settings`,
-  `bin/morrow students find`, `bin/morrow query`). Never reuse a
+  `bin/morrow students find`). Never reuse a
   conversation id in another conversation, and never use a fixed one:
   "edit mode for this conversation" and the names the educator typed
   belong to it, so a reused id carries them into the next
@@ -604,7 +599,7 @@ both modes.
   reactive), `read_confirmations` (bool, default off), `work_summary`
   (brief | full, default full), `default_course_id` (the Canvas
   course number, or empty; default empty), and `timezone` (IANA name
-  or empty, default empty; the failed-students query uses it). Every one of these except
+  or empty, default empty; approvals show dates in it). Every one of these except
   `timezone` is an instruction to you: read it with `bin/morrow settings
   show` and follow it as you work; no code enforces it. Educator docs:
   `settings/README.md`.
@@ -721,8 +716,8 @@ beyond the examples above:
 ## Privacy: student de-identification (default on)
 
 For the educator, in plain English: whenever the connector reads
-student data (rosters, enrollments, submissions, grades, analytics),
-what comes back from Canvas is de-identified before the agent or the
+student data (in this version, the course roster), what comes back
+from Canvas is de-identified before the agent or the
 journal sees it: names, emails, logins, SIS ids, and Canvas user ids
 (including the ones inside links) become a stable label like
 `Student A1`. The label is the same every time, so you can follow one

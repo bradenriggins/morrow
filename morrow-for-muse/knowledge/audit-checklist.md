@@ -16,9 +16,13 @@ below is what makes a write trustworthy end to end.
 - The row status is `live-proven`, and it is not on evidence-hold in
   `dispatch/admission_policy.json` (the policy is the dispatch
   authority; the catalog is the provenance record).
-- For writes: a frozen plan file digest-bound to the exact action, an
-  educator-signed approval digest-bound to the exact action (unexpired,
-  category-scoped, unused), and no `~/.morrow/write_halt` present.
+- For writes in plan mode: a frozen plan file digest-bound to the
+  exact action, an educator-signed approval digest-bound to the exact
+  action (unexpired, category-scoped, unused), and no
+  `~/.morrow/write_halt` present. In edit mode a write needs no
+  approval (run `catalog` directly); the executor still asks before a
+  deletion while the educator's `confirm_destructive_writes` setting
+  is on.
 - The principal is verified: a readback through the executor confirms
   the educator before anything else runs.
 
@@ -124,9 +128,10 @@ full lifecycle on 89585 only.
 
 ## Hard lines (never, no exception)
 
-- Never dispatch a write without the educator-signed approval
-  bound to that exact action. The three requirements (frozen plan,
-  signed approval, no write halt) are all mandatory.
+- Never dispatch a plan-mode write without the educator-approved
+  ceremony (frozen plan, educator-signed approval, no write halt); in
+  edit mode the write runs without asking, except a deletion while
+  `confirm_destructive_writes` is on.
 - Never mint or sign an approval yourself, and never try to learn
   the real name behind a label the educator did not name.
 - Never send anything externally on the educator's behalf without

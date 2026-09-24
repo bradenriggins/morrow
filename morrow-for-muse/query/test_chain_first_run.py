@@ -25,6 +25,14 @@ from query import chain as C  # noqa: E402
 from query import live_read as LR  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _submissions_row_proven(monkeypatch):
+    """These checks come after the submissions row's catalog check
+    (test_chain_catalog_gate.py): run them as on the day a live battery
+    proves that row."""
+    monkeypatch.setattr(C, "_require_live_proven", lambda *a: None)
+
+
 class _BoomReader:
     def __init__(self, *a, **k):
         raise AssertionError("LiveReader must not initialize before "

@@ -39,11 +39,12 @@ uninstall instead.
 
 ## What happens next
 
-If you ask Morrow to do something in Canvas after revoking, it will
-not be able to connect. You will see the plain-language "your sign-in
-expired" notice and a guided path to reconnect. To reconnect, say
-"Connect my Canvas account" and sign in again on the helper page; you
-can pick up where you left off.
+While Morrow is disconnected, every Canvas command says so plainly:
+"you disconnected Morrow from Canvas on this computer", and nothing is
+sent to Canvas. Morrow never reconnects on its own: the agent will
+confirm with you first, then run the installer again, and you sign in
+on the helper page yourself. Your settings, labels, and records pick
+up where they left off.
 
 ## Getting help
 

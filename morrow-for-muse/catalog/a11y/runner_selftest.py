@@ -143,6 +143,48 @@ def main():
     check("audit unknown kind funnels (no traceback)", code == 2 and "Traceback" not in err,
           "code=%r" % (code,))
 
+    # -- Refusals reach the educator as named modes -------------------------
+    # (muse UX audit 3, muse-ux3/a11y-runner-refusals-say-might-have-changed,
+    # written before the fix): every runner refusal used to fall through
+    # to the fallback "unknown" mode, which tells the educator the task
+    # might have made a change and asks them to email support. These
+    # commands are read-only and refuse before anything is sent, so each
+    # refusal must name a mode whose message says nothing was sent.
+    def _payload_of(err):
+        try:
+            return json.loads(err.strip().splitlines()[-1] if err.strip() else "{}")
+        except ValueError:
+            return None
+
+    for kind in ("canvas_rubric", "canvas_discussion", "moodle_page",
+                 "canvas_nope"):
+        code, err = _run_main(["audit", "--target-kind", kind,
+                               "--course-id", "89585", "--target-ids", "{}",
+                               "--canvas-base", "https://x.invalid"])
+        payload = _payload_of(err) or {}
+        check("audit refusal for %s names a11y-target-not-covered" % kind,
+              code == 2 and payload.get("mode_id") == "a11y-target-not-covered"
+              and "might have made a change" not in payload.get("message", ""),
+              "code=%r mode=%r msg=%r" % (code, payload.get("mode_id"),
+                                          (payload.get("message") or "")[:80]))
+
+    code, err = _run_main(["audit", "--target-kind", "canvas_page",
+                           "--course-id", "89585",
+                           "--target-ids", '{"url_or_id": "week-1"}',
+                           "--canvas-base", "https://x.invalid"])
+    payload = _payload_of(err) or {}
+    check("missing target id names caller-input-refused",
+          code == 2 and payload.get("mode_id") == "caller-input-refused"
+          and "might have made a change" not in payload.get("message", ""),
+          "code=%r mode=%r" % (code, payload.get("mode_id")))
+
+    code, err = _run_main(["audit", "--target-kind", "canvas_page",
+                           "--course-id", "89585", "--target-ids", "{}"])
+    payload = _payload_of(err) or {}
+    check("no CANVAS_BASE names setup-tenant-not-configured",
+          code == 2 and payload.get("mode_id") == "setup-tenant-not-configured",
+          "code=%r mode=%r" % (code, payload.get("mode_id")))
+
     # -- Planner mode: validates and stops ----------------------------------
     real = _install_fake_dispatch()
     try:

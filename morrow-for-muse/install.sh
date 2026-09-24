@@ -263,6 +263,18 @@ _RB_EOF
 
 fail() {
   printf 'INSTALL FAIL [%s]: %s\n' "$1" "$2" >&2
+  if [ "${_disconnect_marker_cleared:-0}" = "1" ]; then
+    # Security review 2026-09-24: this run already cleared the
+    # disconnect marker, and the reconnect did not finish. Re-record
+    # the disconnect (config/disconnect.py resolves the same state dir)
+    # so a supervisor relaunch cannot silently undo it.
+    if MORROW_TREE_STATE_DIR="${TREE_STATE_DIR}" \
+      python3 "${TREE}/config/disconnect.py" mark >/dev/null 2>&1; then
+      printf 'rollback: the disconnect record is restored (the reconnect did not finish)\n' >&2
+    else
+      printf 'rollback WARNING: could not restore the disconnect record; run MORROW_TREE_STATE_DIR=%s python3 %s config/disconnect.py mark\n' "${TREE_STATE_DIR}" "${TREE}" >&2
+    fi
+  fi
   if [ -n "${UPGRADE_BACKUP}" ] && [ -d "${UPGRADE_BACKUP}" ]; then
     # W4-P0-7: the backup is restorable ONLY when its completeness
     # marker verifies. A partial backup (e.g. ENOSPC mid-write) is
@@ -371,9 +383,9 @@ vault_warning() {
     "Morrow keeps student names and ids in an encrypted learner vault," \
     "and the vault needs the Python package 'cryptography'. Without it," \
     "Morrow refuses everything that touches student data: finding a" \
-    "student by name, the failed-students question, rosters, grades," \
-    "and submissions. Student names in course pages are hidden without" \
-    "labels, so a change that would save one back is refused." \
+    "student by name and reading the course roster." \
+    "Student names in course pages are hidden without labels, so a" \
+    "change that would save one back is refused." \
     "Everything else works." \
     "" \
     "Reason: ${VAULT_PROBLEM}" \
@@ -1058,6 +1070,33 @@ else
     && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?CANVAS_BASE=' "${ENV_FILE}" 2>/dev/null; then
     fail "env" "CANVAS_BASE is set in this shell but absent from ${ENV_FILE}; the keepalive cron sources only that file, so helper recovery would fail later. Add CANVAS_BASE=${_SHELL_CANVAS_BASE} to ${ENV_FILE} and rerun."
   fi
+  # Muse UX audit 3 (2026-09-23): the helper's tenant rule runs BEFORE
+  # the network probe, from the shared validator in
+  # config/tree_config.py (the same function the helper uses). A pasted
+  # address that embeds an account and password, an http:// address, a
+  # private IP literal, or an unconfirmed custom domain now fails the
+  # install with the helper's plain reason instead of being sent to the
+  # network (the old probe sent embedded credentials over plain HTTP
+  # and reached addresses the helper then refused, with no reason on
+  # the helper's later refusal).
+  # Security review 2026-09-24: CANVAS_BASE is passed as an environment
+  # variable, never interpolated into the python source: a value
+  # containing ''' used to close the triple-quoted string early and
+  # execute injected Python (inject_proof.py under the final-sweep
+  # scratchpad).
+  _TENANT_CHECK="$(cd / && CANVAS_BASE="${CANVAS_BASE}" python3 -c "
+import os, sys
+sys.path.insert(0, '${TREE}')
+from config.tree_config import normalize_tenant_base
+try:
+    normalize_tenant_base(os.environ['CANVAS_BASE'])
+except ValueError as exc:
+    print(exc)
+" 2>&1)"
+  if [ -n "${_TENANT_CHECK}" ]; then
+    fail "tenant" "CANVAS_BASE=${CANVAS_BASE} is not a Canvas address the helper accepts: ${_TENANT_CHECK} Fix it in ${ENV_FILE} and rerun."
+  fi
+  unset _TENANT_CHECK
   # P1-26: probe the tenant before launching the helper against it.
   # (The error-title match is apostrophe-agnostic: Canvas renders the
   # apostrophe as U+2019, so match "find your login page" bare.)
@@ -1138,10 +1177,34 @@ else:
       fi
       ;;
     *)
-      note "WARNING: the helper did not come up (keepalive exit ${KEEP_RC})."
-      note "Check ${TREE_STATE_DIR}/keepalive.log and ${TREE_STATE_DIR}/server.log, then run ${TREE}/helper/keepalive.sh by hand."
+      # Muse UX audit 3 (2026-09-23): a helper that will not come up is
+      # a failed install, not a warning followed by "Install complete":
+      # the agent needs the helper's plain reason to relay.
+      _KEEP_LOG="$(tail -c 4000 "${TREE_STATE_DIR}/keepalive.log" 2>/dev/null | tail -6)"
+      [ -n "${_KEEP_LOG}" ] && note "--- keepalive.log tail"
+      [ -n "${_KEEP_LOG}" ] && printf '%s\n' "${_KEEP_LOG}"
+      _SERVER_LOG="$(tail -c 4000 "${TREE_STATE_DIR}/server.log" 2>/dev/null | tail -6)"
+      [ -n "${_SERVER_LOG}" ] && note "--- server.log tail"
+      [ -n "${_SERVER_LOG}" ] && printf '%s\n' "${_SERVER_LOG}"
+      unset _KEEP_LOG _SERVER_LOG
+      fail "helper" "the helper did not come up (keepalive exit ${KEEP_RC}). Check ${TREE_STATE_DIR}/keepalive.log and ${TREE_STATE_DIR}/server.log for the helper's reason, fix it, and rerun this installer. Do not tell the educator the install succeeded."
       ;;
   esac
+  # Security review 2026-09-24: a completed install reconnects, and the
+  # marker is cleared only here, after the helper-launch branch has
+  # succeeded. Clearing it earlier let any later install failure
+  # (selftest, helper down) leave the marker gone while the keepalive
+  # cron was already installed: within five minutes the helper relaunched
+  # and silently undid the educator's recorded disconnect. fail() re-marks
+  # the disconnect when a failure happens after this clear.
+  _disconnect_marker="${TREE_STATE_DIR}/disconnected"
+  if [ -f "${_disconnect_marker}" ]; then
+    rm -f "${_disconnect_marker}" \
+      || fail "disconnect" "could not remove the disconnect marker ${_disconnect_marker}"
+    _disconnect_marker_cleared=1
+    note "reconnected: the disconnect record is cleared (the educator asked for this)"
+  fi
+  unset _disconnect_marker
 fi
 
 # Record this install: version + manifest under MORROW_HOME (outside the

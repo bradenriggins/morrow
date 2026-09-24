@@ -393,10 +393,17 @@ def main(argv=None, fetcher=None):
     parser.add_argument("name", nargs="+",
                         help="the name as the educator typed it")
     args = parser.parse_args(argv)
+    course_id = str(args.course)
+    from config import disconnect
+    try:
+        disconnect.refuse_if_disconnected()
+    except disconnect.CanvasDisconnected as exc:
+        print(json.dumps(_failure("refused", course_id, exc), indent=1,
+                         sort_keys=True))
+        return 1
     if not args.canvas_base:
         from config import tree_config
         args.canvas_base = tree_config.canvas_base()
-    course_id = str(args.course)
     refusal = _course_refusal(course_id)
     if refusal is not None:
         print(json.dumps(refusal, indent=1, sort_keys=True))

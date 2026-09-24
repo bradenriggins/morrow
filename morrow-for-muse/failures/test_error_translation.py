@@ -52,6 +52,21 @@ from query import live_read as _qliveread  # noqa: E402
 from query import chain as _qchain  # noqa: E402
 
 
+def _a11y_target_not_covered():
+    from catalog.a11y.runner import A11yTargetNotCovered
+    return A11yTargetNotCovered(
+        "learner_data_gated: discussion reads are learner-data flagged "
+        "and gated by the admission policy; the audit does not run them")
+
+
+def _canvas_disconnected():
+    from config.disconnect import CanvasDisconnected
+    return CanvasDisconnected(
+        "the educator disconnected Morrow from Canvas on this computer "
+        "(bin/morrow disconnect deleted the sign-in); nothing was sent. "
+        "Rerun install.sh only when the educator asks to reconnect.")
+
+
 def _student_ambiguous_case():
     """Real StudentAmbiguous from learners/resolve_student.py: the
     translator must merge its resolution_evidence and fill every
@@ -587,6 +602,8 @@ MODE_CASES = {
     "caller-input-refused": lambda: CallerInputError(
         "--body must be a JSON object, or a JSON array of objects (the "
         "bulk date update takes an array)"),
+    "a11y-target-not-covered": _a11y_target_not_covered,
+    "canvas-disconnected": _canvas_disconnected,
     "maintenance-confirmation-required": lambda: ConfirmationRequired(
         "journal-reconcile is destructive: this re-anchors the journal. "
         "Re-run with --yes to confirm, or run this command interactively "
@@ -775,8 +792,8 @@ class PerModeTests(unittest.TestCase):
         self.assertEqual(set(MODE_CASES), catalog_ids,
                          "MODE_CASES must cover every catalog mode exactly")
 
-    def test_catalog_has_95_modes(self):
-        self.assertEqual(95, len(CATALOG.entries))
+    def test_catalog_has_97_modes(self):
+        self.assertEqual(97, len(CATALOG.entries))
 
     def test_retired_lane_modes_stay_retired(self):
         for mode_id, factory in sorted(RETIRED_LANE_CASES.items()):

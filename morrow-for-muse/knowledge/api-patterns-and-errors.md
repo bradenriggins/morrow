@@ -62,10 +62,15 @@ what an agent sees:
   dispatch programmatically through `dispatch_catalog_op(...)` with
   `extra={"query": {"per_page": 100, "page": 2}}`.
 
-Treat any list receipt as partial unless you paged through it
-yourself. For audit-grade verification (e.g. "is the deleted object
-absent"), the terminal member GET or the follow-up readback matters,
-not the list length.
+The Chromium lane paginates for you: every catalog list read follows
+Canvas's `Link rel="next"` up to 20 pages and merges them into one
+list. When more pages remain after that bound (or a page dies
+mid-walk), the result is marked partial (the
+`x-morrow-pagination-partial` header; the receipt keeps the
+`truncated` flag) and the executor says so loudly; it never hands you
+a partial list as if it were complete. For audit-grade verification
+(e.g. "is the deleted object absent"), the terminal member GET or the
+follow-up readback matters, not the list length.
 
 ## Pre-dispatch guardrails (shipped in the executor)
 
