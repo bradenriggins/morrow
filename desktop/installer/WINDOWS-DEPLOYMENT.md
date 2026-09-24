@@ -74,8 +74,9 @@ that data-removal action.
 
 The action is **Remove Morrow's data**, in the *What stays on this computer*
 section of the app. That section names the exact path of every place this
-installation keeps data: `State`, the materials folder, the `Assistant settings
-backups` folder, the Bridge folder Chrome loads, the Blackboard credential
+installation keeps data: `State`, the materials folder, the `Materials` folder
+Morrow made first when a different materials folder was chosen later, the
+`Assistant settings backups` folder, the Bridge folder Chrome loads, the Blackboard credential
 folder, the Blackboard configuration file, and each assistant configuration file
 Morrow wrote.
 
