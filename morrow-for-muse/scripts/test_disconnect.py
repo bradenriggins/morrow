@@ -33,6 +33,13 @@ Failure modes this suite pins down (written before the fix):
      the same wrong paths, and reported the sign-in deleted. A
      MORROW_HOME with a space split the same way, in disconnect and in
      uninstall.
+ 10. (round-2 finding muse-ux-r2-disconnect-ignores-tree-port) the
+     helper port came only from the environment. A tree that pins
+     LOGIN_HELPER_PORT in helper/env (two trees on one machine) was
+     checked on 8901, nothing was stopped, and disconnect reported "The
+     helper is stopped" while the helper kept running on the pinned
+     port. The port resolves as keepalive resolves it: the environment,
+     then helper/env, then 8901.
 
 The real crontab is never touched: a fake `crontab` on PATH stores the
 table in a scratch file, and a fake `ss` reports no listeners. The
@@ -314,3 +321,50 @@ def test_uninstall_with_spaces_in_the_paths(spaced_rig):
     for path in rig["siblings"]:
         assert os.path.exists(path), (path, out)
     assert os.listdir(rig["cwd"]) == [], out
+
+
+# A listener on the pinned port whose PID is not this install's process:
+# disconnect must look at that port and refuse, never skip it as free.
+PINNED_LISTENER = """#!/bin/bash
+echo 'State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process'
+echo 'LISTEN 0      5      127.0.0.1:18911    0.0.0.0:*         users:(("python3",pid=99999999,fd=3))'
+"""
+
+
+def _pin_ports(rig, listener=None):
+    for name in ("LOGIN_HELPER_PORT", "LOGIN_HELPER_CDP_PORT"):
+        rig["env"].pop(name, None)
+    with open(os.path.join(rig["tree"], "helper", "env"), "w") as fh:
+        fh.write("LOGIN_HELPER_PORT=18911\nLOGIN_HELPER_CDP_PORT=18912\n")
+    if listener is not None:
+        with open(os.path.join(rig["root"], "bin", "ss"), "w") as fh:
+            fh.write(listener)
+
+
+def test_disconnect_checks_the_helper_port_pinned_in_helper_env(rig):
+    _pin_ports(rig)
+    proc = _run(rig, "--yes")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "stop the helper (port 18911)" in out, out
+    assert "helper: port 18911 is free; nothing to stop" in out, out
+    assert "8901" not in out, out
+
+
+def test_a_helper_on_the_pinned_port_is_never_reported_stopped(rig):
+    _pin_ports(rig, listener=PINNED_LISTENER)
+    proc = _run(rig, "--yes")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "port 18911 is held by PID 99999999" in out, out
+    assert "The helper is stopped" not in out, out
+    assert os.path.exists(os.path.join(rig["profile"], "Cookies")), out
+
+
+def test_the_environment_port_wins_over_helper_env(rig):
+    _pin_ports(rig)
+    rig["env"]["LOGIN_HELPER_PORT"] = "18921"
+    proc = _run(rig, "--yes")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "helper: port 18921 is free; nothing to stop" in out, out
