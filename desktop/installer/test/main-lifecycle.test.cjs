@@ -143,6 +143,30 @@ test("a duplicate start quits with exit code 0, builds no controller, and writes
   }
 });
 
+// Electron otherwise writes its caches and storage loose in the user-data
+// folder, where What stays on this computer never names them.
+test("Morrow's window keeps its browser data in one named folder inside the user-data folder, set before the app is ready", async () => {
+  const root = await temporaryRoot();
+  const restoreArguments = startedWith({ testRoot: root });
+  try {
+    const app = fakeApp(true);
+    const paths = new Map();
+    const order = [];
+    app.setPath = (name, value) => { order.push(`set ${name}`); paths.set(name, value); };
+    app.getPath = (name) => paths.get(name) ?? installerRoot;
+    const whenReady = app.whenReady;
+    app.whenReady = function () { order.push("whenReady"); return whenReady.call(this); };
+    loadMain(app);
+    const userData = path.join(root, "UserData");
+    assert.equal(paths.get("userData"), userData);
+    assert.equal(paths.get("sessionData"), path.join(userData, "Window data"));
+    assert.ok(order.indexOf("set sessionData") !== -1 && order.indexOf("set sessionData") < order.indexOf("whenReady"),
+      "the folder is set before Electron is ready, which is when Electron starts to use it");
+  } finally {
+    restoreArguments();
+  }
+});
+
 test("the packaged assistant smoke creates the default workspace through the setup transaction", () => {
   const source = require("node:fs").readFileSync(mainPath, "utf8");
   const start = source.indexOf("async function runDesktopSmokeIfRequested()");

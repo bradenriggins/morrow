@@ -117,7 +117,7 @@ async function completePayload(root, options = {}) {
   const gatewayFiles = [
     ["package.json", JSON.stringify({ name: "@morrow-lms/gateway", version: "1.0.0-rc.0", type: "module" })],
     ["dist/index.js", "gateway entrypoint"],
-    ["dist/local-owner-maintenance.js", options.maintenance || "export function localOwnerMaintenanceMarkerPresent() { return false; }\n"],
+    ["dist/local-owner-maintenance.js", options.maintenance || "export function localOwnerMaintenanceMarkerPresent() { return false; }\nexport function workspaceRootTooBroad() { return false; }\n"],
     ["dist/local-owner-sidecar-access.js", "sidecar fixture"]
   ];
   const files = [];
@@ -903,6 +903,7 @@ test("state() reports the Chrome load state the Bridge itself answered", async (
   const manifestSha256 = await completePayload(root, {
     maintenance: [
       "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+      "export function workspaceRootTooBroad() { return false; }",
       "export function readLocalOwnerMaintenanceLease() { return null; }",
       "export function requestLocalOwnerMaintenance() { return null; }",
       "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
@@ -1183,6 +1184,7 @@ test("dead maintenance is recovered before a runtime monitor is created", async 
     maintenance: [
       "globalThis.__morrowRuntimeOrder ??= [];",
       "export function localOwnerMaintenanceMarkerPresent() { globalThis.__morrowRuntimeOrder.push('maintenance'); return false; }",
+      "export function workspaceRootTooBroad() { return false; }",
       "export function readLocalOwnerMaintenanceLease() { return null; }",
       "export function requestLocalOwnerMaintenance() { return null; }",
       "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
@@ -1228,6 +1230,7 @@ test("a desktop mutation stops a live owner under one unbroken authoritative gua
   globalThis.__morrowDesktopMutationOrder = [];
   const maintenance = [
     "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+    "export function workspaceRootTooBroad() { return false; }",
     "export function readLocalOwnerMaintenanceLease() { return null; }",
     "export function requestLocalOwnerMaintenance() { return null; }",
     "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
@@ -1275,6 +1278,7 @@ test("every public desktop configuration mutation writes nothing when owner admi
   const root = await temporaryRoot();
   const maintenance = [
     "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+    "export function workspaceRootTooBroad() { return false; }",
     "export function readLocalOwnerMaintenanceLease() { return null; }",
     "export function requestLocalOwnerMaintenance() { return null; }",
     "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
@@ -1362,6 +1366,7 @@ const BRIDGE_EXTENSION_KEY = JSON.parse(require("node:fs").readFileSync(path.joi
 
 const MAINTENANCE_MODULE = [
   "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+  "export function workspaceRootTooBroad() { return false; }",
   "export function readLocalOwnerMaintenanceLease() { return null; }",
   "export function requestLocalOwnerMaintenance() { return null; }",
   "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
@@ -2382,6 +2387,7 @@ test("a data removal refuses an owner that will not grant authoritative maintena
   const root = await temporaryRoot();
   const maintenance = [
     "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+    "export function workspaceRootTooBroad() { return false; }",
     "export function readLocalOwnerMaintenanceLease() { return null; }",
     "export function requestLocalOwnerMaintenance() { return null; }",
     "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
@@ -2418,6 +2424,7 @@ test("a data removal an open assistant refuses says to quit the assistant, not t
   const root = await temporaryRoot();
   const maintenance = [
     "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+    "export function workspaceRootTooBroad() { return false; }",
     "export function readLocalOwnerMaintenanceLease() { return null; }",
     "export function requestLocalOwnerMaintenance() { return null; }",
     "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
@@ -2485,6 +2492,7 @@ test("a confirmed removal waits for an open SQLite owner to close before deletin
   const root = await temporaryRoot();
   const maintenance = [
     "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+    "export function workspaceRootTooBroad() { return false; }",
     "export function readLocalOwnerMaintenanceLease() { return null; }",
     "export function requestLocalOwnerMaintenance() { return null; }",
     "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
@@ -2843,6 +2851,211 @@ test("a materials folder that is gone is named by its path, and only the default
   assert.equal(current.materialsFolderMissing, null);
   await assert.rejects(() => installer.restoreMaterialsFolder(), (error) => error.code === "setup_failed");
   assert.equal(await fs.stat(defaultFolder).then(() => true, () => false), false);
+});
+
+// The runtime's own workspace rule and maintenance guard, loaded through the
+// payload exactly as the packaged app loads them.
+const RUNTIME_MAINTENANCE = pathToFileURL(path.join(installerRoot, "..", "packages", "mcp-server", "dist", "local-owner-maintenance.js")).href;
+const REAL_MAINTENANCE_MODULE = `export * from ${JSON.stringify(RUNTIME_MAINTENANCE)};\n`;
+
+// A runtime started in a folder its workspace rule refuses exits before it
+// answers, so its monitor observes nothing and grants no maintenance. In any
+// other folder it starts and grants maintenance.
+const WORKSPACE_ADMISSION_MONITOR = [
+  `import { workspaceRootTooBroad } from ${JSON.stringify(RUNTIME_MAINTENANCE)};`,
+  OBSERVED_MONITOR_SNAPSHOTS,
+  "globalThis.__morrowMonitorWorkspaces ??= [];",
+  "export function createRuntimeMonitor(options) {",
+  "  globalThis.__morrowMonitorWorkspaces.push(options.workspaceRoot);",
+  "  const refused = workspaceRootTooBroad(options.workspaceRoot);",
+  "  return {",
+  "    start: async () => refused ? unobserved : ready,",
+  "    snapshot: () => refused ? unobserved : ready,",
+  "    maintenance: async ({ action }) => refused ? { status: 'unavailable' } : action === 'acquire' ? { status: 'held' } : action === 'release' ? { status: 'released' } : { status: 'closing' },",
+  "    close: async () => {}",
+  "  };",
+  "}",
+  ""
+].join("\n");
+
+/** Makes `home` this process's home folder, which the runtime's workspace rule reads, for one test. */
+function useHome(t, home) {
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  t.after(() => {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  assert.equal(os.homedir(), home);
+}
+
+// The runtime refuses a whole drive, the home folder, and any folder that holds
+// the home folder as its workspace. A materials folder like that would leave
+// every assistant unable to start Morrow, so Choose folder refuses it.
+test("Choose folder refuses the home folder, a folder that holds it, and a whole drive, and changes nothing", async (t) => {
+  const root = await fs.realpath(await temporaryRoot());
+  const home = path.join(root, "Home");
+  useHome(t, home);
+  const { installer } = await repairableController(root, { maintenance: REAL_MAINTENANCE_MODULE, runtimeMonitor: WORKSPACE_ADMISSION_MONITOR });
+  let choice = null;
+  installer.dialog = { showOpenDialog: async () => ({ canceled: false, filePaths: [choice] }) };
+  await installer.ensureRuntime();
+  const before = await installer.record();
+
+  for (const folder of [home, root, path.parse(root).root]) {
+    choice = folder;
+    await assert.rejects(() => installer.configureWorkspace(null), (error) => {
+      assert.deepEqual(error, errorDetails("materials_folder_too_broad"));
+      return true;
+    }, folder);
+  }
+  assert.deepEqual(await installer.record(), before, "nothing was recorded");
+  assert.equal((await installer.state()).materialsFolder, null);
+
+  choice = path.join(home, "Documents");
+  await fs.mkdir(choice);
+  assert.equal(await installer.configureWorkspace(null), true);
+  assert.equal((await installer.record()).materialsFolder, choice, "a folder inside the home folder is accepted");
+});
+
+// An earlier Morrow saved such a folder without checking it. That installation
+// must still be able to choose another folder, repair, and remove its data,
+// including after Morrow restarts.
+test("an installation that recorded the home folder can still change folder, repair, and remove its data", async (t) => {
+  const root = await fs.realpath(await temporaryRoot());
+  const home = path.join(root, "Home");
+  useHome(t, home);
+  await fs.writeFile(path.join(home, "notes.txt"), "the person's own file\n");
+  const good = path.join(home, "Course materials");
+  await fs.mkdir(good);
+  const options = { maintenance: REAL_MAINTENANCE_MODULE, runtimeMonitor: WORKSPACE_ADMISSION_MONITOR };
+  const opened = async () => {
+    const { installer } = await repairableController(root, options);
+    installer.dialog = {
+      showOpenDialog: async () => ({ canceled: false, filePaths: [good] }),
+      showMessageBox: async () => ({ response: 1, checkboxChecked: false })
+    };
+    return installer;
+  };
+  let installer = await opened();
+  await installer.repair();
+  await installer.writeRecord({ ...await installer.record(), materialsFolder: home });
+  globalThis.__morrowMonitorWorkspaces = [];
+
+  installer = await opened();
+  const stuck = await installer.state({ recheckAssistants: true });
+  assert.equal(stuck.materialsFolder, home);
+  assert.equal(globalThis.__morrowMonitorWorkspaces.includes(home), false, "Morrow does not start the runtime in a folder the runtime refuses");
+  await assert.rejects(() => installer.installAssistant("codex", null), (error) => {
+    assert.deepEqual(error, errorDetails("materials_folder_too_broad"));
+    return true;
+  });
+  assert.equal(await installer.configureWorkspace(null), true);
+  assert.equal((await installer.record()).materialsFolder, good);
+
+  await installer.writeRecord({ ...await installer.record(), materialsFolder: home });
+  installer = await opened();
+  await installer.state();
+  await installer.repair();
+
+  installer = await opened();
+  await installer.state();
+  const receipt = await installer.removeData(null);
+  assert.equal(receipt.status, "removed");
+  assert.ok(receipt.kept.includes(home), "the home folder is listed as kept");
+  assert.equal(await fs.readFile(path.join(home, "notes.txt"), "utf8"), "the person's own file\n");
+  assert.equal(globalThis.__morrowMonitorWorkspaces.includes(home), false);
+});
+
+// Morrow's own folders are not course materials: removing Morrow's data would
+// delete the backups it promises to keep, and the assistant could name Morrow's
+// journal and learner records as files to upload.
+test("Choose folder refuses Morrow's own data folders and any folder that holds them", async (t) => {
+  const root = await fs.realpath(await temporaryRoot());
+  const home = path.join(root, "Home");
+  useHome(t, home);
+  const appData = path.join(root, "Library", "Application Support");
+  const userData = path.join(appData, "morrow-installer");
+  await fs.mkdir(userData, { recursive: true });
+  const manifestSha256 = await completePayload(root, { maintenance: REAL_MAINTENANCE_MODULE, runtimeMonitor: WORKSPACE_ADMISSION_MONITOR });
+  let choice = null;
+  const installer = controller(root, {
+    app: { getPath: (name) => (name === "userData" ? userData : root) },
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [choice] }) },
+    trustedMcpRuntimeManifestSha256: () => manifestSha256,
+  });
+  await installer.ensureRuntime();
+  for (const folder of [installer.paths.bridgeDirectory, installer.paths.assistantBackups, path.join(installer.paths.state, "Backups")]) {
+    await fs.mkdir(folder, { recursive: true });
+  }
+  const before = await installer.record();
+
+  for (const folder of [
+    userData,
+    appData,
+    installer.paths.state,
+    path.join(installer.paths.state, "Backups"),
+    installer.paths.bridgeDirectory,
+    installer.paths.assistantBackups,
+  ]) {
+    choice = folder;
+    await assert.rejects(() => installer.configureWorkspace(null), (error) => {
+      assert.deepEqual(error, errorDetails("materials_folder_morrow_data"));
+      return true;
+    }, folder);
+  }
+  assert.deepEqual(await installer.record(), before, "nothing was recorded");
+
+  // Morrow's own default Materials folder, and a folder inside it, are course materials.
+  choice = path.join(installer.paths.defaultMaterials, "Week 1");
+  await fs.mkdir(choice, { recursive: true });
+  assert.equal(await installer.configureWorkspace(null), true);
+  assert.equal((await installer.record()).materialsFolder, choice);
+});
+
+// An earlier Morrow could record its own user-data folder as the materials
+// folder. Removing that folder would also delete the backups the removal
+// promises to keep, so the removal leaves it and says it is still there.
+test("a data removal never removes a folder that holds a place it keeps", async () => {
+  const root = await fs.realpath(await temporaryRoot());
+  const { installer, paths } = await installationWithData(root, 1);
+  await installer.writeRecord({ ...await installer.record(), materialsFolder: paths.userData });
+  const backup = path.join(paths.backups, "config.toml.2026-09-01T10-00-00Z.bak");
+  assert.equal(await fs.readFile(backup, "utf8"), "an earlier assistant setting\n");
+
+  const receipt = await installer.removeData(null);
+
+  assert.equal(receipt.status, "incomplete");
+  assert.deepEqual(receipt.remaining, [paths.userData]);
+  assert.ok(receipt.kept.includes(paths.backups));
+  assert.equal(receipt.removed.includes(paths.userData), false);
+  assert.equal(await fs.readFile(backup, "utf8"), "an earlier assistant setting\n", "the kept backup is still on this computer");
+});
+
+// What stays on this computer names the folder the window keeps its browser
+// data in, and a removal that runs beside it leaves it, because Morrow's own
+// window is using it until Morrow quits.
+test("a data removal names the Window data folder as kept and leaves it on this computer", async () => {
+  const root = await fs.realpath(await temporaryRoot());
+  const { installer, paths } = await installationWithData(root, 1);
+  const windowData = installer.paths.windowData;
+  await fs.mkdir(windowData, { recursive: true });
+  await fs.mkdir(path.join(windowData, "Cache"), { recursive: true });
+  await fs.writeFile(path.join(windowData, "Cache", "entry"), "window cache\n");
+
+  const retention = await installer.retention(await installer.record());
+  assert.equal(retention.locations.find((location) => location.path === windowData)?.keptReason, "window_data");
+  assert.equal(retention.locations.find((location) => location.path === windowData)?.removable, false);
+
+  const receipt = await installer.removeData(null);
+
+  assert.equal(receipt.status, "removed");
+  assert.ok(receipt.kept.includes(windowData), "the Window data folder is listed as kept");
+  assert.equal(await fs.stat(path.join(windowData, "Cache", "entry")).then(() => true, () => false), true, "the window data is still on this computer");
+  assert.equal(receipt.removed.includes(windowData), false);
 });
 
 test("Morrow records that an assistant connected only when its own session holds the runtime", async () => {

@@ -12,7 +12,7 @@ const { createUpdateAttemptStore, createUpdateController } = require("./shared/u
 const { UPDATE_FEED } = require("./shared/update-feed.cjs");
 const { createInstallerController, detectAssistant, errorDetails, repairRequiredState } = require("./shared/installer-controller.cjs");
 const { appLocationStatus } = require("./shared/app-location.cjs");
-const { canonicalDirectory, exists, isComplete, mkdirPrivate, payloadLayout } = require("./shared/runtime.cjs");
+const { canonicalDirectory, exists, isComplete, mkdirPrivate, payloadLayout, windowDataDirectory } = require("./shared/runtime.cjs");
 
 /**
  * The only web addresses Morrow may ever open, and only from this fixed list
@@ -37,6 +37,10 @@ const testRoot = IS_TEST_MODE && TEST_ROOT_ARGUMENT
   : null;
 if (testRoot && !path.isAbsolute(testRoot)) throw new Error("Morrow test root must be absolute.");
 if (testRoot) app.setPath("userData", path.join(testRoot, "UserData"));
+// Electron writes the window's caches and storage loose in the user-data
+// folder unless told otherwise. One named folder is a place What stays on this
+// computer can list.
+app.setPath("sessionData", windowDataDirectory(app.getPath("userData")));
 
 let mainWindow = null;
 let installer = null;

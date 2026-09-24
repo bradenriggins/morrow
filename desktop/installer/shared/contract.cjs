@@ -132,6 +132,15 @@ const PUBLIC_ERRORS = Object.freeze({
     message: "Morrow could not open the materials folder.",
     recovery: "Select Copy path and open that folder yourself, or select Change folder to choose another one."
   },
+  // The runtime refuses this folder as its workspace, so no assistant could start Morrow in it.
+  materials_folder_too_broad: {
+    message: "Morrow cannot use a whole drive, your home folder, or a folder that holds your home folder.",
+    recovery: "Choose a folder inside your home folder for your course materials, such as one in Documents."
+  },
+  materials_folder_morrow_data: {
+    message: "That folder holds Morrow's own files.",
+    recovery: "Choose another folder for your course materials, such as one in Documents."
+  },
   first_read_failed: {
     message: "Morrow could not read your course.",
     recovery: "Open the course in Chrome and make sure you are signed in, then select Check connection again."

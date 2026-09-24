@@ -574,7 +574,8 @@ const KEPT_REASONS = Object.freeze({
   assistant_configuration: "Your assistant's own settings file. Remove Morrow's data takes only Morrow's own entry out of it and leaves the rest.",
   assistant_backup: "Copies of your assistant settings from before Morrow changed them. Morrow keeps these copies so you can put a settings file back.",
   outside_morrow_data: "Outside the folders Morrow keeps its own files in. Morrow leaves it as it is.",
-  claude_desktop_extension: "Claude Desktop keeps its own copy of the Morrow extension. Remove Morrow in Claude Desktop under Settings, Extensions."
+  claude_desktop_extension: "Claude Desktop keeps its own copy of the Morrow extension. Remove Morrow in Claude Desktop under Settings, Extensions.",
+  window_data: "Morrow's window uses this while Morrow is open. Delete it after you remove the application."
 });
 
 function retentionRows(locations) {
