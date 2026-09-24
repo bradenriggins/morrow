@@ -281,6 +281,9 @@ Messages:
 - A read Morrow never does in this version, such as a blueprint
   course's links, is described as a read. It was described as a
   change, with an offer to help you write it.
+- After a change is prepared, the assistant is given the whole command
+  that sends it once you approve, with this conversation's id. It was
+  given only part of the command, which does not run as written.
 
 Installing and the docs:
 
