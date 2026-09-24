@@ -25,6 +25,15 @@ function fixtureLedger(extension) {
   };
 }
 
+test("the newest release ledger entry is the Bridge source in this checkout", () => {
+  const ledger = JSON.parse(readFileSync(resolve(root, "connector", "release-ledger.json"), "utf8"));
+  const manifest = bridgeReleaseManifest(extensionRoot);
+  const current = ledger.releases.at(-1);
+  assert.equal(current.version, manifest.version, "the ledger names an older Bridge version than the manifest");
+  assert.equal(current.releaseManifestSha256, releaseManifestDigest(manifest),
+    "the Bridge source changed after the newest sealed release ledger entry");
+});
+
 test("packaging refuses Bridge bytes the newest ledger entry does not seal", () => {
   const fixture = mkdtempSync(join(tmpdir(), "morrow-bridge-seal-"));
   try {
