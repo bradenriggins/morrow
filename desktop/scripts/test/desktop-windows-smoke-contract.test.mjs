@@ -142,6 +142,23 @@ test("binds each retained smoke observation to one exact installer, source, and 
   ]) assert.equal(windowsSmokeObservation(evidence, mismatch), null);
 });
 
+test("preserves the bounded failure classification when binding a damaged Windows observation", () => {
+  const binding = createWindowsSmokeBinding({
+    runId: "1".repeat(32),
+    sourceCommit: "a".repeat(40),
+    packageReceiptSha256: "c".repeat(64),
+    releaseGraphSha256: "e".repeat(64),
+    installerFileName: "Morrow-1.0.4-win-x64.exe",
+    installerSha256: "b".repeat(64),
+  });
+  const observation = damagedReceipt();
+  observation.smokeFailure = { stage: "verify_payload", code: "unclassified_error" };
+  const evidence = bindWindowsSmokeObservation(observation, binding);
+  assert.deepEqual(windowsSmokeObservation(evidence), observation);
+  observation.smokeFailure.code = "unsafe value";
+  assert.throws(() => bindWindowsSmokeObservation(observation, binding), /exact application observation/);
+});
+
 test("Windows smoke source identity comes from the retained package receipt", (t) => {
   const root = mkdtempSync(resolve(tmpdir(), "morrow-windows-package-binding-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
