@@ -423,15 +423,19 @@ async function runDesktopSmokeIfRequested() {
     smokeStage = "resolve_workspace";
     const materials = await installer.workspaceForAssistantSetup(await installer.record());
     if (!materials) throw new Error("materials unavailable");
+    const codexConfig = path.join(installer.home, ".codex", "config.toml");
     if (installCodex) {
-      smokeStage = "install_codex_config";
-      await installer.executeCli([
-        "mcp", "install", "codex", "--scope", "user",
-        "--repository", installer.paths.appRoot, "--upstreams", installer.paths.upstreams,
-        "--node", installer.paths.node, "--server-entry", installer.paths.server,
-        "--workspace-root", materials, "--json"
-      ]);
-      configured = await exists(path.join(installer.home, ".codex", "config.toml"));
+      configured = await exists(codexConfig);
+      if (!configured) {
+        smokeStage = "install_codex_config";
+        await installer.executeCli([
+          "mcp", "install", "codex", "--scope", "user",
+          "--repository", installer.paths.appRoot, "--upstreams", installer.paths.upstreams,
+          "--node", installer.paths.node, "--server-entry", installer.paths.server,
+          "--workspace-root", materials, "--json"
+        ]);
+        configured = await exists(codexConfig);
+      }
     }
     smokeStage = "check_runtime";
     const runtime = await installer.runtimeSnapshot(materials);
@@ -442,7 +446,6 @@ async function runDesktopSmokeIfRequested() {
     };
     runtimeTrace = await currentSmokeRuntimeTrace().catch(() => unavailableSmokeRuntimeTrace());
     stateSecurity = await smokeStateSecurity(installer.paths, installer.userData);
-    const codexConfig = path.join(installer.home, ".codex", "config.toml");
     await writeSmokeReceipt(receipt, {
       schema: "morrow.desktop-windows-smoke.v1",
       runtime: { ready: await isComplete(installer.paths.payload) },
