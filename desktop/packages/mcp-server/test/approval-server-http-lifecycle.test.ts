@@ -1,6 +1,7 @@
 import { request, type ClientRequest } from "node:http";
 import { describe, expect, it } from "vitest";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
+import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 
 function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
   let resolve!: () => void;
@@ -59,11 +60,17 @@ describe("approval HTTP shutdown", () => {
       expect(cookie).toBeTruthy();
 
       holdReview = true;
-      const pendingReview = fetch(reviewUrl).then(
+      const pendingReview = fetch(reviewUrl);
+      await reviewStarted.promise;
+      const loading = await pendingReview;
+      expect(loading.status).toBe(200);
+      const reader = loading.body!.getReader();
+      const firstChunk = await reader.read();
+      expect(new TextDecoder().decode(firstChunk.value)).toContain("Preparing your review");
+      const pendingBody = reader.read().then(
         () => "completed",
         () => "aborted",
       );
-      await reviewStarted.promise;
 
       partial = partialPost(new URL(`${reviewUrl}/approve`), {
         "content-type": "application/x-www-form-urlencoded",
@@ -83,11 +90,93 @@ describe("approval HTTP shutdown", () => {
         new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("approval close exceeded its bound")), 1_000)),
       ])).resolves.toBeUndefined();
       expect(Date.now() - startedAt).toBeLessThan(1_000);
-      await expect(pendingReview).resolves.toBe("aborted");
+      await expect(pendingBody).resolves.toBe("aborted");
       await expect(fetch(`${baseUrl}/operations`, { signal: AbortSignal.timeout(500) })).rejects.toThrow();
     } finally {
       releaseReview.resolve();
       partial?.destroy();
+      await approval.close();
+    }
+  });
+});
+
+describe("approval HTTP streaming", () => {
+  it.each(["changed", "expired", "provider read error"] as const)("leaves no usable approval after %s during a live read", async (failure) => {
+    const operationId = `operation:stream-${failure.replaceAll(" ", "-")}`;
+    const readStarted = deferred();
+    const releaseRead = deferred();
+    let approved = 0;
+    let snapshot = {
+      operationId,
+      state: "awaiting_approval",
+      approvalExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      plan: { tool: "moodle_update_page", arguments: { course_id: 2, module_id: 6, content: "Original text" } },
+    };
+    const approval = new LoopbackApprovalServer({
+      operationGet: () => snapshot,
+      operationList: () => ({ operations: [snapshot] }),
+      operationReviewContext: async () => {
+        readStarted.resolve();
+        await releaseRead.promise;
+        if (failure === "provider read error") throw new Error("provider read failed");
+        return { targets: [
+          { field: "course_id", label: "Course", name: "Biology 101" },
+          { field: "module_id", label: "Page", name: "Week 2 overview" },
+        ] };
+      },
+      approveOperation: () => { approved += 1; return { ...snapshot, state: "approved" }; },
+      runApprovedOperation: async () => undefined,
+      cancelOperation: () => ({ ...snapshot, state: "cancelled" }),
+      setApprovalBaseUrl: () => undefined,
+    });
+    try {
+      const baseUrl = await approval.start();
+      const reviewUrl = `${baseUrl}/operations/${encodeURIComponent(operationId)}`;
+      const pending = fetch(reviewUrl);
+      await readStarted.promise;
+      const page = await pending;
+      expect(page.status).toBe(200);
+      const cookie = page.headers.get("set-cookie")?.split(";", 1)[0] || "";
+      const nonce = cookie.split("=")[1] || "";
+      expect(nonce).toBeTruthy();
+      const reader = page.body!.getReader();
+      const firstChunk = await reader.read();
+      const loading = new TextDecoder().decode(firstChunk.value);
+      expect(loading).toContain("Preparing your review");
+      expect(loading).not.toContain("/approve\"");
+
+      if (failure === "changed") snapshot = {
+        ...snapshot,
+        plan: { ...snapshot.plan, arguments: { ...snapshot.plan.arguments, content: "Changed text" } },
+      };
+      if (failure === "expired") snapshot = { ...snapshot, approvalExpiresAt: new Date(Date.now() - 1_000).toISOString() };
+      releaseRead.resolve();
+
+      let resolved = "";
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        resolved += new TextDecoder().decode(chunk.value);
+      }
+      expect(resolved).toContain(failure === "provider read error" ? "Morrow could not identify" : "Review changed");
+      expect(resolved).not.toContain("/approve\"");
+
+      const approveUrl = `${reviewUrl}/approve`;
+      const attempt = await fetch(approveUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: baseUrl,
+          referer: reviewUrl,
+          cookie,
+        },
+        body: new URLSearchParams({ nonce, presence: bridgeSignedPresence(approval, approveUrl, nonce) }),
+        redirect: "manual",
+      });
+      expect(attempt.status).toBe(409);
+      expect(approved).toBe(0);
+    } finally {
+      releaseRead.resolve();
       await approval.close();
     }
   });
