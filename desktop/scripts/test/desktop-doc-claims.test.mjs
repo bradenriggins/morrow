@@ -313,7 +313,7 @@ test("the README names the desktop artifacts the build configuration actually pr
     assert.match(read(doc), /unsigned/i, `${doc} must state that the desktop build is unsigned`);
   }
   const windowsGuide = flat("installer/WINDOWS-DEPLOYMENT.md");
-  assert.match(windowsGuide, /Morrow Desktop 1\.0\.6 is an unreleased candidate/);
+  assert.match(windowsGuide, /No Windows 1\.0\.6 installer is published/);
   assert.match(windowsGuide, /Every published Windows artifact so far is unsigned/);
   assert.doesNotMatch(windowsGuide, /Every Morrow Desktop release so far, including 1\.0\.5/);
   assert.match(readme, /Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature/,
@@ -321,12 +321,12 @@ test("the README names the desktop artifacts the build configuration actually pr
   assert.equal(typeof config.afterPack, "function", "the unsigned macOS bundle must be ad-hoc sealed after packing");
 });
 
-test("the 1.0.6 tag date is prepared without claiming the release is published", () => {
-  assert.match(flat("README.md"), /Morrow Desktop 1\.0\.6 is an unreleased candidate/);
-  assert.match(flat("LIMITATIONS.md"), /Morrow Desktop `1\.0\.6` is an unreleased candidate/);
+test("the Mac 1.0.6 release keeps Windows on 1.0.5", () => {
+  assert.match(flat("README.md"), /Morrow Desktop 1\.0\.6 is published for Mac with Apple silicon/);
+  assert.match(flat("LIMITATIONS.md"), /Morrow Desktop `1\.0\.6` is available for Mac with Apple silicon/);
   assert.match(flat("CHANGELOG.md"), /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.6 \(2026-09-25\)/);
-  assert.doesNotMatch(flat("README.md"), /public `desktop\/v1\.0\.6` release .* provides unsigned/);
-  assert.match(flat("installer/WINDOWS-DEPLOYMENT.md"), /Morrow Desktop 1\.0\.6 is an unreleased candidate/);
+  assert.match(flat("README.md"), /published `desktop\/v1\.0\.6` release provides unsigned macOS Apple silicon files/);
+  assert.match(flat("installer/WINDOWS-DEPLOYMENT.md"), /No Windows 1\.0\.6 installer is published/);
 });
 
 // electron-builder.config.cjs takes its target platform from MORROW_TARGET_PLATFORM
