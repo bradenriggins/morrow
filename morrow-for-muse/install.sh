@@ -1074,6 +1074,30 @@ if [ -z "${CANVAS_BASE:-}" ]; then
   note "CANVAS_BASE is not set yet: skipping the helper launch."
   note "Set it in ${ENV_FILE}, then rerun this installer: it checks the address before it starts the helper. The one-time sign-in comes after."
 else
+  HELPER_STATUS_URL="http://127.0.0.1:${HELPER_PORT}/status"
+  HELPER_STATUS_TLS=0
+  if [ -n "${LOGIN_HELPER_TLS_CERT:-}" ] \
+      || [ -n "${LOGIN_HELPER_TLS_KEY:-}" ]; then
+    [ -n "${LOGIN_HELPER_TLS_CERT:-}" ] \
+      && [ -n "${LOGIN_HELPER_TLS_KEY:-}" ] \
+      || fail "helper" "LOGIN_HELPER_TLS_CERT and LOGIN_HELPER_TLS_KEY must both be set; the helper cannot start with only one."
+    [ -f "${LOGIN_HELPER_TLS_CERT}" ] \
+      && [ -f "${LOGIN_HELPER_TLS_KEY}" ] \
+      || fail "helper" "the configured helper TLS certificate or key file is missing; refusing an unverified status probe."
+    HELPER_STATUS_URL="https://127.0.0.1:${HELPER_PORT}/status"
+    HELPER_STATUS_TLS=1
+  fi
+  _install_helper_status() {
+    if [ "${HELPER_STATUS_TLS}" = "1" ]; then
+      if [ "${LOGIN_HELPER_TLS_INSECURE:-}" = "1" ]; then
+        curl -sf -m 20 -k "${HELPER_STATUS_URL}"
+      else
+        curl -sf -m 20 --cacert "${LOGIN_HELPER_TLS_CERT}" "${HELPER_STATUS_URL}"
+      fi
+    else
+      curl -sf -m 20 "${HELPER_STATUS_URL}"
+    fi
+  }
   if [ -n "${_SHELL_CANVAS_BASE}" ] \
     && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?CANVAS_BASE=' "${ENV_FILE}" 2>/dev/null; then
     fail "env" "CANVAS_BASE is set in this shell but absent from ${ENV_FILE}; the keepalive cron sources only that file, so helper recovery would fail later. Add CANVAS_BASE=${_SHELL_CANVAS_BASE} to ${ENV_FILE} and rerun."
@@ -1133,8 +1157,47 @@ except ValueError as exc:
   "${TREE}/helper/keepalive.sh" >/dev/null 2>&1
   KEEP_RC=$?
   case "${KEEP_RC}" in
+    0|2)
+      # A second keepalive can return 0 because the supervisor owns the
+      # lock. Its tick has a 600-second timeout; allow cleanup margin.
+      if [ "${KEEP_RC}" = "0" ]; then
+        flock -w 610 "${TREE_STATE_DIR}/keepalive.lock" true \
+          || fail "helper" "another keepalive still holds the lock after 610 seconds; no helper state was accepted. Check ${TREE_STATE_DIR}/keepalive.log and rerun."
+      fi
+      STATUS="$(_install_helper_status 2>/dev/null)" \
+        || fail "helper" "keepalive returned ${KEEP_RC}, but no helper answered /status on port ${HELPER_PORT}. A concurrent keepalive may have held the lock. Check ${TREE_STATE_DIR}/keepalive.log and rerun after the helper is available."
+      _STATUS_STATE="$(printf '%s' "${STATUS}" | TREE="${TREE}" TREE_VERSION="${TREE_VERSION}" python3 -c '
+import json, os, sys
+try:
+    d = json.load(sys.stdin)
+except (ValueError, UnicodeError):
+    sys.exit(1)
+if not isinstance(d, dict) or d.get("helper_version") != os.environ["TREE_VERSION"]:
+    sys.exit(1)
+profile = d.get("profile_dir")
+expected = os.path.realpath(os.path.join(os.environ["TREE"], "helper", "profile"))
+if not isinstance(profile, str) or not os.path.isabs(os.path.expanduser(profile)) \
+        or os.path.realpath(os.path.expanduser(profile)) != expected:
+    sys.exit(1)
+if d.get("chromium_alive") is not True or d.get("starting") is not False \
+        or type(d.get("logged_in")) is not bool \
+        or type(d.get("profile_has_cookies")) is not bool:
+    sys.exit(1)
+if d["logged_in"] and not d["profile_has_cookies"]:
+    sys.exit(1)
+print("signed-in" if d["logged_in"] else "signed-out")
+')" || fail "helper" "keepalive returned ${KEEP_RC}, but /status on port ${HELPER_PORT} did not prove this tree's helper and browser are ready. Check ${TREE_STATE_DIR}/keepalive.log and ${TREE_STATE_DIR}/server.log; rerun after the helper is available."
+      # A lock skip returns 0 even when the concurrent run found a
+      # genuine sign-out. The verified status decides which notice to show.
+      if [ "${_STATUS_STATE}" = "signed-in" ]; then
+        KEEP_RC=0
+      else
+        KEEP_RC=2
+      fi
+      ;;
+  esac
+  case "${KEEP_RC}" in
     0)
-      STATUS="$(curl -sf -m 8 "http://127.0.0.1:${HELPER_PORT}/status" 2>/dev/null || true)"
       note "helper healthy: ${STATUS}"
       # P0-7: the onboarded sentinel is a real authenticated signal only:
       # keepalive exit 0 already implies logged_in=true, and the profile

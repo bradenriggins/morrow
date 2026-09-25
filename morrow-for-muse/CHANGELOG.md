@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.6 (2026-09-25)
+
+The release package is `morrow-muse-connector-0.4.6.zip` from the
+`muse/v0.4.6` GitHub release.
+
+- Refuse to complete a Canvas install when keepalive skips a held lock but
+  no helper is available. The installer now checks the helper's version,
+  profile, and browser state before it records success or asks for sign-in.
+  The check supports a TLS-only helper and pins its configured certificate.
+  A failed install keeps the previous profile and connection state.
+- The separate Moodle module is unchanged. A production Muse browser-session
+  handoff and Moodle Plan/Edit approval path remain unresolved.
+
 ## 0.4.5 (2026-09-24)
 
 The release package is `morrow-muse-connector-0.4.5.zip` from the
