@@ -34,9 +34,9 @@ A tag names one commit, and the assets on its GitHub release are built from that
    - Save the version's `morrow-for-muse/CHANGELOG.md` section as the notes file: `awk -v v="X.Y.Z" 'index($0, "## " v " (") == 1 { keep = 1; next } /^## / { keep = 0 } keep' morrow-for-muse/CHANGELOG.md > <notes file>`. Read it through, then publish: `gh release create muse/vX.Y.Z --verify-tag --title "Morrow for Muse X.Y.Z" --notes-file <notes file> --latest=false dist/morrow-muse-connector-X.Y.Z.zip dist/SHA256SUMS`. A Muse release is never marked Latest, for the reason under Desktop updates below.
 6. **Check what was published.** Download the release into an empty folder with `gh release download <tag> -D <folder>`, and in that folder run `shasum -a 256 -c SHA256SUMS`. Then check every release link the website names with `curl -sI <link>`: a download link must answer `HTTP/2 302`, and a release page link `HTTP/2 200`.
 
-## Desktop 1.0.7 Mac release preparation
+## Desktop 1.0.7 Mac release (published 2026-09-25)
 
-Desktop 1.0.7 is prepared for macOS on Apple silicon only. Morrow Bridge 1.0.126 is sealed in the source. Until the new Mac package passes native smoke and is published, the Mac download remains Desktop 1.0.6. The Windows x64 download stays on published Desktop 1.0.5. There is no Windows 1.0.7 asset or native Windows 1.0.7 smoke receipt. Keep the website's Windows button on `Morrow-1.0.5-win-x64.exe` and label each platform with its published version.
+Desktop 1.0.7 is published for macOS on Apple silicon only (2026-09-25, tag `desktop/v1.0.7`), with Morrow Bridge 1.0.126 sealed in the source. The Mac package passed native smoke before publication, and the Mac download is Desktop 1.0.7. The Windows x64 download stays on published Desktop 1.0.5. There is no Windows 1.0.7 asset or native Windows 1.0.7 smoke receipt. Keep the website's Windows button on `Morrow-1.0.5-win-x64.exe` and label each platform with its published version.
 
 After this release-source pull request reaches `main`, use a clean checkout of that exact commit. Run `pnpm install --frozen-lockfile` in `desktop/` and `desktop/installer/`, then run `pnpm check` from `desktop/`. Build and smoke the unsigned Mac files on Apple silicon from the repository root:
 
