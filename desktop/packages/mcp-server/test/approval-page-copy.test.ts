@@ -259,6 +259,110 @@ describe("approval page copy", () => {
     }
   });
 
+  it.each([
+    ["canvas_mark_submission_as_read_courses", "read"],
+    ["canvas_mark_submission_as_read_sections", "read"],
+    ["canvas_mark_submission_as_unread_courses", "unread"],
+    ["canvas_mark_submission_as_unread_sections", "unread"],
+  ])("describes the %s review without claiming a grade change or checked readback", async (tool, state) => {
+    const review: JsonObject = {
+      ...moodleSnapshot("awaiting_approval"),
+      plan: {
+        tool,
+        risk: { approvalClass: "grade" },
+        arguments: { course_id: "89585", assignment_id: "3636219", user_id: "Student A1" },
+      },
+    };
+    const server = approvalServer(review, review, [
+      { field: "course_id", label: "Course", name: "BIOL 101" },
+      { field: "assignment_id", label: "Assignment", name: "Discussion" },
+      { field: "user_id", label: "Submission", name: "Submission Student A1" },
+    ]);
+    try {
+      const baseUrl = await server.start();
+      const { body } = await reviewPage(baseUrl);
+      expect(body).toContain(`This marks the submission as ${state}. It does not change the student&#39;s grade.`);
+      expect(body).toContain("Morrow cannot check the saved read status. Confirm it in Canvas after Morrow sends the request.");
+      expect(body).not.toContain("This changes grades. Check each student and score.");
+      expect(body).not.toContain("Morrow applies these changes and checks them in Canvas.");
+      expect(body).toContain("Submission Student A1");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("describes mixed batches without promising checked submission read status", async () => {
+    const child = (index: number, tool: string): JsonObject => ({
+      index,
+      operation: {
+        ...moodleSnapshot("awaiting_approval"),
+        operationId: `op:review-copy-child-${index}`,
+        plan: {
+          tool,
+          risk: { approvalClass: "grade" },
+          arguments: { course_id: "89585", assignment_id: "3636219", user_id: "Student A1" },
+        },
+      },
+    });
+    const batchId = "batch-review-copy-1234";
+    const batch: JsonObject = {
+      batch: { state: "planned", batchId },
+      children: [
+        child(0, "canvas_mark_submission_as_read_courses"),
+        child(1, "canvas_grade_or_comment_on_submission_courses"),
+      ],
+      totalChildren: 2,
+      confirmedChildren: 0,
+    };
+    const server = new LoopbackApprovalServer({
+      operationGet: () => moodleSnapshot("awaiting_approval"),
+      operationList: () => ({ schema: "morrow.operations.list.v1", returned: 0, operations: [] }),
+      operationReviewContext: async () => ({ targets: [
+        { field: "course_id", label: "Course", name: "BIOL 101" },
+        { field: "assignment_id", label: "Assignment", name: "Discussion" },
+        { field: "user_id", label: "Submission", name: "Submission Student A1" },
+      ] }),
+      approveOperation: () => moodleSnapshot("approved"),
+      runApprovedOperation: async () => undefined,
+      cancelOperation: () => moodleSnapshot("cancelled"),
+      batchApprovalGet: () => batch,
+      approveBatch: () => batch,
+      runApprovedBatch: async () => undefined,
+      cancelBatchApproval: () => batch,
+      setApprovalBaseUrl: () => undefined,
+    });
+    try {
+      const baseUrl = await server.start();
+      const body = await (await fetch(`${baseUrl}/batches/${batchId}`)).text();
+      expect(body).toContain("Morrow will apply all 2 changes. It will check the results it can in Canvas. Confirm the submission read status in Canvas yourself.");
+      expect(body).not.toContain("check each result in Canvas");
+      expect(body).toContain("This changes grades. Check each student and score.");
+      expect(body).toContain("This marks the submission as read. It does not change the student&#39;s grade.");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps the grade warning for an actual grade change", async () => {
+    const review: JsonObject = {
+      ...moodleSnapshot("awaiting_approval"),
+      plan: {
+        tool: "canvas_grade_or_comment_on_submission_courses",
+        risk: { approvalClass: "grade" },
+        arguments: { course_id: "89585", assignment_id: "3636219", user_id: "Student A1", posted_grade: "90" },
+      },
+    };
+    const server = approvalServer(review);
+    try {
+      const baseUrl = await server.start();
+      const { body } = await reviewPage(baseUrl);
+      expect(body).toContain("This changes grades. Check each student and score.");
+      expect(body).not.toContain("Morrow cannot check the saved read status.");
+    } finally {
+      await server.close();
+    }
+  });
+
   it("keeps the platform of the request when an approval can no longer be taken", async () => {
     const server = approvalServer(moodleSnapshot("awaiting_approval"), moodleSnapshot("applied_or_unknown"));
     try {
