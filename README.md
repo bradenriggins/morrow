@@ -10,12 +10,12 @@ Morrow is and always will be free and open source.
 
 ## The products
 
-This is a monorepo. Each product lives in its own directory, ships on its own version line, and is tested by its own CI suite.
+This is a monorepo. Each product lives in its own directory, ships on its own version line, and has its own local check suite.
 
 | Product | Directory | What it is |
 |---|---|---|
 | Morrow Desktop | `desktop/` | The desktop app plus Morrow Bridge, its Chrome extension. Download it for a Mac with Apple silicon and macOS 13 or later, or for Windows 10 or Windows 11, connect the ChatGPT desktop app, Claude Desktop, Claude Code, or Gemini CLI, and work with the courses your account can open. So far, only OpenAI's Codex CLI, which uses Morrow's ChatGPT setup, has been checked on a live Canvas test course. The ChatGPT desktop app, Claude Desktop, Claude Code, and Gemini CLI setups have passed Morrow's own tests only. Start at [`desktop/README.md`](desktop/README.md). |
-| Morrow for Muse | `morrow-for-muse/` | The connector that runs Morrow on your Muse computer. You sign in to Canvas on your Muse computer, and sign in again if Canvas ends the session. Version 1 supports Canvas only. Includes Morrow Direct, our open format that describes each course-site action Morrow can take and how it runs. Start at [`morrow-for-muse/SKILL.md`](morrow-for-muse/SKILL.md). |
+| Morrow for Muse | `morrow-for-muse/` | The connector that runs on your Muse computer. It supports Canvas and Moodle through separate sign-in and session lanes. Canvas actions use the Canvas catalog; Moodle checks each site's available capabilities before it acts. Start at [`morrow-for-muse/SKILL.md`](morrow-for-muse/SKILL.md). |
 
 ## How Morrow works, in every product
 
@@ -23,9 +23,9 @@ This is a monorepo. Each product lives in its own directory, ships on its own ve
 
 **Plan first.** Morrow starts each course in Plan, so you review proposed changes before they are saved. Edit lets your assistant save changes without asking each time: in Morrow Desktop you grant it per course and per type of change, and in Morrow for Muse you turn it on for your account or for one conversation. After each approved change, Morrow checks what the LMS saved, and your assistant tells you what happened.
 
-**Your sign-in stays yours.** Morrow never sees or saves your password, and your assistant never receives your password, cookies, or other sign-in details. In Morrow Desktop, your Canvas or Moodle sign-in stays in Chrome, and Morrow Bridge uses it there. Blackboard works differently: your administrator gives you an application key and secret, and the Morrow app keeps them in a file on your computer that only your user account can open. In Morrow for Muse, you sign in to Canvas in Morrow's own browser on your Muse computer, and that browser keeps your sign-in there. If Canvas ends the session, you sign in again.
+**Your sign-in stays yours.** Morrow does not store your school password, and your assistant never receives your password, cookies, or other sign-in details. In Morrow Desktop, your Canvas or Moodle sign-in stays in Chrome, and Morrow Bridge uses it there. Blackboard works differently: your administrator gives you an application key and secret, and the Morrow app keeps them in a file on your computer that only your user account can open. In Morrow for Muse, you sign in to Canvas or Moodle on your Muse computer. Each platform has a separate connection flow.
 
-**Student identities stay out of your assistant.** Before course information reaches your assistant, Morrow replaces student names, email addresses, usernames, and school or course account IDs with labels such as Student A1, and it stops if it cannot protect every student in those records. Names you type to your assistant reach it as you typed them. Each product lists what it cannot replace, such as a nickname the course roster does not hold: see the [Morrow Desktop limits](desktop/LIMITATIONS.md#learner-privacy) and the [Morrow for Muse privacy limits](morrow-for-muse/privacy/FERPA_POLICY.md#known-limitations-honest-scope).
+**Student privacy is built into each connection.** Morrow Desktop and the Canvas lane for Muse replace known student identifiers with course-specific labels before course records reach the assistant. Muse's Moodle analytics use approved course-level aggregates instead of individual student records. Each product documents the limits of its privacy protections: see the [Morrow Desktop limits](desktop/LIMITATIONS.md#learner-privacy) and the [Morrow for Muse privacy limits](morrow-for-muse/privacy/FERPA_POLICY.md#known-limitations-honest-scope).
 
 **Start with the course access you already have.** Morrow gives educators direct tools for the courses they already manage. It never gives anyone new access.
 
@@ -34,9 +34,9 @@ This is a monorepo. Each product lives in its own directory, ships on its own ve
 - `desktop/`: Morrow Desktop. The app, the Bridge extension, the MCP server, the installer, and product docs.
 - `morrow-for-muse/`: Morrow for Muse. The connector, Morrow Direct, the dispatch engine, the privacy boundary, and the proof battery.
 - `docs/`: family-level docs, the [product overview](docs/products.md) and [versioning](docs/versioning.md).
-- `.github/workflows/`: CI with path filters. Changes under `desktop/**` run the desktop suite on Linux, and its installer suites and every desktop test Linux skips on Windows and on macOS. Changes under `morrow-for-muse/**` run the Muse suite. A change to a root file a product reads, such as `.gitattributes` or `LICENSE`, runs that product's suites; [versioning](docs/versioning.md#ci-path-filters) lists them. The repository text gates (no em dash, no retired phrase, the platform facts in this README and `docs/products.md`, the security policy and issue templates, and the path filters for root files) run on every change. The required `check` job aggregates the gates and every suite.
+- `desktop/.githooks/`: local commit checks. GitHub Actions are disabled for this repository. The pre-commit hook runs repository text gates and the affected product's local checks for staged changes.
 
-To run what CI runs before each commit, install the pre-commit hook once from the repository root: `git config core.hooksPath desktop/.githooks`. Every commit runs the repository text gates; a commit that changes `desktop/` also runs the desktop gate (`pnpm check`); a commit that changes `morrow-for-muse/` also runs the Muse suite (`pytest`, then the dev selftest suites, then the install suites on a carved tree). A commit that changes `.github/` runs both products' steps, and a commit that changes a root file a product reads runs that product's steps the same way.
+Install the pre-commit hook once from the repository root: `git config core.hooksPath desktop/.githooks`. A change to `desktop/` runs `pnpm check`; a change to `morrow-for-muse/` runs its Python tests, development suites, and carved-package install suites. The hook runs both product suites for shared files that both products use. Release and versioning details are in [`docs/versioning.md`](docs/versioning.md).
 
 ## Versioning
 
