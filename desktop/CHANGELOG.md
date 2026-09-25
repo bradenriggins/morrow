@@ -2,9 +2,9 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
-## 1.0.6 (2026-09-24)
+## 1.0.6 (2026-09-25)
 
-This release is being prepared. Its installers will be published after native Mac and Windows checks of the exact files.
+This Mac release is being prepared. It will include the unsigned `Morrow-1.0.6-mac-arm64.dmg` and `Morrow-1.0.6-mac-arm64.zip` after native Mac checks of the exact files. Windows remains on the published 1.0.5 installer. There is no Windows 1.0.6 installer.
 
 ### Approvals and Edit access
 
@@ -18,6 +18,7 @@ This release is being prepared. Its installers will be published after native Ma
 
 - Updated the Desktop package manager to pnpm 12.6.0 and migrated its lockfile and build settings.
 - Corrected the review path to use the same learner label as the public submission read before matching the submitted item.
+- This patch has no native Windows 1.0.6 smoke receipt. The published Windows x64 installer remains `Morrow-1.0.5-win-x64.exe`.
 
 ## 1.0.5 (2026-09-24)
 
