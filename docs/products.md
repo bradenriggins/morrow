@@ -15,7 +15,7 @@ Start: [`desktop/README.md`](../desktop/README.md). Current limits: [`desktop/LI
 
 ## Morrow for Muse (`morrow-for-muse/`)
 
-The 0.4.4 release candidate includes the Canvas connector and a separate
+The 0.4.5 release includes the Canvas connector and a separate
 Moodle HTTPS module. Canvas uses the educator's browser sign-in and the
 live-proven operation catalog. The Moodle module has public-demo proof and a
 site capability probe, but this package does not connect a signed-in Muse
