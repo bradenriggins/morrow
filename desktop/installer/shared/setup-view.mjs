@@ -322,16 +322,16 @@ export function awaitingBridgeFolder(current) {
  */
 function bridgeFolderBlock(current, { platform = null, bridgeWaitExpired = false } = {}) {
   const folder = current?.bridge?.folderPath;
-  if (typeof folder !== "string" || folder.length === 0) return "";
   const reach = platform === "win32"
     ? "In the folder picker Chrome opens, paste this path into the address bar at the top of the folder picker, press Enter, then select <strong>Select Folder</strong>."
     : platform === "darwin"
       ? "In the folder picker Chrome opens, press <strong>Command+Shift+G</strong>, paste this path, press Return, then select <strong>Select</strong>."
       : "In the folder picker Chrome opens, go to this path.";
-  const late = bridgeWaitExpired
+  const guidance = bridgeWaitExpired
     ? '<div class="blocked-box"><strong>Bridge connection not confirmed</strong><p>If you already added Bridge in Chrome, select Check Bridge. If Morrow still cannot connect, use Load unpacked to select the exact Bridge folder shown below.</p></div>'
-    : "";
-  return `${late}<div class="materials-row"><div><h3>Bridge folder</h3><p class="path-text">${escapeHtml(folder)}</p><p>${reach}</p></div><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="${escapeHtml(folder)}" aria-label="Copy the Bridge folder path">Copy path</button></div>`;
+    : '<div class="info-box"><strong>Next: add Bridge to Chrome</strong><p>Select Show Bridge folder, then follow the steps below. Return here and select Check Bridge after you select Connect Morrow in Chrome.</p></div>';
+  if (typeof folder !== "string" || folder.length === 0) return guidance;
+  return `${guidance}<div class="materials-row"><div><h3>Bridge folder</h3><p class="path-text">${escapeHtml(folder)}</p><p>${reach}</p></div><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="${escapeHtml(folder)}" aria-label="Copy the Bridge folder path">Copy path</button></div>`;
 }
 
 function actionPanel(current, { chosenAssistantId = null, platform = null, bridgeWaitExpired = false } = {}) {
@@ -442,7 +442,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
     return {
       summary: "Set up Morrow Bridge in Chrome",
       title: "Add Morrow Bridge.",
-      copy: "Use this temporary Chrome method until Morrow Bridge is available in the Chrome Web Store.",
+      copy: "Add Morrow Bridge to Chrome from the folder below. It connects Morrow to the courses you choose in Chrome.",
       body: bridgeFolderBlock(current, { platform, bridgeWaitExpired }) + '<ol class="instructions"><li>Select <strong>Show Bridge folder</strong>. Morrow opens the folder named <strong>Bridge</strong> and selects its manifest.json file.</li><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>.</li><li>On that page, turn on <strong>Developer mode</strong>.</li><li>Select <strong>Load unpacked</strong>, then select that <strong>Bridge</strong> folder.</li><li>Open <strong>Morrow Bridge</strong> in Chrome and select <strong>Connect Morrow</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="reveal-bridge-folder">Show Bridge folder</button><button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button><button class="secondary-button" type="button" data-action="repair">Repair Morrow</button></div>',
     };
   }
