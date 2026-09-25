@@ -14,6 +14,8 @@ const REVIEW_READ_TIMEOUT_MS = 4_000;
 // An Item Bank read opens a fresh Item Banks launch tab and takes eight to nine seconds live,
 // so the general budget left every entry and question unnamed and Approve withheld.
 const ITEM_BANK_REVIEW_READ_TIMEOUT_MS = 20_000;
+// A submission review also resolves the learner token against the current course roster.
+const SUBMISSION_REVIEW_READ_TIMEOUT_MS = 20_000;
 const REVIEW_READ_BUDGET = 200;
 const ITEM_BANK_UPDATE_TOOL = "canvas_item_bank_update_item";
 const ITEM_BANK_GUARD_KIND = "item_bank_entry_image_alt";
@@ -487,7 +489,10 @@ async function boundedRead(
   const cached = cache.get(key);
   if (cached) return { result: await cached, limited: false };
   if (cache.size >= REVIEW_READ_BUDGET) return { result: null, limited: true };
-  const signal = AbortSignal.timeout(publicName.startsWith("canvas_item_bank_") ? ITEM_BANK_REVIEW_READ_TIMEOUT_MS : REVIEW_READ_TIMEOUT_MS);
+  const timeoutMs = publicName.startsWith("canvas_item_bank_") ? ITEM_BANK_REVIEW_READ_TIMEOUT_MS
+    : publicName === "canvas_get_single_submission_courses" ? SUBMISSION_REVIEW_READ_TIMEOUT_MS
+    : REVIEW_READ_TIMEOUT_MS;
+  const signal = AbortSignal.timeout(timeoutMs);
   const pending = input.read(publicName, args, signal).catch(() => null);
   cache.set(key, pending);
   return { result: await pending, limited: false };

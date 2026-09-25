@@ -233,6 +233,9 @@ describe("Canvas connector gateway path", () => {
     let activeEditPermission = detailedEditPermission("canvas_page_content");
     let activeEditOptions: JsonObject[] = [];
     let writeCommands = 0;
+    let submissionReviewDelayMs = 0;
+    let pendingSubmissionReviewResponse: Promise<void> | null = null;
+    let submissionReviewResponseError: unknown = null;
     let partialQuiz = false;
     let filteredPage = false;
     let pagePlanOperationId = "";
@@ -298,7 +301,7 @@ describe("Canvas connector gateway path", () => {
             });
           }
         }
-        bridge?.respond(command, {
+        const browserResult = {
           schema: "morrow.canvas-browser-result.v1",
           ok: true,
           sent: true,
@@ -351,7 +354,18 @@ describe("Canvas connector gateway path", () => {
               evidence: "fresh_readback_matches_requested_postcondition",
             },
           } : {}),
-        });
+        };
+        if (command.kind === "invoke_read" && command.toolName === "canvas_get_single_submission_courses" && submissionReviewDelayMs > 0) {
+          pendingSubmissionReviewResponse = new Promise<void>((resolveDelay) => {
+            setTimeout(() => {
+              try { bridge?.respond(command, browserResult); }
+              catch (error) { submissionReviewResponseError = error; }
+              resolveDelay();
+            }, submissionReviewDelayMs);
+          });
+        } else {
+          bridge?.respond(command, browserResult);
+        }
       });
     }, CASE_TIMEOUT_MS);
 
@@ -1101,7 +1115,7 @@ describe("Canvas connector gateway path", () => {
       runtime.cancelOperation(operationId(reviewPlan));
     }, CASE_TIMEOUT_MS);
 
-    it("names the exact learner submission in a Plan review from the private Canvas read", async () => {
+    it("names a learner submission when its private Canvas review read takes more than four seconds", async () => {
       const roster = await runtime.call("canvas_list_users_in_course_users", {
         course_id: "42", enrollment_type: ["student"], enrollment_state: ["active", "invited", "completed", "inactive"],
         morrow_max_pages: 50, _morrow: { source_binding_id: sourceBindingId },
@@ -1120,13 +1134,21 @@ describe("Canvas connector gateway path", () => {
       });
       const id = operationId(planned);
       expect(planned.structuredContent).toMatchObject({ status: "awaiting_approval", receipts: { dispatchAttempt: 0 } });
-      expect(await runtime.operationReviewContext(id)).toMatchObject({ targets: [
-        { field: "course_id", name: "Biology" },
-        { field: "assignment_id", name: "Cell transport reflection" },
-        { field: "user_id", label: "Submission", name: `Submission ${label}` },
-      ] });
-      expect(writeCommands).toBe(writesBeforePlan);
-      runtime.cancelOperation(id);
+      submissionReviewDelayMs = 5_500;
+      try {
+        expect(await runtime.operationReviewContext(id)).toMatchObject({ targets: [
+          { field: "course_id", name: "Biology" },
+          { field: "assignment_id", name: "Cell transport reflection" },
+          { field: "user_id", label: "Submission", name: `Submission ${label}` },
+        ] });
+        expect(writeCommands).toBe(writesBeforePlan);
+      } finally {
+        await pendingSubmissionReviewResponse;
+        submissionReviewDelayMs = 0;
+        pendingSubmissionReviewResponse = null;
+        runtime.cancelOperation(id);
+      }
+      expect(submissionReviewResponseError).toBeNull();
     }, CASE_TIMEOUT_MS);
 
     it("names the student behind a learner label only on the educator's review page", async () => {
