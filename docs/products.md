@@ -1,6 +1,6 @@
 # Products
 
-The Morrow family ships two products from this monorepo. They share a philosophy and nothing else: separate directories, separate version lines, separate CI suites.
+The Morrow family ships two products from this monorepo. They share a philosophy and nothing else: separate directories, separate version lines, and separate local check suites.
 
 ## Morrow Desktop (`desktop/`)
 
@@ -15,11 +15,11 @@ Start: [`desktop/README.md`](../desktop/README.md). Current limits: [`desktop/LI
 
 ## Morrow for Muse (`morrow-for-muse/`)
 
-The connector that runs Morrow on the educator's Muse computer, with nothing to run on their own laptop. The educator signs in to Canvas on their Muse computer, and signs in again if Canvas ends the session. Version 1 supports Canvas only; Moodle is not in this release (see `morrow-for-muse/SCOPE.md`).
+The connector that runs on the educator's Muse computer. The current 0.4.3 release supports Canvas and Moodle through separate sign-in and session lanes. Canvas actions follow the Canvas operation catalog; the Moodle lane probes the school's site before it uses an available capability. See `morrow-for-muse/SCOPE.md` for the exact scope and evidence for each provider.
 
 - Plan and Edit: reading a course never needs approval, and Plan asks before each change. Edit is one grant, for the account or for one conversation, to make changes without asking each time. It has no time limit: it stays on until the educator turns it off.
 - Morrow Direct: our open format that describes each course-site action Morrow can take and how it runs. It lives inside Morrow for Muse until a second product uses it.
-- Privacy boundary: student identifiers are replaced with course-scoped labels before course information reaches the assistant. See `morrow-for-muse/privacy/`.
-- Capability claims follow the proof battery: an operation ships only when it is marked `live-proven` in `morrow-for-muse/proof-battery/OPERATION_CATALOG.md`.
+- Privacy boundary: Canvas student identifiers are replaced with course-scoped labels before supported records reach the assistant. Moodle analytics use approved course-level aggregates rather than individual student records. See `morrow-for-muse/privacy/`.
+- Capability claims follow provider-specific evidence. Canvas actions use the live-proven operation catalog; Moodle capabilities are probed for the connected site. See `morrow-for-muse/SCOPE.md` and `morrow-for-muse/moodle/README.md`.
 
-Start: [`morrow-for-muse/SKILL.md`](../morrow-for-muse/SKILL.md). Exact v1 scope: [`morrow-for-muse/SCOPE.md`](../morrow-for-muse/SCOPE.md).
+Start: [`morrow-for-muse/SKILL.md`](../morrow-for-muse/SKILL.md). Current scope: [`morrow-for-muse/SCOPE.md`](../morrow-for-muse/SCOPE.md).
