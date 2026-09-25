@@ -1,6 +1,6 @@
 # Limitations
 
-Morrow Desktop `1.0.6` is an unreleased candidate for Mac. Windows remains on the published 1.0.5 installer; no Windows 1.0.6 asset is prepared. Publication and live verification remain subject to the evidence below. The version is not an Instructure authorization claim.
+Morrow Desktop `1.0.6` is available for Mac with Apple silicon. Windows remains on the published 1.0.5 installer; no Windows 1.0.6 asset is published. Live provider verification remains subject to the evidence below. The version is not an Instructure authorization claim.
 
 ## Platform coverage
 

@@ -4,7 +4,7 @@ Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/
 
 ## 1.0.6 (2026-09-25)
 
-This Mac release is being prepared. It will include the unsigned `Morrow-1.0.6-mac-arm64.dmg` and `Morrow-1.0.6-mac-arm64.zip` after native Mac checks of the exact files. Windows remains on the published 1.0.5 installer. There is no Windows 1.0.6 installer.
+This Mac release includes the unsigned `Morrow-1.0.6-mac-arm64.dmg` and `Morrow-1.0.6-mac-arm64.zip`. Windows remains on the published 1.0.5 installer. There is no Windows 1.0.6 installer.
 
 ### Approvals and Edit access
 

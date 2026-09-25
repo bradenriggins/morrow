@@ -341,10 +341,10 @@ Morrow Desktop is one desktop application. It carries the Morrow MCP runtime, th
 
 | System | Artifact | What has been checked |
 | --- | --- | --- |
-| macOS on Apple silicon | Prepared 1.0.6: `Morrow-1.0.6-mac-arm64.dmg`, with a matching `.zip` | The unsigned 1.0.0 disk image was mounted and installed on the MacBook. The packaged runtime passed `scripts/test/desktop-mac-smoke.mjs`, including the Bridge listener and private state modes. The 1.0.6 files need their own native smoke receipt before publication. |
+| macOS on Apple silicon | Published 1.0.6: `Morrow-1.0.6-mac-arm64.dmg`, with a matching `.zip` | The exact 1.0.6 package passed the native Mac smoke check, including the Bridge listener and private state modes. |
 | Windows on x64 | Published 1.0.5: `Morrow-1.0.5-win-x64.exe`, a one-click per-user NSIS installer | The unsigned 1.0.0 installer passed install, start, damaged-payload refusal, exact repair, uninstall, and retained-data checks on native Windows `BOOTZ`. `scripts/test/desktop-windows-smoke.mjs` runs on native Windows only. There is no Windows 1.0.6 release asset. |
 
-There is no Intel macOS build and no Linux build. Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature so that a downloaded copy shows the Open Anyway route instead of a damaged-app refusal. Morrow Desktop 1.0.6 is an unreleased candidate for Mac. The [Morrow downloads page](https://meetmorrow.app/download) has the published 1.0.5 Mac and Windows installers. Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
+There is no Intel macOS build and no Linux build. Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature so that a downloaded copy shows the Open Anyway route instead of a damaged-app refusal. Morrow Desktop 1.0.6 is published for Mac with Apple silicon. The [Morrow downloads page](https://meetmorrow.app/download) has Mac 1.0.6 and Windows 1.0.5. Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
 
 You need a Mac with Apple silicon and macOS 13 or later, or an x64 computer with Windows 10 or Windows 11. On that computer you also need Chrome 116 or later and one supported assistant already installed: ChatGPT, Claude Desktop, Claude Code, or Gemini CLI.
 
@@ -532,4 +532,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md), [LIMITATIONS.md](LIMITATIONS.md), and [S
 
 ## Release status
 
-This checkout prepares Mac 1.0.6. The published `desktop/v1.0.5` release provides unsigned macOS Apple silicon and Windows x64 installers. Mac 1.0.6 awaits a native smoke check of its exact disk image and matching archive. Windows stays on its published 1.0.5 installer; no Windows 1.0.6 asset is prepared. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
+This checkout contains Mac 1.0.6. The published `desktop/v1.0.6` release provides unsigned macOS Apple silicon files. Windows stays on its published 1.0.5 installer; no Windows 1.0.6 asset is published. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
