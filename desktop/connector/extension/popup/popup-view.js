@@ -173,8 +173,9 @@ export function primaryAction(status, detectedProvider = null) {
   if (runtimeNeedsReload(status)) return { id: "open_setup", label: "Open setup guide" };
   if (status.authenticationFailed === true) return { id: "pair", label: "Reconnect Morrow" };
   if (!status.paired) return { id: "pair", label: "Connect Morrow" };
+  if (status.connecting && !status.connected) return { id: "wait", label: "Waiting for your assistant" };
+  if (!status.connected) return { id: "retry", label: "Check connection" };
   if (canChooseCourses(status)) return { id: "choose_courses", label: "Choose courses" };
-  if (!status.connected) return { id: "wait", label: "Waiting for your assistant" };
   return currentPlatform(status, detectedProvider) ? { id: "connect_course", label: "Connect this course" } : { id: "none", label: "" };
 }
 
@@ -209,9 +210,9 @@ export function detailText(status, detectedProvider = null) {
     : !status.paired
       ? "Add Morrow to your assistant, then open it. Select Connect Morrow to connect this extension to Morrow. Connecting does not approve changes to your courses."
       : status.connecting
-        ? "Connecting to Morrow. Keep this popup open or return in a moment."
+        ? "Connecting to Morrow. Morrow Bridge retries within 30 seconds while active and checks about once a minute after Chrome idles. Keep this popup open or return in a moment."
         : !status.connected
-        ? "Open the assistant where you added Morrow. This popup will reconnect when Morrow is ready."
+        ? "Open the Morrow app. Morrow Bridge retries within 30 seconds while active and checks about once a minute after Chrome idles. Select Check connection to refresh this status."
         : binding?.runtimeVerified === true
           ? `This selected course is connected. Keep one signed-in ${courseTabName(platform)} tab open while you work in Morrow.`
           : binding
@@ -227,7 +228,7 @@ export function detailText(status, detectedProvider = null) {
 
 export function controlState(status, { actionInFlight = false, detectedProvider = null } = {}) {
   if (!status) return { primaryDisabled: actionInFlight, primaryBusy: actionInFlight, secondaryDisabled: true };
-  const waiting = Boolean(status.authenticationFailed !== true && !runtimeNeedsReload(status) && !canChooseCourses(status) && status.paired && !status.connected);
+  const waiting = Boolean(status.authenticationFailed !== true && !runtimeNeedsReload(status) && !canChooseCourses(status) && status.paired && status.connecting === true && !status.connected);
   const needsDetectedCourse = status.paired === true && status.connected === true
     && !canChooseCourses(status) && currentBinding(status)?.runtimeVerified !== true;
   return {

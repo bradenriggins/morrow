@@ -1222,11 +1222,11 @@ function attentionRowNote(binding) {
   return "";
 }
 
-function courseSelectionAccessibleName(binding) {
+function courseSelectionAccessibleName(binding, action = "Select") {
   const provider = providerName(binding);
   const name = courseName(binding);
   const courseId = nativeCourseId(binding.courseId) || "unavailable";
-  return `Select ${provider} course ${name} (course ID ${courseId})`;
+  return `${action} ${provider} course ${name} (course ID ${courseId})`;
 }
 
 function rowMetaLine(row) {
@@ -1295,7 +1295,7 @@ function renderCourseDetail(binding, isOpen) {
   const listHtml = ids.length ? `<div class="routine-bundle-list">${ids.map((id) => `
     <div class="routine-bundle-item">
       <span>${escapeHtml(categoryLabelFor(id))}</span>
-      <button type="button" class="secondary" data-remove-category="${escapeHtml(id)}" ${state.busy ? "disabled" : ""}>Remove</button>
+      <button type="button" class="secondary" data-remove-category="${escapeHtml(id)}" aria-label="${escapeHtml(courseSelectionAccessibleName(binding, `Remove ${categoryLabelFor(id)} from`))}" ${state.busy ? "disabled" : ""}>Remove</button>
     </div>`).join("")}</div>` : "";
   return `
     <div class="course-detail morrow-panel is-open" id="${escapeHtml(detailId)}" data-binding-id="${escapeHtml(binding.sourceBindingId)}">
@@ -1310,14 +1310,14 @@ function renderCourseDetail(binding, isOpen) {
       ${listHtml}
       <div class="course-detail-links">
         <button type="button" class="secondary" data-open-customize="1">Customize</button>
-        <button type="button" class="secondary danger-action" data-disconnect="1" ${state.busy ? "disabled" : ""}>Disconnect</button>
+        <button type="button" class="secondary danger-action" data-disconnect="1" aria-label="${escapeHtml(courseSelectionAccessibleName(binding, "Disconnect"))}" ${state.busy ? "disabled" : ""}>Disconnect</button>
       </div>
       ${state.confirmingDisconnect === binding.sourceBindingId ? `
       <div class="course-disconnect-confirm" role="group" aria-label="Confirm disconnecting ${escapeHtml(courseName(binding))}">
         <p>Disconnect ${escapeHtml(courseName(binding))}? Morrow stops reading and changing this course, and its Edit access is removed. Your course in ${escapeHtml(providerName(binding))} is not changed. You can connect it again from this list.</p>
         <div class="action-buttons">
-          <button type="button" class="secondary" data-disconnect-cancel="1" ${state.busy ? "disabled" : ""}>Keep course</button>
-          <button type="button" class="secondary danger-action" data-disconnect-confirm="1" ${state.busy ? "disabled" : ""}>Disconnect this course</button>
+          <button type="button" class="secondary" data-disconnect-cancel="1" aria-label="${escapeHtml(courseSelectionAccessibleName(binding, "Keep"))} connected" ${state.busy ? "disabled" : ""}>Keep course</button>
+          <button type="button" class="secondary danger-action" data-disconnect-confirm="1" aria-label="${escapeHtml(courseSelectionAccessibleName(binding, "Confirm disconnect"))}" ${state.busy ? "disabled" : ""}>Disconnect this course</button>
         </div>
       </div>` : ""}
     </div>
@@ -1460,7 +1460,7 @@ function renderRoutineSwitch(showEditStage) {
   routineBundleList.innerHTML = bundles.map((category) => `
     <div class="routine-bundle-item">
       <span>${escapeHtml(category.label)}</span>
-      <button type="button" class="secondary" data-remove-routine="${escapeHtml(category.id)}" ${state.busy ? "disabled" : ""}>Remove</button>
+      <button type="button" class="secondary" data-remove-routine="${escapeHtml(category.id)}" aria-label="${escapeHtml(`Remove ${category.label} from routine edits`)}" ${state.busy ? "disabled" : ""}>Remove</button>
     </div>
   `).join("");
   // WI-4.5: the switch replaces manual Customize browsing while it is engaged, so the two ways to

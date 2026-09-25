@@ -40,7 +40,7 @@ const statuses = [
 // The primary button's words and what a click on it does come from one decision, so a label can
 // never promise one step while the click takes another.
 test("every primary label names the one action a click on it takes", () => {
-  const actionFor = { "Try again": "retry", "Open setup guide": "open_setup", "Reconnect Morrow": "pair",
+  const actionFor = { "Try again": "retry", "Check connection": "retry", "Open setup guide": "open_setup", "Reconnect Morrow": "pair",
     "Connect Morrow": "pair", "Choose courses": "choose_courses", "Waiting for your assistant": "wait", "Connect this course": "connect_course", "": "none" };
   const cases = [
     ...statuses.map((status) => [status, null]),
@@ -56,7 +56,7 @@ test("every primary label names the one action a click on it takes", () => {
   }
   // Connect Morrow pairs in one step, so no status ever waits on an approval page. A status that
   // still carries an older pairing flag is read by its other fields alone.
-  assert.equal(primaryAction({ paired: true, pairing: true, connected: false, bindings: [], siteAnchors: [] }, "canvas").id, "wait");
+  assert.equal(primaryAction({ paired: true, pairing: true, connected: false, bindings: [], siteAnchors: [] }, "canvas").id, "retry");
 });
 
 test("a connected socket with an unhealthy runtime asks for a Bridge reload", () => {
@@ -237,8 +237,9 @@ test("known connection states keep their own value, label, and detail", () => {
   assert.equal(statusValue(statuses[3]), "Connecting…");
   assert.equal(controlState(statuses[3]).primaryBusy, true);
   assert.equal(statusValue(statuses[4]), "Not available");
-  assert.equal(primaryLabel(statuses[4]), "Waiting for your assistant");
-  assert.equal(controlState(statuses[4]).primaryDisabled, true);
+  assert.equal(primaryLabel(statuses[4]), "Check connection");
+  assert.equal(controlState(statuses[4]).primaryDisabled, false);
+  assert.match(detailText(statuses[4]), /retries.*30 seconds.*once a minute.*Select Check connection/s);
   assert.equal(courseValue(statuses[6]), "Not connected");
   assert.equal(primaryLabel(statuses[6]), "", "no platform detected: no primary action at all (WI-5.8)");
   assert.equal(controlState(statuses[6]).primaryDisabled, true);
