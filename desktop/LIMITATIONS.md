@@ -1,6 +1,6 @@
 # Limitations
 
-Morrow Desktop `1.0.7` is prepared for Mac with Apple silicon. The published Mac download remains 1.0.6 until the 1.0.7 package passes native Mac checks and is published. Windows remains on the published 1.0.5 installer; no Windows 1.0.6 or 1.0.7 asset is published, and there is no native Windows 1.0.7 smoke receipt. Live provider verification remains subject to the evidence below. The version is not an Instructure authorization claim.
+Morrow Desktop `1.0.7` runs on Mac with Apple silicon. Windows remains on the published 1.0.5 installer; no Windows 1.0.6 or 1.0.7 asset is published, and there is no native Windows 1.0.7 smoke receipt. Live provider verification remains subject to the evidence below. The version is not an Instructure authorization claim.
 
 ## Platform coverage
 

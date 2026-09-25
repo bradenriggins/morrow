@@ -337,14 +337,14 @@ Client configuration contains only the local Node command, server entry path, wo
 
 ## The Morrow Desktop app
 
-Morrow Desktop is one desktop application. It carries the Morrow MCP runtime, the Node runtime that runs it, and the Morrow Bridge files Chrome loads. `installer/electron-builder.config.cjs` builds `Morrow-<version>-mac-arm64.dmg`, a matching Mac ZIP, and `Morrow-<version>-win-x64.exe`. This checkout prepares 1.0.7 for Mac only.
+Morrow Desktop is one desktop application. It carries the Morrow MCP runtime, the Node runtime that runs it, and the Morrow Bridge files Chrome loads. `installer/electron-builder.config.cjs` builds `Morrow-<version>-mac-arm64.dmg`, a matching Mac ZIP, and `Morrow-<version>-win-x64.exe`. This checkout carries 1.0.7 for Mac only.
 
 | System | Artifact | What has been checked |
 | --- | --- | --- |
-| macOS on Apple silicon | Published 1.0.6: `Morrow-1.0.6-mac-arm64.dmg`, with a matching `.zip`; 1.0.7 is in release preparation | The exact 1.0.6 package passed the native Mac smoke check, including the Bridge listener and private state modes. The 1.0.7 package still needs its own check. |
+| macOS on Apple silicon | 1.0.7: `Morrow-1.0.7-mac-arm64.dmg`, with a matching `.zip` | The release procedure requires a native Mac smoke receipt that binds both exact files to the source commit. |
 | Windows on x64 | Published 1.0.5: `Morrow-1.0.5-win-x64.exe`, a one-click per-user NSIS installer | The unsigned 1.0.0 installer passed install, start, damaged-payload refusal, exact repair, uninstall, and retained-data checks on native Windows `BOOTZ`. `scripts/test/desktop-windows-smoke.mjs` runs on native Windows only. There is no Windows 1.0.6 or 1.0.7 release asset, and no native Windows 1.0.7 smoke receipt. |
 
-There is no Intel macOS build and no Linux build. Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature so that a downloaded copy shows the Open Anyway route instead of a damaged-app refusal. This checkout prepares Morrow Desktop 1.0.7 for Mac with Apple silicon. The [Morrow downloads page](https://meetmorrow.app/download) has published Mac 1.0.6 and Windows 1.0.5. Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
+There is no Intel macOS build and no Linux build. Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature so that a downloaded copy shows the Open Anyway route instead of a damaged-app refusal. Morrow Desktop 1.0.7 is for Mac with Apple silicon. The [Morrow downloads page](https://meetmorrow.app/download) names the currently published Mac and Windows versions. Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
 
 You need a Mac with Apple silicon and macOS 13 or later, or an x64 computer with Windows 10 or Windows 11. On that computer you also need Chrome 116 or later and one supported assistant already installed: ChatGPT, Claude Desktop, Claude Code, or Gemini CLI.
 
@@ -532,4 +532,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md), [LIMITATIONS.md](LIMITATIONS.md), and [S
 
 ## Release status
 
-This checkout prepares Mac 1.0.7 with Morrow Bridge 1.0.126. The published `desktop/v1.0.6` release provides unsigned macOS Apple silicon files. Windows stays on its published 1.0.5 installer; no Windows 1.0.6 or 1.0.7 asset is published, and no native Windows 1.0.7 smoke receipt exists. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
+This checkout contains Mac 1.0.7 with Morrow Bridge 1.0.126. The release procedure requires native Mac smoke for the exact files before publication. Windows stays on its published 1.0.5 installer; no Windows 1.0.6 or 1.0.7 asset is published, and no native Windows 1.0.7 smoke receipt exists. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.

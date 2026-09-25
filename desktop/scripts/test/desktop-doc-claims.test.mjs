@@ -323,10 +323,11 @@ test("the README names the desktop artifacts the build configuration actually pr
 });
 
 test("the Mac 1.0.7 release source keeps published Windows on 1.0.5", () => {
-  assert.match(flat("README.md"), /This checkout prepares Morrow Desktop 1\.0\.7 for Mac with Apple silicon/);
-  assert.match(flat("LIMITATIONS.md"), /Morrow Desktop `1\.0\.7` is prepared for Mac with Apple silicon/);
+  assert.match(flat("README.md"), /Morrow Desktop 1\.0\.7 is for Mac with Apple silicon/);
+  assert.match(flat("LIMITATIONS.md"), /Morrow Desktop `1\.0\.7` runs on Mac with Apple silicon/);
   assert.match(flat("CHANGELOG.md"), /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.7 \(2026-09-25\).*## 1\.0\.6 \(2026-09-25\)/);
-  assert.match(flat("README.md"), /The published `desktop\/v1\.0\.6` release provides unsigned macOS Apple silicon files/);
+  assert.match(flat("README.md"), /This checkout contains Mac 1\.0\.7 with Morrow Bridge 1\.0\.126/);
+  assert.doesNotMatch(flat("CHANGELOG.md").split("## 1.0.6")[0], /prepared but has not been published|Mac download remains on published 1\.0\.6/);
   assert.match(flat("installer\/WINDOWS-DEPLOYMENT.md"), /No Windows 1\.0\.6 or 1\.0\.7 installer is published/);
 });
 

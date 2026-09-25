@@ -91,7 +91,7 @@ Two facts apply to every row, so they are stated once:
 | `reload-required` | "Reload Morrow Bridge." and three exact Chrome actions | Reload it on **Manage Extensions**, then **Check Bridge**. | `installer/shared/setup-view.mjs:420` |
 | `bridge-update-available` | "Update Morrow Bridge." / "This Morrow app includes a newer Morrow Bridge. Select Update Bridge. Morrow updates the Bridge folder and asks Chrome to reload Morrow Bridge. This does not change your course." | **Update Bridge**. Morrow updates the folder and asks Morrow Bridge to reload; when it cannot, the `reload-required` steps follow. Shown only while a Bridge is connected; a failed update names only **Update Bridge** and Chrome's **Reload**. | `installer/shared/setup-view.mjs:428` |
 | `folder-not-ready` | "Morrow Bridge is not ready to open." / "Morrow could not verify its Bridge folder." | **Repair Morrow**, or **Check again**. | `installer/shared/setup-view.mjs:436` |
-| `dev-temporary` | "Add Morrow Bridge." and the temporary Chrome method in five exact substeps | **Show Bridge folder**, use **Manage Extensions**, **Developer mode**, and **Load unpacked**, then select **Connect Morrow** and **Check Bridge**. Also shown when the app has newer Bridge files and no Bridge is connected: **Check Bridge** then replaces the folder with the newer files first. | `installer/shared/setup-view.mjs:444` |
+| `dev-temporary` | "Add Morrow Bridge." / "Add Morrow Bridge to Chrome from the folder below. It connects Morrow to the courses you choose in Chrome." The initial panel says "Next: add Bridge to Chrome"; it shows a connection warning only after the connection remains unconfirmed. | **Show Bridge folder**, use **Manage Extensions**, **Developer mode**, and **Load unpacked**, then select **Connect Morrow** and **Check Bridge**. Also shown when the app has newer Bridge files and no Bridge is connected: **Check Bridge** then replaces the folder with the newer files first. | `installer/shared/setup-view.mjs:444` |
 | `store-available` | "Install Morrow Bridge." / "Morrow Bridge uses the learning platform where you are already signed in. It asks Chrome for access only to the exact learning platform you choose." | Add it from the Chrome Web Store, select **Connect Morrow**, then **Check Bridge**. | `installer/shared/setup-view.mjs:452` |
 | `not-paired` | "Connect Morrow Bridge." / "<assistant> is configured. Open Morrow Bridge in Chrome and select Connect Morrow." | Select **Connect Morrow**, then **Check Bridge**. | `installer/shared/setup-view.mjs:461` |
 | `no-course` | "Open your course in Chrome." / "Morrow Bridge identifies Canvas or Moodle after you open a signed-in course." | Open and sign in to a course. In Morrow Bridge select **Connect Canvas** or **Connect Moodle**, allow the exact address, then in **Plan and Edit settings** select **Connect selected courses in Plan**. | `installer/shared/setup-view.mjs:469` |
@@ -603,16 +603,16 @@ stale name here.
 | `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:132` |
 | `Open Canvas` | Plan and Edit settings | `connector/extension/settings/settings.js:439` |
 | `Open Moodle` | Plan and Edit settings | `connector/extension/settings/settings.js:440` |
-| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1218` |
-| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1218` |
-| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1218` |
-| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:1218` |
-| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:1218` |
-| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:1236` |
-| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:1202` |
-| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:1193` |
-| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:1195` |
-| `I checked it in Canvas: close this change` | Result page of a change Morrow could not settle | `packages/mcp-server/src/approval-server.ts:1200` |
+| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1252` |
+| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1252` |
+| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1252` |
+| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:1252` |
+| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:1252` |
+| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:1270` |
+| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:1236` |
+| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:1227` |
+| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:1229` |
+| `I checked it in Canvas: close this change` | Result page of a change Morrow could not settle | `packages/mcp-server/src/approval-server.ts:1234` |
 
 Names a person reads as landmarks rather than presses:
 

@@ -4,7 +4,7 @@ Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/
 
 ## 1.0.7 (2026-09-25)
 
-This Mac-only patch is prepared but has not been published. It will include Morrow Bridge 1.0.126. The Mac download remains on published 1.0.6 until the 1.0.7 files pass native Mac checks and are published. Windows remains on the published 1.0.5 installer; there is no Windows 1.0.7 installer or native Windows 1.0.7 smoke receipt.
+This Mac release includes the unsigned `Morrow-1.0.7-mac-arm64.dmg` and `Morrow-1.0.7-mac-arm64.zip`, with Morrow Bridge 1.0.126. Windows remains on the published 1.0.5 installer; there is no Windows 1.0.7 installer or native Windows 1.0.7 smoke receipt.
 
 ### Morrow Bridge
 
