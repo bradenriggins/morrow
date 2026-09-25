@@ -317,3 +317,30 @@ def test_demo_login_cli_says_it_does_not_activate_keepalive(
     assert "scheduled keepalive" in output
     assert "SECRET-CANARY" not in output
     assert not (tmp_path / "moodle-session.json").exists()
+
+
+def test_probe_uses_chrome_userid_when_mcfg_omits_it(tmp_path):
+    # Stock Moodle 5.2 theme (sandbox.moodledemo.net): M.cfg carries the
+    # sesskey but no "userid"; the viewer chrome carries data-userid.
+    body = ('<script>M.cfg={"sesskey":"CHROMEKEY01"}</script>'
+            '<div id="nav-notification-popover-container" data-userid="7">'
+            "</div>")
+    result, _ = _probe(tmp_path / "chrome", FakeResponse(body=body),
+                       sesskey="CHROMEKEY01")
+    assert result == {"state": "healthy", "http_status": 200,
+                      "principal_id": 7}
+
+
+def test_probe_rejects_chrome_userid_mismatch(tmp_path):
+    body = ('<script>M.cfg={"sesskey":"%s"}</script>'
+            '<div data-userid="8"></div>' % SESSKEY)
+    result, _ = _probe(tmp_path / "chromemismatch", FakeResponse(body=body))
+    assert result["state"] == "principal_mismatch"
+
+
+def test_probe_stays_unverified_on_conflicting_markers(tmp_path):
+    # M.cfg says 7, chrome says 8: ambiguous, fail closed, never guess.
+    body = ('<script>M.cfg={"sesskey":"%s","userid":7}</script>'
+            '<div data-userid="8"></div>' % SESSKEY)
+    result, _ = _probe(tmp_path / "conflict", FakeResponse(body=body))
+    assert result["state"] == "unverified"
