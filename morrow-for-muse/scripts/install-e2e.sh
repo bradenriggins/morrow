@@ -99,7 +99,26 @@ docker run --rm --security-opt seccomp=unconfined \
     PROFILE_BEFORE="$(find helper/profile -type f -print | sort)"
     exec 8>"$STATE/keepalive.lock"
     flock -x 8
-    if bash install.sh > "$HOME/locked-install.log" 2>&1; then
+    LOG_BEFORE=0
+    if [ -f "$STATE/keepalive.log" ]; then
+      LOG_BEFORE="$(wc -l < "$STATE/keepalive.log")"
+    fi
+    bash install.sh > "$HOME/locked-install.log" 2>&1 &
+    INSTALL_PID=$!
+    SAW_SKIP=0
+    for n in $(seq 1 600); do
+      if tail -n "+$((LOG_BEFORE + 1))" "$STATE/keepalive.log" 2>/dev/null \
+          | grep -q "another keepalive run holds the lock; skipping this run"; then
+        SAW_SKIP=1
+        break
+      fi
+      if ! kill -0 "$INSTALL_PID" 2>/dev/null; then break; fi
+      sleep 1
+    done
+    [ "$SAW_SKIP" = 1 ] || { cat "$HOME/locked-install.log"; exit 1; }
+    flock -u 8
+    exec 8>&-
+    if wait "$INSTALL_PID"; then
       cat "$HOME/locked-install.log"
       echo "held lock returned install success" >&2
       exit 1
@@ -109,8 +128,6 @@ docker run --rm --security-opt seccomp=unconfined \
     ! grep -q "Install complete" "$HOME/locked-install.log"
     [ "$BEFORE" = "$(sha256sum "$HOME/.morrow/installed-version" "$HOME/.morrow/installed-manifest.json" helper/env)" ]
     [ "$PROFILE_BEFORE" = "$(find helper/profile -type f -print | sort)" ]
-    flock -u 8
-    exec 8>&-
     step "keepalive supervision is active"
     CRON_NOW="$(crontab -l 2>/dev/null || true)"
     if printf "%s\n" "$CRON_NOW" | grep -q "helper/keepalive.sh"; then

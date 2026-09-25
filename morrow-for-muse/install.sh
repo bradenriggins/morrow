@@ -1074,6 +1074,30 @@ if [ -z "${CANVAS_BASE:-}" ]; then
   note "CANVAS_BASE is not set yet: skipping the helper launch."
   note "Set it in ${ENV_FILE}, then rerun this installer: it checks the address before it starts the helper. The one-time sign-in comes after."
 else
+  HELPER_STATUS_URL="http://127.0.0.1:${HELPER_PORT}/status"
+  HELPER_STATUS_TLS=0
+  if [ -n "${LOGIN_HELPER_TLS_CERT:-}" ] \
+      || [ -n "${LOGIN_HELPER_TLS_KEY:-}" ]; then
+    [ -n "${LOGIN_HELPER_TLS_CERT:-}" ] \
+      && [ -n "${LOGIN_HELPER_TLS_KEY:-}" ] \
+      || fail "helper" "LOGIN_HELPER_TLS_CERT and LOGIN_HELPER_TLS_KEY must both be set; the helper cannot start with only one."
+    [ -f "${LOGIN_HELPER_TLS_CERT}" ] \
+      && [ -f "${LOGIN_HELPER_TLS_KEY}" ] \
+      || fail "helper" "the configured helper TLS certificate or key file is missing; refusing an unverified status probe."
+    HELPER_STATUS_URL="https://127.0.0.1:${HELPER_PORT}/status"
+    HELPER_STATUS_TLS=1
+  fi
+  _install_helper_status() {
+    if [ "${HELPER_STATUS_TLS}" = "1" ]; then
+      if [ "${LOGIN_HELPER_TLS_INSECURE:-}" = "1" ]; then
+        curl -sf -m 20 -k "${HELPER_STATUS_URL}"
+      else
+        curl -sf -m 20 --cacert "${LOGIN_HELPER_TLS_CERT}" "${HELPER_STATUS_URL}"
+      fi
+    else
+      curl -sf -m 20 "${HELPER_STATUS_URL}"
+    fi
+  }
   if [ -n "${_SHELL_CANVAS_BASE}" ] \
     && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?CANVAS_BASE=' "${ENV_FILE}" 2>/dev/null; then
     fail "env" "CANVAS_BASE is set in this shell but absent from ${ENV_FILE}; the keepalive cron sources only that file, so helper recovery would fail later. Add CANVAS_BASE=${_SHELL_CANVAS_BASE} to ${ENV_FILE} and rerun."
@@ -1135,12 +1159,12 @@ except ValueError as exc:
   case "${KEEP_RC}" in
     0|2)
       # A second keepalive can return 0 because the supervisor owns the
-      # lock. Wait for that run to finish before trusting its status.
+      # lock. Its tick has a 600-second timeout; allow cleanup margin.
       if [ "${KEEP_RC}" = "0" ]; then
-        flock -w 45 "${TREE_STATE_DIR}/keepalive.lock" true \
-          || fail "helper" "another keepalive still holds the lock after 45 seconds; no helper state was accepted. Check ${TREE_STATE_DIR}/keepalive.log and rerun."
+        flock -w 610 "${TREE_STATE_DIR}/keepalive.lock" true \
+          || fail "helper" "another keepalive still holds the lock after 610 seconds; no helper state was accepted. Check ${TREE_STATE_DIR}/keepalive.log and rerun."
       fi
-      STATUS="$(curl -sf -m 20 "http://127.0.0.1:${HELPER_PORT}/status" 2>/dev/null)" \
+      STATUS="$(_install_helper_status 2>/dev/null)" \
         || fail "helper" "keepalive returned ${KEEP_RC}, but no helper answered /status on port ${HELPER_PORT}. A concurrent keepalive may have held the lock. Check ${TREE_STATE_DIR}/keepalive.log and rerun after the helper is available."
       _STATUS_STATE="$(printf '%s' "${STATUS}" | TREE="${TREE}" TREE_VERSION="${TREE_VERSION}" python3 -c '
 import json, os, sys

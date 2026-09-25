@@ -27,13 +27,13 @@ nobody signs in again unless Canvas itself expires the session.
   non-loopback address (e.g. `0.0.0.0`) without `LOGIN_HELPER_BIND_PUBLIC=1`
   is a FATAL error (exit 1) at startup. Publishing the helper's
   session-driving API to the network requires the explicit opt-in.
-- **Public-bind cleartext warning (W5-P2-3):** the helper has NO TLS
-  mode. With `LOGIN_HELPER_BIND_PUBLIC=1` the launch token, `/screenshot`
-  bytes, and the `/cdp/*` proxy cross the LAN in cleartext; anyone able to
-  observe LAN traffic can steal the token and drive the session-bearing
-  browser. Startup prints a loud WARNING to stderr on every launch with
-  the opt-in set. Keep the loopback bind unless remote access is genuinely
-  required; there is currently no TLS mode to choose instead.
+- **Public-bind cleartext warning (W5-P2-3):** without
+  `LOGIN_HELPER_TLS_CERT` and `LOGIN_HELPER_TLS_KEY`, a public bind sends
+  the launch token, `/screenshot` bytes, and the `/cdp/*` proxy across the
+  LAN in cleartext. Startup warns on a public bind without TLS. Keep the
+  loopback bind unless remote access is required. When both TLS files are
+  set, the helper serves HTTPS. Clients verify the configured certificate
+  by default; `LOGIN_HELPER_TLS_INSECURE=1` explicitly skips verification.
 - **Host-header validation (W5-P0-1, DNS-rebinding defense):** every
   request's `Host` header must name this listener: `127.0.0.1`,
   `localhost`, `::1`, or the configured `LOGIN_HELPER_BIND`. A hostile

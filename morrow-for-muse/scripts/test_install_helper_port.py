@@ -225,3 +225,63 @@ def test_install_refuses_status_from_another_profile(world):
     proc = _run(world, 0, status=status)
     assert proc.returncode != 0, proc.stdout + proc.stderr
     assert "FAIL helper" in proc.stdout + proc.stderr
+
+
+def test_tls_helper_status_uses_https_and_pinned_cert(world):
+    cert = world["home"].parent / "school-cert.pem"
+    key = world["home"].parent / "school-key.pem"
+    cert.write_text("test certificate\n")
+    key.write_text("test key\n")
+    with (world["home"].parent / "tree" / "helper" / "env").open("a") as fh:
+        fh.write("LOGIN_HELPER_TLS_CERT=%s\n" % cert)
+        fh.write("LOGIN_HELPER_TLS_KEY=%s\n" % key)
+    proc = _run(world, 0)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    calls = world["curl_log"].read_text()
+    assert "https://127.0.0.1:18911/status" in calls, calls
+    assert "--cacert %s" % cert in calls, calls
+    assert " -k " not in calls, calls
+
+
+def test_tls_helper_status_allows_explicit_insecure_opt_in(world):
+    cert = world["home"].parent / "school-cert.pem"
+    key = world["home"].parent / "school-key.pem"
+    cert.write_text("test certificate\n")
+    key.write_text("test key\n")
+    with (world["home"].parent / "tree" / "helper" / "env").open("a") as fh:
+        fh.write("LOGIN_HELPER_TLS_CERT=%s\n" % cert)
+        fh.write("LOGIN_HELPER_TLS_KEY=%s\n" % key)
+        fh.write("LOGIN_HELPER_TLS_INSECURE=1\n")
+    proc = _run(world, 0)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    calls = world["curl_log"].read_text()
+    assert "https://127.0.0.1:18911/status" in calls, calls
+    assert " -k " in calls, calls
+    assert "--cacert" not in calls, calls
+
+
+@pytest.mark.parametrize("missing", ["cert", "key"])
+def test_tls_helper_status_refuses_missing_material(world, missing):
+    cert = world["home"].parent / "school-cert.pem"
+    key = world["home"].parent / "school-key.pem"
+    cert.write_text("test certificate\n")
+    key.write_text("test key\n")
+    (cert if missing == "cert" else key).unlink()
+    with (world["home"].parent / "tree" / "helper" / "env").open("a") as fh:
+        fh.write("LOGIN_HELPER_TLS_CERT=%s\n" % cert)
+        fh.write("LOGIN_HELPER_TLS_KEY=%s\n" % key)
+    proc = _run(world, 0)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "FAIL helper" in out, out
+    assert "helper healthy:" not in out, out
+    assert not world["curl_log"].exists()
+
+
+def test_lock_wait_covers_supervisor_tick_budget(world):
+    proc = _run(world, 0)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    wait = (world["home"].parent / "flock.log").read_text()
+    assert "-w 610" in wait, wait
