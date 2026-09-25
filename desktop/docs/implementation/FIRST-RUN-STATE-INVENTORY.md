@@ -231,18 +231,18 @@ it. After acceptance the popup keeps one link with that same name instead of rep
 
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
-| `read-failed` | Morrow and Course are "Not checked". The detail names the failed read and retry. | **Try again**. | `connector/extension/popup/popup-view.js:201` |
-| `not-paired` | Morrow "Not connected", Course "Not connected", and the detail says to add Morrow to the assistant and that connecting approves no change. | **Connect Morrow**. | `connector/extension/popup/popup-view.js:210` |
-| `connecting` | Morrow "Connecting…" and a settled waiting detail. | No action. Return in a moment. | `connector/extension/popup/popup-view.js:212` |
-| `paired-not-connected` | Morrow "Not available" and the popup says the assistant must be open. | Open the assistant. | `connector/extension/popup/popup-view.js:214` |
-| `runtime-mismatch` | Morrow "Reload needed", Course "Not available", and a version-mismatch detail. | Reload Morrow Bridge on the Chrome extensions page, then open the popup; if the versions still differ, follow the Morrow app's Morrow Bridge step. **Open setup guide** shows the same step. | `connector/extension/popup/popup-view.js:202` |
-| `authentication-failed` | Morrow "Reconnect needed", Course "Not connected", and the detail says Morrow refused the saved connection. | **Reconnect Morrow**, which connects again in one step. | `connector/extension/popup/popup-view.js:208` |
-| `connected-no-site` | Morrow "Connected", Course "Not connected", no primary action, and instructions to open a signed-in course. | Open a signed-in Canvas or Moodle course in this tab. | `connector/extension/popup/popup-view.js:225` |
-| `detected-platform` | The active course is detected. The primary action and detail both say **Connect this course**, on Canvas or Moodle alike. | Select **Connect this course** and allow the exact address Chrome shows. | `connector/extension/popup/popup-view.js:191` |
-| `site-ready-no-course` | Course "Ready", **Choose courses**, and a Plan explanation. | **Choose courses**, which opens Plan and Edit settings. | `connector/extension/popup/popup-view.js:220` |
-| `site-stale` | Course "Canvas is closed" and the detail names the saved Canvas connection. | Select **Open Canvas** to reopen it (WI-1.1). | `connector/extension/popup/popup-view.js:197` |
-| `course-ready` | Course "Connected", the selected course and the time it was connected, and a detail that names the Canvas course tab. | Ask the assistant, or use **Check or switch course**. | `connector/extension/popup/popup-view.js:216` |
-| `course-tab-closed` | Course "Canvas is closed" and a detail that names the closed Canvas tab. | Select **Open Canvas** to reopen it (WI-1.1). | `connector/extension/popup/popup-view.js:193` |
+| `read-failed` | Morrow and Course are "Not checked". The detail names the failed read and retry. | **Try again**. | `connector/extension/popup/popup-view.js:202` |
+| `not-paired` | Morrow "Not connected", Course "Not connected", and the detail says to add Morrow to the assistant and that connecting approves no change. | **Connect Morrow**. | `connector/extension/popup/popup-view.js:211` |
+| `connecting` | Morrow "Connecting…" and a waiting detail that names the automatic retry timing. | No action. Return in a moment. | `connector/extension/popup/popup-view.js:213` |
+| `paired-not-connected` | Morrow "Not available" and the popup names automatic retry timing. | Open the Morrow app, then select **Check connection** to refresh status. | `connector/extension/popup/popup-view.js:215` |
+| `runtime-mismatch` | Morrow "Reload needed", Course "Not available", and a version-mismatch detail. | Reload Morrow Bridge on the Chrome extensions page, then open the popup; if the versions still differ, follow the Morrow app's Morrow Bridge step. **Open setup guide** shows the same step. | `connector/extension/popup/popup-view.js:203` |
+| `authentication-failed` | Morrow "Reconnect needed", Course "Not connected", and the detail says Morrow refused the saved connection. | **Reconnect Morrow**, which connects again in one step. | `connector/extension/popup/popup-view.js:209` |
+| `connected-no-site` | Morrow "Connected", Course "Not connected", no primary action, and instructions to open a signed-in course. | Open a signed-in Canvas or Moodle course in this tab. | `connector/extension/popup/popup-view.js:226` |
+| `detected-platform` | The active course is detected. The primary action and detail both say **Connect this course**, on Canvas or Moodle alike. | Select **Connect this course** and allow the exact address Chrome shows. | `connector/extension/popup/popup-view.js:192` |
+| `site-ready-no-course` | Course "Ready", **Choose courses**, and a Plan explanation. | **Choose courses**, which opens Plan and Edit settings. | `connector/extension/popup/popup-view.js:221` |
+| `site-stale` | Course "Canvas is closed" and the detail names the saved Canvas connection. | Select **Open Canvas** to reopen it (WI-1.1). | `connector/extension/popup/popup-view.js:198` |
+| `course-ready` | Course "Connected", the selected course and the time it was connected, and a detail that names the Canvas course tab. | Ask the assistant, or use **Check or switch course**. | `connector/extension/popup/popup-view.js:217` |
+| `course-tab-closed` | Course "Canvas is closed" and a detail that names the closed Canvas tab. | Select **Open Canvas** to reopen it (WI-1.1). | `connector/extension/popup/popup-view.js:194` |
 
 The exact status, course, action, and detail strings emitted for these branches are:
 
@@ -254,9 +254,10 @@ The exact status, course, action, and detail strings emitted for these branches 
 - "Add Morrow to your assistant, then open it. Select Connect Morrow to connect this extension to Morrow. Connecting does not approve changes to your courses."
 - "Connecting…"
 - "Waiting for your assistant"
-- "Connecting to Morrow. Keep this popup open or return in a moment."
+- "Connecting to Morrow. Morrow Bridge retries within 30 seconds while active and checks about once a minute after Chrome idles. Keep this popup open or return in a moment."
 - "Not available"
-- "Open the assistant where you added Morrow. This popup will reconnect when Morrow is ready."
+- "Check connection"
+- "Open the Morrow app. Morrow Bridge retries within 30 seconds while active and checks about once a minute after Chrome idles. Select Check connection to refresh this status."
 - "Reload needed"
 - "Open setup guide"
 - "The Morrow app and Morrow Bridge versions do not match. Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step."
@@ -279,7 +280,7 @@ The exact status, course, action, and detail strings emitted for these branches 
 
 A saved Canvas course with an active Moodle tab gives a separate mismatch detail. It tells the person
 to select **Open Canvas** to reopen the selected course, or open the detected Moodle course
-themselves (`connector/extension/popup/popup-view.js:183`).
+themselves (`connector/extension/popup/popup-view.js:184`).
 
 Failures reach one `role="alert"` banner as stable problem codes. Each known code gives what happened,
 why, and one next action; an unknown code remains visible instead of becoming a generic success
@@ -565,9 +566,10 @@ stale name here.
 | `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:646` |
 | `Connect Morrow` | Popup | `connector/extension/popup/popup.html:41`, `connector/extension/popup/popup-view.js:175` |
 | `Try again` | Popup | `connector/extension/popup/popup-view.js:172` |
-| `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:177` |
-| `Choose courses` | Popup | `connector/extension/popup/popup-view.js:176` |
-| `Connect this course` | Popup | `connector/extension/popup/popup-view.js:178` |
+| `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:176` |
+| `Choose courses` | Popup | `connector/extension/popup/popup-view.js:178` |
+| `Check connection` | Popup | `connector/extension/popup/popup-view.js:177` |
+| `Connect this course` | Popup | `connector/extension/popup/popup-view.js:179` |
 | `Open Canvas` | Popup | `connector/extension/popup/popup-view.js:137` |
 | `Open Moodle` | Popup | `connector/extension/popup/popup-view.js:138` |
 | `All courses` | Popup | `connector/extension/popup/popup.html:38` |

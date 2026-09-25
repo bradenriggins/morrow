@@ -105,13 +105,31 @@ test("before a course site is connected the popup names the state it is in", asy
       connection: "Connecting…", courseLabel: "Course", course: "Not connected",
       primary: "Waiting for your assistant", primaryDisabled: true, primaryBusy: "true",
       secondary: null, openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: false, account: null,
-      detail: "Connecting to Morrow. Keep this popup open or return in a moment.",
+      detail: "Connecting to Morrow. Morrow Bridge retries within 30 seconds while active and checks about once a minute after Chrome idles. Keep this popup open or return in a moment.",
+    }],
+    ["Morrow Bridge is paired but disconnected", () => connection({ paired: true }), {
+      connection: "Not available", courseLabel: "Course", course: "Not connected",
+      primary: "Check connection", primaryDisabled: false, primaryBusy: "false",
+      secondary: null, openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: false, account: null,
+      detail: "Open the Morrow app. Morrow Bridge retries within 30 seconds while active and checks about once a minute after Chrome idles. Select Check connection to refresh this status.",
     }],
   ];
   for (const [name, status, expected] of states) {
     const page = await openPopup({ status });
     assert.deepEqual(view(page), expected, name);
   }
+});
+
+test("a paired but disconnected popup lets the person check connection status again", async () => {
+  let reads = 0;
+  const page = await openPopup({ status: () => { reads += 1; return connection({ paired: true }); } });
+  assert.equal(view(page).primary, "Check connection");
+  assert.equal(view(page).primaryDisabled, false);
+  await page.click("#primary");
+  await page.waitFor(() => reads === 2, "Check connection did not read Bridge status again");
+  assert.equal(page.messages("morrow_status").length, 2);
+  assert.equal(page.messages("morrow_pair").length, 0);
+  assert.equal(view(page).primaryDisabled, false);
 });
 
 test("once Morrow is connected the popup names the course state and the one step that follows", async () => {

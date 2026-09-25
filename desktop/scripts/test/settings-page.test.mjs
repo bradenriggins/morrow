@@ -904,6 +904,8 @@ test("the Routine edits switch selects every routine bundle and lists them with 
 test("Remove beside a routine bundle narrows the switch's grant", async () => {
   const page = await openEditStage([FIELD_SELECTION_BUNDLE, ROUTINE_BUNDLE_B], [ANATOMY]);
   await page.click("#routine-edits");
+  assert.equal(page.query(`[data-remove-routine="${FIELD_SELECTION_BUNDLE.id}"]`).getAttribute("aria-label"),
+    `Remove ${FIELD_SELECTION_BUNDLE.label} from routine edits`);
   await page.click(`[data-remove-routine="${FIELD_SELECTION_BUNDLE.id}"]`);
   assert.deepEqual(page.queryAll("#routine-bundle-list .routine-bundle-item span").map((span) => span.textContent), [ROUTINE_BUNDLE_B.label]);
   assert.equal(page.query("#routine-edits").checked, true);
@@ -1203,6 +1205,23 @@ test("a Routine-level course's detail lists the routine bundles with Remove, and
   assert.deepEqual(detail.querySelectorAll(".routine-bundle-item span").map((el) => el.textContent), CANVAS_ROUTINE_IDS.map(curatedLabel));
   assert.equal(detail.querySelector("[data-end-duration]"), null);
   assert.equal(detail.querySelector("select"), null);
+});
+
+test("repeated course Remove and Disconnect controls name the category and exact course", async () => {
+  const anatomy = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1"), enabledCategories: ["canvas_assignment_text"] } });
+  const physiology = canvasCourse(2, "Physiology", { editPermission: { ...editPermissionSummary("canvas:course-2"), enabledCategories: ["canvas_assignment_text"] } });
+  const page = await openSettings({ status: () => statusFixture([anatomy, physiology]) });
+  for (const course of [anatomy, physiology]) {
+    const detail = await openCourseDetail(page, course.sourceBindingId);
+    const target = `Canvas course ${course.courseName} (course ID ${course.courseId})`;
+    assert.equal(detail.querySelector('[data-remove-category="canvas_assignment_text"]').getAttribute("aria-label"),
+      `Remove ${curatedLabel("canvas_assignment_text")} from ${target}`);
+    assert.equal(detail.querySelector('[data-disconnect="1"]').getAttribute("aria-label"), `Disconnect ${target}`);
+    await page.click(`#${detail.getAttribute("id")} [data-disconnect="1"]`);
+    const confirmation = page.query(`#${detail.getAttribute("id")}`);
+    assert.equal(confirmation.querySelector('[data-disconnect-confirm="1"]').getAttribute("aria-label"), `Confirm disconnect ${target}`);
+    await page.click(`#${detail.getAttribute("id")} [data-disconnect-cancel="1"]`);
+  }
 });
 
 // WI-5.4: a saved list that is neither empty nor the full routine set reads as "custom", with its
