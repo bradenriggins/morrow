@@ -59,13 +59,13 @@ The steps below cover Canvas sign-in and readback.
 
 ## Step 1: get the package and unzip it
 
-Download the Morrow for Muse 0.4.4 package:
+Download the Morrow for Muse 0.4.5 package:
 
 ```
-curl -fL -o morrow-muse-connector-0.4.4.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.4/morrow-muse-connector-0.4.4.zip
+curl -fL -o morrow-muse-connector-0.4.5.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.5/morrow-muse-connector-0.4.5.zip
 ```
 
-The `muse/v0.4.4` release page lists the same package. Do not install
+The `muse/v0.4.5` release page lists the same package. Do not install
 Morrow from another source.
 
 Unzip the release into the skills directory. Run these commands from
@@ -76,7 +76,7 @@ sign-in in `helper/profile/`.
 ```
 mkdir -p ~/workspace/skills
 rm -rf ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas/morrow-muse-connector
-unzip -q morrow-muse-connector-0.4.4.zip -d ~/workspace/skills/
+unzip -q morrow-muse-connector-0.4.5.zip -d ~/workspace/skills/
 cd ~/workspace/skills
 if [ -d morrow-canvas ]; then
   cp -R morrow-muse-connector/. morrow-canvas/

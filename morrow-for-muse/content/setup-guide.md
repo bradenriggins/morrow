@@ -1,6 +1,6 @@
 # Setting up Morrow for Muse with Canvas
 
-*Version 0.4.4. Canvas setup takes about 15 minutes. You set it up by talking
+*Version 0.4.5. Canvas setup takes about 15 minutes. You set it up by talking
 to Muse; there is no software to install on your own computer.*
 
 ## Before you start

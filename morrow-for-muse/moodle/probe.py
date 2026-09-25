@@ -40,11 +40,11 @@ except ImportError:  # pragma: no cover
 
 try:  # package import, e.g. "from moodle.probe import ..."
     from .login import bootstrap, resolve_password
-    from .session import MoodleSession
+    from .session import MoodleSession, normalize_moodle_base
 except ImportError:  # script usage: python3 probe.py (moodle/ on sys.path)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from login import bootstrap, resolve_password  # noqa: E402
-    from session import MoodleSession  # noqa: E402
+    from session import MoodleSession, normalize_moodle_base  # noqa: E402
 
 USER_AGENT = "morrow-moodle-prober/0.1 (read-only capability probe)"
 DEFAULT_TIMEOUT = 25
@@ -77,6 +77,7 @@ VERSION_RE = re.compile(r"Moodle\s+(\d+\.\d+)")
 
 def scrape_version(session: "requests.Session", base: str,
                    timeout: int) -> Optional[str]:
+    base = normalize_moodle_base(base)
     resp = session.get(base + "/", timeout=timeout)
     resp.raise_for_status()
     hits = VERSION_RE.findall(resp.text)
