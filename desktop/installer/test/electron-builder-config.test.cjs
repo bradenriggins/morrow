@@ -157,7 +157,7 @@ async function preparedPayload(t, { invalidBridge = false, invalidMcp = false, i
       source,
       dependencyMaterialization: {
         schema: "morrow.runtime-dependency-materialization.v1",
-        packageManager: { declared: "pnpm@10.6.1", observed: "10.6.1" },
+        packageManager: { declared: "pnpm@12.6.0", observed: "12.6.0" },
         lockfile: { path: "pnpm-lock.yaml", sha256: "c".repeat(64), integritySource: "pnpm-lock.yaml packages resolution.integrity" },
         install: { mode: "isolated_frozen_install", network: "offline", scripts: "disabled", flags: ["--prod", "--frozen-lockfile", "--offline", "--ignore-scripts", "--verify-store-integrity"] },
         dependencies: [{ name: "fixture", version: "1.0.0", integrity: "sha512-AAAA" }],

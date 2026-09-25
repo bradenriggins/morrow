@@ -1,8 +1,11 @@
 packages:
-  - packages/*
+  - .
 engineStrict: true
 saveExact: true
 strictPeerDependencies: true
 minimumReleaseAge: 0
+overrides:
+  tmp@<0.2.6: 0.2.7
 allowBuilds:
-  esbuild: true
+  electron: true
+  electron-winstaller: false

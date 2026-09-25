@@ -314,6 +314,8 @@ describe("Canvas connector gateway path", () => {
                 ? command.arguments.assignment_id === "77" ? quizItems : [{ ...quizItems[3], id: "8" }]
               : command.toolName === "canvas_list_users_in_course_users"
                 ? learnerLeftCourse ? [] : [{ id: "9001", name: "Jane Doe", email: "jane.doe@example.edu", login_id: "jdoe" }]
+              : command.toolName === "canvas_get_single_submission_courses"
+                ? { user_id: "9001", assignment_id: "88", workflow_state: "unsubmitted" }
               : command.toolName === "canvas_get_single_user"
                 ? { id: command.arguments.id, name: "Jane Doe", email: "jane.doe@example.edu", login_id: "jdoe" }
               : command.toolName === "canvas_update_course_settings"
@@ -1097,6 +1099,34 @@ describe("Canvas connector gateway path", () => {
       ] });
       expect(writeCommands).toBe(2);
       runtime.cancelOperation(operationId(reviewPlan));
+    }, CASE_TIMEOUT_MS);
+
+    it("names the exact learner submission in a Plan review from the private Canvas read", async () => {
+      const roster = await runtime.call("canvas_list_users_in_course_users", {
+        course_id: "42", enrollment_type: ["student"], enrollment_state: ["active", "invited", "completed", "inactive"],
+        morrow_max_pages: 50, _morrow: { source_binding_id: sourceBindingId },
+      });
+      const label = /Student A[1-9][0-9]*/.exec(JSON.stringify(roster))?.[0];
+      expect(label).toBeTruthy();
+      const submission = await runtime.call("canvas_get_single_submission_courses", {
+        course_id: "42", assignment_id: "88", user_id: label!, _morrow: { source_binding_id: sourceBindingId },
+      });
+      expect(submission.structuredContent).toMatchObject({
+        status: "succeeded", data: { result: { data: { learnerToken: label, assignment_id: "88" } } },
+      });
+      const writesBeforePlan = writeCommands;
+      const planned = await runtime.call("canvas_mark_submission_as_read_courses", {
+        course_id: "42", assignment_id: "88", user_id: label!, _morrow: { source_binding_id: sourceBindingId },
+      });
+      const id = operationId(planned);
+      expect(planned.structuredContent).toMatchObject({ status: "awaiting_approval", receipts: { dispatchAttempt: 0 } });
+      expect(await runtime.operationReviewContext(id)).toMatchObject({ targets: [
+        { field: "course_id", name: "Biology" },
+        { field: "assignment_id", name: "Cell transport reflection" },
+        { field: "user_id", label: "Submission", name: `Submission ${label}` },
+      ] });
+      expect(writeCommands).toBe(writesBeforePlan);
+      runtime.cancelOperation(id);
     }, CASE_TIMEOUT_MS);
 
     it("names the student behind a learner label only on the educator's review page", async () => {

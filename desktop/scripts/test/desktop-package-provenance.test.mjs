@@ -115,8 +115,8 @@ test("desktop payload seals the actual gateway package, records its source prove
   assert.equal(sealed.manifest.schema, "morrow.desktop-package-input.v2");
   assert.deepEqual(sealed.manifest.source, { head: receipt.source.head, dirty: receipt.source.dirty, statusSha256: receipt.source.statusSha256 });
   assert.deepEqual(receipt.source.dependencyMaterialization, sealed.manifest.dependencyMaterialization);
-  assert.equal(sealed.manifest.dependencyMaterialization.packageManager.declared, "pnpm@10.6.1");
-  assert.equal(sealed.manifest.dependencyMaterialization.packageManager.observed, "10.6.1");
+  assert.equal(sealed.manifest.dependencyMaterialization.packageManager.declared, "pnpm@12.6.0");
+  assert.equal(sealed.manifest.dependencyMaterialization.packageManager.observed, "12.6.0");
   assert.equal(sealed.manifest.dependencyMaterialization.lockfile.sha256, createHash("sha256").update(readFileSync(join(root, "pnpm-lock.yaml"))).digest("hex"));
   assert.equal(sealed.manifest.dependencyMaterialization.install.mode, "isolated_frozen_install");
   assert.equal(sealed.manifest.dependencyMaterialization.install.network, "offline");

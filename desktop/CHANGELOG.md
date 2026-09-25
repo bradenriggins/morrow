@@ -2,6 +2,23 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
+## 1.0.6 (2026-09-24)
+
+This release is being prepared. Its installers will be published after native Mac and Windows checks of the exact files.
+
+### Approvals and Edit access
+
+- When your assistant asks to turn on Edit, Morrow opens a review in Chrome. Open it with Morrow Bridge connected and select Turn on Edit. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.
+
+### Course reviews
+
+- A Canvas submission review now identifies the selected learner by their private course label. It no longer says the selected submission is missing when Canvas returned it. The review still waits for your approval in Plan.
+
+### Technical notes
+
+- Updated the Desktop package manager to pnpm 12.6.0 and migrated its lockfile and build settings.
+- Corrected the review path to use the same learner label as the public submission read before matching the submitted item.
+
 ## 1.0.5 (2026-09-24)
 
 Unsigned installers: `Morrow-1.0.5-mac-arm64.dmg`, `Morrow-1.0.5-mac-arm64.zip`, and `Morrow-1.0.5-win-x64.exe`. Morrow Desktop ships with Morrow Bridge 1.0.123.

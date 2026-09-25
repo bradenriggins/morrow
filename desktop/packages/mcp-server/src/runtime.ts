@@ -2591,9 +2591,15 @@ export class GatewayRuntime {
         operation,
         tools: this.catalog.tools,
         ...(cache ? { cache } : {}),
-        read: async (publicName, args, signal) => this.resolveResultArtifact(
-          await this.callSourceOwned(publicName, args, { signal }),
-        ),
+        read: async (publicName, args, signal) => {
+          const raw = await this.callSourceOwned(publicName, args, { signal });
+          const mapping = this.toolByPublicName.get(publicName);
+          // The private submission read carries a Canvas user id; the review names its learner token.
+          const result = publicName === "canvas_get_single_submission_courses" && mapping
+            ? await this.publicSourceResult(mapping, args, raw, { signal })
+            : raw;
+          return this.resolveResultArtifact(result);
+        },
       });
       const learnerNames = await this.reviewLearnerNames(operation, context).catch(() => null);
       return learnerNames ? { ...context, learnerNames } : context;
