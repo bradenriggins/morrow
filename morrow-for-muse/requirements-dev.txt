@@ -30,10 +30,11 @@
 #     (idna/urllib3 extras are not used).
 #
 # Coverage (2026-09-21): wheels for CPython 3.11 and 3.12 on manylinux
-# x86_64 (the reference dev VM), plus sdists for the pure-Python
-# packages (requests, idna, urllib3, certifi) and charset-normalizer
-# as the fallback. Binary sdists for numpy and opencv-python-headless
-# are not hashed here; other platforms regenerate via the recipe below.
+# x86_64 (the reference dev VM), CPython 3.14 on Apple Silicon, plus
+# sdists for the pure-Python packages (requests, idna, urllib3, certifi)
+# and charset-normalizer as the fallback. Binary sdists for numpy and
+# opencv-python-headless are not hashed here; other platforms regenerate
+# via the recipe below.
 # Regenerating hashes when a pin is raised: download the new
 # version's artifacts into the scratch lock dir and re-run
 # gen-dev-lock.py, e.g.
@@ -56,7 +57,8 @@ requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
     --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
 opencv-python-headless==5.0.0.93 \
-    --hash=sha256:09a872a157c1376ab922a69bbf22f9a95bcc7b658a9d8b436a60212b02b2eeb4
+    --hash=sha256:09a872a157c1376ab922a69bbf22f9a95bcc7b658a9d8b436a60212b02b2eeb4 \
+    --hash=sha256:030ca5e0837a2963ab36ef896baa9767eb8d2b83353fb28af5a521e40dd8756f
 charset-normalizer==3.5.1 \
     --hash=sha256:c7b742bf31c88566b4bb6335a7f393bb322e580b6bb98df7bd0c25e6e3519ce8 \
     --hash=sha256:b9af956078716df40d985fb0dfeb2c2120c5ca92ba4ff4b388acfd01cdc14d08 \
@@ -72,4 +74,5 @@ certifi==2026.7.22 \
     --hash=sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55
 numpy==2.4.6 \
     --hash=sha256:89cd468399cfd2504718f0ba50e410dca55a170b61a02ad92bb18c8a65186e93 \
-    --hash=sha256:90f9849678c75fe7afa2d348ac842c168b0a4d3d61919687216dfc547976d853
+    --hash=sha256:90f9849678c75fe7afa2d348ac842c168b0a4d3d61919687216dfc547976d853 \
+    --hash=sha256:d581b735e177fdcdce6fed8e7e8880a3fb6ee4e3653a3ac6af01c6f4c03effc5

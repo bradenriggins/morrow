@@ -1,6 +1,6 @@
 # Setting up Morrow for Muse
 
-*Version 0.4.2. About 15 minutes, start to finish. You set it up by talking
+*Version 0.4.3. About 15 minutes, start to finish. You set it up by talking
 to Muse; there is no software to install on your own computer.*
 
 ## Before you start

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3 (2026-09-24)
+
+The release package is `morrow-muse-connector-0.4.3.zip` from the
+`muse/v0.4.3` GitHub release.
+
+- Keep the Moodle session lane in the release and correct the stale
+  operation-catalog statement that called the lane out of scope.
+- Keep Moodle capability evidence separate from the Canvas catalog.
+
 ## 0.4.2 (2026-09-24)
 
 The release package is `morrow-muse-connector-0.4.2.zip` from the
