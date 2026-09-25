@@ -442,6 +442,26 @@ test("setup asks again on its own while the runtime is still uncertain", async (
   assert.equal(calls.length, 2);
 });
 
+test("the Bridge folder hint refreshes the observed connection before suggesting setup again", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  t.after(() => t.mock.timers.reset());
+  const calls = [];
+  let answer = () => ok(state({ bridgeLoadedInChrome: "unknown" }));
+  const dom = await load("bridge-folder-hint-refresh", async (method) => {
+    calls.push(method);
+    return answer();
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(dom.element("#action-title").textContent, "Add Morrow Bridge.");
+
+  answer = () => ok(state({ bridgeLoadedInChrome: true }));
+  t.mock.timers.tick(90_000);
+  await settle();
+  assert.equal(calls.length, 2, "the hint refreshes the observed Bridge state");
+  assert.equal(dom.element("#action-title").textContent, "Connect Morrow Bridge.");
+  assert.doesNotMatch(dom.element("#action-body").innerHTML, /Bridge connection not confirmed/);
+});
+
 test("a step that leaves the runtime uncertain settles without the person asking", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   t.after(() => t.mock.timers.reset());
