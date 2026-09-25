@@ -1133,8 +1133,47 @@ except ValueError as exc:
   "${TREE}/helper/keepalive.sh" >/dev/null 2>&1
   KEEP_RC=$?
   case "${KEEP_RC}" in
+    0|2)
+      # A second keepalive can return 0 because the supervisor owns the
+      # lock. Wait for that run to finish before trusting its status.
+      if [ "${KEEP_RC}" = "0" ]; then
+        flock -w 45 "${TREE_STATE_DIR}/keepalive.lock" true \
+          || fail "helper" "another keepalive still holds the lock after 45 seconds; no helper state was accepted. Check ${TREE_STATE_DIR}/keepalive.log and rerun."
+      fi
+      STATUS="$(curl -sf -m 20 "http://127.0.0.1:${HELPER_PORT}/status" 2>/dev/null)" \
+        || fail "helper" "keepalive returned ${KEEP_RC}, but no helper answered /status on port ${HELPER_PORT}. A concurrent keepalive may have held the lock. Check ${TREE_STATE_DIR}/keepalive.log and rerun after the helper is available."
+      _STATUS_STATE="$(printf '%s' "${STATUS}" | TREE="${TREE}" TREE_VERSION="${TREE_VERSION}" python3 -c '
+import json, os, sys
+try:
+    d = json.load(sys.stdin)
+except (ValueError, UnicodeError):
+    sys.exit(1)
+if not isinstance(d, dict) or d.get("helper_version") != os.environ["TREE_VERSION"]:
+    sys.exit(1)
+profile = d.get("profile_dir")
+expected = os.path.realpath(os.path.join(os.environ["TREE"], "helper", "profile"))
+if not isinstance(profile, str) or not os.path.isabs(os.path.expanduser(profile)) \
+        or os.path.realpath(os.path.expanduser(profile)) != expected:
+    sys.exit(1)
+if d.get("chromium_alive") is not True or d.get("starting") is not False \
+        or type(d.get("logged_in")) is not bool \
+        or type(d.get("profile_has_cookies")) is not bool:
+    sys.exit(1)
+if d["logged_in"] and not d["profile_has_cookies"]:
+    sys.exit(1)
+print("signed-in" if d["logged_in"] else "signed-out")
+')" || fail "helper" "keepalive returned ${KEEP_RC}, but /status on port ${HELPER_PORT} did not prove this tree's helper and browser are ready. Check ${TREE_STATE_DIR}/keepalive.log and ${TREE_STATE_DIR}/server.log; rerun after the helper is available."
+      # A lock skip returns 0 even when the concurrent run found a
+      # genuine sign-out. The verified status decides which notice to show.
+      if [ "${_STATUS_STATE}" = "signed-in" ]; then
+        KEEP_RC=0
+      else
+        KEEP_RC=2
+      fi
+      ;;
+  esac
+  case "${KEEP_RC}" in
     0)
-      STATUS="$(curl -sf -m 8 "http://127.0.0.1:${HELPER_PORT}/status" 2>/dev/null || true)"
       note "helper healthy: ${STATUS}"
       # P0-7: the onboarded sentinel is a real authenticated signal only:
       # keepalive exit 0 already implies logged_in=true, and the profile

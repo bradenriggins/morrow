@@ -72,6 +72,45 @@ docker run --rm --security-opt seccomp=unconfined \
     bash install.sh
     step "install.sh (rerun, idempotent)"
     bash install.sh
+    step "held keepalive lock cannot report install success"
+    printf "CANVAS_BASE=https://school.instructure.com\n" > helper/env
+    chmod 600 helper/env
+    curl() {
+      case " $* " in
+        *"https://school.instructure.com"*)
+          local output="" previous="" arg
+          for arg in "$@"; do
+            if [ "$previous" = "-o" ]; then output="$arg"; fi
+            previous="$arg"
+          done
+          if [ -n "$output" ]; then
+            printf "<html>Canvas login</html>\n" > "$output"
+          else
+            printf "<html>Canvas login</html>\n"
+          fi
+          return 0 ;;
+      esac
+      command curl "$@"
+    }
+    export -f curl
+    TREE_ID="$(cat .morrow-tree-id)"
+    STATE="$HOME/.morrow/trees/$TREE_ID"
+    BEFORE="$(sha256sum "$HOME/.morrow/installed-version" "$HOME/.morrow/installed-manifest.json" helper/env)"
+    PROFILE_BEFORE="$(find helper/profile -type f -print | sort)"
+    exec 8>"$STATE/keepalive.lock"
+    flock -x 8
+    if bash install.sh > "$HOME/locked-install.log" 2>&1; then
+      cat "$HOME/locked-install.log"
+      echo "held lock returned install success" >&2
+      exit 1
+    fi
+    tail -n 16 "$HOME/locked-install.log"
+    grep -q "INSTALL FAIL \[helper\]" "$HOME/locked-install.log"
+    ! grep -q "Install complete" "$HOME/locked-install.log"
+    [ "$BEFORE" = "$(sha256sum "$HOME/.morrow/installed-version" "$HOME/.morrow/installed-manifest.json" helper/env)" ]
+    [ "$PROFILE_BEFORE" = "$(find helper/profile -type f -print | sort)" ]
+    flock -u 8
+    exec 8>&-
     step "keepalive supervision is active"
     CRON_NOW="$(crontab -l 2>/dev/null || true)"
     if printf "%s\n" "$CRON_NOW" | grep -q "helper/keepalive.sh"; then

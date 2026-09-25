@@ -1,6 +1,6 @@
 # Moodle session lane (Morrow for Muse)
 
-This lane ships in Morrow for Muse 0.4.5 as a
+This lane ships in Morrow for Muse 0.4.6 as a
 separate Moodle HTTPS module. The root `SKILL.md` routes Moodle requests
 here; `INSTALL.md` explains the shared, hash-locked runtime dependencies.
 The package does

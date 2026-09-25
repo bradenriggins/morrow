@@ -1,7 +1,7 @@
 # Morrow for Muse: Operation Catalog (authoritative)
 
 Date: 2026-09-20. Product: Morrow for Muse (Canvas connector and separate Moodle session lane, no MCP).
-Package note (0.4.5): Moodle runtime and agent instructions ship in the release. Moodle claims remain limited to the live-proven rows and lane-level evidence below; catalog status is provider-specific.
+Package note (0.4.6): Moodle runtime and agent instructions ship in the release. Moodle claims remain limited to the live-proven rows and lane-level evidence below; catalog status is provider-specific.
 This file is the authoritative operation catalog for the proof battery. It supersedes the older proof ledger (proof-battery/LEDGER.md), which the source repository keeps as-is for history; it is not in the release.
 
 Path convention: the desktop catalog records paths without the /api prefix; every Canvas REST path below is shown with the real /api prefix added.
