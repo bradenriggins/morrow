@@ -1101,7 +1101,7 @@ function html(
     grade: "This changes grades. Check each student and score.",
     blueprint: "This also affects linked courses. Check which courses are included.",
   };
-  const risks = [...new Set(plans.map((entry) => warnings[String(object(entry.risk).approvalClass)]).filter(Boolean))];
+  const risks = [...new Set(plans.map((entry) => reviewRiskWarning(entry, warnings)).filter(Boolean))];
   const commonTargets = batch ? (contexts.get(String(operations[0]?.operationId))?.targets || []).filter((target) => target.name.trim()
     && operations.every((operation) => {
       const candidate = object(operation.plan);
@@ -1187,7 +1187,7 @@ function html(
     const rowWhere = targets.filter((item) => !commonTargets.some((target) => target.field === item.field)).map((item) => item.name).join(" · ");
     const metadata = (rowWhere !== title ? rowWhere : "") || [request.item_entry_interaction_type_slug ? readableName(String(request.item_entry_interaction_type_slug).replaceAll("-", " ")) : name,
       typeof request.item_points_possible === "number" ? `${request.item_points_possible} points` : ""].filter(Boolean).join(" · ");
-    const sensitive = warnings[String(object(entry.risk).approvalClass)];
+    const sensitive = reviewRiskWarning(entry, warnings);
     return `<details class="change-item" data-search="${escapeHtml(`${title} ${where} ${name} ${kind}`.toLocaleLowerCase())}"><summary><span class="change-number">${index + 1}</span><span class="change-heading"><strong>${escapeHtml(title)}</strong><span class="change-context">${escapeHtml(metadata)}</span>${state !== "awaiting_approval" ? `<span data-operation-status>${operationStatus(String(operations[index]?.state), platformName(entry.tool), operations[index]?.verificationStatus)}</span>` : ""}</span><span class="change-kind${kind === "Remove" ? " removal" : ""}">${kind}</span></summary>${sensitive ? `<p class="item-warning">${escapeHtml(sensitive)}</p>` : ""}${content}</details>`;
   }).join("");
   const reviewContent = batch ? `<section class="batch-review"><div class="change-list-controls" hidden><label for="change-search">Find a change</label><input id="change-search" type="search" placeholder="Search titles or courses" autocomplete="off"></div><div class="change-list">${changed}</div><nav class="change-pagination" aria-label="Review pages" hidden><p id="changes-count" role="status" aria-live="polite"></p><div><button id="changes-previous" type="button" class="secondary">Previous</button><button id="changes-next" type="button" class="secondary">Next</button></div></nav></section>` : changed;
@@ -1224,7 +1224,7 @@ function html(
       // cannot be applied and checking the connection would not help.
       ? '<p class="warning">Canvas does not have the item this change names. It may have been renamed, moved, or removed since this change was prepared.</p><p>Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review. This page has not changed anything.</p>'
       : '<p class="warning">Morrow could not identify the course or a selected item in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
-    : `<p>${batch ? `Morrow will apply all ${plans.length} changes and check each result in Canvas. Searching does not change what you approve.` : addingQuestion ? "Morrow will add this question and check it in Canvas." : "Morrow applies these changes and checks them in Canvas."}</p><p class="keep-open">${keepOpenInstruction(platform)}</p><p class="presence-note">Approve here in Chrome with Morrow Bridge connected. A request from another program cannot approve.</p>`).replaceAll("Canvas", platform);
+    : `<p>${reviewOutcomeCopy(batch, plans, addingQuestion, plan)}</p><p class="keep-open">${keepOpenInstruction(platform)}</p><p class="presence-note">Approve here in Chrome with Morrow Bridge connected. A request from another program cannot approve.</p>`).replaceAll("Canvas", platform);
   // WI-4.4 (D2b, D3): only a single, rememberable change offers "do not ask again", never a
   // batch or a removal (`rememberOffer` already returns null for both). It rides in the same
   // form as the primary approve button, behind its own submit value, so one POST both approves
@@ -1883,4 +1883,27 @@ export class LoopbackApprovalServer {
     this.recentEntries.clear();
     this.recentSessions.clear();
   }
+}
+
+function submissionReadState(tool: unknown): "read" | "unread" | null {
+  if (typeof tool !== "string") return null;
+  if (/^canvas_mark_submission_as_read_(courses|sections)$/.test(tool)) return "read";
+  if (/^canvas_mark_submission_as_unread_(courses|sections)$/.test(tool)) return "unread";
+  return null;
+}
+
+function reviewRiskWarning(entry: JsonObject, warnings: Readonly<Record<string, string>>): string | undefined {
+  const readState = submissionReadState(entry.tool);
+  return readState
+    ? `This marks the submission as ${readState}. It does not change the student's grade.`
+    : warnings[String(object(entry.risk).approvalClass)];
+}
+
+function reviewOutcomeCopy(batch: boolean, plans: readonly JsonObject[], addingQuestion: boolean, plan: JsonObject): string {
+  if (batch) return plans.some((entry) => submissionReadState(entry.tool))
+    ? `Morrow will apply all ${plans.length} changes. It will check the results it can in Canvas. Confirm the submission read status in Canvas yourself. Searching does not change what you approve.`
+    : `Morrow will apply all ${plans.length} changes and check each result in Canvas. Searching does not change what you approve.`;
+  if (addingQuestion) return "Morrow will add this question and check it in Canvas.";
+  if (submissionReadState(plan.tool)) return "Morrow cannot check the saved read status. Confirm it in Canvas after Morrow sends the request.";
+  return "Morrow applies these changes and checks them in Canvas.";
 }
