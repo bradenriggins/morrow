@@ -410,9 +410,9 @@ Every line the five checks can render:
 ## 6. Plan and Edit settings
 
 This page carries more than first-run setup. The rows below are the states a person meets while
-connecting their first course. The Edit stage that follows them (choosing individual actions, a
-duration, and confirming a flagged selection) is rendered at
-`connector/extension/settings/settings.js:666-715` and
+connecting their first course. The Edit stage that follows them (choosing individual actions and
+confirming a flagged selection) is rendered at
+`connector/extension/settings/settings.js:1488-1554` and
 `connector/extension/settings/settings.html:98-155`, and is outside first run.
 
 Every control on this page is a native `<button>`, `<select>`, `<input>` or `<label>`, so all of it is
@@ -420,21 +420,21 @@ keyboard reachable. One `role="alert"` (`connector/extension/settings/settings.h
 failures and one polite `role="status"` (`connector/extension/settings/settings.html:22`) carries
 announcements; a failure arrives as a stable code, and its title, cause and next action are read
 from `connector/extension/src/bridge-problem-copy.js:17` and written into the alert at
-`connector/extension/settings/settings.js:344-347`, with the unexplained-code fallback at
+`connector/extension/settings/settings.js:916-920`, with the unexplained-code fallback at
 `connector/extension/src/bridge-problem-copy.js:309-314`.
 
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
-| `settings-first-paint` | "Checking connected courses…", "Loading connected courses…", "Checking Chrome permission…"; **Refresh connected courses** is disabled during the read | None. The read answers and replaces these lines | `connector/extension/settings/settings.html:28`, `connector/extension/settings/settings.html:56`, `connector/extension/settings/settings.html:88`, disabled at `connector/extension/settings/settings.js:843` |
-| `settings-read-failed` | The alert names the failure. The page says "Connected courses were not checked." and "Course access was not checked. Select Refresh connected courses." It shows no false loading state. | **Refresh connected courses**, re-enabled when the read ends | `connector/extension/settings/settings.js:556`, `connector/extension/settings/settings.js:618`, `connector/extension/settings/settings.js:712`, state set at `connector/extension/settings/settings.js:927` |
+| `settings-first-paint` | "Checking connected courses…", "Loading connected courses…", "Checking Chrome permission…"; **Refresh connected courses** is disabled during the read | None. The read answers and replaces these lines | `connector/extension/settings/settings.html:28`, `connector/extension/settings/settings.html:56`, `connector/extension/settings/settings.html:88`, disabled at `connector/extension/settings/settings.js:1736` |
+| `settings-read-failed` | The alert names the failure. The page says "Connected courses were not checked." and "Course access was not checked. Select Refresh connected courses." It shows no false loading state. | **Refresh connected courses**, re-enabled when the read ends | `connector/extension/settings/settings.js:1375-1376`, `connector/extension/settings/settings.js:1419-1420`, `connector/extension/settings/settings.js:1505-1506`, state set at `connector/extension/settings/settings.js:1770-1784` |
 | `settings-no-anchor` | "Open a course in Canvas or Moodle. Morrow Bridge finds it." and, once a site is saved, **Open Canvas** or **Open Moodle** | Open a signed-in course in Chrome, then **Connect this course** in the popup | `connector/extension/settings/settings.js` `renderCourseList` |
 | `settings-available-list` | Each signed-in site's own available courses under "Not connected", read by itself when the page opens | **Connect** on a course row | `connector/extension/settings/settings.js` `autoStartDiscovery`, `renderCourseRow` |
 | `settings-more-available` | **Load more available courses** while any site has another page | **Load more available courses** | `connector/extension/settings/settings.js` `loadMoreCourses` |
 | `settings-discovery-expired` | Nothing changes on screen. The rows stay; **Connect** or **Load more available courses** reads that site's list again first, and Connect tries once more if the Bridge answers that the list is old or missing | **Connect** again only if the course left the list | `connector/extension/settings/settings.js` `connectCourse`, `currentDiscoveryFor` |
 | `settings-discovery-failed` | The alert names the failure and says to select **Refresh connected courses**; a background refresh does not retry it | **Refresh connected courses**, which reads every site's list again | `connector/extension/settings/settings.js` `readDiscovery`, refresh button listener |
-| `settings-connected` | How many connected courses are ready to use, and how many need an open course tab or a reconnected site | Select a course, then keep Plan or choose Edit | `connector/extension/settings/settings.js:596-600` |
-| `settings-file-access-off` | "Off. Morrow cannot access course file content." | Optional: **Enable course file access** | `connector/extension/settings/settings.js:729`, `connector/extension/settings/settings.html:92` |
-| `settings-file-access-revoked` | "Off. Chrome permission was removed, so Morrow keeps course file access off." | Optional: **Enable course file access** again | `connector/extension/settings/settings.js:726` |
+| `settings-connected` | How many connected courses are ready to use, and how many need an open course tab or a reconnected site | Select a course, then keep Plan or choose Edit | `connector/extension/settings/settings.js:1428-1431` |
+| `settings-file-access-off` | "Off. Morrow cannot access course file content." | Optional: **Enable course file access** | `connector/extension/settings/settings.js:1570`, `connector/extension/settings/settings.html:92` |
+| `settings-file-access-revoked` | "Off. Chrome permission was removed, so Morrow keeps course file access off." | Optional: **Enable course file access** again | `connector/extension/settings/settings.js:1567` |
 
 ---
 
@@ -586,21 +586,21 @@ stale name here.
 | `Refresh connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:35` |
 | `Open Canvas or Moodle when Morrow needs it.` | Plan and Edit settings | `connector/extension/settings/settings.html:148` |
 | `Select` | Plan and Edit settings | `connector/extension/settings/settings.html:50` |
-| `Connect` | Plan and Edit settings | state set at `connector/extension/settings/settings.js:909` |
+| `Connect` | Plan and Edit settings | `connector/extension/settings/settings.js:1245` |
 | `Show more` | Plan and Edit settings | `connector/extension/settings/settings.html:57` |
 | `Load more available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:60` |
 | `Plan. Ask first.` | Plan and Edit settings | `connector/extension/settings/settings.html:65` |
 | `Edit. Routine edits.` | Plan and Edit settings | `connector/extension/settings/settings.html:66` |
-| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:161`, `connector/extension/settings/settings.js:1539` |
-| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:1539` |
+| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:161`, `connector/extension/settings/settings.js:1572` |
+| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:1572` |
 | `Remove HTTPS file access` | Plan and Edit settings | `connector/extension/settings/settings.html:162` |
 | `Return selected courses to Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:121` |
-| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:122`, `connector/extension/settings/settings.js:840` |
-| `Review and save` | Plan and Edit settings (WI-5.5 Customize view summary bar) | `connector/extension/settings/settings.js:1513` |
+| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:122`, `connector/extension/settings/settings.js:1546` |
+| `Review and save` | Plan and Edit settings (WI-5.5 Customize view summary bar) | `connector/extension/settings/settings.js:1546` |
 | `Keep reviewing` | Plan and Edit settings | `connector/extension/settings/settings.html:131` |
 | `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:132` |
-| `Open Canvas` | Plan and Edit settings | `connector/extension/settings/settings.js:436` |
-| `Open Moodle` | Plan and Edit settings | `connector/extension/settings/settings.js:437` |
+| `Open Canvas` | Plan and Edit settings | `connector/extension/settings/settings.js:439` |
+| `Open Moodle` | Plan and Edit settings | `connector/extension/settings/settings.js:440` |
 | `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1218` |
 | `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1218` |
 | `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1218` |
