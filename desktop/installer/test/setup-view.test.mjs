@@ -214,6 +214,10 @@ test("a ready Bridge folder that Chrome has not confirmed still asks for the Chr
   assert.equal(current.bridge.loadedInChrome, "unknown");
   const view = actionView(current, { chosenAssistantId: "codex" });
   assert.equal(view.title, "Add Morrow Bridge.");
+  assert.match(view.copy, /Add Morrow Bridge to Chrome from the folder below/);
+  assert.doesNotMatch(view.copy, /temporary|Chrome Web Store/i);
+  assert.match(view.body, /<div class="info-box"><strong>Next: add Bridge to Chrome<\/strong>/);
+  assert.doesNotMatch(view.body, /blocked-box|Bridge connection not confirmed/);
   assert.match(view.body, /data-action="reveal-bridge-folder"/);
   assert.match(view.body, /data-action="repair"/);
   assert.equal(statusSummary(current), "Set up Morrow Bridge in Chrome");
