@@ -1,16 +1,23 @@
 # Moodle lane: skill instruction layer
 
 How the agent uses the Moodle session lane. This is the instruction
-text the connector skill carries; the code is the enforcement.
+text the connector skill carries. The Python module enforces session
+and transport checks; its write method does not enforce the approval
+boundary described below.
 
 ## Session bootstrap (Lane 2 pattern)
 
-1. The educator signs in once (production: the VM browser sign-in; the
-   sandbox proof: the form login in `login.py` with the provider's
-   published demo credentials).
-2. Capture the session cookie into the `moodle_session` slot and the
-   sesskey into the visible `moodle_sesskey` slot. Close the browser.
-3. Pure API after. The sesskey is a per-session value of 10 or more
+1. The educator signs in once through the school's page in the Muse VM
+   browser. The form login in `login.py` proves the separate HTTPS lane
+   with the provider's published sandbox credentials; it is not a
+   production browser-session handoff.
+2. The Python lane accepts an in-memory `requests.Session` and sesskey
+   through `MoodleSession.from_bundle`. The release package does not
+   include a command that transfers the VM browser session into that
+   bundle. Do not export a school session cookie into a file, command,
+   transcript, or chat to bridge this gap. Keep an existing working VM
+   browser path in its browser-owned session.
+3. In the HTTPS lane, the sesskey is a per-session value of 10 or more
    characters that does not rotate; it goes in the `sesskey` query param of every
    `lib/ajax/service.php` call and in the `sesskey` field of every form
    POST. It is visible by design (it is readable from page content), but
@@ -38,6 +45,11 @@ text the connector skill carries; the code is the enforcement.
   data before presenting anything.
 
 ## Write governance (no exceptions)
+
+`MoodleSession.write` is a low-level HTTPS method. It does not check the
+operation catalog, Plan/Edit mode, or an educator approval. Do not call it
+for production course writes until it is behind those gates. A working VM
+browser path must keep its own approval and provider readback checks.
 
 1. Frozen plan first: op id (UUID), tool, exact args, before-state
    snapshot, expected after-state, frozen readback.

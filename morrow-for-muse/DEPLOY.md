@@ -157,7 +157,7 @@ conventions in `proof-battery/OPERATION_CATALOG.md`). Neither uses
 | Keepalive | Schedule | Status |
 |-----------|----------|--------|
 | Canvas | Daily (every 24h) | **Live.** Last run: 200, principal 28206. Log: `logs/keepalive-canvas.log` |
-| Moodle | Every 6 hours | **Installed but dormant.** No Moodle session bundle exists yet. The script logs `IDLE` and exits 0 until Braden bootstraps a session with `moodle/login.py`. Log: `logs/keepalive-moodle.log` |
+| Moodle | Every 6 hours | **Installed but dormant at this 2026-09-20 readback.** No Moodle session bundle existed. The script logged `IDLE` and exited 0. `moodle/login.py` does not create a persisted bundle. Log: `logs/keepalive-moodle.log` |
 
 **Note:** The VM has no cron daemon. The scheduler is a Python daemon under
 `/home/hatch` (survives restarts). After a VM reboot, run
@@ -229,10 +229,12 @@ The correct lifecycle is quiz-API delete, never assignment-endpoint delete for N
 
 ## Anything still requiring Braden
 
-1. **Moodle session bootstrap:** The Moodle keepalive is installed but
-   dormant. To activate it, run `moodle/login.py` to create a persisted
-   session bundle at `~/.morrow/moodle-session.json`. Until then, the
-   keepalive logs `IDLE` every 6 hours (not an error).
+1. **Moodle session bootstrap:** At this 2026-09-20 readback, the Moodle
+   keepalive was installed but dormant. `moodle/login.py` returns an
+   in-memory sandbox session and does not create
+   `~/.morrow/moodle-session.json`. This package has no production VM
+   browser-session handoff command. The keepalive logs `IDLE` when that
+   bundle is absent; its active path is not release-ready.
 
 2. **Fresh session capture:** The current Canvas session is valid, but a
    truly fresh capture (if the session ever expires) requires Braden to sign

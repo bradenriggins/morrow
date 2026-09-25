@@ -115,10 +115,12 @@ provider's proof as proof for the other.
   educator asks and even with a signed approval.
 - The Canvas Login Helper (`helper/`): educator self-sign-in,
   SSO/MFA-capable, with keepalive.
-- The Moodle session lane (`moodle/`): HTTPS session bootstrap, per-site
-  capability probe, AJAX and form-path dispatch, session-expiry handling,
-  frozen write plans, verified readback, bounded receipts, and an
-  append-only journal. Live proof on the official Moodle 5.2 sandbox covers
+- The Moodle session lane (`moodle/`): sandbox HTTPS session bootstrap,
+  per-site capability probe, AJAX and form-path transport,
+  session-expiry handling, optional AJAX readback on low-level writes,
+  bounded receipts, and an append-only journal. Its production VM-browser
+  handoff and Plan/Edit approval are not wired into this Python module.
+  Live proof on the official Moodle 5.2 sandbox covers
   listing courses and a forum-discussion create, verification, and delete
   lifecycle. Moodle is separate from the Canvas catalog executor; the
   available methods depend on the school's Moodle deployment. Follow

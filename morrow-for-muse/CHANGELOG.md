@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.4 (2026-09-24)
+
+The release package is `morrow-muse-connector-0.4.4.zip` from the
+`muse/v0.4.4` GitHub release.
+
+- Clarify the Canvas setup path and the separate Moodle HTTPS module. The
+  package still lacks a production Muse browser-session handoff to Moodle;
+  its low-level Moodle writer has no Plan/Edit approval gate, and readback is
+  optional. The official Moodle public-demo proof remains separate from a
+  school deployment.
+- Correct the historical Moodle keepalive claim and align first-run and
+  installation instructions with the shipped package.
+- Add the official NumPy 2.4.6 macOS arm64 wheel hash to the development
+  lock file so Python 3.12 development installs pass. This file is not in the
+  educator package, and Moodle runtime behavior is unchanged.
+
 ## 0.4.3 (2026-09-24)
 
 The release package is `morrow-muse-connector-0.4.3.zip` from the

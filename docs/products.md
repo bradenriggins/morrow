@@ -15,11 +15,16 @@ Start: [`desktop/README.md`](../desktop/README.md). Current limits: [`desktop/LI
 
 ## Morrow for Muse (`morrow-for-muse/`)
 
-The connector that runs on the educator's Muse computer. The current 0.4.3 release supports Canvas and Moodle through separate sign-in and session lanes. Canvas actions follow the Canvas operation catalog; the Moodle lane probes the school's site before it uses an available capability. See `morrow-for-muse/SCOPE.md` for the exact scope and evidence for each provider.
+The 0.4.4 release candidate includes the Canvas connector and a separate
+Moodle HTTPS module. Canvas uses the educator's browser sign-in and the
+live-proven operation catalog. The Moodle module has public-demo proof and a
+site capability probe, but this package does not connect a signed-in Muse
+browser session to that module or enforce Plan/Edit approval for its writes.
+See `morrow-for-muse/SCOPE.md` for each provider's exact scope and evidence.
 
-- Plan and Edit: reading a course never needs approval, and Plan asks before each change. Edit is one grant, for the account or for one conversation, to make changes without asking each time. It has no time limit: it stays on until the educator turns it off.
+- Canvas Plan and Edit: reading a course never needs approval, and Plan asks before each change. Edit is one grant, for the account or for one conversation, to make changes without asking each time. It has no time limit: it stays on until the educator turns it off.
 - Morrow Direct: our open format that describes each course-site action Morrow can take and how it runs. It lives inside Morrow for Muse until a second product uses it.
-- Privacy boundary: Canvas student identifiers are replaced with course-scoped labels before supported records reach the assistant. Moodle analytics use approved course-level aggregates rather than individual student records. See `morrow-for-muse/privacy/`.
-- Capability claims follow provider-specific evidence. Canvas actions use the live-proven operation catalog; Moodle capabilities are probed for the connected site. See `morrow-for-muse/SCOPE.md` and `morrow-for-muse/moodle/README.md`.
+- Privacy boundary: Canvas student identifiers are replaced with course-scoped labels before supported records reach the assistant. Moodle instructions restrict analytics to approved course-level aggregates. See `morrow-for-muse/privacy/`.
+- Capability claims follow provider-specific evidence. Canvas actions use the live-proven operation catalog; the Moodle module probes site capabilities after it has a session. See `morrow-for-muse/SCOPE.md` and `morrow-for-muse/moodle/README.md`.
 
 Start: [`morrow-for-muse/SKILL.md`](../morrow-for-muse/SKILL.md). Current scope: [`morrow-for-muse/SCOPE.md`](../morrow-for-muse/SCOPE.md).

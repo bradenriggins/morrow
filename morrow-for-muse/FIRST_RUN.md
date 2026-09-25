@@ -1,7 +1,10 @@
 # First-run checklist: brand-new educator, first hour
 
-V1 (2026-09-22). The agent-facing checklist for taking an educator
-from zero to their first real task. The educator does everything by
+V1 (2026-09-22). This checklist covers the Canvas first-run path. Moodle
+has a separate HTTPS module, described in `moodle/SKILL.md`; the release
+package has no command to transfer a signed-in VM browser session into
+that Python module. Confirm the working VM Moodle path before describing
+its setup or sending a course change. The educator does everything by
 talking to Muse; shell commands below are operator diagnostics, never
 educator homework.
 
