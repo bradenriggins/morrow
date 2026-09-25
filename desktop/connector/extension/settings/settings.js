@@ -16,6 +16,8 @@ const actionFilterField = document.querySelector("#action-filter-field");
 const actionCheckedOnlyField = document.querySelector("#action-checked-only-field");
 const selectionSummary = document.querySelector("#selection-summary");
 const connectionStatus = document.querySelector("#connection-status");
+const coursesTitle = document.querySelector("#courses-title");
+coursesTitle.setAttribute("tabindex", "-1");
 const courseFilter = document.querySelector("#course-filter");
 const coursePlatformFilter = document.querySelector("#course-platform-filter");
 const coursePlatformField = document.querySelector(".platform-field");
@@ -215,6 +217,7 @@ const state = {
   privateChatBusy: false,
   privateChatReview: null,
   readGeneration: 0,
+  statusLoading: false,
   saveConfirmedFor: null,
   selected: new Set(),
   selectedCategories: new Set(),
@@ -469,19 +472,49 @@ async function openSavedPlatform(siteAnchorId, sourceBindingId, provider) {
   }
 }
 
+let pendingCourseFocus = null;
+
 function focusedCourseControl() {
   const active = document.activeElement;
-  if (!(active instanceof HTMLInputElement)) return null;
+  if (!active?.closest?.("#course-list")) return null;
+  const bindingId = active.closest("[data-binding-id]")?.dataset.bindingId;
   if (active.classList.contains("course-select")) {
-    const bindingId = active.closest("[data-binding-id]")?.dataset.bindingId;
-    return bindingId ? { selector: `[data-binding-id=${JSON.stringify(bindingId)}] .course-select` } : null;
+    return bindingId ? { selector: `[data-binding-id=${JSON.stringify(bindingId)}] .course-select`, bindingId } : null;
   }
+  for (const attribute of ["data-toggle-course", "data-open-platform", "data-connect-row", "data-set-level", "data-remove-category", "data-open-customize", "data-disconnect", "data-disconnect-cancel", "data-disconnect-confirm"]) {
+    if (!active.hasAttribute(attribute)) continue;
+    const scope = attribute === "data-open-customize" ? (active.closest(".course-detail-links") ? ".course-detail-links " : ".course-level-control ") : "";
+    const selector = `${scope}[${attribute}=${JSON.stringify(active.getAttribute(attribute))}]`;
+    return { selector: bindingId ? `[data-binding-id=${JSON.stringify(bindingId)}] ${selector}` : selector, bindingId };
+  }
+  if (active.id === "open-platform-empty") return { selector: "#open-platform-empty" };
+  return null;
+}
+
+function courseFocusToRestore() {
+  const focused = focusedCourseControl();
+  if (focused) return focused;
+  if (pendingCourseFocus && document.activeElement === coursesTitle) return pendingCourseFocus;
+  pendingCourseFocus = null;
   return null;
 }
 
 function restoreCourseFocus(focus) {
   if (!focus) return;
-  courseList.querySelector(focus.selector)?.focus();
+  if (state.busy) {
+    pendingCourseFocus = focus;
+    coursesTitle.focus();
+    return;
+  }
+  const target = courseList.querySelector(focus.selector);
+  if (target && !target.disabled) {
+    target.focus();
+    pendingCourseFocus = null;
+    return;
+  }
+  const row = focus.bindingId && courseList.querySelector(`[data-toggle-course=${JSON.stringify(focus.bindingId)}]`);
+  (row || coursesTitle).focus();
+  pendingCourseFocus = null;
 }
 
 /** A list's receipt is good for a few minutes. Its rows stay shown after that; Connect and "Load
@@ -1327,10 +1360,10 @@ function renderCourseBulkBar(rows) {
   courseBulkRoutineButton.disabled = state.busy || !routineAvailable;
 }
 
-function renderCourseList(focus = focusedCourseControl()) {
+function renderCourseList(focus = courseFocusToRestore()) {
   const rows = courseRows();
   const connectedBindings = Array.isArray(state.status?.bindings) ? state.status.bindings : [];
-  courseList.setAttribute("aria-busy", String(!state.status || state.busy));
+  courseList.setAttribute("aria-busy", String(state.statusLoading || state.busy));
   renderCourseToolbar(rows);
   courseSelectModeButton.setAttribute("aria-pressed", String(state.selectMode));
   courseSelectModeButton.textContent = state.selectMode ? "Done" : "Select";
@@ -1656,7 +1689,7 @@ function renderEditBanner() {
   askFirstAllCoursesButton.disabled = state.busy || bindings.length === 0;
 }
 
-function render(courseFocus = focusedCourseControl()) {
+function render(courseFocus = courseFocusToRestore()) {
   renderCustomize();
   renderCourseList(courseFocus);
   renderSelection();
@@ -1699,7 +1732,7 @@ function normalizeEditOptions(result, binding) {
 async function refresh() {
   if (state.busy) return;
   const generation = ++state.readGeneration;
-  courseList.setAttribute("aria-busy", "true");
+  state.statusLoading = true;
   refreshButton.disabled = true;
   // WI-F.10: renders the loading skeleton for the very first read. A later refresh re-renders the
   // course list it already has, which is a no-op until the new read replaces it. Only the course
@@ -1747,6 +1780,7 @@ async function refresh() {
     if (generation !== state.readGeneration) return;
     await refreshCourseMeta();
     if (generation !== state.readGeneration) return;
+    state.statusLoading = false;
     render();
     void refreshSelectedOptions();
     void autoStartDiscovery();
