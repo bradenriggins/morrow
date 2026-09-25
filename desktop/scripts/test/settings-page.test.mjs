@@ -1535,12 +1535,75 @@ test("a state the page cannot read is named as itself, with the next action", as
   assert.equal(page.text("#error"), problemText("bridge_extension_unreachable"));
   assert.equal(page.text("#connection-status"), "Connected courses were not checked.");
   assert.equal(page.text("#course-list"), "Connected courses were not checked. Select Refresh connected courses.");
+  assert.equal(page.query("#course-list").getAttribute("aria-busy"), "false", "a finished failed read must not leave its result region busy");
   assert.equal(page.text("#selection-summary"), "Course access was not checked. Select Refresh connected courses.");
   assert.equal(page.query("#refresh").disabled, false);
 
   const unreadable = await openSettings({ status: () => ({ bindings: "none" }) });
   assert.equal(unreadable.text("#error"), problemText("edit_policy_status_unreadable"));
   assert.equal(unreadable.text("#connection-status"), "Connected courses were not checked.");
+  assert.equal(unreadable.query("#course-list").getAttribute("aria-busy"), "false");
+});
+
+test("a passive course refresh restores keyboard focus to the same row action", async () => {
+  const page = await openSettings({ status: () => statusFixture([ANATOMY]) });
+  const selector = `[data-toggle-course="${ANATOMY.sourceBindingId}"]`;
+  page.query(selector).focus();
+  await page.click("#refresh");
+  assert.ok(globalThis.document.activeElement === page.query(selector), "refresh replaced the focused row action without restoring focus");
+});
+
+test("a custom course refresh restores the Customize action, not the Custom chip", async () => {
+  const custom = canvasCourse(1, "Anatomy", { editPermission: { ...editPermissionSummary("canvas:course-1"), enabledCategories: ["canvas_assignment_text", "canvas_publish_state"] } });
+  const page = await openSettings({ status: () => statusFixture([custom]) });
+  const detail = await openCourseDetail(page, custom.sourceBindingId);
+  const selector = `#${detail.getAttribute("id")} .course-detail-links [data-open-customize]`;
+  page.query(selector).focus();
+  await page.click("#refresh");
+  assert.ok(globalThis.document.activeElement === page.query(selector), "the Customize action was replaced by the Custom chip");
+});
+
+test("a pending course refresh keeps the course list busy until its result appears", async () => {
+  let finishRead;
+  let reads = 0;
+  const page = await openSettings({ status: () => {
+    reads += 1;
+    return reads === 1 ? statusFixture([ANATOMY]) : new Promise((resolve) => { finishRead = resolve; });
+  } });
+  const refresh = page.click("#refresh");
+  await page.waitFor(() => reads === 2, "the course refresh did not start");
+  assert.equal(page.query("#course-list").getAttribute("aria-busy"), "true");
+  finishRead(statusFixture([ANATOMY]));
+  await refresh;
+  assert.equal(page.query("#course-list").getAttribute("aria-busy"), "false");
+});
+
+test("a course that disappears on refresh moves keyboard focus to the course heading", async () => {
+  let courses = [ANATOMY];
+  const page = await openSettings({ status: () => statusFixture(courses) });
+  page.query(`[data-toggle-course="${ANATOMY.sourceBindingId}"]`).focus();
+  courses = [];
+  await page.click("#refresh");
+  assert.ok(globalThis.document.activeElement === page.query("#courses-title"), "removing the focused course left focus on its detached row");
+});
+
+test("a course Edit action keeps keyboard focus through its busy and saved states", async () => {
+  let finishSave;
+  const saving = new Promise((resolve) => { finishSave = resolve; });
+  const page = await openSettings({
+    status: () => statusFixture([ANATOMY]),
+    options: (sourceBindingId) => optionsFixture(sourceBindingId, CANVAS_ROUTINE_OPTIONS),
+    handlers: { morrow_edit_policy_save: () => saving },
+  });
+  const detail = await openCourseDetail(page, ANATOMY.sourceBindingId);
+  const selector = `#${detail.getAttribute("id")} [data-set-level="routine"]`;
+  page.query(selector).focus();
+  await page.click(selector);
+  await page.waitFor(() => page.messages("morrow_edit_policy_save").length === 1, "the course Edit action did not start");
+  assert.ok(globalThis.document.activeElement === page.query("#courses-title"), "busy state left focus on a removed button");
+  finishSave({ editPermission: { enabledCategories: CANVAS_ROUTINE_IDS } });
+  await page.waitFor(() => page.text("#notice").includes("Routine edits are on"), "the course Edit action did not finish");
+  assert.ok(globalThis.document.activeElement === page.query(selector), "saving Edit replaced the focused control without restoring focus");
 });
 
 // WI-5.3: connecting is per row now ("Connect"), not a multi-select-then-bulk-connect flow.
