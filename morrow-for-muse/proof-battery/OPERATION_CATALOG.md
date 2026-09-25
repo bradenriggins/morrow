@@ -1,7 +1,7 @@
 # Morrow for Muse: Operation Catalog (authoritative)
 
 Date: 2026-09-20. Product: Morrow for Muse (Canvas connector and separate Moodle session lane, no MCP).
-Package note (0.4.2): Moodle runtime and agent instructions ship in the release. Moodle claims remain limited to the live-proven rows and lane-level evidence below; catalog status is provider-specific.
+Package note (0.4.3): Moodle runtime and agent instructions ship in the release. Moodle claims remain limited to the live-proven rows and lane-level evidence below; catalog status is provider-specific.
 This file is the authoritative operation catalog for the proof battery. It supersedes the older proof ledger (proof-battery/LEDGER.md), which the source repository keeps as-is for history; it is not in the release.
 
 Path convention: the desktop catalog records paths without the /api prefix; every Canvas REST path below is shown with the real /api prefix added.
@@ -929,7 +929,7 @@ Note: battery2.py also covered the accessibility-relevant check (title non-empty
 
 ## Moodle course-level operations
 
-Reference: the desktop Moodle browser catalog (250 operations). Live proof: proofs/moodle-lane-proof.md (2026-09-20, sandbox.moodledemo.net, Moodle 5.2, teacher demo account). The sandbox resets hourly; production SSO variants and session lifetimes are unproven (proof section 6). Context 2026-09-21: the Moodle read battery (moodle-read-battery/MATRIX.md) enumerated 352 registered external functions on sandbox.moodledemo.net (Moodle 5.2.3): 110 PROVEN / 65 FAILED / 177 BLOCKED over AJAX. The Moodle lane is out of v1, so catalog M-rows keep their existing statuses; this battery is context only, not per-op proof. Context 2026-09-21: the Moodle read battery (moodle-read-battery/MATRIX.md) enumerated 352 registered external functions on sandbox.moodledemo.net (Moodle 5.2.3): 110 PROVEN / 65 FAILED / 177 BLOCKED over AJAX. The Moodle lane is out of v1, so catalog M-rows keep their existing statuses; this battery is context only, not per-op proof.
+Reference: the desktop Moodle browser catalog (250 operations). Live proof: proofs/moodle-lane-proof.md (2026-09-20, sandbox.moodledemo.net, Moodle 5.2, teacher demo account). The sandbox resets hourly; production SSO variants and session lifetimes are unproven (proof section 6). Context 2026-09-21: the Moodle read battery (moodle-read-battery/MATRIX.md) enumerated 352 registered external functions on sandbox.moodledemo.net (Moodle 5.2.3): 110 PROVEN / 65 FAILED / 177 BLOCKED over AJAX. Morrow for Muse includes the separate Moodle session lane. Each M-row keeps its operation-specific evidence status; this battery is context only, not per-op proof.
 
 ### moodle.core_backup (2)
 

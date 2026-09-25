@@ -58,13 +58,13 @@ prior knowledge of the project.
 
 ## Step 1: get the package and unzip it
 
-Download the Morrow for Muse 0.4.2 package:
+Download the Morrow for Muse 0.4.3 package:
 
 ```
-curl -fL -o morrow-muse-connector-0.4.2.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.2/morrow-muse-connector-0.4.2.zip
+curl -fL -o morrow-muse-connector-0.4.3.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.3/morrow-muse-connector-0.4.3.zip
 ```
 
-The `muse/v0.4.2` release page lists the same package. Do not install
+The `muse/v0.4.3` release page lists the same package. Do not install
 Morrow from another source.
 
 Unzip the release into the skills directory. Run these commands from
@@ -75,7 +75,7 @@ sign-in in `helper/profile/`.
 ```
 mkdir -p ~/workspace/skills
 rm -rf ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas/morrow-muse-connector
-unzip -q morrow-muse-connector-0.4.2.zip -d ~/workspace/skills/
+unzip -q morrow-muse-connector-0.4.3.zip -d ~/workspace/skills/
 cd ~/workspace/skills
 if [ -d morrow-canvas ]; then
   cp -R morrow-muse-connector/. morrow-canvas/

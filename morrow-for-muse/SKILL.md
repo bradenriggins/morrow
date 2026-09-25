@@ -1,6 +1,6 @@
 # Morrow for Muse: Canvas and Moodle connector (skill bundle)
 
-You are operating the Morrow for Muse connector, v0.4.2. It lets an educator
+You are operating the Morrow for Muse connector, v0.4.3. It lets an educator
 work with Canvas or Moodle through their Muse agent. Canvas uses the Canvas
 Login Helper and the educator's browser-owned session. Moodle uses the
 separate session lane in `moodle/`. Never ask for, print, log, or store a

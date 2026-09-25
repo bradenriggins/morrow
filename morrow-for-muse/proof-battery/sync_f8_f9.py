@@ -146,17 +146,24 @@ if old_std in text:
     text = text.replace(old_std, new_std)
 assert new_std in text
 
-# Moodle section context annotation
+# Moodle section context annotation. The replacement is idempotent: older runs
+# appended this context more than once because old_moodle remains a prefix of
+# new_moodle.
 old_moodle = ("Reference: the desktop Moodle browser catalog (250 operations). Live proof: proofs/moodle-lane-proof.md "
     "(2026-09-20, sandbox.moodledemo.net, Moodle 5.2, teacher demo account). The sandbox resets hourly; production SSO "
     "variants and session lifetimes are unproven (proof section 6).")
-new_moodle = (old_moodle + " Context 2026-09-21: the Moodle read battery (moodle-read-battery/MATRIX.md) enumerated "
+new_context = (" Context 2026-09-21: the Moodle read battery (moodle-read-battery/MATRIX.md) enumerated "
     "352 registered external functions on sandbox.moodledemo.net (Moodle 5.2.3): 110 PROVEN / 65 FAILED / 177 BLOCKED "
-    "over AJAX. The Moodle lane is out of v1, so catalog M-rows keep their existing statuses; this battery is context only, "
+    "over AJAX. Morrow for Muse includes the separate Moodle session lane. Each M-row keeps its operation-specific evidence "
+    "status; this battery is context only, "
     "not per-op proof.")
-if old_moodle in text:
+new_moodle = old_moodle + new_context
+while new_moodle + new_context in text:
+    text = text.replace(new_moodle + new_context, new_moodle)
+if old_moodle in text and new_moodle not in text:
     text = text.replace(old_moodle, new_moodle)
 assert new_moodle in text
+assert new_moodle + new_context not in text
 
 # recompute footer counts
 def count(status_filter, prefix):
