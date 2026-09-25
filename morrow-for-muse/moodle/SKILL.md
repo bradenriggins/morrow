@@ -16,7 +16,10 @@ boundary described below.
    include a command that transfers the VM browser session into that
    bundle. Do not export a school session cookie into a file, command,
    transcript, or chat to bridge this gap. Keep an existing working VM
-   browser path in its browser-owned session.
+   browser path in its browser-owned session. Code that already owns a
+   live `MoodleSession` can call `moodle.keepalive.probe_session(sess)`
+   for one read-only session check; a scheduled process cannot reload
+   that session from JSON.
 3. In the HTTPS lane, the sesskey is a per-session value of 10 or more
    characters that does not rotate; it goes in the `sesskey` query param of every
    `lib/ajax/service.php` call and in the `sesskey` field of every form

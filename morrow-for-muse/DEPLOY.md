@@ -234,7 +234,9 @@ The correct lifecycle is quiz-API delete, never assignment-endpoint delete for N
    in-memory sandbox session and does not create
    `~/.morrow/moodle-session.json`. This package has no production VM
    browser-session handoff command. The keepalive logs `IDLE` when that
-   bundle is absent; its active path is not release-ready.
+   bundle is absent. In source after this deployment, the legacy script
+   refuses a persisted JSON bundle instead of attempting to load it as a
+   live session. That source correction has not been deployed to this VM.
 
 2. **Fresh session capture:** The current Canvas session is valid, but a
    truly fresh capture (if the session ever expires) requires Braden to sign

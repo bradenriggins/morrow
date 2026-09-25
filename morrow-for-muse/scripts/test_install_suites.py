@@ -17,6 +17,11 @@ sweep 2026-09-23):
   4. (final sweep 2026-09-23) the egress suite bound fixed loopback
      ports 18093 to 18099, so any program holding one of them, or a
      second install running at the same time, failed install step 9.
+  5. A dependency installed in the invoking interpreter's user site
+     disappeared when each suite changed HOME. A VM with a current
+     user-site cryptography package then imported an older system copy
+     and failed step 9. Preserve the invoking interpreter's package
+     search path while keeping each suite's HOME and live state isolated.
 """
 
 import json
@@ -107,6 +112,40 @@ def test_every_suite_runs_isolated_from_live_state(tmp_path):
         homes.add(home)
         assert [v for v in LIVE if v in seen["env"]] == [], suite
     assert len(homes) == 23, "every suite gets its own scratch home"
+
+
+def test_user_site_dependency_survives_scratch_home(tmp_path):
+    tree = _fake_tree(tmp_path)
+    live_home = tmp_path / "live-home"
+    live_home.mkdir()
+    base_python = sys._base_executable
+    env = dict(os.environ, HOME=str(live_home), PYTHONPATH="")
+    user_site = subprocess.check_output(
+        [base_python, "-c", "import site; assert site.ENABLE_USER_SITE; "
+         "print(site.getusersitepackages())"], env=env, text=True).strip()
+    os.makedirs(user_site)
+    module = os.path.join(user_site, "morrow_user_site_probe.py")
+    with open(module, "w") as fh:
+        fh.write("MARKER = 'user-site dependency available'\n")
+    suite = carve.install_suites()[0]
+    (tree / suite).write_text(
+        "import morrow_user_site_probe\n"
+        "assert morrow_user_site_probe.MARKER == "
+        "'user-site dependency available'\n"
+        "import os\n"
+        "assert os.environ['HOME'] != %r\n" % str(live_home)
+        + "assert 'MORROW_HOME' not in os.environ\n")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "python3").symlink_to(base_python)
+    env["PATH"] = str(bindir) + os.pathsep + os.environ["PATH"]
+    env.update(LIVE)
+    proc = subprocess.run(
+        ["bash", str(tree / "scripts" / "install-suites.sh"), suite],
+        cwd=tree, env=env,
+        capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert proc.stdout.splitlines()[-1] == "1/1 selftest suites pass"
 
 
 def test_a_failed_suite_is_named_and_the_rest_still_run(tmp_path):

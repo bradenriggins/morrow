@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.5 (2026-09-24)
+
+The release package is `morrow-muse-connector-0.4.5.zip` from the
+`muse/v0.4.5` GitHub release.
+
+- Reject serialized Moodle session bundles before a journal is opened.
+  An in-memory caller can make one read-only session health probe that
+  checks the Moodle origin, account, and sesskey. The old scheduled Moodle
+  keepalive now reports idle or blocked without loading a session file.
+- Clarify that the demo login command does not create a reusable session.
+  The production Muse browser-session handoff and Moodle Plan/Edit approval
+  path remain unresolved. No Moodle account or VM state was changed.
+- Preserve a simple Moodle site path such as `/moodle` through login,
+  dispatch, and the read-only health probe. Reject ambiguous base URLs
+  before session construction. This path handling is locally verified;
+  no school deployment was tested.
+- Keep hash-pinned optional packages installed in the invoking Python user
+  site visible to install selftests while each suite runs under a scratch
+  HOME with live state variables removed.
+
 ## 0.4.4 (2026-09-24)
 
 The release package is `morrow-muse-connector-0.4.4.zip` from the

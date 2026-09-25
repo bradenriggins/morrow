@@ -1,8 +1,9 @@
 # Moodle session lane (Morrow for Muse)
 
-This lane ships in Morrow for Muse 0.4.4 as a separate Moodle HTTPS
-module. The root `SKILL.md` routes Moodle requests here; `INSTALL.md`
-explains the shared, hash-locked runtime dependencies. The package does
+This lane ships in Morrow for Muse 0.4.5 as a
+separate Moodle HTTPS module. The root `SKILL.md` routes Moodle requests
+here; `INSTALL.md` explains the shared, hash-locked runtime dependencies.
+The package does
 not include a production VM-browser-to-Python session handoff command.
 
 Live-proven against the official Moodle 5.2 public demo. Current
@@ -28,7 +29,14 @@ never for a real tenant.
   provider-published demo credentials (logintoken anti-CSRF handled),
   sesskey discovery from `M.cfg` on an authenticated page, and a
   sesskey stability check. The cookie jar lives in memory only; stdout
-  carries names, lengths, and statuses, never values.
+  carries names, lengths, and statuses, never values. Its standalone
+  command is a demo check; exiting ends the session and does not start
+  a scheduled keepalive.
+- `keepalive.py`: one read-only `/my/` GET for a caller that already holds
+  a live in-memory `MoodleSession`. It reports healthy only when the site,
+  pinned principal id, and sesskey match. It never returns page content
+  or session values. The legacy scheduled shell script cannot use this
+  function because it has no live session object to pass.
 - `session.py`: `MoodleSession`: a low-level session-authenticated dispatcher.
   Primary path `POST {base}/lib/ajax/service.php` with the
   `[{index, methodname, args}]` envelope; form-path fallback for
@@ -71,6 +79,11 @@ The bootstrap/discovery layer couples to these deployment details:
   bootstrap this way at all.
 - `probe.py` behavioral-tests the function set per tenant, but these
   bootstrap assumptions still have to hold first.
+- A simple Moodle base path such as `/moodle` stays attached to login,
+  dispatch, and read-only health URLs. URL credentials, query, fragment,
+  traversal, and encoded path segments are refused. This path handling
+  has local regression coverage; a school path-prefix deployment has
+  not been live-proven.
 - The live write battery verifies reads, a frozen plan, a forum-discussion
   create, readback, undo, and absence. Its receipts stay in the source
   repository. Runtime journals are local to the configured journal

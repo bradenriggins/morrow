@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Morrow keepalive scheduler: runs the Canvas and Moodle keepalives.
 
-Canvas: once daily. Moodle: every 6 hours (dormant until a session bundle
-exists; the script exits 0 and logs IDLE in that case).
+Canvas: once daily. The legacy Moodle entrypoint runs every 6 hours, but
+cannot restore a browser-owned session from JSON. It reports IDLE without
+a bundle and BLOCKED if a legacy bundle exists. An active in-memory
+MoodleSession can use moodle/keepalive.py instead.
 
 This is a userspace scheduler because the VM has no cron daemon and only
 /home/hatch survives restarts. It persists under the deploy directory.

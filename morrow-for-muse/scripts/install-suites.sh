@@ -59,6 +59,15 @@ catalog/a11y/runner_selftest.py"
 [ -n "${NAMED}" ] && SUITES="${NAMED}"
 SELFTEST_UNSET="MORROW_HOME MORROW_TREE_STATE_DIR MORROW_SOURCE_VAULT_PATH MORROW_APPROVAL_SIGNING_KEY MORROW_USER_ID MORROW_CONVERSATION_ID MORROW_HELPER_ENV_FILE MORROW_PRIVACY_MAP MORROW_PRIVACY_SALT MORROW_SELFTEST_HOME LOGIN_HELPER_PROFILE_DIR LOGIN_HELPER_PORT LOGIN_HELPER_CDP_PORT PROC_ROOT"
 
+# Resolve the invoking interpreter's active user site before HOME changes.
+# On Muse, hash-pinned optional packages may be installed there. The
+# selftests still use scratch HOME and never receive live state variables.
+USER_SITE="$(python3 -c 'import site, sys; p = site.getusersitepackages(); print(p if site.ENABLE_USER_SITE and p in sys.path else "")')" || exit 2
+SUITE_PYTHONPATH="${PYTHONPATH:-}"
+if [ -n "${USER_SITE}" ]; then
+  SUITE_PYTHONPATH="${USER_SITE}${SUITE_PYTHONPATH:+:${SUITE_PYTHONPATH}}"
+fi
+
 WORK="${TREE}/.selftest-work"
 mkdir -p "${WORK}" || exit 2
 selftest_env() {
@@ -70,7 +79,7 @@ selftest_env() {
     _st_args="${_st_args} -u ${_v}"
   done
   # shellcheck disable=SC2086
-  env ${_st_args} HOME="${_st_home}" PYTHONDONTWRITEBYTECODE=1 "$@"
+  env ${_st_args} HOME="${_st_home}" PYTHONPATH="${SUITE_PYTHONPATH}" PYTHONDONTWRITEBYTECODE=1 "$@"
 }
 
 PASS=0
