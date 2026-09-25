@@ -978,10 +978,12 @@ test("the Chrome step shows the full Bridge folder path, a Copy button, and the 
   const windows = actionView(state({ ...addBridgeStateInput(), bridgeFolderPath: "C:\\Users\\t\\AppData\\Roaming\\Morrow\\Bridge" }), { platform: "win32" });
   assert.match(windows.body, /address bar at the top of the folder picker/);
   assert.doesNotMatch(windows.body, /Command\+Shift\+G/);
-  assert.doesNotMatch(mac.body, /Chrome has not loaded Morrow Bridge yet/);
+  assert.doesNotMatch(mac.body, /Bridge connection not confirmed/);
 
   const late = actionView(addBridgeState(), { platform: "darwin", bridgeWaitExpired: true });
-  assert.match(late.body, /Chrome has not loaded Morrow Bridge yet/);
+  assert.match(late.body, /Bridge connection not confirmed/);
+  assert.match(late.body, /If you already added Bridge in Chrome, select Check Bridge/);
+  assert.doesNotMatch(late.body, /Chrome has not loaded Morrow Bridge yet/);
 });
 
 function addBridgeStateInput() {

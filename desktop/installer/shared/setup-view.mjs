@@ -329,7 +329,7 @@ function bridgeFolderBlock(current, { platform = null, bridgeWaitExpired = false
       ? "In the folder picker Chrome opens, press <strong>Command+Shift+G</strong>, paste this path, press Return, then select <strong>Select</strong>."
       : "In the folder picker Chrome opens, go to this path.";
   const late = bridgeWaitExpired
-    ? '<div class="blocked-box"><strong>Chrome has not loaded Morrow Bridge yet</strong><p>Check that you chose this exact folder in <strong>Load unpacked</strong>, not a folder inside it or a copy of it.</p></div>'
+    ? '<div class="blocked-box"><strong>Bridge connection not confirmed</strong><p>If you already added Bridge in Chrome, select Check Bridge. If Morrow still cannot connect, use Load unpacked to select the exact Bridge folder shown below.</p></div>'
     : "";
   return `${late}<div class="materials-row"><div><h3>Bridge folder</h3><p class="path-text">${escapeHtml(folder)}</p><p>${reach}</p></div><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="${escapeHtml(folder)}" aria-label="Copy the Bridge folder path">Copy path</button></div>`;
 }

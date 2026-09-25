@@ -548,8 +548,8 @@ function setActiveView(next) {
   applyActiveView();
 }
 
-// How long the Chrome folder step may show before setup points at the exact
-// folder, since loading a folder inside it or a copy of it is the usual mistake.
+// How long the Chrome folder step may show before setup checks the observed
+// connection again and points at the exact folder if it is still unconfirmed.
 const BRIDGE_FOLDER_HINT_MS = 90_000;
 let bridgeStepShownAt = null;
 let bridgeHintTimer = null;
@@ -562,7 +562,11 @@ function bridgeWaitExpired(current) {
   bridgeStepShownAt ??= Date.now();
   const remaining = bridgeStepShownAt + BRIDGE_FOLDER_HINT_MS - Date.now();
   if (remaining > 0 && bridgeHintTimer === null) {
-    bridgeHintTimer = setTimeout(() => { bridgeHintTimer = null; render(state); }, remaining);
+    bridgeHintTimer = setTimeout(() => {
+      bridgeHintTimer = null;
+      if (busy) render(state);
+      else void refresh();
+    }, remaining);
     bridgeHintTimer?.unref?.();
   }
   return remaining <= 0;
