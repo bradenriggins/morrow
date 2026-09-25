@@ -367,7 +367,7 @@ function capture(command, args, options = {}) {
 }
 
 function lockfileIntegrity(lockfile, name, version) {
-  const packagesStart = lockfile.indexOf("\npackages:\n");
+  const packagesStart = lockfile.lastIndexOf("\npackages:\n");
   const snapshotsStart = lockfile.indexOf("\nsnapshots:\n", packagesStart + 1);
   if (packagesStart < 0 || snapshotsStart < 0) throw new Error("pnpm lockfile does not contain bounded package integrity records.");
   const packages = lockfile.slice(packagesStart, snapshotsStart);

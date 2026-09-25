@@ -7,9 +7,10 @@ https://meetmorrow.app/morrow-for-muse", then follow the conversation
 (`content/setup-guide.md` is the educator walkthrough and
 `FIRST_RUN.md` is the agent's first-hour checklist).
 
-This document takes you from a fresh Muse VM to a verified Canvas or
-Moodle connection. Every step is executable as written; nothing here assumes
-prior knowledge of the project.
+This document takes you from a fresh Muse VM to a verified Canvas
+connection. It also installs the separate Moodle HTTPS module, but this
+release does not connect a signed-in Muse browser session to that module.
+The steps below cover Canvas sign-in and readback.
 
 ## Prerequisites
 
@@ -58,13 +59,13 @@ prior knowledge of the project.
 
 ## Step 1: get the package and unzip it
 
-Download the Morrow for Muse 0.4.3 package:
+Download the Morrow for Muse 0.4.4 package:
 
 ```
-curl -fL -o morrow-muse-connector-0.4.3.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.3/morrow-muse-connector-0.4.3.zip
+curl -fL -o morrow-muse-connector-0.4.4.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.4/morrow-muse-connector-0.4.4.zip
 ```
 
-The `muse/v0.4.3` release page lists the same package. Do not install
+The `muse/v0.4.4` release page lists the same package. Do not install
 Morrow from another source.
 
 Unzip the release into the skills directory. Run these commands from
@@ -75,7 +76,7 @@ sign-in in `helper/profile/`.
 ```
 mkdir -p ~/workspace/skills
 rm -rf ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas/morrow-muse-connector
-unzip -q morrow-muse-connector-0.4.3.zip -d ~/workspace/skills/
+unzip -q morrow-muse-connector-0.4.4.zip -d ~/workspace/skills/
 cd ~/workspace/skills
 if [ -d morrow-canvas ]; then
   cp -R morrow-muse-connector/. morrow-canvas/
@@ -317,7 +318,13 @@ previously-working box is a config error (wrong profile path), never a
 dead session. See `SKILL.md` and `knowledge/troubleshooting-playbook.md`
 for the full field guide.
 
-## Step 5: sign in (you, not the agent)
+## Step 5: sign in to Canvas (you, not the agent)
+
+This helper signs in to Canvas. Moodle uses the separate module in
+`moodle/`; this release does not provide a command that hands a Muse VM
+browser session to `MoodleSession`. See `moodle/SKILL.md` for the
+Moodle lane's exact scope and do not use the sandbox form-login command
+with a school account.
 
 Open the helper UI in your phone's browser (the artifact or page your
 agent points you to reaches the VM's `127.0.0.1:8901`). The UI shows the

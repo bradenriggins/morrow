@@ -83,9 +83,9 @@ test("the pnpm/action-setup layout starts pnpm's JavaScript entry with this Node
 
 test("a pnpm shim with a relative or an absolute target starts the program it names", () => {
   const bin = "C:\\pnpm-home\\bin";
-  const entry = "C:\\pnpm-home\\.tools\\pnpm\\10.6.1\\node_modules\\pnpm\\bin\\pnpm.cjs";
+  const entry = "C:\\pnpm-home\\.tools\\pnpm\\12.6.0\\node_modules\\pnpm\\bin\\pnpm.cjs";
   assert.deepEqual(
-    lookup({ PATH: bin }, { [`${bin}\\pnpm.CMD`]: pnpmShim("\"%~dp0\\..\\.tools\\pnpm\\10.6.1\\node_modules\\pnpm\\bin\\pnpm.cjs\""), [entry]: "" }),
+    lookup({ PATH: bin }, { [`${bin}\\pnpm.CMD`]: pnpmShim("\"%~dp0\\..\\.tools\\pnpm\\12.6.0\\node_modules\\pnpm\\bin\\pnpm.cjs\""), [entry]: "" }),
     { command: NODE, args: [entry] },
   );
   assert.deepEqual(

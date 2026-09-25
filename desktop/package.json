@@ -1,12 +1,12 @@
 {
   "name": "morrow",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "type": "module",
   "bin": {
     "morrow": "./packages/client-config/dist/cli.js"
   },
-  "packageManager": "pnpm@10.6.1",
+  "packageManager": "pnpm@12.6.0",
   "engines": {
     "node": ">=22.13"
   },
@@ -70,9 +70,6 @@
     "weekend:check": "node scripts/weekend-check.mjs",
     "conformance:report": "node scripts/conformance-report.mjs",
     "package:desktop:payload": "node scripts/package-mcp-bundle.mjs"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
   },
   "devDependencies": {
     "@types/node": "^22.20.4",

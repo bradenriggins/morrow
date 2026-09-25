@@ -1,8 +1,9 @@
 # Moodle session lane (Morrow for Muse)
 
-This lane ships in Morrow for Muse 0.4.3 as a separate Moodle connection
-path. The root `SKILL.md` routes Moodle requests here; `INSTALL.md`
-explains the shared, hash-locked runtime dependencies.
+This lane ships in Morrow for Muse 0.4.4 as a separate Moodle HTTPS
+module. The root `SKILL.md` routes Moodle requests here; `INSTALL.md`
+explains the shared, hash-locked runtime dependencies. The package does
+not include a production VM-browser-to-Python session handoff command.
 
 Live-proven against the official Moodle 5.2 public demo. Current
 operation statuses are in `../proof-battery/OPERATION_CATALOG.md`.
@@ -23,17 +24,19 @@ never for a real tenant.
 
 ## Files
 
-- `login.py`: session bootstrap. Form login with the provider-published
-  demo credentials (logintoken anti-CSRF handled), sesskey discovery
-  from `M.cfg` on an authenticated page, sesskey stability check. The
-  cookie jar lives in memory only; stdout carries names, lengths, and
-  statuses, never values.
-- `session.py`: `MoodleSession`: the session-authenticated dispatcher.
+- `login.py`: sandbox session bootstrap. Form login with the
+  provider-published demo credentials (logintoken anti-CSRF handled),
+  sesskey discovery from `M.cfg` on an authenticated page, and a
+  sesskey stability check. The cookie jar lives in memory only; stdout
+  carries names, lengths, and statuses, never values.
+- `session.py`: `MoodleSession`: a low-level session-authenticated dispatcher.
   Primary path `POST {base}/lib/ajax/service.php` with the
   `[{index, methodname, args}]` envelope; form-path fallback for
   functions the site does not AJAX-expose. Expiry classifier
   (`classify_signal`), journal (append-only JSONL), used-op-id set,
-  frozen-plan writes with verify blocks, truncation caps.
+  frozen-plan writes with optional verify blocks, truncation caps. This
+  module does not enforce the Canvas executor's catalog, mode, or approval
+  gate; do not use its write method for production course changes.
 - `probe.py`: connect-time capability probe (read-only): version,
   principal, per-function `allowed_from_ajax` classification by live
   behavioral probing, session cookie shape, sesskey stability, and the

@@ -48,10 +48,11 @@
 # --no-index --find-links on the local artifact dir, WITH dependencies
 # (not --no-deps), so the transitive closure is exercised.
 #
-# numpy 2.4.6 (2026-09-23) replaced 2.2.6 after that proof. Its two
-# hashes are PyPI's published sha256 digests for the CPython 3.11 and 3.12
-# manylinux_2_27 x86_64 wheels (glibc 2.27 or later). CI's hash-locked
-# install on CPython 3.12 exercises it.
+# numpy 2.4.6 (2026-09-23) replaced 2.2.6 after that proof. Its hashes
+# are PyPI's published sha256 digests for CPython 3.11 and 3.12
+# manylinux_2_27 x86_64, CPython 3.14 macOS 14 arm64, and CPython 3.12
+# macOS 14 arm64. The Mac CPython 3.12 hash was added after a failed
+# hash-locked install on that platform.
 --require-hashes
 requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
@@ -75,4 +76,5 @@ certifi==2026.7.22 \
 numpy==2.4.6 \
     --hash=sha256:89cd468399cfd2504718f0ba50e410dca55a170b61a02ad92bb18c8a65186e93 \
     --hash=sha256:90f9849678c75fe7afa2d348ac842c168b0a4d3d61919687216dfc547976d853 \
+    --hash=sha256:3213d622a0283a39a93d188f3cf72b26862df52fbb4ca3697f51705016523d41 \
     --hash=sha256:d581b735e177fdcdce6fed8e7e8880a3fb6ee4e3653a3ac6af01c6f4c03effc5
