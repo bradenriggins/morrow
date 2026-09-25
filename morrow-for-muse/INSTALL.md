@@ -326,6 +326,11 @@ browser session to `MoodleSession`. See `moodle/SKILL.md` for the
 Moodle lane's exact scope and do not use the sandbox form-login command
 with a school account.
 
+The unreleased Moodle course-read candidate uses its own browser and helper
+port. It does not change this Canvas setup. See `moodle/README.md` for its
+operator commands and limits; a signed-in Moodle page alone does not prove a
+course read.
+
 Open the helper UI in your phone's browser (the artifact or page your
 agent points you to reaches the VM's `127.0.0.1:8901`). The UI shows the
 live Canvas login page. Sign in exactly as you normally would, including

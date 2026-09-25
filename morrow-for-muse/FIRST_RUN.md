@@ -8,6 +8,11 @@ its setup or sending a course change. The educator does everything by
 talking to Muse; shell commands below are operator diagnostics, never
 educator homework.
 
+The new browser-owned Moodle course-read candidate has a separate profile and
+helper port. It requires a real school sign-in and a successful `moodle.browser_read
+courses` read before it can be described as connected. It cannot make Moodle
+changes or read student data. See `moodle/README.md`.
+
 ## 1. Install
 
 Run `install.sh` from the dist root. Expected:
