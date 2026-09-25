@@ -59,11 +59,17 @@ describe("approval HTTP shutdown", () => {
       expect(cookie).toBeTruthy();
 
       holdReview = true;
-      const pendingReview = fetch(reviewUrl).then(
+      const pendingReview = fetch(reviewUrl);
+      await reviewStarted.promise;
+      const loading = await pendingReview;
+      expect(loading.status).toBe(200);
+      const reader = loading.body!.getReader();
+      const firstChunk = await reader.read();
+      expect(new TextDecoder().decode(firstChunk.value)).toContain("Preparing your review");
+      const pendingBody = reader.read().then(
         () => "completed",
         () => "aborted",
       );
-      await reviewStarted.promise;
 
       partial = partialPost(new URL(`${reviewUrl}/approve`), {
         "content-type": "application/x-www-form-urlencoded",
@@ -83,7 +89,7 @@ describe("approval HTTP shutdown", () => {
         new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("approval close exceeded its bound")), 1_000)),
       ])).resolves.toBeUndefined();
       expect(Date.now() - startedAt).toBeLessThan(1_000);
-      await expect(pendingReview).resolves.toBe("aborted");
+      await expect(pendingBody).resolves.toBe("aborted");
       await expect(fetch(`${baseUrl}/operations`, { signal: AbortSignal.timeout(500) })).rejects.toThrow();
     } finally {
       releaseReview.resolve();

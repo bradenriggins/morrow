@@ -236,15 +236,19 @@ function sendJson(response: ServerResponse, status: number, body: JsonObject): v
   response.end(JSON.stringify(body));
 }
 
-function sendHtml(response: ServerResponse, status: number, body: string, cookie?: string): void {
-  response.writeHead(status, {
+function htmlHeaders(cookie?: string): Record<string, string> {
+  return {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "no-store",
     "content-security-policy": "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     "referrer-policy": "same-origin",
     "x-content-type-options": "nosniff",
     ...(cookie ? { "set-cookie": cookie } : {}),
-  });
+  };
+}
+
+function sendHtml(response: ServerResponse, status: number, body: string, cookie?: string): void {
+  response.writeHead(status, htmlHeaders(cookie));
   response.end(body);
 }
 
@@ -254,7 +258,21 @@ function pageShell(title: string, body: string, polling = false): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Morrow</title>${brandHead}<script src="/review-status.js" defer></script></head><body${polling ? ' data-polling="true"' : ""}><main class="wrap">${brandHeader}<article class="card">${body}</article><p class="foot">This review stays on your computer.</p></main></body></html>`;
 }
 
-const STATUS_SCRIPT = `const changeList = document.querySelector(".change-list");
+function loadingReviewStart(): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Preparing your review · Morrow</title>${brandHead}<script src="/review-status.js" defer></script></head><body><main class="wrap">${brandHeader}<article class="card"><div id="review-loading" role="status" aria-live="polite"><header class="hero"><p class="loading-title" role="heading" aria-level="1">Preparing your review</p><p>Reading the current course details. This can take a moment.</p></header></div>`;
+}
+
+function finishLoadingReview(response: ServerResponse, title: string, content: string): void {
+  response.end(`<div id="review-ready" data-page-title="${escapeHtml(title)}" hidden>${content}</div></article><p class="foot">This review stays on your computer.</p></main></body></html>`);
+}
+
+const STATUS_SCRIPT = `const reviewReady = document.getElementById("review-ready");
+if (reviewReady) {
+  document.getElementById("review-loading").hidden = true;
+  reviewReady.hidden = false;
+  document.title = reviewReady.dataset.pageTitle + " · Morrow";
+}
+const changeList = document.querySelector(".change-list");
 if (changeList) {
   const items = [...changeList.querySelectorAll(".change-item")];
   const search = document.getElementById("change-search");
@@ -1029,6 +1047,21 @@ async function reviewContexts(
   return contexts;
 }
 
+// Ignore changing timestamps, but reject a new state, operation, source, or plan after the live read.
+function reviewIdentity(target: ApprovalTarget, snapshot: JsonObject): string {
+  const operations = target.kind === "batches" && Array.isArray(snapshot.children)
+    ? snapshot.children.map((child) => object(object(child).operation)) : [snapshot];
+  return JSON.stringify({
+    state: reviewState(target, snapshot),
+    operations: operations.map((operation) => ({
+      operationId: operation.operationId,
+      state: operation.state,
+      sourceBindingId: operation.sourceBindingId,
+      plan: operation.plan,
+    })),
+  });
+}
+
 /**
  * Who each learner label in the reviewed operations is, from Morrow's own learner vault. A label
  * two operations name differently is left out, so the Bridge never shows a guess.
@@ -1075,6 +1108,7 @@ function html(
   rememberText: string | undefined,
   recentEntry: string | null,
   closeOffer = false,
+  renderPage: (title: string, body: string, polling?: boolean) => string = pageShell,
 ): string {
   let issued: string | null = null;
   const nonce = (): string => (issued ??= grant());
@@ -1086,7 +1120,7 @@ function html(
   const expiry = String(snapshot.approvalExpiresAt || snapshot.expiresAt || "");
   const expired = Number.isFinite(Date.parse(expiry)) && Date.parse(expiry) <= Date.now();
   const state = reviewState(target, snapshot);
-  if (state === "awaiting_approval" && expired) return statePage("expired", platform);
+  if (state === "awaiting_approval" && expired) return renderPage("Request status", stateContent("expired", platform));
   const expiresAt = Number.isFinite(Date.parse(expiry))
     ? new Date(expiry).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
     : "15 minutes after you opened this page";
@@ -1199,7 +1233,7 @@ function html(
     const close = closeOffer && !batch && !active
       ? `<section class="section person-close"><h2>Checked it yourself?</h2><p>Open the item in Canvas. If it is the way you want it, close this request. Morrow will not send this change again, and the request will say that you checked it, not Morrow.</p><div class="actions"><form method="post" action="/${target.kind}/${escapedId}/close"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="secondary" type="submit">I checked it in Canvas: close this change</button></form></div></section>`.replaceAll("Canvas", platform)
       : "";
-    return pageShell("Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active, contexts, rememberText, recentEntry)}</div>${close}${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
+    return renderPage("Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active, contexts, rememberText, recentEntry)}</div>${close}${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
   }
   const addingQuestion = !batch && plan.tool === "canvas_create_quiz_item";
   const planRouting = object(object(plan.arguments)._morrow);
@@ -1233,7 +1267,7 @@ function html(
     ? `<button name="remember" value="1" class="approve secondary" type="submit">${approveLabel}, and do not ask again for ${escapeHtml(rememberOffer.label.toLocaleLowerCase())} in this course</button>`
     : "";
   const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="approve${destructive ? " danger" : ""}" type="submit">${approveLabel}</button>${rememberButton}</form>`;
-  return pageShell(title, `<header class="hero${destructive ? " danger" : ""}"><h1>${escapeHtml(title)}</h1>${requestedByLine(snapshot, plans)}${batchSummary}${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${reviewContent}<footer class="decision"><div class="next-step">${next}</div><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="cancel" type="submit">Cancel</button></form></div><details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></footer>`);
+  return renderPage(title, `<header class="hero${destructive ? " danger" : ""}"><h1>${escapeHtml(title)}</h1>${requestedByLine(snapshot, plans)}${batchSummary}${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${reviewContent}<footer class="decision"><div class="next-step">${next}</div><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce())}"><button class="cancel" type="submit">Cancel</button></form></div><details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></footer>`);
 }
 
 /**
@@ -1718,33 +1752,69 @@ export class LoopbackApprovalServer {
         }
         const expiry = Date.parse(String(snapshot.approvalExpiresAt || snapshot.expiresAt || ""));
         const state = reviewState(target, snapshot);
-        const contexts = state !== "awaiting_approval" || !Number.isFinite(expiry) || expiry > Date.now()
-          ? await reviewContexts(this.controller, operations, signal)
-          : new Map<string, ApprovalReviewContext>();
         const nonceKey = `${target.kind}:${target.id}`;
-        const canApprove = !namedTargetsMissing(operations, contexts);
         const cookiePath = `/${target.kind}/${encodeURIComponent(target.id)}`;
-        let nonce: string | null = null;
-        const rememberOffer = target.kind === "operations" && state === "awaiting_approval" && this.controller.rememberOffer
-          ? await this.controller.rememberOffer(target.id).catch(() => null)
-          : null;
-        const recentEntry = state === "verified" ? this.issueRecentChangesEntry(`${target.kind}:${target.id}`) : null;
-        const closeOffer = target.kind === "operations" && UNRESOLVED_REVIEW_STATES.has(state)
-          && this.controller.personCloseAvailable?.(target.id) === true;
-        const body = html(target, snapshot, () => (nonce = this.issueNonce(nonceKey, canApprove)), contexts, active, rememberOffer, this.rememberText(target), recentEntry, closeOffer);
-        this.shareLearnerNames(target, ENDED_REVIEW_STATES.has(state) ? undefined : contexts);
-        if (nonce && ((canApprove && state === "awaiting_approval") || closeOffer)) {
-          try {
-            this.controller.announceApprovalPresence?.();
-          } catch { /* the page still loads; the Bridge asks the person to reload when it has no key */ }
+        const streamReview = state === "awaiting_approval"
+          && (!Number.isFinite(expiry) || expiry > Date.now())
+          && Boolean(this.controller.operationReviewContext);
+        // Headers must carry the cookie before the loading shell. Keep its grant disabled until
+        // the context and a fresh snapshot both pass, and never stream a form on failure.
+        const loadingNonce = streamReview ? this.issueNonce(nonceKey, false) : null;
+        if (loadingNonce) {
+          response.writeHead(200, htmlHeaders(`${approvalCookieName(loadingNonce)}=${loadingNonce}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=900`));
+          response.write(loadingReviewStart());
+          response.flushHeaders();
         }
-        sendHtml(
-          response,
-          200,
-          body,
-          nonce ? `${approvalCookieName(nonce)}=${nonce}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=900` : undefined,
-        );
-        return;
+        try {
+          const contexts = state !== "awaiting_approval" || !Number.isFinite(expiry) || expiry > Date.now()
+            ? await reviewContexts(this.controller, operations, signal)
+            : new Map<string, ApprovalReviewContext>();
+          signal.throwIfAborted();
+          const canApprove = !namedTargetsMissing(operations, contexts);
+          let nonce: string | null = null;
+          const rememberOffer = target.kind === "operations" && state === "awaiting_approval" && this.controller.rememberOffer
+            ? await this.controller.rememberOffer(target.id).catch(() => null)
+            : null;
+          const recentEntry = state === "verified" ? this.issueRecentChangesEntry(`${target.kind}:${target.id}`) : null;
+          const closeOffer = target.kind === "operations" && UNRESOLVED_REVIEW_STATES.has(state)
+            && this.controller.personCloseAvailable?.(target.id) === true;
+          let pageTitle = "Review changes";
+          const body = html(target, snapshot, () => (nonce = loadingNonce || this.issueNonce(nonceKey, canApprove)), contexts, active, rememberOffer, this.rememberText(target), recentEntry, closeOffer,
+            loadingNonce ? (title, content) => { pageTitle = title; return content; } : pageShell);
+          if (loadingNonce) {
+            const current = target.kind === "batches"
+              ? this.controller.batchApprovalGet?.(target.id)
+              : this.controller.operationGet(target.id);
+            const currentExpiry = Date.parse(String(current?.approvalExpiresAt || current?.expiresAt || ""));
+            if (!current || reviewIdentity(target, current) !== reviewIdentity(target, snapshot)
+              || !this.nonces.has(loadingNonce) || expiry <= Date.now()
+              || (Number.isFinite(currentExpiry) && currentExpiry <= Date.now())) {
+              this.nonces.delete(loadingNonce);
+              finishLoadingReview(response, "Review changed", '<section class="outcome"><h1>Review changed</h1><p>This request changed while Morrow read the course. <a href="' + escapeHtml(cookiePath) + '">Reload the review</a> to see its current state.</p></section>');
+              return;
+            }
+            const grant = this.nonces.get(loadingNonce);
+            if (!grant || grant.expiresAt <= Date.now() || expiry <= Date.now()) {
+              this.nonces.delete(loadingNonce);
+              finishLoadingReview(response, "Review expired", stateContent("expired", snapshotPlatform(snapshot)));
+              return;
+            }
+            grant.canApprove = canApprove;
+          }
+          this.shareLearnerNames(target, ENDED_REVIEW_STATES.has(state) ? undefined : contexts);
+          if (nonce && ((canApprove && state === "awaiting_approval") || closeOffer)) {
+            try {
+              this.controller.announceApprovalPresence?.();
+            } catch { /* the page still loads; the Bridge asks the person to reload when it has no key */ }
+          }
+          if (loadingNonce) finishLoadingReview(response, pageTitle, body);
+          else sendHtml(response, 200, body,
+            nonce ? `${approvalCookieName(nonce)}=${nonce}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=900` : undefined);
+          return;
+        } catch (error) {
+          if (loadingNonce) this.nonces.delete(loadingNonce);
+          throw error;
+        }
       }
       if (method === "POST" && (target.action === "approve" || target.action === "cancel"
         || (target.action === "close" && target.kind === "operations"))) {
@@ -1866,6 +1936,10 @@ export class LoopbackApprovalServer {
       sendJson(response, 405, { schema: "morrow.problem.v1", code: "method_not_allowed" });
     } catch (error) {
       if (response.destroyed || response.writableEnded) return;
+      if (response.headersSent) {
+        finishLoadingReview(response, "Review unavailable", '<section class="outcome"><h1>Review unavailable</h1><p>Morrow could not finish reading this review. <a href="' + escapeHtml(url.pathname) + '">Reload the review</a> to try again.</p></section>');
+        return;
+      }
       const message = error instanceof Error ? error.message : "approval action failed";
       if (String(request.headers.accept || "").includes("text/html")) {
         sendHtml(response, 409, pageShell("Review unavailable", '<section class="outcome"><h1>Review unavailable</h1><p>This review may have expired or the request may have changed. Return to your assistant and ask Morrow to check its current status.</p><p>Do not repeat the change until Morrow checks the saved result.</p></section>'));
