@@ -17,7 +17,8 @@ globalThis.fetch = async (input) => {
 class ClosedSocket {
   static CONNECTING = 0;
   static OPEN = 1;
-  constructor() { this.readyState = ClosedSocket.CONNECTING; }
+  static attempts = 0;
+  constructor() { this.readyState = ClosedSocket.CONNECTING; ClosedSocket.attempts += 1; }
   send() {}
   close() {}
 }
@@ -133,6 +134,25 @@ function send(message, sender = {}) {
     if (messageHandler(message, sender, resolve) !== true) reject(new Error(`no response for ${message.type}`));
   });
 }
+
+test("only a consented popup can retry a saved Bridge connection", async () => {
+  const popup = { id: EXTENSION_ID, url: `${CATALOG_PREFIX}popup/popup.html` };
+  const otherPage = { id: EXTENSION_ID, url: `${CATALOG_PREFIX}settings/settings.html` };
+  install(fixture({ local: { token: "saved-pairing", morrowCourseDataConsent: null } }));
+  const before = ClosedSocket.attempts;
+  const noConsent = await send({ type: "morrow_reconnect" }, popup);
+  assert.equal(noConsent.ok, false);
+  assert.equal(noConsent.code, "course_data_consent_required");
+  assert.equal(ClosedSocket.attempts, before);
+
+  install(fixture({ local: { token: "saved-pairing" } }));
+  const wrongSender = await send({ type: "morrow_reconnect" }, otherPage);
+  assert.equal(wrongSender.ok, false);
+  assert.equal(ClosedSocket.attempts, before);
+  const allowed = await send({ type: "morrow_reconnect" }, popup);
+  assert.equal(allowed.ok, true);
+  assert.equal(ClosedSocket.attempts, before + 1);
+});
 
 test("course permission preparation never opens an optional Item Banks launch", async () => {
   const value = install(fixture({

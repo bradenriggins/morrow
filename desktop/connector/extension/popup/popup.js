@@ -241,17 +241,6 @@ async function refresh() {
   }
 }
 
-async function retryStatus() {
-  if (actionInFlight) return;
-  actionInFlight = true;
-  updateControls();
-  try { await refresh(); }
-  finally {
-    actionInFlight = false;
-    updateControls();
-  }
-}
-
 function applyError(next) {
   banner = next;
   error.hidden = !banner;
@@ -342,7 +331,8 @@ consentAction.addEventListener("click", async () => {
 primary.addEventListener("click", async () => {
   const action = primaryAction(current, detectedProvider).id;
   if (action === "retry") {
-    await retryStatus();
+    if (current?.paired === true && current.connected !== true) await runAction(() => message("morrow_reconnect"));
+    else await refresh();
     return;
   }
   if (action === "open_setup") {

@@ -2826,6 +2826,11 @@ function resetBridgeReconnect() {
   state.reconnectAttempt = 0;
 }
 
+async function retrySavedBridgeConnection() {
+  resetBridgeReconnect();
+  await connectBridge();
+}
+
 function retireBridgeSocket(socket, { closeCode = null, reason = "", reconnect = true } = {}) {
   if (state.socket !== socket) return false;
   clearBridgeHandshakeDeadline(socket);
@@ -6531,6 +6536,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   const run = message?.type === "morrow_course_data_consent_accept" ? acceptCourseDataConsent
     : message?.type === "morrow_pair" ? (pairingSender(sender) ? requestPairing : () => { throw new Error("bridge_pairing_sender_refused"); })
+    : message?.type === "morrow_reconnect" ? (popupSender(sender) ? retrySavedBridgeConnection : () => { throw new Error("bridge_reconnect_sender_refused"); })
     : message?.type === "morrow_open_setup" ? openSetupGuide
       : message?.type === "morrow_open_platform" ? () => openPlatform(message.siteAnchorId, message.sourceBindingId)
       : message?.type === "morrow_detect_course_platform" ? () => detectActiveCoursePlatform(message.tabId)

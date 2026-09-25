@@ -111,7 +111,7 @@ test("before a course site is connected the popup names the state it is in", asy
       connection: "Not available", courseLabel: "Course", course: "Not connected",
       primary: "Check connection", primaryDisabled: false, primaryBusy: "false",
       secondary: null, openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: false, account: null,
-      detail: "Open the Morrow app. Morrow Bridge retries within 30 seconds while active and checks about once a minute after Chrome idles. Select Check connection to refresh this status.",
+      detail: "Open the Morrow app, then select Check connection to retry now. Morrow Bridge also retries within 30 seconds while active and checks about once a minute after Chrome idles.",
     }],
   ];
   for (const [name, status, expected] of states) {
@@ -120,16 +120,23 @@ test("before a course site is connected the popup names the state it is in", asy
   }
 });
 
-test("a paired but disconnected popup lets the person check connection status again", async () => {
+test("a paired but disconnected popup starts a connection attempt when the person checks", async () => {
   let reads = 0;
-  const page = await openPopup({ status: () => { reads += 1; return connection({ paired: true }); } });
+  let retries = 0;
+  const page = await openPopup({
+    status: () => { reads += 1; return connection({ paired: true, connecting: retries > 0 }); },
+    handlers: { morrow_reconnect: () => { retries += 1; return { started: true }; } },
+  });
   assert.equal(view(page).primary, "Check connection");
   assert.equal(view(page).primaryDisabled, false);
   await page.click("#primary");
   await page.waitFor(() => reads === 2, "Check connection did not read Bridge status again");
+  assert.equal(retries, 1);
+  assert.equal(page.messages("morrow_reconnect").length, 1);
   assert.equal(page.messages("morrow_status").length, 2);
   assert.equal(page.messages("morrow_pair").length, 0);
-  assert.equal(view(page).primaryDisabled, false);
+  assert.equal(view(page).primary, "Waiting for your assistant");
+  assert.equal(view(page).primaryDisabled, true);
 });
 
 test("once Morrow is connected the popup names the course state and the one step that follows", async () => {
