@@ -44,6 +44,11 @@ const COPY = {
     detail: "Morrow Bridge starts a connection only when you select Connect Morrow in its popup or its setup guide.",
     action: "Open the Morrow Bridge popup and select Connect Morrow.",
   },
+  bridge_reconnect_sender_refused: {
+    title: "Connection check was not started from Morrow Bridge",
+    detail: "Only the Morrow Bridge popup can retry its saved connection to Morrow.",
+    action: "Open the Morrow Bridge popup and select Check connection.",
+  },
   bridge_pairing_response_timeout: {
     title: "Morrow did not answer in time",
     detail: "Morrow Bridge reached the Morrow app on this computer, and the app did not finish answering in time, so nothing was connected.",

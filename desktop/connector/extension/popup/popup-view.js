@@ -212,7 +212,7 @@ export function detailText(status, detectedProvider = null) {
       : status.connecting
         ? "Connecting to Morrow. Morrow Bridge retries within 30 seconds while active and checks about once a minute after Chrome idles. Keep this popup open or return in a moment."
         : !status.connected
-        ? "Open the Morrow app. Morrow Bridge retries within 30 seconds while active and checks about once a minute after Chrome idles. Select Check connection to refresh this status."
+        ? "Open the Morrow app, then select Check connection to retry now. Morrow Bridge also retries within 30 seconds while active and checks about once a minute after Chrome idles."
         : binding?.runtimeVerified === true
           ? `This selected course is connected. Keep one signed-in ${courseTabName(platform)} tab open while you work in Morrow.`
           : binding

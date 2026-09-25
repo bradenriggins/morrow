@@ -239,7 +239,7 @@ test("known connection states keep their own value, label, and detail", () => {
   assert.equal(statusValue(statuses[4]), "Not available");
   assert.equal(primaryLabel(statuses[4]), "Check connection");
   assert.equal(controlState(statuses[4]).primaryDisabled, false);
-  assert.match(detailText(statuses[4]), /retries.*30 seconds.*once a minute.*Select Check connection/s);
+  assert.match(detailText(statuses[4]), /select Check connection to retry now.*retries.*30 seconds.*once a minute/s);
   assert.equal(courseValue(statuses[6]), "Not connected");
   assert.equal(primaryLabel(statuses[6]), "", "no platform detected: no primary action at all (WI-5.8)");
   assert.equal(controlState(statuses[6]).primaryDisabled, true);
