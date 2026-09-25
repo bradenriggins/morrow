@@ -2,6 +2,28 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
+## 1.0.7 (2026-09-25)
+
+This Mac release includes the unsigned `Morrow-1.0.7-mac-arm64.dmg` and `Morrow-1.0.7-mac-arm64.zip`, with Morrow Bridge 1.0.126. Windows remains on the published 1.0.5 installer; there is no Windows 1.0.7 installer or native Windows 1.0.7 smoke receipt.
+
+### Morrow Bridge
+
+- If the saved connection to Morrow stops working, **Check connection** in the Bridge popup tries that connection again and shows the next step if Morrow refuses it.
+
+### Approvals and Edit access
+
+- When your assistant asks to turn on Edit, Morrow opens a review in Chrome. Wait for Morrow to finish reading the course, then select Turn on Edit. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.
+- A change review in Chrome now shows that it is loading while Morrow reads the course. Approval controls appear only after that read finishes and the request is still the same. If the request changes during the read, the page asks you to reload it.
+
+### Setup
+
+- The first **Add Morrow Bridge** step now shows what to do next. It no longer starts with a connection warning or calls the Chrome setup method temporary. If Morrow still cannot confirm the connection later, it shows the warning and the exact Bridge folder to select with **Load unpacked**.
+
+### Technical notes
+
+- Morrow Bridge 1.0.126 seals the extension source included in this Desktop version.
+- No Windows 1.0.7 package or native Windows 1.0.7 smoke receipt exists. The Windows download remains `Morrow-1.0.5-win-x64.exe`.
+
 ## 1.0.6 (2026-09-25)
 
 This Mac release includes the unsigned `Morrow-1.0.6-mac-arm64.dmg` and `Morrow-1.0.6-mac-arm64.zip`. Windows remains on the published 1.0.5 installer. There is no Windows 1.0.6 installer.
