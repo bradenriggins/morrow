@@ -8,11 +8,45 @@ The scheduled shell process cannot load a browser session from JSON. Call
 from __future__ import annotations
 
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from urllib.parse import urljoin, urlparse
 
 from .login import SESSKEY_RE, USERID_RE
 from .session import MoodleSession
+
+
+# Viewer-chrome principal markers, in preference order. M.cfg's
+# "userid" is authoritative where the theme serializes it; some
+# themes (e.g. the stock Moodle 5.2 theme on sandbox.moodledemo.net)
+# omit it, in which case the viewer's own chrome carries the same id
+# (data-userid on the notification popover / user menu). Every marker
+# used here is viewer-specific: a page never renders another user's
+# id in these spots.
+_DATA_USERID_RE = re.compile(r'data-userid="(\d+)"')
+
+
+def _extract_principal_id(body: str) -> Optional[int]:
+    """Best-effort viewer id from viewer-specific chrome markers.
+
+    Returns None when no marker is present or when markers disagree
+    (ambiguous: the caller must stay fail-closed and report
+    unverified, never guess).
+    """
+    candidates = []
+    m = USERID_RE.search(body)
+    if m:
+        candidates.append(int(m.group(1)))
+    chrome_ids = {int(dm.group(1))
+                  for dm in _DATA_USERID_RE.finditer(body)}
+    if len(chrome_ids) == 1:
+        candidates.append(next(iter(chrome_ids)))
+    elif len(chrome_ids) > 1:
+        return None  # conflicting chrome markers: ambiguous
+    if not candidates:
+        return None
+    if len(set(candidates)) != 1:
+        return None  # markers disagree: ambiguous
+    return candidates[0]
 
 
 def _result(state: str, status: int | None = None,
@@ -70,11 +104,11 @@ def probe_session(sess: MoodleSession) -> Dict[str, Any]:
     if re.search(r"<form\b[^>]*\baction=[\"'][^\"']*login", body,
                  re.IGNORECASE):
         return _result("expired", status)
-    principal = USERID_RE.search(body)
+    principal_id = _extract_principal_id(body)
     sesskey = SESSKEY_RE.search(body)
-    if principal is None or sesskey is None:
+    if principal_id is None or sesskey is None:
         return _result("unverified", status)
-    if int(principal.group(1)) != pinned_id:
+    if principal_id != pinned_id:
         return _result("principal_mismatch", status)
     if sesskey.group(1) != sess.sesskey:
         return _result("session_changed", status)
