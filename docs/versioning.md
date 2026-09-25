@@ -34,6 +34,23 @@ A tag names one commit, and the assets on its GitHub release are built from that
    - Save the version's `morrow-for-muse/CHANGELOG.md` section as the notes file: `awk -v v="X.Y.Z" 'index($0, "## " v " (") == 1 { keep = 1; next } /^## / { keep = 0 } keep' morrow-for-muse/CHANGELOG.md > <notes file>`. Read it through, then publish: `gh release create muse/vX.Y.Z --verify-tag --title "Morrow for Muse X.Y.Z" --notes-file <notes file> --latest=false dist/morrow-muse-connector-X.Y.Z.zip dist/SHA256SUMS`. A Muse release is never marked Latest, for the reason under Desktop updates below.
 6. **Check what was published.** Download the release into an empty folder with `gh release download <tag> -D <folder>`, and in that folder run `shasum -a 256 -c SHA256SUMS`. Then check every release link the website names with `curl -sI <link>`: a download link must answer `HTTP/2 302`, and a release page link `HTTP/2 200`.
 
+## Desktop 1.0.6 Mac release
+
+Desktop 1.0.6 is prepared for macOS on Apple silicon only. The Windows x64 download stays on the published Desktop 1.0.5 installer. There is no Windows 1.0.6 asset, and the 1.0.5 Windows smoke receipt does not prove the 1.0.6 source on Windows. Keep the website's Windows button on `Morrow-1.0.5-win-x64.exe` and label each platform with its own available version.
+
+After the 1.0.6 changes reach `main`, use a clean checkout of the exact commit to tag. Run `pnpm install --frozen-lockfile` in `desktop/` and again in `desktop/installer/`, then run `pnpm check` from `desktop/`. Build the unsigned Mac files on Apple silicon from the repository root:
+
+```sh
+node desktop/scripts/package-mcp-bundle.mjs --target darwin-arm64 --unsigned-release --output <empty absolute package folder>
+node desktop/scripts/test/desktop-mac-smoke.mjs --disk-image <package folder>/Morrow-1.0.6-mac-arm64.dmg --package-receipt <package folder>/receipt.json --receipt <absolute smoke receipt> --source <main commit> --run-id <32 lowercase hex>
+```
+
+The package receipt must record `source.head` as the commit to tag and `source.dirty` as `false`. The smoke receipt must pass and bind that same source commit, package receipt, disk image digest, and both Mac artifact digests. Keep the exact smoke-tested DMG and ZIP. If merging or tagging changes the commit, rebuild and repeat the smoke check.
+
+Create `desktop/v1.0.6` at that commit only after these checks pass. From the repository root, make `Morrow-1.0.6-source.zip` with `git archive --format=zip --prefix=Morrow-1.0.6-source/ -o <release folder>/Morrow-1.0.6-source.zip desktop/v1.0.6`. Put it beside the two tested Mac files. In the release folder, run `shasum -a 256 Morrow-1.0.6-mac-arm64.dmg Morrow-1.0.6-mac-arm64.zip Morrow-1.0.6-source.zip > SHA256SUMS` and `shasum -a 256 -c SHA256SUMS`. Extract and read the 1.0.6 changelog section as the release notes. Publish only those four files with `gh release create desktop/v1.0.6 --verify-tag --title "Morrow Desktop 1.0.6 for Mac" --notes-file <notes file> --latest Morrow-1.0.6-mac-arm64.dmg Morrow-1.0.6-mac-arm64.zip Morrow-1.0.6-source.zip SHA256SUMS`.
+
+Download the published release into an empty folder and check its `SHA256SUMS`. Then update and check the website's Mac links for 1.0.6 while keeping its Windows links on 1.0.5. A signed release needs separate signing and update-feed work; these commands make the same unsigned distribution type as Desktop 1.0.5.
+
 ## Desktop updates
 
 Morrow Desktop 1.0.5 is unsigned. An unsigned build has no update feed (`publish` is empty in `desktop/installer/electron-builder.config.cjs`), it never updates itself, and the app tells the educator to get newer versions from meetmorrow.app/download. A future signed Desktop release that turns updates on must also be published to `bradenriggins/morrow-downloads`, the feed `desktop/installer/shared/update-feed.cjs` names (see the [update contract](../desktop/installer/UPDATES.md)). This repository cannot be that feed: the updater reads the repository's Latest release and then fetches `latest-mac.yml` from it, which fails whenever the Latest release is a Muse release.

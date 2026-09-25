@@ -324,7 +324,7 @@ test("the README names the desktop artifacts the build configuration actually pr
 test("the 1.0.6 tag date is prepared without claiming the release is published", () => {
   assert.match(flat("README.md"), /Morrow Desktop 1\.0\.6 is an unreleased candidate/);
   assert.match(flat("LIMITATIONS.md"), /Morrow Desktop `1\.0\.6` is an unreleased candidate/);
-  assert.match(flat("CHANGELOG.md"), /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.6 \(2026-09-24\)/);
+  assert.match(flat("CHANGELOG.md"), /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.6 \(2026-09-25\)/);
   assert.doesNotMatch(flat("README.md"), /public `desktop\/v1\.0\.6` release .* provides unsigned/);
   assert.match(flat("installer/WINDOWS-DEPLOYMENT.md"), /Morrow Desktop 1\.0\.6 is an unreleased candidate/);
 });
