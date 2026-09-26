@@ -125,6 +125,10 @@ provider's proof as proof for the other.
   lifecycle. Moodle is separate from the Canvas catalog executor; the
   available methods depend on the school's Moodle deployment. Follow
   `moodle/SKILL.md` for the lane rules.
+- The unreleased browser-owned Moodle candidate (`moodle/browser_read.py`)
+  keeps a separate, tenant-pinned Chromium session and exposes only a
+  sanitized course-list read. It does not add Moodle writes or student data
+  access. A live school Muse VM sign-in and readback are still required.
 
 ### In scope but pending live proof (not shipped v1 claims)
 

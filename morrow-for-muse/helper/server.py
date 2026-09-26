@@ -305,6 +305,11 @@ def _educator_principal_name():
 
 _source_morrow_env()
 
+PROVIDER = os.environ.get("LOGIN_HELPER_PROVIDER", "canvas").lower()
+if PROVIDER not in ("canvas", "moodle"):
+    print("FATAL: LOGIN_HELPER_PROVIDER must be canvas or moodle", file=sys.stderr)
+    sys.exit(2)
+
 # W3-P0-7/W3-P0-8, W6-P1-1: helper API token lifecycle. keepalive.sh
 # mints a 64-hex token per tree at ${TREE_STATE_DIR}/helper_token (0600)
 # and passes its PATH (never the value) as HELPER_AUTH_TOKEN_FILE, so
@@ -656,7 +661,8 @@ def _profile_has_cookies():
         except Exception:
             return True
     return False
-DEFAULT_BASE = os.environ.get("CANVAS_BASE", "")
+DEFAULT_BASE = os.environ.get(
+    "MOODLE_BASE" if PROVIDER == "moodle" else "CANVAS_BASE", "")
 # Large browser window: the helper UI renders this 1:1 up to CSS limits.
 VIEWPORT = (1600, 1000)
 
@@ -1041,6 +1047,8 @@ class HelperBrowser:
         self.cdp = None
         self.tab = None  # the helper's primary tab (CDP tab dict)
         self.base_url = ""
+        self.moodle_site_base = ""
+        self._moodle_read_at = 0.0
         self._lock = threading.Lock()
 
     def start(self, base_url):
@@ -1048,7 +1056,14 @@ class HelperBrowser:
         # (paths, queries, and fragments discarded) and stored exactly that
         # way; status() uses a direct prefix check against it, so sibling
         # hostnames like tenant.instructure.com.evil.com can never match.
-        self.base_url = _normalize_tenant_base(base_url)
+        if PROVIDER == "moodle":
+            from moodle.browser_read import normalize_site_base
+            self.moodle_site_base = normalize_site_base(base_url)
+            parts = urllib.parse.urlsplit(self.moodle_site_base)
+            self.base_url = urllib.parse.urlunsplit(
+                (parts.scheme, parts.netloc, "/", "", ""))
+        else:
+            self.base_url = _normalize_tenant_base(base_url)
         # W6-P2-S3: cookie-expiry metadata read health. A failed CDP
         # read must surface as unknown/warning, never as a silent
         # "no warning".
@@ -1074,7 +1089,10 @@ class HelperBrowser:
         # Never navigate straight to the login form: it does not reliably
         # auto-redirect on a live session, which used to make live sessions
         # look logged out and forced needless re-sign-ins.
-        self.navigate(self.base_url)
+        if PROVIDER == "moodle":
+            self.navigate(self.moodle_site_base)
+        else:
+            self.navigate(self.base_url)
 
     def _protect_primary_tab(self):
         """W2-P2-6: protect the helper's primary tab in the tab registry,
@@ -1135,9 +1153,8 @@ class HelperBrowser:
                 "browser goes to your Canvas sign-in only")
         if self.base_url and not lc.is_tenant_url(url, self.base_url):
             raise ValueError(
-                "refusing navigation off the Canvas tenant %s; the "
-                "helper's browser goes to your Canvas sign-in only" %
-                self.base_url.rstrip("/"))
+                "refusing navigation off the %s tenant %s" %
+                (PROVIDER.title(), self.base_url.rstrip("/")))
         with self._lock:
             self.cdp.navigate(self.tab, url)
 
@@ -1238,6 +1255,10 @@ class HelperBrowser:
                      and not login_path
                      and href != "about:blank"
                      and not href.startswith("chrome-error://"))
+        if PROVIDER == "moodle":
+            # A Moodle page URL alone does not prove a live session.
+            # The badge reports only a recent successful course read.
+            logged_in = logged_in and time.monotonic() - self._moodle_read_at < 30
         # W2 (2026-09-21, proven live): document.title is page-controlled
         # text -- page JS can copy cookie values into it -- so the title
         # is NEVER read by status(): it is not probed, not returned, and
@@ -1250,7 +1271,7 @@ class HelperBrowser:
         # keeps using the full href internally, but consumers never see
         # the query. W3-P2-6: the profile path abbreviates $HOME as ~.
         horizon_days = self._cookie_expiry_horizon_days()
-        return {"url": _loggable_url(href) if href else "",
+        result = {"url": _loggable_url(href) if href else "",
                 "logged_in": logged_in,
                 "chromium_alive": chromium_alive,
                 "starting": starting,
@@ -1283,7 +1304,49 @@ class HelperBrowser:
                 # W6-P2-A4: the pinned principal's display name, so the
                 # UI shows WHO is signed in. Null when no session is
                 # pinned yet.
-                "principal_name": _educator_principal_name()}
+                "principal_name": (_educator_principal_name()
+                                   if PROVIDER == "canvas" else None)}
+        if PROVIDER == "moodle":
+            result.update({"provider": "moodle",
+                           "site_base": self.moodle_site_base,
+                           "connection_id": hashlib.sha256(
+                               os.fsencode(os.path.realpath(PROFILE_DIR))
+                           ).hexdigest()[:16],
+                           "session_notice": None,
+                           "write_halt_active": False})
+        return result
+
+    def moodle_courses(self):
+        if PROVIDER != "moodle":
+            raise ValueError("Moodle course read is unavailable on this helper")
+        from moodle.browser_read import (course_list_expression,
+                                         validate_course_result)
+        with self._lock:
+            world = self.cdp.create_isolated_world(
+                self.tab, "morrow_moodle_course_read")
+            value = self.cdp.evaluate(
+                self.tab, course_list_expression(self.moodle_site_base),
+                await_promise=True, context_id=world, timeout=45)
+            result = validate_course_result(value)
+            # The first verified course read pins the Moodle account. A
+            # later SSO switch cannot silently change the educator identity.
+            principal_path = os.path.join(lc.tree_state_dir(),
+                                          "moodle_principal.json")
+            if os.path.exists(principal_path):
+                with open(principal_path, "r", encoding="utf-8") as fh:
+                    pinned = json.load(fh)
+                if pinned != {"id": result["principal_id"]}:
+                    raise ValueError("Moodle principal differs from the pinned account")
+            else:
+                fd = os.open(principal_path,
+                             os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump({"id": result["principal_id"]}, fh)
+                    fh.write("\n")
+                    fh.flush()
+                    os.fsync(fh.fileno())
+            self._moodle_read_at = time.monotonic()
+            return {"ok": True, **result}
 
     def screenshot(self):
         # W5-P2-5: CDP.call owns its connection on the private
@@ -1522,6 +1585,8 @@ _ROUTES = {
     "/logo.png": ("GET",),
     "/status": ("GET",),
     "/screenshot": ("GET",),
+    "/moodle/ping": ("GET",),
+    "/moodle/courses": ("GET",),
     "/input/key": ("POST",),
     "/input/mouse": ("POST",),
     "/navigate": ("POST",),
@@ -1684,6 +1749,17 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "not found"}, 404)
             return
         if name == "index.html":
+            if PROVIDER == "moodle":
+                body = body.replace(b"Canvas", b"Moodle")
+                body = body.replace(
+                    b"You&rsquo;re signed in.",
+                    b"Your Moodle course read succeeded recently.")
+                old = (b"The name above is the Moodle account Morrow was "
+                       b"connected to on this computer; on every task, "
+                       b"Morrow checks the account signed in to this "
+                       b"browser and pauses if it is not that one.")
+                body = body.replace(old, b"Morrow checks the Moodle course "
+                                    b"list again before reporting courses.")
             # W3-P0-7: the sign-in UI is the one page allowed to call the
             # protected endpoints, so the server injects the token into
             # the __HELPER_TOKEN__ placeholder when serving it. The token
@@ -1772,7 +1848,39 @@ class Handler(BaseHTTPRequestHandler):
                 if n == 1 or n % 50 == 0:
                     _log("screenshot #%d bytes=%d" % (n, len(png)))
                 self._send_png(png)
+            elif path == "/moodle/ping":
+                if PROVIDER != "moodle":
+                    self._send_json({"error": "not found"}, 404)
+                    return
+                if not self._require_auth():
+                    return
+                st = BROWSER.status()
+                self._send_json({
+                    "provider": "moodle", "site_base": st["site_base"],
+                    "connection_id": st["connection_id"],
+                    "chromium_alive": st["chromium_alive"],
+                    "helper_version": st["helper_version"]})
+            elif path == "/moodle/courses":
+                if PROVIDER != "moodle":
+                    self._send_json({"error": "not found"}, 404)
+                    return
+                if not self._require_auth():
+                    return
+                try:
+                    result = BROWSER.moodle_courses()
+                except Exception as exc:
+                    # Do not put page content or a sesskey in an error.
+                    code = getattr(exc, "args", [""])[0]
+                    safe = (code if isinstance(code, str)
+                            and code.startswith("Moodle course read failed:")
+                            else "Moodle course read unavailable")
+                    self._send_json({"ok": False, "code": safe[:90]}, 409)
+                    return
+                self._send_json(result)
             elif path == "/cdp/events":
+                if PROVIDER == "moodle":
+                    self._send_json({"error": "not found"}, 404)
+                    return
                 # W4-P0-3: protected like the write endpoints; it exposes
                 # another process's network traffic.
                 if not self._require_auth():
@@ -1818,6 +1926,12 @@ class Handler(BaseHTTPRequestHandler):
             if not self._require_auth():
                 return
             path = self.path.split("?", 1)[0]
+            if PROVIDER == "moodle" and path in (
+                    "/navigate", "/cdp/tabs", "/cdp/new-tab",
+                    "/cdp/call", "/cdp/evaluate", "/cdp/navigate",
+                    "/cdp/close-tab"):
+                self._send_json({"error": "not available for Moodle"}, 403)
+                return
             if path == "/input/key":
                 body = self._read_json()
                 kind = body.get("kind")
@@ -2030,7 +2144,9 @@ def main():
     global BROWSER
     base = (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_BASE).rstrip("/")
     if not base:
-        print("ERROR: no Canvas tenant. Set CANVAS_BASE or pass the base URL, e.g.",
+        print("ERROR: no %s tenant. Set %s or pass the base URL." %
+              (PROVIDER, "MOODLE_BASE" if PROVIDER == "moodle"
+               else "CANVAS_BASE"),
               file=sys.stderr)
         print("  CANVAS_BASE=https://myschool.instructure.com python3 helper/server.py",
               file=sys.stderr)

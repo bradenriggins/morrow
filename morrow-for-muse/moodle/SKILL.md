@@ -5,6 +5,20 @@ text the connector skill carries. The Python module enforces session
 and transport checks; its write method does not enforce the approval
 boundary described below.
 
+## Browser-owned production course read candidate
+
+For a school Moodle connection, use `python3 -m moodle.browser_read start
+--base <school HTTPS Moodle URL>` from the installed tree. Show the educator
+the helper sign-in page through the existing user-controlled VM helper access.
+The educator enters their credentials on the school page, never in Muse chat.
+Then run `python3 -m moodle.browser_read courses`. It returns only a pinned
+Moodle user ID and course IDs/names. If the site does not expose the course-list
+AJAX function, report that the read is unavailable on this deployment. Do not
+use `login.py` with school credentials. Do not send a Moodle write or learner
+data through this browser read path. A successful sign-in page alone is not
+connection proof; require the course read. The source candidate still needs a
+live Muse VM sign-in and readback before a production claim.
+
 ## Session bootstrap (Lane 2 pattern)
 
 1. The educator signs in once through the school's page in the Muse VM

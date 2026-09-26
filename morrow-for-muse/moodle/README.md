@@ -6,6 +6,35 @@ here; `INSTALL.md` explains the shared, hash-locked runtime dependencies.
 The package does
 not include a production VM-browser-to-Python session handoff command.
 
+## Browser-owned course read candidate
+
+`browser_read.py` is a separate, read-only connection path. It starts the
+existing sign-in helper with a Moodle-specific profile, token, state directory,
+and loopback port (default `8903`). It does not move a browser cookie or
+sesskey into `MoodleSession`. The educator signs in on the school page shown
+by that helper. From the installed tree, the operator starts it with:
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m moodle.browser_read start --base https://moodle.school.edu
+```
+
+The helper URL in the result is VM-local. Present it through the same
+user-controlled helper access used for Canvas; do not ask the educator to put
+a password, cookie, or sesskey in chat. After sign-in, read only course IDs and
+names with:
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m moodle.browser_read courses
+```
+
+The first successful course read pins the Moodle user ID. Later reads refuse
+a different account. The read fails when the site's AJAX course-list function
+is unavailable, including deployments that disable AJAX; it does not silently
+fall back to HTML scraping or claim a partial list. The helper is not yet
+supervised across VM reboot, and this candidate has not had a live school VM
+sign-in/readback. Do not claim the school Moodle connection is proven until
+that readback succeeds. This path has no Moodle write or learner-data API.
+
 Live-proven against the official Moodle 5.2 public demo. Current
 operation statuses are in `../proof-battery/OPERATION_CATALOG.md`.
 Detailed sandbox journals and proof drivers stay in the source repository
