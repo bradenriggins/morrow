@@ -41,6 +41,21 @@ async function readLog(path: string): Promise<readonly string[]> {
   }
 }
 
+// A child process can still be flushing a file into the temp directory when
+// the owner's descriptor disappears, so a single recursive rm can lose a
+// rmdir race (ENOTEMPTY). Retry briefly before giving up.
+async function removeDirectory(directory: string): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOTEMPTY" || attempt >= 4) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+}
+
 async function writeConfig(
   directory: string,
   options: { readonly delayMs?: number; readonly privateChat?: boolean } = {},
@@ -314,7 +329,7 @@ describe("modern local-owner ingress and lifetime", () => {
     } finally {
       await closeClient(connection);
       await stopTestOwner(ownerPath);
-      await rm(directory, { recursive: true, force: true });
+      await removeDirectory(directory);
     }
   }, 20_000);
 
@@ -347,7 +362,7 @@ describe("modern local-owner ingress and lifetime", () => {
     } finally {
       await closeClient(connection);
       await stopTestOwner(ownerPath);
-      await rm(directory, { recursive: true, force: true });
+      await removeDirectory(directory);
     }
   }, 20_000);
 
@@ -393,7 +408,7 @@ describe("modern local-owner ingress and lifetime", () => {
     } finally {
       await Promise.all([closeClient(second), closeClient(first)]);
       await stopTestOwner(ownerPath);
-      await rm(directory, { recursive: true, force: true });
+      await removeDirectory(directory);
     }
   }, 20_000);
 
@@ -422,7 +437,7 @@ describe("modern local-owner ingress and lifetime", () => {
     } finally {
       await closeClient(connection);
       await stopTestOwner(ownerPath);
-      await rm(directory, { recursive: true, force: true });
+      await removeDirectory(directory);
     }
   }, 20_000);
 
@@ -446,7 +461,7 @@ describe("modern local-owner ingress and lifetime", () => {
     } finally {
       await closeClient(connection);
       await stopTestOwner(ownerPath);
-      await rm(directory, { recursive: true, force: true });
+      await removeDirectory(directory);
     }
   }, 20_000);
 });

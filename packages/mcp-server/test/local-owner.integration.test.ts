@@ -19,6 +19,21 @@ import { assertPortListening, reserveLoopbackPort } from "./fixtures/loopback-po
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 const entryPath = fileURLToPath(new URL("../dist/index.js", import.meta.url));
 
+// A child process can still be flushing a file into the temp directory when
+// the owner's descriptor disappears, so a single recursive rm can lose a
+// rmdir race (ENOTEMPTY). Retry briefly before giving up.
+async function removeDirectory(directory: string): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOTEMPTY" || attempt >= 4) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+}
+
 async function waitFor(predicate: () => Promise<boolean> | boolean, detail: string): Promise<void> {
   for (let attempt = 0; attempt < 150; attempt += 1) {
     if (await predicate()) return;
@@ -157,7 +172,7 @@ describe("Morrow local owner", () => {
     } finally {
       await connection?.client.close();
       await waitFor(() => !existsSync(ownerPath), "the delayed owner's shutdown");
-      await rm(directory, { recursive: true, force: true });
+      await removeDirectory(directory);
     }
   }, 40_000);
 
@@ -355,7 +370,7 @@ describe("Morrow local owner", () => {
       await waitFor(() => !processIsAlive(secondProxyPid!), "the failed proxy to terminate");
     } finally {
       await Promise.all([first?.client.close(), second?.client.close(), third?.client.close()]);
-      await rm(directory, { recursive: true, force: true });
+      await removeDirectory(directory);
     }
   }, 30_000);
 
@@ -611,7 +626,7 @@ describe("Morrow local owner", () => {
       }
       await Promise.all([first?.client.close(), second?.client.close()]);
       await waitFor(() => !existsSync(ownerPath), "workspace local owner cleanup");
-      await rm(directory, { recursive: true, force: true });
+      await removeDirectory(directory);
     }
   }, 60_000);
 
@@ -746,7 +761,7 @@ describe("Morrow local owner", () => {
         if (typeof descriptor.pid === "number") process.kill(descriptor.pid, "SIGKILL");
       } catch { /* owner already stopped */ }
       await rm(ownerPath, { force: true });
-      await rm(directory, { recursive: true, force: true });
+      await removeDirectory(directory);
     }
   }, 40_000);
 
@@ -883,7 +898,7 @@ describe("Morrow local owner", () => {
         if (typeof descriptor.pid === "number") process.kill(descriptor.pid, "SIGKILL");
       } catch { /* owner already stopped */ }
       await rm(ownerPath, { force: true });
-      await rm(directory, { recursive: true, force: true });
+      await removeDirectory(directory);
     }
   }, 40_000);
 });

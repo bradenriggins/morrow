@@ -48,6 +48,21 @@ async function readLog(path: string): Promise<readonly string[]> {
   }
 }
 
+// A child process can still be flushing a file into the temp directory when
+// the owner's descriptor disappears, so a single recursive rm can lose a
+// rmdir race (ENOTEMPTY). Retry briefly before giving up.
+async function removeDirectory(directory: string): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOTEMPTY" || attempt >= 4) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+}
+
 async function writeConfig(directory: string, delayMs = 0): Promise<{ configPath: string; journalPath: string; callLogPath: string }> {
   const configPath = join(directory, "morrow.upstreams.json");
   const journalPath = join(directory, "gateway.sqlite3");
@@ -213,7 +228,7 @@ describe("local-owner lifecycle", () => {
     } finally {
       await Promise.all([closeClient(peer), closeClient(monitor)]);
       await waitUntil(() => !existsSync(ownerPath), "the modern owner's cleanup");
-      await rm(directory, { recursive: true, force: true });
+      await removeDirectory(directory);
     }
   }, 20_000);
 
@@ -258,7 +273,7 @@ describe("local-owner lifecycle", () => {
         const descriptor = JSON.parse(await readFile(ownerPath, "utf8")) as OwnerDescriptor;
         if (processIsAlive(descriptor.pid)) process.kill(descriptor.pid, "SIGKILL");
       } catch { /* owner already stopped */ }
-      await rm(directory, { recursive: true, force: true });
+      await removeDirectory(directory);
     }
   }, 15_000);
 });

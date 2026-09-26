@@ -792,6 +792,18 @@ function sameSourceCheckpoint(left, right) {
 
 function rebuildWorkspaceReleaseOutputs(root = ROOT, execute = () => capture("pnpm", ["build"])) {
   const packages = workspacePackages(root);
+  if (process.env.MORROW_PACKAGER_SKIP_REBUILD === "1") {
+    // The always-on script suite runs test files concurrently, so a test that
+    // rebuilds here must not delete the shared packages/*/dist outputs out
+    // from under the other files. The suite's build step already compiled them.
+    for (const entry of packages) {
+      const output = resolve(entry.source, "dist");
+      if (!existsSync(output) || !statSync(output).isDirectory() || regularFiles(output).length === 0) {
+        throw new Error(`Compiled output is missing for ${entry.name}. Run pnpm build first.`);
+      }
+    }
+    return packages;
+  }
   for (const entry of packages) rmSync(resolve(entry.source, "dist"), { recursive: true, force: true });
   execute(packages);
   for (const entry of packages) {
